@@ -8,7 +8,7 @@ import org.junit.Test
 
 class SettingsPresentationTest {
     @Test
-    fun retainedSettingsHaveUniqueIdsAndNineGroups() {
+    fun retainedSettingsKeepInventoryAndSixVisibleGroups() {
         val entries = SettingsCatalog.entries
         // Current inventory includes independent generation/vision, P05 and platform tools.
         assertEquals(36, entries.size)
@@ -16,7 +16,9 @@ class SettingsPresentationTest {
         assertTrue(entries.map { it.id }.containsAll(setOf("platform_tools", "accessibility", "voice", "donate")))
         assertEquals(app.daiyu.android.ui.FeatureRoute.BALANCE_SETTINGS, SettingsCatalog.entry("balance").route)
         assertEquals(entries.size, entries.map { it.id }.toSet().size)
-        assertEquals(9, SettingsCatalog.groups.size)
+        assertEquals(7, SettingsCatalog.groups.size)
+        assertEquals(listOf("通用设置", "模型与服务", "扩展能力", "工具与环境", "数据与记录", "关于"),
+            SettingsCatalog.visibleGroups().map { it.title })
         assertTrue(entries.none { it.id == "terminal" })
         assertEquals(listOf("platform_tools", "workspace", "browser", "linux", "task_surface"),
             SettingsCatalog.groups.single { it.id == "tools" }.entries.map { it.id })
@@ -47,7 +49,12 @@ class SettingsPresentationTest {
             assertEquals(29, entries.size)
             assertTrue(entries.none { it.id in hiddenIds })
             assertTrue(groups.none { it.id == "permissions" })
-            assertEquals(listOf("providers"), groups.single { it.id == "llm" }.entries.map { it.id })
+            assertEquals(listOf("appearance", "assistants", "voice", "haptics"),
+                groups.single { it.id == "general" }.entries.map { it.id })
+            assertEquals(listOf("providers", "compression", "vision", "subagents", "title_model", "reconnect"),
+                groups.single { it.id == "models" }.entries.map { it.id })
+            assertEquals(listOf("usage", "backup", "logging", "export_logs", "clear_logs"),
+                groups.single { it.id == "data" }.entries.map { it.id })
             assertTrue(entries.map { it.id }.containsAll(setOf(
                 "task_surface", "linux", "voice", "donate",
             )))
@@ -59,6 +66,16 @@ class SettingsPresentationTest {
             assertTrue(filterSettingsGroups(title).isEmpty())
         }
         assertEquals(SettingsCatalog.visibleGroups(), SettingsCatalog.visibleGroups(engineeringUi = true))
+    }
+
+    @Test
+    fun homeDescriptionsAreConciseAndDoNotInventNewControls() {
+        val dynamicDescriptions = setOf("logging", "export_logs", "clear_logs", "updates", "donate")
+        val entries = SettingsCatalog.visibleGroups().flatMap { it.entries }
+        assertTrue(entries.filterNot { it.id in dynamicDescriptions }.all { !it.summary.isNullOrBlank() })
+        assertTrue(entries.mapNotNull { it.summary }.all { it.length <= 24 })
+        assertTrue(entries.none { it.id in setOf("color_mode", "search_service", "preferences") })
+        assertTrue(filterSettingsGroups("个性化").isEmpty()) // Search continues to match entry titles only.
     }
 
     @Test

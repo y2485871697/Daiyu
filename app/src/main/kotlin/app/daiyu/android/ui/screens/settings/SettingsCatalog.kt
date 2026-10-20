@@ -14,48 +14,45 @@ internal data class SettingsEntry(
     val id: String, val title: String, val icon: ImageVector,
     val control: SettingControl = SettingControl.PAGE, val route: FeatureRoute? = null,
     val localPage: SettingsLocalPage? = null,
+    val summary: String? = null,
 )
 internal data class SettingsGroup(val id: String, val title: String, val summary: String, val entries: List<SettingsEntry>)
 
-/** Original settings inventory, independently presented; not the feature-migration ledger. */
+/** Settings inventory and home grouping; route identities stay independent of presentation. */
 internal object SettingsCatalog {
     val groups = listOf(
-        SettingsGroup("llm", "LLM 提供商", "服务商连接与默认推理", listOf(
-            SettingsEntry("providers", "模型提供商", DaiyuIcons.Provider, SettingControl.PAGE, FeatureRoute.MODEL_SETTINGS),
+        SettingsGroup("general", "通用设置", "外观、助手、语音与触感", listOf(
+            SettingsEntry("appearance", "外观与主题", DaiyuIcons.Palette, SettingControl.PAGE, summary = "主题、图标与界面显示"),
+            SettingsEntry("assistants", "助手", DaiyuIcons.Assistant, SettingControl.PAGE, summary = "角色、提示词与个性化"),
+            SettingsEntry("voice", "语音", DaiyuIcons.Voice, SettingControl.PAGE, summary = "语音输入、朗读与对话"),
+            SettingsEntry("haptics", "震动列表", DaiyuIcons.Vibration, SettingControl.PAGE, summary = "触感反馈与试听"),
+        )),
+        SettingsGroup("models", "模型与服务", "提供商、模型用途与请求设置", listOf(
+            SettingsEntry("providers", "模型提供商", DaiyuIcons.Provider, SettingControl.PAGE, FeatureRoute.MODEL_SETTINGS, summary = "服务商连接与模型管理"),
             SettingsEntry("balance", "供应商余额", DaiyuIcons.Balance, SettingControl.PAGE, FeatureRoute.BALANCE_SETTINGS),
-        )),
-        SettingsGroup("models", "模型功能", "压缩、视觉、子代理与标题模型", listOf(
-            SettingsEntry("compression", "上下文压缩", DaiyuIcons.Compress, SettingControl.PAGE, FeatureRoute.COMPRESSION_SETTINGS),
+            SettingsEntry("compression", "上下文压缩", DaiyuIcons.Compress, SettingControl.PAGE, FeatureRoute.COMPRESSION_SETTINGS, summary = "摘要模型与上下文压缩"),
             SettingsEntry("generation", "独立生成模型", DaiyuIcons.Vision, SettingControl.PAGE, FeatureRoute.GENERATION_SETTINGS),
-            SettingsEntry("vision", "辅助视觉模型", DaiyuIcons.Vision, SettingControl.PAGE, FeatureRoute.AUXILIARY_VISION_SETTINGS),
-            SettingsEntry("subagents", "子代理", DaiyuIcons.SubAgent, SettingControl.PAGE),
-            SettingsEntry("title_model", "标题模型", DaiyuIcons.Title, SettingControl.PAGE, FeatureRoute.TITLE_MODEL_SETTINGS),
-            SettingsEntry("reconnect", "错误重连", DaiyuIcons.Reconnect, SettingControl.PAGE, FeatureRoute.RECONNECT_SETTINGS),
+            SettingsEntry("vision", "辅助视觉模型", DaiyuIcons.Vision, SettingControl.PAGE, FeatureRoute.AUXILIARY_VISION_SETTINGS, summary = "图片理解使用的模型"),
+            SettingsEntry("subagents", "子代理", DaiyuIcons.SubAgent, SettingControl.PAGE, summary = "协作模型与任务分工"),
+            SettingsEntry("title_model", "标题模型", DaiyuIcons.Title, SettingControl.PAGE, FeatureRoute.TITLE_MODEL_SETTINGS, summary = "会话标题使用的模型"),
+            SettingsEntry("reconnect", "错误重连", DaiyuIcons.Reconnect, SettingControl.PAGE, FeatureRoute.RECONNECT_SETTINGS, summary = "请求重试与错误重连"),
         )),
-        SettingsGroup("extensions", "扩展", "助手、Skills、MCP 与鲸鱼女仆", listOf(
-            SettingsEntry("pet", "鲸鱼女仆", DaiyuIcons.Pet, SettingControl.PAGE, FeatureRoute.PET_SETTINGS),
-            SettingsEntry("assistants", "助手", DaiyuIcons.Assistant, SettingControl.PAGE),
-            SettingsEntry("skills", "Skills", DaiyuIcons.Skills, SettingControl.PAGE, FeatureRoute.SKILLS),
-            SettingsEntry("mcp", "MCP 服务器", DaiyuIcons.Gateway, SettingControl.PAGE, FeatureRoute.MCP_SETTINGS),
+        SettingsGroup("extensions", "扩展能力", "桌面伙伴、Skills 与 MCP", listOf(
+            SettingsEntry("pet", "鲸鱼女仆", DaiyuIcons.Pet, SettingControl.PAGE, FeatureRoute.PET_SETTINGS, summary = "桌面伙伴与互动"),
+            SettingsEntry("skills", "Skills", DaiyuIcons.Skills, SettingControl.PAGE, FeatureRoute.SKILLS, summary = "技能管理与工具扩展"),
+            SettingsEntry("mcp", "MCP 服务器", DaiyuIcons.Gateway, SettingControl.PAGE, FeatureRoute.MCP_SETTINGS, summary = "外部工具与服务连接"),
         )),
-        SettingsGroup("general", "通用", "语音、外观、用量与数据备份", listOf(
-            SettingsEntry("voice", "语音", DaiyuIcons.Voice, SettingControl.PAGE),
-            SettingsEntry("appearance", "外观与主题", DaiyuIcons.Palette, SettingControl.PAGE),
-            SettingsEntry("usage", "用量统计", DaiyuIcons.Chart, SettingControl.PAGE, FeatureRoute.USAGE_STATS),
-            SettingsEntry("backup", "数据备份", DaiyuIcons.Backup, SettingControl.PAGE, FeatureRoute.BACKUP),
-        )),
-        SettingsGroup("tools", "工具", "工作区、Linux 与任务执行偏好", listOf(
+        SettingsGroup("tools", "工具与环境", "工作区、Linux 与任务执行偏好", listOf(
             SettingsEntry("platform_tools", "平台只读工具与私密出站", DaiyuIcons.Shield, SettingControl.PAGE),
-            SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE, localPage = SettingsLocalPage.WORKSPACE),
+            SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE, localPage = SettingsLocalPage.WORKSPACE, summary = "文件、目录与共享访问"),
             SettingsEntry("browser", "浏览器", DaiyuIcons.Browser, SettingControl.PAGE, FeatureRoute.BROWSER_SETTINGS),
-            SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.LINUX_SETTINGS),
+            SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.LINUX_SETTINGS, summary = "运行环境与可选工具"),
             SettingsEntry("task_surface", "Agent任务偏好", DaiyuIcons.VirtualScreen, SettingControl.PAGE,
-                localPage = SettingsLocalPage.TASK_SURFACE),
+                localPage = SettingsLocalPage.TASK_SURFACE, summary = "前台、后台或每次询问"),
         )),
-        SettingsGroup("haptics", "震动", "震动反馈与试听", listOf(
-            SettingsEntry("haptics", "震动列表", DaiyuIcons.Vibration, SettingControl.PAGE),
-        )),
-        SettingsGroup("diagnostics", "诊断", "日志记录、导出与清理", listOf(
+        SettingsGroup("data", "数据与记录", "用量、备份与诊断日志", listOf(
+            SettingsEntry("usage", "用量统计", DaiyuIcons.Chart, SettingControl.PAGE, FeatureRoute.USAGE_STATS, summary = "对话、Token 与模型用量"),
+            SettingsEntry("backup", "数据备份", DaiyuIcons.Backup, SettingControl.PAGE, FeatureRoute.BACKUP, summary = "导入与导出应用数据"),
             SettingsEntry("logging", "记录诊断日志", DaiyuIcons.File, SettingControl.TOGGLE),
             SettingsEntry("export_logs", "导出日志", DaiyuIcons.Export, SettingControl.ACTION),
             SettingsEntry("clear_logs", "清除日志", DaiyuIcons.Delete, SettingControl.ACTION),
@@ -67,12 +64,12 @@ internal object SettingsCatalog {
         )),
         SettingsGroup("about", "关于", "版本、社区与项目入口", listOf(
             SettingsEntry("updates", "检查更新", DaiyuIcons.Refresh, SettingControl.ACTION),
-            SettingsEntry("telegram", "Telegram 频道", DaiyuIcons.Browser, SettingControl.ACTION),
-            SettingsEntry("qq", "QQ 群", DaiyuIcons.Browser, SettingControl.ACTION),
-            SettingsEntry("source", "源代码", DaiyuIcons.Browser, SettingControl.ACTION),
-            SettingsEntry("relay", "自用中转站", DaiyuIcons.Gateway, SettingControl.PAGE),
-            SettingsEntry("relay_st", "ST API", DaiyuIcons.Gateway, SettingControl.ACTION),
-            SettingsEntry("relay_moyu", "摸鱼", DaiyuIcons.Gateway, SettingControl.ACTION),
+            SettingsEntry("telegram", "Telegram 频道", DaiyuIcons.Browser, SettingControl.ACTION, summary = "公告与项目动态"),
+            SettingsEntry("qq", "QQ 群", DaiyuIcons.Browser, SettingControl.ACTION, summary = "交流与使用反馈"),
+            SettingsEntry("source", "源代码", DaiyuIcons.Browser, SettingControl.ACTION, summary = "项目代码与开发记录"),
+            SettingsEntry("relay", "自用中转站", DaiyuIcons.Gateway, SettingControl.PAGE, summary = "常用服务入口"),
+            SettingsEntry("relay_st", "ST API", DaiyuIcons.Gateway, SettingControl.ACTION, summary = "打开 ST API"),
+            SettingsEntry("relay_moyu", "摸鱼", DaiyuIcons.Gateway, SettingControl.ACTION, summary = "打开摸鱼"),
             SettingsEntry("donate", "给煮波恰饭🍚", DaiyuIcons.Balance, SettingControl.ACTION),
         )),
     )

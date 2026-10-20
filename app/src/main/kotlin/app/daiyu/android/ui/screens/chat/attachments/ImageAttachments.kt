@@ -3,6 +3,8 @@ package app.daiyu.android.ui.screens.chat.attachments
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +43,10 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.screens.chat.conversation.ChatIconButton
+import app.daiyu.android.ui.screens.chat.conversation.chatChromeColors
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.daiyu.android.R
@@ -79,10 +85,13 @@ fun ImageAttachments(
     loadPreview: ImageAttachmentPreviewLoader,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    compact: Boolean = false,
 ) {
     val colors = MiuixTheme.colorScheme
-    Column(modifier.fillMaxWidth().testTag("image_attachments"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    if (!compact || state.items.isNotEmpty() || state.selection != null || state.submission != null) Column(
+        modifier.fillMaxWidth().then(if (compact) Modifier.padding(horizontal = 13.dp, vertical = 6.dp) else Modifier)
+            .testTag("image_attachments"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (!compact) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.image_attachments_title, state.ready.size, state.maxImages),
                 modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1,
                 color = colors.onSurfaceVariantSummary)
@@ -96,14 +105,14 @@ fun ImageAttachments(
         if (state.submission != null) {
             StatusText(stringResource(R.string.image_attachments_submitting), "image_attachments_submitting")
         }
-        if (state.items.isEmpty()) {
+        if (!compact && state.items.isEmpty()) {
             Text(stringResource(R.string.image_attachments_empty), style = MiuixTheme.textStyles.footnote1,
                 color = colors.onSurfaceVariantSummary, modifier = Modifier.padding(bottom = 4.dp))
-        } else {
+        } else if (state.items.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.items.forEachIndexed { index, item ->
                     key(item.key) {
-                        AttachmentTile(item, index + 1, enabled && state.canRemove(item.key), actions, loadPreview)
+                        AttachmentTile(item, index + 1, enabled && state.canRemove(item.key), actions, loadPreview, compact)
                     }
                 }
             }
@@ -121,12 +130,44 @@ private fun AttachmentTile(
     removable: Boolean,
     actions: ImageAttachmentsActions,
     loadPreview: ImageAttachmentPreviewLoader,
+    compact: Boolean,
 ) {
     val colors = MiuixTheme.colorScheme
     val previewLabel = stringResource(R.string.image_attachments_preview_number, number)
+    if (compact) {
+        val chrome = chatChromeColors()
+        Row(Modifier.width(188.dp).clip(RoundedCornerShape(12.dp))
+            .background(chrome.accent.copy(alpha = .08f))
+            .testTag("image_attachments_item:${item.key.id}").padding(4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val previewModifier = if (item is ImageAttachmentItem.Ready) Modifier.clickable(
+                interactionSource = remember { MutableInteractionSource() }, indication = null,
+                role = Role.Button, onClickLabel = previewLabel, onClick = { actions.onPreview(item.key) },
+            ) else Modifier
+            Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).then(previewModifier)
+                .testTag("image_attachments_thumbnail:${item.key.id}"), contentAlignment = Alignment.Center) {
+                if (item is ImageAttachmentItem.Ready) AttachmentImage(item, loadPreview, 256, previewLabel, ContentScale.Crop, compact = true)
+                else androidx.compose.material3.Icon(DaiyuIcons.Image, null, Modifier.size(18.dp), tint = chrome.accent)
+            }
+            Text(when (item) {
+                is ImageAttachmentItem.Ready -> "图片 $number · ${item.attachment.width} × ${item.attachment.height}"
+                is ImageAttachmentItem.Importing -> stringResource(R.string.image_attachments_importing)
+                is ImageAttachmentItem.Failed -> failureText(item.failure)
+            }, Modifier.weight(1f).then(when (item) {
+                is ImageAttachmentItem.Importing -> Modifier.testTag("image_attachments_importing:${item.key.id}")
+                is ImageAttachmentItem.Failed -> Modifier.testTag("image_attachments_failed:${item.key.id}")
+                else -> Modifier
+            }), fontSize = 10.sp, lineHeight = 14.sp, color = chrome.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            ChatIconButton(DaiyuIcons.Close, stringResource(R.string.image_attachments_remove_number, number),
+                { actions.onRemove(item.key) }, Modifier.size(24.dp).testTag("image_attachments_remove:${item.key.id}"),
+                enabled = removable, iconSize = 12.dp, tint = chrome.muted)
+        }
+        return
+    }
     Column(Modifier.width(144.dp).clip(RoundedCornerShape(12.dp)).background(colors.surfaceContainerHigh)
         .testTag("image_attachments_item:${item.key.id}")) {
         val previewModifier = if (item is ImageAttachmentItem.Ready) Modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null,
             role = Role.Button, onClickLabel = previewLabel, onClick = { actions.onPreview(item.key) },
         ) else Modifier
         Box(Modifier.fillMaxWidth().height(96.dp).then(previewModifier)
@@ -162,6 +203,7 @@ private fun AttachmentImage(
     description: String,
     contentScale: ContentScale,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val loader by rememberUpdatedState(loadPreview)
     var attempt by remember(item.key) { mutableStateOf(0) }
@@ -176,8 +218,15 @@ private fun AttachmentImage(
         }
     }
     when (val current = result) {
-        PreviewResult.Loading -> StatusText(stringResource(R.string.image_attachments_preview_loading), "image_attachments_preview_loading:${item.key.id}")
-        PreviewResult.Failed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        PreviewResult.Loading -> if (compact) androidx.compose.material3.Icon(DaiyuIcons.Image,
+            stringResource(R.string.image_attachments_preview_loading),
+            Modifier.size(18.dp).testTag("image_attachments_preview_loading:${item.key.id}"), tint = chatChromeColors().muted)
+        else StatusText(stringResource(R.string.image_attachments_preview_loading), "image_attachments_preview_loading:${item.key.id}")
+        PreviewResult.Failed -> if (compact) ChatIconButton(DaiyuIcons.Retry,
+            stringResource(R.string.image_attachments_retry_preview), { attempt++ },
+            Modifier.size(24.dp).testTag("image_attachments_preview_failed:${item.key.id}"),
+            iconSize = 14.dp, tint = chatChromeColors().muted)
+        else Column(horizontalAlignment = Alignment.CenterHorizontally) {
             StatusText(stringResource(R.string.image_attachments_preview_failed), "image_attachments_preview_failed:${item.key.id}")
             TextButton(text = stringResource(R.string.image_attachments_retry_preview),
                 onClick = { attempt++ }, modifier = Modifier.heightIn(min = 48.dp))

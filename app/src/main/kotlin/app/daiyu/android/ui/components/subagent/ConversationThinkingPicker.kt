@@ -21,6 +21,9 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
@@ -32,9 +35,9 @@ import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.ui.haptics.TouchHaptics
 import kotlin.math.roundToInt
 
-@Composable internal fun ConversationThinkingMark(modifier: Modifier = Modifier) {
+@Composable internal fun ConversationThinkingMark(modifier: Modifier = Modifier, tint: Color = conversationAgentColors().accent) {
     androidx.compose.material3.Icon(app.daiyu.android.ui.icons.ChatPreviewIcons.Thought,
-        contentDescription = null, modifier = modifier, tint = conversationAgentColors().accent)
+        contentDescription = null, modifier = modifier, tint = tint)
 }
 
 @Composable internal fun ConversationThinkingPicker(show: Boolean, effort: ReasoningEffort, options: List<ReasoningEffort>,
@@ -42,17 +45,21 @@ import kotlin.math.roundToInt
     if (!show) return
     val colors = conversationAgentColors()
     val subagent = LocalConversationAgentStyle.current
-    var selected by remember(show, effort, options) { mutableIntStateOf(options.indexOf(effort).coerceAtLeast(0)) }
+    val choices = if (subagent) options else options.filter { it != ReasoningEffort.DEFAULT }
+    if (choices.isEmpty()) return
+    var selected by remember(show, effort, choices) {
+        mutableIntStateOf(if (subagent) choices.indexOf(effort).coerceAtLeast(0) else choices.indexOf(effort))
+    }
     val maxHeight = (LocalConfiguration.current.screenHeightDp - 50).coerceAtLeast(160).dp
     if (subagent) {
         SubAgentConfigurationWindow("思考深度", onDismiss) {
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ConversationThinkingMark(Modifier.size(34.dp))
-                Text(options[selected].displayName, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.padding(top = 14.dp))
+                Text(choices[selected].displayName, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.padding(top = 14.dp))
             }
-            if (options.size > 1) ConversationDepthSlider(selected, options.lastIndex, { selected = it }, { index ->
-                if (options[index] != effort) onEffortChange(options[index])
+            if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { selected = it }, { index ->
+                if (choices[index] != effort) onEffortChange(choices[index])
             })
             if (description != null) Text(description, fontSize = 9.sp, lineHeight = 15.sp, color = colors.muted, modifier = Modifier.padding(top = 15.dp))
             }
@@ -62,20 +69,20 @@ import kotlin.math.roundToInt
         return
     }
     ConversationAgentTypography {
-        ConversationAgentSheet(onDismiss, radius = if (subagent) 25 else 28, modifier = Modifier.heightIn(max = maxHeight)) {
+        ConversationAgentSheet(onDismiss, radius = 28, modifier = Modifier.heightIn(max = maxHeight)) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 22.dp, bottom = 24.dp).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("调整思考深度", fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 19.dp), color = colors.text)
-                ConversationThinkingMark(Modifier.size(if (subagent) 34.dp else 30.dp))
-                Text(options[selected].displayName, fontSize = if (subagent) 22.sp else 20.sp,
-                    lineHeight = 28.sp, fontWeight = FontWeight.Normal, color = colors.text,
-                    modifier = Modifier.padding(top = if (subagent) 14.dp else 8.dp, bottom = if (subagent) 25.dp else 18.dp))
-                if (options.size > 1) ConversationDepthSlider(selected, options.lastIndex, { selected = it }, { index ->
-                    if (options[index] != effort) onEffortChange(options[index])
-                })
-                // Real capability/permission explanation is retained; no preview endpoint claims.
-                if (description != null) Text(description, fontSize = 9.sp, lineHeight = 15.sp, color = colors.muted,
-                    modifier = Modifier.padding(top = 12.dp))
+                Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                    ConversationThinkingMark(Modifier.size(30.dp), tint = colors.strong)
+                }
+                Text(choices.getOrNull(selected)?.displayName ?: "选择思考深度", fontSize = 20.sp,
+                    lineHeight = 28.sp, fontWeight = FontWeight(450), color = colors.text,
+                    modifier = Modifier.testTag("chat-thinking-value").padding(top = 8.dp, bottom = 18.dp))
+                if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { index ->
+                    selected = index
+                    if (choices[index] != effort) onEffortChange(choices[index])
+                }, {})
             }
         }
     }
@@ -87,8 +94,10 @@ import kotlin.math.roundToInt
     val view = LocalView.current
     val preview by rememberUpdatedState(onPreview)
     val commit by rememberUpdatedState(onCommit)
-    Canvas(Modifier.fillMaxWidth().height(28.dp).semantics {
-        progressBarRangeInfo = ProgressBarRangeInfo(selected.toFloat(), 0f..maximum.toFloat(), (maximum - 1).coerceAtLeast(0))
+    Canvas(Modifier.testTag("thinking-depth-slider").fillMaxWidth().height(28.dp).semantics {
+        contentDescription = "思考深度"
+        if (selected >= 0) progressBarRangeInfo = ProgressBarRangeInfo(selected.toFloat(), 0f..maximum.toFloat(), (maximum - 1).coerceAtLeast(0))
+        else stateDescription = "尚未选择"
         setProgress { value -> val index = value.roundToInt().coerceIn(0, maximum); preview(index); commit(index); true }
     }.pointerInput(maximum) {
         awaitEachGesture {
@@ -108,10 +117,10 @@ import kotlin.math.roundToInt
         }
     }) {
         val radius = 14.dp.toPx()
-        val thumbX = radius + (size.width - 2 * radius) * selected / maximum.coerceAtLeast(1)
+        val thumbX = radius + (size.width - 2 * radius) * selected.coerceAtLeast(0) / maximum.coerceAtLeast(1)
         val active = Color(if (colors.dark) 0xffb2a0c9 else 0xffa38db9)
         drawRoundRect(Color(if (colors.dark) 0xff332f3d else 0xffeee9f3), cornerRadius = CornerRadius(radius))
-        drawRoundRect(active, size = Size((thumbX + radius).coerceAtMost(size.width), size.height), cornerRadius = CornerRadius(radius))
+        if (selected >= 0) drawRoundRect(active, size = Size((thumbX + radius).coerceAtMost(size.width), size.height), cornerRadius = CornerRadius(radius))
         // CSS stardust is decorative and deterministic, never a task or capability signal.
         listOf(.08f to .22f,.18f to .78f,.28f to .19f,.40f to .76f,.56f to .25f,.68f to .72f,.81f to .21f,.93f to .69f).forEach { (x,y) ->
             drawCircle(Color.White.copy(alpha = .6f), .7.dp.toPx(), Offset(size.width*x,size.height*y))
@@ -120,7 +129,7 @@ import kotlin.math.roundToInt
             drawCircle(if (i <= selected) Color(0xe6ffffff) else Color(if (colors.dark) 0xff8b8199 else 0xffb6adbf), 3.5.dp.toPx(),
                 Offset(radius + (size.width - 2 * radius)*i/maximum.coerceAtLeast(1), size.height/2))
         }
-        drawCircle(Color(if (colors.dark) 0xfffcfaff else 0xffffffff), 11.dp.toPx(), Offset(thumbX,size.height/2))
-        drawCircle(Color(if (colors.dark) 0x40ffffff else 0x40a99aba), 11.dp.toPx(), Offset(thumbX,size.height/2), style = Stroke(1.dp.toPx()))
+        if (selected >= 0) drawCircle(Color(if (colors.dark) 0xfffcfaff else 0xffffffff), 11.dp.toPx(), Offset(thumbX,size.height/2))
+        if (selected >= 0) drawCircle(Color(if (colors.dark) 0x40ffffff else 0x40a99aba), 11.dp.toPx(), Offset(thumbX,size.height/2), style = Stroke(1.dp.toPx()))
     }
 }

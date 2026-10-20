@@ -148,18 +148,16 @@ private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (Cha
 
 @Composable
 internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit) {
-    var showPath by remember { mutableStateOf(false) }
     val entries = listOf(
         MenuEntry("图片", DaiyuIcons.Image, ChatMenuAction.ATTACH_IMAGE),
         MenuEntry("视频", DaiyuIcons.Video, ChatMenuAction.ATTACH_VIDEO),
         MenuEntry("文件引用", DaiyuIcons.File, ChatMenuAction.ATTACH_FILE),
         MenuEntry("目录引用", DaiyuIcons.Folder, ChatMenuAction.ATTACH_FOLDER),
-        MenuEntry("路径引用", DaiyuIcons.Terminal, ChatMenuAction.ATTACH_PATH),
     )
     val colors = usagePalette()
     ChatSelectionSheet("附件", onDismiss, subtitle = "选择你要添加的内容") {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-            entries.filter { it.action != ChatMenuAction.ATTACH_PATH || showPath }.forEach { entry ->
+            entries.forEach { entry ->
                 val tint = when (entry.action) {
                     ChatMenuAction.ATTACH_IMAGE, ChatMenuAction.ATTACH_VIDEO -> Color(0xFFB97595)
                     ChatMenuAction.ATTACH_FILE, ChatMenuAction.ATTACH_FOLDER -> Color(0xFFB08D59)
@@ -179,10 +177,10 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
             HorizontalDivider(Modifier.padding(top = 12.dp), color = colors.line)
             Row(Modifier.fillMaxWidth().testTag("chat-attachment-path-toggle")
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    role = Role.Button) { showPath = !showPath }.padding(vertical = 12.dp),
+                    role = Role.Button) { onDismiss(); onAction(ChatMenuAction.ATTACH_PATH) }.padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("输入文件路径", Modifier.weight(1f), fontSize = 11.sp, color = colors.muted)
-                Icon(ChatPreviewIcons.Chevron, if (showPath) "收起" else "展开", Modifier.size(11.dp), tint = colors.muted)
+                Icon(ChatPreviewIcons.ChevronRight, null, Modifier.size(11.dp), tint = colors.muted)
             }
         }
     }

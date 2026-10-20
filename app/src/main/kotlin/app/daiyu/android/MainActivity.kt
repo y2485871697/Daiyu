@@ -2032,14 +2032,12 @@ class MainActivity : ComponentActivity() {
                 val thinkingOwner = chatState.conversationKey
                 SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = reasoningPreference.get(thinkingOwner),
                     chatStyle = true,
-                    options = ReasoningEffort.entries,
-                    description = "下一次主请求生效。默认保留供应商配置；Responses 使用 reasoning。Messages 手动 thinking 预算：最小1024、低2048、中4096、高8192；未设 max_tokens 时为预算+4096，已有上限不足会拒绝。不支持的配置不会自动降档；远端模型仍可能拒绝。仅展示模型已报告的摘要或思考文本，不代表获得隐藏内部推理。",
+                    options = ReasoningEffort.entries.filter { it != ReasoningEffort.DEFAULT },
                     onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
                         if (activityUsable() && selected?.id?.value == thinkingOwner) {
                             try { reasoningPreference.set(thinkingOwner, effort); publishChat() }
                             catch (_: Exception) { toast("思考偏好保存未确认；请重新保存") }
                         }
-                        thinkingPicker = false
                     })
             }
         }

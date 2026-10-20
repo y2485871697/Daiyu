@@ -31,6 +31,7 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
 
     private fun show(initial: CompressionSettingsDraftUi) {
         submitted = null
+        observed = null
         pickerOpens = 0
         mainThread {
             activity.setContent {
@@ -70,6 +71,38 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
         assertEquals(1, pickerOpens)
         assertNull(submitted)
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSummaryEndpointMenuHasOriginalOptionsAndDescriptions() {
+        show(draft())
+        ui.onNodeWithText("仅用于摘要。默认 Chat Completions；模型需要时选 Responses。Anthropic / Codex 不受此项影响。")
+            .assertExists()
+        ui.onNodeWithText("关闭时沿用对话模型。").assertExists()
+        node("compression-protocol").performClick()
+        node("compression-protocol-menu").assertExists()
+        node("compression-endpoint:chat-completions").assertTextEquals("Chat Completions API")
+        node("compression-endpoint:responses").assertTextEquals("Responses API")
+        ui.onNodeWithText("Anthropic Messages").assertDoesNotExist()
+        ui.onNodeWithText("OpenAI Responses").assertDoesNotExist()
+        assertEquals(0, pickerOpens)
+        assertNull(submitted)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testEndpointPlaceholderDoesNotChangeProviderOrOpenModelPicker() {
+        val initial = draft().copy(provider = draft().provider.copy(protocol = ProviderProtocol.MESSAGES))
+        show(initial)
+        listOf("compression-endpoint:chat-completions", "compression-endpoint:responses").forEach { option ->
+            node("compression-protocol").performClick()
+            node(option).assertIsNotSelected().performClick()
+            node("compression-protocol-menu").assertDoesNotExist()
+            assertEquals(0, pickerOpens)
+            assertNull(submitted)
+            assertNull(observed)
+            assertEquals(0, fixture.opens.get())
+        }
+        reveal("compression-summary-config", "上下文压缩").performClick()
+        assertEquals(1, pickerOpens)
     }
 
     fun testDraftProtocolAuthorizationAndRequestPolicyResetRemainExplicit() {

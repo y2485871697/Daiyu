@@ -28,23 +28,25 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         } }
     }
 
-    private fun assertCompact(tag: String) {
+    private fun assertSpaciousWithBottomFooter(tag: String) {
         node(tag).assertIsDisplayed()
         val card = node("subagent-collaboration-card").fetchSemanticsNode().boundsInRoot
         val footer = node("subagent-collaboration-footer").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue("Empty sheet must not reserve the full editor height: ${card.height / density}", card.height / density < 300f)
+        assertTrue("Empty sheet retains its intended height: ${card.height / density}", card.height / density in 350f..385f)
+        val message = node(tag).fetchSemanticsNode().boundsInRoot
+        assertTrue("Whitespace belongs between message and footer", (footer.top - message.bottom) / density > 60f)
         assertTrue("Footer stays within sheet", footer.bottom <= card.bottom + 1f)
         assertTrue("No unused area after footer", (card.bottom - footer.bottom) / density < 32f)
     }
 
-    fun testNoConversationUsesCompactReadableStateWithoutWritingConfiguration() {
+    fun testNoConversationKeepsWhitespaceAndBottomFooterWithoutWritingConfiguration() {
         for (dark in listOf(false, true)) {
             val prefs = instrumentation.targetContext.getSharedPreferences("collaboration-empty-${UUID.randomUUID()}", 0)
             try {
                 val repository = ConversationSubAgentPreferences(prefs)
                 val before = prefs.all.toMap()
                 show(null, repository, dark)
-                assertCompact("subagent-no-conversation")
+                assertSpaciousWithBottomFooter("subagent-no-conversation")
                 ui.onNodeWithText("尚未选择会话").assertIsDisplayed()
                 ui.onNodeWithText("使用当前配置").assertDoesNotExist()
                 ui.onNodeWithText("关闭").performClick()
@@ -63,7 +65,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 val before = prefs.all.toMap()
                 show("empty-state", repository, dark)
                 ui.waitUntil(5_000) { ui.onAllNodesWithTag("subagent-no-presets").fetchSemanticsNodes().size == 1 }
-                assertCompact("subagent-no-presets")
+                assertSpaciousWithBottomFooter("subagent-no-presets")
                 ui.onNodeWithText("还没有子代理组").assertIsDisplayed()
                 ui.onNodeWithText("使用当前配置").assertIsEnabled()
                 ui.onNodeWithText("完成").performClick()

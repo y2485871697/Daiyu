@@ -1445,17 +1445,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 when (retainedPage) {
-                    "context-management" -> {
-                        val visit = contextManagementVisit
-                        if (visit != null) key(visit) {
-                            ContextManagementRoute(visit.adapter, onClose = {
-                                if (contextManagementVisit === visit) returnToChat()
-                            })
-                        } else Column(Modifier.fillMaxSize().padding(16.dp)) {
-                            top.yukonga.miuix.kmp.basic.Text("上下文页面已失效；请返回原会话重新打开")
-                            top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { returnToChat() })
-                        }
-                    }
                     "balance-settings" -> {
                         val runtime = balanceRuntime
                         if (runtime != null) app.daiyu.android.balance.ui.BalanceSettingsScreen(
@@ -1950,6 +1939,20 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                    }
+                }
+                if (retainedPage == "context-management") {
+                    val visit = contextManagementVisit
+                    if (visit != null) key(visit) {
+                        ContextManagementRoute(visit.adapter,
+                            source = remember(visit) {
+                                app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers)
+                            }, onClose = {
+                                if (contextManagementVisit === visit) returnToChat()
+                            })
+                    } else app.daiyu.android.ui.components.UsageGlassDialog("压缩会话", onDismiss = { returnToChat() }) {
+                        top.yukonga.miuix.kmp.basic.Text("上下文页面已失效；请返回原会话重新打开")
+                        app.daiyu.android.ui.components.UsageAction("返回", { returnToChat() })
                     }
                 }
                 if (retainedPage == "browser") {

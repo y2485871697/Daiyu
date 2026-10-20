@@ -135,6 +135,39 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(conversation.id, next.state.value.owner.conversationId)
         assertEquals(0, fixture.opens.get())
     }
+    fun testCompressionDialogChoicesStayLocalAndPickerBackKeepsTheConversation() {
+        seedAndSelect()
+        val before = fixture.database.exportBackup()
+        val configuration = fixture.settings.loadForEditing().settings
+        val preferences = instrumentation.targetContext.getSharedPreferences("settings-model-selection", 0)
+        val savedSelection = preferences.all.toMap()
+        val adapter = openAndAwait()
+        mainThread { offerConfirmationMetadata(adapter) }
+        node("compression-dialog-custom").assertIsOn()
+        node("context-refresh").assertDoesNotExist()
+        node("context-advanced").assertDoesNotExist()
+        val protocol = app.daiyu.android.model.ProviderProtocol.RESPONSES
+        node("compression-dialog-api:${protocol.wireName}").performClick()
+        node("compression-dialog-custom").performClick().assertIsOff()
+        node("context-compress").assertIsEnabled().performClick()
+        assertFalse(adapter.state.value.confirmingCompression)
+        assertNull(adapter.state.value.operation)
+        node("compression-dialog-custom").performClick().assertIsOn()
+        node("compression-dialog-model").performClick()
+        awaitUniqueTag("settings-model-picker")
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("context-management")
+        node("compression-dialog-api:${protocol.wireName}").assertIsSelected()
+        node("context-close").performClick()
+        node("context-management").assertDoesNotExist()
+        assertDraft("retained unsent draft")
+        assertNull(adapter.state.value.snapshot)
+        assertEquals(savedSelection, preferences.all)
+        assertEquals(configuration, fixture.settings.loadForEditing().settings)
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testSelectionAndPageChangesRevokeBeforeOldCommandsAndSameIdGetsNewVisit() {
         val conversation = seedAndSelect()
         val old = openAndAwait()
@@ -271,8 +304,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         node("context-management").assertDoesNotExist()
         val old = openAndAwait()
         mainThread { offerConfirmationMetadata(old) }
-        node("context-management").performScrollToNode(hasTestTag("context-compress"))
-        node("context-compress").performClick()
+        node("context-compress").assertIsDisplayed().performClick()
         mainThread { assertTrue(old.state.value.confirmingCompression) }
         // This is the same adapter method retained by the actual Panel's confirmation button.
         val oldConfirm: () -> Unit = old::confirmCompression

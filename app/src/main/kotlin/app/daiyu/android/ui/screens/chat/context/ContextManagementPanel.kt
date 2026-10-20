@@ -25,6 +25,9 @@ import app.daiyu.android.context.ContextManagementControllerAdapter
 import app.daiyu.android.context.ContextManagementOperation
 import app.daiyu.android.context.ContextManagementState
 import app.daiyu.android.domain.Message
+import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.ui.screens.settings.SettingsModelPicker
+import app.daiyu.android.ui.screens.settings.SettingsModelSource
 import app.daiyu.android.ui.components.UsageBody as Text
 import app.daiyu.android.ui.components.UsageAction as TextButton
 import app.daiyu.android.ui.components.UsageGlassDialog
@@ -39,11 +42,49 @@ import androidx.compose.ui.unit.sp
 /** Visit-scoped adapter: construction/loading never starts a model request. Parent supplies the
  * real admission seam; this route is intentionally not attached to Main's pendingFeature. */
 @Composable
-internal fun ContextManagementRoute(adapter: ContextManagementControllerAdapter, onClose: () -> Unit) {
+internal fun ContextManagementRoute(
+    adapter: ContextManagementControllerAdapter,
+    source: SettingsModelSource,
+    onClose: () -> Unit,
+) {
     val state by adapter.state.collectAsState()
     LaunchedEffect(adapter) { adapter.refresh() }
     DisposableEffect(adapter) { onDispose { adapter.close() } }
-    ContextManagementPanel(state, adapter, onClose = { adapter.close(); onClose() })
+    val dismiss = { adapter.close(); onClose() }
+    val initial = remember(adapter, state.snapshot?.configuration?.summaryModel, state.snapshot?.summaryTarget) {
+        CompressionDialogDraft(
+            customModel = state.snapshot?.configuration?.summaryModel != null,
+            modelLabel = state.snapshot?.summaryTarget?.apiModel ?: source.label("compression"),
+            modelKey = source.key("compression"),
+            protocol = if (source.protocol("compression") == ProviderProtocol.RESPONSES)
+                ProviderProtocol.RESPONSES else ProviderProtocol.CHAT_COMPLETIONS,
+        )
+    }
+    var draft by remember(initial) { mutableStateOf(initial) }
+    var modelPicked by remember(initial) { mutableStateOf(false) }
+    var choosingModel by remember(adapter) { mutableStateOf(false) }
+    var managing by remember(adapter) { mutableStateOf(false) }
+    if (managing) {
+        ContextManagementPanel(state, adapter, onClose = dismiss)
+    } else if (choosingModel) {
+        SettingsModelPicker("压缩模型", source, draft.modelKey,
+            onSelect = { choice ->
+                draft = draft.copy(modelLabel = choice.selection.record.displayName, modelKey = choice.key)
+                modelPicked = true
+                choosingModel = false
+            }, onDismiss = { choosingModel = false })
+    } else {
+        CompressionConversationDialog(draft, onChange = { draft = it },
+            onChooseModel = { choosingModel = true }, onDismiss = dismiss, onConfirm = {
+                // New model/API choices remain a local draft until their execution path is wired.
+                // Never send to the old saved target after the user selected a different target.
+                if (draft == initial && !modelPicked && state.snapshot?.canCompress == true &&
+                    state.operation == null && !state.requiresRefresh) {
+                    adapter.requestCompression()
+                    if (adapter.state.value.confirmingCompression) managing = true
+                }
+            })
+    }
 }
 
 /** Controlled screen. Archive text is selectable literal evidence, never Markdown, a WebView,

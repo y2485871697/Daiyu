@@ -104,24 +104,22 @@ internal fun ProviderChoiceRow(title: String, value: String, tag: String, enable
                 DaiyuIcon(DaiyuIcons.ChevronDown, null, Modifier.size(12.dp))
             }
         }
-        Box(Modifier.align(Alignment.BottomEnd)) {
-            WithoutPressRipple {
-                DropdownMenu(expanded && enabled, onDismissRequest = { expanded = false },
-                    modifier = Modifier.widthIn(max = 320.dp).testTag("$tag-menu"),
-                    shape = RoundedCornerShape(22.dp), containerColor = colors.surface) {
-                    choices.forEachIndexed { index, choice ->
-                        DropdownMenuItem(
-                            text = { Text(choice, style = MiuixTheme.textStyles.body1) },
-                            modifier = Modifier.testTag(optionTags[index]).semantics { selected = index == selectedIndex },
-                            trailingIcon = { if (index == selectedIndex) DaiyuIcon(DaiyuIcons.Check, "已选择", size = 22.dp) },
-                            onClick = {
-                                if (expanded && currentEnabled && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                                    expanded = false
-                                    onSelect(index)
-                                }
-                            },
-                        )
-                    }
+        WithoutPressRipple {
+            DropdownMenu(expanded && enabled, onDismissRequest = { expanded = false },
+                modifier = Modifier.widthIn(max = 320.dp).testTag("$tag-menu"),
+                shape = RoundedCornerShape(22.dp), containerColor = colors.surface) {
+                choices.forEachIndexed { index, choice ->
+                    DropdownMenuItem(
+                        text = { Text(choice, style = MiuixTheme.textStyles.body1) },
+                        modifier = Modifier.testTag(optionTags[index]).semantics { selected = index == selectedIndex },
+                        trailingIcon = { if (index == selectedIndex) DaiyuIcon(DaiyuIcons.Check, "已选择", size = 22.dp) },
+                        onClick = {
+                            if (expanded && currentEnabled && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                                expanded = false
+                                onSelect(index)
+                            }
+                        },
+                    )
                 }
             }
         }

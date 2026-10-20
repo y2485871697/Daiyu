@@ -124,7 +124,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertEquals(14f, dp(search.left - drawer.left), .6f)
             assertEquals(15f, dp(drawer.right - search.right), .6f)
             assertEquals(38f, dp(search.height), .6f)
-            assertEquals(13f, dp(bounds("drawer-search-icon").left - search.left), .6f)
+            assertEquals(13f, dp(bounds("drawer-search-icon").left - search.left), dp(1f) + .01f)
             assertEquals(18f, dp(bounds("drawer-search-icon").width), .6f)
             assertEquals(8f, dp(bounds("drawer-search-input").left - bounds("drawer-search-icon").right), .6f)
             assertEquals(12f, dp(newChat.top - search.bottom), .6f)

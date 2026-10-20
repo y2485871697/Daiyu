@@ -165,6 +165,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         setDraft("分页跳转前草稿")
         openMessages()
         node("search:query").performTextReplacement("分页UI命中")
+        dismissIme(activity.window.decorView)
         ui.waitUntil(5_000) {
             ui.onAllNodesWithText(activity.getString(R.string.search_message_count, 200)).fetchSemanticsNodes().isNotEmpty()
         }

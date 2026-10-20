@@ -5,11 +5,16 @@ import android.app.Instrumentation
 import android.content.Intent
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
+import androidx.compose.ui.text.AnnotatedString
 import java.util.concurrent.CopyOnWriteArrayList
 
 class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
     private fun entry(title: String): SemanticsNodeInteraction {
-        node("settings-search").performTextReplacement(title)
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString(title)))
+            }
+            .assertEditableText(title)
         return reveal("settings-row:$title", "设置")
     }
     private fun intercept(action: () -> Unit): List<Intent> {

@@ -31,7 +31,8 @@ class SecretVisibilityActivityTest : WiredActivityTestCase() {
         openModels(); assertMasked()
         modelField("API Key").performSemanticsAction(SemanticsActions.SetText) { setText ->
             assertTrue(setText(AnnotatedString("visibility-secret-canary")))
-        }.assertEditableText("visibility-secret-canary")
+        }
+        assertMasked()
         toggle().assertContentDescriptionEquals("显示密钥").performClick()
         modelField("API Key").assertEditableText("visibility-secret-canary")
         toggle().assertContentDescriptionEquals("隐藏密钥").performClick(); assertMasked()

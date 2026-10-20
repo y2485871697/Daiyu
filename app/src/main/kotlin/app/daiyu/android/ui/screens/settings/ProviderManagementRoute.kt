@@ -268,7 +268,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         open(added.slotId)
                     }) { repo, revision, admit ->
                         repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
-                            submitted.protocolChangeAuthorized, admit)
+                            submitted.protocolChangeAuthorized, enabled = submitted.providerEnabled, admit = admit)
                     }
                 }
             }, onFetchCatalog = {}, onBack = { back() }, pageTitle = "添加提供商", providerName = "",
@@ -311,7 +311,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         controller.saveProviderSettings(d.editor, value.getOrThrow(), d.editing,
                             submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, d.saveOwner,
                             headersReplacementAuthorized = submitted.headersReplacementAuthorized,
-                            providerName = submitted.providerName.orEmpty().trim()) { success ->
+                            providerName = submitted.providerName.orEmpty().trim(),
+                            providerEnabled = submitted.providerEnabled) { success ->
                             if (busy === ticket) busy = null
                             if (live()) {
                                 if (success && d.editor.slotId == ProviderRegistry.PRIMARY) {

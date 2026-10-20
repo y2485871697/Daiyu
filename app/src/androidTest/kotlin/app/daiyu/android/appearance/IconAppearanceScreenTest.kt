@@ -156,7 +156,7 @@ class IconAppearanceScreenTest : ComposeActivityTestCase() {
         reveal("settings-row:图标", page).performClick()
         swatch("cat", 0).assertIsSelected()
         val click = checkNotNull(reveal("icon-appearance-confirm", page).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings()) {
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             top.yukonga.miuix.kmp.basic.Text("已离开外观设置")
         } } }
         ui.waitForIdle()

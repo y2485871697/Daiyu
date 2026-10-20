@@ -11,8 +11,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.runningmode.*
 import app.daiyu.android.terminal.*
 import app.daiyu.android.terminal.install.LinuxInstallState
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
@@ -33,7 +35,10 @@ private enum class LinuxFilesPage { WORKSPACE, SHARED, BROWSE }
 /** Parent retains the page owner. Browsing and selecting never start a terminal or install. */
 @Composable
 internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: LinuxSettingsPageOwner,
-    onBack: () -> Unit, modifier: Modifier = Modifier, host: TerminalEnvironmentHost? = null) {
+    onBack: () -> Unit, modifier: Modifier = Modifier, host: TerminalEnvironmentHost? = null,
+    runningModeStore: RunningModeStore = AndroidRunningModeStore.get(LocalContext.current)) {
+    val runningMode by runningModeStore.mode.collectAsState()
+    val rootMode = runningMode == RunningMode.ROOT
     val state by page.state.collectAsState()
     val terminal = host?.state?.collectAsState()?.value
     val proot = controller.installation?.state?.collectAsState()?.value
@@ -48,7 +53,8 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     }
     val pendingInstall = if (pendingMode == LinuxExecutionMode.CHROOT) chroot else proot.takeIf { pendingMode != null }
     val distribution = distributionDraft ?: pendingInstall?.prepared?.artifact?.distribution ?: terminal?.linux?.distribution ?: "alpine"
-    val mode = modeDraft ?: pendingMode ?: selected?.executionMode ?: LinuxExecutionMode.PROOT
+    val mode = if (rootMode) modeDraft ?: pendingMode ?: selected?.executionMode ?: LinuxExecutionMode.PROOT
+        else LinuxExecutionMode.PROOT
     val installation = if (mode == LinuxExecutionMode.CHROOT) chroot else proot
     val otherInstallation = if (mode == LinuxExecutionMode.CHROOT) proot else chroot
     val scope = rememberCoroutineScope()
@@ -79,7 +85,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     else installation
 
     fun choose(nextDistribution: String, nextMode: LinuxExecutionMode) {
-        if (!choiceEnabled) return
+        if (!choiceEnabled || nextMode == LinuxExecutionMode.CHROOT && runningModeStore.mode.value != RunningMode.ROOT) return
         confirmInstall = false
         confirmUse = false
         distributionDraft = nextDistribution
@@ -147,7 +153,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
             state.pendingRemoval?.let { pending ->
                 SettingsCard { SettingsRow("重试移除环境授权", onClick = if (pageEnabled) ({ page.remove(pending); Unit }) else null) }
             }
-            state.pendingApproval?.let {
+            state.pendingApproval?.takeIf { it.installation.executionMode != LinuxExecutionMode.CHROOT || rootMode }?.let {
                 SettingsCard { SettingsRow("完成环境设置", onClick = if (pageEnabled) ({ confirmPending = true }) else null) }
             }
         }
@@ -159,7 +165,8 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                     selectedIndex = if (distribution.equals("debian", true)) 1 else 0,
                     onSelect = { choose(if (it == 0) "alpine" else "debian", mode) })
                 LinuxChoiceRow("运行方式", modeName(mode), "linux-execution-choice", choiceEnabled,
-                    choices = listOf("普通模式 · PRoot" to "无需 Root，使用独立的私有 Linux 环境", "Root 模式 · chroot" to "使用 Root 与独立挂载空间，保留已有环境"),
+                    choices = listOf("普通模式 · PRoot" to "无需 Root，使用独立的私有 Linux 环境") +
+                        if (rootMode) listOf("Root 模式 · chroot" to "使用 Root 与独立挂载空间，保留已有环境") else emptyList(),
                     selectedIndex = if (mode == LinuxExecutionMode.CHROOT) 1 else 0,
                     onSelect = { choose(distribution, if (it == 0) LinuxExecutionMode.PROOT else LinuxExecutionMode.CHROOT) })
             }
@@ -196,14 +203,17 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
         title = "安装 ${distributionName(prepared.artifact.distribution)}", message =
             "将下载并安装 Linux 环境${if (mode == LinuxExecutionMode.CHROOT) "，期间需要 Root 授权" else ""}。不会更改已有环境。",
         confirmText = "下载并安装", destructive = false,
-        onConfirm = { confirmInstall = false; page.install(prepared) },
+        onConfirm = {
+            confirmInstall = false
+            if (prepared.installation.executionMode != LinuxExecutionMode.CHROOT || runningModeStore.mode.value == RunningMode.ROOT) page.install(prepared)
+        },
         onDismiss = { confirmInstall = false })
     val registration = installation?.registration
     if (confirmUse && registration != null && installationMatches && registration.installation.distribution.equals(distribution, true) && registration.installation.executionMode == mode && installationIdle && !installation.registered && installation.receipt?.directorySyncConfirmed == true) DaiyuConfirmDialog(
         title = "启用环境", message = "允许应用使用此 Linux 环境？完成后重启应用生效。", confirmText = "允许使用", destructive = false,
         onConfirm = { confirmUse = false; page.approveInstalled(registration) }, onDismiss = { confirmUse = false })
     state.pendingApproval?.let { pending ->
-        if (confirmPending && pageEnabled) DaiyuConfirmDialog("完成环境设置",
+        if (confirmPending && pageEnabled && (pending.installation.executionMode != LinuxExecutionMode.CHROOT || rootMode)) DaiyuConfirmDialog("完成环境设置",
             "允许应用使用 ${distributionName(pending.installation.distribution)} 环境？" +
                 if (pending.installation.sharedMounts.isEmpty()) "" else "\n将访问以下共享目录：\n" + pending.installation.sharedMounts.keys.joinToString("\n"),
             confirmText = "允许使用", destructive = false,

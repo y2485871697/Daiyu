@@ -1,6 +1,8 @@
 package app.daiyu.android.terminal
 
 import android.content.Context
+import app.daiyu.android.runningmode.AndroidRunningModeStore
+import app.daiyu.android.runningmode.RunningMode
 import app.daiyu.android.workspace.PrivateWorkspacePaths
 import app.daiyu.android.domain.tools.TaskAuthorization
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -341,11 +343,21 @@ private class AndroidTerminalEnvironmentBackend(
 
     override fun linuxStatus(): TerminalLinuxState = selection.status()
 
-    override fun selectLinux(reference: LinuxGenerationRef?) = selection.select(reference)
+    private fun requireMode(reference: LinuxGenerationRef?) {
+        if (reference != null && installations.any {
+                it.environmentId == reference.environmentId && it.generation == reference.generation && it.executionMode == LinuxExecutionMode.CHROOT
+            }) check(AndroidRunningModeStore.get(context).mode.value == RunningMode.ROOT) { "linux_root_mode_required" }
+    }
+
+    override fun selectLinux(reference: LinuxGenerationRef?) {
+        requireMode(reference)
+        selection.select(reference)
+    }
 
     override fun open(request: TerminalOpenRequest): TerminalOwnedResource {
         try {
             if (request.linux != null) {
+                requireMode(request.linux)
                 // Validate before creating home/tmp/journal or looking up the PTY helper. The
                 // guard lease prevents a selection change until openLinux acquires its own lease.
                 return selection.withSelection(request.linux) { store ->

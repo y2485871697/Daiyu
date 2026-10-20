@@ -11,16 +11,18 @@ class SettingsPresentationTest {
     fun retainedSettingsKeepInventoryAndSixVisibleGroups() {
         val entries = SettingsCatalog.entries
         // Current inventory includes independent generation/vision, P05 and platform tools.
-        assertEquals(36, entries.size)
+        assertEquals(37, entries.size)
         assertTrue(entries.none { it.id in setOf("permission_check", "accessibility_keep", "default_reasoning") })
         assertTrue(entries.map { it.id }.containsAll(setOf("platform_tools", "accessibility", "voice", "donate")))
         assertEquals(app.daiyu.android.ui.FeatureRoute.BALANCE_SETTINGS, SettingsCatalog.entry("balance").route)
         assertEquals(entries.size, entries.map { it.id }.toSet().size)
+        assertEquals(SettingsLocalPage.RUNNING_MODE, SettingsCatalog.entry("running_mode").localPage)
+        assertEquals(null, SettingsCatalog.entry("running_mode").summary)
         assertEquals(7, SettingsCatalog.groups.size)
         assertEquals(listOf("通用设置", "模型与服务", "扩展能力", "工具与环境", "数据与记录", "关于"),
             SettingsCatalog.visibleGroups().map { it.title })
         assertTrue(entries.none { it.id == "terminal" })
-        assertEquals(listOf("platform_tools", "workspace", "browser", "linux", "task_surface"),
+        assertEquals(listOf("platform_tools", "running_mode", "workspace", "browser", "linux", "task_surface"),
             SettingsCatalog.groups.single { it.id == "tools" }.entries.map { it.id })
         assertEquals(listOf("extensions"), SettingsCatalog.groups.filter { group ->
             group.entries.any { it.id == "skills" }
@@ -46,7 +48,7 @@ class SettingsPresentationTest {
         for (engineeringUi in listOf(false, true)) {
             val groups = SettingsCatalog.visibleGroups(engineeringUi = engineeringUi)
             val entries = groups.flatMap { it.entries }
-            assertEquals(29, entries.size)
+            assertEquals(30, entries.size)
             assertTrue(entries.none { it.id in hiddenIds })
             assertTrue(groups.none { it.id == "permissions" })
             assertEquals(listOf("appearance", "assistants", "voice", "haptics"),
@@ -70,7 +72,7 @@ class SettingsPresentationTest {
 
     @Test
     fun homeDescriptionsAreConciseAndDoNotInventNewControls() {
-        val dynamicDescriptions = setOf("logging", "export_logs", "clear_logs", "updates", "donate")
+        val dynamicDescriptions = setOf("logging", "export_logs", "clear_logs", "updates", "donate", "running_mode")
         val entries = SettingsCatalog.visibleGroups().flatMap { it.entries }
         assertTrue(entries.filterNot { it.id in dynamicDescriptions }.all { !it.summary.isNullOrBlank() })
         assertTrue(entries.mapNotNull { it.summary }.all { it.length <= 24 })

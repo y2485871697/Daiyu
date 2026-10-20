@@ -60,6 +60,34 @@ class LinuxSettingsControllerTest : TestCase() {
         }
     }
 
+    fun testChrootApprovalRequiresRootModeAndOldPreviewCannotBypassIt() = runTest {
+        val catalog = Catalog()
+        var rootMode = false
+        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this,
+            allowChroot = { rootMode })
+        val page = controller.enterPage()
+        runCurrent()
+        val configuration = LinuxSettingsDraft(distribution = "alpine", environmentId = "root-env",
+            rootfs = "/local/chroot", executionMode = LinuxExecutionMode.CHROOT)
+        assertTrue(page.preview(configuration))
+        runCurrent()
+        val preview = checkNotNull(page.state.value.preview)
+        assertFalse(page.approve(preview))
+        assertEquals(0, catalog.approvals)
+        rootMode = true
+        assertTrue(page.approve(preview))
+        runCurrent()
+        assertEquals(1, catalog.approvals)
+        assertTrue(page.preview(configuration))
+        runCurrent()
+        val oldPreview = checkNotNull(page.state.value.preview)
+        rootMode = false
+        assertFalse(page.approve(oldPreview))
+        assertFalse(page.prepareInstall("alpine", "primary", LinuxExecutionMode.CHROOT))
+        assertEquals(1, catalog.approvals)
+        controller.close()
+    }
+
     fun testNoReadBeforePageAndFrozenFullPreviewIsNotApproval() = runTest {
         val catalog = Catalog()
         val gate = LinuxSettingsAdmission(emptySet())

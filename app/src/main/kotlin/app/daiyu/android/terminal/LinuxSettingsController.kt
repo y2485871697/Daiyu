@@ -95,6 +95,7 @@ class LinuxSettingsController internal constructor(
     startupEntries: List<LinuxInstallation> = emptyList(),
     val installation: app.daiyu.android.terminal.install.LinuxInstallCoordinator? = null,
     val chrootInstallation: app.daiyu.android.terminal.install.LinuxInstallCoordinator? = null,
+    private val allowChroot: () -> Boolean = { false },
 ) : AutoCloseable {
     // For a failed later refresh, keep known startup refs visible so a broken file can be revoked.
     // These rows are explicitly unconfirmed, never a replacement for the admission gate.
@@ -154,7 +155,8 @@ class LinuxSettingsController internal constructor(
     internal fun installAction(page: LinuxSettingsPageOwner, mode: LinuxExecutionMode = LinuxExecutionMode.PROOT,
         newRequest: Boolean = false,
         action: (app.daiyu.android.terminal.install.LinuxInstallCoordinator) -> Boolean): Boolean = synchronized(lock) {
-        if (!active(page) || page.mutable.value.busy || pending != null || page.mutable.value.preview != null) false
+        if (!active(page) || mode == LinuxExecutionMode.CHROOT && !allowChroot() ||
+            page.mutable.value.busy || pending != null || page.mutable.value.preview != null) false
         else {
             val target = if (mode == LinuxExecutionMode.CHROOT) chrootInstallation else installation
             val other = if (mode == LinuxExecutionMode.CHROOT) installation else chrootInstallation
@@ -192,9 +194,11 @@ class LinuxSettingsController internal constructor(
         val mutation = PendingOperation.Approval(approval)
         return submit(page, failure = mutation.failure, mutation = mutation,
             invalidateListOnFailure = true, eligible = {
-                !installationBlocksManual && it.preview === approval && (pending == null ||
+                (approval.installation.executionMode != LinuxExecutionMode.CHROOT || allowChroot()) &&
+                    !installationBlocksManual && it.preview === approval && (pending == null ||
                     (pending as? PendingOperation.Approval)?.approval === approval)
             }) {
+            check(approval.installation.executionMode != LinuxExecutionMode.CHROOT || allowChroot()) { "linux_root_mode_required" }
             val entries = catalog.approve(approval)
             return@submit { state -> state.copy(entries = entries, preview = null, listConfirmed = true,
                 notice = "完整配置已批准并保存；新增配置仅下次应用进程启动生效。未选择或启动终端。") }

@@ -86,8 +86,8 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
     fun testSettingsCardsHaveNoOutlineOrRowDividersInBothThemes() {
         for (dark in listOf(false, true)) {
             showHome(mutableListOf(), dark)
-            val first = node("settings-row:模型提供商").fetchSemanticsNode().boundsInRoot
-            val second = node("settings-row:默认启用推理").fetchSemanticsNode().boundsInRoot
+            val first = reveal("settings-row:上下文压缩", "设置").fetchSemanticsNode().boundsInRoot
+            val second = node("settings-row:辅助视觉模型").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             assertEquals(first.bottom, second.top, 0.1f)
             val pixels = ui.onRoot().captureToImage().toPixelMap()
             val density = activity.resources.displayMetrics.density
@@ -131,11 +131,12 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(listOf("MCP_SETTINGS", "SKILLS"), events) }
     }
 
-    fun testOriginalGroupedHomeKeepsReasoningEntryWithoutCategoryNavigation() {
+    fun testOriginalGroupedHomeRemovesDefaultReasoningWithoutCategoryNavigation() {
         val events = mutableListOf<String>()
         showHome(events)
         node("settings-row:LLM 提供商").assertDoesNotExist()
-        reveal("settings-row:默认启用推理", "设置").assertIsEnabled().performClick()
+        node("settings-row:默认启用推理").assertDoesNotExist()
+        node("settings-row:模型提供商").assertIsDisplayed().assertHasClickAction()
         node("page:设置").assertExists()
         ui.runOnIdle { assertTrue(events.isEmpty()) }
     }

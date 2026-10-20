@@ -79,6 +79,7 @@ internal object SettingsCatalog {
     )
     private val hiddenEntryIds = setOf(
         "balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility",
+        "default_reasoning",
     )
 
     // Retain underlying routes; remove only product entry points.

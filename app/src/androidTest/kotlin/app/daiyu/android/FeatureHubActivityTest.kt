@@ -106,7 +106,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
         val expectedIds = listOf(
-            "providers", "default_reasoning",
+            "providers",
             "compression", "vision", "subagents", "title_model", "reconnect",
             "pet", "assistants", "skills", "mcp",
             "voice", "appearance", "usage", "backup",
@@ -114,11 +114,11 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             "logging", "export_logs", "clear_logs",
             "updates", "telegram", "qq", "source", "relay", "relay_st", "relay_moyu", "donate",
         )
-        assertEquals(30, entries.size)
+        assertEquals(29, entries.size)
         for (engineering in listOf(false, true)) {
             assertEquals(expectedIds, SettingsCatalog.visibleGroups(engineering).flatMap { it.entries }.map { it.id })
         }
-        val hidden = setOf("balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility")
+        val hidden = setOf("default_reasoning", "balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility")
         for (engineering in listOf(false, true)) assertTrue(SettingsCatalog.visibleGroups(engineering)
             .flatMap { it.entries }.none { it.id in hidden })
         entries.forEach { item -> entry(item.id).assertIsEnabled().assert(
@@ -133,7 +133,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("updates", "assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs")
+        val implemented = setOf("updates", "assistants", "subagents", "appearance", "haptics", "voice", "source", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs")
         val placeholder = entries.single { it.id == "donate" }
         val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented && it != placeholder }
         assertEquals(0, unwired.size)
@@ -235,21 +235,13 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             }
-            for (id in listOf("default_reasoning", "logging")) {
-                val row = entry(id)
-                if (id == "logging") awaitControl("diagnostic store loaded") { fixture.diagnostics.state.value.loaded }
-                row.performClick()
-                if (id == "default_reasoning") {
-                    ui.onNodeWithText(activity.getString(R.string.subagent_reasoning_picker_title)).assertExists()
-                    instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-                    ui.waitForIdle()
-                    ui.onNodeWithText(activity.getString(R.string.subagent_reasoning_picker_title)).assertDoesNotExist()
-                }
-                node("page:设置").assertExists()
-                assertEquals(owner.id, fixture.controller.active!!.id)
-                assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
-                assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
-            }
+            val row = entry("logging")
+            awaitControl("diagnostic store loaded") { fixture.diagnostics.state.value.loaded }
+            row.performClick()
+            node("page:设置").assertExists()
+            assertEquals(owner.id, fixture.controller.active!!.id)
+            assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
+            assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             entry("task_surface").performClick(); node("page:Agent任务偏好").assertExists()
             assertEquals(owner.id, fixture.controller.active!!.id)
             assertFalse(fixture.controller.runState(owner)!!.pauseRequested)

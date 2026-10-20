@@ -103,6 +103,20 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testAppearanceIconExpandsInPlaceAndBackReturnsDirectlyToSettings() {
+        setDraft("图标展开保留草稿")
+        val before = fixture.database.exportBackup()
+        openHub(); entry("appearance").performClick()
+        node("icon-appearance-editor").assertDoesNotExist()
+        reveal("settings-row:图标", "外观与主题").performClick()
+        node("icon-appearance-editor").assertExists()
+        node("icon-preview:light").assertExists(); node("icon-preview:dark").assertExists()
+        node("page:应用图标").assertDoesNotExist()
+        backToPage(activity, "page:设置")
+        backToChat(activity); assertDraft("图标展开保留草稿")
+        assertEquals(before, fixture.database.exportBackup()); assertEquals(0, fixture.opens.get())
+    }
+
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
         val expectedIds = listOf(

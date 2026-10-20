@@ -23,8 +23,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import android.content.res.Configuration
-import app.daiyu.android.data.model.AppearancePaletteStyle
-import app.daiyu.android.data.model.AppearanceAccentColor
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -141,12 +139,6 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertTrue(events.isEmpty()) }
     }
 
-    private fun chooseSheetOption(index: Int) {
-        ui.onNode(hasScrollToIndexAction() and hasAnyDescendant(hasTestTag("prompt-choice:0")),
-            useUnmergedTree = true).performScrollToIndex(index)
-        ui.onNodeWithTag("prompt-choice:$index", useUnmergedTree = true).assertIsDisplayed().performClick()
-    }
-
     fun testAppearanceSelectionAndWholeRowSwitchUpdateControlledState() {
         var state by mutableStateOf(AppearanceSettings())
         mainThread {
@@ -162,18 +154,13 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             assertEquals(AppearanceThemeMode.DARK, state.themeMode)
             assertTrue(state.pureBlackEnabled)
         }
-        reveal("settings-row:强调色", "外观与主题").performClick()
-        chooseSheetOption(8)
-        ui.runOnIdle { assertEquals(AppearanceAccentColor.GREEN, state.accentColor); assertTrue(state.monetEnabled) }
-        reveal("settings-row:强调色", "外观与主题").performClick()
-        chooseSheetOption(0)
-        ui.runOnIdle { assertFalse(state.monetEnabled); assertEquals(AppearanceAccentColor.GREEN, state.accentColor) }
-        reveal("settings-row:色彩风格", "外观与主题").performClick()
-        chooseSheetOption(9)
-        ui.runOnIdle { assertTrue(state.monetEnabled); assertEquals(AppearancePaletteStyle.CONTENT, state.paletteStyle) }
-        reveal("settings-row:色彩风格", "外观与主题").performClick()
-        chooseSheetOption(0)
-        ui.runOnIdle { assertFalse(state.monetEnabled); assertEquals(AppearancePaletteStyle.CONTENT, state.paletteStyle) }
+        val beforePaletteClicks = state
+        for (title in listOf("强调色", "色彩风格")) {
+            reveal("settings-row:$title", "外观与主题").assertHasClickAction().performClick()
+            node("page:外观与主题").assertExists()
+            ui.onAllNodesWithTag("prompt-choice:0", useUnmergedTree = true).assertCountEquals(0)
+            ui.runOnIdle { assertEquals(beforePaletteClicks, state) }
+        }
         reveal("settings-switch:消息时间戳", "外观与主题").performClick().assertIsOn()
         reveal("settings-switch:圆形加载指示器", "外观与主题").performClick()
         reveal("settings-switch:仅消息生成前", "外观与主题").performClick().assertIsOn()

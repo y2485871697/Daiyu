@@ -1438,7 +1438,6 @@ class MainActivity : ComponentActivity() {
                         "usage" -> closeUsagePage()
                         "offline-speech" -> retainedPage = offlineSpeechReturnPage
                         "pet-model-settings" -> retainedPage = "pet-settings"
-                        "app-icon" -> retainedPage = "appearance"
                         "assistant-edit" -> closeAssistantEditor()
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
@@ -1837,11 +1836,10 @@ class MainActivity : ComponentActivity() {
                         state = appearance,
                         onChange = { saveAppearance(it) },
                         onBack = { retainedPage = "settings" },
-                        onOpenIcon = { if (activityUsable() && retainedPage == "appearance") retainedPage = "app-icon" },
-                    )
-                    "app-icon" -> IconAppearanceScreen(
-                        coordinator = iconCoordinator,
-                        onBack = { if (activityUsable() && retainedPage == "app-icon") retainedPage = "appearance" },
+                        iconContent = { expanded ->
+                            IconAppearanceEditor(iconCoordinator, expanded,
+                                ownerCurrent = { activityUsable() && retainedPage == "appearance" })
+                        },
                     )
                     "subagents" -> SubAgentSettingsScreen(onBack = { if (activityUsable() && retainedPage == "subagents") retainedPage = "settings" },
                         repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents",

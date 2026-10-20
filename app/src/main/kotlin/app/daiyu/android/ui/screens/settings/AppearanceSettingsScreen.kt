@@ -23,6 +23,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -34,8 +37,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
-import app.daiyu.android.data.model.AppearancePaletteStyle
-import app.daiyu.android.data.model.AppearanceAccentColor
 import app.daiyu.android.data.model.AppearanceTopBarBlurStyle
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
@@ -88,7 +89,7 @@ internal fun AppearanceSettingsScreen(
     onChange: (AppearanceSettings) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    onOpenIcon: () -> Unit = {},
+    iconContent: @Composable (expanded: Boolean) -> Unit = {},
     scaleRange: ClosedFloatingPointRange<Float> =
         app.daiyu.android.data.model.MIN_INTERFACE_SCALE..app.daiyu.android.data.model.MAX_INTERFACE_SCALE,
 ) {
@@ -97,25 +98,16 @@ internal fun AppearanceSettingsScreen(
     var scaleEditor by remember { mutableStateOf(false) }
     var scaleInput by remember { mutableStateOf("") }
     var loadingExpanded by remember { mutableStateOf(false) }
-    var choice by remember { mutableStateOf<String?>(null) }
-    val palettes = listOf("柔和", "中性", "鲜艳", "表现力", "彩虹", "水果沙拉", "单色", "忠实", "内容")
-    val accents = listOf("跟随壁纸", "蓝色", "紫色", "粉色", "红色", "橙色", "黄色", "绿色", "青色")
+    var iconExpanded by rememberSaveable { mutableStateOf(false) }
+    var choosingBlur by remember { mutableStateOf(false) }
     val blurStyles = listOf("高斯模糊", "渐进模糊")
     val blurSupported = isRuntimeShaderSupported()
-    val currentChoice = choice
-    if (currentChoice != null) DaiyuChoiceSheet(
-        title = when (currentChoice) { "palette" -> "色彩风格"; "accent" -> "强调色"; else -> "顶栏模糊样式" },
-        options = when (currentChoice) { "palette" -> listOf("代鱼默认配色") + palettes; "accent" -> listOf("墨绿") + accents; else -> blurStyles },
+    if (choosingBlur) DaiyuChoiceSheet(
+        title = "顶栏模糊样式", options = blurStyles,
         onSelect = { index ->
-            onChange(when (currentChoice) {
-                "palette" -> if (index == 0) state.copy(monetEnabled = false)
-                    else state.copy(paletteStyle = AppearancePaletteStyle.entries[index - 1], monetEnabled = true)
-                "accent" -> if (index == 0) state.copy(monetEnabled = false)
-                    else state.copy(accentColor = AppearanceAccentColor.entries[index - 1], monetEnabled = true)
-                else -> state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index])
-            })
-            choice = null
-        }, onDismiss = { choice = null },
+            onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))
+            choosingBlur = false
+        }, onDismiss = { choosingBlur = false },
     )
     if (scaleEditor) WindowDialog(show = true, title = "界面缩放", onDismissRequest = { scaleEditor = false }) {
         Column {
@@ -140,13 +132,16 @@ internal fun AppearanceSettingsScreen(
                         ThemeChoice(mode, state.themeMode == mode, { onChange(state.copy(themeMode = mode)) }, Modifier.weight(1f))
                     }
                 }
-                SettingsRow("色彩风格", summary = if (state.monetEnabled) palettes[state.paletteStyle.ordinal] else "代鱼默认配色",
-                    onClick = { choice = "palette" })
-                SettingsRow("强调色", summary = if (state.monetEnabled) accents[state.accentColor.ordinal] else "墨绿",
-                    onClick = { choice = "accent" })
+                SettingsRow("色彩风格", onClick = {})
+                SettingsRow("强调色", onClick = {})
                 SettingsSwitchRow("纯黑背景", state.pureBlackEnabled) { onChange(state.copy(pureBlackEnabled = it)) }
-                SettingsRow("图标", onClick = onOpenIcon,
-                    leading = { SettingsIcon(DaiyuIcons.AppIcon) })
+                SettingsRow("图标", summary = "浅色、暗色和猫咪颜色", onClick = { iconExpanded = !iconExpanded },
+                    modifier = Modifier.semantics { stateDescription = if (iconExpanded) "已展开" else "已收起" },
+                    leading = { SettingsIcon(DaiyuIcons.AppIcon) },
+                    trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null,
+                        modifier = Modifier.rotate(if (iconExpanded) 180f else 0f),
+                        tint = colors.onSurfaceVariantSummary, size = 20.dp) })
+                iconContent(iconExpanded)
             }
         }
         item(key = "appearance_scale") {
@@ -194,7 +189,7 @@ internal fun AppearanceSettingsScreen(
                 }
                 if (blurSupported) {
                     if (state.blurEnabled) {
-                        SettingsRow("顶栏模糊样式", summary = blurStyles[state.topBarBlurStyle.ordinal], onClick = { choice = "blur" })
+                        SettingsRow("顶栏模糊样式", summary = blurStyles[state.topBarBlurStyle.ordinal], onClick = { choosingBlur = true })
                     }
                 }
                 SettingsSwitchRow("横移返回手势", state.swipeDismissEnabled) {

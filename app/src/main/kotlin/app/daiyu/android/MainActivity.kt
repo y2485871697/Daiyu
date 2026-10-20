@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.screens.chat.attachments.ImageAttachments
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder

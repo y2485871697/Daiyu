@@ -35,16 +35,19 @@ class SettingsPresentationTest {
     fun productSettingsHideRemovedEntriesInAllModes() {
         val hiddenIds = setOf(
             "balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility",
+            "default_reasoning",
         )
         val hiddenTitles = listOf(
             "供应商余额", "独立生成模型", "平台只读", "浏览器", "悬浮窗权限", "Root 与系统增强", "无障碍",
+            "默认启用推理",
         )
         for (engineeringUi in listOf(false, true)) {
             val groups = SettingsCatalog.visibleGroups(engineeringUi = engineeringUi)
             val entries = groups.flatMap { it.entries }
-            assertEquals(30, entries.size)
+            assertEquals(29, entries.size)
             assertTrue(entries.none { it.id in hiddenIds })
             assertTrue(groups.none { it.id == "permissions" })
+            assertEquals(listOf("providers"), groups.single { it.id == "llm" }.entries.map { it.id })
             assertTrue(entries.map { it.id }.containsAll(setOf(
                 "task_surface", "linux", "voice", "donate",
             )))

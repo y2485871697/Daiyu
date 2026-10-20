@@ -4,12 +4,15 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewField
@@ -42,6 +45,9 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
         node("usage-button").assertHeightIsEqualTo(34.dp)
     }
     fun testPlatformFontScaleIsAppliedOnlyOnceAndTextareasKeepCssMinimums() {
+        val promptHeight = AtomicInteger()
+        val memoryHeight = AtomicInteger()
+        val fieldDensity = AtomicReference<Density>()
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
@@ -53,11 +59,13 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
                             UsageAction("用量确认", {})
                             ToolMiniAction("工具确认", Modifier.testTag("tool-mini"), onClick = {})
                             UserMessageText("用户正文")
+                            fieldDensity.set(LocalDensity.current)
                             AssistantPreviewField("", {}, "提示词", singleLine = false,
-                                minHeight = 110.dp, maxHeight = 250.dp, fieldModifier = Modifier.testTag("prompt-area"))
+                                minHeight = 110.dp, maxHeight = 250.dp,
+                                fieldModifier = Modifier.onSizeChanged { promptHeight.set(it.height) }.testTag("prompt-area"))
                             AssistantPreviewField("", {}, "记忆", singleLine = false,
                                 minHeight = 90.dp, maxHeight = 180.dp, bottomSpacing = 0.dp,
-                                fieldModifier = Modifier.testTag("memory-area"))
+                                fieldModifier = Modifier.onSizeChanged { memoryHeight.set(it.height) }.testTag("memory-area"))
                         }
                     }
                 }
@@ -73,8 +81,14 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
             if (text == "用户正文") assertEquals(18.7.sp, results.single().layoutInput.style.lineHeight)
         }
         node("tool-mini").assertHeightIsEqualTo(27.dp)
-        node("prompt-area").assertHeightIsEqualTo(110.dp)
-        node("memory-area").assertHeightIsEqualTo(90.dp)
+        node("prompt-area").assertExists()
+        node("memory-area").assertExists()
+        ui.waitForIdle()
+        val density = checkNotNull(fieldDensity.get()).density
+        assertTrue(promptHeight.get() > 0 && memoryHeight.get() > 0)
+        // Measure the decorated field; text semantics exclude its 9dp vertical padding.
+        assertEquals(110f, promptHeight.get() / density, .5f)
+        assertEquals(90f, memoryHeight.get() / density, .5f)
     }
 
 }

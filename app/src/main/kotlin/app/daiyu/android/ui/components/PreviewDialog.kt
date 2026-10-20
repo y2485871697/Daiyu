@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -16,6 +17,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 @Composable
 internal fun PreviewDialog(onDismiss: () -> Unit, content: @Composable BoxWithConstraintsScope.() -> Unit) {
     val colors = usagePalette()
+    val density = LocalDensity.current
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
@@ -23,7 +25,9 @@ internal fun PreviewDialog(onDismiss: () -> Unit, content: @Composable BoxWithCo
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.matchParentSize().background(Color(if (colors.dark) 0x55000000 else 0x2620172d))
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
-            BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), content = content)
+            CompositionLocalProvider(LocalDensity provides density) {
+                BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), content = content)
+            }
         }
     }
 }

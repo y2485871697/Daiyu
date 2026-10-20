@@ -21,7 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,7 +79,7 @@ internal fun SubAgentStatusHost(controller: ChatController, conversationId: Stri
 internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolean, failed: Boolean,
     onDismiss: () -> Unit) {
     val colors = conversationAgentColors()
-    val maximumHeight = (LocalConfiguration.current.screenHeightDp - 48).coerceAtLeast(180).dp
+    val maximumHeight = (appWindowSize().height - 48.dp).coerceAtLeast(0.dp)
     ConversationAgentSheet(onDismiss, radius = 26, modifier = Modifier.heightIn(max = maximumHeight)) {
         Column(Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp).testTag("subagent-status")) {
             ConversationAgentHandle()

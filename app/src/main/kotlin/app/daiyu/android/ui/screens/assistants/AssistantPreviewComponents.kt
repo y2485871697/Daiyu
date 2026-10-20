@@ -45,11 +45,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Local-only translation of preview-agent-cards: .glass-sheet and .ap-* (CSS 89–98, 528–601).
- * CSS pixels map directly to dp geometry and sp typography.
- * Original CSS type ratios are preserved; Android fontScale remains in charge of accessibility.
- * No application theme or settings component is changed by these tokens.
- */
+/** Assistant surfaces share the app's device-tuned density and retain system font scaling. */
 internal data class AssistantPreviewPalette(val dark: Boolean) {
     val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
     val toolbar = if (dark) Color(0xFFB2A9C7) else Color(0xFF716A82)
@@ -122,12 +118,12 @@ internal fun AssistantPreviewSheet(
         Box(Modifier.align(Alignment.CenterHorizontally).width(29.dp * s).height(3.dp * s)
             .clip(CircleShape).background(colors.toolbar.copy(alpha = .24f)))
         Spacer(Modifier.height(17.dp * s))
-        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 13.dp * s).heightIn(min = 28.dp * s), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 13.dp * s).heightIn(min = 40.dp * s), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
             if (onBack != null) AssistantPreviewIcon(AssistantPreviewIcons.Back, "返回", onBack)
             Text(title, modifier = Modifier.weight(1f), color = colors.text,
-                fontSize = (16f * s).sp, lineHeight = (22.4f * s).sp,
-                fontWeight = FontWeight(550), letterSpacing = (-.3f * s).sp)
+                fontSize = (18f * s).sp, lineHeight = (26f * s).sp,
+                fontWeight = FontWeight(650), letterSpacing = (-.3f * s).sp)
             if (showCloseButton) AssistantPreviewIcon(AssistantPreviewIcons.Close, "关闭", onClose)
         }
         Column(Modifier.fillMaxWidth().weight(1f), content = content)
@@ -140,10 +136,10 @@ internal fun AssistantPreviewSheet(
 @Composable
 internal fun AssistantPreviewIcon(icon: ImageVector, label: String, onClick: () -> Unit) {
     val s = assistantPreviewScale()
-    Box(Modifier.size(28.dp * s).clip(RoundedCornerShape(9.dp * s))
+    Box(Modifier.size(40.dp * s).clip(RoundedCornerShape(9.dp * s))
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center) {
-        Icon(icon, label, Modifier.size(15.dp * s), tint = assistantPreviewPalette().muted)
+        Icon(icon, label, Modifier.size(20.dp * s), tint = assistantPreviewPalette().muted)
     }
 }
 
@@ -162,7 +158,7 @@ internal fun AssistantPreviewButton(
     val s = assistantPreviewScale()
     val shape = RoundedCornerShape(11.dp * s)
     val foreground = when { danger -> colors.danger; primary -> colors.onPrimary; else -> colors.accent }
-    Row(modifier.heightIn(min = (if (actionRow) 42 else 33).dp * s).alpha(if (enabled) 1f else .4f)
+    Row(modifier.heightIn(min = (if (actionRow) 48 else 44).dp * s).alpha(if (enabled) 1f else .4f)
         .clip(shape).background(when { actionRow -> Color.Transparent; primary -> colors.primary
             danger -> Color(0x0BAE687A); else -> colors.soft })
         .border(1.dp, when { actionRow -> Color.Transparent; primary -> colors.primary; danger -> Color(0x40AE687A); else -> colors.line }, shape)
@@ -170,11 +166,11 @@ internal fun AssistantPreviewButton(
         .padding(1.dp).padding(horizontal = 10.dp * s, vertical = 8.dp * s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (actionRow) Arrangement.Start else Arrangement.Center) {
-        if (icon != null) { Icon(icon, null, Modifier.size(13.dp * s), tint = foreground); Spacer(Modifier.width(6.dp * s)) }
-        Text(text, color = foreground, fontSize = (10f * s).sp, lineHeight = (15f * s).sp,
+        if (icon != null) { Icon(icon, null, Modifier.size(18.dp * s), tint = foreground); Spacer(Modifier.width(6.dp * s)) }
+        Text(text, color = foreground, fontSize = (14f * s).sp, lineHeight = (20f * s).sp,
             modifier = if (actionRow) Modifier.weight(1f) else Modifier)
         // .ap-actions .ap-button svg:last-child { margin-left:auto; width:10px; opacity:.5 }
-        if (actionRow) Icon(AssistantPreviewIcons.Chevron, null, Modifier.size(10.dp * s).alpha(.5f), tint = foreground)
+        if (actionRow) Icon(AssistantPreviewIcons.Chevron, null, Modifier.size(14.dp * s).alpha(.5f), tint = foreground)
     }
 }
 
@@ -200,13 +196,13 @@ internal fun AssistantPreviewField(
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     var focused by remember { mutableStateOf(false) }
-    val textStyle = TextStyle(color = colors.text, fontSize = (11f * s).sp,
-        lineHeight = (18.15f * s).sp,
+    val textStyle = TextStyle(color = colors.text, fontSize = (14f * s).sp,
+        lineHeight = (21f * s).sp,
         fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default)
     Column(modifier.padding(bottom = bottomSpacing)) {
         if (label.isNotBlank()) Row(Modifier.fillMaxWidth().padding(bottom = 5.dp * s),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = colors.text, fontSize = (10f * s).sp, lineHeight = (16f * s).sp,
+            Text(label, color = colors.text, fontSize = (13f * s).sp, lineHeight = (20f * s).sp,
                 modifier = Modifier.weight(1f))
             labelAction?.invoke()
         }
@@ -234,16 +230,16 @@ internal fun AssistantPreviewSwitch(checked: Boolean, enabled: Boolean, label: S
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp * s)) {
-        Text(label, color = colors.muted, fontSize = (9f * s).sp, lineHeight = (14.4f * s).sp)
-        Box(modifier.size(29.dp * s, 18.dp * s).alpha(if (enabled) 1f else .35f)
+        Text(label, color = colors.muted, fontSize = (12f * s).sp, lineHeight = (18f * s).sp)
+        Box(modifier.size(36.dp * s, 22.dp * s).alpha(if (enabled) 1f else .35f)
             .toggleable(checked, enabled = enabled, role = Role.Switch,
                 interactionSource = remember { MutableInteractionSource() }, indication = null, onValueChange = onToggle),
             contentAlignment = Alignment.Center) {
-            Box(Modifier.size(29.dp * s, 18.dp * s).clip(CircleShape)
+            Box(Modifier.size(36.dp * s, 22.dp * s).clip(CircleShape)
                 .background(if (checked) (if (colors.dark) Color(0xFFB3A0C7) else Color(0xFFA18BB8)) else colors.soft)
                 .border(1.dp, if (checked) Color.Transparent else colors.line, CircleShape)) {
                 Box(Modifier.align(Alignment.CenterStart).offset(x = (if (checked) 14 else 3).dp * s)
-                    .size(12.dp * s).clip(CircleShape).background(if (checked) Color.White else colors.muted))
+                    .size(16.dp * s).clip(CircleShape).background(if (checked) Color.White else colors.muted))
             }
         }
     }

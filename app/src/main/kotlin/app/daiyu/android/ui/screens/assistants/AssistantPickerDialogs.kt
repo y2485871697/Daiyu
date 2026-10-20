@@ -92,21 +92,21 @@ fun AssistantPickerDialog(
             AssistantPreviewButton(stringResource(R.string.assistant_done), onDismiss,
                 Modifier.weight(1f).testTag("assistant-done"), primary = true)
         }) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp * s).testTag("assistant-search")
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp * s).testTag("assistant-search")
             .clip(RoundedCornerShape(13.dp * s)).background(colors.soft)
             .border(1.dp, if (searchFocused) colors.accent else colors.line, RoundedCornerShape(13.dp * s))
             .padding(1.dp).padding(horizontal = 11.dp * s),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
-            Icon(AssistantPreviewIcons.Search, null, Modifier.size(14.dp * s), tint = colors.muted)
+            Icon(AssistantPreviewIcons.Search, null, Modifier.size(18.dp * s), tint = colors.muted)
             BasicTextField(searchQuery, { searchQuery = it }, singleLine = true,
-                modifier = Modifier.weight(1f).heightIn(min = 34.dp * s)
+                modifier = Modifier.weight(1f).heightIn(min = 42.dp * s)
                     .testTag("assistant-search-input").onFocusChanged { searchFocused = it.isFocused },
                 cursorBrush = SolidColor(colors.accent),
-                textStyle = TextStyle(color = colors.text, fontSize = (11f * s).sp, lineHeight = (16.5f * s).sp),
+                textStyle = TextStyle(color = colors.text, fontSize = (14f * s).sp, lineHeight = (20f * s).sp),
                 decorationBox = { innerTextField ->
                     Box(Modifier.padding(horizontal = 2.dp * s, vertical = 1.dp * s), contentAlignment = Alignment.CenterStart) {
                         if (searchQuery.isEmpty()) Text(stringResource(R.string.assistant_search), color = colors.muted,
-                            fontSize = (11f * s).sp, lineHeight = (16.5f * s).sp)
+                            fontSize = (14f * s).sp, lineHeight = (20f * s).sp)
                         innerTextField()
                     }
                 })
@@ -115,9 +115,9 @@ fun AssistantPickerDialog(
             .padding(start = 2.dp * s, end = 2.dp * s, top = 10.dp * s, bottom = 7.dp * s),
             horizontalArrangement = Arrangement.SpaceBetween) {
             Text(stringResource(R.string.assistant_count, filtered.size), color = colors.muted,
-                fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp)
+                fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
             Text(stringResource(R.string.assistant_list_hint), color = colors.muted,
-                fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp)
+                fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("assistant-list"),
             contentPadding = PaddingValues(start = 2.dp * s, end = 2.dp * s, top = 2.dp * s, bottom = 7.dp * s),
@@ -128,8 +128,8 @@ fun AssistantPickerDialog(
                     modifier = Modifier.testTag("assistant-item-${profile.id}"))
             }
             if (filtered.isEmpty()) item {
-                Text(stringResource(R.string.assistant_empty), color = colors.muted, fontSize = (10f * s).sp,
-                    lineHeight = (18f * s).sp, textAlign = TextAlign.Center,
+                Text(stringResource(R.string.assistant_empty), color = colors.muted, fontSize = (13f * s).sp,
+                    lineHeight = (20f * s).sp, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp * s, vertical = 22.dp * s))
             }
         }
@@ -201,25 +201,25 @@ internal fun AssistantProfileCard(
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     val shape = RoundedCornerShape(15.dp * s)
-    Row(modifier.fillMaxWidth().heightIn(min = 64.dp * s).clip(shape)
+    Row(modifier.fillMaxWidth().heightIn(min = 76.dp * s).clip(shape)
         .background(if (selected) colors.soft else androidx.compose.ui.graphics.Color.Transparent)
         .border(1.dp, if (selected) colors.line else androidx.compose.ui.graphics.Color.Transparent, shape)
         .combinedClickable(hapticFeedbackEnabled = false, interactionSource = remember { MutableInteractionSource() }, indication = null,
             onClick = { TouchHaptics.click(view); onClick() },
             onLongClick = { TouchHaptics.longPress(view); onLongClick() }).padding(1.dp).padding(10.dp * s),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
-        AssistantAvatar(bitmap = bitmap, size = 34.dp * s, modifier = Modifier.testTag("assistant-avatar-${profile.id}"))
+        AssistantAvatar(bitmap = bitmap, size = 40.dp * s, modifier = Modifier.testTag("assistant-avatar-${profile.id}"))
         Column(Modifier.weight(1f)) {
-            Text(profile.name, color = colors.text, fontSize = (11f * s).sp,
-                fontWeight = FontWeight(550), lineHeight = (16.5f * s).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(profile.name, color = colors.text, fontSize = (15f * s).sp,
+                fontWeight = FontWeight(550), lineHeight = (21f * s).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             // There is no description field in the production profile; do not create a shadow model.
             Text(profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手",
-                color = colors.muted, fontSize = (9f * s).sp, lineHeight = (14.4f * s).sp,
+                color = colors.muted, fontSize = (12f * s).sp, lineHeight = (18f * s).sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp * s))
         }
         if (selected) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp * s)) {
             Icon(AssistantPreviewIcons.Check, null, Modifier.size(11.dp * s), tint = colors.accent)
-            Text(stringResource(R.string.assistant_current), color = colors.accent, fontSize = (8f * s).sp, lineHeight = (11f * s).sp, maxLines = 1)
+            Text(stringResource(R.string.assistant_current), color = colors.accent, fontSize = (11f * s).sp, lineHeight = (16f * s).sp, maxLines = 1)
         }
     }
 }
@@ -251,7 +251,7 @@ internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantA
         }) {
         AssistantDialogIdentity(profile, assets)
         Text(stringResource(R.string.assistant_delete_body, profile.name), color = assistantPreviewPalette().text,
-            fontSize = (11f * s).sp, lineHeight = (19.8f * s).sp, modifier = Modifier.padding(start = 2.dp * s, end = 2.dp * s, top = 3.dp * s, bottom = 10.dp * s)
+            fontSize = (14f * s).sp, lineHeight = (22f * s).sp, modifier = Modifier.padding(start = 2.dp * s, end = 2.dp * s, top = 3.dp * s, bottom = 10.dp * s)
                 .verticalScroll(rememberScrollState()))
     }
 }
@@ -265,10 +265,10 @@ private fun AssistantDialogIdentity(profile: AssistantProfile, assets: Assistant
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
         AssistantAvatar(bitmap = bitmap, size = 44.dp * s)
         Column(Modifier.weight(1f)) {
-            Text(profile.name, color = colors.text, fontSize = (12f * s).sp, lineHeight = (19.2f * s).sp,
+            Text(profile.name, color = colors.text, fontSize = (15f * s).sp, lineHeight = (22f * s).sp,
                 fontWeight = FontWeight(550))
             Text(profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手",
-                color = colors.muted, fontSize = (9f * s).sp, lineHeight = (15.3f * s).sp,
+                color = colors.muted, fontSize = (12f * s).sp, lineHeight = (18f * s).sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp * s))
         }
     }

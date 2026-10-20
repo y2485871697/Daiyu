@@ -74,13 +74,13 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
 @Composable internal fun ConversationAgentSwitch(checked: Boolean, enabled: Boolean, onCheckedChange: ((Boolean) -> Unit)? = null) {
     val colors = conversationAgentColors()
     val shape = RoundedCornerShape(20.dp)
-    Box(Modifier.size(30.dp, 18.dp).alpha(if (enabled) 1f else .4f).clip(shape)
+    Box(Modifier.size(36.dp, 22.dp).alpha(if (enabled) 1f else .4f).clip(shape)
         .background(if (checked) Color(0xff82728f) else Color(0x28b4aabb))
         .border(1.dp, if (checked) Color(0xff82728f) else colors.line, shape)
         .then(if (onCheckedChange != null) Modifier.toggleable(value = checked, enabled = enabled, role = Role.Switch,
             interactionSource = remember { MutableInteractionSource() }, indication = null, onValueChange = onCheckedChange) else Modifier),
         contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart) {
-        Box(Modifier.padding(horizontal = 2.dp).size(12.dp).background(if (checked) Color.White else Color(0xffa69baa), CircleShape))
+        Box(Modifier.padding(horizontal = 2.dp).size(16.dp).background(if (checked) Color.White else Color(0xffa69baa), CircleShape))
     }
 }
 
@@ -88,12 +88,12 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
     modifier: Modifier = Modifier, onClick: () -> Unit) {
     val colors = conversationAgentColors()
     val shape = RoundedCornerShape(10.dp)
-    Box(modifier.defaultMinSize(minHeight = 31.dp).clip(shape)
+    Box(modifier.defaultMinSize(minHeight = 44.dp).clip(shape)
         .background(if (primary) Color(0xff786c83) else colors.soft)
         .border(1.dp, if (primary) Color(0xff786c83) else colors.line, shape)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 10.sp, lineHeight = 14.sp, color = (if (primary) Color.White else colors.accent).copy(alpha = if (enabled) 1f else .4f))
+        Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = (if (primary) Color.White else colors.accent).copy(alpha = if (enabled) 1f else .4f))
     }
 }
 
@@ -102,8 +102,8 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
     fun style(size: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(fontSize = size.sp, lineHeight = (size * 1.6f).sp, fontWeight = weight)
     MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(onSurface = colors.text, onSurfaceVariant = colors.muted,
         primary = colors.accent, outline = colors.line, outlineVariant = colors.line), typography = MaterialTheme.typography.copy(
-        titleLarge = style(16, FontWeight.SemiBold), titleMedium = style(11, FontWeight.Medium), titleSmall = style(11, FontWeight.Medium),
-        bodyLarge = style(11), bodyMedium = style(11), bodySmall = style(9), labelSmall = style(9), labelMedium = style(10)), content = content)
+        titleLarge = style(18, FontWeight.SemiBold), titleMedium = style(14, FontWeight.Medium), titleSmall = style(13, FontWeight.Medium),
+        bodyLarge = style(14), bodyMedium = style(14), bodySmall = style(12), labelSmall = style(11), labelMedium = style(13)), content = content)
 }
 
 @Composable internal fun ConversationAgentIconButton(onClick: () -> Unit, modifier: Modifier = Modifier,

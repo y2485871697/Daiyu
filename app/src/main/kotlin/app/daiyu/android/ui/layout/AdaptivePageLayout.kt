@@ -14,8 +14,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.app.LocalPlatformDensity
+
+/** Window pixels translated through the same density as the rendered page and dialogs. */
+@Composable
+internal fun appWindowSize(): DpSize {
+    val pixels = LocalWindowInfo.current.containerSize
+    return with(LocalDensity.current) { DpSize(pixels.width.toDp(), pixels.height.toDp()) }
+}
 
 private val WideScreenMinWidth = 600.dp
 private val MaxPageContentWidth = 800.dp

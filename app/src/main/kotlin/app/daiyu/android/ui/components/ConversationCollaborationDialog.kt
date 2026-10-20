@@ -12,7 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -100,7 +100,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     val directory = editor?.let { rememberSubAgentPresetDirectory(it.repository) }
     val emptyState = editor == null || (choosing && directory?.entries.isNullOrEmpty())
     val providers by modelSource.providers.collectAsState()
-    val maximumHeight = (LocalConfiguration.current.screenHeightDp - 48).coerceAtLeast(160).dp
+    val maximumHeight = (appWindowSize().height - 48.dp).coerceAtLeast(0.dp)
     val view = LocalView.current
     val chooserPopup = if (choosing && directory != null && editor != null) {
         val popup = remember(editor) { OwnerBoundPopup(editor.owner) }

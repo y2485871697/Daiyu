@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -31,16 +33,20 @@ import app.daiyu.android.ui.screens.settings.DaiyuSettingsScreen
 import java.io.File
 
 class SettingsChromeActivityTest : WiredActivityTestCase() {
-    private fun showHome(events: MutableList<String>, dark: Boolean = false) {
+    private fun showHome(events: MutableList<String>, dark: Boolean = false, scale: Float = 1f,
+        fontScale: Float = 1f, pureBlack: Boolean = false) {
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
-                CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
-                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), false) {
-                        Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("settings-host")) {
-                            DaiyuSettingsScreen(onBack = { events.add("back") }, onRoute = { events.add(it.name) },
-                                onOpenSubAgents = { events.add("subagents") }, onOpenAssistants = { events.add("assistants") },
-                                onOpenAppearance = { events.add("appearance") })
+                CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                    key(dark, scale, fontScale, pureBlack) {
+                        AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                            interfaceScale = scale, pureBlackEnabled = pureBlack), true) {
+                            Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("settings-host")) {
+                                DaiyuSettingsScreen(onBack = { events.add("back") }, onRoute = { events.add(it.name) },
+                                    onOpenSubAgents = { events.add("subagents") }, onOpenAssistants = { events.add("assistants") },
+                                    onOpenAppearance = { events.add("appearance") })
+                            }
                         }
                     }
                 }
@@ -84,8 +90,8 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
     fun testSettingsCardsHaveNoOutlineOrRowDividersInBothThemes() {
         for (dark in listOf(false, true)) {
             showHome(mutableListOf(), dark)
-            val first = reveal("settings-row:上下文压缩", "设置").fetchSemanticsNode().boundsInRoot
-            val second = node("settings-row:辅助视觉模型").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val first = reveal("settings-row:外观与主题", "设置").fetchSemanticsNode().boundsInRoot
+            val second = node("settings-row:助手").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             assertEquals(first.bottom, second.top, 0.1f)
             val pixels = ui.onRoot().captureToImage().toPixelMap()
             val density = activity.resources.displayMetrics.density
@@ -93,12 +99,52 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             val boundary = first.bottom.toInt()
             val surface = pixels[x, boundary - 4]
             for (y in boundary - 3..boundary + 3) {
-                assertEquals("Row boundary must remain one continuous surface", surface, pixels[x, y])
+                val actual = pixels[x, y]
+                assertEquals(surface.red, actual.red, .02f)
+                assertEquals(surface.green, actual.green, .02f)
+                assertEquals(surface.blue, actual.blue, .02f)
             }
             val middle = ((first.left + first.right) / 2).toInt()
             val top = first.top.toInt()
-            assertEquals("Card top must not draw an outline", pixels[middle, top + 4], pixels[middle, top])
+            val inside = pixels[middle, top + 4]
+            val edge = pixels[middle, top]
+            assertEquals(inside.red, edge.red, .02f)
+            assertEquals(inside.green, edge.green, .02f)
+            assertEquals(inside.blue, edge.blue, .02f)
         }
+    }
+
+    fun testHomeKeepsDaiyuCardsAndReadableDescriptionsAtSmallScaleAndLargeFont() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            showHome(mutableListOf(), dark, scale, fontScale = 1.3f)
+            node("settings-section:general").assertTextEquals("通用设置")
+            node("settings-row:外观与主题").assertTextContains("主题、图标与界面显示")
+            node("settings-row:助手").assertTextContains("角色、提示词与个性化")
+            node("settings-row:颜色模式").assertDoesNotExist()
+            node("settings-row:偏好设置").assertDoesNotExist()
+            node("settings-row:搜索服务").assertDoesNotExist()
+            val host = node("settings-host").fetchSemanticsNode().boundsInRoot
+            for ((group, title) in listOf("general" to "外观与主题", "models" to "模型提供商",
+                    "extensions" to "Skills", "tools" to "Agent任务偏好", "data" to "数据备份", "about" to "源代码")) {
+                val row = reveal("settings-row:$title", "设置").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+                val bounds = row.fetchSemanticsNode().boundsInRoot
+                val card = node("settings-card:$group").fetchSemanticsNode().boundsInRoot
+                assertTrue(card.left > host.left && card.right < host.right)
+                assertTrue(bounds.left >= card.left && bounds.right <= card.right)
+                row.assertHasClickAction()
+            }
+            assertEquals(0, fixture.opens.get())
+        }
+    }
+
+    fun testPureBlackBackgroundRemainsBlackOutsideHomeCards() {
+        showHome(mutableListOf(), dark = true, pureBlack = true)
+        val card = node("settings-card:general").fetchSemanticsNode().boundsInRoot
+        val page = node("page:设置").fetchSemanticsNode().boundsInRoot
+        val pixels = ui.onRoot().captureToImage().toPixelMap()
+        val x = ((page.left + card.left) / 2).toInt()
+        val y = (card.top + 20).toInt()
+        assertEquals(Color.Black, pixels[x, y])
     }
 
     fun testSearchUsesOriginalButtonsAndMcpHasARealIndependentRoute() {
@@ -134,7 +180,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         showHome(events)
         node("settings-row:LLM 提供商").assertDoesNotExist()
         node("settings-row:默认启用推理").assertDoesNotExist()
-        node("settings-row:模型提供商").assertIsDisplayed().assertHasClickAction()
+        reveal("settings-row:模型提供商", "设置").assertIsDisplayed().assertHasClickAction()
         node("page:设置").assertExists()
         ui.runOnIdle { assertTrue(events.isEmpty()) }
     }

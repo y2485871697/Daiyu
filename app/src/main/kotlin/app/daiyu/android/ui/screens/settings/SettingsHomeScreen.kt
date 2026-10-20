@@ -3,9 +3,9 @@ package app.daiyu.android.ui.screens.settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -24,6 +24,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -39,6 +42,7 @@ import app.daiyu.android.update.GithubReleaseChecker
 import app.daiyu.android.update.ReleaseCheck
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.components.MiuixScaffoldPage
+import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.daiyuIconColor
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -60,10 +64,11 @@ internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 @Composable
 internal fun SettingsSearch(query: String, onQueryChange: (String) -> Unit,
-    placeholder: String = "搜索设置", tag: String = "settings-search") {
+    placeholder: String = "搜索设置", tag: String = "settings-search",
+    containerColor: Color = MiuixTheme.colorScheme.surfaceContainerHigh) {
     val colors = MiuixTheme.colorScheme
     Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth()
-        .background(colors.surfaceContainerHigh, RoundedCornerShape(12.dp))
+        .background(containerColor, RoundedCornerShape(12.dp))
         .padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         DaiyuIcon(DaiyuIcons.Search, null, tint = colors.onSurfaceVariantSummary, size = 20.dp)
         BasicTextField(value = query, onValueChange = onQueryChange, singleLine = true,
@@ -86,7 +91,21 @@ internal fun SettingsSearch(query: String, onQueryChange: (String) -> Unit,
 }
 
 @Composable
-private fun OriginalSettingsRow(entry: SettingsEntry, diagnostics: SettingsDiagnosticsUi,
+private fun SettingsHomeSection(title: String, tag: String) {
+    Text(title, modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 9.dp)
+        .testTag(tag), fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.Medium,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+}
+
+@Composable
+private fun SettingsHomeCard(id: String, content: @Composable ColumnScope.() -> Unit) {
+    val colors = usagePalette()
+    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().testTag("settings-card:$id")
+        .clip(RoundedCornerShape(22.dp)).background(Brush.linearGradient(colors.sheet)), content = content)
+}
+
+@Composable
+private fun SettingsHomeRow(entry: SettingsEntry, diagnostics: SettingsDiagnosticsUi,
     release: SettingsReleaseUi, onClick: () -> Unit) {
     if (entry.id == "updates") {
         SettingsRow(entry.title, onClick = if (release.checking) null else onClick,
@@ -102,15 +121,8 @@ private fun OriginalSettingsRow(entry: SettingsEntry, diagnostics: SettingsDiagn
         summary = when (entry.id) {
             "donate" -> "暂未开放，不提供支付入口"
             "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
-            "task_surface" -> "前台、后台或每次运行询问；不改变当前运行"
-            else -> null
-        }, leading = { SettingsIcon(entry.icon) }, trailing = when (entry.id) {
-            "telegram", "qq", "source" -> ({
-                Text(when (entry.id) { "telegram" -> "Telegram"; "qq" -> "QQ"; else -> "GitHub" },
-                    style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            })
-            else -> null
-        })
+            else -> entry.summary
+        }, leading = { SettingsIcon(entry.icon) })
 }
 
 @Composable
@@ -192,9 +204,12 @@ internal fun DaiyuSettingsScreen(
             else -> entry.route?.let(onRoute)
         }
     }
+    val homeBackground = if (MiuixTheme.colorScheme.background == Color.Black) Color.Black
+        else MiuixTheme.colorScheme.surfaceContainerHigh
     MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier, listState = listState,
         scrollBehavior = scrollBehavior,
-        listModifier = if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier,
+        listModifier = Modifier.background(homeBackground)
+            .then(if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier),
     ) {
         item(key = "settings_search") {
             SettingsSearch(query, onQueryChange = {
@@ -202,21 +217,21 @@ internal fun DaiyuSettingsScreen(
                     query = it
                     scope.launch { listState.scrollToItem(0) }
                 }
-            })
+            }, containerColor = MiuixTheme.colorScheme.surfaceContainerHighest)
         }
         if (query.isNotBlank()) item(key = "search_heading") {
-            SettingsSectionTitle("搜索结果 · ${groups.sumOf { it.entries.size }}")
+            SettingsHomeSection("搜索结果 · ${groups.sumOf { it.entries.size }}", "settings-search-heading")
         }
         if (groups.isEmpty()) item(key = "settings_empty") { SettingsNote("没有匹配的设置") }
         groups.forEach { group ->
-            item(key = "settings_group_${group.id}") { SettingsSectionTitle(group.title) }
+            item(key = "settings_group_${group.id}") { SettingsHomeSection(group.title, "settings-section:${group.id}") }
             item(key = "settings_entries_${group.id}") {
-                SettingsCard {
+                SettingsHomeCard(group.id) {
                     group.entries.forEach { entry ->
                         when {
                             entry.id in setOf("relay_st", "relay_moyu") && query.isBlank() -> Unit
                             entry.id == "relay" && query.isBlank() -> {
-                                SettingsRow(entry.title, leading = { SettingsIcon(entry.icon) }, onClick = { open(entry) },
+                                SettingsRow(entry.title, summary = entry.summary, leading = { SettingsIcon(entry.icon) }, onClick = { open(entry) },
                                     trailing = {
                                         DaiyuIcon(if (relayExpanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
                                             if (relayExpanded) "收起" else "展开", size = 20.dp)
@@ -227,7 +242,7 @@ internal fun DaiyuSettingsScreen(
                                     }
                                 }
                             }
-                            else -> OriginalSettingsRow(entry, diagnosticsUi, release) { open(entry) }
+                            else -> SettingsHomeRow(entry, diagnosticsUi, release) { open(entry) }
                         }
                     }
                 }

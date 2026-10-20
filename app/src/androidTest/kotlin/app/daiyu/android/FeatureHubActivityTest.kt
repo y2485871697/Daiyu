@@ -45,7 +45,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         openHub()
         // Exercise a real swipe too, so a collapsed top bar is part of the restored viewport.
         node("page:设置").performTouchInput { swipeUp() }
-        for ((title, page) in listOf("震动列表" to "page:触感反馈", "Agent任务偏好" to "page:Agent任务偏好")) {
+        for ((title, page) in listOf("用量统计" to "usage-stats-screen", "Agent任务偏好" to "page:Agent任务偏好")) {
             val tag = "settings-row:$title"
             node("page:设置").performScrollToNode(hasTestTag(tag))
             node(tag).assertIsDisplayed()
@@ -88,7 +88,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         ui.waitForIdle()
         node("settings-search").assertEditableText("")
         assertEquals(0f, settingsScrollPosition(), .00002f)
-        node("settings-row:模型提供商").assertIsDisplayed()
+        node("settings-row:外观与主题").assertIsDisplayed()
         node("page:设置").performScrollToNode(hasTestTag("settings-row:震动列表"))
         val before = settingsScrollPosition()
         node("settings-row:震动列表").performClick()
@@ -120,12 +120,11 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
         val expectedIds = listOf(
-            "providers",
-            "compression", "vision", "subagents", "title_model", "reconnect",
-            "pet", "assistants", "skills", "mcp",
-            "voice", "appearance", "usage", "backup",
-            "workspace", "linux", "task_surface", "haptics",
-            "logging", "export_logs", "clear_logs",
+            "appearance", "assistants", "voice", "haptics",
+            "providers", "compression", "vision", "subagents", "title_model", "reconnect",
+            "pet", "skills", "mcp",
+            "workspace", "linux", "task_surface",
+            "usage", "backup", "logging", "export_logs", "clear_logs",
             "updates", "telegram", "qq", "source", "relay", "relay_st", "relay_moyu", "donate",
         )
         assertEquals(29, entries.size)

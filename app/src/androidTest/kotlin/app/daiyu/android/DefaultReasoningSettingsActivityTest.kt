@@ -23,11 +23,11 @@ class DefaultReasoningSettingsActivityTest : WiredActivityTestCase() {
         val settings = fixture.settings.loadForEditing().settings
         val default = fixture.controller.reasoningPreference.snapshot(null)
         openSettings()
-        node("settings-row:模型提供商").assertIsDisplayed()
+        node("settings-row:外观与主题").assertIsDisplayed()
         node("settings-row:默认启用推理").assertDoesNotExist()
         for (query in listOf("默认启用推理", "推理")) assertRemovedFromSearch(query)
         node("settings-search-clear").performClick()
-        node("settings-row:模型提供商").assertIsDisplayed()
+        node("settings-row:外观与主题").assertIsDisplayed()
         node("settings-row:默认启用推理").assertDoesNotExist()
         backToChat(activity); assertDraft("removed reasoning entry draft")
         assertEquals(default, fixture.controller.reasoningPreference.snapshot(null))

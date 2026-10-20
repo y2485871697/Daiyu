@@ -168,8 +168,11 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertEquals(database, fixture.database.exportBackup())
         assertChatPickerOffline(calls)
         node("chat-model-search").performTextReplacement("second")
+        node("chat-model-search").assertEditableText("second")
+        dismissIme()
+        awaitChatPickerReady()
         node("chat-model-option:first").assertDoesNotExist()
-        node("chat-model-option:second").performClick()
+        node("chat-model-option:second").assertIsDisplayed().assertIsEnabled().performClick()
         awaitControl("chat model selected") { !fixture.controller.dataBusy }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
         node("chat-model-picker").assertDoesNotExist()

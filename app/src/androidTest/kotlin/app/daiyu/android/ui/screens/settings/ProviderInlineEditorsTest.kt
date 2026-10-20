@@ -45,6 +45,13 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         assertEquals(current, draft); assertSame(current, draft)
         assertEquals("request_cache_key", draft.sessionGateway.keyField)
         control("settings-field:模型正则（每一行一个）").performTextReplacement("current-pattern")
+        ui.waitForIdle()
+        node("settings-field:模型正则（每一行一个）").assertEditableText("current-pattern")
+        assertEquals("current modelPattern edit", "current-pattern", draft.sessionGateway.modelPattern)
+        assertEquals("newer keyField must remain", "request_cache_key", draft.sessionGateway.keyField)
+        assertEquals(current.sessionGateway.pathPattern, draft.sessionGateway.pathPattern)
+        assertEquals(current.sessionGateway.retention, draft.sessionGateway.retention)
+        assertEquals(current.sessionGateway.keySource, draft.sessionGateway.keySource)
         assertEquals(current.copy(sessionGateway = current.sessionGateway.copy(modelPattern = "current-pattern")), draft)
         assertNull(saved); assertEquals(0, fixture.opens.get())
     }

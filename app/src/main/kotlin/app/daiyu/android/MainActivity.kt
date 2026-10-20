@@ -1617,6 +1617,7 @@ class MainActivity : ComponentActivity() {
                         ownerCurrent = { activityUsable() && retainedPage == "gui-settings" },
                     )
                     "skills" -> SkillManagementScreen(
+                        engineeringUi = engineeringUi,
                         managementFactory = { controller.skillManagement() },
                         onBack = { if (activityUsable() && retainedPage == "skills") retainedPage = "settings" },
                     )

@@ -17,25 +17,24 @@ import app.daiyu.android.R
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TextField
+import app.daiyu.android.ui.screens.settings.SettingsTextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun SearchQueryField(query: String, hint: String, onChange: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        TextField(
+    Column(Modifier.fillMaxWidth()) {
+        SettingsTextField(
+            label = hint,
             value = query,
             onValueChange = { onChange(it.take(1000)) },
-            label = hint,
-            useLabelAsPlaceholder = true,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().testTag("search:query"),
+            hint = hint,
+            tag = "search:query",
         )
         if (query.isNotEmpty()) {
             TextButton(
                 text = stringResource(R.string.search_clear),
                 onClick = { onChange("") },
-                modifier = Modifier.testTag("search:clear"),
+                modifier = Modifier.padding(horizontal = 16.dp).testTag("search:clear"),
             )
         }
     }

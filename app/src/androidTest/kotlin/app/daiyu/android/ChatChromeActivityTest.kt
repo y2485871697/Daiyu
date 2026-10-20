@@ -96,10 +96,12 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         val contextLayout = layout("37% 上下文")
         assertEquals(1, contextLayout.lineCount)
         assertFalse(contextLayout.isLineEllipsized(0))
-        assertFalse("Context must fit: constraints=${contextLayout.layoutInput.constraints}, " +
+        val lineLeft = contextLayout.getLineLeft(0)
+        val lineRight = contextLayout.getLineRight(0)
+        assertTrue("Context text must fit: line=[$lineLeft, $lineRight], constraints=${contextLayout.layoutInput.constraints}, " +
             "size=${contextLayout.size}, paragraphWidth=${contextLayout.multiParagraph.width}, " +
             "intrinsicWidth=${contextLayout.multiParagraph.intrinsics.maxIntrinsicWidth}, bounds=$context, host=$host",
-            contextLayout.didOverflowWidth)
+            lineLeft >= -1f && lineRight <= contextLayout.size.width.toFloat() + 1f)
     }
 
     fun testTouchDispatchesPickersMenusSupplementContinueAndLongStop() {

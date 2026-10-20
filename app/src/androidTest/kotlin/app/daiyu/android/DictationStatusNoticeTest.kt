@@ -19,7 +19,7 @@ class DictationStatusNoticeTest : WiredActivityTestCase() {
     fun testProductionStatusDoesNotLeaveTextOrMoveComposer() {
         val state = mutableStateOf(ComposerDictationState())
         mainThread { activity.setContent {
-            AgentAppTheme(AppearanceSettings()) {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 Column {
                     DictationStatusNotice(state.value, engineeringUi = false)
                     Box(Modifier.size(40.dp).testTag("composer-position"))
@@ -43,7 +43,7 @@ class DictationStatusNoticeTest : WiredActivityTestCase() {
 
     fun testEngineeringStatusRemainsAvailableForDiagnostics() {
         mainThread { activity.setContent {
-            AgentAppTheme(AppearanceSettings()) {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 DictationStatusNotice(ComposerDictationState(status = "系统语音识别服务不可用"), engineeringUi = true)
             }
         } }

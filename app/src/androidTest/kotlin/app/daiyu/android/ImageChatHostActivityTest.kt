@@ -146,7 +146,9 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         ui.waitUntil(10_000) { host().session.attachments.state.value.ready.size == count }
     }
     private fun authorize() {
-        node("image-host-authorize").performClick()
+        node("image-host-authorize").assertDoesNotExist()
+        ui.onNodeWithContentDescription("附件").performClick()
+        node("image-host-authorize").performScrollTo().performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("dialog-confirm").fetchSemanticsNodes().isNotEmpty() }
         node("dialog-confirm").performClick()
         ui.waitUntil(10_000) { host().authorizationLabel.startsWith("已声明") }

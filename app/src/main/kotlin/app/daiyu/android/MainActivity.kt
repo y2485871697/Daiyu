@@ -10,7 +10,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.screens.chat.attachments.ImageAttachments
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -2291,6 +2289,9 @@ class MainActivity : ComponentActivity() {
                         contextManagementEntryEpoch)
                 }
             }
+            ChatMenuAction.DECLARE_IMAGE_SUPPORT -> if (currentChat() && selectionReady &&
+                controller.ready && !controller.dataBusy && controller.active == null && !imageHost.busy)
+                declareImageSupport()
             ChatMenuAction.ATTACH_PATH -> openPathReference()
             ChatMenuAction.ATTACH_FILE -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) pickChatReference(false)
             ChatMenuAction.ATTACH_FOLDER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) pickChatReference(true)
@@ -4109,17 +4110,6 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxWidth()) {
             ImageAttachments(images, imageHost.actions(::launchImagePicker), imageHost.draftLoader,
                 enabled = enabled, compact = true)
-            if (images.items.isNotEmpty() || MessageHistory.expand(shown.map { it.second })
-                    .any { row -> row.blocks.any { it is MessageBlock.Image } }) top.yukonga.miuix.kmp.basic.Text(
-                text = imageHost.authorizationLabel,
-                fontSize = 9.sp, lineHeight = 13.sp, maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                color = app.daiyu.android.ui.screens.chat.conversation.chatChromeColors().accent,
-                modifier = Modifier.padding(horizontal = 13.dp).testTag("image-host-authorize")
-                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button,
-                        onClick = { if (imageHost.session === session && editorGeneration == ownerGeneration) declareImageSupport() })
-                    .padding(vertical = 4.dp))
             val attempt = session.attempt
             if (attempt != null && !session.uncertain) top.yukonga.miuix.kmp.basic.TextButton(
                 text = "取消图片准备", modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-cancel"),

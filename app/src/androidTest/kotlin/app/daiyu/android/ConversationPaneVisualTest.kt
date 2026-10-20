@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -10,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -45,14 +48,14 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         ConversationSummaryUi("second", "Second chat", "", "", mode = ConversationModeUi.Chat, isToday = true),
     )
 
-    private fun show(scale: Float = 1f, dark: Boolean = false) {
+    private fun show(scale: Float = 1f, dark: Boolean = false, fontScale: Float = .9f, compact: Boolean = false) {
         action = null
         val renderGeneration = ++generation
         mainThread {
             activity.setContent {
                 key(renderGeneration) {
                     val platform = LocalDensity.current
-                    CompositionLocalProvider(LocalDensity provides Density(platform.density, .9f)) {
+                    CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
                         AgentAppTheme(AppearanceSettings(interfaceScale = scale,
                             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                             applyInterfaceScale = true) {
@@ -71,7 +74,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                                 onConversationRename = { action = "rename:${it.id}" },
                                 onConversationDelete = { action = "delete:${it.id}" },
                                 onNewConversation = { action = "new" },
-                                onSelectFolder = { action = "folder:$it" },
+                                onSelectFolder = { action = "folder:$it"; state = state.copy(selectedFolderId = it) },
                                 onCreateFolder = { action = "create-folder:$it" },
                                 assistants = listOf(AssistantDisplay("assistant-a", "Drawer assistant")),
                                 selectedAssistantId = "assistant-a",
@@ -82,7 +85,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                                 onOpenUsageStats = { action = "usage" },
                                 onOpenSkills = { action = "skills" },
                                 onOpenPermissions = { action = "permissions" },
-                                modifier = Modifier.testTag("drawer-host"),
+                                modifier = Modifier.testTag("drawer-host").then(if (compact) Modifier.widthIn(max = 320.dp) else Modifier),
                             ) { Box(Modifier.fillMaxSize()) }
                         }
                     }
@@ -134,7 +137,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         assertEquals(.9f, input.density.fontScale, .001f)
     }
 
-    fun testDrawerMatchesCssGeometryAcrossThemesAndInterfaceScales() {
+    fun testDrawerKeepsReadableGeometryAcrossThemesAndInterfaceScales() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(scale, dark)
             val drawer = bounds("conversation-drawer")
@@ -151,20 +154,20 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertEquals(minOf(dp(bounds("drawer-host").width) * .78f, 320f), dp(drawer.width), .7f)
             assertEquals(14f, dp(search.left - drawer.left), .6f)
             assertEquals(15f, dp(drawer.right - search.right), .6f)
-            assertEquals(38f, dp(search.height), .6f)
+            assertEquals(44f, dp(search.height), .6f)
             assertEquals(13f, dp(bounds("drawer-search-icon").left - search.left), dp(1f) + .01f)
-            assertEquals(18f, dp(bounds("drawer-search-icon").width), .6f)
+            assertEquals(20f, dp(bounds("drawer-search-icon").width), .6f)
             assertEquals(8f, dp(bounds("drawer-search-input").left - bounds("drawer-search-icon").right), .6f)
             assertEquals(12f, dp(newChat.top - search.bottom), .6f)
-            assertEquals(40f, dp(newChat.height), .6f)
-            assertEquals(40f, dp(manage.height), .6f)
+            assertEquals(44f, dp(newChat.height), .6f)
+            assertEquals(44f, dp(manage.height), .6f)
             assertEquals(8f, dp(manage.top - newChat.bottom), .6f)
             assertEquals(13f, dp(bounds("drawer-new-icon").left - newChat.left), dp(1f) + .01f)
             assertEquals(12f, dp(folders.top - manage.bottom), .6f)
-            assertEquals(34f, dp(folders.height), .6f)
+            assertEquals(36f, dp(folders.height), .6f)
             assertEquals(6f, dp(bounds("drawer-folder:design").left - folders.right), .6f)
             assertEquals(12f, dp(bounds("drawer-folder:design-icon").left - bounds("drawer-folder:design").left), .6f)
-            assertEquals(13f, dp(bounds("drawer-folder:design-icon").width), .6f)
+            assertEquals(15f, dp(bounds("drawer-folder:design-icon").width), .6f)
             assertEquals(12f, dp(list.top - folders.bottom), .6f)
             assertEquals(5f, dp(pinnedHeading.top - list.top), .6f)
             assertEquals(6f, dp(pinned.top - pinnedHeading.bottom), .6f)
@@ -198,15 +201,70 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertEquals(dp(dock.width) * .0390625f,
                 dp(bounds("drawer-dock-models").left - bounds("drawer-dock-permissions").right), .6f)
             assertEquals(0f, dp(dock.right - bounds("drawer-dock-settings").right), .6f)
-            assertType(text(R.string.conversation_search_hint), 12.sp, 16.sp)
-            assertType(text(R.string.drawer_new_conversation), 11.sp, 14.sp)
-            assertType(text(R.string.drawer_chats_chip), 10.sp, 13.sp)
-            assertType("First chat", 12.sp, 17.4.sp)
-            assertType("Drawer assistant", 12.sp, 18.sp)
+            assertType(text(R.string.conversation_search_hint), 14.sp, 20.sp)
+            assertType(text(R.string.drawer_new_conversation), 14.sp, 20.sp)
+            assertType(text(R.string.drawer_chats_chip), 12.sp, 16.sp)
+            assertType("First chat", 14.sp, 20.sp)
+            assertType("Drawer assistant", 14.sp, 20.sp)
             assertEquals(FontWeight.SemiBold, layout("First chat").layoutInput.style.fontWeight)
             assertEquals(if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F), layout("First chat").layoutInput.style.color)
             assertEquals(if (dark) Color(0xFFC6B7D5) else Color(0xFF655A72),
                 layout(text(R.string.drawer_new_conversation)).layoutInput.style.color)
+        }
+    }
+
+    private fun assertFolderFill(tag: String, fill: Color) {
+        node(tag).performScrollTo().assertIsDisplayed()
+        val drawer = bounds("conversation-drawer")
+        val chip = bounds(tag)
+        val pixels = node("conversation-drawer").captureToImage().toPixelMap()
+        val x = (chip.center.x - drawer.left).toInt()
+        val top = chip.top - drawer.top
+        val background = pixels[x, (top - 3 * density.get().density).toInt()]
+        val actual = pixels[x, (top + 4 * density.get().density).toInt()]
+        val expected = fill.compositeOver(background)
+        assertEquals(expected.red, actual.red, .015f)
+        assertEquals(expected.green, actual.green, .015f)
+        assertEquals(expected.blue, actual.blue, .015f)
+    }
+
+    fun testFolderAndCreateChipsKeepIdleBackgroundWhenSelectionChanges() {
+        for (dark in listOf(false, true)) {
+            show(dark = dark)
+            val idle = if (dark) Color(0x24C0ACD7) else Color(0x2281738E)
+            val selected = if (dark) Color(0xFF786A89) else Color(0xFF786C83)
+            assertFolderFill("drawer-folder-unfiled", selected)
+            assertFolderFill("drawer-folder:design", idle)
+            assertFolderFill("drawer-folder-new", idle)
+            node("drawer-folder:design").performScrollTo().performTouchInput { click() }
+            assertEquals("folder:design", action)
+            assertFolderFill("drawer-folder:design", selected)
+            assertFolderFill("drawer-folder-unfiled", idle)
+            assertFolderFill("drawer-folder-new", idle)
+        }
+    }
+
+    fun testNarrowDrawerAndLargerSystemFontKeepControlsReadableAndReachable() {
+        for (dark in listOf(false, true)) {
+            show(dark = dark, fontScale = 1.3f, compact = true)
+            node("drawer-search").assertHeightIsAtLeast(44.dp)
+            node("drawer-new").assertHeightIsAtLeast(44.dp)
+            node("drawer-manage").assertHeightIsAtLeast(44.dp)
+            val search = layout(text(R.string.conversation_search_hint))
+            assertEquals(14.sp, search.layoutInput.style.fontSize)
+            assertEquals(1.3f, search.layoutInput.density.fontScale, .001f)
+            assertFalse(search.hasVisualOverflow)
+            assertFalse(layout(text(R.string.drawer_new_conversation)).hasVisualOverflow)
+            assertTrue(bounds("drawer-manage").bottom < bounds("drawer-folder-unfiled").top)
+            assertTrue(bounds("drawer-list").height > 0)
+            assertTrue(bounds("drawer-list").bottom <= bounds("drawer-footer-border").top)
+            node("drawer-folder-new").performScrollTo().assertIsDisplayed()
+                .performTouchInput { click() }
+            node("folder-name-input").assertIsDisplayed()
+            node("folder-name-cancel").performClick()
+            node("drawer-dock-settings").assertIsDisplayed().performClick()
+            ui.waitForIdle()
+            assertEquals("settings", action)
         }
     }
 
@@ -218,7 +276,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         node("drawer-selection-count").assertTextEquals("已选择 1 项")
         assertNull(action)
         assertEquals(13f, dp(bounds("drawer-select:first").width), .6f)
-        assertType("已选择 1 项", 9.sp, 12.sp)
+        assertType("已选择 1 项", 12.sp, 17.sp)
         node("drawer-manage").performClick()
         node("drawer-selection-count").assertDoesNotExist()
         node("drawer-search").performClick()

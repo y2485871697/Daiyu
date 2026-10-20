@@ -24,6 +24,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
     private val density = AtomicReference<Density>()
     private var selected: String? = null
     private var dismissed = false
+    private var edited: String? = null
 
     private fun show(scale: Float = 1f, dark: Boolean = false) {
         val assets = FileAssistantAssets(instrumentation.targetContext)
@@ -39,7 +40,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = true) {
                         density.set(LocalDensity.current)
-                        AssistantPickerDialog(true, profiles, "visual-a", { selected = it }, {}, { dismissed = true },
+                        AssistantPickerDialog(true, profiles, "visual-a", { selected = it }, { edited = it }, { dismissed = true },
                             onCopy = {}, onDelete = {}, assets = assets)
                     }
                 }
@@ -109,6 +110,33 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertEquals(if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F), layout("Visual A").layoutInput.style.color)
             assertEquals(if (dark) Color(0xFF9C92A8) else Color(0xFF968B9F), layout("First description").layoutInput.style.color)
             assertEquals(if (dark) Color(0xFF261F30) else Color.White, layout(text(R.string.assistant_done)).layoutInput.style.color)
+        }
+    }
+
+    fun testActionsKeepPreviewGeometryAndEditUsesOriginalId() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            show(scale, dark)
+            ui.onNodeWithTag("assistant-item-visual-a").performTouchInput { longClick() }
+            val copy = bounds("assistant-action-copy")
+            val edit = bounds("assistant-action-edit")
+            val delete = bounds("assistant-action-delete")
+            for (row in listOf(copy, edit, delete)) assertEquals(42f, dp(row.height), .6f)
+            assertEquals(6f, dp(edit.top - copy.bottom), .6f)
+            assertEquals(6f, dp(delete.top - edit.bottom), .6f)
+            assertEquals(copy.left, edit.left, .6f)
+            assertEquals(copy.right, delete.right, .6f)
+            assertType(text(R.string.assistant_actions_title), 16.sp, 22.4.sp)
+            assertType("Visual A", 12.sp, 19.2.sp)
+            assertType("First description", 9.sp, 15.3.sp)
+            assertType(text(R.string.ui_edit_assistant), 10.sp, 15.sp)
+            assertEquals(if (dark) Color(0xFFDF9CA9) else Color(0xFFAE687A),
+                layout(text(R.string.ui_delete_assistant)).layoutInput.style.color)
+            ui.onNodeWithText(text(R.string.assistant_back_to_list)).performClick()
+            ui.onNodeWithTag("assistant-item-visual-a").assertIsDisplayed()
+            assertNull(selected)
+            ui.onNodeWithTag("assistant-item-visual-a").performTouchInput { longClick() }
+            ui.onNodeWithTag("assistant-action-edit").performClick()
+            assertEquals("visual-a", edited)
         }
     }
 

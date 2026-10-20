@@ -7,31 +7,23 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.DesignServices
-import androidx.compose.material.icons.rounded.Extension
-import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,11 +31,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.R
 import app.daiyu.android.assistants.AssistantAssets
 import app.daiyu.android.assistants.AssistantMemoryDraft
@@ -51,21 +43,12 @@ import app.daiyu.android.assistants.AssistantEditSession
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantStore
 import app.daiyu.android.ui.components.AssistantAvatar
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Eta's personality editor. Runtime skill discovery is supplied by the host, not copied. */
+/** Assistant editor; skill discovery and persistence remain owned by the host. */
 @Composable
 fun AssistantEditScreen(
     assistantId: String,
@@ -160,72 +143,92 @@ fun AssistantEditScreen(
     val s = assistantPreviewScale()
     val close = { session.close(); onBack() }
     BackHandler(onBack = close)
-    // Editing is the preview's ap-editor inside a bottom glass sheet, not a settings scaffold.
-    // The only production-only row is the existing avatar picker; its owner checks remain intact.
-    AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_edit_title), onDismiss = close, onBack = close,
-            footer = {
-                AssistantPreviewButton(stringResource(R.string.action_cancel), close, Modifier.weight(1f))
-                AssistantPreviewButton(stringResource(R.string.action_save), ::save, Modifier.weight(1f), primary = true,
-                    enabled = dirty && !saving && !memoryOverLimit && memoryRevision.isNotBlank())
-            }) {
-            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 2.dp * s)) {
-                Row(Modifier.fillMaxWidth().padding(top = 7.dp * s, bottom = 16.dp * s),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
-                    AssistantAvatar(bitmap = avatarBitmap, size = 44.dp * s, modifier = Modifier.clickable(enabled = !saving) {
-                        if (session.isActive && pickerOwner == null) {
-                            pickerOwner = session
-                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                        }
-                    })
-                    Column(Modifier.weight(1f)) {
-                        Text(name.trim().ifBlank { stringResource(R.string.assistant_unnamed) }, color = colors.text,
-                            fontSize = (12f * s).sp, fontWeight = FontWeight.Medium)
-                        Text(stringResource(R.string.assistant_preview), color = colors.muted, fontSize = (8f * s).sp,
-                            modifier = Modifier.padding(top = 3.dp * s))
-                    }
-                }
-                AssistantPreviewField(name, { if (session.isActive && !saving) name = it },
-                    stringResource(R.string.assistant_name), enabled = !saving)
-                AssistantPreviewField(prompt, { if (session.isActive && !saving) prompt = it },
-                    stringResource(R.string.assistant_prompt_title), enabled = !saving, singleLine = false, minLines = 5, maxLines = 10, minHeight = 110.dp, maxHeight = 250.dp)
-                AssistantPreviewSection(stringResource(R.string.route_skills)) {
-                    Text(stringResource(R.string.assistant_skills_summary), color = colors.muted, fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp)
-                    if (installedSkills.isEmpty()) {
-                        Text(stringResource(R.string.ui_no_skills_installed_yet_4e960f), color = colors.muted,
-                            fontSize = (10f * s).sp, modifier = Modifier.padding(vertical = 14.dp * s))
-                    } else installedSkills.forEachIndexed { index, skill ->
-                        if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
-                        AssistantSkillSwitchRow(skill, enabledSkillIds.contains(skill.id), !saving) { enabled ->
-                            if (session.isActive && !saving) {
-                                val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
-                                enabledSkillIds = next
-                                persistAssistantToggles(nextSkills = next)
+    AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_editor_title), onDismiss = close, onBack = close,
+        footer = {
+            AssistantPreviewButton(stringResource(R.string.action_cancel), close, Modifier.weight(1f).testTag("assistant-edit-cancel"))
+            AssistantPreviewButton(stringResource(R.string.assistant_save_changes), ::save,
+                Modifier.weight(1f).testTag("assistant-edit-save"), primary = true,
+                enabled = dirty && !saving && !memoryOverLimit && memoryRevision.isNotBlank())
+        }) {
+        Column(Modifier.fillMaxWidth().weight(1f).testTag("assistant-editor")
+            .verticalScroll(rememberScrollState()).padding(horizontal = 2.dp * s, vertical = 1.dp * s)) {
+            AssistantPreviewField(name, { if (session.isActive && !saving) name = it },
+                stringResource(R.string.assistant_editor_name), enabled = !saving,
+                fieldModifier = Modifier.testTag("assistant-edit-name"), labelAction = {
+                    AssistantAvatar(bitmap = avatarBitmap, size = 16.dp * s,
+                        modifier = Modifier.testTag("assistant-edit-avatar").clickable(enabled = !saving,
+                            interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            if (session.isActive && pickerOwner == null) {
+                                pickerOwner = session
+                                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             }
-                        }
-                    }
+                        })
+                })
+            // The production profile has no description field; keep this preview slot read-only.
+            AssistantPreviewField("", {}, stringResource(R.string.assistant_description), readOnly = true,
+                placeholder = stringResource(R.string.assistant_description_placeholder),
+                fieldModifier = Modifier.testTag("assistant-edit-description"))
+            AssistantPreviewField(prompt, { if (session.isActive && !saving) prompt = it },
+                stringResource(R.string.assistant_system_prompt), enabled = !saving, singleLine = false,
+                minHeight = 110.dp, maxHeight = 250.dp, fieldModifier = Modifier.testTag("assistant-edit-prompt"))
+            AssistantPreviewSection(stringResource(R.string.route_skills), Modifier.testTag("assistant-skills")) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
+                    Text(stringResource(R.string.assistant_skills_caption), color = colors.muted,
+                        fontSize = (9f * s).sp, lineHeight = (14.4f * s).sp, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.assistant_independent_switches), color = colors.muted,
+                        fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp)
                 }
-                AssistantPreviewSection(stringResource(R.string.ui_memory_b55ff5)) {
-                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp * s), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp * s)) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(R.string.ui_enable_memory_4b69b7), color = colors.text, fontSize = (10f * s).sp,
-                                fontWeight = FontWeight.Medium)
-                            Text(stringResource(R.string.assistant_memory_summary), color = colors.muted, fontSize = (8f * s).sp,
-                                lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 4.dp * s))
-                        }
-                        AssistantPreviewSwitch(memoryEnabled, !saving, "") {
-                            if (session.isActive && !saving) { memoryEnabled = it; persistAssistantToggles(nextMemory = it) }
+                Spacer(Modifier.height(7.dp * s))
+                if (installedSkills.isEmpty()) {
+                    Text(stringResource(R.string.ui_no_skills_installed_yet_4e960f), color = colors.muted,
+                        fontSize = (10f * s).sp, lineHeight = (16f * s).sp,
+                        modifier = Modifier.padding(vertical = 14.dp * s))
+                } else installedSkills.forEachIndexed { index, skill ->
+                    if (index > 0) {
+                        Spacer(Modifier.height(3.dp * s))
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
+                    }
+                    AssistantSkillSwitchRow(skill, enabledSkillIds.contains(skill.id), !saving) { enabled ->
+                        if (session.isActive && !saving) {
+                            val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
+                            enabledSkillIds = next
+                            persistAssistantToggles(nextSkills = next)
                         }
                     }
-                    AssistantPreviewField(memoryDraft, {
-                        if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
-                    }, "MEMORY.md", enabled = !saving, singleLine = false, minLines = 4, maxLines = 8, monospace = true,
-                        minHeight = 90.dp, maxHeight = 180.dp, bottomSpacing = 0.dp)
-                    if (memoryOverLimit) Text(stringResource(R.string.memory_over_limit), color = colors.danger,
-                        fontSize = (8f * s).sp, modifier = Modifier.padding(top = 8.dp * s))
                 }
             }
+            AssistantPreviewSection(modifier = Modifier.testTag("assistant-memory")) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 12.dp * s), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp * s)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.ui_memory_b55ff5), color = colors.text,
+                            fontSize = (11f * s).sp, lineHeight = (17.6f * s).sp, fontWeight = FontWeight(550))
+                        Text(stringResource(R.string.assistant_memory_caption), color = colors.muted,
+                            fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 4.dp * s))
+                    }
+                    AssistantPreviewSwitch(memoryEnabled, !saving, stringResource(R.string.assistant_enable),
+                        Modifier.testTag("assistant-memory-switch")) {
+                        if (session.isActive && !saving) { memoryEnabled = it; persistAssistantToggles(nextMemory = it) }
+                    }
+                }
+                AssistantPreviewField(memoryDraft, {
+                    if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
+                }, stringResource(R.string.assistant_memory_content), enabled = !saving, singleLine = false,
+                    minHeight = 90.dp, maxHeight = 180.dp, bottomSpacing = 0.dp,
+                    fieldModifier = Modifier.testTag("assistant-edit-memory"),
+                    placeholder = stringResource(R.string.assistant_memory_placeholder))
+                Text(stringResource(if (memoryEnabled) R.string.assistant_enabled else R.string.assistant_disabled),
+                    color = colors.muted, fontSize = (8f * s).sp, lineHeight = (13.6f * s).sp,
+                    modifier = Modifier.padding(start = 2.dp * s, end = 2.dp * s, top = 7.dp * s))
+            }
         }
+        Box(Modifier.fillMaxWidth().heightIn(min = 15.dp * s).padding(horizontal = 2.dp * s)
+            .testTag("assistant-edit-error")) {
+            if (memoryOverLimit) Text(stringResource(R.string.memory_over_limit), color = colors.danger,
+                fontSize = (9f * s).sp, lineHeight = (15.3f * s).sp)
+        }
+    }
     cropBitmap?.let { bitmap ->
         AvatarCropDialog(bitmap = bitmap, onCancel = { cropBitmap = null }, onConfirm = { cropped ->
             cropBitmap = null
@@ -259,10 +262,11 @@ private fun AssistantSkillSwitchRow(skill: AssistantSkill, checked: Boolean, ena
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp * s), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp * s)) {
         Column(Modifier.weight(1f)) {
-            Text(skill.name, color = colors.text, fontSize = (10f * s).sp)
+            Text(skill.name, color = colors.text, fontSize = (10f * s).sp, lineHeight = (16f * s).sp)
             Text(skill.description.ifBlank { stringResource(R.string.skills_no_description) }, color = colors.muted,
                 fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 3.dp * s))
         }
-        AssistantPreviewSwitch(checked, enabled, "启用", onToggle)
+        AssistantPreviewSwitch(checked, enabled, stringResource(R.string.assistant_enable),
+            Modifier.testTag("assistant-skill-${skill.id}"), onToggle)
     }
 }

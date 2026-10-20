@@ -72,13 +72,13 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
             }
         }
         for ((text, size) in listOf("助手确认" to 14.sp, "代理确认" to 14.sp,
-            "用量确认" to 14.sp, "工具确认" to 8.sp, "用户正文" to 11.sp)) {
+            "用量确认" to 14.sp, "工具确认" to 8.sp, "用户正文" to 16.sp)) {
             val results = mutableListOf<TextLayoutResult>()
             ui.onNodeWithText(text, useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
             assertEquals(size, results.single().layoutInput.style.fontSize)
             assertEquals(.9f, results.single().layoutInput.density.fontScale)
-            if (text == "用户正文") assertEquals(18.7.sp, results.single().layoutInput.style.lineHeight)
+            if (text == "用户正文") assertEquals(26.sp, results.single().layoutInput.style.lineHeight)
         }
         node("tool-mini").assertHeightIsEqualTo(27.dp)
         node("prompt-area").assertExists()

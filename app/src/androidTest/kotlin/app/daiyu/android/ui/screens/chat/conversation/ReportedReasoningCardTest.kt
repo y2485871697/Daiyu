@@ -5,6 +5,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.ReportedReasoning
@@ -27,7 +30,11 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.onNodeWithText("工作过程").assertIsDisplayed()
         ui.onNodeWithText("reported summary").assertDoesNotExist()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
-        ui.onNodeWithText("reported summary").assertIsDisplayed()
+        val summary = ui.onNodeWithText("reported summary").assertIsDisplayed()
+        val layouts = mutableListOf<TextLayoutResult>()
+        summary.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        assertEquals(16.sp, layouts.single().layoutInput.style.fontSize)
+        assertEquals(26.sp, layouts.single().layoutInput.style.lineHeight)
         ui.onNodeWithText("answer remains").assertIsDisplayed()
         ui.onNodeWithText("工作过程").performClick()
         ui.onNodeWithText("fixture tool").assertIsDisplayed()

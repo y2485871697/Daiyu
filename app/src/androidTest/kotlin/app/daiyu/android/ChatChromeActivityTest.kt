@@ -159,10 +159,10 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         val bar = node("chat-top-bar").fetchSemanticsNode().boundsInRoot
         val density = bar.width / 320f
         val title = layout("测试会话")
-        assertEquals(16.sp, title.layoutInput.style.fontSize)
+        assertEquals(18.sp, title.layoutInput.style.fontSize)
         assertEquals(FontWeight(650), title.layoutInput.style.fontWeight)
         assertEquals(.9f, title.layoutInput.density.fontScale, .001f)
-        assertEquals(11.sp, layout("代码助手 · gpt-6.1-sol").layoutInput.style.fontSize)
+        assertEquals(13.sp, layout("代码助手 · gpt-6.1-sol").layoutInput.style.fontSize)
         val drawer = button("打开侧边栏").fetchSemanticsNode().boundsInRoot
         val more = button("更多").fetchSemanticsNode().boundsInRoot
         val agents = button("本会话协作").fetchSemanticsNode().boundsInRoot
@@ -201,13 +201,13 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(33f, node("chat-draft").fetchSemanticsNode().boundsInRoot.height / density, .75f)
             node("chat-send").assertIsNotEnabled()
             val modelText = layout(state.modelLabel)
-            assertEquals(12.sp, modelText.layoutInput.style.fontSize)
-            assertEquals(17.sp, modelText.layoutInput.style.lineHeight)
-            assertEquals(10.sp, layout("37% 上下文").layoutInput.style.fontSize)
-            assertEquals(15.sp, layout("37% 上下文").layoutInput.style.lineHeight)
+            assertEquals(13.sp, modelText.layoutInput.style.fontSize)
+            assertEquals(18.sp, modelText.layoutInput.style.lineHeight)
+            assertEquals(12.sp, layout("37% 上下文").layoutInput.style.fontSize)
+            assertEquals(18.sp, layout("37% 上下文").layoutInput.style.lineHeight)
             val placeholder = layout("给代鱼发消息")
-            assertEquals(14.sp, placeholder.layoutInput.style.fontSize)
-            assertEquals(20.sp, placeholder.layoutInput.style.lineHeight)
+            assertEquals(16.sp, placeholder.layoutInput.style.fontSize)
+            assertEquals(24.sp, placeholder.layoutInput.style.lineHeight)
             assertEquals(.9f, placeholder.layoutInput.density.fontScale, .001f)
         }
     }

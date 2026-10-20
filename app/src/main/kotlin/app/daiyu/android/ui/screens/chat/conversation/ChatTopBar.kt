@@ -52,15 +52,15 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(ChatPreviewIcons.Menu, "打开侧边栏", actions.onOpenSidebar,
             Modifier.size(40.dp), tint = chrome.text, iconSize = 22.dp)
-        val titleBlockHeight = with(LocalDensity.current) { 22.sp.toDp() + 16.sp.toDp() } + 4.dp
+        val titleBlockHeight = with(LocalDensity.current) { 24.sp.toDp() + 18.sp.toDp() } + 4.dp
         Column(Modifier.weight(1f).heightIn(min = titleBlockHeight)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
                 color = chrome.text,
-                style = MiuixTheme.textStyles.title3.copy(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight(650)),
+                style = MiuixTheme.textStyles.title3.copy(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight(650)),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(listOf(assistantLabel, modelLabel).filter { it.isNotBlank() }.joinToString(" · "),
                 modifier = Modifier.testTag("chat-subtitle").padding(top = 4.dp), color = chrome.muted,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 16.sp),
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = chrome.toolbar, iconSize = 22.dp)

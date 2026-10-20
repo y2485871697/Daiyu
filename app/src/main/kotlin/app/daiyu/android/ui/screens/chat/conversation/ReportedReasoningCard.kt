@@ -50,10 +50,10 @@ internal fun ReportedReasoningCard(ownerKey: String, reported: List<ReportedReas
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Icon(Icons.Rounded.Psychology, null, Modifier.size(14.dp), tint = colors.accent)
             Text("思考摘要", Modifier.weight(1f), color = colors.accent,
-                style = MiuixTheme.textStyles.body2.copy(fontSize = 10.sp, lineHeight = 15.sp))
+                style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
             // ReportedReasoning does not supply elapsed time; do not manufacture a duration.
             Text("模型已报告", color = colors.muted,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 12.sp))
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 16.sp))
             Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
                 if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
                 Modifier.size(10.dp), tint = colors.muted)
@@ -64,11 +64,11 @@ internal fun ReportedReasoningCard(ownerKey: String, reported: List<ReportedReas
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("仅包含供应商实际公开返回的内容；不代表隐藏内部推理。流中断时可能不完整。",
                     color = colors.muted,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 13.sp))
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp))
                 SelectionContainer {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         visible.forEach { Text(it.text, color = colors.muted,
-                            style = MiuixTheme.textStyles.body2.copy(fontSize = 10.sp, lineHeight = 18.sp)) }
+                            style = MiuixTheme.textStyles.body2.copy(fontSize = 16.sp, lineHeight = 26.sp)) }
                     }
                 }
             }

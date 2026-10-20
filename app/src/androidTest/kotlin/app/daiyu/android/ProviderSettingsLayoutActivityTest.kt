@@ -30,7 +30,8 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
     fun testNewProviderUsesItsRegisteredNameAndKeepsBothTabsBeforeFirstSave() {
         openProviderManagement()
         val before = fixture.controller.providers.snapshot()
-        reveal("provider-add", "提供商").performClick()
+        reveal("provider-add", "模型提供商").performClick()
+        reveal("provider-auth-api-key", "认证方式").performClick()
         awaitUniqueTag("prompt-input")
         node("prompt-input").performTextReplacement("Custom provider layout")
         ui.onNodeWithText("保存").performClick()
@@ -38,8 +39,6 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
             fixture.controller.providers.snapshot().providers.any { it.name == "Custom provider layout" }
         }
         val registered = fixture.controller.providers.snapshot()
-        val slot = registered.providers.single { it.name == "Custom provider layout" }.slotId
-        reveal("provider-open-$slot", "提供商").performClick()
         awaitUniqueTag("page:Custom provider layout")
         reveal("provider-name", "Custom provider layout").assert(hasAnyDescendant(hasText("Custom provider layout")))
         reveal("settings-radio:配置", "Custom provider layout").assertIsSelected()
@@ -66,8 +65,21 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         reveal("provider-endpoint-select").assertTextContains("Chat Completions API")
         node("responses-path-select").assertDoesNotExist()
         modelField("API Key").assertEditableText("")
-        reveal("settings-switch:重输密钥并绑定").assertIsOff()
+        node("settings-switch:重输密钥并绑定").assertDoesNotExist()
         assertEquals(ProviderProtocol.RESPONSES, before.protocol)
+        assertEquals(before, fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testProtocolMenuHasNoGeminiAndKeyRebindSwitchIsAbsent() {
+        val before = fixture.settings.load()
+        openModels()
+        reveal("provider-protocol-select").performClick()
+        node("provider-family:openai").assertExists()
+        node("settings-radio:Google Gemini").assertDoesNotExist()
+        node("settings-radio:Anthropic Messages").assertExists().performClick()
+        modelField("API Key").assertEditableText("")
+        node("settings-switch:重输密钥并绑定").assertDoesNotExist()
         assertEquals(before, fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }

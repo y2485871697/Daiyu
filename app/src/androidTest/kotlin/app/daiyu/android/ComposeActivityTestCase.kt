@@ -228,7 +228,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.waitUntil(5_000) {
             ui.onAllNodes(hasTestTag("provider-add") and isEnabled()).fetchSemanticsNodes().size == 1
         }
-        reveal("provider-open-primary", "提供商").assertIsDisplayed().assertIsEnabled()
+        reveal("provider-open-primary", "模型提供商").assertIsDisplayed().assertIsEnabled()
     }
     protected fun selectProviderTab(title: String) {
         val tag = "settings-radio:$title"
@@ -254,7 +254,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun openModels() {
         openProviderManagement()
-        reveal("provider-open-primary", "提供商").performClick()
+        reveal("provider-open-primary", "模型提供商").performClick()
         awaitModelEditor()
     }
     protected fun awaitModelEditor() {

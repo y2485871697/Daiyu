@@ -273,7 +273,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPauseDismissesDialogAndOldHitCannotNavigateAfterResume() {
+    fun testPausePreservesSearchButOldHitCannotNavigateAfterResume() {
         val (conversation, message) = seed("暂停检索", "pause", "暂停前搜索词")
         mainThread { activity.select(conversation) }
         setDraft("暂停保留草稿")
@@ -297,12 +297,16 @@ class SearchHostActivityTest : WiredActivityTestCase() {
             val before = generation.getLong(activity)
             oldClick()
             assertEquals(before, generation.getLong(activity))
-            assertNull(invokeHost(activity, "getSearchPage"))
-            assertEquals("chat", invokeHost(activity, "getRetainedPage"))
+            assertNotNull(invokeHost(activity, "getSearchPage"))
+            assertEquals("history-search", invokeHost(activity, "getRetainedPage"))
         }
         realPauseResume(activity, atPause = { replayOldHit() })
-        node("search-history-dialog").assertDoesNotExist()
+        awaitTag("search-history-dialog")
+        node("search:query").assertEditableText("暂停前搜索词")
+        awaitTag(tag)
         mainThread { replayOldHit() }
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
         assertDraft("暂停保留草稿")
         assertEquals(0, fixture.opens.get())
     }

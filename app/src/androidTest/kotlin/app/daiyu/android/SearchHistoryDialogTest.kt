@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
@@ -18,6 +19,8 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.SearchHistoryDialog
 import app.daiyu.android.ui.model.MessageSearchHit
 import app.daiyu.android.ui.model.MessageSearchPage
+import app.daiyu.android.ui.model.MessageSearchCursor
+import app.daiyu.android.ui.model.SearchConversationRevision
 import app.daiyu.android.ui.screens.search.MessageSearchPageReader
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -138,4 +141,52 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
         } finally { release.countDown() }
         assertEquals(0, fixture.opens.get())
     }
+    fun testPausedPagedSearchRestoresPositionAfterSlowReadAndAppendRetryAndRejectsOldClicks() {
+        val reads = AtomicInteger()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        try {
+            show(reader = { request, cursor, signal ->
+                val attempt = reads.incrementAndGet()
+                if (attempt == 4) { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
+                if (attempt == 5) error("synthetic append read failure")
+                signal.throwIfCanceled()
+                val start = cursor?.nextExpanded ?: 0
+                val rows = (start until start + 20).map { hit.copy(messageId = "paged-$it") }
+                MessageSearchPage(rows, if (start < 40) MessageSearchCursor(request.query, "current",
+                    listOf(SearchConversationRevision("current", "当前会话", "fixture")), 0, start + 20) else null)
+            })
+            node("search:query").performTextReplacement("历史")
+            dismissIme()
+            awaitUniqueTag("search:message:current:paged-0:1")
+            node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
+            val oldMore = checkNotNull(node("search:more").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            node("search:more").performClick()
+            ui.waitUntil(5_000) { reads.get() == 2 }
+            node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
+            node("search:more").performClick()
+            val tag = "search:message:current:paged-55:1"
+            ui.waitUntil(5_000) { reads.get() == 3 }
+            node("search-history-results").scrollToDescendant(hasTestTag(tag))
+            val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            val before = node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+            val top = node(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top
+            realPauseResume(activity, atPause = { oldClick(); oldMore() })
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            node(tag).assertDoesNotExist()
+            release.countDown()
+            awaitUniqueTag("search:retry")
+            node(tag).assertDoesNotExist()
+            node("search:retry").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag(tag).fetchSemanticsNodes().size == 1 && node(tag).isDisplayed() }
+            node("search:query").assertEditableText("历史")
+            assertEquals(before, node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .001f)
+            assertEquals(top, node(tag).fetchSemanticsNode().boundsInRoot.top, 2f)
+            assertEquals(7, reads.get())
+            mainThread { oldClick(); oldMore() }
+            assertNull(opened)
+            assertEquals(7, reads.get())
+            assertEquals(0, fixture.opens.get())
+        } finally { release.countDown() }
+    }
+
 }

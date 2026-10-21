@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -60,8 +62,14 @@ internal fun SearchHistoryDialog(
     var resumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var query by remember(conversationId) { mutableStateOf("") }
     val request = MessageSearchRequest(query.trim(), conversationId)
+    val listState = remember(conversationId, query) { LazyListState() }
+    val loadingListState = rememberLazyListState()
+    var visit by remember(lifecycle) { mutableStateOf(Any()) }
+    val renderedVisit = visit
+    var restoreCount by remember(conversationId) { mutableStateOf(0) }
+    var restoring by remember(conversationId) { mutableStateOf(false) }
 
-    fun available() = currentOwner() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    fun available() = visit === renderedVisit && currentOwner() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun search() {
         if (available() && conversationId != null && request.query.isNotEmpty()) {
             requests.start(request, debounceMillis = 180, read = latestSearch)
@@ -69,14 +77,32 @@ internal fun SearchHistoryDialog(
     }
     DisposableEffect(requests, lifecycle) {
         val observer = LifecycleEventObserver { _, _ ->
-            resumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            val nextResumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            if (resumed && !nextResumed) {
+                visit = Any()
+                restoreCount = maxOf(restoreCount, requests.state.value.results.size)
+                restoring = restoreCount > 0
+            }
+            resumed = nextResumed
             if (!resumed) requests.cancel()
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer); requests.cancel() }
     }
-    LaunchedEffect(request, query, resumed) { search() }
+    LaunchedEffect(request, query, resumed, renderedVisit) { search() }
     val phase = if (snapshot.request == request) snapshot.phase else SearchPhase.Idle
+    LaunchedEffect(resumed, restoring, snapshot.generation, snapshot.phase, snapshot.results.size, snapshot.appendPhase) {
+        if (resumed && restoring) {
+            val now = requests.state.value
+            if (now.request == request && now.phase == SearchPhase.Results && now.appendPhase == SearchAppendPhase.Idle) {
+                if (now.results.size < restoreCount && now.nextCursor != null) requests.loadMore()
+                else { restoring = false; restoreCount = 0 }
+            }
+        }
+    }
+    fun cancelSearch() {
+        if (available()) requests.cancel()
+    }
     val exit = { if (available()) { requests.cancel(); onDismiss() } }
 
     UsageGlassDialog(title = stringResource(R.string.action_search_history), onDismiss = exit) {
@@ -84,12 +110,14 @@ internal fun SearchHistoryDialog(
             AssistantPreviewField(query, onValueChange = {
                 if (available() && query != it.take(1000)) {
                     requests.cancel()
+                    restoring = false; restoreCount = 0
                     query = it.take(1000)
                 }
             }, label = "", placeholder = stringResource(R.string.search_history_hint),
                 fieldModifier = Modifier.testTag("search:query"), minHeight = 44.dp, bottomSpacing = 8.dp)
             LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 360.dp)
-                .testTag("search-history-results")) {
+                .testTag("search-history-results"),
+                state = if (!resumed || restoring || phase != SearchPhase.Results) loadingListState else listState) {
                 when {
                     request.query.isBlank() -> item("prompt") {
                         SearchNotice(stringResource(R.string.search_history_empty), "search:prompt")
@@ -97,13 +125,24 @@ internal fun SearchHistoryDialog(
                     conversationId == null -> item("empty-draft") {
                         SearchNotice(stringResource(R.string.search_history_no_results), "search:empty")
                     }
-                    phase == SearchPhase.Idle || phase == SearchPhase.Loading -> item("loading") {
-                        SearchLoading { if (available()) requests.cancel() }
-                    }
                     phase == SearchPhase.ReadError -> item("error") { SearchReadError { search() } }
                     phase == SearchPhase.Cancelled -> item("cancelled") {
                         SearchNotice(stringResource(R.string.search_cancelled))
                         TextButton(text = stringResource(R.string.search_retry), onClick = { search() })
+                    }
+                    restoring && snapshot.appendPhase == SearchAppendPhase.ReadError -> item("restore-error") {
+                        SearchReadError { if (available()) requests.loadMore() }
+                    }
+                    restoring && snapshot.appendPhase == SearchAppendPhase.Cancelled -> item("restore-cancelled") {
+                        SearchNotice(stringResource(R.string.search_cancelled))
+                        TextButton(text = stringResource(R.string.search_retry), onClick = { search() })
+                    }
+                    restoring && snapshot.appendPhase == SearchAppendPhase.Invalidated -> item("restore-invalidated") {
+                        SearchNotice(stringResource(R.string.search_history_changed), "search:history_changed")
+                        TextButton(text = stringResource(R.string.search_refresh), onClick = { search() })
+                    }
+                    !resumed || restoring || phase == SearchPhase.Idle || phase == SearchPhase.Loading -> item("loading") {
+                        SearchLoading { cancelSearch() }
                     }
                     else -> {
                         if (snapshot.results.isEmpty()) item("empty") {

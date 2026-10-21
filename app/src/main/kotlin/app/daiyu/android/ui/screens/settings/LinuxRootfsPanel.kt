@@ -47,8 +47,8 @@ internal fun rememberLinuxRootfsPanel(root: File?): @Composable () -> Unit {
     }
     DisposableEffect(root, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) { request?.set(true); request = null; listing = null }
-            if (event == Lifecycle.Event.ON_RESUME) load(null)
+            if (event == Lifecycle.Event.ON_PAUSE) { request?.set(true); request = null }
+            if (event == Lifecycle.Event.ON_RESUME) load()
         }
         lifecycle.addObserver(observer)
         onDispose { visit.set(false); request?.set(true); lifecycle.removeObserver(observer) }

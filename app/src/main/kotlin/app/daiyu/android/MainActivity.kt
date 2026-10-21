@@ -830,7 +830,7 @@ class MainActivity : ComponentActivity() {
             if (value != "session-gateway") {
                 gatewayOwner?.revoke(); gatewayOwner = null
                 gatewayEditing = null; gatewayProviderEditor = null; gatewayDraft = null
-                gatewayReplacementAuthorized = false; gatewayError = null
+                gatewayReplacementAuthorized = false; gatewayReloadPending = false; gatewayError = null
             }
             if (value != "generation-settings") {
                 generationSettingsVisit?.active?.set(false)
@@ -1302,6 +1302,7 @@ class MainActivity : ComponentActivity() {
         val active: Message?, val folderId: String?,
     )
     private var searchPage by mutableStateOf<SearchPage?>(null)
+    private var historySearchEpoch by mutableLongStateOf(0L)
     private var configurationRestorePreview by mutableStateOf<ChatController.ConfigurationRestorePreview?>(null)
     private var restorePreviewText by mutableStateOf("")
     private var backupImportVisit: Any? = null
@@ -1322,6 +1323,7 @@ class MainActivity : ComponentActivity() {
     private var gatewayDraft by mutableStateOf<app.daiyu.android.model.sessiongateway.SessionGatewayRule?>(null)
     private var gatewayError by mutableStateOf<String?>(null)
     private var gatewayReplacementAuthorized by mutableStateOf(false)
+    private var gatewayReloadPending by mutableStateOf(false)
     private var chatModelPicker by mutableStateOf<ChatModelPickerState?>(null)
     private var chatModelProviderEditor: ProviderEditorSlot? = null
     private var chatModelSettings: ModelSettings? = null
@@ -1704,14 +1706,14 @@ class MainActivity : ComponentActivity() {
                     "session-gateway" -> {
                         val owner = gatewayOwner
                         val value = gatewayDraft
-                        if (owner != null && value != null) key(owner) {
+                        if (owner != null && value != null) {
                             SessionGatewaySettingsScreen(
                                 draft = value,
                                 onDraftChange = { if (gatewayCurrent(owner) && !controller.dataBusy) gatewayDraft = it },
                                 onSave = { saveSessionGateway(owner, it) },
                                 onBack = { if (gatewayCurrent(owner)) retainedPage = "settings" },
                                 errorText = gatewayError,
-                                enabled = controller.ready && controller.active == null && !controller.dataBusy,
+                                enabled = !gatewayReloadPending && gatewayEditing != null && controller.ready && controller.active == null && !controller.dataBusy,
                                 requestOptionsUnavailable = gatewayEditing?.requestOptionsUnavailable == true,
                                 replacementAuthorized = gatewayReplacementAuthorized,
                                 onReplacementAuthorization = {
@@ -4436,6 +4438,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
+        if (retainedPage == "session-gateway" && gatewayReloadPending) loadSessionGateway(restore = true)
         chatReferencePick?.pickerAway = false
         subAgentSourceRevision++
         refreshUnknownBranchOutcome()
@@ -4479,12 +4482,13 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        if (retainedPage == "session-gateway") {
+            gatewayOwner?.revoke()
+            gatewayReloadPending = true; gatewayReplacementAuthorized = false
+        }
         revokeContextManagementEntry()
         dismissChatModels()
-        if (retainedPage == "history-search") {
-            searchPage = null
-            retainedPage = "chat"
-        }
+        historySearchEpoch++
         val mediaPicker = pendingGenerationMediaOriginal
         val preserveMedia = mediaPicker != null && mediaPicker.pickerHopPending && mediaPicker.active.get() &&
             generationMediaVisit === mediaPicker.active && pendingBackupRequest == mediaPicker.requestCode &&
@@ -4576,7 +4580,6 @@ class MainActivity : ComponentActivity() {
         revokeTerminalJobsVisit()
         invalidateMessageActionEditor()
         gatewayOwner?.revoke()
-        if (retainedPage == "session-gateway") retainedPage = "settings"
         controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
         voiceForeground = false
@@ -4916,11 +4919,14 @@ class MainActivity : ComponentActivity() {
         dismissSidebar()
     }
 
-    private fun historySearchHitAction(page: SearchPage): (MessageSearchHit) -> Unit = { hit ->
-        if (activityUsable() && searchPage === page && retainedPage == page.route &&
-            selected?.id?.value == page.conversationId && hit.conversationId == page.conversationId &&
-            lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
-            guard { openHistoryHit(hit) }
+    private fun historySearchHitAction(page: SearchPage): (MessageSearchHit) -> Unit {
+        val epoch = historySearchEpoch
+        return { hit ->
+            if (activityUsable() && epoch == historySearchEpoch && searchPage === page && retainedPage == page.route &&
+                selected?.id?.value == page.conversationId && hit.conversationId == page.conversationId &&
+                lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                guard { openHistoryHit(hit) }
+            }
         }
     }
 
@@ -4994,10 +5000,7 @@ class MainActivity : ComponentActivity() {
         requireActivityUsable()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
-        if (retainedPage == "history-search") {
-            searchPage = null
-            retainedPage = "chat"
-        }
+        historySearchEpoch++
         if (revokeContextManagementEntry()) editorGeneration++
         voiceConversationDialogOwner = null
         fenceVideoRoute()
@@ -5532,31 +5535,45 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun gatewayCurrent(owner: ModelSettingsSaveOwner) = activityUsable() &&
-        retainedPage == "session-gateway" && gatewayOwner === owner
+        retainedPage == "session-gateway" && gatewayOwner === owner && !gatewayReloadPending
 
     private fun openSessionGateway() {
         requireActivityUsable()
         check(controller.ready && controller.active == null && !controller.dataBusy)
+        retainedPage = "session-gateway"
+        loadSessionGateway(restore = false)
+    }
+
+    private fun loadSessionGateway(restore: Boolean) {
+        val oldEditor = gatewayProviderEditor
+        val oldEditing = gatewayEditing
+        val oldDraft = gatewayDraft
         gatewayOwner?.revoke()
         val owner = ModelSettingsSaveOwner()
-        gatewayOwner = owner; gatewayEditing = null; gatewayProviderEditor = null; gatewayDraft = null
-        gatewayReplacementAuthorized = false; gatewayError = null
-        retainedPage = "session-gateway"
+        gatewayOwner = owner
+        gatewayReloadPending = true; gatewayReplacementAuthorized = false; gatewayError = null
+        if (!restore) { gatewayEditing = null; gatewayProviderEditor = null; gatewayDraft = null }
         lifecycleScope.launch {
             val loaded = withContext(Dispatchers.IO) { runCatching {
                 val editor = controller.providers.activeEditor()
                 editor to controller.providers.editing(editor)
             } }
-            if (!gatewayCurrent(owner)) return@launch
+            if (!activityUsable() || !voiceForeground || retainedPage != "session-gateway" || gatewayOwner !== owner) return@launch
             loaded.fold(onSuccess = { (editor, editing) ->
+                val sameConfiguration = restore && oldEditor == editor && oldEditing == editing && oldDraft != null
                 gatewayProviderEditor = editor
                 gatewayEditing = editing
-                gatewayDraft = editing.settings.requestOptions.sessionGateway
+                gatewayDraft = if (sameConfiguration) oldDraft else editing.settings.requestOptions.sessionGateway
+                gatewayReloadPending = false
+                if (restore && !sameConfiguration) gatewayError = "提供商配置已变化，已重新读取会话网关设置"
                 if (editing.credentialUnavailable && !editing.requestOptionsUnavailable ||
                     editing.settings.protocol == app.daiyu.android.model.ProviderProtocol.UNKNOWN) {
                     gatewayError = "凭据或协议不可用；请先到模型设置修复，未更改网关策略"
                 }
-            }, onFailure = { gatewayError = "设置无法读取；未更改配置，请返回后重试" })
+            }, onFailure = {
+                gatewayEditing = null; gatewayProviderEditor = null; gatewayReloadPending = false
+                gatewayError = "设置无法读取；未更改配置，请返回后重试"
+            })
         }
     }
 

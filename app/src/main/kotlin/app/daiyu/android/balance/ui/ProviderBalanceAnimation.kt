@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.icons.MoneyBag02
 import androidx.compose.material3.Icon
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Text
@@ -167,15 +167,14 @@ internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: Strin
         val merged = (burst?.delta ?: BigDecimal.ZERO) + incoming.delta
         if (balanceEffectLevel(merged) == BalanceEffectLevel.Strong) target - merged else null
     }
-    val currency = state.successful?.money?.currency.orEmpty()
     val displayText = when {
-        rollingActive -> "$currency ${formatBalanceDisplay(rolling.value.toString())}"
-        pendingStrongFrom != null -> "$currency ${formatBalanceDisplay(pendingStrongFrom.toPlainString())}"
+        rollingActive -> formatBalanceDisplay(rolling.value.toString())
+        pendingStrongFrom != null -> formatBalanceDisplay(pendingStrongFrom.toPlainString())
         else -> amount
     }
     Box(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(DaiyuIcons.Balance, contentDescription = null,
+            Icon(MoneyBag02, contentDescription = null,
                 modifier = Modifier.padding(end = 4.dp).size(12.dp).graphicsLayer { rotationZ = iconRotation.value },
                 tint = amountColor)
             Text(text = displayText, style = textStyle, color = amountColor,
@@ -195,7 +194,7 @@ internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: Strin
                 color = if (current.level == BalanceEffectLevel.Increase) BalanceIncreaseColor else decreaseColor,
                 maxLines = 1,
                 modifier = Modifier.align(Alignment.BottomEnd)
-                    // Zero-sized placement: drawing-layer effects do not remeasure the top bar.
+                    // Zero-sized placement: drawing-layer effects do not remeasure the composer.
                     .layout { measurable, _ ->
                         val placeable = measurable.measure(Constraints())
                         layout(0, 0) { placeable.placeRelative(-placeable.width, 0) }

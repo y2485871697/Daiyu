@@ -32,6 +32,27 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         assertTrue(fixture.controller.providers.catalogSnapshot(editor).models.isEmpty())
         assertEquals(0, fixture.opens.get())
     }
+    fun testSavedProviderWithoutModelsCanBeDeletedFromItsConfigurationFooter() {
+        openProviderManagement()
+        val before = fixture.controller.providers.snapshot()
+        reveal("provider-add", "模型提供商").performClick()
+        reveal("provider-auth-api-key", "认证方式").performClick()
+        awaitUniqueTag("page:添加提供商")
+        node("provider-delete").assertDoesNotExist()
+        fillNew("empty-catalog fixture")
+        reveal("model-save", "添加提供商").performClick()
+        awaitUniqueTag("page:empty-catalog fixture")
+        reveal("model-save", "empty-catalog fixture", "model_save").assertTextContains("保存配置")
+        reveal("provider-delete", "empty-catalog fixture", "provider_delete").performClick()
+        node("dialog-confirm").performClick()
+        awaitControl("new provider deleted") {
+            fixture.controller.providers.snapshot().providers == before.providers
+        }
+        awaitUniqueTag("page:模型提供商")
+        assertEquals(before.activeSlotId, fixture.controller.providers.snapshot().activeSlotId)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testPausedAddDoesNotRegisterOrRestoreCredentials() {
         openProviderManagement()
         val before = fixture.controller.providers.snapshot()

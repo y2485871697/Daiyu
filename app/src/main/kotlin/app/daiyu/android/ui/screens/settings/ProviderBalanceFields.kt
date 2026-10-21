@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -15,6 +16,7 @@ import app.daiyu.android.balance.BalanceState
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 
 internal typealias ProviderBalanceTester = (ModelSettingsDraftUi, () -> Boolean, (BalanceResult) -> Unit) -> Boolean
 
@@ -47,7 +49,6 @@ internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean
             change(options.copy(enabled = it))
         }
         if (options.enabled) {
-            if (configuration?.option == null) SettingsNote("保留已有 RFC6901 余额路径；选择预设模板后转换为新格式。")
             ProviderChoiceRow("预设模板", names.getOrElse(presets.indexOf(options.preset)) { "自定义" },
                 "provider-balance-preset", enabled, names, presets.map { "provider-balance-preset:$it" },
                 presets.indexOf(options.preset), summary = when (options.preset) {
@@ -56,24 +57,21 @@ internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean
                     BalanceOption.PRESET_DEEPSEEK -> "填入 /user/balance 和 balance_infos[0].total_balance，可以再改"
                     else -> "自行填写接口路径和 JSON 结果键"
                 }) { change(BalanceOption.applyPreset(presets[it], options)) }
-            if (options.preset != BalanceOption.PRESET_NEW_API) {
+            if (options.preset == BalanceOption.PRESET_NEW_API) {
+                SettingsTextField("访问令牌", options.accessToken, { change(options.copy(accessToken = it)) },
+                    password = true, enabled = enabled, compact = true, tag = "provider-balance-token")
+                SettingsNote("从 NewAPI 的个人安全设置获取；留空使用提供商 API Key。")
+            } else {
                 SettingsTextField("余额 API 路径", options.apiPath, { change(options.copy(apiPath = it)) },
                     enabled = enabled, compact = true, tag = "provider-balance-path")
                 SettingsTextField("结果 JSON 键", options.resultPath, { change(options.copy(resultPath = it)) },
                     enabled = enabled, compact = true, tag = "provider-balance-result")
             }
-            SettingsTextField("访问令牌（可选）", options.accessToken, { change(options.copy(accessToken = it)) },
-                password = true, enabled = enabled, compact = true, tag = "provider-balance-token")
-            SettingsNote("默认使用此提供商的 Base URL 和 API Key；访问令牌留空时使用提供商 API Key。")
-            if (options.accessToken.isNotEmpty()) {
-                TextButton(text = "清除余额访问令牌", enabled = enabled,
-                    modifier = Modifier.testTag("provider-balance-token-clear"), onClick = { change(options.copy(accessToken = "")) })
-            }
             val valid = runCatching { requireNotNull(configuration).validateProviderBinding() }.isSuccess
-            if (!valid) SettingsNote("请检查提供商 HTTPS 地址、API Key、余额路径及结果键。", error = true)
             TextButton(text = if (test.running) "正在测试余额查询" else "测试余额查询",
                 enabled = enabled && testBalance != null && valid && !test.running, onClick = test.start,
-                modifier = Modifier.testTag("provider-balance-test").fillMaxWidth().padding(12.dp))
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+                modifier = Modifier.testTag("provider-balance-test").padding(12.dp).fillMaxWidth().heightIn(min = 48.dp))
             test.status?.let { SettingsNote(it) }
         }
     }

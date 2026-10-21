@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-/** Real MainActivity/settings/back/top-bar wiring with a process-owned, isolated in-memory P05
+/** Real MainActivity/settings/back/composer wiring with a process-owned, isolated in-memory P05
  * host. No user balance namespace, Keystore, real network or paid model API is used by this fixture.
  * System backgrounding deliberately leaves settings composed: cancellation must be ON_STOP based.
  */
@@ -99,16 +99,17 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         reveal("balance-query-saved", "独立余额设置").assertIsEnabled().performClick()
     }
 
-    private fun assertTopBarMoney() {
-        awaitUniqueTag("chat-provider-balance") { "balance=${runtime.state.value.project()}" }
-        ui.waitUntil(5_000) { ui.onNodeWithTag("chat-provider-balance").isDisplayed() }
-        node("chat-provider-balance").assertIsDisplayed().assertHasNoClickAction()
-        ui.onNode(hasText("CNY 12.34") and hasAnyAncestor(hasTestTag("chat-provider-balance")),
+    private fun assertComposerMoney() {
+        awaitUniqueTag("chat-composer-provider-balance") { "balance=${runtime.state.value.project()}" }
+        ui.waitUntil(5_000) { ui.onNodeWithTag("chat-composer-provider-balance").isDisplayed() }
+        node("chat-composer-provider-balance").assertIsDisplayed().assertHasNoClickAction()
+        node("chat-provider-balance").assertDoesNotExist()
+        ui.onNode(hasText("12.34") and hasAnyAncestor(hasTestTag("chat-composer-provider-balance")),
             useUnmergedTree = true).assertIsDisplayed()
     }
 
     fun testSettingsRouteBackAndActivityRecreationRetainTheSameProcessRuntime() {
-        assertTopBarMoney()
+        assertComposerMoney()
         openBalance()
         val revision = runtime.state.value.revision
         activity = recreateActivity(activity)
@@ -119,14 +120,16 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         node("page:设置").assertIsDisplayed()
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-        assertTopBarMoney()
+        assertComposerMoney()
     }
 
-    fun testProviderDraftUsesProviderBoundInjectedQueryWithoutSavingOrReplacingTopBar() {
+    fun testProviderDraftUsesProviderBoundInjectedQueryWithoutSavingOrReplacingComposerMoney() {
         val savedBalance = runtime.store.configurationForEditing()
         val revision = runtime.state.value.revision
         val savedChat = fixture.settings.load()
         openModels()
+        reveal("provider-balance-preset", lazyKey = "provider_balance").performClick()
+        node("provider-balance-preset:new_api").performClick()
         reveal("provider-balance-token", lazyKey = "provider_balance").performTextReplacement("unsaved-access-token")
         node("provider-balance-account").assertDoesNotExist()
         node("provider-balance-endpoint").assertDoesNotExist()
@@ -149,19 +152,19 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testFailureKeepsActualTopBarAmountAndControllerErrorUsesSeparateStatus() {
+    fun testFailureKeepsActualComposerAmountAndControllerErrorUsesSeparateStatus() {
         fail.set(true)
         runBlocking { withTimeout(5000) { runtime.manualRefresh() } }
         assertEquals(BalanceResult.Failed(BalanceFailure.NETWORK), runtime.state.value.result)
-        assertTopBarMoney()
+        assertComposerMoney()
         mainThread {
             ChatController::class.java.getDeclaredField("problem").apply { isAccessible = true }
                 .set(fixture.controller, "余额槽之外的会话错误")
             MainActivity::class.java.getDeclaredMethod("publishChat").apply { isAccessible = true }.invoke(activity)
         }
         node("chat-status").assertTextEquals("余额槽之外的会话错误")
-        assertTopBarMoney()
-        assertFalse(node("chat-provider-balance").fetchSemanticsNode().config.toString()
+        assertComposerMoney()
+        assertFalse(node("chat-composer-provider-balance").fetchSemanticsNode().config.toString()
             .contains("余额槽之外的会话错误"))
     }
 

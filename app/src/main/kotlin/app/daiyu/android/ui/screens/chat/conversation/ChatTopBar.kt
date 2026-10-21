@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.icons.ChatPreviewIcons
-import app.daiyu.android.balance.ui.ProviderBalanceIndicator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,7 +43,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.BalanceState?, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
+internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false, modelLabel: String = "") {
     var expanded by remember { mutableStateOf(false) }
@@ -65,8 +64,6 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
                     modifier = Modifier.weight(1f, fill = false).testTag("chat-subtitle"), color = chrome.muted,
                     style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                ProviderBalanceIndicator(balanceState, Modifier.testTag("chat-provider-balance"), animateChanges = true,
-                    textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp))
             }
         }
         ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = chrome.toolbar, iconSize = 22.dp)

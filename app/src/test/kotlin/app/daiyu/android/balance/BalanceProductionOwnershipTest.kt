@@ -152,7 +152,7 @@ class BalanceProductionOwnershipTest {
         assertTrue(source("ui/FeatureCatalog.kt").contains("FeatureEntry(\"P05\", \"供应商余额\", FeatureRoute.BALANCE_SETTINGS)"))
         assertTrue(source("ui/screens/settings/SettingsCatalog.kt").contains("FeatureRoute.BALANCE_SETTINGS"))
         val chat = source("ui/screens/chat/conversation/ChatScreen.kt")
-        assertTrue(chat.contains("ChatTopBar(state.title, state.balanceState"))
+        assertTrue(chat.contains("ChatTopBar(state.title, actions"))
         assertTrue(chat.contains("state.statusText?.let"))
         assertTrue(Regex(
             """ChatComposer\(\s*state\.composer\s*,\s*actions\s*,\s*assistant\s*=\s*assistant\s*,\s*balanceState\s*=\s*state\.balanceState\s*(?=[,)])"""
@@ -162,8 +162,8 @@ class BalanceProductionOwnershipTest {
         assertTrue(composer.contains("state = balanceState, modifier = Modifier.testTag(\"chat-composer-provider-balance\")"))
         assertFalse(composer.contains("testTag(\"chat-provider-balance\")"))
         val topBar = source("ui/screens/chat/conversation/ChatTopBar.kt")
-        assertTrue(topBar.contains("Modifier.testTag(\"chat-provider-balance\")"))
-        assertTrue(topBar.contains("ProviderBalanceIndicator("))
+        assertFalse(topBar.contains("chat-provider-balance"))
+        assertFalse(topBar.contains("ProviderBalanceIndicator("))
         assertTrue(composer.contains("animateChanges = true"))
         val screen = source("balance/ui/BalanceSettingsScreen.kt")
         assertTrue(screen.contains("BalanceLifecycleBinding(lifecycle, scope, runtime, poll = false)"))

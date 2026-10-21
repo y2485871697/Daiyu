@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class ConversationPaneStartupActivityTest : WiredActivityTestCase() {
-    private lateinit var conversation: ConversationId
+    private var conversation: ConversationId by kotlin.properties.Delegates.notNull()
     override fun createFixture() = super.createFixture().also {
         val row = it.database.create()
         conversation = row.id

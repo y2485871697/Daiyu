@@ -125,13 +125,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         }
     }
 
-    override fun runBare() {
-        try { super.runBare() }
-        catch (failure: Throwable) {
-            try { cleanupFixture() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
-            throw failure
-        }
-    }
+    override fun cleanupAfterLegacy() { cleanupFixture() }
 
     override fun tearDown() {
         try { cleanupFixture() } finally { super.tearDown() }
@@ -177,7 +171,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         mainThread { MainActivity::class.java.getDeclaredMethod("openBrowserDownloadOutputs").apply {
             isAccessible = true
         }.invoke(activity) }
-        ui.waitForIdle()
+        awaitUniqueTag("browser-download-save:${reference.id}")
     }
     private fun pendingCode(): Int? = MainActivity::class.java.getDeclaredField("pendingBackupRequest").apply {
         isAccessible = true

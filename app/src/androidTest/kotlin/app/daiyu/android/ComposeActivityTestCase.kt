@@ -2,6 +2,11 @@ package app.daiyu.android
 
 import android.content.Intent
 import android.os.Bundle
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlin.math.ceil
+import kotlin.math.floor
 import android.test.InstrumentationTestCase
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -32,8 +37,19 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             instrumentation.runOnMainSync {
                 (instrumentation.targetContext.applicationContext as ChatApplication).engineeringUiForTests = engineeringUi
             }
-            ui.apply(object : Statement() { override fun evaluate() { runLegacy() } },
-                Description.createTestDescription(javaClass, name)).evaluate()
+            ui.apply(object : Statement() {
+                override fun evaluate() {
+                    var primary: Throwable? = null
+                    try { runLegacy() }
+                    catch (failure: Throwable) { primary = failure; throw failure }
+                    finally {
+                        try { cleanupAfterLegacy() }
+                        catch (cleanup: Throwable) {
+                            if (primary == null) throw cleanup else primary.addSuppressed(cleanup)
+                        }
+                    }
+                }
+            }, Description.createTestDescription(javaClass, name)).evaluate()
         } finally {
             voicePreferenceSnapshot?.let { (hadValue, value) ->
                 val editor = instrumentation.targetContext.getSharedPreferences("chat-voice-entry", 0).edit()
@@ -45,12 +61,41 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             }
         }
     }
+    protected open fun cleanupAfterLegacy() = Unit
+
     protected fun mainThread(action: () -> Unit) {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
         var failure: Throwable? = null
         instrumentation.runOnMainSync { try { action() } catch (t: Throwable) { failure = t } }
         failure?.let { throw it }
+        awaitVisualIdle()
+    }
+    protected fun awaitVisualIdle() {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
         instrumentation.waitForIdleSync()
     }
+    protected fun captureScreenNode(target: SemanticsNodeInteraction): ImageBitmap {
+        awaitVisualIdle()
+        val node = target.assertIsDisplayed().fetchSemanticsNode()
+        val bounds = ui.runOnIdle { node.boundsInRoot.translate(node.positionOnScreen - node.positionInRoot) }
+        check(listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() } &&
+            bounds.width > 0f && bounds.height > 0f)
+        val left = floor(bounds.left.toDouble()).toInt()
+        val top = floor(bounds.top.toDouble()).toInt()
+        val right = ceil(bounds.right.toDouble()).toInt()
+        val bottom = ceil(bounds.bottom.toDouble()).toInt()
+        val screen = checkNotNull(instrumentation.uiAutomation.takeScreenshot()) { "截图未返回图像" }
+        var cropped: Bitmap? = null
+        try {
+            check(left >= 0 && top >= 0 && right <= screen.width && bottom <= screen.height && right > left && bottom > top) {
+                "Node crop $bounds outside ${screen.width}x${screen.height}"
+            }
+            return Bitmap.createBitmap(screen, left, top, right - left, bottom - top).also { cropped = it }.asImageBitmap()
+        } finally { if (cropped !== screen) screen.recycle() }
+    }
+
     protected fun node(tag: String): SemanticsNodeInteraction {
         val interaction = ui.onNodeWithTag(tag)
         val found = ui.onAllNodesWithTag(tag)
@@ -793,6 +838,17 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             }
         } finally { instrumentation.removeMonitor(monitor) }
     }
+    protected fun finishExistingMainActivities() {
+        val existing = linkedSetOf<MainActivity>()
+        mainThread {
+            val monitor = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+            androidx.test.runner.lifecycle.Stage.values().filter { it != androidx.test.runner.lifecycle.Stage.DESTROYED }
+                .forEach { stage -> existing.addAll(monitor.getActivitiesInStage(stage).filterIsInstance<MainActivity>()) }
+            existing.forEach { if (!it.isDestroyed) it.finish() }
+        }
+        awaitControl("previous MainActivities destroyed before fixture replacement") { existing.all { it.isDestroyed } }
+    }
+
     protected fun startMain(intent: Intent = Intent(instrumentation.targetContext, MainActivity::class.java)): MainActivity {
         val app = instrumentation.targetContext.applicationContext as ChatApplication
         val created = mutableListOf<MainActivity>()
@@ -813,7 +869,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
         mainThread { app.registerActivityLifecycleCallbacks(callbacks) }
         try {
-            instrumentation.runOnMainSync { app.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            instrumentation.runOnMainSync { app.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) }
             awaitControl("MainActivity created by explicit launch") { created.isNotEmpty() }
             val activity = created.single()
             currentHost = activity
@@ -846,6 +902,7 @@ abstract class WiredActivityTestCase : ComposeActivityTestCase() {
     internal open fun createFixture() = RunControlFixture(instrumentation.targetContext)
     override fun setUp() {
         super.setUp()
+        finishExistingMainActivities()
         fixture = createFixture()
         awaitControl("controller ready") { fixture.controller.ready }
         mainThread {
@@ -854,13 +911,7 @@ abstract class WiredActivityTestCase : ComposeActivityTestCase() {
         }
         activity = startMain()
     }
-    override fun runBare() {
-        try { super.runBare() }
-        catch (failure: Throwable) {
-            try { cleanupFixture() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
-            throw failure
-        }
-    }
+    override fun cleanupAfterLegacy() { cleanupFixture() }
     override fun tearDown() {
         try { cleanupFixture() } finally { super.tearDown() }
     }

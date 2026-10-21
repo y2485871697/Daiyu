@@ -41,7 +41,7 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
                 }
             }
         }
-        ui.waitForIdle()
+        awaitUniqueTag("context-management")
     }
 
     fun testOriginalControlsUseNewThemeAndOnlyDispatchExplicitActions() {
@@ -66,7 +66,7 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
             node("compression-dialog-help-text").assertTextContains("Anthropic / Codex", substring = true)
             node("context-close").assertIsDisplayed().assertHeightIsAtLeast(44.dp)
             node("context-compress").assertIsDisplayed().assertHeightIsAtLeast(44.dp)
-            val pixels = node("context-compress").captureToImage().toPixelMap()
+            val pixels = captureScreenNode(node("context-compress")).toPixelMap()
             val actual = pixels[(pixels.width * .1f).toInt(), pixels.height / 2]
             val expected = AssistantPreviewPalette(dark).primary
             assertEquals(expected.red, actual.red, .025f)

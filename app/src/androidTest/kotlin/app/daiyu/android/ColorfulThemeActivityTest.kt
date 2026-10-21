@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,6 +43,7 @@ import java.io.File
 class ColorfulThemeActivityTest : WiredActivityTestCase() {
     private fun show(dark: Boolean, pureBlack: Boolean = false,
         appearance: AppearanceSettings = AppearanceSettings(), content: @Composable () -> Unit) {
+        val committed = java.util.concurrent.atomic.AtomicBoolean(false)
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
@@ -50,12 +52,13 @@ class ColorfulThemeActivityTest : WiredActivityTestCase() {
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
                         pureBlackEnabled = pureBlack,
                     ), applyInterfaceScale = false) {
-                        Box(Modifier.requiredWidth(360.dp).fillMaxHeight()) { content() }
+                        Box(Modifier.requiredWidth(360.dp).fillMaxHeight()) { content(); SideEffect { committed.set(true) } }
                     }
                 }
             }
         }
-        ui.waitForIdle()
+        awaitVisualIdle()
+        ui.waitUntil(5_000) { committed.get() }
     }
 
     private fun contrast(foreground: Color, background: Color): Double =
@@ -148,7 +151,7 @@ class ColorfulThemeActivityTest : WiredActivityTestCase() {
     }
 
     private fun capture(name: String, tag: String? = null) {
-        val bitmap = (if (tag == null) ui.onRoot() else ui.onNodeWithTag(tag)).captureToImage().asAndroidBitmap()
+        val bitmap = captureScreenNode(if (tag == null) ui.onRoot() else ui.onNodeWithTag(tag)).asAndroidBitmap()
         val directory = File(checkNotNull(activity.getExternalFilesDir(null)), "settings-ui")
         check(directory.isDirectory || directory.mkdirs())
         File(directory, "$name.png").outputStream().use {

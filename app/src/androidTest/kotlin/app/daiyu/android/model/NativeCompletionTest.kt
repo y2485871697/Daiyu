@@ -492,7 +492,9 @@ class NativeCompletionTest : InstrumentationTestCase() {
             for (endpoint in listOf("http://provider.invalid", "https://u:p@provider.invalid", "https://provider.invalid?q=secret", "https://provider.invalid/#bad", "https://provider.invalid:0", "https://provider.invalid/v1/responses"))
                 rejected { NativeCompletionModel(value.copy(endpoint = endpoint), { fail("must not connect"); Connection("") }).open(input()) }
             rejected { value.copy(responsesPath = "/other").validate() }
-            rejected { SummaryProviderFactory.validate(value.requestSnapshot()) }
+            if (protocol == ProviderProtocol.GEMINI)
+                rejected { SummaryProviderFactory.validate(value.requestSnapshot()) }
+            else SummaryProviderFactory.validate(value.requestSnapshot())
         }
         listOf(ModelFailure.ENDPOINT, ModelFailure.REQUEST, ModelFailure.PROTOCOL).forEach { assertFalse(it.userMessage.contains("Responses")) }
     }

@@ -42,7 +42,7 @@ class AssistantProfileCasDatabaseTest : InstrumentationTestCase() {
         stale { first.compareAndSet(saved, saved.copy(name = "must not revive")) }
         assertNull(first.read(original.id))
         assertEquals(listOf("other"), first.list().filter { first.read(it.id) != null }.map { it.id })
-        assertEquals(8, db.readableDatabase.rawQuery("PRAGMA table_info(assistants)", null).use { it.count })
+        assertEquals(9, db.readableDatabase.rawQuery("PRAGMA table_info(assistants)", null).use { it.count })
         val restored = SqliteAssistantStore(database())
         assertNull(restored.read(original.id))
         assertEquals(listOf("other"), restored.list().map { it.id })

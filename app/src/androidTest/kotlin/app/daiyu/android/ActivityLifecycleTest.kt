@@ -81,13 +81,7 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         mainThread { original = application.controller; application.controller = controller }
     }
     private var fixtureCleaned = false
-    override fun runBare() {
-        try { super.runBare() }
-        catch (failure: Throwable) {
-            try { cleanupFixture() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
-            throw failure
-        }
-    }
+    override fun cleanupAfterLegacy() { cleanupFixture() }
     override fun tearDown() {
         try { cleanupFixture() } finally { super.tearDown() }
     }

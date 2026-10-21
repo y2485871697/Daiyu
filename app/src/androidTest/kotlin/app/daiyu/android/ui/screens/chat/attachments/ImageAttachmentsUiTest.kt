@@ -61,7 +61,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
                 }
             }
         }
-        ui.waitForIdle()
+        awaitVisualIdle()
     }
 
     private fun showComposer(holder: ImageAttachmentsState) {
@@ -81,7 +81,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
                 } }
             }
         } }
-        ui.waitForIdle()
+        awaitVisualIdle()
     }
 
     fun testCompactImagesRaiseOnlyComposerTopAndLastRemovalRestoresHeight() {
@@ -105,11 +105,15 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         node("image_attachments_select").assertDoesNotExist()
         node("chat-send").assertIsEnabled()
         node("image_attachments_thumbnail:${key.id}").performClick()
+        awaitVisualIdle()
         node("image_attachments_preview").assertIsDisplayed()
         node("image_attachments_close_preview").performClick()
+        awaitVisualIdle()
         node("image_attachments_remove:${key.id}").performClick()
+        awaitVisualIdle()
         node("image_attachments").assertDoesNotExist()
         ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
             val restored = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
             kotlin.math.abs(restored.top - empty.top) <= 1f &&
                 kotlin.math.abs(restored.bottom - empty.bottom) <= 1f
@@ -132,6 +136,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         mainThread { holder.importFailed(key, ImageAttachmentFailure.SOURCE_UNAVAILABLE) }
         node("image_attachments_failed:${key.id}").assertIsDisplayed()
         node("image_attachments_remove:${key.id}").performClick()
+        awaitVisualIdle()
         node("image_attachments").assertDoesNotExist()
     }
 
@@ -139,6 +144,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         val holder = ImageAttachmentsState(draft)
         show(holder)
         node("image_attachments_select").assertIsDisplayed().assertTextContains("选择图片").performClick()
+        awaitVisualIdle()
         node("image_attachments_selecting").assertIsDisplayed()
         node("image_attachments_select").assertIsNotEnabled()
         lateinit var keys: List<ImageAttachmentItemKey>
@@ -151,6 +157,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         }
         node("image_attachments_failed:${keys[1].id}").assertTextContains("无法读取图片，请重新选择")
         node("image_attachments_remove:${keys[1].id}").assertTextContains("移除第 2 项").performClick()
+        awaitVisualIdle()
         node("image_attachments_item:${keys[1].id}").assertDoesNotExist()
         node("image_attachments_item:${keys[0].id}").assertIsDisplayed()
         assertEquals(listOf("success"), holder.state.value.ready.map { it.attachment.id })
@@ -162,13 +169,17 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         val second = holder.state.value.ready.last().key
         show(holder)
         node("image_attachments_thumbnail:${first.id}").performClick()
+        awaitVisualIdle()
         node("image_attachments_preview").assertIsDisplayed()
         ui.onNode(androidx.compose.ui.test.hasText("重置缩放")).assertIsDisplayed().performClick()
+        awaitVisualIdle()
         node("image_attachments_preview").assertIsDisplayed()
         node("image_attachments_close_preview").assertTextContains("关闭").performClick()
+        awaitVisualIdle()
         node("image_attachments_preview").assertDoesNotExist()
         assertEquals(2, holder.state.value.ready.size)
         node("image_attachments_remove:${first.id}").performClick()
+        awaitVisualIdle()
         node("image_attachments_item:${first.id}").assertDoesNotExist()
         node("image_attachments_item:${second.id}").assertIsDisplayed()
         assertEquals(listOf("second"), holder.state.value.ready.map { it.attachment.id })
@@ -183,6 +194,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
             ImageBitmap(8, 8)
         }
         node("image_attachments_thumbnail:${key.id}").performClick()
+        awaitVisualIdle()
         mainThread { assertEquals("thumbnail click must open the full preview", key, holder.state.value.preview) }
         node("image_attachments_preview").assertIsDisplayed()
         val inDialog = androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag("image_attachments_preview"))
@@ -191,8 +203,10 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         node("image_attachments_preview").assertIsDisplayed()
         allowDecode.set(true)
         ui.onNode(androidx.compose.ui.test.hasText("重试预览") and inDialog).performClick()
+        awaitVisualIdle()
         ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodes(failed).fetchSemanticsNodes().isEmpty() }
         node("image_attachments_close_preview").performClick()
+        awaitVisualIdle()
         assertEquals(listOf("kept"), holder.state.value.ready.map { it.attachment.id })
     }
 
@@ -239,6 +253,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         val oldSlot = holder.beginImport(requireNotNull(holder.requestSelection()), 1).single()
         show(holder)
         node("image_attachments_thumbnail:${key.id}").performClick()
+        awaitVisualIdle()
         node("image_attachments_preview").assertIsDisplayed()
         mainThread {
             holder.activate(ImageAttachmentDraft(ImageAttachmentOwner("new-conversation", "new-draft"), 1))

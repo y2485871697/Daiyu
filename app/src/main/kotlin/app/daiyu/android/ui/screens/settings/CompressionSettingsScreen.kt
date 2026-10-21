@@ -23,6 +23,7 @@ internal fun CompressionSettingsScreen(
     val main = remember { Handler(Looper.getMainLooper()) }
     val binding = remember(editor) { SummaryModelBinding(UUID.randomUUID().toString(), UUID.randomUUID().toString()) }
     var draft by remember(editor) { mutableStateOf(CompressionSettingsDraftUi(binding)) }
+    var retainedSummaryBinding by remember(editor) { mutableStateOf<SummaryModelBinding?>(null) }
     var busy by remember(editor) { mutableStateOf(true) }
     var notice by remember(editor) { mutableStateOf<String?>(null) }
     var error by remember(editor) { mutableStateOf(false) }
@@ -43,14 +44,16 @@ internal fun CompressionSettingsScreen(
                         if (!editor.isCurrent(completed)) return@onSuccess
                         when (val outcome = completed.outcome) {
                             is CompressionSettingsEditor.Outcome.Loaded -> {
-                                draft = outcome.snapshot.toDraft(binding).let {
+                                outcome.snapshot.settings.summaryModel?.let { retainedSummaryBinding = it }
+                                draft = outcome.snapshot.toDraft(retainedSummaryBinding ?: binding).let {
                                     it.copy(provider = it.provider.copy(protocol = source.protocol("compression") ?: it.provider.protocol))
                                 }
                                 error = outcome.snapshot.profileUnavailableReason != null
                                 notice = if (error) "已选压缩模型暂不可用。" else null
                             }
                             is CompressionSettingsEditor.Outcome.Saved -> {
-                                draft = outcome.snapshot.toDraft(binding).let {
+                                outcome.snapshot.settings.summaryModel?.let { retainedSummaryBinding = it }
+                                draft = outcome.snapshot.toDraft(retainedSummaryBinding ?: binding).let {
                                     it.copy(provider = it.provider.copy(protocol = source.protocol("compression") ?: it.provider.protocol))
                                 }
                                 modelLabel = source.label("compression")
@@ -110,7 +113,7 @@ internal fun CompressionSettingsScreen(
                 }
             }
         }, onBack = leave, enabled = !busy, notice = notice, error = error, modifier = modifier,
-        modelLabel = modelLabel, onChooseModel = {
+        modelLabel = modelLabel, hasSummarySelection = retainedSummaryBinding != null, onChooseModel = {
             if (!busy && page.active && currentOwner()) choosingModel = true
         })
     if (choosingModel) SettingsModelPicker("压缩模型", source, selectedKey,
@@ -133,11 +136,11 @@ internal fun CompressionSettingsScreen(
 
 private class CompressionPage { var active = true }
 
-private fun CompressionSettingsEditor.Snapshot.toDraft(fallbackBinding: SummaryModelBinding): CompressionSettingsDraftUi {
+internal fun CompressionSettingsEditor.Snapshot.toDraft(fallbackBinding: SummaryModelBinding): CompressionSettingsDraftUi {
     val value = CompressionSettingsDraftUi(settings.summaryModel ?: fallbackBinding,
         automatic = settings.automatic, window = settings.contextWindowTokens?.toString().orEmpty(),
         reserve = settings.reserveTokens.toString(), trigger = settings.triggerPercent.toString(),
-        keepTurns = settings.keepTurns.toString(), configureSummary = settings.summaryModel != null)
+        configureSummary = settings.summaryModel != null)
     val saved = profile ?: return value
     return value.copy(provider = app.daiyu.android.storage.ModelSettings("", saved.provider.model, "", false,
             responsesPath = saved.provider.responsesPath, protocol = saved.provider.protocol), savedProtocol = saved.provider.protocol,

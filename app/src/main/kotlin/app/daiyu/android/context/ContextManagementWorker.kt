@@ -26,7 +26,7 @@ internal data class ContextManagementSnapshot(
     val savedConfiguration: CompressionSettings? = configuration,
 ) {
     val canCompress: Boolean get() = originals.isNotEmpty() && configuration?.let {
-        it.contextWindowTokens != null && it.summaryModel != null && it.keepTurns != null &&
+        it.contextWindowTokens != null && it.summaryModel != null &&
             summaryTarget?.binding == it.summaryModel
     } == true
 }
@@ -108,7 +108,7 @@ internal class ContextManagementWorker(
         val target = profiles.describeSelection(selection)
         val selected = expected.copy(configuration = saved.copy(summaryModel = target.binding),
             summaryTarget = target, savedConfiguration = saved)
-        require(selected.canCompress) { "需要完整历史、明确窗口、保留轮数和可用摘要目标" }
+        require(selected.canCompress) { "需要完整历史、明确窗口和可用摘要模型" }
         checkLease(lease)
         require(settings() == saved) { "压缩设置已改变；请刷新后重新选择" }
         service.readQuery { validateSnapshot(lease, expected) }
@@ -132,7 +132,7 @@ internal class ContextManagementWorker(
         expected: ContextManagementSnapshot): ContextCompressionReceipt {
         checkLease(lease)
         service.readQuery { validateSnapshot(lease, expected) }
-        require(expected.canCompress) { "需要明确窗口、保留轮数和独立摘要绑定" }
+        require(expected.canCompress) { "需要明确窗口和可用摘要模型" }
         val saved = requireNotNull(expected.savedConfiguration)
         val selected = requireNotNull(expected.configuration)
         require(selected.copy(summaryModel = saved.summaryModel) == saved) { "本次压缩配置不匹配；请刷新后重新确认" }
@@ -144,23 +144,14 @@ internal class ContextManagementWorker(
         var success = false
         var failure: Throwable? = null
         try {
-            val coordinator = ContextPreparationCoordinator(service, { selected.copy(automatic = true) }, policies,
-                SummaryModelResolver { binding ->
-                    require(binding == target.binding) { "摘要目标不匹配；请刷新并重新确认" }
-                    // Atomic revision comparison + credential capture, not a check followed by resolving
-                    // the current binding again. All later I/O uses this exact retained candidate.
-                    profiles.freeze(target, operation.port)
-                })
-            val frozen = coordinator.freeze(expected.conversationId, emptyList(), lease.cancellation)
-            val summarizer = requireNotNull(frozen.summarizer) { "独立摘要模型不可用；未回退聊天模型" }
+            val policy = policies.resolve(selected.copy(automatic = true))
+            val bound = requireNotNull(profiles.freeze(target, operation.port)) { "所选摘要模型不可用，请重新选择" }
+            require(bound.binding == target.binding) { "摘要目标不匹配；请刷新后重新确认" }
+            val summarizer = ModelContextSummarizer(bound, lease.cancellation)
             checkLease(lease)
             require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
-            check(frozen.consumed.compareAndSet(false, true)) { "准备只能使用一次" }
-            // Manual intent bypasses only the automatic pressure threshold. Service owns the retained
-            // cut, full authoritative-history CAS, budget, archive publication and cancellation checks.
-            // Never call prepare() afterwards: that would risk a second summary request.
-            val archive = service.compress(expected.conversationId, frozen.policy, summarizer,
-                pendingMessages = frozen.pendingMessages, cancelled = { lease.cancellation.isCancelled })
+            val archive = service.compress(expected.conversationId, policy, summarizer,
+                pendingMessages = emptyList(), cancelled = { lease.cancellation.isCancelled })
             // No post-publication history check or second request. Usage close remains in finally;
             // a close failure is an accounting error, never permission to repeat paid work.
             success = true
@@ -209,7 +200,19 @@ internal class ContextManagementWorker(
             val app = context.applicationContext ?: context
             return ContextManagementWorker(service, settings = {
                 requireWorker()
-                ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
+                ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings().let { saved ->
+                    if (saved.contextWindowTokens != null) saved else {
+                        val repository = ProviderRepository(app)
+                        val editor = repository.activeEditor()
+                        val window = repository.withEditor(editor) { store ->
+                            store.modelCatalog.readConfiguration {
+                                val model = store.summaryRequestMetadata().model
+                                store.modelCatalog.readRegisteredModel(model)?.settings?.contextWindowOverride?.toLong()
+                            }
+                        }
+                        saved.copy(contextWindowTokens = window)
+                    }
+                }
             }, policies = ProductionCompressionPolicyResolver,
                 profiles = object : ContextManagementSummaryProfiles {
                     override fun describeSelection(selection: ContextManagementSelection): SummaryProfileDescriptor {

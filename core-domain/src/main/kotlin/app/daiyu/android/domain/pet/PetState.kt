@@ -15,7 +15,7 @@ fun petSatietyBand(value: Int): PetSatietyBand = when {
 fun petSatietyPercent(value: Int): Int = value.coerceIn(0, PET_MAX_SATIETY) * 100 / PET_MAX_SATIETY
 
 enum class PetFood(val displayName: String, val satiety: Int, val resourceKey: String) {
-    GRAIN("一粒米", 1, "rice_grain"), SPOON("一勺米饭", 1_000, "rice_spoon"),
+    GRAIN("一粒米饭", 1, "rice_grain"), SPOON("一勺米饭", 1_000, "rice_spoon"),
     BOWL("一碗米饭", 3_000, "rice_bowl"), POT("一锅米饭", 10_000, "rice_pot")
 }
 data class PetModelSelection(val assistantId: String = "", val providerId: String = "", val modelId: String = "") {

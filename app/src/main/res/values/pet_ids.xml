@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <item name="pet_chat_compose_content" type="id" />
+    <item name="pet_sprite" type="id" />
 </resources>

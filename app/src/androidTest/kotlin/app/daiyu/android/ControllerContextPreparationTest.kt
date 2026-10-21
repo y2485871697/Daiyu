@@ -392,10 +392,10 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
     fun testProductionFactoryRejectsMissingSummaryProfileWithoutChatFallback() {
         val factories=AtomicInteger()
         val f=fresh(production=true) {factories.incrementAndGet();ModelPort {session()}}
-        // Real persisted v2 settings -> production policy -> independent profile store.
+        // Real persisted v3 settings -> production policy -> independent profile store.
         // No injected coordinator/resolver in this test; missing credentials prevent transport I/O.
         ProductionCompressionSettingsStore(f.app).save(
-            ProductionCompressionSettings(true,10000,1000,10,2,binding))
+            ProductionCompressionSettings(true,10000,1000,summaryModel = binding))
         val owner=seed(f);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
         assertEquals("独立摘要配置不可用（MISSING）；请重新保存，草稿保留，未回退聊天模型",f.controller.problem)

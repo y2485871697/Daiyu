@@ -11,6 +11,37 @@ class CatalogSummaryExecutionPolicyTest {
     private fun settings() = ModelSettings("https://summary.invalid", "summary-only", "synthetic-key", true,
         deviceStatusEnabled = true, contextWindowOverride = 32768)
 
+    @Test fun defaultChatSummaryKeepsFrozenIdentityAndProjectsChatOptions() {
+        val settings = ModelSettings("https://chat.invalid/v1/responses", "chat-model", "fixture-key",
+            batteryEnabled = true, deviceStatusEnabled = true, contextWindowOverride = 64000,
+            requestOptions = ProviderRequestOptions(
+                customBody = """{"reasoning":{"effort":"low"},"max_output_tokens":9000,"temperature":0.5}""",
+                openAiWebSearchEnabled = true))
+        val snapshot = settings.requestSnapshot()
+        val result = CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, 32000)
+        assertEquals(snapshot.endpoint, result.provider.endpoint)
+        assertEquals(snapshot.protocol, result.provider.protocol)
+        assertEquals(snapshot.model, result.provider.model)
+        assertEquals(snapshot.apiKey, result.provider.apiKey)
+        assertEquals(32000L, result.contextWindowTokens)
+        assertFalse(result.provider.batteryEnabled); assertFalse(result.provider.deviceStatusEnabled)
+        assertFalse(result.provider.requestOptions.openAiWebSearchEnabled)
+        val body = org.json.JSONObject(result.provider.requestOptions.customBody)
+        assertEquals(setOf("temperature"), body.keys().asSequence().toSet())
+        assertTrue(snapshot.requestOptions.customBody.contains("reasoning"))
+    }
+
+    @Test fun defaultSummaryPreservesTheFrozenEffectiveWireModel() {
+        val source = settings().copy(model = "configured-A", contextWindowOverride = null,
+            requestOptions = ProviderRequestOptions(customBody = """{"model":"wire-B"}"""))
+        val snapshot = source.requestSnapshot()
+        val result = CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, 32000)
+        assertEquals("wire-B", result.provider.model)
+        assertEquals("wire-B", result.apiModel)
+        assertEquals("configured-A", snapshot.model)
+        assertEquals("wire-B", org.json.JSONObject(snapshot.requestOptions.customBody).getString("model"))
+    }
+
     @Test fun unknownCapacityNeverBorrowsMainWindow() {
         try {
             CatalogSummaryExecutionPolicy.configuration(binding, settings().copy(contextWindowOverride = null))

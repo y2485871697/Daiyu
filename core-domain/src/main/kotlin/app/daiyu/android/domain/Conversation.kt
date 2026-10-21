@@ -65,16 +65,22 @@ object MessageHistory {
      * conversation/run/id; when such a row is present it is validated and omitted from the
      * output because the segment supplies its position in the owner's authoritative order.
      */
-    fun expand(history: List<Message>): List<Message> {
+    data class ExpandedEntry(val message: Message, val sourcePhysicalIndex: Int)
+
+    fun expand(history: List<Message>): List<Message> =
+        if (history.none { it.historySegments.isNotEmpty() }) history else expandWithSources(history).map { it.message }
+
+    /** The source is the durable owner, never a duplicate standalone supplement. */
+    fun expandWithSources(history: List<Message>): List<ExpandedEntry> {
         history.forEach(MessageImages::validate)
-        if (history.none { it.historySegments.isNotEmpty() }) return history
+        if (history.none { it.historySegments.isNotEmpty() }) return history.mapIndexed { index, message -> ExpandedEntry(message, index) }
         val supplements = validatedSupplements(history)
         val originalRows = history.associateBy { it.key() }
 
-        return history.flatMap { row ->
+        return history.flatMapIndexed { source, row ->
             if (row.historySegments.isNotEmpty()) {
                 row.historySegments.map { segment ->
-                    row.copy(
+                    ExpandedEntry(row.copy(
                         id = segment.messageId,
                         role = segment.role,
                         blocks = segment.blocks,
@@ -86,12 +92,12 @@ object MessageHistory {
                             Key(row.conversationId, row.runId, segment.messageId)]?.createdAt,
                         status = if (segment.role == Message.USER_ROLE) RunStatus.COMPLETED else row.status,
                         error = if (segment.role == Message.USER_ROLE) null else row.error
-                    )
+                    ), source)
                 }
             } else if (row.key() in supplements.keys) {
                 emptyList()
             } else {
-                listOf(row)
+                listOf(ExpandedEntry(row, source))
             }
         }
     }

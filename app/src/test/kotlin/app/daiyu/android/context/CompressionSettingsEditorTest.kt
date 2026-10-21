@@ -101,7 +101,7 @@ class CompressionSettingsEditorTest {
         val settings = ProductionCompressionSettings(summaryModel = selected)
         assertTrue(owner.prepareSelection(settings) {}!!.runWorker().outcome is CompressionSettingsEditor.Outcome.Saved)
         assertTrue(owner.prepareLoad()!!.runWorker().outcome is CompressionSettingsEditor.Outcome.Loaded)
-        assertTrue(owner.prepareSave(CompressionSettingsEditor.SaveRequest(settings.copy(keepTurns = 5)))!!
+        assertTrue(owner.prepareSave(CompressionSettingsEditor.SaveRequest(settings.copy(reserveTokens = 5000)))!!
             .runWorker().outcome is CompressionSettingsEditor.Outcome.Saved)
         assertEquals(3, validations)
         assertEquals(0, modelReads + modelWrites + profileOpens)
@@ -132,7 +132,7 @@ class CompressionSettingsEditorTest {
             UUID.randomUUID().toString(), "summary-api", ProviderProtocol.RESPONSES)
         for (selected in listOf(CatalogSummaryBindings.encode(target),
             SummaryModelBinding("catalog-summary:v1:bad-json", target.localIdentity))) {
-            val settings = ProductionCompressionSettings(automatic = false, keepTurns = 5, summaryModel = selected)
+            val settings = ProductionCompressionSettings(automatic = false, reserveTokens = 5000, summaryModel = selected)
             ProductionCompressionSettingsStore(compressionPrefs).save(settings)
             val owner = CompressionSettingsEditor({ ProductionCompressionSettingsStore(compressionPrefs) },
                 { error("no legacy fallback") }, { error("stale directory") })
@@ -154,7 +154,7 @@ class CompressionSettingsEditorTest {
                 throw SummaryProfileUnavailableException(SummaryProfileUnavailableReason.INVALID_CONFIGURATION)
             })
         assertTrue(owner.prepareSelection(settings) {}!!.runWorker().outcome is CompressionSettingsEditor.Outcome.Saved)
-        val changed = settings.copy(automatic = !settings.automatic, keepTurns = 5)
+        val changed = settings.copy(automatic = !settings.automatic, reserveTokens = 5000)
         val saved = owner.prepareSave(CompressionSettingsEditor.SaveRequest(changed))!!.runWorker().outcome as
             CompressionSettingsEditor.Outcome.Saved
         assertEquals(changed, saved.snapshot.settings)
@@ -348,7 +348,7 @@ class CompressionSettingsEditorTest {
         }
         val editor = editor(wrapped)
         val result = requireNotNull(editor.prepareSave(CompressionSettingsEditor.SaveRequest(
-            ProductionCompressionSettings(keepTurns = 2)))).runWorker()
+            ProductionCompressionSettings(reserveTokens = 2048)))).runWorker()
         val failure = result.outcome as CompressionSettingsEditor.Outcome.Failed
         assertEquals(CompressionSettingsEditor.Stage.SAVE_SETTINGS, failure.stage)
         assertTrue(failure.writesMayHaveOccurred)
@@ -360,10 +360,10 @@ class CompressionSettingsEditorTest {
         // Mutate the compression record between its save and the editor's read-back factory.
         beforeCompressionOpen = {
             if (compressionOpens == 2) ProductionCompressionSettingsStore(compressionPrefs)
-                .save(ProductionCompressionSettings(keepTurns = 7))
+                .save(ProductionCompressionSettings(reserveTokens = 7000))
         }
         val result = requireNotNull(editor.prepareSave(CompressionSettingsEditor.SaveRequest(
-            ProductionCompressionSettings(keepTurns = 2)))).runWorker()
+            ProductionCompressionSettings(reserveTokens = 2048)))).runWorker()
         val failure = result.outcome as CompressionSettingsEditor.Outcome.Failed
         assertEquals(CompressionSettingsEditor.Stage.READ_BACK, failure.stage)
         assertTrue(failure.writesMayHaveOccurred)

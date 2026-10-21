@@ -15,39 +15,43 @@ class ProductionCompressionSettingsTest : InstrumentationTestCase() {
     }
     override fun tearDown() { prefs.edit().clear().commit(); super.tearDown() }
 
-    fun testFreshDefaultsAndRoundTripUseExplicitTurns() {
+    fun testFreshDefaultsAndRoundTripUseTokenTail() {
         val store = ProductionCompressionSettingsStore(prefs)
         assertEquals(ProductionCompressionSettings(), store.snapshot())
-        val expected = ProductionCompressionSettings(true, 32000, 4000, 75, 3, SummaryModelBinding("p", "summary"))
+        val expected = ProductionCompressionSettings(true, 32000, 4000, summaryModel = SummaryModelBinding("p", "summary"))
         store.save(expected)
         val frozen = store.snapshot()
         store.save(ProductionCompressionSettings())
         assertEquals(expected, frozen)
         val policy = ProductionCompressionPolicyResolver.resolve(frozen.coordinatorSettings())
-        assertEquals(3, policy.keepTurns)
-        assertFalse(policy.shouldCompress(20999))
-        assertTrue(policy.shouldCompress(21000))
+        assertTrue(policy.tokenTail)
+        assertFalse(policy.shouldCompress(25599))
+        assertTrue(policy.shouldCompress(25600))
         assertEquals(28000L, policy.sendBudgetTokens)
         val json = JSONObject(prefs.getString(ProductionCompressionSettingsStore.KEY, null)!!)
-        assertEquals(2, json.getInt("version"))
-        assertTrue(json.has("keepTurns")); assertFalse(json.has("keepRecent"))
+        assertEquals(3, json.getInt("version"))
+        assertFalse(json.has("keepTurns")); assertFalse(json.has("keepRecent"))
     }
 
-    fun testV1RequiresExplicitSaveEvenWhenDisabledAndNeverMapsMessages() {
-        CompressionSettingsStore(prefs).save(CompressionSettings(keepRecentMessages = 0))
+    fun testLegacyRecordsMigrateAtomicallyToTokenTailAndMixedVersionsRequireSave() {
         val store = ProductionCompressionSettingsStore(prefs)
-        try { store.snapshot(); fail("v1 must not silently become turns") }
-        catch (failure: IllegalStateException) { assertTrue(failure.message!!.contains("轮数")) }
-        try { ProductionCompressionPolicyResolver.resolve(CompressionSettings()); fail() }
-        catch (_: IllegalArgumentException) { }
-        store.save(ProductionCompressionSettings(keepTurns = 1))
-        assertEquals(1, store.snapshot().keepTurns)
+        CompressionSettingsStore(prefs).save(CompressionSettings(keepRecentMessages = 0))
+        assertEquals(ProductionCompressionSettings(), store.snapshot())
         assertFalse(prefs.contains(CompressionSettingsStore.KEY))
-        // A later legacy writer must not silently leave a stale v2 record in force.
+        assertEquals(3, JSONObject(prefs.getString(ProductionCompressionSettingsStore.KEY, null)!!).getInt("version"))
+        val legacy = JSONObject().put("version", 2).put("automatic", true).put("window", 32000)
+            .put("reserve", 4000).put("trigger", 75).put("keepTurns", 3)
+            .put("summaryModel", JSONObject().put("provider", "p").put("model", "summary"))
+        prefs.edit().remove(ProductionCompressionSettingsStore.KEY)
+            .putString(ProductionCompressionSettingsStore.V2_KEY, legacy.toString()).commit()
+        assertEquals(ProductionCompressionSettings(true, 32000, 4000,
+            summaryModel = SummaryModelBinding("p", "summary")), store.snapshot())
+        assertFalse(prefs.contains(ProductionCompressionSettingsStore.V2_KEY))
         CompressionSettingsStore(prefs).save(CompressionSettings(keepRecentMessages = 2))
-        try { store.snapshot(); fail("mixed versions need explicit resave") } catch (_: IllegalStateException) { }
-        store.save(ProductionCompressionSettings(keepTurns = 3))
-        assertEquals(3, store.snapshot().keepTurns)
+        try { store.snapshot(); fail("mixed records") } catch (_: IllegalStateException) { }
+        store.save(ProductionCompressionSettings(reserveTokens = 3000))
+        assertEquals(3000L, store.snapshot().reserveTokens)
+        assertFalse(prefs.contains(CompressionSettingsStore.KEY))
     }
 
     fun testDisabledOrUnknownPolicyIsDisabledAndWindowIsNotGuessed() {
@@ -58,30 +62,32 @@ class ProductionCompressionSettingsTest : InstrumentationTestCase() {
         }
     }
 
-    fun testEnabledWithNoSummarySelectionIsExplicitlyUnavailable() {
-        try {
-            ProductionCompressionPolicyResolver.resolve(ProductionCompressionSettings(true, 32000).coordinatorSettings())
-            fail("enabled policy requires explicit summary binding")
-        } catch (failure: SummaryProfileUnavailableException) {
-            assertEquals(SummaryProfileUnavailableReason.MISSING, failure.reason)
-        }
+    fun testEnabledWithNoCustomSummaryUsesFrozenChatMode() {
+        val policy = ProductionCompressionPolicyResolver.resolve(
+            ProductionCompressionSettings(true, 32000).coordinatorSettings())
+        assertTrue(policy.enabled)
+        val store = ProductionCompressionSettingsStore(prefs)
+        store.save(ProductionCompressionSettings(contextWindowTokens = 32000))
+        assertTrue(store.changeAutomatic(false).automatic)
+        assertNull(store.snapshot().summaryModel)
     }
 
     fun testMalformedAndInvalidValuesAreNotCoerced() {
         val store = ProductionCompressionSettingsStore(prefs)
         store.save(ProductionCompressionSettings())
         val good = prefs.getString(ProductionCompressionSettingsStore.KEY, null)!!
-        val badRecords = listOf(good + " garbage", good.replace("\"version\":2", "\"version\":1"),
-            good.replace("\"keepTurns\":4", "\"keepTurns\":0"),
-            good.replace("\"keepTurns\":4", "\"keepTurns\":4.5"),
-            good.replace("\"keepTurns\":4", "\"keepRecent\":4"),
-            good.replace("\"automatic\":false", "\"automatic\":\"false\""))
+        val badRecords = listOf(good + " garbage",
+            good.replace("\"version\":3", "\"version\":2"),
+            good.replace("\"trigger\":80", "\"trigger\":75"),
+            good.replace("\"reserve\":4096", "\"reserve\":4.5"),
+            good.replace("\"automatic\":false", "\"automatic\":\"false\""),
+            JSONObject(good).put("keepTurns", 4).toString())
         for (bad in badRecords) {
             prefs.edit().putString(ProductionCompressionSettingsStore.KEY, bad).commit()
             try { store.snapshot(); fail("invalid record") } catch (_: Exception) { }
         }
         for (invalid in listOf<() -> Unit>(
-            { ProductionCompressionSettings(keepTurns = 0) },
+            { ProductionCompressionSettings(triggerPercent = 75) },
             { ProductionCompressionSettings(contextWindowTokens = 1000) },
             { ProductionCompressionSettings(contextWindowTokens = 4096, reserveTokens = 4096) })) {
             try { invalid(); fail("invalid policy") } catch (_: IllegalArgumentException) { }
@@ -104,14 +110,17 @@ class ProductionCompressionSettingsTest : InstrumentationTestCase() {
         try { store.save(ProductionCompressionSettings()); fail() } catch (_: IllegalStateException) { }
         try { ProductionCompressionSettingsStore(failing).snapshot(); fail() } catch (_: IllegalStateException) { }
         failCommit = false
-        store.save(ProductionCompressionSettings(keepTurns = 2))
-        assertEquals(2, ProductionCompressionSettingsStore(failing).snapshot().keepTurns)
+        store.save(ProductionCompressionSettings(reserveTokens = 2000))
+        assertEquals(2000L, ProductionCompressionSettingsStore(failing).snapshot().reserveTokens)
     }
     fun testMenuTogglePreservesConfigurationAndRejectsStaleOrIncompleteValues() {
         val store = ProductionCompressionSettingsStore(prefs)
-        try { store.changeAutomatic(false); fail("missing summary binding") } catch (_: IllegalStateException) { }
-        assertEquals(ProductionCompressionSettings(), store.snapshot())
-        val initial = ProductionCompressionSettings(false, 32000, 4000, 75, 3, SummaryModelBinding("p", "summary"))
+        assertTrue(store.changeAutomatic(false).automatic)
+        assertNull(store.snapshot().contextWindowTokens)
+        assertFalse(ProductionCompressionPolicyResolver.resolve(store.snapshot().coordinatorSettings()).enabled)
+        assertTrue(ProductionCompressionSettingsStore(prefs).snapshot().automatic)
+        assertFalse(store.changeAutomatic(true).automatic)
+        val initial = ProductionCompressionSettings(false, 32000, 4000, summaryModel = SummaryModelBinding("p", "summary"))
         store.save(initial)
         assertEquals(initial.copy(automatic = true), store.changeAutomatic(false))
         try { store.changeAutomatic(false); fail("stale menu") } catch (_: IllegalStateException) { }

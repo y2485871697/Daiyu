@@ -64,9 +64,9 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         try { database.close(); context.deleteDatabase("conversations.db"); context.filesDir.deleteRecursively() }
         finally { super.tearDown() }
     }
-    private fun worker(wire: Wire, keepTurns: Int = 1): ContextManagementWorker = ContextManagementWorker(service,
-        { CompressionSettings(automatic = false, contextWindowTokens = 1_000_000, reserveTokens = 1000,
-            summaryModel = binding, keepTurns = keepTurns) }, ProductionCompressionPolicyResolver,
+    private fun worker(wire: Wire): ContextManagementWorker = ContextManagementWorker(service,
+        { ProductionCompressionSettings(automatic = false, contextWindowTokens = 1_000_000, reserveTokens = 1000,
+            summaryModel = binding).coordinatorSettings() }, ProductionCompressionPolicyResolver,
         object : ContextManagementSummaryProfiles {
             override fun describe(binding: SummaryModelBinding) = profiles.descriptor(binding)
             override fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel? {
@@ -280,7 +280,11 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         rejected { worker.compress(lease, old) }
         assertEquals(0, wire.posts)
         assertEquals(0L, scalar("SELECT COUNT(*) FROM context_usage"))
-        val noCut = worker(wire, keepTurns = 100)
+        val first = service.displayHistory(lease.owner.conversationId).first()
+        tx { sql -> sql.delete("messages", "conversation_id=? AND id<>?",
+            arrayOf(lease.owner.conversationId.value, first.id.value)) }
+        assertEquals(listOf(first), service.displayHistory(lease.owner.conversationId))
+        val noCut = worker(wire)
         assertNull(noCut.compress(lease, noCut.snapshot(lease)).archiveId)
         assertEquals(0, wire.posts)
         assertEquals(0, read().parentCoverage.totalManualSummaryRequests)

@@ -25,6 +25,7 @@ data class CompressionSettings(
     val summaryModel: SummaryModelBinding? = null,
     /** Only explicit v2 production configuration supplies turns; never derived from v1 messages. */
     val keepTurns: Int? = null,
+    val tokenTail: Boolean = false,
 ) {
     init {
         require(contextWindowTokens == null || contextWindowTokens > 0)

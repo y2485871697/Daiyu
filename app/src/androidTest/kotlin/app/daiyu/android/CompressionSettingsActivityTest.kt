@@ -9,20 +9,23 @@ import app.daiyu.android.context.ProductionCompressionSettingsStore
 class CompressionSettingsActivityTest : WiredActivityTestCase() {
     private var oldV1: String? = null
     private var oldV2: String? = null
+    private var oldV3: String? = null
     private val preferences get() = instrumentation.targetContext.getSharedPreferences("context-compression", Context.MODE_PRIVATE)
 
     override fun setUp() {
         oldV1 = preferences.getString("compression-settings-v1", null)
         oldV2 = preferences.getString("compression-settings-v2", null)
+        oldV3 = preferences.getString("compression-settings-v3", null)
         ProductionCompressionSettingsStore(instrumentation.targetContext).save(ProductionCompressionSettings())
         super.setUp()
     }
 
     override fun tearDown() {
         try { super.tearDown() } finally {
-            val edit = preferences.edit().remove("compression-settings-v1").remove("compression-settings-v2")
+            val edit = preferences.edit().remove("compression-settings-v1").remove("compression-settings-v2").remove("compression-settings-v3")
             oldV1?.let { edit.putString("compression-settings-v1", it) }
             oldV2?.let { edit.putString("compression-settings-v2", it) }
+            oldV3?.let { edit.putString("compression-settings-v3", it) }
             check(edit.commit())
         }
     }

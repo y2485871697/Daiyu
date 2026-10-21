@@ -125,14 +125,38 @@ object ArchiveCodec {
         }) } }
     }
 
-    /** Decode both legacy arrays and arrays whose message entries contain history. */
-    fun decode(bytes: ByteArray): List<Message> {
+    data class Document(val messages: List<Message>, val logicalPrefixCount: Int? = null)
+
+    /** Physical evidence stays intact; only the envelope records an intra-owner logical cut. */
+    fun encodeDocument(messages: List<Message>, logicalPrefixCount: Int): ByteArray {
+        val expanded = MessageHistory.expand(messages)
+        require(logicalPrefixCount in 1..expanded.size)
+        return JSONObject().put("format", "daiyu-context-archive").put("version", 2)
+            .put("logical_prefix_count", logicalPrefixCount)
+            .put("messages", JSONArray(strictUtf8(encode(messages)))).toString().toByteArray(Charsets.UTF_8).also {
+                require(it.size.toLong() <= MAX_ARCHIVE_BYTES) { "归档超过大小上限" }
+            }
+    }
+
+    /** Array facade is retained for paging, backup manifests and branch integrity checks. */
+    fun decode(bytes: ByteArray): List<Message> = decodeDocument(bytes).messages
+
+    fun decodeDocument(bytes: ByteArray): Document {
         require(bytes.size.toLong() <= MAX_ARCHIVE_BYTES) { "归档超过大小上限" }
-        val text = strictUtf8(bytes)
-        val parser = org.json.JSONTokener(text)
+        val parser = org.json.JSONTokener(strictUtf8(bytes))
         val parsed = parser.nextValue()
-        require(parsed is JSONArray && parser.nextClean() == '\u0000') { "归档须为完整JSON数组" }
-        val array = parsed
+        require(parser.nextClean() == '\u0000') { "归档须为完整JSON" }
+        if (parsed is JSONArray) return Document(decodeArray(parsed))
+        require(parsed is JSONObject) { "归档格式无效" }
+        parsed.requireFields(setOf("format", "version", "logical_prefix_count", "messages"))
+        require(parsed.get("format") == "daiyu-context-archive" && parsed.configurationLong("version") == 2L)
+        val messages = decodeArray(parsed.getJSONArray("messages"))
+        val cut = parsed.configurationInt("logical_prefix_count")
+        require(cut in 1..MessageHistory.expand(messages).size) { "归档逻辑截点无效" }
+        return Document(messages, cut)
+    }
+
+    private fun decodeArray(array: JSONArray): List<Message> {
         require(array.length() <= MAX_MESSAGES) { "归档消息数量超限" }
         val identities = HashSet<ArchiveIdentity>()
         return (0 until array.length()).map { i ->

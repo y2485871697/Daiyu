@@ -11,6 +11,27 @@ internal object CatalogSummaryExecutionPolicy {
     const val DEADLINE_MILLIS = 60_000L
     private const val EXTRA_FRAMING_RESERVE = 512L
 
+    fun chatConfiguration(snapshot: app.daiyu.android.model.ProviderSnapshot, window: Long): SummaryProviderConfiguration {
+        require(window in 1024..10_000_000)
+        val settings = summarySettings(snapshot.asModelSettings())
+        val binding = SummaryModelBinding("frozen-chat-summary", settings.model)
+        return configuration(binding, settings.copy(contextWindowOverride = window.toInt()))
+    }
+
+    /** Project chat-only reasoning/output/tool options onto the existing tool-free summary policy. */
+    fun summarySettings(settings: ModelSettings): ModelSettings {
+        val options = settings.requestOptions
+        val body = if (options.customBody.isEmpty()) org.json.JSONObject() else
+            app.daiyu.android.model.MessagesRequest.jsonObject(options.customBody)
+        val projected = org.json.JSONObject()
+        listOf("temperature", "top_p", "service_tier").forEach { key ->
+            if (body.has(key)) projected.put(key, body.get(key))
+        }
+        return settings.copy(model = if (body.has("model")) body.getString("model") else settings.model,
+            batteryEnabled = false, deviceStatusEnabled = false,
+            requestOptions = options.copy(customBody = projected.toString(), openAiWebSearchEnabled = false))
+    }
+
     fun configuration(binding: SummaryModelBinding, settings: ModelSettings): SummaryProviderConfiguration {
         val window = settings.contextWindowOverride?.toLong()
             ?: throw SummaryProfileUnavailableException(SummaryProfileUnavailableReason.INVALID_CONFIGURATION)

@@ -70,7 +70,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
             "offline-fixture-only", false, protocol = ProviderProtocol.RESPONSES))
         val config = SummaryProviderConfiguration(binding, provider, binding.modelId, 128000, 127104, 256, 128, 512, 60000)
         val coordinator = ContextPreparationCoordinator(ContextService(context, database),
-            { ProductionCompressionSettings(true, 20000, 1000, 10, 1, binding).coordinatorSettings() },
+            { ProductionCompressionSettings(true, 4000, 1000, summaryModel = binding).coordinatorSettings() },
             ProductionCompressionPolicyResolver,
             ProviderSummaryModelResolver({ config }, { wire }, deadlines))
         return Submission(user, assistant, cancellation, usage, coordinator,

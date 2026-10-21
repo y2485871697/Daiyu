@@ -19,7 +19,6 @@ internal data class CompressionSettingsDraftUi(
     val window: String = "",
     val reserve: String = "4096",
     val trigger: String = "80",
-    val keepTurns: String = "4",
     val configureSummary: Boolean = false,
     val provider: ModelSettings = ModelSettings("", "", "", false),
     val savedProtocol: ProviderProtocol? = null,
@@ -41,7 +40,7 @@ internal data class CompressionSettingsDraftUi(
 
     fun compression() = ProductionCompressionSettings(automatic,
         window.trim().takeIf { it.isNotEmpty() }?.toLong(), reserve.trim().toLong(),
-        trigger.trim().toInt(), keepTurns.trim().toInt(), binding.takeIf { configureSummary })
+        trigger.trim().toInt(), binding.takeIf { configureSummary })
 
     fun summary(): SummaryProfileSettings? = if (!configureSummary) null else SummaryProfileSettings(
         binding, provider, SummaryProfileBudgets(summaryWindow.trim().toLong(), inputBudget.trim().toLong(),
@@ -68,6 +67,7 @@ internal fun CompressionSettingsForm(
     error: Boolean,
     modifier: Modifier = Modifier,
     modelLabel: String? = null,
+    hasSummarySelection: Boolean = false,
     onChooseModel: () -> Unit = {},
 ) {
     SettingsScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
@@ -75,7 +75,7 @@ internal fun CompressionSettingsForm(
         item("compression-automatic") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("自动压缩上下文", draft.automatic, enabled,
-                    tag = "settings-switch:自动压缩", summary = "达到阈值时，自动摘要较早对话。") {
+                    tag = "settings-switch:自动压缩", summary = "实测达到窗口 80% 时压缩，保留约 16% 最近上下文。") {
                     onSave(draft.copy(automatic = it))
                 }
             }
@@ -94,7 +94,7 @@ internal fun CompressionSettingsForm(
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("自定义压缩模型", draft.configureSummary, enabled,
                     tag = "settings-switch:使用独立摘要配置", summary = "关闭时沿用对话模型。") {
-                    if (it && modelLabel == null) onChooseModel() else onSave(draft.copy(configureSummary = it))
+                    if (it && !hasSummarySelection) onChooseModel() else onSave(draft.copy(configureSummary = it))
                 }
                 SettingsRow("压缩模型", summary = modelLabel ?: "选择模型", tag = "compression-summary-config",
                     onClick = if (enabled) onChooseModel else null)

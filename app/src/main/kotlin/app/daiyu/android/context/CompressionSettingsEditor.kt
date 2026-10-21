@@ -151,7 +151,8 @@ class CompressionSettingsEditor internal constructor(
 
     private fun load(): Outcome {
         val settings = try { compressionStore().snapshot() }
-        catch (_: Exception) { return Outcome.Failed(Stage.LOAD_SETTINGS, false) }
+        catch (failure: Exception) { return Outcome.Failed(Stage.LOAD_SETTINGS,
+            failure is CompressionSettingsWriteUnconfirmed) }
         val binding = settings.summaryModel ?: return Outcome.Loaded(Snapshot(settings, null))
         return try {
             Outcome.Loaded(Snapshot(settings, loadSelectedProfile(binding)))

@@ -95,17 +95,28 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         }
         if (archive == null) return PreparedContext(original, estimateTokens(original), null)
         val count = archive[1].toInt()
-        // Refuse stale compression silently replacing changed facts. Fall back to the intact original table.
-        if (count !in 0..original.size || !isCompleteContextPrefix(original, count) ||
-            ContextRevision.digest(original.take(count)) != archive[2])
+        if (count !in 0..original.size || ContextRevision.digest(original.take(count)) != archive[2])
             return PreparedContext(original, estimateTokens(original), null)
-        // Video metadata lives beside physical rows, not in a text archive.
         if (original.take(count).any { app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty() })
             return PreparedContext(original, estimateTokens(original), null)
-        val archived = ArchiveCodec.decode(blobs.read(archive[4])).also { MessageHistory.expand(it) }
-        require(ContextRevision.digest(archived) == archive[2]) { "原文档案不一致" }
+        val document = ArchiveCodec.decodeDocument(blobs.read(archive[4]))
+        val archived = document.messages
+        require(archived.size == count && archived.all { it.conversationId == id } &&
+            ContextRevision.digest(archived) == archive[2]) { "原文档案不一致" }
+        val logicalCut = document.logicalPrefixCount
+        val tail = if (logicalCut == null) {
+            if (!isCompleteContextPrefix(original, count))
+                return PreparedContext(original, estimateTokens(original), null)
+            original.drop(count)
+        } else {
+            val expanded = MessageHistory.expand(original)
+            require(isHistoryClosedPrefix(original, count) && logicalCut < expanded.size &&
+                TokenTailCompression.isSafeCut(expanded, logicalCut) &&
+                MessageHistory.expand(archived).take(logicalCut) == expanded.take(logicalCut)) { "归档逻辑前缀不一致" }
+            expanded.drop(logicalCut)
+        }
         val summary = summaryMessage(id, archive[0], archive[3])
-        val messages = listOf(summary) + original.drop(count)
+        val messages = listOf(summary) + tail
         return PreparedContext(messages, estimateTokens(messages), archive[0])
     }
     fun compress(id: ConversationId, policy: CompressionPolicy, summarizer: ContextSummarizer,
@@ -120,24 +131,40 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty()
             }
         }
-        val requested = compressionBoundary(snapshot, policy.keepTurns)
-        require(requested in 0..snapshot.size)
-        // An injected legacy boundary cannot split 03 owners/supplements or tool runs.
-        val ceiling = minOf(requested, compressiblePrefix(snapshot, policy.keepTurns),
-            if (firstVideo < 0) snapshot.size else firstVideo)
-        val count = (ceiling downTo 1).firstOrNull { end ->
-            isCompleteContextPrefix(snapshot, end)
-        } ?: return null
+        val expanded = if (policy.tokenTail) MessageHistory.expandWithSources(snapshot) else emptyList()
+        val logical = expanded.map { it.message }
+        val logicalCut = if (policy.tokenTail) TokenTailCompression.selectStart(logical, policy.contextTokens) else null
+        val count: Int
+        val summaryInput: List<Message>
+        val tail: List<Message>
+        if (logicalCut != null) {
+            if (logicalCut <= 0) return null
+            val minimum = expanded.take(logicalCut).maxOf { it.sourcePhysicalIndex } + 1
+            val ceiling = if (firstVideo < 0) snapshot.size else firstVideo
+            count = (minimum..ceiling).firstOrNull { isHistoryClosedPrefix(snapshot, it) } ?: return null
+            summaryInput = logical.take(logicalCut)
+            require(MessageHistory.expand(snapshot.take(count)).take(logicalCut) == summaryInput)
+            tail = logical.drop(logicalCut)
+        } else {
+            val requested = compressionBoundary(snapshot, policy.keepTurns)
+            require(requested in 0..snapshot.size)
+            val ceiling = minOf(requested, compressiblePrefix(snapshot, policy.keepTurns),
+                if (firstVideo < 0) snapshot.size else firstVideo)
+            count = (ceiling downTo 1).firstOrNull { isCompleteContextPrefix(snapshot, it) } ?: return null
+            summaryInput = MessageHistory.expand(snapshot.take(count))
+            tail = snapshot.drop(count)
+        }
         val prefix = snapshot.take(count); val revision = ContextRevision.digest(prefix)
         // Run model outside the write transaction. Exception/empty/nonshrinking leaves originals untouched.
         checkCancellation(cancelled)
-        val summary = summarizer.summarize(CompressionInput(MessageHistory.expand(prefix), revision)).trim()
+        val summary = summarizer.summarize(CompressionInput(summaryInput, revision)).trim()
         checkCancellation(cancelled)
-        require(summary.isNotEmpty() && summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(prefix)) { "压缩未缩小；保留原文" }
+        require(summary.isNotEmpty() && summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)) { "压缩未缩小；保留原文" }
         val archive = UUID.randomUUID().toString()
         // Validate the actual wrapped summary plus retained tail and new input BEFORE publishing.
-        requireCapacity(policy, listOf(summaryMessage(id, archive, summary)) + snapshot.drop(count) + pending)
-        val hash = blobs.put(ArchiveCodec.encode(prefix))
+        requireCapacity(policy, listOf(summaryMessage(id, archive, summary)) + tail + pending)
+        val hash = blobs.put(if (logicalCut == null) ArchiveCodec.encode(prefix)
+            else ArchiveCodec.encodeDocument(prefix, logicalCut))
         transactions.run { db ->
             checkCancellation(cancelled)
             ensureIdle(db, id); require(ContextRevision.digest(read(db, id)) == ContextRevision.digest(snapshot)) { "历史已改变；摘要未应用" }

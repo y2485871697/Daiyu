@@ -579,15 +579,7 @@ jobs:
           emulator-boot-timeout: 180
           pre-emulator-launch-script: |
             bash scripts/install_bounded_adb.sh
-            python3 - <<'PYDISPLAY'
-            import os
-            from pathlib import Path
-            path = Path(os.environ['ANDROID_AVD_HOME']) / 'test.avd/config.ini'
-            values = {'hw.lcd.width': '1216', 'hw.lcd.height': '2432', 'hw.lcd.density': '160',
-                      'skin.name': '1216x2432', 'skin.path': '1216x2432'}
-            lines = [line for line in path.read_text().splitlines() if line.split('=', 1)[0].strip() not in values]
-            path.write_text('\n'.join(lines + [f'{key}={value}' for key, value in values.items()]) + '\n')
-            PYDISPLAY
+            python3 -c 'import os; from pathlib import Path; p=Path(os.environ["ANDROID_AVD_HOME"])/"test.avd/config.ini"; values={"hw.lcd.width":"1216","hw.lcd.height":"2432","hw.lcd.density":"160","skin.name":"1216x2432","skin.path":"1216x2432"}; lines=[line for line in p.read_text().splitlines() if line.split("=",1)[0].strip() not in values]; p.write_text("\n".join(lines+[f"{key}={value}" for key,value in values.items()])+"\n")'
             cp "$ANDROID_AVD_HOME/test.ini" smoke/avd.ini
             cp "$ANDROID_AVD_HOME/test.avd/config.ini" smoke/avd-config.ini
             cat smoke/avd.ini

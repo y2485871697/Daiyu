@@ -101,6 +101,8 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         var failure: VideoAttachmentFailure? = null
         var wrongPreview = false
         var gate: CountDownLatch? = null
+        var inventoryGate: CountDownLatch? = null
+        var inventoryEntered: CountDownLatch? = null
         val jpeg = ByteArrayOutputStream().also { out ->
             Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).let { bitmap ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
@@ -120,7 +122,11 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
             check(maxEdge in 1..1024)
             return VideoPreview(if (wrongPreview) video.copy(id = UUID.randomUUID().toString()) else video, 8, 8, jpeg)
         }
-        override fun list(owner: VideoAttachmentOwner) = originals.values.filter { it.owner == owner }
+        override fun list(owner: VideoAttachmentOwner): List<VideoAttachment> {
+            inventoryEntered?.countDown()
+            check(inventoryGate?.await(60, TimeUnit.SECONDS) != false)
+            return originals.values.filter { it.owner == owner }
+        }
         override fun remove(video: VideoAttachment) {
             originals.remove(video.id)
             removals.incrementAndGet()
@@ -156,6 +162,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
     override fun tearDown() {
         try {
             media.gate?.countDown()
+            media.inventoryGate?.countDown()
             mainThread { life.registry.currentState = Lifecycle.State.DESTROYED }
         } finally { super.tearDown() }
     }
@@ -189,6 +196,48 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
     }
+    fun testCompactRecoveryIsSilentAndKeepsSendBlockedWithOrWithoutOriginals() {
+        for (withVideo in listOf(false, true)) {
+            mainThread { mounted.value = false }
+            ui.waitForIdle()
+            val gate = CountDownLatch(1)
+            val entered = CountDownLatch(1)
+            var original: VideoAttachment? = null
+            mainThread {
+                val owner = VideoAttachmentOwner(UUID.randomUUID().toString(), UUID.randomUUID().toString())
+                original = if (withVideo) VideoAttachment(owner, UUID.randomUUID().toString(),
+                    "video/mp4", 256, "a".repeat(64), 1000, 32, 24) else null
+                val rows = listOfNotNull(original)
+                media.inventoryGate = gate; media.inventoryEntered = entered
+                rows.forEach { media.originals[it.id] = it }
+                val journal = MemoryJournal().apply {
+                    this.rows = listOf(VideoHostDraftStore.Draft(null, owner, 0, rows, false))
+                }
+                host = VideoChatHost(journal, media)
+                mounted.value = true
+            }
+            try {
+                show(compact = true)
+                assertTrue("restored owner inventory entered", entered.await(5, TimeUnit.SECONDS))
+                assertTrue(host.state.recovering)
+                node("video_attachments_recovering").assertDoesNotExist()
+                ui.onNodeWithText("正在恢复视频草稿或清理已移除的视频…").assertDoesNotExist()
+                if (withVideo) {
+                    node("video_attachments_item:${checkNotNull(original).id}").assertIsDisplayed()
+                    node("video_attachments_remove:${checkNotNull(original).id}").assertIsNotEnabled()
+                } else node("video_attachments").assertDoesNotExist()
+                node("chat-send").assertIsNotEnabled()
+                assertNull(handed)
+                assertTrue(picker.launches.isEmpty())
+            } finally { gate.countDown() }
+            ui.waitUntil(5_000) { !host.state.recovering }
+            node("chat-send").assertIsEnabled()
+            assertEquals(if (withVideo) 1 else 0, host.state.items.size)
+            original?.let { assertEquals(it, media.originals[it.id]) }
+            assertEquals(0, media.removals.get())
+        }
+    }
+
     fun testCompactComposerHidesEmptyPanelAndUsesOnlyMainSend() {
         mainThread { text.value = "" }
         show(compact = true)

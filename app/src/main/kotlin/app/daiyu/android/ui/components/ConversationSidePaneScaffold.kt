@@ -462,7 +462,7 @@ private fun ConversationPanePanel(
                 overscrollEffect = null,
             ) {
                 if (visibleConversations.isEmpty()) {
-                    item(contentType = "drawer-empty") {
+                    if (state.conversationsLoaded) item(contentType = "drawer-empty") {
                         EmptyConversations(isSearching = query.isNotBlank())
                     }
                 } else {

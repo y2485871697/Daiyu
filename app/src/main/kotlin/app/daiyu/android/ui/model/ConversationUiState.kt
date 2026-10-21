@@ -10,6 +10,7 @@ data class ConversationPaneUiState(
     val folders: List<ConversationFolderUi> = emptyList(),
     val selectedFolderId: String? = null,
     val historyConversations: List<ConversationSummaryUi> = emptyList(),
+    val conversationsLoaded: Boolean = true,
 )
 
 @Immutable

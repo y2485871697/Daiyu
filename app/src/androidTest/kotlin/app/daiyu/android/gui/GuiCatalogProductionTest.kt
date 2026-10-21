@@ -6,6 +6,10 @@ import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.skills.SkillRunSession
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -120,6 +124,45 @@ class GuiCatalogProductionTest : InstrumentationTestCase() {
         catch (expected: IllegalArgumentException) { assertEquals("gui_user_barrier_not_supported", expected.message) }
         finally { catalog.close() }
         assertFalse(gui.preparationAvailable())
+    }
+
+    fun testWorkerCloseSealsAdmissionBeforeMainReleasesLease() {
+        val gui = main { GuiRunSession(GuiLeaseGate.Lease(GuiOwner("worker-close", "worker-close"))) }
+        try {
+            main {
+                assertTrue(gui.preparationAvailable())
+                val returned = CountDownLatch(1)
+                val failure = AtomicReference<Throwable?>()
+                Thread {
+                    try { gui.close() } catch (t: Throwable) { failure.set(t) }
+                    finally { returned.countDown() }
+                }.start()
+                assertTrue(returned.await(5, TimeUnit.SECONDS))
+                failure.get()?.let { throw it }
+                assertFalse(gui.preparationAvailable())
+                assertTrue(gui.lease.valid)
+                assertFalse(gui.releaseConfirmed)
+            }
+            main {
+                assertFalse(gui.lease.valid)
+                assertTrue(gui.releaseConfirmed)
+            }
+        } finally { main { gui.close() } }
+    }
+
+    fun testMainCloseStaysSynchronousInsideImmediateCoroutine() {
+        main {
+            runBlocking(Dispatchers.Main.immediate) {
+                val gui = GuiRunSession(GuiLeaseGate.Lease(GuiOwner("main-close", "main-close")))
+                try {
+                    assertTrue(gui.preparationAvailable())
+                    gui.close()
+                    assertFalse(gui.preparationAvailable())
+                    assertFalse(gui.lease.valid)
+                    assertTrue(gui.releaseConfirmed)
+                } finally { gui.close() }
+            }
+        }
     }
 
     fun testCatalogCloseWaitsForActualMainReleaseAndDoesNotDropGuiObservation() {

@@ -36,6 +36,35 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         reveal("provider-name").assertEditableText("本地名称草稿")
         assertEquals(0, fixture.opens.get())
     }
+    fun testProviderFooterKeepsSaveConfigurationAndAlignedDeleteButtons() {
+        val before = fixture.controller.providers.snapshot()
+        openModels()
+        reveal("provider-delete", lazyKey = "provider_delete").assertIsEnabled()
+        val save = node("model-save").assertIsDisplayed().assertTextContains("保存配置")
+            .fetchSemanticsNode().boundsInRoot
+        val delete = node("provider-delete").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val density = activity.resources.displayMetrics.density
+        assertEquals(save.left, delete.left, 1f)
+        assertEquals(save.right, delete.right, 1f)
+        assertTrue("save keeps a full-width touch target", save.width / density > 200f && save.height / density >= 48f)
+        assertTrue("delete keeps a full-width touch target", delete.width / density > 200f && delete.height / density >= 48f)
+        assertTrue("delete is below save", delete.top >= save.bottom)
+        node("provider-delete").performClick()
+        ui.onNodeWithText("不会自动切换", substring = true).assertExists()
+        node("dialog-cancel").performClick()
+        assertEquals(before, fixture.controller.providers.snapshot())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToChat() {
+        openModels()
+        reveal("provider-delete", lazyKey = "provider_delete").performClick()
+        node("dialog-confirm").performClick()
+        awaitControl("provider deleted") { fixture.controller.providers.snapshot().providers.isEmpty() }
+        awaitUniqueTag("chat-top-bar")
+        assertNull(fixture.controller.providers.snapshot().activeSlotId)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testNameIsSavedInsideConfigurationWithoutChangingModelOrCredentials() {
         val before = fixture.settings.load()
         openModels()

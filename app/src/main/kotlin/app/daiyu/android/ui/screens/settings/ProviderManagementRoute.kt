@@ -38,6 +38,7 @@ private class ProviderDetail(
     val configurationRevision: Long,
     val persistence: SavedModelCatalogPersistence<CatalogModelParameters>, val catalogIdentity: String?,
     val balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration?,
+    val registry: ProviderRegistrySnapshot,
 ) {
     val live = AtomicBoolean(true)
     val saveOwner = ModelSettingsSaveOwner()
@@ -76,7 +77,7 @@ private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.co
 internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: () -> Boolean,
     onBack: () -> Unit, onDetailBack: () -> Unit = onBack, engineeringUi: Boolean = false,
     initialSlot: String? = null, pageTitleOverride: String? = null,
-) {
+) = ProviderSettingsTheme {
     val repo = controller.providers
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -162,7 +163,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 val balance = controller.providerBalances.get(slot).store.configurationForEditing()
                 repo.withEditor(editor) { }
                 ProviderDetail(editor, registration.name, registration.enabled, editing, configurationRevision,
-                    repo.catalogPersistence(editor), identity, balance)
+                    repo.catalogPersistence(editor), identity, balance, snapshot)
             } }
             if (!current(p) || serial != request) return@launch
             loading = false
@@ -174,6 +175,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 if (newProtocol != null) loaded.draft = loaded.draft.selectProtocol(newProtocol)
                 authentication = false
                 pausedDraft = null
+                registry = loaded.registry
                 detail = loaded
             }, onFailure = { pausedDraft = null; notice = "详情读取失败或已变化，请刷新后重新打开。" })
         }
@@ -426,6 +428,19 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     if (live() && !requestCancelled()) complete(it)
                 } else complete(CatalogLocalEditResult.CANCELLED)
             })
+        val delete: () -> Unit = {
+            if (live() && enabled && registry === d.registry) {
+                confirmation = ProviderConfirm("删除提供商", "确定删除“${d.name}”？若为当前提供商，将清空当前选择，不会自动切换。", true) {
+                    if (live() && enabled && registry === d.registry) {
+                        closeDetail()
+                        mutate(d.registry, p, completed = {
+                            if (d.editor.slotId == ProviderRegistry.PRIMARY) { p.revoke(); onDetailBack() }
+                            else refresh()
+                        }) { repo, revision, admit -> repo.delete(revision, d.editor.slotId, admit) }
+                    }
+                }
+            }
+        }
         if (d.catalogIdentity == null) {
             var modelTab by remember { mutableStateOf(false) }
             val tabs: LazyListScope.() -> Unit = {
@@ -443,7 +458,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 pageTitle = detailTitle, providerName = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
                 credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                 headersUnavailable = d.editing.headersUnavailable,
-                catalogEnabled = false, errorText = notice, testBalance = balanceTest)
+                catalogEnabled = false, errorText = notice, testBalance = balanceTest, onDelete = delete)
         } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
                 if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
@@ -459,7 +474,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             headersUnavailable = d.editing.headersUnavailable,
-            testConnection = connection, localModelActions = actions, testBalance = balanceTest)
+            testConnection = connection, localModelActions = actions, testBalance = balanceTest,
+            onDelete = delete)
     } else if (loading) {
         SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
     } else if (authentication) {

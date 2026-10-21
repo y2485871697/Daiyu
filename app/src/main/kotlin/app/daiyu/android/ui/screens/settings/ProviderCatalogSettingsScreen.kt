@@ -58,6 +58,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     providerName: String? = null,
     ownerCurrent: () -> Boolean = { true },
     testBalance: ProviderBalanceTester? = null,
+    onDelete: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -115,6 +116,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
             session.invalidate(); test(value, cancelled, deliver)
         } },
         testBalance = testBalance,
+        onDelete = onDelete?.let { delete -> { session.invalidate(); delete() } },
         draft = draft,
         onDraftChange = { session.invalidate(); onDraftChange(it) },
         onSave = { session.invalidate(); onSave(it) },

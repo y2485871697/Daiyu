@@ -55,7 +55,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                         SideEffect { actionColors = colors }
                         ChatMenuLayer(Modifier.fillMaxSize()) {
                             Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
-                                ChatTopBar("测试会话", null, actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
+                                ChatTopBar("测试会话", actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
                                 ChatComposer(composer, actions)
                             }
                         }

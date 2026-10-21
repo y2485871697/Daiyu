@@ -84,14 +84,21 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
             assertFalse(draft.providerEnabled)
             reveal("settings-switch:余额", title).assertIsOff().performClick()
             reveal("provider-balance-test", title).assertIsNotEnabled()
+            node("provider-balance-token").assertDoesNotExist()
+            node("provider-balance-token-clear").assertDoesNotExist()
             preset("sub2api")
+            node("provider-balance-token").assertDoesNotExist()
             assertEquals("/usage", draft.balanceOption.apiPath); assertEquals("remaining", draft.balanceOption.resultPath)
             preset("deepseek")
+            node("provider-balance-token").assertDoesNotExist()
             assertEquals("/user/balance", draft.balanceOption.apiPath)
             assertEquals("balance_infos[0].total_balance", draft.balanceOption.resultPath)
             preset("custom"); edit("provider-balance-path", "/my/balance")
             assertEquals("/my/balance", draft.balanceOption.apiPath)
+            node("provider-balance-token").assertDoesNotExist()
+            node("provider-balance-token-clear").assertDoesNotExist()
             preset("new_api"); edit("provider-balance-token", "independent-token")
+            node("provider-balance-token-clear").assertDoesNotExist()
             reveal("provider-balance-test", title).assertIsNotEnabled()
             mainThread { draft = draft.copy(endpoint = "https://provider.invalid/v1", apiKey = "provider-key") }
             ui.waitForIdle()
@@ -117,6 +124,24 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
             assertEquals(saved, fixture.settings.load()); assertEquals(registry, fixture.controller.providers.snapshot())
             assertEquals(0, fixture.opens.get())
         }
+    }
+
+    fun testCustomBalanceHasOnlyPathAndResultFieldsAndNoTechnicalWarning() {
+        val fake = Fake()
+        show(fake, initial = validDraft())
+        reveal("provider-balance-path", title).assertEditableText("/balance")
+        reveal("provider-balance-result", title).assertEditableText("balance")
+        node("provider-balance-token").assertDoesNotExist()
+        node("provider-balance-token-clear").assertDoesNotExist()
+        ui.onAllNodesWithText("RFC6901", substring = true).assertCountEquals(0)
+        ui.onAllNodesWithText("HTTPS", substring = true).assertCountEquals(0)
+        val before = draft
+        start()
+        assertSame(before, fake.last.draft)
+        assertEquals("provider-key", checkNotNull(fake.last.draft.providerBalanceConfiguration()).resolvedToken())
+        deliver(fake.last)
+        awaitReceipt("余额测试成功：CNY 12.34（仅本次测试，未保存）")
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testEditingOrDisablingBalanceCancelsReceiptsWithoutSaving() {

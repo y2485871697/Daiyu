@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -19,7 +20,9 @@ import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.icons.ModelBrandIcon
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -111,6 +114,7 @@ internal fun ModelSettingsScreen(
     showCatalog: Boolean = true,
     providerName: String? = null,
     testBalance: ProviderBalanceTester? = null,
+    onDelete: (() -> Unit)? = null,
 ) {
     val latestDraft by rememberUpdatedState(draft)
     val latestEnabled by rememberUpdatedState(enabled)
@@ -249,11 +253,23 @@ internal fun ModelSettingsScreen(
         item(key = "model_save") {
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)
             TextButton(
-                text = "保存",
+                text = if (providerName != null) "保存配置" else "保存",
                 onClick = submit,
+                colors = ButtonDefaults.textButtonColorsPrimary(),
                 enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid,
-                modifier = Modifier.testTag("model-save").semantics { this[RetainedModelSaveAction] = submit }.fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
+                modifier = Modifier.testTag("model-save").semantics { this[RetainedModelSaveAction] = submit }.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().heightIn(min = 48.dp),
             )
+        }
+        if (onDelete != null) item(key = "provider_delete") {
+            TextButton(text = "删除提供商", enabled = enabled, onClick = {
+                if (latestEnabled && latestDraft === draft) {
+                    connection.cancel(); balance.cancel(); onDelete()
+                }
+            }, colors = ButtonDefaults.textButtonColorsPrimary(
+                color = MiuixTheme.colorScheme.surfaceVariant,
+                textColor = assistantPreviewPalette().danger),
+                modifier = Modifier.testTag("provider-delete").padding(horizontal = 20.dp, vertical = 8.dp)
+                    .fillMaxWidth().heightIn(min = 48.dp))
         }
     }
 }

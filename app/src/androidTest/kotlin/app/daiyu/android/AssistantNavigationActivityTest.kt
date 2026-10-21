@@ -18,7 +18,7 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
     }
 
     private fun actions(id: String) {
-        node("assistant-list").performScrollToNode(hasTestTag("assistant-item-$id"))
+        node("assistant-list").scrollToDescendant(hasTestTag("assistant-item-$id"))
         node("assistant-item-$id").performTouchInput { longClick() }
         awaitUniqueTag("assistant-action-edit")
         ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
@@ -46,7 +46,7 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
             for (system in listOf(false, true)) {
                 actions(profile.id)
                 edit()
-                node("assistant-edit-name").performScrollTo()
+                node("assistant-edit-name").scrollToVisible()
                     .performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString("Unsaved name")) }
                 dismissIme()
                 back(system)
@@ -83,7 +83,7 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
         openPicker(fromSettings = true)
         actions(profile.id)
         edit()
-        node("assistant-edit-name").performScrollTo()
+        node("assistant-edit-name").scrollToVisible()
             .performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString("Renamed assistant")) }
         dismissIme()
         ui.waitUntil(5_000) {

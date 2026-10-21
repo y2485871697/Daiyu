@@ -60,9 +60,9 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
             node("compression-dialog-custom").performClick().assertIsOn()
             node("compression-dialog-model").assertTextContains("deepseek-v4-1-flash")
             node("compression-dialog-help-text").assertDoesNotExist()
-            node("context-management").performScrollToNode(hasTestTag("compression-dialog-help"))
+            node("context-management").scrollToDescendant(hasTestTag("compression-dialog-help"))
             node("compression-dialog-help").performClick()
-            node("context-management").performScrollToNode(hasTestTag("compression-dialog-help-text"))
+            node("context-management").scrollToDescendant(hasTestTag("compression-dialog-help-text"))
             node("compression-dialog-help-text").assertTextContains("Anthropic / Codex", substring = true)
             node("context-close").assertIsDisplayed().assertHeightIsAtLeast(44.dp)
             node("context-compress").assertIsDisplayed().assertHeightIsAtLeast(44.dp)
@@ -72,7 +72,7 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
             assertEquals(expected.red, actual.red, .025f)
             assertEquals(expected.green, actual.green, .025f)
             assertEquals(expected.blue, actual.blue, .025f)
-            node("context-management").performScrollToNode(hasTestTag("compression-dialog-help"))
+            node("context-management").scrollToDescendant(hasTestTag("compression-dialog-help"))
             node("compression-dialog-help").performClick()
             node("compression-dialog-help-text").assertDoesNotExist()
             node("context-compress").performClick()
@@ -89,9 +89,9 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
 
     fun testExpandedHelpAtLargerFontKeepsFooterReachableAndBackCancels() {
         show(dark = true, scale = .8f, fontScale = 1.3f)
-        node("context-management").performScrollToNode(hasTestTag("compression-dialog-help"))
+        node("context-management").scrollToDescendant(hasTestTag("compression-dialog-help"))
         node("compression-dialog-help").performClick()
-        node("context-management").performScrollToNode(hasTestTag("compression-dialog-help-text"))
+        node("context-management").scrollToDescendant(hasTestTag("compression-dialog-help-text"))
         val help = node("compression-dialog-help-text").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val footer = node("context-compress").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue(help.bottom <= footer.top)

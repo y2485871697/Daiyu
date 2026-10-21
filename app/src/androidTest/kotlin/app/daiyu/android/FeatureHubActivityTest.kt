@@ -47,7 +47,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         node("page:设置").performTouchInput { swipeUp() }
         for ((title, page) in listOf("用量统计" to "usage-stats-screen", "Agent任务偏好" to "page:Agent任务偏好")) {
             val tag = "settings-row:$title"
-            node("page:设置").performScrollToNode(hasTestTag(tag))
+            node("page:设置").scrollToDescendant(hasTestTag(tag))
             node(tag).assertIsDisplayed()
             ui.waitForIdle()
             val position = settingsScrollPosition()
@@ -89,7 +89,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         node("settings-search").assertEditableText("")
         assertEquals(0f, settingsScrollPosition(), .00002f)
         node("settings-row:外观与主题").assertIsDisplayed()
-        node("page:设置").performScrollToNode(hasTestTag("settings-row:震动列表"))
+        node("page:设置").scrollToDescendant(hasTestTag("settings-row:震动列表"))
         val before = settingsScrollPosition()
         node("settings-row:震动列表").performClick()
         awaitUniqueTag("page:触感反馈")

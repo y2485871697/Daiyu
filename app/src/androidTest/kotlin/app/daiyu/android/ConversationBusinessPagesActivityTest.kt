@@ -52,7 +52,7 @@ class ConversationBusinessPagesActivityTest : WiredActivityTestCase() {
                 }
             }
             val button = node("conversation-export-choose")
-            node("page:${text(R.string.business_export_title)}").performScrollToNode(hasTestTag("conversation-export-choose"))
+            node("page:${text(R.string.business_export_title)}").scrollToDescendant(hasTestTag("conversation-export-choose"))
             if (available && !pending && !busy) button.assertIsEnabled().performClick()
             else button.assertIsNotEnabled()
         }
@@ -105,12 +105,12 @@ class ConversationBusinessPagesActivityTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("child-task:child-QUEUED").fetchSemanticsNodes().isNotEmpty() }
         val page = node("page:${text(R.string.business_task_records)}")
         statuses.forEach { (status, label) ->
-            page.performScrollToNode(hasTestTag("child-task:child-$status"))
+            page.scrollToDescendant(hasTestTag("child-task:child-$status"))
             ui.onNodeWithText(text(label)).assertIsDisplayed()
         }
-        page.performScrollToNode(hasText(text(R.string.business_task_unknown_note)))
+        page.scrollToDescendant(hasText(text(R.string.business_task_unknown_note)))
         ui.onNodeWithText(text(R.string.business_task_unknown_note)).assertIsDisplayed()
-        page.performScrollToNode(hasTestTag("child-task-expand:child-UNKNOWN"))
+        page.scrollToDescendant(hasTestTag("child-task-expand:child-UNKNOWN"))
         node("child-task-expand:child-UNKNOWN").performClick()
         ui.onNodeWithText("重试").assertDoesNotExist()
         ui.onNodeWithText("Retry").assertDoesNotExist()

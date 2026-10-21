@@ -196,7 +196,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         key(state.controlOwnerKey) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
-                                state = balanceState, modifier = Modifier.testTag("chat-provider-balance")
+                                state = balanceState, modifier = Modifier.testTag("chat-composer-provider-balance")
                                     .widthIn(max = 60.dp), animateChanges = true,
                                 textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 30.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {

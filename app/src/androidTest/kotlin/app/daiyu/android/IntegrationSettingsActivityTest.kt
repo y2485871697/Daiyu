@@ -146,9 +146,9 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val before = providers.snapshot()
         val calls = guardChatPickerNetwork()
         node("chat-model").performClick(); awaitChatPickerLoaded()
-        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-provider:${other.slotId}"))
+        node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-provider:${other.slotId}"))
         node("chat-model-provider:${other.slotId}").assertTextContains("Other fixture").performClick()
-        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:${other.slotId}:second"))
+        node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:${other.slotId}:second"))
         node("chat-model-option:${other.slotId}:second").assertIsNotSelected().performClick()
         awaitControl("provider catalog selected") { providers.snapshot().activeSlotId == other.slotId && !fixture.controller.dataBusy }
         assertEquals(before.revision + 1, providers.snapshot().revision)
@@ -200,7 +200,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     }
     private fun awaitChatPickerReady() {
         awaitChatPickerLoaded()
-        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:second"))
+        node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:second"))
         node("chat-model-option:second").assertIsEnabled()
     }
     // Retain the exact visit's capability, not an ID that could be resolved against a new visit.
@@ -360,7 +360,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model-option:second").assertIsNotEnabled()
         reopenChatPicker(); awaitChatPickerReady()
         ui.onNodeWithText(rejected).assertDoesNotExist()
-        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
+        node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:external-change"))
         node("chat-model-option:external-change").assertIsEnabled()
         closeChatPicker()
         assertEquals(changed, fixture.settings.load())
@@ -379,7 +379,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             node("chat-model").performClick()
             awaitChatPickerLoaded()
             node("chat-model-picker").assertExists()
-            node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
+            node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:external-change"))
             node("chat-model-option:external-change").assertIsNotEnabled()
             val sessionField = MainActivity::class.java.getDeclaredField("chatModelSession")
                 .apply { isAccessible = true }
@@ -391,7 +391,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
                 mainThread { replaced = sessionField.get(activity)?.let { it !== previousSession } == true }
                 replaced
             }
-            node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
+            node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:external-change"))
             node("chat-model-option:external-change").assertIsNotEnabled()
             node("chat-model-refresh").assertDoesNotExist()
             assertEquals(changed, fixture.settings.load())

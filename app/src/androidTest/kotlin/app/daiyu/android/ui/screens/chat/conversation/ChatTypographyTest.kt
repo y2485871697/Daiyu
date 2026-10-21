@@ -61,7 +61,7 @@ class ChatTypographyTest : WiredActivityTestCase() {
     }
 
     private fun layout(text: String): TextLayoutResult {
-        node("type-list").performScrollToNode(hasText(text))
+        node("type-list").scrollToDescendant(hasText(text))
         val target = ui.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
         val results = mutableListOf<TextLayoutResult>()
         target.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }

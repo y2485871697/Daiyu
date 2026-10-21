@@ -75,7 +75,7 @@ class TerminalApprovalHostTest : WiredActivityTestCase() {
         assertEquals(ControllerTerminalPreparation.State.PREVIEW, p.state)
         val pages = terminalApprovalSections(p)
         listOf("terminal-argv-2-1", "terminal-env-0-0", "terminal-input-1-2-0", "terminal-effect-1-0", "terminal-read-1-0").forEach { tag ->
-            ui.onNodeWithTag("terminal-approval-pages").performScrollToNode(hasTestTag(tag))
+            ui.onNodeWithTag("terminal-approval-pages").scrollToDescendant(hasTestTag(tag))
             ui.onNodeWithTag(tag, useUnmergedTree = true).assertTextEquals(pages.single { it.id == tag }.text)
         }
         assertEquals(0, confirmations.get())

@@ -155,7 +155,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
     private fun authorize() {
         node("image-host-authorize").assertDoesNotExist()
         ui.onNodeWithContentDescription("附件").performClick()
-        node("image-host-authorize").performScrollTo().performClick()
+        node("image-host-authorize").scrollToVisible().performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("dialog-confirm").fetchSemanticsNodes().isNotEmpty() }
         node("dialog-confirm").performClick()
         ui.waitUntil(10_000) { host().authorizationLabel.startsWith("已声明") }

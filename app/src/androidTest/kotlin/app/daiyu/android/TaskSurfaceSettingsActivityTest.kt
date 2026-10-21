@@ -62,7 +62,7 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
             ui.onAllNodes(hasTestTag("settings-radio:后台执行") and isEnabled())
                 .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
         }
-        node("page:Agent任务偏好").performScrollToNode(hasText(failure))
+        node("page:Agent任务偏好").scrollToDescendant(hasText(failure))
         ui.onNodeWithText(failure).assertIsDisplayed()
         assertEquals("task-surface-v1\nASK\n", record)
         assertSame(TaskSurfaceSettings.Unavailable, store.load())
@@ -76,7 +76,7 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
             ui.onAllNodes(hasTestTag("settings-radio:后台执行") and isEnabled())
                 .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
         }
-        node("page:Agent任务偏好").performScrollToNode(hasText(success))
+        node("page:Agent任务偏好").scrollToDescendant(hasText(success))
         ui.onNodeWithText(success).assertIsDisplayed()
         assertEquals(TaskSurfaceSettings.Available(TaskSurfacePreference.BACKGROUND), store.load())
         assertEquals(before, fixture.database.exportBackup())

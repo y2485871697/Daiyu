@@ -31,8 +31,8 @@ class R08PlanEditorScreenTest : WiredActivityTestCase() {
 
     private fun reveal(tag: String) {
         dismissIme()
-        node("r08-plan-rows").performScrollToNode(hasTestTag(tag))
-        node(tag).performScrollTo().assertIsDisplayed()
+        node("r08-plan-rows").scrollToDescendant(hasTestTag(tag))
+        node(tag).scrollToVisible().assertIsDisplayed()
     }
     private fun add(action: String) { reveal("r08-add-$action"); node("r08-add-$action").performClick() }
     private fun edit(index: Int, field: String, value: String) {

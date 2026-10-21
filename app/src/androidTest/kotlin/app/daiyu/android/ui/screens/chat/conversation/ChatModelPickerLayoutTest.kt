@@ -53,7 +53,7 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
             node("chat-model-provider:a").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
             node("chat-model-option:same").assertIsSelected()
             node("chat-model-option:b:same").assertDoesNotExist()
-            node("chat-model-list").performScrollToNode(hasTestTag("chat-model-provider:b"))
+            node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-provider:b"))
             node("chat-model-provider:b").performClick()
             node("chat-model-option:b:same").assertIsNotSelected().performClick()
             node("chat-model-option:same").assertDoesNotExist()
@@ -86,7 +86,7 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
     fun testLongCatalogRemainsLazyAndRunningStateDisablesSelection() {
         val many = (0..999).map { ModelCatalogEntryUi("model-$it", "长模型名称 $it") }
         show(ChatModelPickerState("model-999", many, enabled = false), font = 1.3f)
-        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:model-999"))
+        node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:model-999"))
         node("chat-model-option:model-999").assertIsDisplayed().assertIsSelected().assertIsNotEnabled()
         node("chat-model-option:model-0").assertDoesNotExist()
         assertTrue(selected.isEmpty())

@@ -243,7 +243,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             }
             ui.waitForIdle()
             for (title in listOf("主题模式", "色彩与背景", "应用图标", "界面与效果", "导航与手势")) {
-                node("page:外观与主题").performScrollToNode(hasText(title))
+                node("page:外观与主题").scrollToDescendant(hasText(title))
                 ui.onNodeWithText(title).assertIsDisplayed()
             }
             val host = node("appearance-host").fetchSemanticsNode().boundsInRoot

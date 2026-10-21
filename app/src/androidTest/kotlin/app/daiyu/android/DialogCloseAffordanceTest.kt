@@ -102,7 +102,7 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
     fun testImageCapabilityEntryDismissesAttachmentSheetAndRoutesOnlyExplicitAction() {
         var action: app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction? = null
         show { dismiss -> ChatAttachmentSheet(dismiss) { action = it } }
-        node("image-host-authorize").performScrollTo().performClick()
+        node("image-host-authorize").scrollToVisible().performClick()
         assertEquals(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.DECLARE_IMAGE_SUPPORT, action)
         assertEquals(1, closes)
         node("chat-attachment:ATTACH_IMAGE").assertDoesNotExist()

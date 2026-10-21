@@ -21,7 +21,7 @@ class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         val packBefore = OfflineSpeechPack.state.value
         openSettings(); entry("voice")
-        node("voice-offline-settings").performScrollTo().performClick()
+        node("voice-offline-settings").scrollToVisible().performClick()
         node("offline-speech-settings").assertExists()
         assertEquals(packBefore.enabled, OfflineSpeechPack.state.value.enabled)
         assertEquals(packBefore.downloading, OfflineSpeechPack.state.value.downloading)
@@ -44,9 +44,9 @@ class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
     fun testDuplicateEntriesAreHiddenAndGesturePreferencesRemain() {
         assertFalse(SettingsCatalog.entries.any { it.id in setOf("permission_check", "accessibility_keep") })
         openSettings(); entry("appearance")
-        node("page:外观与主题").performScrollToNode(hasText("界面与效果"))
+        node("page:外观与主题").scrollToDescendant(hasText("界面与效果"))
         for (title in listOf("横移返回手势", "预测性返回手势")) {
-            node("page:外观与主题").performScrollToNode(hasTestTag("settings-switch:$title"))
+            node("page:外观与主题").scrollToDescendant(hasTestTag("settings-switch:$title"))
             val toggle = node("settings-switch:$title").assertExists().assertIsEnabled()
             val wasOn = toggle.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] ==
                 androidx.compose.ui.state.ToggleableState.On
@@ -56,7 +56,7 @@ class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
             if (wasOn) toggle.assertIsOn() else toggle.assertIsOff()
         }
         if (android.os.Build.VERSION.SDK_INT < 33) {
-            node("page:外观与主题").performScrollToNode(hasTestTag("settings-switch:模糊效果"))
+            node("page:外观与主题").scrollToDescendant(hasTestTag("settings-switch:模糊效果"))
             node("settings-switch:模糊效果").assertIsDisplayed().assertIsNotEnabled().assertIsOff()
             node("settings-row:顶栏模糊样式").assertDoesNotExist()
         }

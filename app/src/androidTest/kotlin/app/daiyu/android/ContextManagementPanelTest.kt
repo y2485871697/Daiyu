@@ -67,18 +67,18 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
     fun testExactOwnerReadOnlyEvidenceAndArchivePageDispatchDoNotCompress() {
         val actions = Actions(); show(actions)
         node("context-current-message-0").assertDoesNotExist()
-        node("context-advanced").performScrollTo().performClick()
+        node("context-advanced").scrollToVisible().performClick()
         ui.onNodeWithText("精确会话 ID：exact-child-not-parent\n选择代次：31", substring = true).assertExists()
         mainThread { assertTrue(actions.events.isEmpty()) }
-        node("context-management").performScrollToNode(hasTestTag("context-current-message-0"))
+        node("context-management").scrollToDescendant(hasTestTag("context-current-message-0"))
         node("context-current-message-0").assertExists()
         ui.onNodeWithText("<script>do not execute tools", substring = true).assertExists()
         mainThread { assertTrue(actions.events.isEmpty()) }
-        node("context-management").performScrollToNode(hasTestTag("context-open-archive"))
+        node("context-management").scrollToDescendant(hasTestTag("context-open-archive"))
         node("context-open-archive").performClick()
-        node("context-management").performScrollToNode(hasTestTag("context-archive-message-0"))
+        node("context-management").scrollToDescendant(hasTestTag("context-archive-message-0"))
         node("context-archive-message-0").assertExists()
-        node("context-management").performScrollToNode(hasTestTag("context-archive-next"))
+        node("context-management").scrollToDescendant(hasTestTag("context-archive-next"))
         node("context-archive-next").performClick()
         mainThread { assertEquals(listOf("archive", "next"), actions.events) }
         assertEquals(0, fixture.opens.get())
@@ -86,18 +86,18 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
 
     fun testManualCompressionNeedsExplicitConfirmationAndShowsRealEndpointAndApiModel() {
         val actions = Actions(); show(actions)
-        node("context-compress").performScrollTo().performClick()
+        node("context-compress").scrollToVisible().performClick()
         node("context-compression-confirmation").assertExists()
         ui.onNodeWithText("本次收费目标 endpoint：https://summary.invalid/v1/responses\nAPI model：actual-api-model")
-            .performScrollTo().assertExists()
+            .scrollToVisible().assertExists()
         ui.onNodeWithText("opaque-model-uuid", substring = true).assertDoesNotExist()
         mainThread { assertEquals(listOf("request"), actions.events) }
-        node("context-dismiss-compress").performScrollTo().performClick()
+        node("context-dismiss-compress").scrollToVisible().performClick()
         node("context-confirm-compress").assertDoesNotExist()
-        node("context-compress").performScrollTo().performClick()
-        node("context-confirm-compress").performScrollTo().performClick()
-        node("context-compress").performScrollTo().assertIsNotEnabled()
-        node("context-cancel").performScrollTo().performClick()
+        node("context-compress").scrollToVisible().performClick()
+        node("context-confirm-compress").scrollToVisible().performClick()
+        node("context-compress").scrollToVisible().assertIsNotEnabled()
+        node("context-cancel").scrollToVisible().performClick()
         mainThread { assertEquals(listOf("request", "dismiss", "request", "confirm", "cancel"), actions.events) }
         assertEquals(0, fixture.opens.get())
     }
@@ -108,14 +108,14 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         actions.state.value = actions.state.value.copy(snapshot = original.copy(
             configuration = original.configuration!!.copy(contextWindowTokens = null)))
         show(actions)
-        node("context-compress").performScrollTo().assertIsNotEnabled()
+        node("context-compress").scrollToVisible().assertIsNotEnabled()
         mainThread { actions.state.value = actions.state.value.copy(snapshot = original,
             requiresRefresh = true, notice = "结果未确认；只刷新核对") }
-        node("context-compress").performScrollTo().assertIsNotEnabled()
-        node("context-advanced").performScrollTo().performClick()
-        node("context-management").performScrollToNode(hasTestTag("context-open-archive"))
+        node("context-compress").scrollToVisible().assertIsNotEnabled()
+        node("context-advanced").scrollToVisible().performClick()
+        node("context-management").scrollToDescendant(hasTestTag("context-open-archive"))
         node("context-open-archive").assertIsNotEnabled()
-        node("context-refresh").performScrollTo().performClick()
+        node("context-refresh").scrollToVisible().performClick()
         mainThread { assertEquals(listOf("refresh"), actions.events) }
         assertEquals(0, fixture.opens.get())
     }

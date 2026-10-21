@@ -40,7 +40,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         }
     }
     private fun revealLinux(tag: String): SemanticsNodeInteraction {
-        node("page:Linux 工具环境").performScrollToNode(hasTestTag(tag))
+        node("page:Linux 工具环境").scrollToDescendant(hasTestTag(tag))
         return node(tag)
     }
     fun testOriginalGroupsHaveNoTechnicalPreviewAndUnavailableToolsAreNotMarkedInstalled() {

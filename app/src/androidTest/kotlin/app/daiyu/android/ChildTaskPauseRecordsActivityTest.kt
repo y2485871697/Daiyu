@@ -23,7 +23,7 @@ class ChildTaskPauseRecordsActivityTest : WiredActivityTestCase() {
     private fun page() = node("page:${activity.getString(R.string.business_task_records)}")
     private fun button(action: String): SemanticsNodeInteraction {
         val tag = "child-task-$action:child"
-        page().performScrollToNode(hasTestTag(tag))
+        page().scrollToDescendant(hasTestTag(tag))
         return node(tag)
     }
     private fun awaitReads(reads: AtomicInteger, count: Int) {
@@ -35,7 +35,7 @@ class ChildTaskPauseRecordsActivityTest : WiredActivityTestCase() {
     }
     private fun awaitText(id: Int) {
         val text = activity.getString(id)
-        page().performScrollToNode(hasText(text))
+        page().scrollToDescendant(hasText(text))
         ui.onAllNodesWithText(text).onFirst().assertIsDisplayed()
     }
 
@@ -135,7 +135,7 @@ class ChildTaskPauseRecordsActivityTest : WiredActivityTestCase() {
             }
         }
         awaitReads(reads, 1)
-        page().performScrollToNode(hasTestTag("child-task:child"))
+        page().scrollToDescendant(hasTestTag("child-task:child"))
         node("child-task-resume:child").assertDoesNotExist()
         node("child-task-pause:child").assertDoesNotExist()
         ui.onAllNodesWithText(activity.getString(R.string.business_task_paused)).assertCountEquals(0)
@@ -156,7 +156,7 @@ class ChildTaskPauseRecordsActivityTest : WiredActivityTestCase() {
         }
         awaitReads(reads, 1)
         awaitText(R.string.business_task_live_load_failed)
-        page().performScrollToNode(hasTestTag("child-task:child"))
+        page().scrollToDescendant(hasTestTag("child-task:child"))
         ui.onNodeWithText("review").assertExists()
         node("child-task-resume:child").assertDoesNotExist()
         node("child-task-pause:child").assertDoesNotExist()

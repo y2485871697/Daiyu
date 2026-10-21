@@ -5,7 +5,7 @@ import androidx.compose.ui.test.*
 class InteractiveModeActivityTest : WiredActivityTestCase() {
     private fun openInteractiveEntry(): SemanticsNodeInteraction {
         ui.onNodeWithContentDescription("更多").performClick()
-        return node("chat-menu:INTERACTIVE_MODE").performScrollTo().assertIsDisplayed().assertIsEnabled()
+        return node("chat-menu:INTERACTIVE_MODE").scrollToVisible().assertIsDisplayed().assertIsEnabled()
     }
     fun testTopBarSavesExplicitChoiceAndRestoresAfterActivityRecreation() {
         mainThread { fixture.controller.interactiveMode.setEnabled(false) }

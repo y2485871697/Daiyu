@@ -39,10 +39,24 @@ class SourceTests(unittest.TestCase):
     def test_native_framebuffer_does_not_change_default_test_canvas(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         hook = workflow.split('          pre-emulator-launch-script: |', 1)[1].split('          disable-animations:', 1)[0]
-        self.assertIn("'hw.lcd.width': '1216'", hook)
-        self.assertIn("'hw.lcd.height': '2432'", hook)
-        self.assertIn("'hw.lcd.density': '160'", hook)
-        self.assertLess(hook.index('path.write_text('), hook.index('cp "$ANDROID_AVD_HOME/test.avd/config.ini"'))
+        self.assertIn('"hw.lcd.width":"1216"', hook)
+        self.assertIn('"hw.lcd.height":"2432"', hook)
+        self.assertIn('"hw.lcd.density":"160"', hook)
+        self.assertNotIn("<<", hook)  # This action executes each nonblank line in a separate shell.
+        self.assertLess(hook.index('p.write_text('), hook.index('cp "$ANDROID_AVD_HOME/test.avd/config.ini"'))
+        command = next(line.strip() for line in hook.splitlines() if line.strip().startswith('python3 -c '))
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / 'test.avd/config.ini'
+            config.parent.mkdir()
+            config.write_text('hw.lcd.width=320\nhw.lcd.width=640\nhw.lcd.height=640\nother=preserved\n')
+            result = subprocess.run(['sh', '-c', command], env=dict(os.environ, ANDROID_AVD_HOME=temporary),
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual = config.read_text()
+            self.assertEqual(actual.count('hw.lcd.width='), 1)
+            for entry in ('hw.lcd.width=1216', 'hw.lcd.height=2432', 'hw.lcd.density=160',
+                          'skin.name=1216x2432', 'skin.path=1216x2432', 'other=preserved'):
+                self.assertIn(entry + '\n', actual)
         self.assertNotIn('          resolution:', workflow)
         script = (ROOT / 'scripts/smoke_boot.sh').read_text()
         self.assertLess(script.index('verify_display_baseline before'), script.index('adb_stage install-app'))

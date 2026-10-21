@@ -160,9 +160,10 @@ class ControllerVideoSendingTest {
         val snapshot = adapter.history.capture(attempt.conversationId)
         val plan = adapter.preflight(snapshot, provider, permission, prepared) { false }
         var gate = false
-        val receipt = attempt.commit(db, snapshot, prepared, plan, "default", request.text, { false }) {
-            gate = true; assertEquals("PREPARING", phase())
-        }
+        val receipt = attempt.commit(db, snapshot, prepared, plan, "default", request.text,
+            cancelled = { false }, beforeSend = {
+                gate = true; assertEquals("PREPARING", phase())
+            })
         assertTrue(gate)
         assertEquals(VideoDraftOutcome.ACCEPTED, receipt.outcome)
         assertTrue(videoReceiptMatches(request, receipt))

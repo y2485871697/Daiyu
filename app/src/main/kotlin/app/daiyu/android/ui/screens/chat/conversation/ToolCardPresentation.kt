@@ -6,9 +6,9 @@ import org.json.JSONObject
 internal object ToolCardPresentations {
     val categories = setOf("memory", "skills", "delegation", "child_control", "workspace", "terminal", "background_job", "files", "image_read", "browser", "gui", "apps", "device_read", "personal_search", "system_action", "generation", "speech", "mcp", "context", "user_question", "generic")
     private val categoryTitles = mapOf(
-        "memory" to "记忆", "skills" to "技能", "delegation" to "子代理委派", "child_control" to "子任务控制",
-        "workspace" to "工作区", "terminal" to "终端", "background_job" to "后台任务", "files" to "文件",
-        "image_read" to "图片与视频读取", "browser" to "网页浏览器", "gui" to "手机屏幕与 GUI", "apps" to "应用",
+        "memory" to "记忆", "skills" to "Skills", "delegation" to "子代理委派与结果", "child_control" to "子任务控制",
+        "workspace" to "工作区", "terminal" to "终端命令", "background_job" to "后台与守护任务", "files" to "文件操作",
+        "image_read" to "图片与视频封面", "browser" to "网页浏览器", "gui" to "手机屏幕与 GUI", "apps" to "应用",
         "device_read" to "设备查询", "personal_search" to "个人数据检索", "system_action" to "系统动作",
         "generation" to "图片与视频生成", "speech" to "语音", "mcp" to "MCP 外部工具",
         "context" to "上下文与运行事件", "user_question" to "用户问答", "generic" to "未知工具回退",
@@ -21,33 +21,35 @@ internal object ToolCardPresentations {
         fun group(category: String, vararg entries: Pair<String, String>) { entries.forEach { (name, title) -> put(name, category to title) } }
         group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆")
         group("skills", "skills_list" to "查找技能", "skills_read" to "读取技能说明", "skills_read_resource" to "读取技能资源")
-        group("delegation", "run_child_models" to "批量委派子代理", "start_child_tasks" to "后台委派子任务")
+        group("delegation", "run_child_models" to "批量委派", "start_child_tasks" to "后台委派")
         group("child_control", "direct_child_task" to "指导子任务")
-        group("terminal", "terminal_pty_step" to "执行终端步骤", "terminal_pty_read" to "读取终端输出", "shizuku_execute" to "执行 Shizuku 命令")
-        group("background_job", "terminal_job_start" to "启动后台任务", "terminal_job_read" to "读取后台任务结果")
-        group("files", "list_files" to "列出文件", "file_metadata" to "读取文件信息", "read_text_file" to "读取文本文件")
+        group("terminal", "terminal_pty_step" to "执行终端步骤", "terminal_pty_read" to "读取输出", "shizuku_execute" to "执行命令")
+        group("background_job", "terminal_job_start" to "启动后台任务", "terminal_job_read" to "读取后台结果")
+        group("files", "list_files" to "列目录", "file_metadata" to "读取文件信息", "read_text_file" to "读取文件")
         group("browser", "browser_read" to "读取网页", "browser_write" to "操作网页")
         group("gui", "screen" to "查看屏幕", "screen_action" to "操作屏幕", "r08_virtual_display_step" to "执行虚拟显示步骤", "r08_virtual_display_read" to "读取虚拟显示状态")
         group("apps", "search_apps" to "查找应用")
-        group("device_read", "get_battery_status" to "查询电量", "device_status" to "查询设备状态", "network_status" to "查询网络状态", "device_time" to "查询时间", "device_audio" to "查询音频状态", "device_environment" to "查询设备环境", "platform_permissions" to "查询权限状态", "last_known_location" to "读取最近位置")
-        group("personal_search", "search_media" to "检索媒体元数据", "calendar_events" to "检索日历", "search_contacts" to "检索联系人", "app_notifications" to "读取本应用通知", "current_notifications" to "读取当前通知", "notification_history" to "检索通知历史")
-        group("system_action", "platform_set_alarm" to "设置闹钟", "platform_set_timer" to "设置计时器", "platform_set_volume" to "调节音量", "platform_media_key" to "媒体控制", "platform_set_wifi" to "切换 Wi-Fi")
+        group("device_read", "get_battery_status" to "查询电池", "device_status" to "查询设备状态", "network_status" to "查询网络", "device_time" to "查询时间", "device_audio" to "查询音频环境", "device_environment" to "查询设备环境", "platform_permissions" to "查询权限", "last_known_location" to "查询位置")
+        group("personal_search", "search_media" to "检索媒体元数据", "calendar_events" to "检索日历", "search_contacts" to "检索联系人", "app_notifications" to "读取本应用通知", "current_notifications" to "检索通知", "notification_history" to "检索通知历史")
+        group("system_action", "platform_set_alarm" to "设置闹钟", "platform_set_timer" to "设置计时器", "platform_set_volume" to "调整音量", "platform_media_key" to "控制媒体", "platform_set_wifi" to "切换 Wi-Fi")
         group("generation", "generate_images" to "生成图片", "generate_videos" to "生成视频")
-        group("context", "context_archive_page" to "读取历史档案", "context_usage" to "查询上下文用量")
+        group("context", "context_archive_page" to "读取历史档案", "context_usage" to "查询上下文")
         group("user_question", "ask_user" to "向用户提问")
     }
-    private val browserActions = mapOf("list_tabs" to "查看标签页", "get_readable" to "读取网页正文", "get_text" to "读取网页文本", "find_elements" to "查找网页元素", "get_page_info" to "读取页面信息", "get_backbone" to "读取页面结构", "screenshot" to "截取网页画面", "new_tab" to "新建标签页", "close_tab" to "关闭标签页", "navigate" to "打开网页", "click" to "点击网页元素", "type" to "输入网页内容", "hover" to "悬停网页元素", "scroll" to "滚动网页", "execute_js" to "执行网页脚本", "fetch" to "获取网页资源", "get_cookies" to "读取 Cookie", "set_cookies" to "设置 Cookie", "scroll_and_collect" to "滚动收集网页内容", "set_user_agent" to "设置浏览器标识", "set_viewport" to "设置网页视口", "wait_for_selector" to "等待网页元素", "wait_for_dom_stable" to "等待页面稳定", "reload" to "刷新网页", "go_back" to "网页后退", "go_forward" to "网页前进")
-    private val guiActions = mapOf("observe" to "查看屏幕", "screenshot" to "截取屏幕", "tap" to "点击屏幕", "long_press" to "长按屏幕", "scroll_forward" to "向前滚动", "scroll_backward" to "向后滚动", "input" to "输入屏幕内容", "back" to "返回", "home" to "返回主屏幕", "recents" to "查看最近任务", "notifications" to "打开通知栏")
+    private val browserActions = mapOf("list_tabs" to "查看标签页", "get_readable" to "读取正文", "get_text" to "读取正文", "find_elements" to "查找元素", "get_page_info" to "读取页面信息", "get_backbone" to "读取页面结构", "screenshot" to "网页截图", "new_tab" to "新建标签页", "close_tab" to "关闭标签页", "navigate" to "打开页面", "click" to "网页点击", "type" to "网页输入", "hover" to "悬停网页元素", "scroll" to "网页滚动", "execute_js" to "执行网页脚本", "fetch" to "获取网页资源", "get_cookies" to "读取 Cookie", "set_cookies" to "设置 Cookie", "scroll_and_collect" to "滚动收集网页内容", "set_user_agent" to "设置浏览器标识", "set_viewport" to "设置网页视口", "wait_for_selector" to "等待网页元素", "wait_for_dom_stable" to "等待页面稳定", "reload" to "刷新网页", "go_back" to "网页后退", "go_forward" to "网页前进")
+    private val guiActions = mapOf("observe" to "查看屏幕", "screenshot" to "手机截图", "tap" to "点击", "long_press" to "长按", "scroll_forward" to "滚动", "scroll_backward" to "滚动", "input" to "输入", "back" to "系统按键", "home" to "系统按键", "recents" to "系统按键", "notifications" to "系统按键")
 
     fun present(toolName: String, arguments: String, result: String?): Presentation {
         val args = parse(arguments)
-        var kind = tools[toolName] ?: if (toolName.matches(Regex("mcp_[0-7]_call"))) "mcp" to "调用外部工具" else "generic" to "执行其他工具"
+        var kind = tools[toolName] ?: if (toolName.matches(Regex("mcp_[0-7]_call"))) "mcp" to "调用 MCP 工具" else "generic" to "执行其他工具"
         val branch = when (toolName) {
             "browser_read", "browser_write" -> browserActions[args?.optString("action")]
             "screen", "screen_action" -> guiActions[args?.optString("operation")]
+            "search_media" -> if (args?.optString("kind") == "audio") "检索音乐" else "检索相册"
             "direct_child_task" -> mapOf("APPEND" to "追加子任务", "REPLACE" to "替换子任务", "REDISPATCH" to "失败后重新委派")[args?.optString("kind")]
             else -> null
         }
+        if (toolName == "search_media") kind = kind.first to requireNotNull(branch)
         if (toolName in setOf("browser_read", "browser_write", "screen", "screen_action", "direct_child_task")) {
             kind = if (branch == null) "generic" to "执行其他工具" else kind.first to branch
         }
@@ -122,7 +124,7 @@ internal object ToolCardPresentations {
         "unknown_after_process_restart" to "进程重启后状态未确认")
 
     private fun parse(source: String?): JSONObject? {
-        if (source == null || source.length > 32_768 || !source.trimStart().startsWith('{')) return null
+        if (source == null || source.length > 65_536 || !source.trimStart().startsWith('{')) return null
         return runCatching { JSONObject(source) }.getOrNull()
     }
     private fun numbers(value: JSONObject?, keys: List<String>): String = keys.mapNotNull { key ->

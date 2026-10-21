@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import java.net.URI
-import java.time.OffsetDateTime
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import org.json.JSONArray
@@ -85,6 +85,7 @@ internal object ToolRichDetails {
         var outputDocument = false
         val fields = mutableListOf<ToolFieldUi>()
         val returnedFields = mutableListOf<ToolFieldUi>()
+        val returnedTexts = mutableSetOf<String>()
         val docs = mutableListOf<ToolDisclosureUi>()
         val entries = mutableListOf<ToolRichEntryUi>()
         fun field(source: JSONObject?, key: String, label: String) {
@@ -99,8 +100,13 @@ internal object ToolRichDetails {
             if (value.isNotBlank()) {
                 if (source !== args) outputDocument = true
                 val text = scrub(value, hidden)
+                if (source !== args) {
+                    if (title in setOf("操作回执", "错误回执") && text in returnedTexts) return
+                    returnedTexts += text
+                }
                 val aliases = when (title) {
                     "技能说明" -> setOf("技能说明")
+                    "记忆正文", "记忆内容" -> setOf("记忆正文", "记忆内容")
                     "文件内容", "读取内容" -> setOf("文件内容", "读取内容")
                     "网页正文", "页面文本", "页面内容" -> setOf("网页正文", "页面文本", "页面内容")
                     "标准输出", "已收到输出" -> setOf("标准输出", "已收到输出")
@@ -121,7 +127,7 @@ internal object ToolRichDetails {
                         .mapNotNull { (name, label) -> (row.opt(name) as? String)?.takeIf { it.isNotBlank() }
                             ?.let { ToolDisclosureUi(label, scrub(it, hidden)) } }
                     val heading = if (private) null else clean(if (title == "Cookie属性") row.opt("name") else row.opt("name") ?: row.opt("title"), 100)
-                    entries += ToolRichEntryUi(heading ?: "$title ${index + 1}",
+                    if (heading != null || cells.isNotEmpty() || documents.isNotEmpty()) entries += ToolRichEntryUi(heading ?: "$title ${index + 1}",
                         cells.filterNot { it.label in setOf("名称", "标题") && it.value == heading },
                         documents.distinctBy { it.text }.filterNot { doc -> cells.any { it.value == doc.text } }, title)
                 } else if (title != "Cookie属性") clean(row)?.let { entries += ToolRichEntryUi("$title ${index + 1}", emptyList(), listOf(ToolDisclosureUi("条目", it)), title) }
@@ -144,15 +150,15 @@ internal object ToolRichDetails {
             }
             "skills" -> {
                 document(args, "query", "技能查询")
-                field(args, "skill_id", "技能"); field(args, "skillId", "技能"); field(args, "relative_path", "资源"); field(args, "relativePath", "资源")
+                field(args, "id", "技能"); field(args, "skill_id", "技能"); field(args, "skillId", "技能"); field(args, "relative_path", "资源"); field(args, "relativePath", "资源")
                 fields(args, "source" to "来源", "repository" to "仓库", "ref" to "固定引用", "commit" to "固定提交")
-                documents(args, "path" to "技能路径", "resource" to "技能资源")
+                documents(args, "path" to "资源", "resource" to "资源")
                 fields(output, "source" to "来源", "repository" to "仓库", "commitSha" to "固定提交")
                 list(output, "compatibility", "兼容检查", listOf("name" to "条件", "status" to "状态", "required" to "必需"))
                 list(output, "capabilities", "技能能力", listOf("name" to "能力", "supported" to "支持"))
                 field(output, "id", "技能"); field(output, "name", "名称"); field(output, "revision", "固定版本")
                 list(output, "skills", "技能", identityColumns + listOf("source" to "来源", "enabled" to "已启用"))
-                document(output, "bodyMarkdown", "技能说明"); document(output, "body", "技能说明"); document(output, "content", "资源内容", true)
+                document(output, "bodyMarkdown", "技能说明"); document(output, "body", "技能说明"); document(output, "content", if (toolName == "skills_read") "技能说明" else "资源内容", toolName != "skills_read")
             }
             "terminal", "background_job" -> {
                 field(args, "environment", "环境"); field(args, "identity", "身份")
@@ -329,11 +335,11 @@ internal object ToolRichDetails {
             "no_cached_location" -> "没有可用的最近位置缓存"
             "unsupported" -> "设备不支持本次操作"
             "unavailable" -> "本次读取不可用"
-            else -> "本次调用未完成，详情见技术详情"
+            else -> if (cookies || encodedScreenshot || category == "user_question") "本次调用未完成" else "本次调用未完成，详情见技术详情"
         }
         val technical = if (cookies || encodedScreenshot || category == "user_question") emptyList() else buildList {
             if (arguments.isNotBlank()) add(ToolDisclosureUi("调用参数", if (args == null) scrub(arguments, hidden) else scrub(sanitizedJson(args, 0).toString(2), hidden), true))
-            if (!result.isNullOrBlank()) add(ToolDisclosureUi("调用回执", if (privacyRestricted) failure else if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden), true))
+            if (!result.isNullOrBlank()) add(ToolDisclosureUi("原始回执", if (privacyRestricted) failure else if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden), true))
         }
         val compact = category in setOf("device_read", "system_action", "terminal", "background_job")
         val receipt = docs.firstOrNull { it.title in setOf("操作回执", "错误回执") }?.text
@@ -364,6 +370,9 @@ internal object ToolRichDetails {
                     .distinct().joinToString("\n", transform = ::readable).ifBlank {
                         if (entries.isNotEmpty() || outputDocument) "" else "已收到设备快照，详情见技术详情"
                     }
+                cookies -> "未返回可展示的 Cookie 属性"
+                category in setOf("files", "workspace", "gui", "mcp", "image_read", "speech") && returnedFields.isNotEmpty() ->
+                    returnedFields.distinct().joinToString("\n", transform = ::readable)
                 else -> "已收到回执，详情见技术详情"
             }
             body.takeIf { it.isNotBlank() }?.let { ToolDisclosureUi("", it) }
@@ -388,7 +397,7 @@ internal object ToolRichDetails {
     }
 
     private fun formatDeviceTime(value: String, timezone: String?): String {
-        val parsed = runCatching { OffsetDateTime.parse(value) }.getOrNull()
+        val parsed = runCatching { ZonedDateTime.parse(value).toOffsetDateTime() }.getOrNull()
         val date = parsed?.format(DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss", Locale.ROOT)) ?: value
         val offset = parsed?.offset?.id?.let { if (it == "Z") "UTC" else "UTC$it" }
         return listOf(date, listOfNotNull(timezone, offset).joinToString(" · ")).filter { it.isNotBlank() }.joinToString("\n")
@@ -421,15 +430,26 @@ internal object ToolRichDetails {
             result.put(key, when {
                 secretKey.containsMatchIn(key) -> "[已隐藏]"
                 value is JSONObject -> sanitizedJson(value, depth + 1)
-                value is JSONArray -> JSONArray().apply { repeat(minOf(value.length(), 32)) { index ->
-                    val row = value.opt(index)
-                    put(if (row is JSONObject) sanitizedJson(row, depth + 1) else if (row is String) scrub(row) else if (row is Number || row is Boolean) row else "[结构已省略]")
-                } }
+                value is JSONArray -> sanitizedArray(value, depth + 1)
                 value is String -> scrub(value)
                 else -> value
             })
         }
         return result
+    }
+    private fun sanitizedArray(source: JSONArray, depth: Int): JSONArray {
+        if (depth > 6) return JSONArray().put("层级已截断")
+        return JSONArray().apply { repeat(minOf(source.length(), 32)) { index ->
+            val value = source.opt(index)
+            put(when (value) {
+                null, JSONObject.NULL -> JSONObject.NULL
+                is JSONObject -> sanitizedJson(value, depth + 1)
+                is JSONArray -> sanitizedArray(value, depth + 1)
+                is String -> scrub(value)
+                is Number, is Boolean -> value
+                else -> "[结构已省略]"
+            })
+        } }
     }
     private fun json(value: String?): JSONObject? = value?.takeIf { it.length <= MAX_INPUT && it.trimStart().startsWith('{') }
         ?.let { runCatching { JSONObject(it) }.getOrNull() }

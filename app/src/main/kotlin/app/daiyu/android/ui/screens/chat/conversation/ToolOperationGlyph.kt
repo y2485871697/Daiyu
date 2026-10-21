@@ -45,7 +45,7 @@ internal fun toolOperationGlyph(toolName: String, arguments: String): String {
             "input" -> "keyboard"; "back", "home", "recents", "notifications" -> "systemKey"
             else -> "generic"
         }
-        "r08_virtual_display_step" -> "tap"
+        "r08_virtual_display_step" -> "device"
         "r08_virtual_display_read" -> "screen"
         "search_apps" -> "appSearch"
         "get_battery_status" -> "battery"
@@ -56,7 +56,7 @@ internal fun toolOperationGlyph(toolName: String, arguments: String): String {
         "device_environment" -> "device"
         "platform_permissions" -> "lock"
         "last_known_location" -> "pin"
-        "search_media" -> "album"
+        "search_media" -> if (args?.optString("kind") == "audio") "music" else "album"
         "calendar_events" -> "calendar"
         "search_contacts" -> "contacts"
         "app_notifications", "current_notifications" -> "bell"

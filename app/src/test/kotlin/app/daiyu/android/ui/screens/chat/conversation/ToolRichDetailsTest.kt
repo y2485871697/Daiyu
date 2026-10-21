@@ -18,7 +18,7 @@ class ToolRichDetailsTest {
             """{"ok":true,"data":{"local_iso":"2026-04-18T21:22:00+08:00","timezone":"Asia/Shanghai","epoch_ms":1}}""")
         assertEquals("2026-04-18 21:22:00\nAsia/Shanghai · UTC+08:00", time.prose!!.text)
         assertFalse(time.prose!!.text.contains("epoch_ms"))
-        assertTrue(time.technical.any { it.title == "调用回执" && it.text.contains("epoch_ms") })
+        assertTrue(time.technical.any { it.title == "原始回执" && it.text.contains("epoch_ms") })
         val location = ToolRichDetails.project("device_read", "last_known_location", "{}",
             """{"ok":true,"data":{"latitude":31.2,"longitude":121.4,"accuracy_m":20,"age_ms":6000}}""")
         assertEquals("31.2, 121.4\n精度 20m · 6 秒前", location.prose!!.text)
@@ -204,12 +204,12 @@ class ToolRichDetailsTest {
         assertTrue(unknown.documents.any { it.text.contains("new_value") })
     }
     @Test fun hiddenMetadataStillHasAnExplicitReadableReceipt() {
-        for ((category, payload) in listOf("memory" to """{"revision":"r1"}""",
-            "files" to """{"data":{"scope":"complete"}}""")) {
+        for ((category, payload, expected) in listOf(Triple("memory", """{"revision":"r1"}""", "已收到回执，详情见技术详情"),
+            Triple("files", """{"data":{"scope":"complete"}}""", "读取范围：complete"))) {
             val value = ToolRichDetails.project(category, "fixture", "{}", payload)
-            assertEquals("已收到回执，详情见技术详情", value.prose!!.text)
+            assertEquals(expected, value.prose!!.text)
             assertFalse(value.documents.any { it.title == "已记录返回" })
-            assertTrue(value.technical.any { it.title == "调用回执" })
+            assertTrue(value.technical.any { it.title == "原始回执" })
         }
     }
     @Test fun failedOuterAndInnerReceiptsRestrictCategoryBodiesButKeepDiagnostics() {
@@ -260,4 +260,60 @@ class ToolRichDetailsTest {
     @Test fun documentDebugStringNeverContainsContent() {
         assertFalse(ToolDisclosureUi("正文", "PRIVATE_CONTENT").toString().contains("PRIVATE_CONTENT"))
     }
+    @Test fun productionZonedTimeKeepsHtmlTwoLineLayoutForLiveAndHistoricalReceipts() {
+        val value = ToolRichDetails.project("device_read", "device_time", "{}",
+            """{"ok":true,"data":{"local_iso":"2026-10-21T15:36:32.861853+08:00[Asia/Shanghai]","timezone":"Asia/Shanghai","utc_offset_seconds":28800}}""")
+        assertEquals("2026-10-21 15:36:32\nAsia/Shanghai · UTC+08:00", value.prose!!.text)
+        assertEquals("{}", value.technical.single { it.title == "调用参数" }.text)
+        assertTrue(value.technical.single { it.title == "原始回执" }.text.contains("861853"))
+        assertEquals(2, value.prose!!.text.lines().size)
+    }
+
+    @Test fun allOrdinaryCategoriesPreserveNonEmptyArgumentsAndExplicitEmptyObjects() {
+        val arguments = """{"path":"/workspace/report.txt","limit":4,"enabled":false,"options":{"count":2},"items":[1,true,null]}"""
+        for (category in ToolCardPresentations.categories - "user_question") {
+            val rich = ToolRichDetails.project(category, "fixture", arguments, """{"ok":true}""")
+            val actual = org.json.JSONObject(rich.technical.single { it.title == "调用参数" }.text)
+            assertEquals(category, "/workspace/report.txt", actual.getString("path"))
+            assertEquals(4, actual.getInt("limit"))
+            assertFalse(actual.getBoolean("enabled"))
+            assertEquals(2, actual.getJSONObject("options").getInt("count"))
+            assertTrue(actual.getJSONArray("items").isNull(2))
+            assertEquals("{}", ToolRichDetails.project(category, "fixture", "{}", null)
+                .technical.single { it.title == "调用参数" }.text)
+        }
+        val memory = ToolRichDetails.project("memory", "assistant_memory_read", "{}",
+            """{"text":"same body","content":"same body"}""")
+        assertEquals(1, memory.documents.count { it.text == "same body" })
+    }
+
+    @Test fun technicalArgumentsKeepNestedArrayTypesWhileHidingSecrets() {
+        val args = """{"enabled":false,"count":0,"items":[null,3,true,["text",{"token":"CUSTOM_SECRET","safe":"ok"}]]}"""
+        val rich = ToolRichDetails.project("generic", "future_tool", args, null)
+        val document = rich.technical.single { it.title == "调用参数" }
+        val parsed = org.json.JSONObject(document.text)
+        assertFalse(parsed.getBoolean("enabled"))
+        assertEquals(0, parsed.getInt("count"))
+        val items = parsed.getJSONArray("items")
+        assertTrue(items.isNull(0))
+        assertEquals(3, items.getInt(1))
+        assertTrue(items.getBoolean(2))
+        assertEquals("text", items.getJSONArray(3).getString(0))
+        assertEquals("ok", items.getJSONArray(3).getJSONObject(1).getString("safe"))
+        assertFalse(document.text.contains("CUSTOM_SECRET"))
+    }
+
+    @Test fun emptyRowsAndDuplicateReceiptMessagesDoNotCreateExtraBodyGroups() {
+        val empty = ToolRichDetails.project("files", "list_files", "{}", """{"entries":[{}]}""")
+        assertTrue(empty.entries.isEmpty())
+        assertNotNull(empty.prose)
+        val receipt = ToolRichDetails.project("files", "read_text_file", "{}", """{"text":"same body","message":"same body"}""")
+        assertEquals(1, receipt.documents.count { it.text == "same body" })
+        val cookie = ToolRichDetails.project("browser", "browser_write", """{"action":"get_cookies"}""", """{"cookies":[]}""")
+        assertTrue(cookie.technical.isEmpty())
+        assertEquals("未返回可展示的 Cookie 属性", cookie.prose!!.text)
+        val failed = ToolRichDetails.project("browser", "browser_write", """{"action":"get_cookies"}""", """{"ok":false}""")
+        assertEquals("本次调用未完成", failed.prose!!.text)
+    }
+
 }

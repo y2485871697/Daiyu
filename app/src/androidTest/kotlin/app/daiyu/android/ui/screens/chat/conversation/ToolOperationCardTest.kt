@@ -46,16 +46,16 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
             if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
-            ui.onNodeWithText("读取终端输出").scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithText("读取输出").scrollToVisible().assertIsDisplayed().performClick()
             ui.onNodeWithText("原始等待状态").assertDoesNotExist()
-            ui.onNodeWithTag("tool-runtime").scrollToVisible().performClick()
-            ui.onNodeWithText("原始等待状态").assertIsDisplayed()
+            ui.onNodeWithTag("tool-runtime").assertDoesNotExist()
             ui.onNodeWithText("secret-output", substring = true).assertIsDisplayed()
             ui.onNodeWithText("技术详情").scrollToVisible().assertIsDisplayed().performClick()
-            ui.onNodeWithText("收起技术详情").scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithText("收起技术详情").assertDoesNotExist()
+            ui.onNodeWithTag("tool-step-technical:card-call").scrollToVisible().performClick()
             ui.onNodeWithContentDescription("复制安全摘要").assertDoesNotExist()
-            ui.onNodeWithContentDescription("重试 读取终端输出").assertDoesNotExist()
-            ui.onNodeWithText("读取终端输出").scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithContentDescription("重试 读取输出").assertDoesNotExist()
+            ui.onNodeWithText("读取输出").scrollToVisible().assertIsDisplayed().performClick()
             assertEquals(0, executions)
             ui.onNodeWithText("final answer").assertIsDisplayed()
         }
@@ -113,7 +113,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("调用参数").assertDoesNotExist()
             ui.onNodeWithText("技术详情").scrollToVisible().performClick()
             ui.onNodeWithText("调用参数").scrollToVisible().assertIsDisplayed()
-            ui.onNodeWithText("调用回执").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("原始回执").scrollToVisible().assertIsDisplayed()
         }
         assertEquals(0, executions)
     }
@@ -169,7 +169,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             } }
             ui.waitForIdle()
             if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
-            ui.onNodeWithText("读取终端输出").scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithText("读取输出").scrollToVisible().assertIsDisplayed().performClick()
             ui.onAllNodesWithText("trusted-host-slot").assertCountEquals(1)
             ui.onNodeWithText(body).assertDoesNotExist()
             val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
@@ -178,7 +178,12 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             assertTrue(layouts.single().lineCount <= 3)
             ui.onNodeWithTag("tool-document:标准输出").performClick()
             ui.onNodeWithText(body).assertExists()
-            ui.onNodeWithTag("tool-output-copy").performClick()
+            ui.onNodeWithText("读取输出 · 输出").assertExists()
+            ui.onNodeWithTag("tool-output-meta").assertTextContains("1 行")
+            ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assert(
+                SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsActions.OnClick))
+            ui.onNodeWithTag("tool-output-close").assertHasClickAction()
+            ui.onNodeWithTag("tool-output-copy").assertHasClickAction().performClick()
             ui.onNodeWithText("已复制").assertExists()
             mainThread {
                 val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -320,7 +325,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
     fun testSameCategoryAndMixedToolChainsUseCategoryDrivenTitles() {
         for ((names, heading) in listOf(
             listOf("device_time", "network_status") to "设备查询",
-            listOf("terminal_pty_read", "terminal_pty_read") to "终端",
+            listOf("terminal_pty_read", "terminal_pty_read") to "终端命令",
             listOf("device_time", "terminal_pty_read", "future_tool") to "工具链")) {
             val key = names.joinToString("-")
             val message = Message(MessageId(key), ConversationId("conversation"), RunId("run"), Message.ASSISTANT_ROLE,

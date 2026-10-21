@@ -41,11 +41,10 @@ class ToolOperationCardTest : WiredActivityTestCase() {
     }
     fun testBothProductionPathsRenderCallOnceAndDisclosureNeverRetries() {
         var executions = 0
-        var copies = 0
         for (mixed in listOf(false, true)) {
             val turn = ChatTurnMapper.map(listOf(source(mixed)), toolState = { _, _ -> WorkStepState.FAILED }).single() as ChatTurnUi.Assistant
-            show(turn, ChatScreenActions(onRetryStep = { executions++ }, onCopyToolSummary = { copies++ }))
-            if (!mixed) ui.onNodeWithText("工作过程").performClick()
+            show(turn, ChatScreenActions(onRetryStep = { executions++ }))
+            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
             ui.onNodeWithText("读取终端输出").scrollToVisible().assertIsDisplayed().performClick()
             ui.onNodeWithText("原始等待状态").assertDoesNotExist()
@@ -54,8 +53,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("secret-output", substring = true).assertIsDisplayed()
             ui.onNodeWithText("技术详情").scrollToVisible().assertIsDisplayed().performClick()
             ui.onNodeWithText("收起技术详情").scrollToVisible().assertIsDisplayed().performClick()
-            ui.onNodeWithContentDescription("复制安全摘要").scrollToVisible().assertIsDisplayed().performClick()
-            assertEquals(if (mixed) 2 else 1, copies)
+            ui.onNodeWithContentDescription("复制安全摘要").assertDoesNotExist()
             ui.onNodeWithContentDescription("重试 读取终端输出").assertDoesNotExist()
             ui.onNodeWithText("读取终端输出").scrollToVisible().assertIsDisplayed().performClick()
             assertEquals(0, executions)
@@ -106,9 +104,9 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             })
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
-            if (!mixed) ui.onNodeWithText("工作过程").performClick()
+            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
             ui.onNodeWithText(if (device) "查询时间" else "切换 Wi-Fi").scrollToVisible().performClick()
-            ui.onNodeWithText(if (device) "2026-04-18T21:22:00+08:00 · Asia/Shanghai" else "系统已记录请求").assertIsDisplayed()
+            ui.onNodeWithText(if (device) "2026-04-18 21:22:00\nAsia/Shanghai · UTC+08:00" else "系统已记录请求").assertIsDisplayed()
             ui.onNodeWithText("时间戳").assertDoesNotExist()
             ui.onNodeWithText("请求启用").assertDoesNotExist()
             ui.onNodeWithText("已记录返回").assertDoesNotExist()
@@ -133,12 +131,12 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
-            for (tag in listOf("tool-document:命令", "tool-output-preview:标准输出")) {
+            for (tag in listOf("tool-document:命令", "tool-document:标准输出")) {
                 val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
                 ui.onNodeWithTag(tag, useUnmergedTree = true).performSemanticsAction(
                     androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
                 assertEquals(androidx.compose.ui.text.font.FontFamily.Monospace, layouts.single().layoutInput.style.fontFamily)
-                assertEquals(8.5.sp, layouts.single().layoutInput.style.fontSize)
+                assertEquals(13.sp, layouts.single().layoutInput.style.fontSize)
             }
             val pixels = captureScreenNode(ui.onNodeWithTag("tool-document:命令", useUnmergedTree = true)).toPixelMap()
             val actual = pixels[pixels.width / 2, (pixels.height * .15f).toInt()]
@@ -146,9 +144,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             assertEquals(expected.red, actual.red, .025f)
             assertEquals(expected.green, actual.green, .025f)
             assertEquals(expected.blue, actual.blue, .025f)
-            ui.onNodeWithTag("tool-document:标准输出").performClick()
-            ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals("hello")
-            ui.onNodeWithTag("tool-output-close").performClick()
+            ui.onNodeWithTag("tool-output-hint:标准输出").assertDoesNotExist()
+            ui.onNodeWithTag("tool-document:标准输出", useUnmergedTree = true).assertTextEquals("hello")
             ui.onNodeWithText("运行回执").assertDoesNotExist()
         }
     }
@@ -171,7 +168,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
-            if (!mixed) ui.onNodeWithText("工作过程").performClick()
+            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
             ui.onNodeWithText("读取终端输出").scrollToVisible().assertIsDisplayed().performClick()
             ui.onAllNodesWithText("trusted-host-slot").assertCountEquals(1)
             ui.onNodeWithText(body).assertDoesNotExist()
@@ -190,6 +187,41 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-output-close").performClick()
             ui.onNodeWithText(body).assertDoesNotExist()
             assertEquals(0, executions)
+        }
+    }
+
+    fun testRestrictedReceiptsNeverComposeAssetsOrControlsInEitherProductionPath() {
+        var hostCompositions = 0
+        for (mixed in listOf(false, true)) for (private in listOf(false, true)) {
+            val key = "restricted-$mixed-$private"
+            val state = if (private) "\"privacy_redacted\":true" else "\"ok\":false"
+            val payload = "{\"data\":{" + state + ",\"text\":\"RESTRICTED_PAYLOAD\"}}"
+            val original = source(mixed, key)
+            val message = original.copy(blocks = original.blocks.map { block ->
+                if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = "read_text_file"), result = payload) else block
+            })
+            val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        AssistantTurn(turn, ChatScreenActions(), toolContent = {
+                            hostCompositions++
+                            top.yukonga.miuix.kmp.basic.Text("restricted-host-content")
+                        })
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+            ui.onNodeWithTag("tool-step-header:card-call$key").scrollToVisible().performClick()
+            ui.onNodeWithText(if (private) "结果未获展示授权" else "本次调用未完成，详情见技术详情").assertIsDisplayed()
+            ui.onNodeWithText("restricted-host-content").assertDoesNotExist()
+            ui.onNodeWithText("RESTRICTED_PAYLOAD", substring = true).assertDoesNotExist()
+            if (private) {
+                ui.onNodeWithTag("tool-step-technical:card-call$key").scrollToVisible().performClick()
+                ui.onNodeWithText("RESTRICTED_PAYLOAD", substring = true).assertDoesNotExist()
+            }
+            assertEquals(0, hostCompositions)
         }
     }
 
@@ -215,10 +247,67 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.waitForIdle()
             ui.onAllNodesWithText("Dedicated question").assertCountEquals(1)
             ui.onNodeWithText("Dedicated question").assertIsDisplayed()
-            ui.onNodeWithText("工作过程").assertDoesNotExist()
+            ui.onNodeWithTag("work-process-header").assertDoesNotExist()
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(0)
             show(turn, ChatScreenActions())
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
+        }
+    }
+
+    fun testPublicListShowsFirstResultsAndPrivateListRemainsExplicit() {
+        for (category in listOf("files", "personal_search")) {
+            val result = "{\"items\":[" + (1..5).joinToString { "{\"name\":\"file$it\",\"content\":\"body$it\"}" } + "]}"
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        ToolCategoryContent(category, ToolCategoryDetails.project(category, "{}", result))
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            if (category == "files") {
+                ui.onNodeWithText("body1").assertIsDisplayed()
+                ui.onNodeWithText("body4").assertDoesNotExist()
+                ui.onNodeWithText("查看其余 2 项").scrollToVisible().performClick()
+                ui.onNodeWithText("body4").scrollToVisible().assertIsDisplayed()
+            } else {
+                ui.onNodeWithText("body1").assertDoesNotExist()
+                ui.onNodeWithTag("tool-entries").performClick()
+                ui.onNodeWithText("body1").assertIsDisplayed()
+            }
+        }
+    }
+    fun testPrivacyWithheldHidesAllCategoryDataAndUnknownCategoryIsNotBlank() {
+        for (category in listOf("files", "apps", "browser", "personal_search", "future_category")) {
+            val payload = if (category == "future_category") """{"new_result":"unknown visible receipt"}"""
+                else """{"privacy_redacted":true,"status":"private_result_withheld","data":{"text":"PRIVATE_BODY","items":[{"content":"PRIVATE_ITEM"}]}}"""
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ToolCategoryContent(category, ToolCategoryDetails.project(category, "{}", payload))
+                }
+            } }
+            ui.waitForIdle()
+            if (category == "future_category") ui.onNodeWithText("unknown visible receipt", substring = true).assertExists()
+            else {
+                ui.onNodeWithText("结果未获展示授权").assertIsDisplayed()
+                ui.onNodeWithText("PRIVATE_BODY", substring = true).assertDoesNotExist()
+                ui.onNodeWithText("PRIVATE_ITEM", substring = true).assertDoesNotExist()
+            }
+        }
+    }
+    fun testSameCategoryAndMixedToolChainsUseCategoryDrivenTitles() {
+        for ((names, heading) in listOf(
+            listOf("device_time", "network_status") to "设备查询",
+            listOf("terminal_pty_read", "terminal_pty_read") to "终端",
+            listOf("device_time", "terminal_pty_read", "future_tool") to "工具链")) {
+            val key = names.joinToString("-")
+            val message = Message(MessageId(key), ConversationId("conversation"), RunId("run"), Message.ASSISTANT_ROLE,
+                names.mapIndexed { index, name -> MessageBlock.Tool(ToolInvocation(ToolCallId("chain-$index"), name, "{}"), "unique receipt $index") }, RunStatus.COMPLETED)
+            val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
+            show(turn, ChatScreenActions())
+            ui.onNodeWithText(heading).assertIsDisplayed()
+            ui.onNodeWithTag("work-process-header").performClick()
+            names.indices.forEach { ui.onAllNodesWithTag("tool-step:chain-$it").assertCountEquals(1) }
         }
     }
 

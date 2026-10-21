@@ -314,7 +314,7 @@ internal fun AssistantTurn(
 
 @Composable
 private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, toolContent: @Composable (WorkStepUi) -> Unit) {
-    turn.workProcess?.let { WorkProcessCard(it, turn.listKey, actions.onCopyToolSummary, toolContent = toolContent) }
+    turn.workProcess?.let { WorkProcessCard(it, turn.listKey, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
         ParsedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText))
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {

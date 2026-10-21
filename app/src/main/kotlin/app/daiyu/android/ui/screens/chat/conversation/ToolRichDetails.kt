@@ -1,6 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import java.net.URI
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -19,6 +22,7 @@ data class ToolRichDetailsUi(
     val operation: String = "调用详情",
     val technical: List<ToolDisclosureUi> = emptyList(),
     val prose: ToolDisclosureUi? = null,
+    val bodyRestricted: Boolean = false,
 )
 
 /** A bounded, read-only projection. No URI resolving, asset loading or execution lives here. */
@@ -80,14 +84,31 @@ internal object ToolRichDetails {
         }
         var outputDocument = false
         val fields = mutableListOf<ToolFieldUi>()
+        val returnedFields = mutableListOf<ToolFieldUi>()
         val docs = mutableListOf<ToolDisclosureUi>()
         val entries = mutableListOf<ToolRichEntryUi>()
-        fun field(source: JSONObject?, key: String, label: String) { clean(source?.opt(key))?.let { fields += ToolFieldUi(label, it) } }
+        fun field(source: JSONObject?, key: String, label: String) {
+            clean(source?.opt(key))?.let {
+                val value = ToolFieldUi(label, it)
+                fields += value
+                if (source !== args) returnedFields += value
+            }
+        }
         fun document(source: JSONObject?, key: String, title: String, code: Boolean = false) {
             val value = source?.opt(key) as? String ?: return
             if (value.isNotBlank()) {
                 if (source !== args) outputDocument = true
-                docs += ToolDisclosureUi(title, scrub(value, hidden), code)
+                val text = scrub(value, hidden)
+                val aliases = when (title) {
+                    "技能说明" -> setOf("技能说明")
+                    "文件内容", "读取内容" -> setOf("文件内容", "读取内容")
+                    "网页正文", "页面文本", "页面内容" -> setOf("网页正文", "页面文本", "页面内容")
+                    "标准输出", "已收到输出" -> setOf("标准输出", "已收到输出")
+                    "任务日志", "守护日志" -> setOf("任务日志", "守护日志")
+                    "已保留片段" -> setOf("已保留片段")
+                    else -> setOf(title)
+                }
+                if (docs.none { it.title in aliases && it.text == text }) docs += ToolDisclosureUi(title, text, code)
             }
         }
         fun list(source: JSONObject?, key: String, title: String, columns: List<Pair<String, String>>, private: Boolean = false) {
@@ -100,7 +121,9 @@ internal object ToolRichDetails {
                         .mapNotNull { (name, label) -> (row.opt(name) as? String)?.takeIf { it.isNotBlank() }
                             ?.let { ToolDisclosureUi(label, scrub(it, hidden)) } }
                     val heading = if (private) null else clean(if (title == "Cookie属性") row.opt("name") else row.opt("name") ?: row.opt("title"), 100)
-                    entries += ToolRichEntryUi(heading ?: "$title ${index + 1}", cells, documents, title)
+                    entries += ToolRichEntryUi(heading ?: "$title ${index + 1}",
+                        cells.filterNot { it.label in setOf("名称", "标题") && it.value == heading },
+                        documents.distinctBy { it.text }.filterNot { doc -> cells.any { it.value == doc.text } }, title)
                 } else if (title != "Cookie属性") clean(row)?.let { entries += ToolRichEntryUi("$title ${index + 1}", emptyList(), listOf(ToolDisclosureUi("条目", it)), title) }
             }
             if (rows.length() > 32) fields += ToolFieldUi("列表范围", "显示前32项 / 共${rows.length()}项")
@@ -212,6 +235,21 @@ internal object ToolRichDetails {
                 fields(output, "temperature" to "温度", "accuracy" to "位置精度米", "age_ms" to "位置年龄毫秒", "total_bytes" to "总字节", "available_bytes" to "可用字节", "used_bytes" to "已用字节", "memory_total" to "总内存", "memory_available" to "可用内存", "volume" to "音量", "do_not_disturb" to "勿扰", "ringer_mode" to "铃声模式")
                 list(output, "processes", "进程快照", listOf("name" to "进程", "rss_bytes" to "RSS字节", "package_name" to "应用"))
                 list(output, "permissions", "权限状态", listOf("name" to "权限", "permission" to "权限", "granted" to "已授予"))
+                fields(output, "percent" to "电量百分比", "internet_capability" to "可访问互联网", "density_dpi" to "屏幕密度", "orientation" to "屏幕方向", "uptime_ms" to "开机时长毫秒")
+                val battery = output?.optJSONObject("battery")?.takeIf { it.opt("ok") == true }
+                fields(battery, "percent" to "电量百分比", "charging" to "充电")
+                val android = output?.optJSONObject("android")
+                fields(android, "api_level" to "API", "release" to "Android版本")
+                for ((key, prefix) in listOf("memory" to "内存", "storage" to "存储")) {
+                    val sample = output?.optJSONObject(key) ?: continue
+                    if (sample.opt("ok") == false) fields += ToolFieldUi(prefix, "本次采样不可用")
+                    else fields(sample, "total_bytes" to "${prefix}总字节", "available_bytes" to "${prefix}可用字节", "low_memory" to "低内存")
+                }
+                for ((key, label) in listOf("wifi" to "Wi-Fi", "bluetooth" to "蓝牙")) {
+                    val sample = output?.optJSONObject(key) ?: continue
+                    val enabled = sample.optJSONObject("data")?.opt("enabled") as? Boolean
+                    fields += ToolFieldUi(label, if (sample.opt("ok") == true && enabled != null) { if (enabled) "已启用" else "已关闭" } else "本次采样不可用")
+                }
                 listOf("charging" to "充电", "battery_percent" to "电量百分比", "network_type" to "网络", "validated" to "网络已验证", "locked" to "已锁屏", "timezone" to "时区", "datetime" to "快照时间", "android_version" to "Android版本", "sdk" to "API").forEach { (key, label) -> field(output, key, label) }
             }
             "system_action" -> {
@@ -220,6 +258,7 @@ internal object ToolRichDetails {
                 document(args, "label", "标签"); document(args, "repeat_days", "重复计划")
                 if (args?.has("text") == true) fields += ToolFieldUi("文本长度", args.optString("text").length.toString())
                 field(output, "enabled", "返回启用值"); field(output, "percent", "返回百分比")
+                fields(output, "stream" to "返回通道", "index" to "返回音量", "read_back" to "回读确认")
             }
             "generation", "image_read", "speech" -> {
                 if (category == "image_read") {
@@ -272,48 +311,62 @@ internal object ToolRichDetails {
         }
         if (!cookies && category != "user_question") {
             if (!outputDocument && entries.isEmpty() && result != null && result.isNotBlank() &&
-                !(category in setOf("terminal", "background_job") && output != null)) {
+                (output == null || category !in ToolCardPresentations.categories || category == "generic")) {
                 val cleaned = if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden)
                 docs += ToolDisclosureUi(if (category in setOf("terminal", "background_job")) "操作回执" else "已记录返回", cleaned, category in setOf("files", "workspace", "mcp", "generic"))
             }
         }
+        val receiptStates = listOfNotNull(envelope, envelope?.optJSONObject("data")).distinct()
+        val privacyRestricted = receiptStates.any {
+            it.opt("privacy_redacted") == true || it.optString("status") in setOf("private_result_withheld", "private_result_consent_required")
+        }
+        val failureStatus = receiptStates.map { it.optString("status") }.firstOrNull {
+            it in setOf("permission_denied", "unsupported", "unavailable", "no_cached_location")
+        }
+        val failed = privacyRestricted || failureStatus != null || receiptStates.any { it.opt("ok") == false }
+        val failure = if (privacyRestricted) "结果未获展示授权" else when (failureStatus) {
+            "permission_denied" -> "缺少本次操作所需权限"
+            "no_cached_location" -> "没有可用的最近位置缓存"
+            "unsupported" -> "设备不支持本次操作"
+            "unavailable" -> "本次读取不可用"
+            else -> "本次调用未完成，详情见技术详情"
+        }
         val technical = if (cookies || encodedScreenshot || category == "user_question") emptyList() else buildList {
             if (arguments.isNotBlank()) add(ToolDisclosureUi("调用参数", if (args == null) scrub(arguments, hidden) else scrub(sanitizedJson(args, 0).toString(2), hidden), true))
-            if (!result.isNullOrBlank()) add(ToolDisclosureUi("调用回执", if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden), true))
+            if (!result.isNullOrBlank()) add(ToolDisclosureUi("调用回执", if (privacyRestricted) failure else if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden), true))
         }
         val compact = category in setOf("device_read", "system_action", "terminal", "background_job")
-        val prose = if (compact) {
-            val receipt = docs.firstOrNull { it.title in setOf("操作回执", "错误回执") }?.text
-            val failed = envelope?.opt("ok") == false || envelope?.opt("privacy_redacted") == true
-            val failure = when (envelope?.optString("status")) {
-                "permission_denied" -> "缺少本次操作所需权限"
-                "private_result_withheld", "private_result_consent_required" -> "结果未获展示授权"
-                "no_cached_location" -> "没有可用的最近位置缓存"
-                "unsupported" -> "设备不支持本次操作"
-                "unavailable" -> "本次读取不可用"
-                else -> "本次调用未完成，详情见技术详情"
-            }
+        val receipt = docs.firstOrNull { it.title in setOf("操作回执", "错误回执") }?.text
+        val prose = if (compact || failed || (!outputDocument && entries.isEmpty() && docs.none { it.title == "已记录返回" })) {
             val time = clean(output?.opt("local_iso"))
             val latitude = (output?.opt("latitude") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() in -90.0..90.0 }?.let { clean(it) }
             val longitude = (output?.opt("longitude") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() in -180.0..180.0 }?.let { clean(it) }
+            fun readable(field: ToolFieldUi): String = "${field.label}：" + when (field.value) { "true" -> "是"; "false" -> "否"; else -> field.value }
             val body = when {
                 result.isNullOrBlank() -> "等待执行回执"
                 failed -> failure
                 receipt != null -> receipt
-                category == "device_read" && time != null -> listOfNotNull(time, clean(output?.opt("timezone"))).joinToString(" · ")
+                category == "device_read" && time != null -> formatDeviceTime(time, clean(output?.opt("timezone")))
                 category == "device_read" && latitude != null && longitude != null -> {
-                    listOfNotNull("最近位置：$latitude, $longitude",
-                        (output?.opt("accuracy_m") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() >= 0 }?.let { "精度 ${clean(it)}米" },
-                        (output?.opt("age_ms") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() >= 0 }?.let { "样本距读取时 ${clean(it)}毫秒" }).joinToString(" · ")
+                    val metadata = listOfNotNull(
+                        (output?.opt("accuracy_m") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() >= 0 }?.let { "精度 ${clean(it)}m" },
+                        (output?.opt("age_ms") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() >= 0 }?.let {
+                            val seconds = it.toLong() / 1000
+                            if (seconds >= 60) "${seconds / 60} 分钟前" else "$seconds 秒前"
+                        }).joinToString(" · ")
+                    listOf("$latitude, $longitude", metadata).filter { it.isNotBlank() }.joinToString("\n")
                 }
                 output == null -> scrub(result, hidden)
-                category == "system_action" -> "已收到系统回执，详情见技术详情"
+                category == "system_action" -> returnedFields.distinct().joinToString("\n", transform = ::readable)
+                    .ifBlank { if (output.opt("accepted") == true) "请求已受理，结果未确认" else "已收到系统回执，详情见技术详情" }
                 category in setOf("terminal", "background_job") -> "已收到运行回执，未返回输出"
-                else -> fields.filter { it.label in setOf("电量百分比", "充电", "网络", "网络已验证", "Android版本", "设备型号") }
-                    .take(3).joinToString(" · ") { "${it.label}：${it.value}" }
-                    .ifBlank { "已收到设备快照，详情见技术详情" }
+                category == "device_read" -> fields.filterNot { it.label in setOf("命名空间", "设置键", "读取上限", "快照时间", "时间戳", "本地时间", "位置年龄毫秒") }
+                    .distinct().joinToString("\n", transform = ::readable).ifBlank {
+                        if (entries.isNotEmpty() || outputDocument) "" else "已收到设备快照，详情见技术详情"
+                    }
+                else -> "已收到回执，详情见技术详情"
             }
-            ToolDisclosureUi("", body)
+            body.takeIf { it.isNotBlank() }?.let { ToolDisclosureUi("", it) }
         } else null
         val source = when (category) {
             "context" -> "上下文与用量记录 · 未报告字段不按0处理"
@@ -324,11 +377,21 @@ internal object ToolRichDetails {
         }
         val personal = category == "personal_search"
         fun privateText(text: String): String = if (personal) maskPersonal(text) else text
+        if (privacyRestricted) return ToolRichDetailsUi(source = source, operation = operation,
+            technical = technical.map { it.copy(text = privateText(it.text)) },
+            prose = ToolDisclosureUi("", failure), bodyRestricted = true)
         return ToolRichDetailsUi((if (cookies) fields.filter { it.label in setOf("动作", "标签") } else fields).distinct().map { it.copy(value = privateText(it.value)) },
             (if (cookies) entries.filter { it.group == "Cookie属性" } else entries).map { entry -> entry.copy(fields = entry.fields.map { it.copy(value = privateText(it.value)) },
                 documents = entry.documents.map { it.copy(text = privateText(it.text)) }) },
             (if (cookies) emptyList() else docs).distinctBy { it.title to it.text }.map { it.copy(text = privateText(it.text)) }, source, operation,
-            technical.map { it.copy(text = privateText(it.text)) }, prose)
+            technical.map { it.copy(text = privateText(it.text)) }, prose?.let { it.copy(text = privateText(it.text)) }, failed)
+    }
+
+    private fun formatDeviceTime(value: String, timezone: String?): String {
+        val parsed = runCatching { OffsetDateTime.parse(value) }.getOrNull()
+        val date = parsed?.format(DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss", Locale.ROOT)) ?: value
+        val offset = parsed?.offset?.id?.let { if (it == "Z") "UTC" else "UTC$it" }
+        return listOf(date, listOfNotNull(timezone, offset).joinToString(" · ")).filter { it.isNotBlank() }.joinToString("\n")
     }
 
     private fun maskPersonal(value: String): String = value

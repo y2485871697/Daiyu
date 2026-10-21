@@ -5,6 +5,17 @@ import org.json.JSONObject
 /** Display taxonomy, not a registry or an execution permission. */
 internal object ToolCardPresentations {
     val categories = setOf("memory", "skills", "delegation", "child_control", "workspace", "terminal", "background_job", "files", "image_read", "browser", "gui", "apps", "device_read", "personal_search", "system_action", "generation", "speech", "mcp", "context", "user_question", "generic")
+    private val categoryTitles = mapOf(
+        "memory" to "记忆", "skills" to "技能", "delegation" to "子代理委派", "child_control" to "子任务控制",
+        "workspace" to "工作区", "terminal" to "终端", "background_job" to "后台任务", "files" to "文件",
+        "image_read" to "图片与视频读取", "browser" to "网页浏览器", "gui" to "手机屏幕与 GUI", "apps" to "应用",
+        "device_read" to "设备查询", "personal_search" to "个人数据检索", "system_action" to "系统动作",
+        "generation" to "图片与视频生成", "speech" to "语音", "mcp" to "MCP 外部工具",
+        "context" to "上下文与运行事件", "user_question" to "用户问答", "generic" to "未知工具回退",
+    )
+    fun processTitle(categories: List<String>): String =
+        categories.distinct().singleOrNull()?.let(categoryTitles::get) ?: "工具链"
+
     data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi)
     private val tools = buildMap {
         fun group(category: String, vararg entries: Pair<String, String>) { entries.forEach { (name, title) -> put(name, category to title) } }
@@ -94,22 +105,6 @@ internal object ToolCardPresentations {
         } else kind.second
         return Presentation(kind.first, title, summary, sections, ToolCategoryDetails.project(kind.first, arguments, result, toolName))
     }
-    fun copySummary(turns: List<ChatTurnUi>, requested: WorkStepUi): String? {
-        if (requested.owner == null) return null
-        val current = turns.filterIsInstance<ChatTurnUi.Assistant>().asSequence().flatMap { turn ->
-            if (turn.content.isNotEmpty()) turn.content.filterIsInstance<MessageContentUi.Tool>().map { it.step }.asSequence()
-            else turn.workProcess?.segments.orEmpty().flatMap { it.steps }.asSequence()
-        }.firstOrNull { it.owner == requested.owner && it.toolCallId == requested.toolCallId && it.toolName == requested.toolName }
-            ?: return null
-        val category = current.categoryDetails
-        val typed = category?.let { detail -> listOf(detail.heading) +
-            detail.fields.map { "${it.label}：${it.value}" } + detail.items.flatMap { item ->
-                listOf(item.title) + item.fields.map { "${it.label}：${it.value}" }
-            } }.orEmpty()
-        return (listOf(current.name, current.detail) + typed + current.sections.map { "${it.title}：${it.text}" })
-            .joinToString("\n").take(4096)
-    }
-
     private fun arrayCount(value: JSONObject?, key: String, label: String): String =
         value?.optJSONArray(key)?.let { "$label：${it.length()}" }.orEmpty()
 

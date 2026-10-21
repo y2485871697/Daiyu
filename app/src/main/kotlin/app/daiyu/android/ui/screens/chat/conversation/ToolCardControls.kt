@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,7 +40,7 @@ internal fun ToolMediaSurface(step: WorkStepUi, thumbnail: Bitmap?, video: Boole
     assetKey: String?, onPreview: (() -> Unit)? = null, onAction: (ToolCardActionRequest) -> Unit) {
     val action = if (video) ToolCardAction.PLAY_VIDEO else ToolCardAction.OPEN_IMAGE
     Column(Modifier.fillMaxWidth().testTag("tool-media-surface:${step.toolCallId}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.fillMaxWidth().heightIn(max = 140.dp).clip(RoundedCornerShape(10.dp))
+        Box(Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 140.dp).clip(RoundedCornerShape(10.dp))
             .background(MiuixTheme.colorScheme.surfaceVariant)
             .conversationClickable(role = Role.Button, onClickLabel = if (onPreview != null) "预览图片" else action.label) {
                 if (onPreview != null) onPreview() else onAction(step.actionRequest(action, assetKey))
@@ -53,7 +54,7 @@ internal fun ToolMediaSurface(step: WorkStepUi, thumbnail: Bitmap?, video: Boole
                 .padding(8.dp).clip(RoundedCornerShape(4.dp)).background(MiuixTheme.colorScheme.surface).padding(4.dp),
                 style = MiuixTheme.textStyles.footnote1)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             listOf(action, ToolCardAction.SAVE_MEDIA).forEach { item ->
                 ToolMiniAction(text = item.label, modifier = Modifier.testTag("tool-action:${item.name}"),
                     onClick = { onAction(step.actionRequest(item, assetKey)) })
@@ -70,8 +71,8 @@ internal fun ToolAudioControls(step: WorkStepUi, position: Float = 0f, durationM
         .padding(10.dp).testTag("tool-audio:${step.toolCallId}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(if (playing) DaiyuIcons.Pause else DaiyuIcons.Resume, if (playing) "暂停" else "播放",
-                Modifier.size(44.dp).conversationClickable(role = Role.Button) { onAction(step.actionRequest(if (playing) ToolCardAction.PAUSE_AUDIO else ToolCardAction.PLAY_AUDIO)) }
-                    .padding(10.dp), tint = MiuixTheme.colorScheme.primary)
+                Modifier.size(48.dp).conversationClickable(role = Role.Button) { onAction(step.actionRequest(if (playing) ToolCardAction.PAUSE_AUDIO else ToolCardAction.PLAY_AUDIO)) }
+                    .padding(12.dp), tint = MiuixTheme.colorScheme.primary)
             Text(if (durationMs == null) "--:-- / --:--" else "${mediaTime((durationMs * position).toLong())} / ${mediaTime(durationMs)}",
                 style = MiuixTheme.textStyles.footnote1)
         }
@@ -86,9 +87,9 @@ internal fun ToolAudioControls(step: WorkStepUi, position: Float = 0f, durationM
 
 @Composable
 internal fun ToolMiniAction(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
-    Box(modifier.heightIn(min = 27.dp).conversationClickable(enabled = enabled, onClick = onClick)
-        .padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
-        Text(text, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 13.6.sp),
+    Box(modifier.widthIn(min = 48.dp).heightIn(min = 48.dp).conversationClickable(enabled = enabled, onClick = onClick)
+        .padding(horizontal = 10.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(text, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 20.sp),
             color = conversationColors().accent.copy(alpha = if (enabled) 1f else .4f))
     }
 }

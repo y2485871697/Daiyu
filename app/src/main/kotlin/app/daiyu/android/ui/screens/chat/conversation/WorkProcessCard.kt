@@ -30,7 +30,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
@@ -38,35 +37,37 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.daiyu.android.ui.haptics.TouchHaptics
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, onCopy: ((WorkStepUi) -> Unit)? = null, modifier: Modifier = Modifier, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     var expanded by rememberSaveable(ownerKey) { mutableStateOf(false) }
     val colors = conversationColors()
-    val stepCount = work.segments.sumOf { it.steps.size }
+    val steps = work.segments.flatMap { it.steps }
+    val stepCount = steps.size
+    val category = steps.map { it.category }.distinct().singleOrNull()
+    val title = ToolCardPresentations.processTitle(steps.map { it.category })
     val shape = RoundedCornerShape(14.dp)
     Column(modifier.fillMaxWidth().clip(shape).background(colors.surface).drawWithContent {
         drawContent()
         drawLine(if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF),
             Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), 1.dp.toPx())
     }.border(1.dp, colors.line, shape).testTag("work-process-surface")) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 35.dp).conversationClickable { expanded = !expanded }
+        Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 48.dp).conversationClickable { expanded = !expanded }
             .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
             .padding(horizontal = 11.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Icon(ToolOperationIcons.category(work.segments.flatMap { it.steps }.map { it.category }.distinct().singleOrNull()),
-                null, Modifier.size(16.dp), tint = colors.accent)
-            Text("工作过程", color = colors.text,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-            Text("$stepCount 步 · ${work.summary}", Modifier.weight(1f),
-                color = colors.muted, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 12.sp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(ToolOperationIcons.category(category),
+                null, Modifier.size(22.dp).testTag("work-process-icon"), tint = colors.accent)
+            Text(title, Modifier.weight(1f), color = colors.text,
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("$stepCount 项 · ${work.summary}", Modifier.widthIn(max = 140.dp),
+                color = colors.muted, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
-                if (expanded) "收起工作过程" else "展开工作过程", Modifier.size(10.dp), tint = colors.muted)
+                if (expanded) "收起$title" else "展开$title", Modifier.size(16.dp), tint = colors.muted)
         }
         AnimatedVisibility(expanded) {
             Column {
@@ -77,16 +78,16 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, onCopy: ((Wo
                             val narrationConnector = work.segments.take(segmentIndex).any { it.steps.isNotEmpty() } &&
                                 work.segments.drop(segmentIndex).any { it.steps.isNotEmpty() }
                             Text(segment.narration, Modifier.fillMaxWidth().drawBehind {
-                                if (narrationConnector) drawLine(colors.line, Offset(4.dp.toPx(), 0f),
-                                    Offset(4.dp.toPx(), size.height + 5.dp.toPx()), 1.dp.toPx())
-                            }.padding(start = if (narrationConnector) 18.dp else 0.dp), color = colors.muted,
-                                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 18.sp))
+                                if (narrationConnector) drawLine(colors.line, Offset(6.dp.toPx(), 0f),
+                                    Offset(6.dp.toPx(), size.height + 5.dp.toPx()), 1.dp.toPx())
+                            }.padding(start = if (narrationConnector) 22.dp else 0.dp), color = colors.muted,
+                                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
                         }
                         segment.steps.forEachIndexed { index, step ->
                             key(ownerKey, step.owner, step.toolCallId) {
                                 val laterStep = index < segment.steps.lastIndex ||
                                     work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() }
-                                WorkStepRow(step, onCopy, showConnector = laterStep, toolContent = toolContent)
+                                WorkStepRow(step, showConnector = laterStep, toolContent = toolContent)
                             }
                         }
                     }
@@ -98,9 +99,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, onCopy: ((Wo
 
 /** A single compact timeline row shared by work summaries and ordered mixed content. */
 @Composable
-internal fun WorkStepRow(step: WorkStepUi, onCopy: ((WorkStepUi) -> Unit)? = null, showConnector: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val colors = conversationColors()
-    val view = LocalView.current
     var expanded by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
     var technical by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
     val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
@@ -120,56 +120,53 @@ internal fun WorkStepRow(step: WorkStepUi, onCopy: ((WorkStepUi) -> Unit)? = nul
     Row(Modifier.fillMaxWidth().testTag("tool-step:${step.toolCallId}").drawBehind {
         // Draw against the measured row, including its expanded body, rather than a fixed-height stub.
         if (showConnector) drawLine(colors.line,
-            Offset(4.dp.toPx(), 23.dp.toPx()), Offset(4.dp.toPx(), size.height + 5.dp.toPx()), 1.dp.toPx())
-    }, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-        Box(Modifier.padding(top = 14.dp).width(11.dp), contentAlignment = Alignment.TopStart) {
+            Offset(6.dp.toPx(), 30.dp.toPx()), Offset(6.dp.toPx(), size.height + 5.dp.toPx()), 1.dp.toPx())
+    }, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.padding(top = 18.dp).width(14.dp), contentAlignment = Alignment.TopStart) {
             val ring = running && step.state != WorkStepState.OK && step.state != WorkStepState.FAILED
-            Box(Modifier.size(9.dp).clip(CircleShape).then(
+            Box(Modifier.size(12.dp).clip(CircleShape).then(
                 if (ring) Modifier.border(2.dp, tint, CircleShape) else Modifier.background(tint)),
                 contentAlignment = Alignment.Center) {
-                if (step.state == WorkStepState.OK) Icon(DaiyuIcons.Check, null, Modifier.size(7.dp), tint = Color.White)
+                if (step.state == WorkStepState.OK) Icon(DaiyuIcons.Check, null, Modifier.size(10.dp), tint = Color.White)
                 else if (step.state == WorkStepState.FAILED) Text("!", color = Color.White,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 7.sp, lineHeight = 9.sp))
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 12.sp))
             }
         }
         Column(Modifier.weight(1f)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 37.dp).conversationClickable { expanded = !expanded }
+            Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").heightIn(min = 48.dp).conversationClickable { expanded = !expanded }
                 .semantics { stateDescription = "$stateLabel · ${if (expanded) "已展开" else "已折叠"}" }
                 .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Icon(ToolOperationIcons.operation(step.operationGlyph), null, Modifier.size(14.dp), tint = colors.accent)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(ToolOperationIcons.operation(step.operationGlyph), null, Modifier.size(20.dp).testTag("tool-operation-icon:${step.toolCallId}"), tint = colors.accent)
                 Text(step.name, Modifier.weight(1f), color = colors.text,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(stateLabel, color = tint, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 12.sp), maxLines = 1)
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(stateLabel, Modifier.widthIn(max = 88.dp), color = tint,
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp),
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
-                    if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(10.dp), tint = colors.muted)
+                    if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(16.dp), tint = colors.muted)
             }
             if (step.activity in setOf(ToolActivityUi.STOPPING, ToolActivityUi.STOPPED, ToolActivityUi.INTERRUPTED) &&
                 step.state in setOf(WorkStepState.PENDING, WorkStepState.UNKNOWN)) Text("工具回执未确认 · 不重放", color = colors.muted,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 13.sp))
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp))
             AnimatedVisibility(expanded) {
                 Column(Modifier.padding(bottom = 8.dp).then(
                     if (step.categoryDetails != null) Modifier.testTag("tool-category:${step.category}") else Modifier
                 ), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     step.categoryDetails?.let { ToolCategoryContent(step.category, it) }
-                    toolContent(step)
+                    if (step.categoryDetails?.rich?.bodyRestricted != true) toolContent(step)
                     if (step.categoryDetails == null) {
                         step.sections.forEach { section -> ToolDetailSection(section, step.category in setOf("terminal", "background_job", "files")) }
                     }
                     val inspect = step.categoryDetails?.rich?.technical.orEmpty()
                     if (inspect.isNotEmpty()) {
-                        Text(if (technical) "收起技术详情" else "技术详情", Modifier.heightIn(min = 22.dp)
+                        Text(if (technical) "收起技术详情" else "技术详情", Modifier.fillMaxWidth().testTag("tool-step-technical:${step.toolCallId}").heightIn(min = 48.dp)
                             .conversationClickable { technical = !technical }.padding(vertical = 3.dp),
-                            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 7.5.sp, lineHeight = 12.sp), color = colors.muted)
+                            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp), color = colors.muted)
                         if (technical) inspect.forEach { ToolDocument(it) }
                     }
-                    onCopy?.let { copy ->
-                        ConversationIconButton(onClick = { TouchHaptics.click(view); copy(step) }) {
-                            Icon(DaiyuIcons.Copy, "复制安全摘要", Modifier.size(13.dp), tint = colors.muted)
-                        }
-                    }
-                    if (step.sections.isEmpty() && step.detail.isNotBlank()) ToolDetailSection(ToolDetailSectionUi("详情", step.detail), false)
+                    if (step.categoryDetails == null && step.sections.isEmpty() && step.detail.isNotBlank()) ToolDetailSection(ToolDetailSectionUi("详情", step.detail), false)
                 }
             }
         }

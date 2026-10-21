@@ -68,7 +68,9 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     override fun setUp() {super.setUp();application=instrumentation.targetContext.applicationContext as ChatApplication;main {original=application.controller}}
     override fun tearDown() {
         try {
-            main {activity?.finish();application.controller=original};instrumentation.waitForIdleSync()
+            finishExistingMainActivities()
+            activity=null
+            main {application.controller=original}
             fixtures.forEach {f ->
                 f.c.close();f.db.close();f.db.runtimeLockFile.delete()
                 f.app.deleteDatabase("conversations.db");f.app.deleteDatabase("questions.db")
@@ -99,8 +101,9 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         await(f,"recovery ready") {f.c.ready};assertNull(f.c.problem);return f
     }
     private fun launch(f:Fixture,conversation:Conversation?=null) {
+        finishExistingMainActivities()
         main {application.controller=f.c}
-        activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        activity=startMain()
         instrumentation.waitForIdleSync()
         if(conversation!=null) main {checkNotNull(activity).select(conversation)}
     }

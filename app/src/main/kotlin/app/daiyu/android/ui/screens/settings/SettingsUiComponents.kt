@@ -24,7 +24,9 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +37,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import top.yukonga.miuix.kmp.basic.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -48,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -174,15 +180,31 @@ internal fun SettingsTextField(
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var secretVisible by remember(password) { mutableStateOf(false) }
+    var editorValue by remember { mutableStateOf(TextFieldValue(value)) }
+    val focusRequester = remember { FocusRequester() }
+    var fieldFocused by remember { mutableStateOf(false) }
+    var restoreFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(secretVisible) {
+        if (restoreFocus) {
+            restoreFocus = false
+            if (enabled && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) focusRequester.requestFocus()
+        }
+    }
     if (password) DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) secretVisible = false
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                restoreFocus = false
+                secretVisible = false
+            }
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
     val toggleSecret: () -> Unit = {
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) secretVisible = !secretVisible
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            restoreFocus = fieldFocused
+            secretVisible = !secretVisible
+        }
     }
     val labelContent: @Composable () -> Unit = {
         Text(label, style = if (compact) MiuixTheme.textStyles.body2.copy(fontSize = 12.sp, lineHeight = 16.sp) else MiuixTheme.textStyles.body2,
@@ -203,30 +225,37 @@ internal fun SettingsTextField(
         }
     }
     val field: @Composable () -> Unit = {
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            enabled = enabled,
-            singleLine = !multiline,
-            minLines = if (multiline) 4 else 1,
-            maxLines = if (multiline) 8 else 1,
-            textStyle = MiuixTheme.textStyles.body1.copy(color = MiuixTheme.colorScheme.onSurface),
-            cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
-            visualTransformation = if (password && !secretVisible) PasswordVisualTransformation() else VisualTransformation.None,
-            keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
-            modifier = Modifier.testTag(tag).fillMaxWidth()
-                .then(if (embedded) Modifier.padding(vertical = 12.dp) else Modifier)
-                .then(if (compact) Modifier else Modifier.clip(RoundedCornerShape(12.dp))
-                    .background(MiuixTheme.colorScheme.surfaceVariant).padding(14.dp))
-                .semantics { contentDescription = label },
-            decorationBox = { editor ->
-                Box(contentAlignment = Alignment.CenterStart) {
-                    if (value.isEmpty()) Text(hint.ifEmpty { if (embedded) label else "" }, style = MiuixTheme.textStyles.body1,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    editor()
-                }
-            },
-        )
+        // Compose 1.9.0 retains the previous Password semantics when this node is reused.
+        key(password && !secretVisible) {
+            BasicTextField(
+                value = if (editorValue.text == value) editorValue else editorValue.copy(text = value, composition = null),
+                onValueChange = { updated ->
+                    editorValue = updated
+                    if (updated.text != value) onValueChange(updated.text)
+                },
+                enabled = enabled,
+                singleLine = !multiline,
+                minLines = if (multiline) 4 else 1,
+                maxLines = if (multiline) 8 else 1,
+                textStyle = MiuixTheme.textStyles.body1.copy(color = MiuixTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                visualTransformation = if (password && !secretVisible) PasswordVisualTransformation() else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
+                modifier = Modifier.testTag(tag).fillMaxWidth()
+                    .focusRequester(focusRequester).onFocusChanged { fieldFocused = it.isFocused }
+                    .then(if (embedded) Modifier.padding(vertical = 12.dp) else Modifier)
+                    .then(if (compact) Modifier else Modifier.clip(RoundedCornerShape(12.dp))
+                        .background(MiuixTheme.colorScheme.surfaceVariant).padding(14.dp))
+                    .semantics { contentDescription = label },
+                decorationBox = { editor ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (value.isEmpty()) Text(hint.ifEmpty { if (embedded) label else "" }, style = MiuixTheme.textStyles.body1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        editor()
+                    }
+                },
+            )
+        }
     }
     if (compact) {
         Row(Modifier.testTag("$tag-container").fillMaxWidth()

@@ -75,7 +75,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         return node(tag).assertIsDisplayed()
     }
     private fun assertFill(tag: String, expected: Color) {
-        val pixels = captureScreenNode(node(tag)).toPixelMap()
+        val pixels = node(tag).captureToImage().toPixelMap()
         for (x in listOf(pixels.width / 6, pixels.width * 5 / 6)) {
             val actual = pixels[x, pixels.height / 2]
             assertEquals("$tag red", expected.red, actual.red, .025f)

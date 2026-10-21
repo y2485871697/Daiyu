@@ -2,6 +2,9 @@ package app.daiyu.android.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -57,14 +60,14 @@ fun MiuixDialogActions(
         confirmEnabled
     }
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TextButton(
             text = cancelText ?: stringResource(R.string.action_cancel),
             onClick = { cancelClick() },
             enabled = cancelEnabled,
-            modifier = Modifier.testTag("dialog-cancel").weight(1f).semantics {
+            modifier = Modifier.testTag("dialog-cancel").weight(1f).fillMaxHeight().semantics {
                 semanticsClick { cancelClick() }
             },
         )
@@ -72,7 +75,7 @@ fun MiuixDialogActions(
             text = confirmText,
             onClick = { confirmClick() },
             enabled = confirmEnabled,
-            modifier = Modifier.testTag("dialog-confirm").weight(1f).semantics {
+            modifier = Modifier.testTag("dialog-confirm").weight(1f).fillMaxHeight().semantics {
                 semanticsClick { confirmClick() }
             },
             colors = if (destructive) {

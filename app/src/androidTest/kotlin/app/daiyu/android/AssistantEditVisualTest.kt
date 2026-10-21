@@ -203,11 +203,11 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             val pageRange = tagged("assistant-editor").fetchSemanticsNode()
                 .config[SemanticsProperties.VerticalScrollAxisRange]
             val beforePage = pageRange.value()
-            val before = field.captureToImage().toPixelMap()
+            val before = captureScreenNode(field).toPixelMap()
             field.performTouchInput { swipe(Offset(centerX, height * .75f), Offset(centerX, height * .25f), 350) }
-            ui.waitForIdle()
+            awaitVisualIdle()
             assertEquals(beforePage, pageRange.value(), 1f)
-            val after = field.captureToImage().toPixelMap()
+            val after = captureScreenNode(field).toPixelMap()
             var changed = 0
             for (y in 0 until minOf(before.height, after.height)) for (x in 0 until minOf(before.width, after.width)) {
                 if (before[x, y] != after[x, y]) changed++
@@ -215,7 +215,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             assertTrue("Text must scroll inside $tag", changed > before.width)
             repeat(5) {
                 field.performTouchInput { swipeDown(durationMillis = 100) }
-                ui.waitForIdle()
+                awaitVisualIdle()
                 assertEquals(beforePage, pageRange.value(), 1f)
             }
         }
@@ -225,7 +225,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             .config[SemanticsProperties.VerticalScrollAxisRange]
         val before = range.value()
         tagged("assistant-skills").performTouchInput { swipeDown(durationMillis = 350) }
-        ui.waitForIdle()
+        awaitVisualIdle()
         assertTrue(range.value() < before)
         assertEquals(0, writes.get())
         assertEquals(0, saved.get())
@@ -242,7 +242,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
         assertEquals("擅长整理资料", profile.description)
         assertEquals("Original prompt", profile.prompt)
         mainThread { activity.setContent { Box(Modifier) {} } }
-        ui.waitForIdle()
+        awaitVisualIdle()
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -270,8 +270,9 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                     }
                 }
             }
+            awaitUniqueTag("tinted-input")
             val field = tagged("tinted-input").assertHeightIsEqualTo(48.dp)
-            val pixels = field.captureToImage().toPixelMap()
+            val pixels = captureScreenNode(field).toPixelMap()
             val actual = pixels[pixels.width / 2, pixels.height / 2]
             val expected = fill.compositeOver(background)
             assertEquals(expected.red, actual.red, .01f)
@@ -295,7 +296,8 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                     }
                 }
             }
-            val pixels = tagged("assistant-section-legend:Skills").captureToImage().toPixelMap()
+            awaitUniqueTag("assistant-section-legend:Skills")
+            val pixels = captureScreenNode(tagged("assistant-section-legend:Skills")).toPixelMap()
             // The legend's horizontal padding must show its real parent, not a white mask.
             for (x in listOf(1, pixels.width - 2)) {
                 val pixel = pixels[x, 1]

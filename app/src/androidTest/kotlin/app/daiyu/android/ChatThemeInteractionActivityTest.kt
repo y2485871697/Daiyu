@@ -68,11 +68,13 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
                     }
                 }
             } }
-            ui.waitForIdle()
+            awaitVisualIdle()
             for (tag in listOf("plain-click", "material-click", "miuix-click"))
                 node(tag).performTouchInput { click(center) }
             node("open-dialog").performClick()
+            awaitUniqueTag("close-dialog")
             node("close-dialog").assertIsDisplayed().performClick()
+            awaitVisualIdle()
             ui.runOnIdle { assertEquals(listOf("plain", "material", "miuix"), events) }
         }
     }
@@ -103,7 +105,7 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
                     }
                 }
             } }
-            ui.waitForIdle()
+            awaitVisualIdle()
         }
     }
 
@@ -127,24 +129,31 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
                 }
             }
         } }
-        ui.waitForIdle()
+        awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertDoesNotExist()
         node("child-action").assertIsDisplayed().performClick()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠")).performClick()
+        awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertIsDisplayed()
         ui.onNodeWithText("第二项详情").assertDoesNotExist()
         ui.runOnIdle { first = first.copy(status = "已暂停") }
+        awaitVisualIdle()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
         ui.runOnIdle { reversed = true }
+        awaitVisualIdle()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
         node("tool-child-summary:two").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
         node("tool-child-summary:two").performClick()
+        awaitVisualIdle()
         node("tool-child-summary:one").performClick()
+        awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertDoesNotExist()
         ui.onNodeWithText("第二项详情").assertIsDisplayed()
         node("tool-child-summary:one").performClick()
+        awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertIsDisplayed()
         ui.runOnIdle { first = first.copy(owner = first.owner.copy(taskGroupId = "replacement")) }
+        awaitVisualIdle()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
         ui.runOnIdle { assertEquals(1, actions) }
     }

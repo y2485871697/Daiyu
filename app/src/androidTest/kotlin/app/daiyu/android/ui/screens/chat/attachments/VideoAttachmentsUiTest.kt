@@ -418,6 +418,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         node("video_attachments_confirm_text").performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
             assertTrue(scroll(0f, 100_000f))
         }
+        ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
         val after = node("video_attachments_confirm_text").fetchSemanticsNode()
             .config[SemanticsProperties.VerticalScrollAxisRange]

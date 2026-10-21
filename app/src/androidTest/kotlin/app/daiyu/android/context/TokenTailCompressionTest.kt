@@ -46,7 +46,7 @@ class TokenTailCompressionTest : InstrumentationTestCase() {
 
     fun testArchiveEnvelopePreservesPhysicalOwnerAndLegacyArrays() {
         val owner = message(1).copy(historySegments = listOf(
-            MessageHistorySegment(MessageId("segment-a"), "assistant", listOf(MessageBlock.Text("a", "first"))),
+            MessageHistorySegment(MessageId("m-1"), "assistant", listOf(MessageBlock.Text("a", "first"))),
             MessageHistorySegment(MessageId("segment-u"), "user", listOf(MessageBlock.Text("u", "next"))),
             MessageHistorySegment(MessageId("m-1"), "assistant", listOf(MessageBlock.Text("text", "a".repeat(400))))))
         val physical = listOf(message(0, "user"), owner)

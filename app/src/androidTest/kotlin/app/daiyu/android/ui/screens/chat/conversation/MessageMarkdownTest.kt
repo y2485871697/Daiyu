@@ -360,6 +360,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         longNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
         assertTrue("long cell must wrap within its column", layouts.single().lineCount > 1)
         viewport.performSemanticsAction(SemanticsActions.ScrollBy) { it(10_000f, 0f) }
+        ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
         ui.onNodeWithText("H5", useUnmergedTree = true).assertIsDisplayed()
         assertTrue(opened.isEmpty())

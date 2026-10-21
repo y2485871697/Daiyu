@@ -589,8 +589,6 @@ private fun PaneSearchRow(
                     text = stringResource(R.string.conversation_search_hint),
                     color = colors.muted,
                     style = textStyle,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
             BasicTextField(

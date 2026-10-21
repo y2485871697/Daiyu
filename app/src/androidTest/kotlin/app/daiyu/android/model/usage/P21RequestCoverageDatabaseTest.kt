@@ -226,7 +226,7 @@ class P21RequestCoverageDatabaseTest : InstrumentationTestCase() {
         // Corrupt identity and INTEGER storage classes independently; getLong() must not
         // normalize REAL 1.5/0.5 into an apparently valid revision or report-presence bit.
         for (id in listOf("bad-message", "bad-revision", "bad-has-usage")) {
-            db.execSQL("INSERT INTO runtime_preparations SELECT ?,conversation_id,run_id,owner,process_owner,revision,state,?,request_owner,attempt_id,has_usage,input_tokens,output_tokens,cached_tokens FROM runtime_preparations WHERE message_id=?",
+            db.execSQL("INSERT INTO runtime_preparations SELECT ?,conversation_id,run_id,owner,process_owner,revision,state,?,request_owner,attempt_id,has_usage,input_tokens,output_tokens,cached_tokens,cache_creation_tokens FROM runtime_preparations WHERE message_id=?",
                 arrayOf(id, "request-$id", assistant.id.value))
         }
         db.execSQL("UPDATE runtime_preparations SET message_id='' WHERE message_id='bad-message'")

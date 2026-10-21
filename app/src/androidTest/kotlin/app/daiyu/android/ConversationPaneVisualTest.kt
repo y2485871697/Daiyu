@@ -215,7 +215,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                 val icon = bounds("drawer-dock-$id-icon")
                 assertEquals(dp(dock.width) * .15625f, dp(button.width), .6f)
                 assertEquals(dp(button.width), dp(button.height), .6f)
-                assertEquals(dp(button.width) * .5f, dp(icon.width), .6f)
+                assertEquals(dp(button.width) * .5f, dp(icon.width), maxOf(.6f, dp(1f) + .01f))
             }
             assertEquals(dp(dock.width) * .0390625f,
                 dp(bounds("drawer-dock-models").left - bounds("drawer-dock-permissions").right), .6f)

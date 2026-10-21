@@ -101,7 +101,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         try {
             show {
                 CompositionLocalProvider(LocalMarkdownParser provides parser) {
-                    ChatMessageList(listOf(turn), false,
+                    ChatMessageList(listOf(turn),
                         ChatScreenActions(onVisibleCompleted = { confirmed += it }))
                 }
             }
@@ -191,7 +191,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         try {
             show {
                 CompositionLocalProvider(LocalMarkdownParser provides parser) {
-                    ChatMessageList(listOf(turn), false,
+                    ChatMessageList(listOf(turn),
                         ChatScreenActions(onVisibleCompleted = { confirmed += it }))
                 }
             }
@@ -556,7 +556,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             listKey = "shared-message:first")
         var second by mutableStateOf(ChatTurnUi.Assistant("shared-message", content = blocks("**before**"),
             status = RunStatus.RUNNING, listKey = "shared-message:second"))
-        show { ChatMessageList(listOf(first, second), false, ChatScreenActions(), imageLoader = loader) }
+        show { ChatMessageList(listOf(first, second), ChatScreenActions(), imageLoader = loader) }
         ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithContentDescription("消息图片 1").fetchSemanticsNodes().size == 1 }
         assertEquals(listOf(Triple(owner, reference, 1024)), requests.toList())
         awaitNodes(hasText("first"))

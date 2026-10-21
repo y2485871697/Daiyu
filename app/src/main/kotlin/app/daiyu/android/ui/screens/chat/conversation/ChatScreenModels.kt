@@ -9,7 +9,6 @@ data class ChatScreenState(
     val statusText: String? = null,
     val turns: List<ChatTurnUi> = emptyList(),
     val composer: ComposerUi = ComposerUi(),
-    val canJumpToPreviousUser: Boolean = false,
     val conversationKey: String? = null,
     val scrollRequest: ChatScrollRequest? = null,
     val contentRevision: Long = 0L,

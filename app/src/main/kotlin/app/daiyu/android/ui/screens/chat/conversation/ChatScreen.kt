@@ -44,7 +44,6 @@ data class ChatScreenActions(
     val onBranch: (String) -> Unit = {},
     val onEditUser: (String) -> Unit = {},
     val onDeleteTurn: (String) -> Unit = {},
-    val onJumpPreviousUser: () -> Unit = {},
     val onRetryStep: (String) -> Unit = {},
     val onMenuAction: (ChatMenuAction) -> Unit = {},
     val onInteractiveModeChange: (Boolean) -> Unit = {},
@@ -83,7 +82,7 @@ internal fun DaiyuChatScreen(
         }
         ChatConversationLayers(Modifier.weight(1f), messages = { bottomInset ->
             androidx.compose.runtime.key(state.conversationKey) {
-                ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.fillMaxSize(),
+                ChatMessageList(state.turns, actions, Modifier.fillMaxSize(),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset)
             }
         }, composer = { backdrop ->

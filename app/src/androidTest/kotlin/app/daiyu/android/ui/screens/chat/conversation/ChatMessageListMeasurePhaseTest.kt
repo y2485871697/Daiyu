@@ -37,14 +37,14 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
     private fun rows(): List<ChatTurnUi> = List(20) { ChatTurnUi.User("u$it", "row $it") }
 
     fun testInitialBottomRequestUnderSubcompositionMeasuresWithoutReentry() {
-        mount { ChatMessageList(rows(), false, ChatScreenActions(), scrollRequest = ChatScrollRequest(1)) }
+        mount { ChatMessageList(rows(), ChatScreenActions(), scrollRequest = ChatScrollRequest(1)) }
         ui.onNodeWithText("row 19").assertIsDisplayed()
         ui.onNodeWithText("row 0").assertIsNotDisplayed()
     }
 
     fun testInitialExactTargetRequestDoesNotGetOverriddenByFollow() {
         mount {
-            ChatMessageList(rows(), false, ChatScreenActions(),
+            ChatMessageList(rows(), ChatScreenActions(),
                 scrollRequest = ChatScrollRequest(serial = 1, messageId = "u2", followBottom = false))
         }
         ui.onNodeWithText("row 2").assertIsDisplayed()
@@ -53,7 +53,7 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
 
     fun testBottomRequestRemainsPendingUntilRowsArrive() {
         var turns by mutableStateOf<List<ChatTurnUi>>(emptyList())
-        mount { ChatMessageList(turns, false, ChatScreenActions(), scrollRequest = ChatScrollRequest(1)) }
+        mount { ChatMessageList(turns, ChatScreenActions(), scrollRequest = ChatScrollRequest(1)) }
         mainThread { turns = rows() }
         ui.waitForIdle()
         ui.onNodeWithText("row 19").assertIsDisplayed()
@@ -62,7 +62,7 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
     fun testSameCountTailHeightGrowthStillFollowsItsMeasuredBottom() {
         var extraHeight by mutableStateOf(40.dp)
         mount {
-            ChatMessageList(listOf(ChatTurnUi.Assistant("a", finalText = "answer")), false,
+            ChatMessageList(listOf(ChatTurnUi.Assistant("a", finalText = "answer")),
                 ChatScreenActions(), scrollRequest = ChatScrollRequest(1), turnExtras = {
                     Box(Modifier.height(extraHeight))
                     Text("measured tail")
@@ -77,7 +77,7 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         var extraHeight by mutableStateOf(40.dp)
         var request by mutableStateOf(ChatScrollRequest(1))
         mount {
-            ChatMessageList(listOf(ChatTurnUi.Assistant("a", finalText = "answer")), false,
+            ChatMessageList(listOf(ChatTurnUi.Assistant("a", finalText = "answer")),
                 ChatScreenActions(), scrollRequest = request, turnExtras = {
                     Box(Modifier.height(extraHeight))
                     Text("touch controlled tail")
@@ -106,7 +106,7 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
             if (terminal.listKey in keys) accepted.incrementAndGet()
         }
         mount {
-            ChatMessageList(listOf(terminal), false,
+            ChatMessageList(listOf(terminal),
                 ChatScreenActions(onVisibleCompleted = if (allowed) accept else deny))
         }
         ui.waitUntil(5_000) { refused.get() > 0 }
@@ -160,7 +160,7 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
             val callback = androidx.compose.runtime.remember(epoch) {
                 { keys: Set<String> -> if (terminal.listKey in keys) received.incrementAndGet(); Unit }
             }
-            ChatMessageList(listOf(terminal), false, ChatScreenActions(onVisibleCompleted = callback))
+            ChatMessageList(listOf(terminal), ChatScreenActions(onVisibleCompleted = callback))
         }
         ui.waitUntil(5_000) { received.get() > 0 }
         ui.mainClock.autoAdvance = false

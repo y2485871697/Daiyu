@@ -12,7 +12,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +24,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.produceState
@@ -40,7 +38,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -52,14 +49,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.material3.Icon
-import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.domain.RunStatus
-import app.daiyu.android.ui.icons.DaiyuIcons
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import top.yukonga.miuix.kmp.basic.Text
@@ -68,7 +60,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun ChatMessageList(
     turns: List<ChatTurnUi>,
-    canJumpToPreviousUser: Boolean,
     actions: ChatScreenActions,
     modifier: Modifier = Modifier,
     scrollRequest: ChatScrollRequest? = null,
@@ -91,7 +82,6 @@ internal fun ChatMessageList(
     val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
-    val scope = rememberCoroutineScope()
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
     LaunchedEffect(scrollRequest, requestedIndex, turns.size, touchEpoch) {
         scrollRequest?.takeIf { it.serial != consumedScrollSerial }?.let { request ->
@@ -189,7 +179,7 @@ internal fun ChatMessageList(
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
             }
         },
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + 64.dp),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + 12.dp),
             verticalArrangement = Arrangement.spacedBy(26.dp)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 Column(Modifier.testTag("chat-turn:${turn.id}")) {
@@ -202,22 +192,6 @@ internal fun ChatMessageList(
                             turnExtras(turn)
                         }
                     }
-                }
-            }
-        }
-        if (canJumpToPreviousUser) {
-            val view = LocalView.current
-            Box(Modifier.align(Alignment.BottomEnd).padding(bottom = composerBottomInset).padding(12.dp)
-                .background(conversationColors().surface, CircleShape)) {
-                ConversationIconButton(onClick = {
-                    TouchHaptics.click(view)
-                    followBottom = false
-                    val anchor = listState.firstVisibleItemIndex
-                    val index = turns.indices.lastOrNull { it < anchor && turns[it] is ChatTurnUi.User }
-                    if (index != null) scope.launch { listState.animateScrollToItem(index) }
-                    actions.onJumpPreviousUser()
-                }, minWidth = 32.dp, minHeight = 32.dp) {
-                    Icon(DaiyuIcons.JumpUp, "上一条用户消息", Modifier.size(15.dp), tint = conversationColors().muted)
                 }
             }
         }

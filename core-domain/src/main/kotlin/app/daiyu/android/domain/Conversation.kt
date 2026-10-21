@@ -68,7 +68,10 @@ object MessageHistory {
     data class ExpandedEntry(val message: Message, val sourcePhysicalIndex: Int)
 
     fun expand(history: List<Message>): List<Message> =
-        if (history.none { it.historySegments.isNotEmpty() }) history else expandWithSources(history).map { it.message }
+        if (history.none { it.historySegments.isNotEmpty() }) {
+            history.forEach(MessageImages::validate)
+            history
+        } else expandWithSources(history).map { it.message }
 
     /** The source is the durable owner, never a duplicate standalone supplement. */
     fun expandWithSources(history: List<Message>): List<ExpandedEntry> {

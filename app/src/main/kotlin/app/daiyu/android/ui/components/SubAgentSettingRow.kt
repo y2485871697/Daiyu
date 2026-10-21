@@ -4,7 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.combinedClickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.*
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -41,7 +42,7 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
                 .heightIn(min = if (thinking) 31.dp else 0.dp)
                 .then(if (plain) Modifier else Modifier.background(colors.soft, RoundedCornerShape(10.dp)).border(1.dp, colors.line, RoundedCornerShape(10.dp)))
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    enabled = enabled, role = Role.Button, hapticFeedbackEnabled = false, onClick = onClick, onLongClick = onLongClick)
+                    enabled = enabled, role = Role.Button, onClick = onClick, onLongClick = onLongClick)
                 .padding(horizontal = if (plain) 0.dp else 10.dp, vertical = if (model || thinking) 7.dp else if (speed) 10.dp else 9.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 if (model || label == "思考深度") Icon(icon, null, Modifier.size(if (model) 12.dp else 13.dp), tint = colors.accent)
@@ -63,7 +64,7 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
     val alpha = if (enabled) 1f else 0.38f
     Row(modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = description }
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-            enabled = enabled, role = Role.Button, hapticFeedbackEnabled = false, onClick = onClick, onLongClick = onLongClick)
+            enabled = enabled, role = Role.Button, onClick = onClick, onLongClick = onLongClick)
         .padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(22.dp), tint = daiyuIconColor(icon).copy(alpha = alpha))
         Text(label, Modifier.widthIn(min = 72.dp, max = 100.dp), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface.copy(alpha = alpha))

@@ -1,6 +1,6 @@
 package app.daiyu.android.ui.components.subagent
 
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.Color
 import app.daiyu.android.ui.components.WithoutPressRipple
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
+import app.daiyu.android.ui.haptics.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,16 +20,16 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.*
+import app.daiyu.android.ui.haptics.material.TextButton
+import app.daiyu.android.ui.haptics.material.RadioButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.R
 import app.daiyu.android.delegation.SubAgentProvider
-import app.daiyu.android.ui.haptics.TouchHaptics
 
 internal data class SubAgentModelPickerUiState(val providerGroups: List<SubAgentModelGroupUi>, val selectedModel: SubAgentModelOptionUi?)
 internal data class SubAgentModelGroupUi(val providerId: String, val providerName: String, val models: List<SubAgentModelOptionUi>)
@@ -57,7 +57,6 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
         ConversationSubAgentModels(state, onDismiss, onModelSelected, title, onClearSelection)
         return
     }
-    val view = LocalView.current
     var expanded by remember { mutableStateOf(state.selectedModel?.providerId ?: state.providerGroups.singleOrNull()?.providerId) }
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
     WithoutPressRipple {
@@ -70,7 +69,7 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
                         .modelSelectionBackground(highlightSelection && state.selectedModel == null, MaterialTheme.colorScheme.primaryContainer)
                         .selectable(selected = state.selectedModel == null, role = Role.RadioButton,
                             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {
-                                TouchHaptics.click(view); onClearSelection()
+                                onClearSelection()
                             }).padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!highlightSelection) RadioButton(selected = state.selectedModel == null, onClick = null)
                         Text("无", modifier = Modifier.weight(1f).padding(start = 12.dp), color = MaterialTheme.colorScheme.onSurface)
@@ -83,7 +82,7 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
                     val isExpanded = expanded == group.providerId
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) {
-                            TouchHaptics.click(view); expanded = if (isExpanded) null else group.providerId
+                            expanded = if (isExpanded) null else group.providerId
                         }.padding(horizontal = 4.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(group.providerName, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                         Icon(if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
@@ -96,7 +95,7 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
                                 .modelSelectionBackground(highlightSelection && selected, MaterialTheme.colorScheme.primaryContainer)
                                 .selectable(selected = selected, role = Role.RadioButton,
                                     interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {
-                                        TouchHaptics.click(view); onModelSelected(model.providerId, model.id)
+                                        onModelSelected(model.providerId, model.id)
                                     }).padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (!highlightSelection) RadioButton(selected = selected, onClick = null)
                                 Text(model.displayName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
@@ -106,7 +105,7 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
                     }
                 }
             }
-        }, confirmButton = { TextButton(onClick = { TouchHaptics.click(view); onDismiss() }) { Text(stringResource(R.string.subagent_action_close)) } })
+        }, confirmButton = { TextButton(onClick = { onDismiss() }) { Text(stringResource(R.string.subagent_action_close)) } })
     }
     }
 }

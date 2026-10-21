@@ -3,7 +3,7 @@ package app.daiyu.android.ui.screens.settings
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.text.format.Formatter
-import androidx.compose.foundation.combinedClickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -13,7 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.IconButton
+import app.daiyu.android.ui.haptics.miuix.IconButton
 import app.daiyu.android.ui.icons.DaiyuIcon
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
@@ -166,7 +166,7 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
         SettingsNote("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。")
         SettingsCard {
             if (compact) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                top.yukonga.miuix.kmp.basic.TextButton("导入文件", onClick = importFile,
+                app.daiyu.android.ui.haptics.miuix.TextButton("导入文件", onClick = importFile,
                     modifier = Modifier.heightIn(min = 48.dp).testTag("workspace-private-import"))
                 IconButton(onClick = { load() }, modifier = Modifier.size(48.dp).testTag("workspace-private-refresh")) {
                     DaiyuIcon(DaiyuIcons.Refresh, "刷新", size = 21.dp)

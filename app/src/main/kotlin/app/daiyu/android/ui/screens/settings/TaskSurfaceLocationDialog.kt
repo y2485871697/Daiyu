@@ -3,7 +3,7 @@ package app.daiyu.android.ui.screens.settings
 import androidx.compose.foundation.layout.Column
 import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember

@@ -24,7 +24,7 @@ import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.model.generation.GenerationKind
 import app.daiyu.android.storage.GenerationAttemptBinding
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 

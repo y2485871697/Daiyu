@@ -2,12 +2,12 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import app.daiyu.android.ui.haptics.material.DropdownMenuItem
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,9 +26,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.Button
+import app.daiyu.android.ui.haptics.miuix.Button
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Parent retains the page owner. Browsing and selecting never start a terminal or install. */
@@ -117,7 +117,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                 WorkspaceSettingsScreen(onBack = leave, pageTitle = "Linux 工具环境", integratedLinux = true,
                     rootfs = rootfs, onOpenTerminal = onOpenTerminal)
             } else SettingsScaffoldPage("Linux 工具环境", leave, actions = {
-                if (onOpenTerminal != null) top.yukonga.miuix.kmp.basic.IconButton(onClick = { if (basicCurrent()) onOpenTerminal() },
+                if (onOpenTerminal != null) app.daiyu.android.ui.haptics.miuix.IconButton(onClick = { if (basicCurrent()) onOpenTerminal() },
                     modifier = Modifier.size(48.dp).testTag("linux-open-terminal")) { DaiyuIcon(DaiyuIcons.Terminal, "终端") }
             }) {
                 item("linux-status") {

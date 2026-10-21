@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +26,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.Role
 import top.yukonga.miuix.kmp.window.WindowDialog
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text

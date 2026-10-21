@@ -1,5 +1,6 @@
 package app.daiyu.android.question
 
+import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -137,6 +138,7 @@ class QuestionCardView(context: Context) : LinearLayout(context) {
         val delegateId = if (value.question.allowDelegation) View.generateViewId() else -1
         if (otherId != -1) options.addView(RadioButton(context).apply { id = otherId; text = "其他（自行填写）" })
         if (delegateId != -1) options.addView(RadioButton(context).apply { id = delegateId; text = "由你决定" })
+        for (index in 0 until options.childCount) options.getChildAt(index).setHapticClickListener {}
         addView(options)
         val other = if (otherId != -1) EditText(context).apply {
             hint = "其他答案"; filters = arrayOf(InputFilter.LengthFilter(4000)); visibility = GONE; addView(this)
@@ -170,19 +172,19 @@ class QuestionCardView(context: Context) : LinearLayout(context) {
         val send = Button(context).apply { text = "提交答案"; isEnabled = writable && !busy && !blocked && !detached }
         addView(send); button = send
         val token = generation
-        send.setOnClickListener {
-            if (generation != token || identity != owner || !writable || busy || detached || blocked) return@setOnClickListener
+        send.setHapticClickListener {
+            if (generation != token || identity != owner || !writable || busy || detached || blocked) return@setHapticClickListener
             val noteText = note?.text?.toString()?.takeIf { it.isNotEmpty() }
             val selected = options.checkedRadioButtonId
             val answer = when {
                 selected in ids -> QuestionAnswer.Selected(ids.getValue(selected), noteText)
                 selected == otherId && otherId != -1 -> {
                     val text = other?.text?.toString().orEmpty()
-                    if (text.isBlank()) { status.text = "请填写其他答案"; return@setOnClickListener }
+                    if (text.isBlank()) { status.text = "请填写其他答案"; return@setHapticClickListener }
                     QuestionAnswer.Other(text, noteText)
                 }
                 selected == delegateId && delegateId != -1 -> QuestionAnswer.Delegate(noteText)
-                else -> { status.text = "请选择一个答案；推荐选项不会自动选择"; return@setOnClickListener }
+                else -> { status.text = "请选择一个答案；推荐选项不会自动选择"; return@setHapticClickListener }
             }
             busy = true; send.isEnabled = false; status.text = "正在保存答案…"
             val submittedAttachment = attachmentEpoch

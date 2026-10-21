@@ -1,5 +1,6 @@
 package app.daiyu.android.ui
 
+import app.daiyu.android.ui.haptics.setHapticClickListener
 import app.daiyu.android.ui.components.startDaiyuEnterMotion
 import android.app.Dialog
 import android.content.Context
@@ -54,8 +55,8 @@ internal object GenerationMediaDialog {
         layout.addView(surface, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
             (320 * context.resources.displayMetrics.density).toInt()))
         layout.addView(button)
-        button.setOnClickListener {
-            if (!ready || released) return@setOnClickListener
+        button.setHapticClickListener {
+            if (!ready || released) return@setHapticClickListener
             try {
                 original.requireActive(); check(gate.current(lease))
                 if (player.isPlaying) { player.pause(); button.text = "播放" }

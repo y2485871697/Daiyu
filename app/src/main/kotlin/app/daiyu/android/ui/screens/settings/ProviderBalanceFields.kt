@@ -15,7 +15,7 @@ import app.daiyu.android.balance.BalanceResult
 import app.daiyu.android.balance.BalanceState
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 
 internal typealias ProviderBalanceTester = (ModelSettingsDraftUi, () -> Boolean, (BalanceResult) -> Unit) -> Boolean

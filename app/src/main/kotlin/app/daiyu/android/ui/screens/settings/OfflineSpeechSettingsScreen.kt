@@ -15,7 +15,7 @@ import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.voice.offline.OfflineSpeechPack
 import app.daiyu.android.voice.offline.SpeechInputPolicy
 import app.daiyu.android.voice.offline.SpeechModelManifest
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable

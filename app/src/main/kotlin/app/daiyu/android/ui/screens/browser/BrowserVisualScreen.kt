@@ -2,7 +2,7 @@ package app.daiyu.android.ui.screens.browser
 
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -66,7 +66,7 @@ internal fun BrowserVisualScreen(
                 Column(modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.9f)
                     .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
                     .background(MaterialTheme.colorScheme.surface)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {})
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, clickFeedback = false, onClick = {})
                     .navigationBarsPadding().imePadding().testTag("browser-visual-page")) {
                     Box(Modifier.fillMaxWidth().height(64.dp)) {
                         PlainToolButton(DaiyuIcons.Device, "浏览器设置", "browser-visual-controls",

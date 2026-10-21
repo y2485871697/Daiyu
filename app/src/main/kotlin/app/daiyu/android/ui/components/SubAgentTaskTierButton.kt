@@ -2,15 +2,16 @@ package app.daiyu.android.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.selection.selectable
+import app.daiyu.android.ui.haptics.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.*
+
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,7 +26,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.SubAgentTaskTier
-import app.daiyu.android.ui.haptics.TouchHaptics
 
 @Composable
 internal fun SubAgentChoiceField(label: String, value: String, enabled: Boolean, description: String,
@@ -65,7 +65,7 @@ internal fun SubAgentSelectionItem(text: String, selected: Boolean, onClick: () 
     Box(Modifier.fillMaxWidth().padding(horizontal = 3.dp, vertical = 1.dp).clip(RoundedCornerShape(7.dp))
         .background(if (selected) colors.primaryContainer else Color.Transparent)
         .selectable(selected = selected, role = Role.RadioButton, interactionSource = remember { MutableInteractionSource() },
-            indication = null, onClick = { TouchHaptics.click(view); onClick() }).height(32.dp).padding(horizontal = 12.dp),
+            indication = null, onClick = { onClick() }).height(32.dp).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center) {
         Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
@@ -86,7 +86,7 @@ internal fun SubAgentTaskTierButton(label: String, tier: SubAgentTaskTier?, enab
                 .semantics { contentDescription = "设置${label}任务分工" }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     enabled = enabled, role = Role.Button,
-                    onClick = { if (latestEnabled) { TouchHaptics.click(view); expanded = !expanded } }), contentAlignment = Alignment.Center) {
+                    onClick = { if (latestEnabled) { expanded = !expanded } }), contentAlignment = Alignment.Center) {
                 Row(Modifier.clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (enabled) 1f else 0.38f))
                     .padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
@@ -99,7 +99,7 @@ internal fun SubAgentTaskTierButton(label: String, tier: SubAgentTaskTier?, enab
             }
         } else SubAgentChoiceField(label, tier?.label ?: "未设置分工", enabled,
             if (label == "任务分工") "设置任务分工" else "设置${label}任务分工",
-            onClick = { if (latestEnabled) { TouchHaptics.click(view); expanded = !expanded } })
+            onClick = { if (latestEnabled) { expanded = !expanded } })
         if (enabled) SubAgentDropdownMenu(expanded, { expanded = false }, Modifier.selectableGroup(),
             offset = if (compact) DpOffset(0.dp, (-(32 * SubAgentTaskTier.entries.size + 10)).dp) else DpOffset.Zero) {
             SubAgentTaskTier.entries.forEach { option ->

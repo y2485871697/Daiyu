@@ -1,5 +1,8 @@
 package app.daiyu.android.ui
 
+import app.daiyu.android.ui.haptics.setHapticNeutralButton
+import app.daiyu.android.ui.haptics.setHapticNegativeButton
+import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.app.Activity
 import app.daiyu.android.ui.components.startDaiyuEnterMotion
 import android.app.AlertDialog
@@ -30,8 +33,8 @@ internal class FeatureHubDialog(
         }
         val scroller = ScrollView(activity).apply { addView(body) }
         val dialog = AlertDialog.Builder(activity).setTitle("功能总览")
-            .setView(scroller).setNegativeButton("关闭", null)
-            .setNeutralButton("返回总览", null).create()
+            .setView(scroller).setHapticNegativeButton("关闭", null)
+            .setHapticNeutralButton("返回总览", null).create()
         fun live(generation: Long) = window === dialog && dialog.isShowing &&
             pageGeneration == generation && !activity.isFinishing && !activity.isDestroyed
         fun heading(id: String, title: String) = TextView(activity).apply {
@@ -51,7 +54,7 @@ internal class FeatureHubDialog(
                     group.entries.forEach { item ->
                         body.addView(Button(activity).apply {
                             tag = "feature:${item.id}"; text = item.title
-                            setOnClickListener { if (live(generation)) render(item) }
+                            setHapticClickListener { if (live(generation)) render(item) }
                         })
                     }
                 }
@@ -70,7 +73,7 @@ internal class FeatureHubDialog(
                             body.addView(TextView(activity).apply { text = control.kind.label })
                         } else {
                             control.route?.let { route ->
-                                row.setOnClickListener {
+                                row.setHapticClickListener {
                                     if (live(generation)) {
                                         ++pageGeneration
                                         dialog.dismiss()
@@ -99,7 +102,7 @@ internal class FeatureHubDialog(
         dialog.window?.setWindowAnimations(0)
         dialog.show()
         dialog.startDaiyuEnterMotion()
-        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setHapticClickListener {
             if (window === dialog && dialog.isShowing && !activity.isFinishing && !activity.isDestroyed) render(null)
         }
         render(entryId?.let { id -> FeatureCatalog.groups.flatMap { it.entries }.single { it.id == id } })

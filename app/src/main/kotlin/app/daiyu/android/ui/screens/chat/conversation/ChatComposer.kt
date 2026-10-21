@@ -9,7 +9,7 @@ import app.daiyu.android.ui.components.AssistantDisplay
 import app.daiyu.android.ui.components.AssistantAvatar
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.combinedClickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass

@@ -8,7 +8,7 @@ import androidx.compose.ui.platform.LocalContext
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -29,10 +29,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Checkbox
+import app.daiyu.android.ui.haptics.material.Checkbox
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Switch
+import app.daiyu.android.ui.haptics.material.IconButton
+import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect

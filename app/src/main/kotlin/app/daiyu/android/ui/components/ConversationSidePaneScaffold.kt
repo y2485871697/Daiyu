@@ -6,8 +6,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import app.daiyu.android.ui.haptics.clickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -109,7 +109,7 @@ import app.daiyu.android.ui.haptics.TouchHaptics
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import androidx.compose.material3.DropdownMenuItem
+import app.daiyu.android.ui.haptics.material.DropdownMenuItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -920,7 +920,6 @@ private fun ConversationTextRow(
                 .semantics { if (managing) { role = Role.Checkbox; this.selected = checked } }
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    hapticFeedbackEnabled = false,
                     onClick = {
                         TouchHaptics.click(view)
                         onClick()

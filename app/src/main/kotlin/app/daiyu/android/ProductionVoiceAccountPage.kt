@@ -20,7 +20,7 @@ import app.daiyu.android.voice.releaseOnMain
 import app.daiyu.android.voice.providers.DoubaoPersonalVoice
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 /** One saved profile and one composition incarnation. No audio or request on page entry. */
 @Composable

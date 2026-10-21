@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.material3.RadioButton
+import app.daiyu.android.ui.haptics.material.RadioButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect

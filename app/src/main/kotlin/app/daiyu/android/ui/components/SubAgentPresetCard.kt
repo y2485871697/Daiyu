@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material3.*
+import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.SubAgentPreset
-import app.daiyu.android.ui.haptics.TouchHaptics
 import app.daiyu.android.ui.icons.daiyuIconColor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
@@ -70,7 +70,7 @@ internal fun SubAgentPresetDirectoryStatus(directory: SubAgentPresetDirectory) {
     when {
         directory.error != null -> {
             Text("子代理组读取或保存失败：${directory.error}", color = MaterialTheme.colorScheme.error)
-            val retry = { TouchHaptics.click(view); directory.retry() }
+            val retry = { directory.retry() }
             if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
                 app.daiyu.android.ui.components.subagent.ConversationAgentButton("重试读取子代理组", onClick = retry)
             } else TextButton(onClick = retry) { Text("重试读取子代理组") }
@@ -89,7 +89,7 @@ internal fun SubAgentPresetCard(preset: SubAgentPreset, enabled: Boolean, action
             border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) androidx.compose.ui.graphics.Color(0x5281738e) else colors.line), modifier = Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth().semantics { contentDescription = actionLabel }
                 .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                    TouchHaptics.click(view); onClick()
+                    onClick()
                 }.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(preset.name, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -112,7 +112,7 @@ internal fun SubAgentPresetCard(preset: SubAgentPreset, enabled: Boolean, action
             else Modifier, verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).heightIn(min = 96.dp).semantics { contentDescription = actionLabel }
                 .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                    TouchHaptics.click(view); onClick()
+                    onClick()
                 }.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Icon(Icons.Rounded.AccountTree, null, tint = daiyuIconColor(Icons.Rounded.AccountTree))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

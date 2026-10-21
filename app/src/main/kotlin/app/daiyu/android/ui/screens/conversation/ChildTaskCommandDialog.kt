@@ -13,7 +13,7 @@ import androidx.compose.ui.semantics.semantics
 import app.daiyu.android.domain.delegation.*
 import java.util.UUID
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 // Expose the exact callback for retained-callback tests, not a rebindable ClickableNode wrapper.
 internal val ChildTaskCommandDialogAction = SemanticsPropertyKey<() -> Unit>("ChildTaskCommandDialogAction")

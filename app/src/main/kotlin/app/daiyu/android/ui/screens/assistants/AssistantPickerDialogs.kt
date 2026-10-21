@@ -21,7 +21,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -49,7 +49,6 @@ import app.daiyu.android.assistants.AssistantStore
 import app.daiyu.android.assistants.AssistantAssets
 import app.daiyu.android.assistants.duplicate
 import app.daiyu.android.ui.components.AssistantAvatar
-import app.daiyu.android.ui.haptics.TouchHaptics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -208,9 +207,9 @@ internal fun AssistantProfileCard(
     Row(modifier.fillMaxWidth().heightIn(min = 76.dp * s).clip(shape)
         .background(if (selected) colors.soft else androidx.compose.ui.graphics.Color.Transparent)
         .border(1.dp, if (selected) colors.line else androidx.compose.ui.graphics.Color.Transparent, shape)
-        .combinedClickable(hapticFeedbackEnabled = false, interactionSource = remember { MutableInteractionSource() }, indication = null,
-            onClick = { TouchHaptics.click(view); onClick() },
-            onLongClick = { TouchHaptics.longPress(view); onLongClick() }).padding(1.dp).padding(10.dp * s),
+        .combinedClickable( interactionSource = remember { MutableInteractionSource() }, indication = null,
+            onClick = { onClick() },
+            onLongClick = { onLongClick() }).padding(1.dp).padding(10.dp * s),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
         AssistantAvatar(bitmap = bitmap, size = 40.dp * s, modifier = Modifier.testTag("assistant-avatar-${profile.id}"))
         Column(Modifier.weight(1f)) {

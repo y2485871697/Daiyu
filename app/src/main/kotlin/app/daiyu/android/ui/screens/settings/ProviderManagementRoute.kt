@@ -24,7 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 internal val RetainedProviderConnectionTest =
     SemanticsPropertyKey<Pair<ModelSettingsDraftUi, ModelConnectionTester>>("RetainedProviderConnectionTest")

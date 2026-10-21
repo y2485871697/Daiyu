@@ -12,12 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.selection.selectable
+import app.daiyu.android.ui.haptics.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material3.Slider
+import app.daiyu.android.ui.haptics.material.Slider
 import androidx.compose.material3.SliderDefaults
 import top.yukonga.miuix.kmp.window.WindowDialog
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -207,7 +207,7 @@ internal fun AppearanceSettingsScreen(
                             onChange(state.copy(morphLoadingIndicator = true)); loadingExpanded = true
                         } else loadingExpanded = !loadingExpanded
                     }, trailing = {
-                        androidx.compose.material3.Switch(checked = state.morphLoadingIndicator,
+                        app.daiyu.android.ui.haptics.material.Switch(checked = state.morphLoadingIndicator,
                             onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) })
                     })
                 if (state.morphLoadingIndicator && loadingExpanded) {

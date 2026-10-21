@@ -1,7 +1,9 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.ui.platform.LocalView
+import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,11 +16,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.toggleable
+import app.daiyu.android.ui.haptics.selectable
+import app.daiyu.android.ui.haptics.toggleable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Switch
+import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -34,7 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -97,9 +99,10 @@ internal fun SettingsRow(
     modifier: Modifier = Modifier,
     tag: String = "settings-row:$title",
 ) {
+    val feedbackView = LocalView.current
     Row(
         modifier = Modifier.testTag(tag).then(modifier).fillMaxWidth()
-            .then(if (onClick != null) Modifier.semantics { semanticsClick { onClick(); true } }.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.semantics { semanticsClick { TouchHaptics.action(feedbackView) { onClick() }; true } }.clickable(onClick = onClick) else Modifier)
             .heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -214,7 +217,7 @@ internal fun SettingsTextField(
         if (!compact) TextButton(
             text = if (secretVisible) "隐藏$secretLabel" else "显示$secretLabel",
             enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = toggleSecret,
-        ) else androidx.compose.material3.IconButton(
+        ) else app.daiyu.android.ui.haptics.material.IconButton(
             enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = toggleSecret,
         ) {
             androidx.compose.material3.Icon(

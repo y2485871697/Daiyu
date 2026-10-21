@@ -4,7 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.selectable
+import app.daiyu.android.ui.haptics.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier

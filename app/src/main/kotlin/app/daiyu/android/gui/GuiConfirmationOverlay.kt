@@ -1,5 +1,6 @@
 package app.daiyu.android.gui
 
+import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.view.Gravity
@@ -66,7 +67,7 @@ internal class GuiConfirmationOverlay(
         parent.addView(Button(service).apply {
             text = title
             // Do not mutate enabled/text/selection when clicked after final observation.
-            setOnClickListener {
+            setHapticClickListener {
                 try { callback() }
                 catch (_: Exception) { revoke("CONFIRMATION_ABORTED_BEFORE_TRANSFER_NOT_EXECUTED") }
             }

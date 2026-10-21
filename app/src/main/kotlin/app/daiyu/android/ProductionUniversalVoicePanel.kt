@@ -7,7 +7,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.voice.control.*
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 /** The only entry is an explicit in-app control panel. Opening/selecting never acquires audio. */
 @Composable

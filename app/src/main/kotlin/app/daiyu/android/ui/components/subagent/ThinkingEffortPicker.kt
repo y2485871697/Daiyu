@@ -67,7 +67,14 @@ internal fun SubAgentThinkingEffortPickerDialog(
                 modifier = Modifier.padding(top = 6.dp, bottom = 16.dp))
             if (options.size > 1) {
                 Box(modifier = Modifier.fillMaxWidth()) {
-                    Slider(value = sliderValue.coerceIn(0f, maxIndex), onValueChange = {}, modifier = Modifier.fillMaxWidth(),
+                    Slider(value = sliderValue.coerceIn(0f, maxIndex), onValueChange = { value ->
+                        val index = value.roundToInt().coerceIn(0, latestOptions.lastIndex)
+                        val next = latestOptions[index]
+                        if (next != latestEffort) TouchHaptics.action(view) {
+                            sliderValue = index.toFloat()
+                            latestOnEffortChange(next)
+                        }
+                    }, modifier = Modifier.fillMaxWidth(),
                         valueRange = 0f..maxIndex, steps = (options.size - 2).coerceAtLeast(0), showKeyPoints = true,
                         keyPoints = options.indices.map { it.toFloat() }, magnetThreshold = 0.18f,
                         hapticEffect = SliderDefaults.SliderHapticEffect.None)

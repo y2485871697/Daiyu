@@ -8,7 +8,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -210,7 +210,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 5.dp, bottomStart = 16.dp))
                 .background(conversationColors().bubble)
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    onClick = {}, onLongClick = { showMenu = true })
+                    clickFeedback = false, onClick = {}, onLongClick = { showMenu = true })
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
                 if (turn.content.isNotEmpty()) {
                     MessageContent(turn.content, actions, imageLoader, markdown = false,

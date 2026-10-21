@@ -9,7 +9,7 @@ import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.screens.settings.SettingsCard
 import app.daiyu.android.ui.screens.settings.SettingsNote
 import app.daiyu.android.ui.screens.settings.SettingsRow
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 @Composable
 internal fun ConversationExportScreen(

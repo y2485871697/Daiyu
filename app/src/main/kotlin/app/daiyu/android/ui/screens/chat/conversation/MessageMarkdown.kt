@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.haptics.TouchHaptics
+import androidx.compose.ui.platform.LocalView
 import android.graphics.Typeface
 import android.text.Spanned
 import android.text.style.StrikethroughSpan
@@ -94,9 +96,10 @@ internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?
 @Composable
 internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, modifier: Modifier = Modifier) {
     val uriHandler = LocalUriHandler.current
-    val openLink: (String) -> Unit = remember(uriHandler) { { url ->
+    val feedbackView = LocalView.current
+    val openLink: (String) -> Unit = remember(uriHandler, feedbackView) { { url ->
         // Recheck at the capability boundary; tolerate a missing external handler.
-        if (MarkdownText.isSafeLink(url)) runCatching { uriHandler.openUri(url) }
+        if (MarkdownText.isSafeLink(url)) TouchHaptics.action(feedbackView) { runCatching { uriHandler.openUri(url) } }
         Unit
     } }
     SelectionContainer {

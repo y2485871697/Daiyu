@@ -7,7 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.sessiongateway.SessionGatewayRule
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 /** Independent controlled editor. The host owns persistence/admission and keeps all five fields. */
 @Composable

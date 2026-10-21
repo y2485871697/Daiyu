@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.ui.haptics.setHapticNegativeButton
+import app.daiyu.android.ui.haptics.setHapticPositiveButton
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -454,8 +456,8 @@ class MainActivity : ComponentActivity() {
         voiceConsent = android.app.AlertDialog.Builder(this)
             .setTitle("本次发送参考录音？")
             .setMessage("将向 ${config.provider}（${config.endpoint}）发送参考录音「${reference.name}」及本条回答文本用于合成，可能收费。仅授权本次请求，不长期授权。")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("确认本次发送") { _, _ ->
+            .setHapticNegativeButton("取消", null)
+            .setHapticPositiveButton("确认本次发送") { _, _ ->
                 if (current()) lifecycleScope.launch {
                     try { play(voiceRuntime.authorizeReference(frozen)) }
                     catch (_: Exception) { if (current()) toast("参考录音或配置已失效；未发送") }
@@ -546,8 +548,8 @@ class MainActivity : ComponentActivity() {
         val decided = AtomicBoolean(false)
         fun answer(value: Boolean) { if (decided.compareAndSet(false, true)) decision(value) }
         videoDialog = android.app.AlertDialog.Builder(this).setTitle(title).setMessage(message)
-            .setPositiveButton("明确允许") { _, _ -> answer(true) }
-            .setNegativeButton("拒绝") { _, _ -> answer(false) }
+            .setHapticPositiveButton("明确允许") { _, _ -> answer(true) }
+            .setHapticNegativeButton("拒绝") { _, _ -> answer(false) }
             .setOnCancelListener { answer(false) }.create().also { dialog ->
                 dialog.setOnDismissListener { answer(false); if (videoDialog === dialog) videoDialog = null }
                 dialog.show()
@@ -1490,7 +1492,7 @@ class MainActivity : ComponentActivity() {
                             runtime = runtime, onBack = { retainedPage = "settings" },
                             modifier = Modifier.fillMaxSize())
                         else Column(Modifier.fillMaxSize().padding(16.dp)) {
-                            top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { retainedPage = "settings" })
+                            app.daiyu.android.ui.haptics.miuix.TextButton(text = "返回", onClick = { retainedPage = "settings" })
                             top.yukonga.miuix.kmp.basic.Text("请先选择提供商，再配置其独立余额")
                         }
                     }
@@ -1721,7 +1723,7 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                         } else Column {
-                            top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { retainedPage = "settings" })
+                            app.daiyu.android.ui.haptics.miuix.TextButton(text = "返回", onClick = { retainedPage = "settings" })
                             top.yukonga.miuix.kmp.basic.Text(gatewayError ?: "正在加载会话网关设置")
                         }
                     }
@@ -1747,7 +1749,7 @@ class MainActivity : ComponentActivity() {
                     )
                     "settings" -> settingsPageState.SaveableStateProvider("settings-home") {
                         Column(Modifier.fillMaxSize()) {
-                        if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
+                        if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "保留会话网关",
                             modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
                         Box(Modifier.weight(1f)) { DaiyuSettingsScreen(
                         scrollBehavior = settingsScrollBehavior,
@@ -1842,7 +1844,7 @@ class MainActivity : ComponentActivity() {
                         else app.daiyu.android.ui.components.MiuixScaffoldPage("旧版兼容资料库",
                             onBack = { retainedPage = "backup" }) {
                             item("reopen") {
-                                top.yukonga.miuix.kmp.basic.TextButton("重新打开资料库",
+                                app.daiyu.android.ui.haptics.miuix.TextButton("重新打开资料库",
                                     onClick = { backupGuard { openLegacyLibrary() } })
                             }
                         }
@@ -1959,7 +1961,7 @@ class MainActivity : ComponentActivity() {
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
                                         pendingTextSend?.let { pending ->
-                                            top.yukonga.miuix.kmp.basic.TextButton(
+                                            app.daiyu.android.ui.haptics.miuix.TextButton(
                                                 text = "取消发送准备",
                                                 modifier = Modifier.testTag("text-send-cancel"),
                                                 onClick = { cancelPendingTextSend(pending) }
@@ -2032,7 +2034,7 @@ class MainActivity : ComponentActivity() {
                 generationReceiptNotice?.let { notice ->
                     androidx.compose.ui.window.Popup(alignment = androidx.compose.ui.Alignment.TopCenter) {
                         androidx.compose.material3.Surface(modifier = Modifier.dialogEnterMotion(), tonalElevation = 8.dp) {
-                            androidx.compose.material3.TextButton(
+                            app.daiyu.android.ui.haptics.material.TextButton(
                                 modifier = Modifier.testTag("generation-receipt-ack"),
                                 onClick = {
                                     if (activityUsable() && controller.acknowledgeGenerationReceipt(notice)) {
@@ -2432,12 +2434,12 @@ class MainActivity : ComponentActivity() {
         fun currentVoiceControls() = currentEditor() && voiceRequestEpoch == capturedVoiceEpoch &&
             cascadeVoice.operationToken == capturedCascadeToken && remoteVoice.operationToken == capturedRemoteToken &&
             speechHost.owner == capturedSpeechOwner
-        if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
+        if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
             onClick = { if (activityUsable() && retainedPage == "chat" && !sidebarVisible) {
                 offlineSpeechReturnPage = "chat"
                 retainedPage = "offline-speech"
             } })
-        if (pack.enabled && (engineeringUi || offline.listening)) top.yukonga.miuix.kmp.basic.TextButton(
+        if (pack.enabled && (engineeringUi || offline.listening)) app.daiyu.android.ui.haptics.miuix.TextButton(
             text = if (offline.listening) "取消离线听写" else "离线听写（本机麦克风）",
             modifier = Modifier.testTag("offline-speech-microphone"),
             onClick = {
@@ -2478,7 +2480,7 @@ class MainActivity : ComponentActivity() {
         if (cascadeStatus.isNotEmpty()) {
             top.yukonga.miuix.kmp.basic.Text(cascadeStatus,
                 modifier = Modifier.testTag("voice-cascade-status").semantics { liveRegion = LiveRegionMode.Polite })
-            top.yukonga.miuix.kmp.basic.TextButton(text = "停止级联", modifier = Modifier.testTag("voice-cascade-stop"), onClick = {
+            app.daiyu.android.ui.haptics.miuix.TextButton(text = "停止级联", modifier = Modifier.testTag("voice-cascade-stop"), onClick = {
                 if (currentVoiceControls()) {
                     stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
                 }
@@ -2488,7 +2490,7 @@ class MainActivity : ComponentActivity() {
         if (remoteStatus.isNotEmpty()) {
             top.yukonga.miuix.kmp.basic.Text(remoteStatus,
                 modifier = Modifier.testTag("remote-voice-status").semantics { liveRegion = LiveRegionMode.Polite })
-            top.yukonga.miuix.kmp.basic.TextButton(text = "停止云端语音", modifier = Modifier.testTag("remote-voice-stop"), onClick = {
+            app.daiyu.android.ui.haptics.miuix.TextButton(text = "停止云端语音", modifier = Modifier.testTag("remote-voice-stop"), onClick = {
                 if (currentVoiceControls()) {
                     stopCascadeVoice(); invalidateConfiguredVoice(); speechHost.stop(capturedSpeechOwner)
                 }
@@ -2502,7 +2504,7 @@ class MainActivity : ComponentActivity() {
         }
         if (state.listening) {
             val target = state.target
-            top.yukonga.miuix.kmp.basic.TextButton(text = "停止听写", modifier = Modifier.testTag("dictation-stop"),
+            app.daiyu.android.ui.haptics.miuix.TextButton(text = "停止听写", modifier = Modifier.testTag("dictation-stop"),
                 onClick = { if (dictationHost.state.value.target == target) dictationHost.invalidate() })
         }
     }
@@ -2517,7 +2519,7 @@ class MainActivity : ComponentActivity() {
             !imageHost.busy && !shizukuWritesBlocked && !hasImages && draft.isNotBlank() && terminalEditor == null
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
             if (engineeringUi) Row(Modifier.fillMaxWidth()) {
-                top.yukonga.miuix.kmp.basic.TextButton(
+                app.daiyu.android.ui.haptics.miuix.TextButton(
                     text = if (hasImages) "Shizuku 仅限无附件文本" else "Shizuku 文本审批",
                     enabled = available && shizukuEditor == null,
                     modifier = Modifier.weight(1f).testTag("shizuku-text-entry").heightIn(min = 48.dp),
@@ -2527,11 +2529,11 @@ class MainActivity : ComponentActivity() {
                             shizukuEditor = ShizukuEditor(selected, generation, revision, draft)
                         }
                     })
-                top.yukonga.miuix.kmp.basic.TextButton(text = "Shizuku 权限设置",
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "Shizuku 权限设置",
                     modifier = Modifier.weight(1f).testTag("shizuku-settings-entry").heightIn(min = 48.dp),
                     onClick = { if (activityUsable()) retainedPage = "shizuku-settings" })
             }
-            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(
+            if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(
                 text = if (mcpPreparing) "正在冻结 MCP 本轮范围" else "MCP 本轮精确调用审批",
                 enabled = available && !mcpPreparing && mcpApproval == null && pendingTextSend == null,
                 modifier = Modifier.testTag("mcp-approval-entry").heightIn(min = 48.dp),
@@ -2542,22 +2544,22 @@ class MainActivity : ComponentActivity() {
                     onCancel = { if (mcpVisit === visit && mcpApproval === pending) cancelMcpEditor() },
                     onApprove = { approveMcp(pending, visit) })
             }
-            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(
+            if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(
                 text = if (browserPreparing) "正在准备浏览器审批" else "浏览器操作审批",
                 enabled = available && !browserPreparing && browserApproval == null && pendingTextSend == null,
                 modifier = Modifier.testTag("browser-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openBrowserApproval)
-            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(
+            if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(
                 text = "图片 / 视频生成审批",
                 enabled = available && pendingTextSend == null && generationApproval == null &&
                     !controller.generationSubmissionPending(),
                 modifier = Modifier.testTag("generation-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationApproval)
-            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 精确动作审批（前台屏幕）",
+            if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "GUI 精确动作审批（前台屏幕）",
                 enabled = available && pendingTextSend == null && guiEditor == null,
                 modifier = Modifier.testTag("gui-prepare-entry").heightIn(min = 48.dp),
                 onClick = ::openGuiPreparation)
-            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 系统无障碍设置",
+            if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "GUI 系统无障碍设置",
                 modifier = Modifier.testTag("gui-settings-entry").heightIn(min = 48.dp),
                 onClick = { if (activityUsable()) {
                     when (val result = app.daiyu.android.gui.GuiSystemSettings.openFromUser(this@MainActivity)) {
@@ -2569,37 +2571,37 @@ class MainActivity : ComponentActivity() {
             guiEditor?.let { entry ->
                 androidx.compose.material3.Text(if (entry.submitted) "GUI 已交给本次任务；Unknown 不重试，资源释放前不可再次批准。"
                     else "请切换到目标应用，在无障碍浮层读取并确认唯一真实目标。返回聊天或取消可撤销。")
-                top.yukonga.miuix.kmp.basic.TextButton(text = "撤销 GUI 准备 / 停止原任务",
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "撤销 GUI 准备 / 停止原任务",
                     modifier = Modifier.testTag("gui-cancel"), onClick = { cancelGuiEditor(entry); publishChat() })
             }
-            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "副屏运行准备（需单独批准）",
+            if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "副屏运行准备（需单独批准）",
                 enabled = available && pendingTextSend == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
                     controller.virtualDisplayEntry() == null,
                 modifier = Modifier.testTag("vd-prepare-entry").heightIn(min = 48.dp),
                 onClick = ::openVirtualDisplayPreparation)
             virtualDisplayEditor?.let { entry ->
                 androidx.compose.material3.Text("已冻结 ${entry.writes.size} 项写步骤、${entry.reads.size} 项读取；消息受理后仍须审阅完整副屏授权。")
-                top.yukonga.miuix.kmp.basic.TextButton(text = "接受消息并审阅完整副屏授权",
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "接受消息并审阅完整副屏授权",
                     enabled = !entry.submitted && entry.taskSurface.ready(TaskSurface.BACKGROUND)?.selfTarget == null &&
                         entry.taskSurface.ready(TaskSurface.BACKGROUND) != null,
                     modifier = Modifier.testTag("vd-submit"),
                     onClick = { submitVirtualDisplay(entry) })
-                top.yukonga.miuix.kmp.basic.TextButton(text = "停止副屏运行 / 取消准备",
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "停止副屏运行 / 取消准备",
                     modifier = Modifier.testTag("vd-cancel"), onClick = virtualDisplayCancelAction(entry, null))
             }
             controller.virtualDisplayEntry()?.let { originalEntry ->
-                top.yukonga.miuix.kmp.basic.TextButton(text = "原副屏任务交付 / Release 收尾",
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "原副屏任务交付 / Release 收尾",
                     enabled = originalEntry.revoked && selected?.id == originalEntry.conversationId,
                     modifier = Modifier.testTag("vd-cleanup-entry"),
                     onClick = { openVirtualDisplayCleanup(originalEntry) })
-                top.yukonga.miuix.kmp.basic.TextButton(text = "核实副屏停止（UNKNOWN 继续保留）",
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "核实副屏停止（UNKNOWN 继续保留）",
                     modifier = Modifier.testTag("vd-observe-close"),
                     onClick = { controller.observeVirtualDisplayClose(originalEntry) })
             }
-            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "读取本会话生成资产",
+            if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "读取本会话生成资产",
                 modifier = Modifier.testTag("generation-output-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationOutputs)
-            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "保存本会话浏览器下载原件",
+            if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "保存本会话浏览器下载原件",
                 modifier = Modifier.testTag("browser-download-output-entry").heightIn(min = 48.dp),
                 onClick = ::openBrowserDownloadOutputs)
             BrowserDownloadOutputsSurface()
@@ -2645,7 +2647,7 @@ class MainActivity : ComponentActivity() {
                     childApproval = { ChildBrowserApprovalHost(pending, controller::prepareBrowserChild) })
             }
             if (controller.browserChildPlans().isNotEmpty()) {
-                top.yukonga.miuix.kmp.basic.TextButton(text = "停止工具型浏览器子任务（UNKNOWN 保留）",
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "停止工具型浏览器子任务（UNKNOWN 保留）",
                     modifier = Modifier.testTag("child-browser-stop"), onClick = controller::stopBrowserChildren)
             }
             val editor = shizukuEditor
@@ -2653,7 +2655,7 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.testTag("shizuku-text-panel")) {
                     ShizukuApprovalHost(controller, editor.conversation, editor.text,
                         onAccepted = { preview, saved -> acceptShizuku(editor, preview, saved) })
-                    top.yukonga.miuix.kmp.basic.TextButton(text = "取消文本审批",
+                    app.daiyu.android.ui.haptics.miuix.TextButton(text = "取消文本审批",
                         modifier = Modifier.testTag("shizuku-text-cancel"), onClick = ::cancelShizukuEditor)
                 }
             }
@@ -2724,7 +2726,7 @@ class MainActivity : ComponentActivity() {
             !shizukuWritesBlocked && pendingTextSend == null && controller.textSendState() == null && draft.isNotBlank() && terminalEditor == null &&
             shizukuEditor == null && browserApproval == null && !browserPreparing && generationApproval == null
         val renderedDraft = terminalDraft()
-        if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "终端精确命令审批",
+        if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "终端精确命令审批",
             enabled = canEnter, modifier = Modifier.testTag("terminal-chat-entry"), onClick = {
                 if (canEnter && activityUsable() && retainedPage == "chat" && !sidebarVisible &&
                     renderedDraft == terminalDraft() && terminalEditor == null && !imageHost.hasAttachments &&
@@ -2741,7 +2743,7 @@ class MainActivity : ComponentActivity() {
                     else "固定命令 job：独立 shell 使用私有 stdin 脚本（末尾补换行），不保留跨命令变量或 cwd；聊天草稿不是命令。async 随 run 关闭请求停止；daemon 仅 Android 应用身份通过 setsid，在同 app 进程内独立于 run，不承诺跨重启、后代退出或长期存活。")
                 Row {
                     listOf(null to "PTY", "async" to "async job", "daemon" to "daemon job").forEach { (mode, label) ->
-                        androidx.compose.material3.TextButton(enabled = terminalInputEditable(editor) &&
+                        app.daiyu.android.ui.haptics.material.TextButton(enabled = terminalInputEditable(editor) &&
                             (mode != "daemon" || editor.linux == null), onClick = {
                             if (terminalInputEditable(editor) && (mode != "daemon" || editor.linux == null)) editor.jobMode = mode
                         }, modifier = Modifier.testTag("terminal-mode-${mode ?: "pty"}")) {
@@ -2755,7 +2757,7 @@ class MainActivity : ComponentActivity() {
                     label = { androidx.compose.material3.Text("精确终端命令（包含所需换行）") },
                     modifier = Modifier.fillMaxWidth().testTag("terminal-exact-command"))
                 val canChoose = terminalInputEditable(editor)
-                androidx.compose.material3.TextButton(enabled = canChoose, onClick = {
+                app.daiyu.android.ui.haptics.material.TextButton(enabled = canChoose, onClick = {
                     if (terminalInputEditable(editor)) editor.linux = null
                 }, modifier = Modifier.testTag("terminal-chat-android")) {
                     androidx.compose.material3.Text(if (editor.linux == null) "已选 Android（应用 UID）" else "选择 Android（应用 UID）")
@@ -2765,7 +2767,7 @@ class MainActivity : ComponentActivity() {
                     val status by host.state.collectAsStateWithLifecycle()
                     LaunchedEffect(application) { host.refreshLinux() }
                     status.linux.choices.forEach { choice ->
-                        androidx.compose.material3.TextButton(enabled = canChoose && editor.jobMode != "daemon", onClick = {
+                        app.daiyu.android.ui.haptics.material.TextButton(enabled = canChoose && editor.jobMode != "daemon", onClick = {
                             if (terminalInputEditable(editor) && editor.jobMode != "daemon") {
                                 // Explicit selection only; prepare itself never changes environment.
                                 editor.choosing = true
@@ -2789,7 +2791,7 @@ class MainActivity : ComponentActivity() {
                 if (jobPending != null) {
                     TerminalJobApproval(editor, jobPending)
                 } else if (pending == null) {
-                    androidx.compose.material3.Button(enabled = terminalInputEditable(editor) && editor.command.isNotEmpty(),
+                    app.daiyu.android.ui.haptics.material.Button(enabled = terminalInputEditable(editor) && editor.command.isNotEmpty(),
                         modifier = Modifier.testTag("terminal-prepare"), onClick = { prepareTerminal(editor) }) {
                         androidx.compose.material3.Text(if (editor.preparing) "准备中（不启动）" else "准备终端审批（不启动）")
                     }
@@ -2810,13 +2812,13 @@ class MainActivity : ComponentActivity() {
                         }, onCancel = { if (terminalEditor === editor && editor.preparation === it) cancelTerminalEditor() }, problem = controller.problem)
                     if (state == ControllerTerminalPreparation.State.CONFIRMED) {
                         androidx.compose.material3.Text("已确认；尚未发送或执行。仅授权 2 个步骤及 2 个有界读页。")
-                        androidx.compose.material3.Button(modifier = Modifier.testTag("terminal-send-approved"),
+                        app.daiyu.android.ui.haptics.material.Button(modifier = Modifier.testTag("terminal-send-approved"),
                             onClick = { sendTerminal(editor, pending) }) {
                             androidx.compose.material3.Text("发送已批准任务")
                         }
                     }
                 }
-                androidx.compose.material3.TextButton(onClick = { if (terminalEditor === editor) cancelTerminalEditor() },
+                app.daiyu.android.ui.haptics.material.TextButton(onClick = { if (terminalEditor === editor) cancelTerminalEditor() },
                     modifier = Modifier.testTag("terminal-chat-cancel")) { androidx.compose.material3.Text("取消终端审批") }
             }
         }
@@ -2833,13 +2835,13 @@ class MainActivity : ComponentActivity() {
             "argv=${org.json.JSONArray(linux?.shellArgv ?: listOf("/system/bin/sh"))}\n" +
             "env=${org.json.JSONObject(linux?.environment.orEmpty() + config.environment)}\n" +
             "shared=${org.json.JSONObject(linux?.sharedMounts.orEmpty())}\n精确命令（脚本末尾另补换行）：\n${plan.command}")
-        if (!editor.confirmed) androidx.compose.material3.Button(modifier = Modifier.testTag("terminal-job-confirm"), onClick = {
+        if (!editor.confirmed) app.daiyu.android.ui.haptics.material.Button(modifier = Modifier.testTag("terminal-job-confirm"), onClick = {
             if (terminalEditorCurrent(editor) && editor.jobPreparation === pending) {
                 if (controller.confirmTerminalJob(pending, terminalDraft())) editor.confirmed = true
                 else cancelTerminalEditor()
             }
         }) { androidx.compose.material3.Text("仅批准此固定命令，不启动") }
-        else androidx.compose.material3.Button(modifier = Modifier.testTag("terminal-job-send"), onClick = {
+        else app.daiyu.android.ui.haptics.material.Button(modifier = Modifier.testTag("terminal-job-send"), onClick = {
             if (terminalEditorCurrent(editor) && editor.jobPreparation === pending) sendTerminalJob(editor, pending)
         }) { androidx.compose.material3.Text("发送已批准 job") }
     }
@@ -3104,7 +3106,7 @@ class MainActivity : ComponentActivity() {
             app.daiyu.android.ui.components.DaiyuAlertDialog(onDismissRequest = {},
                 title = { androidx.compose.material3.Text("分支结果未确认") },
                 text = { androidx.compose.material3.Text("目标会话：${locator.conversationId.value}\n静态身份：${locator.staticIdentities.joinToString()}\n只读核实不会重新分支、生成或清理未知文件。此提示仅在当前进程保留，进程重启后请手动核实历史，不要重试。") },
-                confirmButton = { androidx.compose.material3.TextButton(modifier = Modifier.testTag("branch-unknown-inspect"), onClick = {
+                confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(modifier = Modifier.testTag("branch-unknown-inspect"), onClick = {
                     if (activityUsable() && voiceForeground && controller.pendingBranchOutcome() === receipt) {
                         if (!controller.inspectBranch(locator) { verified ->
                             if (activityUsable() && voiceForeground && unknownBranchOutcome === receipt) toast(if (verified)
@@ -3112,7 +3114,7 @@ class MainActivity : ComponentActivity() {
                         }) toast("请等待当前数据操作完成；UNKNOWN仍保留，未重试")
                     }
                 }) { androidx.compose.material3.Text("只读核实") } },
-                dismissButton = { androidx.compose.material3.TextButton(modifier = Modifier.testTag("branch-unknown-dismiss"),
+                dismissButton = { app.daiyu.android.ui.haptics.material.TextButton(modifier = Modifier.testTag("branch-unknown-dismiss"),
                     onClick = { dismissUnknownBranchOutcome(receipt) }) {
                     androidx.compose.material3.Text("关闭（不重试）")
                 } })
@@ -3156,7 +3158,7 @@ class MainActivity : ComponentActivity() {
                                 accepted
                             },
                             onCancelled = ::cancelGenerationEditor)
-                        androidx.compose.material3.TextButton(onClick = ::cancelGenerationEditor) {
+                        app.daiyu.android.ui.haptics.material.TextButton(onClick = ::cancelGenerationEditor) {
                             androidx.compose.material3.Text("关闭生成表单")
                         }
                     }
@@ -3186,7 +3188,7 @@ class MainActivity : ComponentActivity() {
                             androidx.compose.material3.Text("静态 ${source.kind} · ${source.mimeType} · ${source.bytes} bytes · ${source.width}×${source.height}")
                             display.thumbnail?.let { bitmap -> androidx.compose.foundation.Image(bitmap = bitmap.asImageBitmap(),
                                 contentDescription = "分支静态生成图片", modifier = Modifier.fillMaxWidth()) }
-                            androidx.compose.material3.TextButton(onClick = { backupGuard { pickStaticGenerationOriginal(display.output, originalStaticVisit) } }) {
+                            app.daiyu.android.ui.haptics.material.TextButton(onClick = { backupGuard { pickStaticGenerationOriginal(display.output, originalStaticVisit) } }) {
                                 androidx.compose.material3.Text("保存静态原件")
                             }
                         }
@@ -3201,12 +3203,12 @@ class MainActivity : ComponentActivity() {
                                 androidx.compose.foundation.Image(bitmap = bitmap.asImageBitmap(),
                                     contentDescription = "备份中的历史生成图片", modifier = Modifier.fillMaxWidth())
                             }
-                            androidx.compose.material3.TextButton(onClick = {
+                            app.daiyu.android.ui.haptics.material.TextButton(onClick = {
                                 backupGuard { pickHistoricalGenerationOriginal(history) }
                             }) { androidx.compose.material3.Text("保存历史原件") }
                         }
                     }
-                }, confirmButton = { androidx.compose.material3.TextButton(onClick = ::cancelGenerationOutputs) {
+                }, confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(onClick = ::cancelGenerationOutputs) {
                     androidx.compose.material3.Text("关闭")
                 } })
         }
@@ -3247,14 +3249,14 @@ class MainActivity : ComponentActivity() {
                         if (listing.references.isEmpty()) androidx.compose.material3.Text("暂无下载")
                         listing.references.forEach { reference ->
                             androidx.compose.material3.Text("${reference.lease.owner.kind} · ${reference.size} bytes · SHA-256 ${reference.sha256}")
-                            androidx.compose.material3.TextButton(
+                            app.daiyu.android.ui.haptics.material.TextButton(
                                 enabled = controller.active == null && !controller.dataBusy,
                                 modifier = Modifier.testTag("browser-download-save:${reference.id}"),
                                 onClick = { backupGuard { pickBrowserDownloadOriginal(listing, reference) } }
                             ) { androidx.compose.material3.Text("另存为原文件") }
                         }
                     }
-                }, confirmButton = { androidx.compose.material3.TextButton(onClick = { browserDownloadOutputs = null }) {
+                }, confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(onClick = { browserDownloadOutputs = null }) {
                     androidx.compose.material3.Text("关闭")
                 } })
         }
@@ -3762,16 +3764,16 @@ class MainActivity : ComponentActivity() {
                 androidx.compose.material3.Surface {
                     Column(Modifier.fillMaxSize().padding(16.dp)) {
                         if (visit.request == null) {
-                            androidx.compose.material3.TextButton(onClick = { prepareVirtualDisplayCleanup(visit) },
+                            app.daiyu.android.ui.haptics.material.TextButton(onClick = { prepareVirtualDisplayCleanup(visit) },
                                 enabled = !visit.busy, modifier = Modifier.testTag("vd-cleanup-release-only")) {
                                 androidx.compose.material3.Text("仅申请 Release 收尾（不交付任务）")
                             }
-                            androidx.compose.material3.TextButton(onClick = { observeVirtualDisplayTasks(visit) },
+                            app.daiyu.android.ui.haptics.material.TextButton(onClick = { observeVirtualDisplayTasks(visit) },
                                 enabled = !visit.busy && !visit.observationStarted,
                                 modifier = Modifier.testTag("vd-cleanup-observe-tasks")) {
                                 androidx.compose.material3.Text("显式观察原副屏可交付任务（只读）")
                             }
-                            androidx.compose.material3.TextButton(onClick = { shutdownVirtualDisplayUninitialized(visit) },
+                            app.daiyu.android.ui.haptics.material.TextButton(onClick = { shutdownVirtualDisplayUninitialized(visit) },
                                 enabled = !visit.busy && !visit.shutdownStarted,
                                 modifier = Modifier.testTag("vd-cleanup-shutdown-uninitialized")) {
                                 androidx.compose.material3.Text("查证未初始化并仅关闭原 owner 进程")
@@ -3780,7 +3782,7 @@ class MainActivity : ComponentActivity() {
                             visit.tasks?.let { tasks ->
                                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                                     tasks.candidateTaskIds.forEach { id ->
-                                        androidx.compose.material3.Checkbox(checked = id in visit.selectedTaskIds,
+                                        app.daiyu.android.ui.haptics.material.Checkbox(checked = id in visit.selectedTaskIds,
                                             onCheckedChange = { checked -> if (!visit.busy) {
                                                 visit.selectedTaskIds = if (checked) visit.selectedTaskIds + id else visit.selectedTaskIds - id
                                             } }, enabled = !visit.busy,
@@ -3788,12 +3790,12 @@ class MainActivity : ComponentActivity() {
                                         androidx.compose.material3.Text("原副屏 ${tasks.displayId} · owned task $id")
                                     }
                                 }
-                                androidx.compose.material3.Button(onClick = { prepareVirtualDisplayTaskHandoff(visit) },
+                                app.daiyu.android.ui.haptics.material.Button(onClick = { prepareVirtualDisplayTaskHandoff(visit) },
                                     enabled = !visit.busy && visit.selectedTaskIds.isNotEmpty(),
                                     modifier = Modifier.testTag("vd-cleanup-freeze-delivery")) {
                                     androidx.compose.material3.Text("冻结所选任务交付审批")
                                 }
-                                androidx.compose.material3.TextButton(onClick = { prepareVirtualDisplayTaskHandoff(visit, keepNone = true) },
+                                app.daiyu.android.ui.haptics.material.TextButton(onClick = { prepareVirtualDisplayTaskHandoff(visit, keepNone = true) },
                                     enabled = !visit.busy, modifier = Modifier.testTag("vd-cleanup-freeze-empty")) {
                                     androidx.compose.material3.Text("不交付任何任务：申请清理 owned 任务 → 条件 Release")
                                 }
@@ -3805,7 +3807,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.weight(1f))
                         }
                         androidx.compose.material3.Text(visit.status, Modifier.testTag("vd-cleanup-status"))
-                        androidx.compose.material3.TextButton(onClick = { closeVirtualDisplayCleanup(visit) },
+                        app.daiyu.android.ui.haptics.material.TextButton(onClick = { closeVirtualDisplayCleanup(visit) },
                             modifier = Modifier.testTag("vd-cleanup-close")) {
                             androidx.compose.material3.Text("关闭此次收尾访问（不释放资源）")
                         }
@@ -4070,7 +4072,7 @@ class MainActivity : ComponentActivity() {
             ImageAttachments(images, imageHost.actions(::launchImagePicker), imageHost.draftLoader,
                 enabled = enabled, compact = true)
             val attempt = session.attempt
-            if (attempt != null && !session.uncertain) top.yukonga.miuix.kmp.basic.TextButton(
+            if (attempt != null && !session.uncertain) app.daiyu.android.ui.haptics.miuix.TextButton(
                 text = "取消图片准备", modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-cancel"),
                 onClick = {
                     if (editorGeneration == ownerGeneration && imageHost.session === session)
@@ -4079,7 +4081,7 @@ class MainActivity : ComponentActivity() {
             if (imageHost.fenced) {
                 top.yukonga.miuix.kmp.basic.Text(
                     "发送结果待核实；保留原草稿，禁止重发", modifier = Modifier.testTag("image-host-unknown"))
-                top.yukonga.miuix.kmp.basic.TextButton(text = "只读核实原发送结果", enabled = imageHost.canRecover,
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "只读核实原发送结果", enabled = imageHost.canRecover,
                     modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-recover"), onClick = {
                         if (editorGeneration == ownerGeneration && imageHost.session === session) imageHost.recover(session)
                     })
@@ -4282,7 +4284,7 @@ class MainActivity : ComponentActivity() {
                 .semantics { liveRegion = LiveRegionMode.Polite },
         )
         if (voiceHostIsActive(state)) {
-            top.yukonga.miuix.kmp.basic.TextButton(
+            app.daiyu.android.ui.haptics.miuix.TextButton(
                 text = stringResource(R.string.voice_host_stop),
                 modifier = Modifier.testTag("voice-host-stop-$id"),
                 onClick = { speechHost.stop(renderedOwner, id) },
@@ -4405,7 +4407,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun QuestionCleanup(id: String) {
         val row = questionRows[id] ?: return
         if (row.retryCleanup) {
-            top.yukonga.miuix.kmp.basic.TextButton(text = "重试停止清理",
+            app.daiyu.android.ui.haptics.miuix.TextButton(text = "重试停止清理",
                 modifier = Modifier.testTag("question-retry-cleanup"),
                 onClick = { guard { controller.stop(row.message) } })
         }

@@ -7,6 +7,7 @@ import java.lang.ref.WeakReference
 
 /** Existing click sites delegate to P31; no second system-click fallback or shadow preferences. */
 internal object TouchHaptics {
+    private var actionDepth = 0
     private var runtime = WeakReference<HapticsRuntime>(null)
 
     /** Install the application-owned runtime once; stale disposal cannot unbind its replacement. */
@@ -18,9 +19,16 @@ internal object TouchHaptics {
 
     fun click(view: View?) = perform(view, HapticKind.CLICK)
     fun longPress(view: View?) = perform(view, HapticKind.LONG_PRESS)
+    fun tick(view: View?) = perform(view, HapticKind.TICK)
     fun gestureThreshold(view: View?) = perform(view, HapticKind.THRESHOLD)
 
+    fun <T> action(view: View?, kind: HapticKind = HapticKind.CLICK, block: () -> T): T {
+        perform(view, kind)
+        actionDepth++
+        return try { block() } finally { actionDepth-- }
+    }
+
     private fun perform(view: View?, kind: HapticKind) {
-        if (view != null) runtime.get()?.uiTouch(view, kind)
+        if (actionDepth == 0 && view != null) runtime.get()?.uiTouch(view, kind)
     }
 }

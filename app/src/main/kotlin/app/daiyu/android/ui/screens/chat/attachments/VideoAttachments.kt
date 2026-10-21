@@ -4,7 +4,7 @@ import android.graphics.BitmapFactory
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,7 +58,7 @@ import app.daiyu.android.videoReceiptMatches
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** The parent's editor identity, distinct from the host's video revision. Frozen at confirmation. */

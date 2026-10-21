@@ -27,7 +27,7 @@ import app.daiyu.android.ui.model.ConversationPaneUiState
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import app.daiyu.android.ui.model.filterForFolder
 import app.daiyu.android.ui.model.searchResults
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 /**
  * P28: load a COMPLETE summary snapshot, then filter only title/preview using the existing rule.

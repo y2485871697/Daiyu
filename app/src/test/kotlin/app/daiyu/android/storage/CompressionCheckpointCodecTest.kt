@@ -26,6 +26,45 @@ class CompressionCheckpointCodecTest {
         assertEquals(6, JSONObject(RunCheckpointCodec.encode(legacy)).getInt("version"))
         assertEquals(legacy, RunCheckpointCodec.decode(RunCheckpointCodec.encode(legacy)))
     }
+    @Test fun v9LogicalSegmentsRoundTripWithoutWeakeningPhysicalArchives() {
+        val base = checkpoint()
+        val call = ToolInvocation(ToolCallId("read"), "read", "{}")
+        val toolSegment = base.message.copy(status = RunStatus.COMPLETED,
+            blocks = listOf(MessageBlock.Tool(call, "done")))
+        val textSegment = toolSegment.copy(blocks = listOf(MessageBlock.Text("answer", "finished")),
+            reportedReasoning = listOf(ReportedReasoning("reason", "reported")))
+        val value = base.copy(history = listOf(toolSegment, textSegment),
+            context = base.context!!.copy(compactions = 1))
+        val encoded = RunCheckpointCodec.encode(value)
+        assertEquals(9, JSONObject(encoded).getInt("version"))
+        assertEquals(value, RunCheckpointCodec.decode(encoded))
+        assertEquals(value.context, ProcessRecovery.interrupt(RunCheckpointCodec.decode(encoded)).context)
+        assertThrows(IllegalArgumentException::class.java) {
+            app.daiyu.android.context.ArchiveCodec.encode(value.history)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            RunCheckpointCodec.encode(value.copy(context = null))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            app.daiyu.android.context.ArchiveCodec.decode(JSONObject(encoded).getJSONArray("history")
+                .apply { getJSONObject(1).remove("reported_reasoning") }.toString().toByteArray())
+        }
+        val legacyEncoded = JSONObject(RunCheckpointCodec.encode(base.copy(context = null)))
+            .put("history", JSONObject(encoded).getJSONArray("history")
+                .apply { getJSONObject(1).remove("reported_reasoning") })
+        assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(legacyEncoded.toString()) }
+        val duplicateReasoning = JSONObject(encoded)
+        val parts = duplicateReasoning.getJSONArray("history").getJSONObject(1).getJSONArray("reported_reasoning")
+        parts.put(parts.getJSONObject(0))
+        assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(duplicateReasoning.toString()) }
+        assertThrows(IllegalArgumentException::class.java) {
+            RunCheckpointCodec.encode(value.copy(history = listOf(textSegment.copy(role = Message.USER_ROLE))))
+        }
+        val invalid = JSONObject(encoded)
+        invalid.getJSONArray("history").getJSONObject(1).put("role", "not-a-role")
+        assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(invalid.toString()) }
+    }
+
     @Test fun rejectsForeignAnchorsAndStrictNumberAndDuplicateSummary() {
         val value = checkpoint()
         assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.encode(value.copy(context =

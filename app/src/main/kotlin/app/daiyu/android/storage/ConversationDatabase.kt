@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 22), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 23), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -57,7 +57,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..21 && newVersion == 22) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..22 && newVersion == 23) { "不支持此数据库版本，保留原数据" }
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
         app.daiyu.android.platform.NotificationHistoryStore.installSchema(db)
@@ -100,6 +100,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         if (oldVersion < 11) upgradeGenerationSchema(db)
         if (oldVersion < 14) SQLiteChildTaskStore.installCommandSchema(db)
         SQLiteChildTaskStore.installDisplaySchema(db)
+        installUsageCreationColumns(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
@@ -110,6 +111,14 @@ class ConversationDatabase internal constructor(context: Context, private val af
         keys.forEach { (conversation, id) ->
             val row = storedMessage(db, ConversationId(conversation), id, verifyVideoWitness = false)
             ControllerVideoManifestWitness.migrateLegacy(db, listOf(row), emptyIsProven = oldVersion < 12)
+        }
+    }
+    private fun installUsageCreationColumns(db: SQLiteDatabase) {
+        listOf("child_request_usage", "runtime_preparations", "context_usage", RecordedUsageHistory.REQUESTS).forEach { table ->
+            val columns = db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(1)) }
+            }
+            if ("cache_creation_tokens" !in columns) db.execSQL("ALTER TABLE $table ADD COLUMN cache_creation_tokens INTEGER")
         }
     }
     private fun upgradeGenerationSchema(db: SQLiteDatabase) {

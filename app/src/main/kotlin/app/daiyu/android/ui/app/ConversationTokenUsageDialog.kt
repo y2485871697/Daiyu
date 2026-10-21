@@ -4,12 +4,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,27 +34,32 @@ internal fun ConversationTokenUsageDialog(
     onDismiss: () -> Unit,
 ) {
     if (!show) return
-    var cacheExpanded by remember { mutableStateOf(false) }
-    // Final preview cascade: centered 218px card, plain rows, cache details closed by default.
-    UsageGlassDialog(stringResource(R.string.action_token_usage), onDismiss, compact = true) {
+    UsageGlassDialog(stringResource(R.string.action_token_usage), onDismiss, compact = true, adaptiveWidth = true) {
+        Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()).testTag("conversation-usage-body")) {
         if (!usage.hasUsage) {
             Text(stringResource(R.string.token_usage_empty), fontSize = 10.sp, color = usagePalette().muted,
                 modifier = Modifier.padding(vertical = 12.dp))
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                UsageMetric(stringResource(R.string.token_usage_total), formatTokenCount(usage.totalTokens), total = true)
-                UsageMetric(stringResource(R.string.stats_page_fresh_input_tokens), formatTokenCount(usage.freshInputTokens))
-                UsageMetric(stringResource(R.string.stats_page_output_tokens), formatTokenCount(usage.outputTokens))
-            }
-            UsageAction(if (cacheExpanded) "▾ 缓存明细" else "▸ 缓存明细",
-                onClick = { cacheExpanded = !cacheExpanded }, plain = true,
-                modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
-            if (cacheExpanded) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                UsageMetric(stringResource(R.string.stats_page_cached_tokens), formatTokenCount(usage.cachedTokens))
-                UsageMetric(stringResource(R.string.stats_page_cache_creation_tokens), formatTokenCount(usage.cacheCreationTokens))
-                UsageMetric(stringResource(R.string.stats_model_cache_hit_rate), formatCachePercent(usage.cachePercent))
-            }
+        } else ConversationTokenUsageContent(usage)
         }
+    }
+}
+
+@Composable
+internal fun ConversationTokenUsageContent(usage: ConversationTokenUsageUi) {
+    var cacheExpanded by remember { mutableStateOf(false) }
+    fun tokens(value: Long?) = value?.let(::formatTokenCount) ?: "—"
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        UsageMetric("累计用量", tokens(usage.totalTokens), total = true)
+        UsageMetric("输入 Token", tokens(usage.freshInputTokens))
+        UsageMetric(stringResource(R.string.stats_page_output_tokens), tokens(usage.outputTokens))
+    }
+    UsageAction(if (cacheExpanded) "▾ 缓存明细" else "▸ 缓存明细",
+        onClick = { cacheExpanded = !cacheExpanded }, plain = true,
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp).testTag("chat-usage-cache-toggle"))
+    if (cacheExpanded) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        UsageMetric(stringResource(R.string.stats_page_cached_tokens), tokens(usage.cachedTokens))
+        UsageMetric(stringResource(R.string.stats_page_cache_creation_tokens), tokens(usage.cacheCreationTokens))
+        UsageMetric(stringResource(R.string.stats_model_cache_hit_rate), formatCachePercent(usage.cachePercent))
     }
 }
 

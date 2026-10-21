@@ -15,7 +15,7 @@ internal object RuntimePreparationSchema {
             "revision INTEGER NOT NULL,state TEXT NOT NULL," +
             "request_id TEXT NOT NULL,request_owner TEXT NOT NULL,attempt_id TEXT NOT NULL," +
             "has_usage INTEGER NOT NULL DEFAULT 0," +
-            "input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER)")
+            "input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER,cache_creation_tokens INTEGER)")
         db.execSQL("CREATE INDEX IF NOT EXISTS runtime_preparations_conversation ON runtime_preparations(conversation_id,state)")
         val childColumns = db.rawQuery("PRAGMA table_info(child_request_usage)", null).use { c ->
             buildSet { while (c.moveToNext()) add(c.getString(1)) }

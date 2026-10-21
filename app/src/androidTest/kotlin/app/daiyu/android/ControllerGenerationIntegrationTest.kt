@@ -781,7 +781,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
                 target.database.readableDatabase, "neutral_backup_history"))
             target.database.writableDatabase.execSQL("DROP TRIGGER controller_bad_receipt")
             assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("已导入"))
-            assertEquals(22, target.database.readableDatabase.version)
+            assertEquals(23, target.database.readableDatabase.version)
             assertEquals(0, count("generation_outputs")); assertEquals(0, count("runtime_checkpoints"))
             assertEquals(2, count("generation_attempts")); assertEquals(1, count("child_task_commands")); assertEquals(1, count("child_request_usage"))
             originalRows.forEach { (conversation, rows) ->

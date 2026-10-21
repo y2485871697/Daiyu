@@ -12,12 +12,17 @@ sealed interface ModelEvent {
      * billing receipt. null is unknown, not zero. Cache reads are a subset of total input,
      * not an additional charge. A later snapshot replaces all fields, even null or lower counts.
      * Providers normalize partial wire observations and apply their own upper count bound. */
-    data class Usage(val inputTokens: Long?, val outputTokens: Long?, val cachedTokens: Long? = null) : ModelEvent {
+    data class Usage(val inputTokens: Long?, val outputTokens: Long?, val cachedTokens: Long? = null,
+        val cacheCreationTokens: Long? = null) : ModelEvent {
         init {
             require(inputTokens == null || inputTokens >= 0)
             require(outputTokens == null || outputTokens >= 0)
             require(cachedTokens == null || cachedTokens >= 0)
             require(inputTokens == null || cachedTokens == null || cachedTokens <= inputTokens)
+            require(cacheCreationTokens == null || cacheCreationTokens >= 0)
+            require(inputTokens == null || cacheCreationTokens == null || cacheCreationTokens <= inputTokens)
+            require(inputTokens == null || cachedTokens == null || cacheCreationTokens == null ||
+                cacheCreationTokens <= inputTokens - cachedTokens)
         }
     }
 }

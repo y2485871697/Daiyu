@@ -10,8 +10,9 @@ internal object BackupUsageCodec {
     val legacyColumns = listOf("request_id", "run_id", "branch_id", "input_tokens", "output_tokens", "cached_tokens", "reasoning_tokens")
     private val metadata = listOf("usage_source", "request_owner", "attempt_id", "parent_message_id", "has_usage",
         "process_owner", "usage_state", "usage_revision", "operation_id", "terminal_reason")
-    val columns = legacyColumns + metadata
-    private val tokens = listOf("input_tokens", "output_tokens", "cached_tokens", "reasoning_tokens")
+    val typedColumns = legacyColumns + metadata
+    val columns = typedColumns + "cache_creation_tokens"
+    private val tokens = listOf("input_tokens", "output_tokens", "cached_tokens", "reasoning_tokens", "cache_creation_tokens")
     private val reasons = setOf("SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN")
 
     fun export(db: SQLiteDatabase, conversation: String?): JSONArray {
@@ -38,13 +39,18 @@ internal object BackupUsageCodec {
         require(rows.length() <= MAX_ROWS)
         repeat(rows.length()) { index ->
             val row = rows.getJSONObject(index)
-            fields(row, if (version >= 3) columns else legacyColumns)
+            fields(row, if (version >= 6) columns else if (version >= 3) typedColumns else legacyColumns)
             require(requests.add(id(row, "request_id")))
             require(id(row, "branch_id") in conversations)
-            tokens.forEach { if (!row.isNull(it)) require(number(row, it) >= 0) }
+            tokens.filter { row.has(it) }.forEach { if (!row.isNull(it)) require(number(row, it) >= 0) }
             if (version >= 3 && text(row, "usage_source") != "LEGACY" &&
                 !row.isNull("input_tokens") && !row.isNull("cached_tokens"))
                 require(number(row, "cached_tokens") <= number(row, "input_tokens"))
+            if (version >= 6 && text(row, "usage_source") != "LEGACY") {
+                fun token(key: String): Long? = if (row.isNull(key)) null else number(row, key)
+                app.daiyu.android.domain.ModelEvent.Usage(token("input_tokens"), token("output_tokens"),
+                    token("cached_tokens"), token("cache_creation_tokens"))
+            }
             if (version < 3 || text(row, "usage_source") == "LEGACY") {
                 fun token(key: String): Long? = if (row.isNull(key)) null else number(row, key)
                 app.daiyu.android.domain.context.UsageRecord(text(row, "request_id"), text(row, "run_id"), text(row, "branch_id"),
@@ -76,6 +82,7 @@ internal object BackupUsageCodec {
         repeat(rows.length()) { index ->
             val expected = JSONObject(rows.getJSONObject(index).toString())
             if (version < 3) metadata.forEach { expected.put(it, if (it == "usage_source") "LEGACY" else JSONObject.NULL) }
+            if (version < 6) expected.put("cache_creation_tokens", JSONObject.NULL)
             verifyRow(db, "context_usage", expected, listOf("request_id"))
         }
     }

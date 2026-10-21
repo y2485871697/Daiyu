@@ -1,6 +1,10 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -25,6 +29,7 @@ class UsageCompactPresentationTest : WiredActivityTestCase() {
                 }
             }
         }
+        awaitUniqueTag("conversation-usage-body")
         ui.onNodeWithText("120").assertExists()
         ui.onNodeWithText("65").assertExists()
         val cachedLabel = activity.getString(R.string.stats_page_cached_tokens)
@@ -37,6 +42,23 @@ class UsageCompactPresentationTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testLargeFontCacheDetailsRemainReachable() {
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val density = LocalDensity.current
+                CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                    ConversationTokenUsageDialog(true, ConversationTokenUsageUi(100, 20, 30, 5), {})
+                }
+            }
+        } }
+        awaitUniqueTag("conversation-usage-body")
+        node("chat-usage-cache-toggle").performClick()
+        ui.mainClock.advanceTimeByFrame()
+        ui.onNodeWithText(activity.getString(R.string.stats_model_cache_hit_rate)).scrollToVisible().assertIsDisplayed()
+        ui.onNodeWithText("30.0%").assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testTouchingDialogTitleDoesNotDismissTheCard() {
         var dismissals = 0
         mainThread {
@@ -46,6 +68,7 @@ class UsageCompactPresentationTest : WiredActivityTestCase() {
                 }
             }
         }
+        ui.mainClock.advanceTimeByFrame()
         ui.onNodeWithText("inside card").performTouchInput { click() }
         mainThread { assertEquals(0, dismissals) }
     }
@@ -59,6 +82,7 @@ class UsageCompactPresentationTest : WiredActivityTestCase() {
                 }
             }
         }
+        ui.mainClock.advanceTimeByFrame()
         ui.onNodeWithText("disabled action").assertIsNotEnabled().performTouchInput { click() }
         mainThread { assertEquals(0, calls) }
     }

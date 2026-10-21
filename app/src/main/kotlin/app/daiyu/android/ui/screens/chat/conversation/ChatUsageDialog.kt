@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -21,11 +22,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ChatController
 import app.daiyu.android.data.repository.RecordedUsageProjection
-import app.daiyu.android.data.repository.formatReportedUsage
-import app.daiyu.android.data.repository.formatTokenCount
 import app.daiyu.android.domain.ConversationId
+import app.daiyu.android.ui.app.ConversationTokenUsageContent
 import app.daiyu.android.ui.components.UsageGlassDialog
-import app.daiyu.android.ui.components.UsageMetric
 import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.layout.appWindowSize
 import kotlinx.coroutines.Dispatchers
@@ -46,8 +45,8 @@ internal fun ChatUsageDialog(controller: ChatController, conversationId: Convers
         loading = false
     }
     val colors = usagePalette()
-    UsageGlassDialog(title = "Token 用量", onDismiss = onDismiss, compact = true) {
-        Column(Modifier.fillMaxWidth().heightIn(max = minOf(540.dp, appWindowSize().height * 0.65f))
+    UsageGlassDialog(title = "Token 用量", onDismiss = onDismiss, compact = true, adaptiveWidth = true) {
+        Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = minOf(540.dp, appWindowSize().height * 0.65f))
             .verticalScroll(rememberScrollState()).testTag("chat-usage-dialog"),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val usage = projection
@@ -60,16 +59,7 @@ internal fun ChatUsageDialog(controller: ChatController, conversationId: Convers
                     }
                 }
                 usage == null -> Text("用量读取失败", fontSize = 10.sp, color = MiuixTheme.colorScheme.error)
-                else -> {
-                    UsageMetric("输入 Token", usage.combined.input.reportedTokens?.let(::formatTokenCount) ?: "—")
-                    UsageMetric("输出 Token", usage.combined.output.reportedTokens?.let(::formatTokenCount) ?: "—")
-                    UsageMetric("缓存读取", formatReportedUsage(usage.combined.cached))
-                    UsageMetric("主请求输入", formatReportedUsage(usage.main.input))
-                    UsageMetric("主请求输出", formatReportedUsage(usage.main.output))
-                    UsageMetric("子任务输入", formatReportedUsage(usage.child.input))
-                    UsageMetric("子任务输出", formatReportedUsage(usage.child.output))
-                    Text("已报告小计；缺报显示 —", fontSize = 8.sp, lineHeight = 13.sp, color = colors.muted)
-                }
+                else -> key(controller, conversationId) { ConversationTokenUsageContent(usage.conversationUsage) }
             }
         }
     }

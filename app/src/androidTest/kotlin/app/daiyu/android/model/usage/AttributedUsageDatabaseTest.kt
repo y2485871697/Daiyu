@@ -60,6 +60,57 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         DatabaseTransactions { database.readableDatabase }.run { RecordedUsageReader.readAttributed(it, conversation, budget) }
     private fun rejects(work: () -> Unit) { try { work(); fail("must reject") } catch (_: Exception) {} }
 
+    fun testCacheCreationSurvivesReopening() {
+        val owner = parent(); val child = task(owner)
+        val first = checkpoint(child, value = ModelEvent.Usage(17, 8, 5, 2))
+        runtime.childUsage.record(child, first)
+        assertEquals(2L, read(owner.conversationId).summary.combined.creation.reportedTokens)
+        runtime.close(); database.close()
+        database = ConversationDatabase(context)
+        runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
+        assertEquals(2L, read(owner.conversationId).requests.single().snapshot.cacheCreationTokens)
+    }
+    fun testV22UpgradeAddsUnknownCreationWithoutChangingExistingUsage() {
+        val owner = parent(); val child = task(owner)
+        runtime.childUsage.record(child, checkpoint(child))
+        val before = read(owner.conversationId).summary.combined
+        runtime.close(); database.close()
+        val tables = listOf("child_request_usage", "runtime_preparations", "context_usage", "recorded_usage_requests")
+        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath("conversations.db").path,
+            null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.beginTransaction()
+            try {
+                tables.forEach { table ->
+                    val sql = db.rawQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", arrayOf(table))
+                        .use { check(it.moveToFirst()); it.getString(0) }
+                    val indexes = db.rawQuery("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL",
+                        arrayOf(table)).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+                    val columns = db.rawQuery("PRAGMA table_info($table)", null).use { c -> buildList {
+                        while (c.moveToNext()) if (c.getString(1) != "cache_creation_tokens") add(c.getString(1))
+                    } }.joinToString(",")
+                    db.execSQL(sql.replace(table, "old_$table").replace(",cache_creation_tokens INTEGER", ""))
+                    db.execSQL("INSERT INTO old_$table($columns) SELECT $columns FROM $table")
+                    db.execSQL("DROP TABLE $table")
+                    db.execSQL("ALTER TABLE old_$table RENAME TO $table")
+                    indexes.forEach(db::execSQL)
+                }
+                db.version = 22
+                db.setTransactionSuccessful()
+            } finally { db.endTransaction() }
+        }
+        database = ConversationDatabase(context)
+        runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
+        assertEquals(23, database.readableDatabase.version)
+        tables.forEach { table ->
+            database.readableDatabase.rawQuery("SELECT cache_creation_tokens FROM $table", null).use { c ->
+                while (c.moveToNext()) assertTrue(c.isNull(0))
+            }
+        }
+        val after = read(owner.conversationId).summary.combined
+        assertEquals(before.input, after.input); assertEquals(before.output, after.output)
+        assertEquals(before.cached, after.cached); assertNull(after.creation.reportedTokens)
+    }
+
     fun testMainAndChildQueriesShareOneTransactionAndKeepRequestAttribution() {
         val parent = parent(); val child = task(parent)
         runtime.childUsage.record(child, checkpoint(child))
@@ -159,7 +210,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         app.daiyu.android.removeAssistantSchemaForLegacyFixture(database.writableDatabase)
         database.writableDatabase.version = 8; database.close()
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(22, database.readableDatabase.version)
+        assertEquals(23, database.readableDatabase.version)
         assertEquals(1, read().childCoverage.tasksWithoutReportedUsage)
         assertNull(read().summary.child.input.reportedTokens)
     }

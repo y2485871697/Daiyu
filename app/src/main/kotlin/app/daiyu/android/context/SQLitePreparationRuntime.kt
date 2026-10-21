@@ -72,7 +72,7 @@ internal class SQLitePreparationRuntime(
                         update(db, row, ContentValues().apply {
                             put("revision", revision + 1); put("has_usage", 1)
                             put("input_tokens", usage.snapshot.inputTokens); put("output_tokens", usage.snapshot.outputTokens)
-                            put("cached_tokens", usage.snapshot.cachedTokens)
+                            put("cached_tokens", usage.snapshot.cachedTokens); put("cache_creation_tokens", usage.snapshot.cacheCreationTokens)
                         })
                         row.revision + 1
                     }
@@ -131,7 +131,7 @@ internal class SQLitePreparationRuntime(
             put("state", "HANDED"); put("owner", checkpoint.owner); put("revision", row.revision + 1)
             // Keep the report-presence bit as coverage evidence after transferring the tokens.
             // HANDED+has_usage=0 remains a missing SUMMARY request, even if MAIN reports later.
-            putNull("input_tokens"); putNull("output_tokens"); putNull("cached_tokens")
+            putNull("input_tokens"); putNull("output_tokens"); putNull("cached_tokens"); putNull("cache_creation_tokens")
         })
     }
 
@@ -173,7 +173,7 @@ internal class SQLitePreparationRuntime(
         private const val TABLE = "runtime_preparations"
         private fun read(db: SQLiteDatabase, id: String): Row? = db.rawQuery(
             "SELECT conversation_id,run_id,message_id,owner,process_owner,revision,state,request_id,request_owner,attempt_id," +
-                "has_usage,input_tokens,output_tokens,cached_tokens FROM $TABLE WHERE message_id=?", arrayOf(id)).use { c ->
+                "has_usage,input_tokens,output_tokens,cached_tokens,cache_creation_tokens FROM $TABLE WHERE message_id=?", arrayOf(id)).use { c ->
             if (!c.moveToFirst()) null else {
                 require((listOf(0, 1, 2, 3, 4, 6, 7, 8, 9)).all {
                     c.getType(it) == android.database.Cursor.FIELD_TYPE_STRING &&
@@ -191,7 +191,7 @@ internal class SQLitePreparationRuntime(
                 }
                 val request = RequestCheckpoint(c.getString(7), c.getString(9), c.getString(8), RequestOperation.NEXT)
                 Row(c.getString(0), c.getString(1), c.getString(2), c.getString(3), c.getString(4), c.getLong(5), c.getString(6),
-                    request, if (hasUsage == 0L) null else ModelEvent.Usage(token(11), token(12), token(13)))
+                    request, if (hasUsage == 0L) null else ModelEvent.Usage(token(11), token(12), token(13), token(14)))
             }
         }
 

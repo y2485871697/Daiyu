@@ -14,7 +14,7 @@ internal object RecordedUsageHistory {
     val parentColumns = listOf("message_id", "conversation_id", "run_id")
     val requestColumns = listOf("kind", "message_id", "conversation_id", "run_id", "parent_message_id",
         "request_owner", "request_id", "attempt_id", "operation", "usage_source", "has_usage",
-        "input_tokens", "output_tokens", "cached_tokens")
+        "input_tokens", "output_tokens", "cached_tokens", "cache_creation_tokens")
 
     fun install(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS $PARENTS(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE," +
@@ -24,7 +24,7 @@ internal object RecordedUsageHistory {
             "run_id TEXT NOT NULL,parent_message_id TEXT REFERENCES messages(id) ON DELETE CASCADE," +
             "request_owner TEXT NOT NULL,request_id TEXT NOT NULL,attempt_id TEXT NOT NULL," +
             "operation TEXT NOT NULL CHECK(operation IN ('NEXT','RESUME')),usage_source TEXT NOT NULL CHECK(usage_source IN ('MAIN','SUMMARY'))," +
-            "has_usage INTEGER NOT NULL CHECK(has_usage IN (0,1)),input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER," +
+            "has_usage INTEGER NOT NULL CHECK(has_usage IN (0,1)),input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER,cache_creation_tokens INTEGER," +
             "PRIMARY KEY(request_owner,request_id))")
         db.execSQL("CREATE INDEX IF NOT EXISTS recorded_usage_requests_parent ON $REQUESTS(message_id,kind)")
         db.execSQL("CREATE INDEX IF NOT EXISTS recorded_usage_requests_conversation ON $REQUESTS(conversation_id)")
@@ -47,7 +47,7 @@ internal object RecordedUsageHistory {
         require(source == UsageRequestSource.MAIN || source == UsageRequestSource.SUMMARY)
         require(kind != "PREPARATION" || source == UsageRequestSource.SUMMARY)
         val presence = integer("has_usage"); require(presence in 0L..1L)
-        val snapshot = ModelEvent.Usage(token("input_tokens"), token("output_tokens"), token("cached_tokens"))
+        val snapshot = ModelEvent.Usage(token("input_tokens"), token("output_tokens"), token("cached_tokens"), token("cache_creation_tokens"))
         require(presence == 1L || snapshot == ModelEvent.Usage(null, null, null))
         val request = RequestCheckpoint(text("request_id"), text("attempt_id"), text("request_owner"), RequestOperation.valueOf(text("operation")))
         require(request.operation != RequestOperation.OPEN)

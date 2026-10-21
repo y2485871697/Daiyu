@@ -254,7 +254,7 @@ class P21RequestCoverageDatabaseTest : InstrumentationTestCase() {
         db.version = 16
         database.close(); database = ConversationDatabase(context)
         val upgraded = database.writableDatabase
-        assertEquals(22, upgraded.version)
+        assertEquals(23, upgraded.version)
         upgraded.rawQuery("SELECT usage_source,input_tokens,output_tokens,cached_tokens FROM child_request_usage", null).use {
             assertTrue(it.moveToFirst()); assertEquals("MAIN", it.getString(0)); assertTrue(it.isNull(1)); assertEquals(0L, it.getLong(2)); assertTrue(it.isNull(3))
         }

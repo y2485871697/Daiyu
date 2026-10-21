@@ -149,7 +149,7 @@ private fun VideoAttachmentsContent(
         onDispose { live = false; controls(null) }
     }
     val colors = MiuixTheme.colorScheme
-    val hasStatus = picker.selecting || picker.notice != null || state.storageFailed || state.recovering || state.fenced
+    val hasStatus = picker.selecting || picker.notice != null || state.storageFailed || state.fenced
     if (!compact || state.items.isNotEmpty() || hasStatus) Column(modifier.fillMaxWidth().then(if (compact) Modifier.padding(horizontal = 13.dp, vertical = 6.dp) else Modifier).testTag("video_attachments"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (!compact) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("原视频附件（${state.items.size}/4）", modifier = Modifier.weight(1f),
@@ -163,7 +163,6 @@ private fun VideoAttachmentsContent(
         if (picker.selecting) VideoStatus("正在选择视频…", "video_attachments_selecting")
         picker.notice?.let { VideoStatus(it, "video_attachments_notice") }
         if (state.storageFailed) VideoStatus("视频草稿保存失败，已停止操作；请勿重复发送", "video_attachments_storage_failed")
-        if (state.recovering) VideoStatus("正在恢复视频草稿或清理已移除的视频…", "video_attachments_recovering")
         if (state.fenced) VideoStatus("正在确认视频发送结果，请勿重复发送", "video_attachments_fenced")
         if (!compact && state.items.isEmpty()) Text("尚未选择视频", style = MiuixTheme.textStyles.footnote1)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

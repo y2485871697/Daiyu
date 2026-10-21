@@ -48,7 +48,8 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         ConversationSummaryUi("second", "Second chat", "", "", mode = ConversationModeUi.Chat, isToday = true),
     )
 
-    private fun show(scale: Float = 1f, dark: Boolean = false, fontScale: Float = .9f, compact: Boolean = false) {
+    private fun show(scale: Float = 1f, dark: Boolean = false, fontScale: Float = .9f, compact: Boolean = false,
+        loaded: Boolean = true, rows: List<ConversationSummaryUi> = conversations, query: String = "") {
         action = null
         val renderGeneration = ++generation
         mainThread {
@@ -62,9 +63,9 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                             density.set(LocalDensity.current)
                             var visible by remember { mutableStateOf(true) }
                             var state by remember { mutableStateOf(ConversationPaneUiState(
-                                conversations = conversations, selectedConversationId = "first", searchQuery = "",
+                                conversations = rows, selectedConversationId = "first", searchQuery = query,
                                 folders = listOf(ConversationFolderUi("design", "设计")),
-                                historyConversations = conversations,
+                                historyConversations = rows, conversationsLoaded = loaded,
                             )) }
                             ConversationSidePaneScaffold(
                                 state = state, visible = visible, backHandlerEnabled = true,
@@ -135,6 +136,24 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         assertEquals(size, input.style.fontSize)
         assertEquals(lineHeight, input.style.lineHeight)
         assertEquals(.9f, input.density.fontScale, .001f)
+    }
+
+    fun testEmptyAndSearchMessagesRequireACompletedSnapshot() {
+        for (dark in listOf(false, true)) {
+            show(dark = dark, loaded = false, rows = emptyList())
+            ui.onNodeWithText(text(R.string.conversation_empty)).assertDoesNotExist()
+            ui.onNodeWithText(text(R.string.conversation_no_results)).assertDoesNotExist()
+            show(dark = dark, loaded = false, rows = emptyList(), query = "not-loaded")
+            ui.onNodeWithText(text(R.string.conversation_empty)).assertDoesNotExist()
+            ui.onNodeWithText(text(R.string.conversation_no_results)).assertDoesNotExist()
+            show(dark = dark, rows = emptyList())
+            ui.onNodeWithText(text(R.string.conversation_empty)).assertIsDisplayed()
+            show(dark = dark, query = "no matching conversation")
+            ui.onNodeWithText(text(R.string.conversation_no_results)).assertIsDisplayed()
+            show(dark = dark)
+            node("drawer-conversation:first").assertIsDisplayed()
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testDrawerKeepsReadableGeometryAcrossThemesAndInterfaceScales() {

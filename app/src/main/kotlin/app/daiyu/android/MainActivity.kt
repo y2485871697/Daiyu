@@ -870,7 +870,12 @@ class MainActivity : ComponentActivity() {
             retainedPageState = value
             syncHaptics()
         }
-    private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, ""))
+    private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, "", conversationsLoaded = false))
+    private data class PaneRevision(val data: Long, val title: Long,
+        val active: Triple<ConversationId, MessageId, RunId>?)
+    private var paneSnapshotRevision: PaneRevision? = null
+    private fun currentPaneRevision() = PaneRevision(controller.dataRevision, controller.titleRevision,
+        controller.active?.let { Triple(it.conversationId, it.id, it.runId) })
     internal var paneSnapshotReader: (ConversationId?) -> RetainedConversationData.PaneSnapshot =
         { activeConversationId -> retainedData.paneSnapshot(activeConversationId) }
     private var paneRefreshSerial = 0L
@@ -4931,7 +4936,9 @@ class MainActivity : ComponentActivity() {
                         historyConversations = all,
                         selectedConversationId = selected?.id?.value,
                         folders = snapshot.folders,
+                        conversationsLoaded = true,
                     )
+                    paneSnapshotRevision = PaneRevision(data, title, active)
                 }
             } finally {
                 paneRefreshRunning = false
@@ -5335,7 +5342,8 @@ class MainActivity : ComponentActivity() {
             prepareMessageActionSnapshot()
             publishChat()
             selected?.let(::loadRefreshedHistory)
-            if (sidebarVisible || retainedPage == "manage") requestPaneRefresh(invalidate = false)
+            if (sidebarVisible || retainedPage == "manage" || paneSnapshotRevision != currentPaneRevision())
+                requestPaneRefresh(invalidate = false)
         }
     }
     private fun currentAssistantLabel(): String = try {

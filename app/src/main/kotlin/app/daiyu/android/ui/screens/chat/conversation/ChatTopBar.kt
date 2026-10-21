@@ -1,11 +1,12 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.icons.ChatPreviewIcons
+import androidx.compose.foundation.Indication
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -69,13 +70,9 @@ internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Mod
         ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = chrome.toolbar, iconSize = 22.dp)
         Box {
             val moreShape = RoundedCornerShape(10.dp)
-            val dark = MiuixTheme.colorScheme.background.luminance() < .3f
-            val activeBackground = if (dark) Color(0xFF26233D) else Color(0xFFF0ECFC)
             ChatIconButton(ChatPreviewIcons.More, "更多", { actions.onMore(); expanded = true },
-                Modifier.size(40.dp).semantics { selected = expanded }
-                    .background(if (expanded) activeBackground else Color.Transparent, moreShape)
-                    .then(if (expanded) Modifier.border(1.dp, Color(0x0D9980BE), moreShape) else Modifier),
-                tint = if (expanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape)
+                Modifier.size(40.dp).semantics { selected = expanded },
+                tint = if (expanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape, indication = null)
             ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
                 interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending)
         }
@@ -96,9 +93,11 @@ internal fun ChatIconButton(
     iconSize: androidx.compose.ui.unit.Dp? = null,
     containerSize: androidx.compose.ui.unit.Dp = 20.dp,
     shape: Shape = CircleShape,
+    indication: Indication? = LocalIndication.current,
 ) {
     Box(modifier.size(48.dp).clip(shape).combinedClickable(
         enabled = enabled, role = Role.Button, onClickLabel = label,
+        interactionSource = remember { MutableInteractionSource() }, indication = indication,
         onLongClick = onLongClick, onClick = onClick,
     ), contentAlignment = Alignment.Center) {
         Box(if (containerColor == null) Modifier else Modifier.size(containerSize).background(containerColor, CircleShape),

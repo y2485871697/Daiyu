@@ -135,6 +135,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         node("chat-menu:NEW_CHAT").assertIsDisplayed().assertTextContains("新建会话")
         node("chat-menu:SEARCH").assertIsDisplayed().assertTextContains("搜索记录")
         touch(node("chat-menu:OPEN_TERMINAL").scrollToVisible())
+        ui.mainClock.advanceTimeBy(176)
         node("chat-overflow-menu").assertDoesNotExist()
         touch(button("更多"))
         val menu = node("chat-overflow-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
@@ -323,6 +324,33 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testMoreButtonHasNoPressedOrExpandedBackgroundInEitherTheme() {
+        for (dark in listOf(false, true)) {
+            show(composer(), dark = dark)
+            val more = button("更多")
+            val idle = captureScreenNode(more).toPixelMap()
+            more.performTouchInput { down(center) }
+            val pressed = try { captureScreenNode(more).toPixelMap() }
+                finally { more.performTouchInput { up() } }
+            more.assertIsSelected()
+            val expanded = captureScreenNode(more).toPixelMap()
+            for (image in listOf(pressed, expanded)) {
+                for ((fx, fy) in listOf(.2f to .2f, .8f to .2f, .2f to .8f, .8f to .8f)) {
+                    val x = (idle.width * fx).toInt().coerceAtMost(idle.width - 1)
+                    val y = (idle.height * fy).toInt().coerceAtMost(idle.height - 1)
+                    val expected = idle[x, y]
+                    val actual = image[x, y]
+                    assertEquals("More background red, dark=$dark", expected.red, actual.red, .01f)
+                    assertEquals("More background green, dark=$dark", expected.green, actual.green, .01f)
+                    assertEquals("More background blue, dark=$dark", expected.blue, actual.blue, .01f)
+                }
+            }
+            touch(node("chat-menu:NEW_CHAT"))
+            ui.mainClock.advanceTimeBy(176)
+            node("chat-overflow-menu").assertDoesNotExist()
+        }
+    }
+
     fun testExpandedMoreStateAndFullMenuKeepBothCompressionRowsReachable() {
         show(composer())
         button("更多").assertIsNotSelected()
@@ -334,6 +362,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             .assertExists().assertWidthIsEqualTo(25.dp).assertHeightIsEqualTo(15.dp)
         touch(node("chat-menu:NEW_CHAT").scrollToVisible())
         button("更多").assertIsNotSelected()
+        ui.mainClock.advanceTimeBy(176)
         node("chat-overflow-menu").assertDoesNotExist()
     }
 
@@ -383,6 +412,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         for (action in listOf("NEW_CHAT", "SEARCH")) {
             touch(button("更多"))
             touch(node("chat-menu:$action"))
+            ui.mainClock.advanceTimeBy(176)
             node("chat-overflow-menu").assertDoesNotExist()
         }
         ui.runOnIdle { assertEquals(listOf("NEW_CHAT", "SEARCH"), events) }

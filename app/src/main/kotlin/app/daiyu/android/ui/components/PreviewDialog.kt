@@ -1,6 +1,5 @@
 package app.daiyu.android.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -21,12 +20,12 @@ internal fun PreviewDialog(onDismiss: () -> Unit, content: @Composable BoxWithCo
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { window?.setDimAmount(0f) }
+        SideEffect { window?.setDimAmount(0f); window?.setWindowAnimations(0) }
         Box(Modifier.fillMaxSize()) {
-            Box(Modifier.matchParentSize().background(Color(if (colors.dark) 0x55000000 else 0x2620172d))
+            Box(Modifier.matchParentSize().dialogDimBackground(Color(if (colors.dark) 0x55000000 else 0x2620172d))
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
             CompositionLocalProvider(LocalDensity provides density) {
-                BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), content = content)
+                BoxWithConstraints(Modifier.dialogEnterMotion().fillMaxSize().safeDrawingPadding().imePadding(), content = content)
             }
         }
     }

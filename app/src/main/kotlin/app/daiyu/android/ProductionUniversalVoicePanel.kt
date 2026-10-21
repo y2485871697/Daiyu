@@ -38,7 +38,7 @@ internal fun ProductionUniversalVoicePanel(
             locallyExpanded = !expanded
             if (expanded) onCloseRequest()
         })
-    if (expanded) androidx.compose.ui.window.Dialog(onDismissRequest = {
+    if (expanded) app.daiyu.android.ui.components.DaiyuDialog(onDismissRequest = {
         state.permitId?.let { host.stop(it) }; locallyExpanded = false; onCloseRequest()
     }) {
         androidx.compose.material3.Surface {

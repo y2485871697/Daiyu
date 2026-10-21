@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.chat.conversation.ChatIconButton
 import app.daiyu.android.ui.screens.chat.conversation.chatChromeColors
-import androidx.compose.ui.window.Dialog
+import app.daiyu.android.ui.components.DaiyuDialog as Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.daiyu.android.R
 import app.daiyu.android.media.ImageAttachment

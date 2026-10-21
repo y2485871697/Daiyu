@@ -31,6 +31,7 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.assistants.AssistantEditScreen
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlin.math.floor
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -300,7 +301,8 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                 activity.setContent {
                     AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = false) {
-                        Box(Modifier.fillMaxWidth().background(background).padding(24.dp)) {
+                        density.set(LocalDensity.current)
+                        Box(Modifier.fillMaxWidth().background(background).testTag("skills-legend-fixture").padding(24.dp)) {
                             AssistantPreviewSection("Skills") {
                                 Box(Modifier.fillMaxWidth().padding(24.dp))
                             }
@@ -310,11 +312,21 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             }
             awaitUniqueTag("assistant-section-legend:Skills")
             awaitVisualIdle()
-            val pixels = captureScreenNode(tagged("assistant-section-legend:Skills")).toPixelMap()
-            // The legend's horizontal padding must show its real parent, not a white mask.
-            for (x in listOf(1, pixels.width - 2)) {
-                // Above the section edge: below it the transparent legend reveals the section gradient.
-                val pixel = pixels[x, pixels.height / 4]
+            val fixture = tagged("skills-legend-fixture")
+            val fixtureNode = fixture.fetchSemanticsNode()
+            val textNode = ui.onNodeWithText("Skills", useUnmergedTree = true).fetchSemanticsNode()
+            val fixtureScreen = fixtureNode.boundsInRoot.translate(fixtureNode.positionOnScreen - fixtureNode.positionInRoot)
+            val textScreen = textNode.boundsInRoot.translate(textNode.positionOnScreen - textNode.positionInRoot)
+            val cropLeft = floor(fixtureScreen.left.toDouble()).toInt()
+            val cropTop = floor(fixtureScreen.top.toDouble()).toInt()
+            val inset = with(density.get()) { 2.5.dp.toPx() }
+            val pixels = captureScreenNode(fixture).toPixelMap()
+            val y = floor((textScreen.top + textScreen.height / 4f).toDouble()).toInt() - cropTop
+            // The Text has the actual offset; sample its 5dp padding above the section edge.
+            for (screenX in listOf(textScreen.left - inset, textScreen.right + inset)) {
+                val x = floor(screenX.toDouble()).toInt() - cropLeft
+                assertTrue("Padding sample outside fixture", x in 0 until pixels.width && y in 0 until pixels.height)
+                val pixel = pixels[x, y]
                 assertEquals(background.red, pixel.red, .01f)
                 assertEquals(background.green, pixel.green, .01f)
                 assertEquals(background.blue, pixel.blue, .01f)

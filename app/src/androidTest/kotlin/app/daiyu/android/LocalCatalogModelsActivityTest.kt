@@ -127,7 +127,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) {
             ui.onAllNodes(hasTestTag("local-model-add") and isEnabled()).fetchSemanticsNodes().size == 1
         }
-        reveal("local-model:extra-local").assertTextContains("Renamed local model")
+        reveal("local-model:extra-local").assert(hasAnyDescendant(hasText("Renamed local model")))
         val renamed = checkNotNull(fixture.settings.localModelCatalogSnapshot())
         assertEquals(extra.copy(displayName = "Renamed local model"), renamed.models.single { it.id == extra.id })
         assertEquals(current, renamed.models.single { it.id == current.id })

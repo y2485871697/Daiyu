@@ -18,9 +18,24 @@ internal object RunCheckpointCodec {
     fun encode(value: RunCheckpoint): String {
         validate(value)
         fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
+        fun projectedHistory(rows: List<Message>): JSONArray {
+            require(rows.size <= ArchiveCodec.MAX_MESSAGES)
+            return JSONArray().apply { rows.forEach { row ->
+                val item = messages(listOf(row)).getJSONObject(0)
+                if (row.reportedReasoning.isNotEmpty()) {
+                    validateReportedReasoning(row)
+                    item.put("reported_reasoning", JSONArray().apply { row.reportedReasoning.forEach {
+                        put(JSONObject().put("item_id", it.itemId).put("text", it.text))
+                    } })
+                }
+                put(item)
+            } }
+        }
         val version = if (value.context != null) 9 else if (value.usage.any { it.snapshot.cacheCreationTokens != null }) 8 else if (value.transport == null) 6 else 7
         return JSONObject().put("version", version).put("message", messages(listOf(value.message)))
-            .put("history", messages(value.history)).put("phase", value.phase.name)
+            // Runtime context is a logical projection: several segments may share one physical message ID.
+            .put("history", if (value.context != null) projectedHistory(value.history) else messages(value.history))
+            .put("phase", value.phase.name)
             .put("tools", JSONArray().apply { value.tools.forEach { record -> put(JSONObject()
                 .put("id", record.invocation.id.value).put("name", record.invocation.name)
                 .put("arguments", record.invocation.arguments).put("disposition", record.disposition.name)
@@ -112,6 +127,25 @@ internal object RunCheckpointCodec {
             }
         }
         fun messages(key: String) = ArchiveCodec.decode(value.getJSONArray(key).toString().toByteArray(Charsets.UTF_8))
+        fun projectedHistory(): List<Message> {
+            val rows = value.getJSONArray("history")
+            require(rows.length() <= ArchiveCodec.MAX_MESSAGES)
+            return (0 until rows.length()).map { index ->
+                val item = JSONObject(rows.getJSONObject(index).toString())
+                val reported = if (!item.has("reported_reasoning")) emptyList() else {
+                    val parts = item.getJSONArray("reported_reasoning")
+                    require(parts.length() in 1..1024)
+                    (0 until parts.length()).map { i ->
+                        val part = parts.getJSONObject(i)
+                        fields(part, "item_id", "text")
+                        ReportedReasoning(string(part, "item_id"), string(part, "text"))
+                    }
+                }
+                item.remove("reported_reasoning")
+                ArchiveCodec.decode(JSONArray().put(item).toString().toByteArray(Charsets.UTF_8))
+                    .single().copy(reportedReasoning = reported).also(::validateReportedReasoning)
+            }
+        }
         val message = messages("message").single()
         val tools = value.getJSONArray("tools")
         if (recoveryOwner != null) require((0 until tools.length()).none {
@@ -119,7 +153,7 @@ internal object RunCheckpointCodec {
         val outputs = value.getJSONArray("outputs")
         require(tools.length() <= 10_000 && outputs.length() <= 10_000)
         val round = integer(value, "round"); require(round in 0..100)
-        return RunCheckpoint(message, messages("history"), ExecutionPhase.valueOf(string(value, "phase")),
+        return RunCheckpoint(message, if (context != null) projectedHistory() else messages("history"), ExecutionPhase.valueOf(string(value, "phase")),
             (0 until tools.length()).map { i -> val t = tools.getJSONObject(i)
                 fields(t, "id", "name", "arguments", "disposition", "result")
                 ToolRecord(ToolInvocation(ToolCallId(string(t, "id")), string(t, "name"), string(t, "arguments")),
@@ -192,6 +226,8 @@ internal object RunCheckpointCodec {
         value.outputs.forEach { out -> require(value.tools.any { it.invocation.id == out.callId &&
             hasResult(it.disposition) && it.result == out.output }) }
     }
+    private fun validateReportedReasoning(row: Message) = MessageHistory.validateSegment(
+        MessageHistorySegment(row.id, row.role, row.blocks, row.protocolItems, row.createdAt, row.reportedReasoning))
     private fun hasResult(disposition: ToolDisposition) = disposition in setOf(
         ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)
     private fun encodeInput(value: RequestInputCheckpoint) = JSONObject()

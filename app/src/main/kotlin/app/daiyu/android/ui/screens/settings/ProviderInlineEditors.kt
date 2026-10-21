@@ -4,6 +4,7 @@ import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -122,7 +123,7 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
                     }, password = headers, multiline = !headers, enabled = enabled, compact = true, embedded = true,
                         tag = "$prefix-value:$index", secretLabel = "值")
                 }
-                IconButton(enabled = enabled, modifier = Modifier.testTag("$prefix-delete:$index"), onClick = {
+                IconButton(enabled = enabled, modifier = Modifier.size(48.dp).testTag("$prefix-delete:$index"), onClick = {
                     update(rows.filter { it.id != row.id })
                 }) {
                     DaiyuIcon(DaiyuIcons.Delete, if (headers) "删除请求头" else "删除请求体字段",

@@ -38,7 +38,7 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
                 }
             }
         }
-        ui.waitForIdle()
+        awaitVisualIdle()
     }
     private fun control(tag: String) = ui.onNodeWithTag(tag)
     private fun capture(name: String) {
@@ -50,7 +50,7 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
     }
     private fun open(headers: Boolean) {
         control(if (headers) "model-custom-headers" else "model-body-fields").performClick()
-        ui.waitForIdle()
+        awaitVisualIdle()
     }
     fun testHeaderFieldsShareDeleteColumnAndEyeStaysInsideValueAt320Dp() {
         for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
@@ -84,15 +84,18 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
         mainThread { draft = ModelSettingsDraftUi(customHeaders = """{"X-Project":"header-layout-canary"}""") }
         show(headers = true); open(headers = true)
         control("settings-secret-visibility:值").performClick()
+        awaitVisualIdle()
         control("model-header-value:0").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Password))
         realPauseResume(activity, atPause = {})
-        ui.waitForIdle()
+        awaitVisualIdle()
         control("model-header-name:0").assertDoesNotExist()
         open(headers = true)
         control("model-header-value:0").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         control("model-header-delete:0").performClick()
+        awaitVisualIdle()
         control("model-header-name:0").assertDoesNotExist()
         control("model-header-add").assertIsDisplayed().performClick()
+        awaitVisualIdle()
         control("model-header-name:0").assertIsDisplayed()
         assertFalse(draft.headerFieldsValid)
         assertEquals(0, fixture.opens.get())
@@ -123,8 +126,10 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
         mainThread { draft = ModelSettingsDraftUi(customHeaders = """{"X-First":"first-value","X-Second":"second-value"}""") }
         show(headers = true); open(headers = true)
         ui.onAllNodesWithTag("settings-secret-visibility:值")[0].performClick()
+        awaitVisualIdle()
         control("model-header-value:0").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Password))
         control("model-header-delete:0").performClick()
+        awaitVisualIdle()
         control("model-header-value:0").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         assertEquals("X-Second", draft.headerFieldRows!!.single().name)
         assertEquals("second-value", draft.headerFieldRows!!.single().value)

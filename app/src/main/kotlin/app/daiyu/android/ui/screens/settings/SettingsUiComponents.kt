@@ -170,7 +170,7 @@ internal fun SettingsTextField(
     tag: String = "settings-field:$label",
     secretLabel: String = "密钥",
     compact: Boolean = false,
-    secretTextButton: Boolean = false,
+    embedded: Boolean = false,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var secretVisible by remember(password) { mutableStateOf(false) }
@@ -189,7 +189,7 @@ internal fun SettingsTextField(
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
     val visibilityButton: @Composable () -> Unit = {
-        if (!compact || secretTextButton) TextButton(
+        if (!compact) TextButton(
             text = if (secretVisible) "隐藏$secretLabel" else "显示$secretLabel",
             enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = toggleSecret,
         ) else androidx.compose.material3.IconButton(
@@ -215,12 +215,13 @@ internal fun SettingsTextField(
             visualTransformation = if (password && !secretVisible) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
             modifier = Modifier.testTag(tag).fillMaxWidth()
+                .then(if (embedded) Modifier.padding(vertical = 12.dp) else Modifier)
                 .then(if (compact) Modifier else Modifier.clip(RoundedCornerShape(12.dp))
                     .background(MiuixTheme.colorScheme.surfaceVariant).padding(14.dp))
                 .semantics { contentDescription = label },
             decorationBox = { editor ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (value.isEmpty()) Text(hint, style = MiuixTheme.textStyles.body1,
+                    if (value.isEmpty()) Text(hint.ifEmpty { if (embedded) label else "" }, style = MiuixTheme.textStyles.body1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     editor()
                 }
@@ -228,11 +229,15 @@ internal fun SettingsTextField(
         )
     }
     if (compact) {
-        Row(Modifier.testTag("$tag-container").fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+        Row(Modifier.testTag("$tag-container").fillMaxWidth()
+            .then(if (embedded) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
             .clip(RoundedCornerShape(16.dp)).background(MiuixTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            .padding(start = if (embedded) 12.dp else 16.dp,
+                end = if (embedded && password) 0.dp else if (embedded) 12.dp else 16.dp,
+                top = if (embedded) 0.dp else 6.dp, bottom = if (embedded) 0.dp else 6.dp)
+            .then(if (embedded) Modifier.heightIn(min = 48.dp) else Modifier), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                labelContent()
+                if (!embedded) labelContent()
                 field()
             }
             if (password) visibilityButton()

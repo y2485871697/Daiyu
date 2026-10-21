@@ -3,6 +3,12 @@ package app.daiyu.android.ui.screens.settings
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +32,8 @@ import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.TextButton
 
 internal val RetainedProviderFieldAdd = SemanticsPropertyKey<() -> Unit>("RetainedProviderFieldAdd")
@@ -103,35 +111,23 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
         trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.rotate(if (expanded) 180f else 0f)) })
     if (expanded) {
         rows.forEachIndexed { index, row -> key(row.id) {
-            if (headers) {
-                Column(Modifier.fillMaxWidth()) {
-                    SettingsTextField("名称", row.name, { value ->
-                        update(rows.map { if (it.id == row.id) it.copy(name = value) else it })
-                    }, enabled = enabled, compact = true, tag = "$prefix-name:$index")
-                    SettingsTextField("值", row.value, { value ->
-                        update(rows.map { if (it.id == row.id) it.copy(value = value) else it })
-                    }, password = true, enabled = enabled, compact = true, secretTextButton = true,
-                        tag = "$prefix-value:$index", secretLabel = "值")
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
-                        TextButton("删除", enabled = enabled, modifier = Modifier.testTag("$prefix-delete:$index"), onClick = {
-                            update(rows.filter { it.id != row.id })
-                        })
-                    }
-                }
-            } else {
-            Row {
-                Column(Modifier.weight(1f)) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 12.dp)
+                .testTag("$prefix-row:$index"), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SettingsTextField(if (headers) "名称" else "字段名", row.name, { value ->
                         update(rows.map { if (it.id == row.id) it.copy(name = value) else it })
-                    }, enabled = enabled, tag = "$prefix-name:$index")
+                    }, enabled = enabled, compact = true, embedded = true, tag = "$prefix-name:$index")
                     SettingsTextField(if (headers) "值" else "值（JSON）", row.value, { value ->
                         update(rows.map { if (it.id == row.id) it.copy(value = value) else it })
-                    }, password = headers, multiline = !headers, enabled = enabled, tag = "$prefix-value:$index", secretLabel = "值")
+                    }, password = headers, multiline = !headers, enabled = enabled, compact = true, embedded = true,
+                        tag = "$prefix-value:$index", secretLabel = "值")
                 }
-                TextButton("删除", enabled = enabled, modifier = Modifier.testTag("$prefix-delete:$index"), onClick = {
+                IconButton(enabled = enabled, modifier = Modifier.testTag("$prefix-delete:$index"), onClick = {
                     update(rows.filter { it.id != row.id })
-                })
-            }
+                }) {
+                    DaiyuIcon(DaiyuIcons.Delete, if (headers) "删除请求头" else "删除请求体字段",
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
+                }
             }
         } }
         notice?.let { SettingsNote(it, error = true) }
@@ -139,9 +135,15 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
         val add: () -> Unit = {
             if (current() && rows.size < 32) update(rows + ProviderFieldRow(nextId, "", ""))
         }
-        TextButton(if (headers) "添加请求头" else "添加请求体字段", enabled = enabled && rows.size < 32,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("$prefix-add").semantics { this[RetainedProviderFieldAdd] = add },
-            onClick = add)
+        HorizontalDivider(color = MiuixTheme.colorScheme.onSurface.copy(alpha = .10f))
+        Row(Modifier.fillMaxWidth().testTag("$prefix-add").semantics { this[RetainedProviderFieldAdd] = add }
+            .clickable(enabled = enabled && rows.size < 32, role = Role.Button, onClick = add)
+            .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            val color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = if (enabled && rows.size < 32) 1f else .38f)
+            DaiyuIcon(DaiyuIcons.Add, null, tint = color, size = 20.dp)
+            Text(if (headers) "添加请求头" else "添加请求体字段", style = MiuixTheme.textStyles.body1, color = color)
+        }
     }
 }
 

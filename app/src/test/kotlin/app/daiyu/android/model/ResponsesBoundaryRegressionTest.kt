@@ -114,10 +114,23 @@ class ResponsesBoundaryRegressionTest {
         var connections=0
         val failure=IllegalStateException("synthetic sink failure")
         val session=ResponsesModel(config) {connections++;Connection()}.open(emptyList())
-        try {session.next(emptyList()) {throw failure};fail("sink failure swallowed")}
-        catch(caught:Exception) {assertSame(failure,caught)}
+        try {
+            session.next(emptyList()) { event ->
+                if (event is ModelEvent.ProtocolOutput) throw failure
+            }
+            fail("sink failure swallowed")
+        } catch(caught:Exception) {assertSame(failure,caught)}
         try {session.next(emptyList()) {};fail("failed sink reposted")} catch(_:IllegalStateException) {}
         assertEquals(1,connections)
+    }
+    @Test fun inputEstimateSinkFailureSealsSessionBeforeConnecting() {
+        var connections=0
+        val failure=IllegalStateException("synthetic estimate sink failure")
+        val session=ResponsesModel(config) {connections++;Connection()}.open(emptyList())
+        try {session.next(emptyList()) {throw failure};fail("input estimate sink failure swallowed")}
+        catch(caught:Exception) {assertSame(failure,caught)}
+        try {session.next(emptyList()) {};fail("failed estimate sink reposted")} catch(_:IllegalStateException) {}
+        assertEquals(0,connections)
     }
     @Test fun usageDeliveryFailureSealsSessionWithoutReposting() {
         var connections=0

@@ -8,6 +8,7 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.media.ImageAttachment
 import app.daiyu.android.media.ImageAttachmentOwner
 import app.daiyu.android.media.MessageImageAssetStore
+import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.model.images.FrozenMessageImagePlan
 import app.daiyu.android.storage.ConversationDatabase
@@ -64,13 +65,13 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         try { assertTrue("controller timeout", done.await(10, TimeUnit.SECONDS)) }
         finally { main { f.controller.unobserve(listener) } }
     }
-    private fun fixture(): Fixture {
+    private fun fixture(protocol: ProviderProtocol = ProviderProtocol.RESPONSES): Fixture {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(instrumentation.targetContext, "image-$id-"))
         val db = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.image.$id"
         val settings = ModelSettingsStore(app, alias)
-        settings.save(ModelSettings("https://example.invalid", "image-fixture", "fixture-key", false))
+        settings.save(ModelSettings("https://example.invalid", "image-fixture", "fixture-key", false, protocol = protocol))
         val probe = Probe()
         lateinit var controller: ChatController
         controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0),
@@ -369,8 +370,14 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         assertEquals(1, f.controller.imageAttachments.store.list(owner).size)
     }
 
-    fun testAcceptedOrderedBlocksExactReceiptAndHistoryAfterDraftRemoval() {
-        val f = fixture(); val conversation = f.db.create("default")
+    fun testAcceptedOrderedBlocksExactReceiptAndHistoryAfterDraftRemoval() =
+        acceptedOrderedBlocksExactReceiptAndHistoryAfterDraftRemoval(ProviderProtocol.RESPONSES)
+
+    fun testChatCompletionsAcceptedOrderedBlocksExactReceiptAndHistoryAfterDraftRemoval() =
+        acceptedOrderedBlocksExactReceiptAndHistoryAfterDraftRemoval(ProviderProtocol.CHAT_COMPLETIONS)
+
+    private fun acceptedOrderedBlocksExactReceiptAndHistoryAfterDraftRemoval(protocol: ProviderProtocol) {
+        val f = fixture(protocol); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor-one")
         val first = image(f, owner); val second = image(f, owner)
         val parts = listOf(ImageSendPart.Text("before"), ImageSendPart.Image(first),

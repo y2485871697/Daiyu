@@ -253,6 +253,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
         setDraft("旧选择不得借用新页面")
+        assertDraft("旧选择不得借用新页面")
+        dismissIme()
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
         val database = fixture.database.exportBackup()
         node("chat-model").performClick(); awaitChatPickerReady()
         lateinit var stale: () -> Unit

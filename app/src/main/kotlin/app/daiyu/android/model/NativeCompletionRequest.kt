@@ -2,6 +2,7 @@ package app.daiyu.android.model
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.model.images.FrozenMessageImagePlan
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
@@ -102,21 +103,25 @@ internal object NativeCompletionRequest {
         return calls
     }
 
-    fun history(protocol: ProviderProtocol, history: List<Message>, allowPending: Boolean = false): JSONArray {
+    fun history(protocol: ProviderProtocol, history: List<Message>, allowPending: Boolean = false,
+                images: FrozenMessageImagePlan? = null): JSONArray {
         requireNative(protocol)
         val expanded = MessageHistory.expand(history)
-        app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImages(expanded)
+        FrozenMessageImagePlan.rejectRawImages(expanded, protocol)
         val rows = JSONArray()
-        expanded.forEach { message ->
+        expanded.forEachIndexed { messageIndex, message ->
             require(message.role in setOf("user", "assistant")) { "系统指令必须使用独立指令通道" }
-            require(message.blocks.none { it is MessageBlock.Image }) { "当前协议尚不支持图片输入" }
+            val hasImages = message.blocks.any { it is MessageBlock.Image }
+            require(!hasImages || protocol == ProviderProtocol.CHAT_COMPLETIONS) { "当前协议尚不支持图片输入" }
+            require(!hasImages || message.role == "user") { "Images require user history" }
+            require(!hasImages || message.protocolItems.isEmpty()) { "Images cannot also replay protocolItems" }
             val raw = message.protocolItems.map { MessagesRequest.jsonObject(it).also { row -> calls(protocol, row) } }
             if (message.role == "assistant" && message.status != RunStatus.COMPLETED) {
                 if (message.status == RunStatus.INTERRUPTED) {
                     val text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
                     if (text.isNotBlank()) rows.put(textMessage(protocol, "assistant", "$text\n\n[回复已中断]"))
                 }
-                return@forEach
+                return@forEachIndexed
             }
             val pending = linkedMapOf<String, String>()
             val results = mutableSetOf<String>()
@@ -144,7 +149,20 @@ internal object NativeCompletionRequest {
             if (raw.isEmpty()) {
                 val text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
                 val tools = message.blocks.filterIsInstance<MessageBlock.Tool>()
-                if (tools.isEmpty()) { if (text.isNotEmpty()) rows.put(textMessage(protocol, message.role, text)) }
+                if (tools.isEmpty()) {
+                    if (hasImages) {
+                        val plan = requireNotNull(images) { "Images require a frozen plan" }
+                        val content = JSONArray()
+                        message.blocks.forEachIndexed { blockIndex, block ->
+                            when (block) {
+                                is MessageBlock.Text -> content.put(JSONObject().put("type", "text").put("text", block.text))
+                                is MessageBlock.Image -> content.put(plan.block(messageIndex, blockIndex))
+                                is MessageBlock.Tool -> error("Tool calls require assistant history")
+                            }
+                        }
+                        rows.put(JSONObject().put("role", message.role).put("content", content))
+                    } else if (text.isNotEmpty()) rows.put(textMessage(protocol, message.role, text))
+                }
                 else {
                     require(message.role == "assistant")
                     val row = textMessage(protocol, "assistant", text)

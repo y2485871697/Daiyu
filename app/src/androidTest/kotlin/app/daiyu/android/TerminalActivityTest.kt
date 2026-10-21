@@ -63,14 +63,16 @@ class TerminalActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("暂无任务").assertIsDisplayed()
         mainThread {
             val visit = checkNotNull(invokeHost(activity, "getTerminalJobsVisit"))
-            val conversation = visit.javaClass.getDeclaredMethod("getConversation").apply { isAccessible = true }.invoke(visit)
+            val conversation = visit.javaClass.getDeclaredField("conversation").apply { isAccessible = true }.get(visit)
             assertNull(conversation)
         }
         node("terminal-tasks-refresh").performClick()
         ui.onNodeWithText("暂无任务").assertIsDisplayed()
-        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        awaitNodeWindowFocus(node("terminal-tasks-dialog"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         ui.waitForIdle()
         node("terminal-tasks-dialog").assertDoesNotExist()
+        node("terminal-screen").assertIsDisplayed()
         assertSame(retained, owner); assertSame(caller, owner.caller.value)
         assertFalse(owner.host.state.value.ownsResources)
         assertEquals(0, fixture.opens.get())

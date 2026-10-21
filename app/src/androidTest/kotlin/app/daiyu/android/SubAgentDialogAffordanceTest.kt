@@ -81,7 +81,10 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         ui.onNodeWithText("取消").assertIsDisplayed()
         ui.onNodeWithText("确认").assertIsDisplayed()
         noHeaderNavigation()
-        ui.onNodeWithContentDescription("草稿思考深度").assertIsEnabled().performClick()
+        awaitNodeWindowFocus(ui.onNodeWithText("子代理配置"))
+        ui.onNodeWithContentDescription("草稿思考深度").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        awaitUniqueTag("thinking-depth-slider")
+        awaitNodeWindowFocus(node("thinking-depth-slider"))
         noHeaderNavigation()
         node("thinking-depth-slider").performScrollTo().assertIsDisplayed()
         node("subagent-thinking-value").assertTextEquals("选择思考深度")
@@ -90,18 +93,25 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         node("subagent-thinking-value").assertTextEquals("高")
         assertNull(repository.snapshot(owner).profiles.single().reasoning)
         back()
+        node("thinking-depth-slider").assertDoesNotExist()
+        awaitNodeWindowFocus(ui.onNodeWithText("子代理配置"))
         ui.onNodeWithText("确认").assertIsEnabled().performClick()
         awaitControl("confirmed child reasoning") { repository.snapshot(owner).profiles.single().reasoning == ReasoningEffort.HIGH }
         ui.waitForIdle()
         ui.runOnIdle { assertNull(active) }
         mainThread { active = checkNotNull(SubAgentProfileDraftSession.open(editor, repository.snapshot(owner).profiles.single())) }
-        ui.onNodeWithContentDescription("草稿思考深度").performClick()
+        awaitNodeWindowFocus(ui.onNodeWithText("子代理配置"))
+        ui.onNodeWithContentDescription("草稿思考深度").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        awaitUniqueTag("thinking-depth-slider")
+        awaitNodeWindowFocus(node("thinking-depth-slider"))
         node("subagent-thinking-value").assertTextEquals("高")
         node("thinking-depth-slider").performScrollTo().assertIsDisplayed().performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(0f)) }
         node("subagent-thinking-value").assertTextEquals("关闭")
         ui.onAllNodes(hasText("关闭") and hasClickAction()).assertCountEquals(0)
         assertEquals(ReasoningEffort.HIGH, repository.snapshot(owner).profiles.single().reasoning)
         back()
+        node("thinking-depth-slider").assertDoesNotExist()
+        awaitNodeWindowFocus(ui.onNodeWithText("子代理配置"))
         ui.onNodeWithText("取消").performClick()
         assertEquals(ReasoningEffort.HIGH, repository.snapshot(owner).profiles.single().reasoning)
         ui.runOnIdle { assertNull(active) }

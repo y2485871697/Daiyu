@@ -109,6 +109,7 @@ internal class AuxiliaryVisionModelAdapter(
                         check(terminalText == null) { "Duplicate auxiliary terminal output" }
                         terminalText = completedText(event.items)
                     }
+                    is ModelEvent.InputEstimate -> Unit
                     is ModelEvent.Usage -> synchronized(lifecycle) { checkCancelled(); activeUsage?.observe(event) }
                     is ModelEvent.ReasoningDelta, is ModelEvent.ReasoningFinal -> Unit
                 }

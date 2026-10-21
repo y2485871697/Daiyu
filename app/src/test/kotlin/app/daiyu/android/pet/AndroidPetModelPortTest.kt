@@ -41,6 +41,7 @@ class AndroidPetModelPortTest {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                 assertTrue(outputs.isEmpty())
                 beforeReply()
+                sink(ModelEvent.InputEstimate(123))
                 sink(ModelEvent.TextFinal("t", "pet reply"))
             }
             override fun cancel() {}
@@ -66,7 +67,9 @@ class AndroidPetModelPortTest {
                             assertTrue(outputs.isEmpty())
                             sink(ModelEvent.TextDelta("t", "partial"))
                             sink(ModelEvent.TextFinal("t", "{\"mood\":\"happy\",\"speech\":\"米饭真香\"}"))
+                            sink(ModelEvent.InputEstimate(123))
                             sink(ModelEvent.Usage(41, 12))
+                            sink(ModelEvent.InputEstimate(9999))
                         }
                         override fun cancel() {}
                     }

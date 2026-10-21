@@ -53,9 +53,17 @@ class DialogMotionContractTest(unittest.TestCase):
             with self.subTest(file=file):
                 self.assertIn("startDaiyuEnterMotion()", self.text(file))
         sheet = self.text("ui/components/SubAgentPresetActionsSheet.kt")
-        self.assertIn("AssistantSheetMotion(entering = sheetState.currentValue == SheetValue.Hidden)", sheet)
         self.assertIn("ModalBottomSheet(", sheet)
-        self.assertIn("val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)", sheet)
+        self.assertIn("SheetState(", sheet)
+        self.assertIn("initialValue = SheetValue.Expanded", sheet)
+        self.assertIn("skipPartiallyExpanded = true", sheet)
+        self.assertIn("56.dp.toPx()", sheet)
+        self.assertIn("125.dp.toPx()", sheet)
+        self.assertIn("modifier = Modifier.dialogEnterMotion()", sheet)
+        self.assertIn("dragHandle = { BottomSheetDefaults.DragHandle() }", sheet)
+        self.assertNotIn("AssistantSheetMotion", sheet)
+        self.assertNotIn("MotionScheme", self.text("ui/components/DialogMotion.kt"))
+        self.assertNotIn(".motionScheme", self.text("ui/components/DialogMotion.kt"))
 
     def test_production_glass_menu_uses_original_popup_motion_and_exit_retention(self):
         motion = self.text("ui/components/PopupMotion.kt")

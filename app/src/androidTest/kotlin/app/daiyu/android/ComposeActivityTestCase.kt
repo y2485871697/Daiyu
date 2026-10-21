@@ -148,6 +148,18 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         node(tag).assertExists()
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    protected fun awaitNodeWindowFocus(target: SemanticsNodeInteraction) {
+        val view = (target.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+        ui.waitUntil(5_000) {
+            var focused = false
+            instrumentation.runOnMainSync {
+                focused = view.isAttachedToWindow && view.hasWindowFocus()
+            }
+            focused
+        }
+    }
+
     protected fun awaitHostWindowFocus(host: MainActivity) {
         awaitControl("host resumed before focused-window check") {
             !host.isDestroyed && !host.isFinishing &&

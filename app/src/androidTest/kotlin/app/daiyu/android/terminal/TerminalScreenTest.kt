@@ -1,8 +1,15 @@
 package app.daiyu.android.terminal
 
 import androidx.activity.compose.setContent
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
+import kotlinx.coroutines.awaitCancellation
+import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
 import androidx.compose.ui.input.key.Key
@@ -11,17 +18,31 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.terminal.TerminalScreenContent
 
+@OptIn(ExperimentalComposeUiApi::class)
 class TerminalScreenTest : WiredActivityTestCase() {
     private var state by mutableStateOf(TerminalEnvironmentState())
     private val created = mutableListOf<LinuxGenerationRef?>()
     private var closes = 0
     private var tasks = 0
     private val sent = mutableListOf<String>()
-    private fun show() = mainThread {
+    private val inputRequest = AtomicReference<PlatformTextInputMethodRequest?>()
+    private fun show(interceptInput: Boolean = false) = mainThread {
         activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                TerminalScreenContent(state, onCreateSession = { created += it }, onSend = { sent += it },
-                    onClose = { closes++ }, onBack = {}, onOpenTasks = { tasks++ })
+                val content: @androidx.compose.runtime.Composable () -> Unit = {
+                    TerminalScreenContent(state, onCreateSession = { created += it }, onSend = { sent += it },
+                        onClose = { closes++ }, onBack = {}, onOpenTasks = { tasks++ })
+                }
+                if (interceptInput) {
+                    val interceptor = remember {
+                        PlatformTextInputInterceptor { request, _ ->
+                            inputRequest.set(request)
+                            try { awaitCancellation() }
+                            finally { inputRequest.compareAndSet(request, null) }
+                        }
+                    }
+                    InterceptPlatformTextInput(interceptor = interceptor, content = content)
+                } else content()
             }
         }
     }
@@ -139,14 +160,19 @@ class TerminalScreenTest : WiredActivityTestCase() {
             }
         }
         state = TerminalEnvironmentState(phase = "RUNNING", ownsResources = true, acceptsInput = true)
-        show()
+        show(interceptInput = true)
         node("terminal-mode").performClick()
         node("terminal-direct-input").performClick()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            inputRequest.get() != null
+        }
         lateinit var connection: android.view.inputmethod.InputConnection
         mainThread {
-            connection = checkNotNull(checkNotNull(activity.currentFocus)
-                .onCreateInputConnection(android.view.inputmethod.EditorInfo()))
-            assertTrue(connection.setComposingText("ls", 1))
+            connection = checkNotNull(inputRequest.get()).createInputConnection(android.view.inputmethod.EditorInfo())
+            assertTrue(connection.beginBatchEdit())
+            try { assertTrue(connection.setComposingText("ls", 1)) }
+            finally { connection.endBatchEdit() }
         }
         awaitInputStage(enabled = false, expectedSent = emptyList())
         node("terminal-key:Tab").assertIsNotEnabled()

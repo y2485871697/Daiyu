@@ -162,7 +162,8 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         }
         node("terminal-task-output").assertTextContains("terminal page history", substring = true)
         node("terminal-task-output").assertTextContains("历史任务状态未知", substring = true)
-        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        awaitNodeWindowFocus(node("terminal-tasks-dialog"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         ui.waitForIdle()
         node("terminal-tasks-dialog").assertDoesNotExist()
         node("terminal-screen").assertIsDisplayed()

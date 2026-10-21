@@ -182,4 +182,29 @@ class ComposeScrollActionsTest : WiredActivityTestCase() {
         assertNotNull(failure)
         assertTrue(checkNotNull(failure).message.orEmpty().contains("Scroll made no progress"))
     }
+    fun testPageClickScrollAvoidsOverlayingTopBar() {
+        val state = ScrollState(0)
+        var clicks = 0
+        show {
+            Box {
+                Column(Modifier.width(180.dp).height(180.dp).testTag("page:overlay").verticalScroll(state)) {
+                    Box(Modifier.height(200.dp))
+                    BasicText("target", Modifier.height(40.dp).testTag("target").clickable { clicks++ })
+                    Box(Modifier.height(400.dp))
+                }
+                Box(Modifier.height(90.dp).width(180.dp).testTag("page-topbar:overlay").clickable {})
+            }
+        }
+        val target = ui.onNodeWithTag("target")
+        val top = target.fetchSemanticsNode().positionInRoot.y
+        ui.onNodeWithTag("page:overlay").performSemanticsAction(SemanticsActions.ScrollBy) {
+            assertTrue(it(0f, top))
+        }
+        ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+        assertTrue(target.fetchSemanticsNode().boundsInRoot.center.y <
+            ui.onNodeWithTag("page-topbar:overlay").fetchSemanticsNode().boundsInRoot.bottom)
+        target.scrollToVisible().performClick()
+        ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+        assertEquals(1, clicks)
+    }
 }

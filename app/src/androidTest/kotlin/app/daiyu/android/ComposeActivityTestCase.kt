@@ -366,8 +366,12 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             var root = coordinates
             while (true) root = root.parentLayoutCoordinates ?: break
             val parentCoordinates = parent.layoutInfo.coordinates
-            val viewport = parentCoordinates.boundsInParent().translate(
+            val bounds = parentCoordinates.boundsInParent().translate(
                 parentCoordinates.parentLayoutCoordinates?.positionInRoot() ?: Offset.Zero)
+            val page = parent.config.getOrNull(SemanticsProperties.TestTag)?.takeIf { it.startsWith("page:") }
+            val bar = page?.let { ui.onAllNodesWithTag("page-topbar:${it.removePrefix("page:")}")
+                .fetchSemanticsNodes().singleOrNull()?.boundsInRoot }
+            val viewport = Rect(bounds.left, maxOf(bounds.top, bar?.bottom ?: bounds.top), bounds.right, bounds.bottom)
             return ScrollFrame(viewport, root.localBoundingBoxOf(coordinates, clipBounds = false),
                 parent.config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange)?.value?.invoke(),
                 parent.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.value?.invoke())

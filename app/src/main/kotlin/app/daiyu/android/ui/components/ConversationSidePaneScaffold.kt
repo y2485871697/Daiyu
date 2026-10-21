@@ -651,8 +651,8 @@ private fun DrawerActionRow(
         }.padding(1.dp).padding(horizontal = 12.dp * s, vertical = 10.dp * s),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp * s)) {
         Icon(icon, null, Modifier.size(20.dp * s).testTag("$tag-icon"), tint = colors.toolbar)
-        Text(label, color = colors.accent, fontSize = (14f * s).sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, modifier = Modifier.weight(1f), color = colors.accent,
+            fontSize = (14f * s).sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium)
     }
 }
 

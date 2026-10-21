@@ -11,7 +11,7 @@ class SettingsPresentationTest {
     fun retainedSettingsKeepInventoryAndSixVisibleGroups() {
         val entries = SettingsCatalog.entries
         // Current inventory includes independent generation/vision, P05 and platform tools.
-        assertEquals(36, entries.size)
+        assertEquals(35, entries.size)
         assertTrue(entries.none { it.id in setOf("permission_check", "accessibility_keep", "default_reasoning") })
         assertTrue(entries.map { it.id }.containsAll(setOf("platform_tools", "accessibility", "voice", "donate")))
         assertEquals(app.daiyu.android.ui.FeatureRoute.BALANCE_SETTINGS, SettingsCatalog.entry("balance").route)
@@ -21,8 +21,12 @@ class SettingsPresentationTest {
         assertEquals(7, SettingsCatalog.groups.size)
         assertEquals(listOf("通用设置", "模型与服务", "扩展能力", "工具与环境", "数据与记录", "关于"),
             SettingsCatalog.visibleGroups().map { it.title })
-        assertTrue(entries.none { it.id == "terminal" })
-        assertEquals(listOf("platform_tools", "workspace", "browser", "linux", "task_surface"),
+        assertTrue(entries.none { it.id in setOf("terminal", "workspace") })
+        assertTrue(filterSettingsGroups("工作区与文件").isEmpty())
+        assertEquals("运行环境与可选工具", SettingsCatalog.entry("linux").summary)
+        assertEquals(listOf("linux", "task_surface"),
+            SettingsCatalog.visibleGroups().single { it.id == "tools" }.entries.map { it.id })
+        assertEquals(listOf("platform_tools", "browser", "linux", "task_surface"),
             SettingsCatalog.groups.single { it.id == "tools" }.entries.map { it.id })
         assertEquals(listOf("extensions"), SettingsCatalog.groups.filter { group ->
             group.entries.any { it.id == "skills" }
@@ -48,7 +52,7 @@ class SettingsPresentationTest {
         for (engineeringUi in listOf(false, true)) {
             val groups = SettingsCatalog.visibleGroups(engineeringUi = engineeringUi)
             val entries = groups.flatMap { it.entries }
-            assertEquals(29, entries.size)
+            assertEquals(28, entries.size)
             assertTrue(entries.none { it.id in hiddenIds })
             assertTrue(groups.none { it.id == "permissions" })
             assertEquals(listOf("appearance", "assistants", "voice", "haptics"),

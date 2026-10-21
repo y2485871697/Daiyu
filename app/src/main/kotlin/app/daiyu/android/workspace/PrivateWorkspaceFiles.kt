@@ -11,11 +11,12 @@ import java.util.UUID
 
 /** App-owned files only. Each operation walks pinned directory descriptors, never a SAF host path. */
 internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
+    private val readOnly: Boolean get() = paths.readOnly
     constructor(context: Context) : this(PrivateWorkspacePaths(context.filesDir))
 
     internal data class Identity(val device: Long, val inode: Long, val mode: Int, val size: Long, val modified: Long)
     class Entry internal constructor(val relative: String, val name: String, val directory: Boolean,
-        val size: Long, internal val identities: List<Identity>)
+        val size: Long, internal val identities: List<Identity>, val symbolicLink: Boolean = false)
     data class Listing(val directory: Entry, val entries: List<Entry>, val truncated: Boolean)
 
     fun list(directory: Entry? = null, cancelled: () -> Boolean = { false }): Listing = synchronized(publicationLock) {
@@ -33,10 +34,11 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
                     if (scanned++ == MAX_ENTRIES) { truncated = true; break }
                     if (child.name.startsWith(STAGING)) continue
                     val stat = Os.lstat(child.path)
-                    if (!OsConstants.S_ISDIR(stat.st_mode) && !OsConstants.S_ISREG(stat.st_mode)) continue
+                    val symbolicLink = OsConstants.S_ISLNK(stat.st_mode)
+                    if (!OsConstants.S_ISDIR(stat.st_mode) && !OsConstants.S_ISREG(stat.st_mode) && !(readOnly && symbolicLink)) continue
                     val id = identity(stat)
                     entries += Entry(listOf(relative, child.name).filter { it.isNotEmpty() }.joinToString("/"),
-                        child.name, OsConstants.S_ISDIR(stat.st_mode), stat.st_size, chain + id)
+                        child.name, OsConstants.S_ISDIR(stat.st_mode), stat.st_size, chain + id, symbolicLink)
                 }
             }
             active(cancelled)
@@ -52,6 +54,7 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
 
     fun importFile(directory: Entry, name: String, openInput: () -> InputStream,
         cancelled: () -> Boolean = { false }): String {
+        check(!readOnly) { "workspace_read_only" }
         check(directory.directory) { "workspace_not_directory" }
         val cleaned = name.substringAfterLast('/').substringAfterLast('\\')
             .map { if (it.isISOControl()) '_' else it }.joinToString("").ifBlank { "文件" }
@@ -117,7 +120,8 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
     }
 
     fun exportFile(entry: Entry, openOutput: () -> OutputStream, cancelled: () -> Boolean = { false }) {
-        check(!entry.directory) { "workspace_not_file" }
+        check(!readOnly) { "workspace_read_only" }
+        check(!entry.directory && !entry.symbolicLink) { "workspace_not_file" }
         pinned(entry, cancelled) { descriptor, _ ->
             // Duplicate the pinned file: closing the stream must not close the walk's descriptor twice.
             ParcelFileDescriptor.AutoCloseInputStream(ParcelFileDescriptor.dup(descriptor.fileDescriptor)).use { input ->
@@ -129,6 +133,7 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
 
     /** Deletes files and empty directories only; a populated directory is never recursively removed. */
     fun delete(entry: Entry, cancelled: () -> Boolean = { false }) {
+        check(!readOnly) { "workspace_read_only" }
         check(entry.relative.isNotEmpty()) { "workspace_root_protected" }
         val parentRelative = entry.relative.substringBeforeLast('/', "")
         val parent = Entry(parentRelative, "", true, 0, entry.identities.dropLast(1))
@@ -144,11 +149,12 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
     private fun <T> pinned(entry: Entry?, cancelled: () -> Boolean,
         block: (ParcelFileDescriptor, List<Identity>) -> T): T {
         active(cancelled)
-        val root = paths.ensureRoot()
+        paths.ensureRoot()
         val descriptors = mutableListOf<ParcelFileDescriptor>()
         try {
             val storage = open(paths.storage.path, true).also { descriptors += it }
-            var held = open("${fdPath(storage)}/${root.name}", true).also { descriptors += it }
+            var held = storage
+            for (part in paths.rootParts) held = open("${fdPath(held)}/$part", true).also { descriptors += it }
             val chain = mutableListOf(identity(Os.fstat(held.fileDescriptor)))
             val parts = entry?.relative.orEmpty().split('/').filter { it.isNotEmpty() }
             check(entry == null || entry.relative.isEmpty() ||

@@ -139,11 +139,11 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             "appearance", "assistants", "voice", "haptics",
             "providers", "compression", "vision", "subagents", "title_model", "reconnect",
             "pet", "skills", "mcp",
-            "workspace", "linux", "task_surface",
+            "linux", "task_surface",
             "usage", "backup", "logging", "export_logs", "clear_logs",
             "updates", "telegram", "qq", "source", "relay", "relay_st", "relay_moyu", "donate",
         )
-        assertEquals(29, entries.size)
+        assertEquals(28, entries.size)
         for (engineering in listOf(false, true)) {
             assertEquals(expectedIds, SettingsCatalog.visibleGroups(engineering).flatMap { it.entries }.map { it.id })
         }

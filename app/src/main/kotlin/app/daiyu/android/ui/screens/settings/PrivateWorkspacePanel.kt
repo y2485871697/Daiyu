@@ -11,7 +11,10 @@ import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.unit.dp
+import top.yukonga.miuix.kmp.basic.IconButton
+import app.daiyu.android.ui.icons.DaiyuIcon
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -34,7 +37,7 @@ private class WorkspaceDelete(val entry: PrivateWorkspaceFiles.Entry, val epoch:
 @Composable
 internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles? = null,
     parentVisit: AtomicBoolean = remember { AtomicBoolean(true) },
-    sharedBusy: () -> Boolean = { false }, onOccupied: (Boolean) -> Unit = {}): @Composable () -> Unit {
+    sharedBusy: () -> Boolean = { false }, onOccupied: (Boolean) -> Unit = {}, compact: Boolean = false): @Composable () -> Unit {
     val context = LocalContext.current
     val files = suppliedFiles ?: remember(context) { PrivateWorkspaceFiles(context.applicationContext) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -151,17 +154,24 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                 }
             }
         }, onDismiss = { if (deleting === deletion) deleting = null })
+    val importFile: () -> Unit = {
+        val directory = listing?.directory
+        if (current() && !busy && !sharedBusy() && pending == null && request == null && directory != null) {
+            deleting = null; pending = WorkspaceTransfer(directory, null); onOccupied(true)
+            try { importer.launch(arrayOf("*/*")) } catch (_: Exception) { pending = null; onOccupied(false); notice = "未能打开文件选择器" }
+        }
+    }
     return { Column {
         SettingsSectionTitle("私有工作区")
         SettingsNote("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。")
         SettingsCard {
-            SettingsRow("导入文件", tag = "workspace-private-import", onClick = {
-                val directory = listing?.directory
-                if (current() && !busy && !sharedBusy() && pending == null && request == null && directory != null) {
-                    deleting = null; pending = WorkspaceTransfer(directory, null); onOccupied(true)
-                    try { importer.launch(arrayOf("*/*")) } catch (_: Exception) { pending = null; onOccupied(false); notice = "未能打开文件选择器" }
+            if (compact) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                top.yukonga.miuix.kmp.basic.TextButton("导入文件", onClick = importFile,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("workspace-private-import"))
+                IconButton(onClick = { load() }, modifier = Modifier.size(48.dp).testTag("workspace-private-refresh")) {
+                    DaiyuIcon(DaiyuIcons.Refresh, "刷新", size = 21.dp)
                 }
-            })
+            } else SettingsRow("导入文件", tag = "workspace-private-import", onClick = importFile)
         }
         notice?.let { SettingsNote(it) }
         if (busy || request != null) SettingsNote("正在处理私有文件")
@@ -179,6 +189,14 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                 SettingsCard {
                     SettingsRow(entry.name, summary = if (entry.directory) "目录" else Formatter.formatShortFileSize(context, entry.size),
                         leading = { SettingsIcon(if (entry.directory) DaiyuIcons.Folder else DaiyuIcons.File) },
+                        trailing = if (compact) ({
+                            IconButton(onClick = {
+                                if (current() && !busy && !sharedBusy() && pending == null && request == null)
+                                    actions = WorkspaceDelete(entry, epoch.get())
+                            }, modifier = Modifier.size(48.dp).testTag("workspace-private-actions:${entry.relative}")) {
+                                DaiyuIcon(DaiyuIcons.More, "文件操作", size = 20.dp)
+                            }
+                        }) else null,
                         modifier = Modifier.combinedClickable(
                             enabled = current() && !busy && !sharedBusy() && pending == null && request == null,
                             onClick = { if (entry.directory) load(entry) },

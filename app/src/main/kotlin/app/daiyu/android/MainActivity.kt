@@ -1416,7 +1416,7 @@ class MainActivity : ComponentActivity() {
         if (state?.getBoolean("terminal-page", false) == true) {
             terminalPageOwner = Any()
             terminalReturnPage = state.getString("terminal-return-page")
-                ?.takeIf { it == "settings" || it == "chat" } ?: "settings"
+                ?.takeIf { it in setOf("settings", "chat", "linux-settings") } ?: "settings"
             retainedPageState = "terminal"
         }
         hapticsHost = app.daiyu.android.haptics.HapticsActivityHost(
@@ -1614,7 +1614,11 @@ class MainActivity : ComponentActivity() {
                             if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsVisit === visit)
                                 retainedPage = "settings"
                         }) else {
-                            LinuxSettingsScreen(ready.application.settings, page, host = ready.application.terminalOwner.host, onBack = {
+                            LinuxSettingsScreen(ready.application.settings, page, host = ready.application.terminalOwner.host,
+                                onOpenTerminal = {
+                                    if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsPageOwner === page)
+                                        openTerminal()
+                                }, onBack = {
                                 if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsPageOwner === page)
                                     retainedPage = "settings"
                             })
@@ -4778,12 +4782,19 @@ class MainActivity : ComponentActivity() {
     }
     private fun openTerminal() {
         requireActivityUsable()
-        terminalReturnPage = if (retainedPage == "settings") "settings" else "chat"
+        terminalReturnPage = when (retainedPage) {
+            "settings", "linux-settings" -> retainedPage
+            else -> "chat"
+        }
         terminalPageOwner = Any()
         retainedPage = "terminal"
     }
     private fun closeTerminalPage() {
-        if (terminalReturnPage == "settings") retainedPage = "settings" else returnToChat()
+        when (terminalReturnPage) {
+            "settings" -> retainedPage = "settings"
+            "linux-settings" -> openLinuxSettings()
+            else -> returnToChat()
+        }
     }
     private fun openUsagePage(returnPage: String) {
         usageReturnPage = returnPage

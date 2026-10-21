@@ -1,9 +1,17 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PixelMap
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -19,6 +27,10 @@ import app.daiyu.android.ui.screens.assistants.AssistantPreviewField
 import app.daiyu.android.ui.screens.chat.conversation.ToolMiniAction
 import app.daiyu.android.ui.screens.chat.conversation.UserMessageText
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
+import top.yukonga.miuix.kmp.basic.Button as MiuixButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.UsageAction
 import app.daiyu.android.ui.components.subagent.ConversationAgentButton
@@ -44,6 +56,67 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
         node("agent-button").assertHeightIsEqualTo(44.dp)
         node("usage-button").assertHeightIsEqualTo(44.dp)
     }
+    fun testNormalButtonCornersMatchMiuixInBothThemesAndInterfaceScales() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            val backdrop = if (dark) Color(0xFF101218) else Color.White
+            val assistantFill = AssistantPreviewPalette(dark).primary
+            val agentFill = Color(0xFF786C83)
+            mainThread {
+                activity.setContent {
+                    val platform = LocalDensity.current
+                    CompositionLocalProvider(LocalDensity provides Density(platform.density, 1f)) {
+                        AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                            themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                            applyInterfaceScale = true) {
+                            Column(Modifier.background(backdrop).padding(16.dp)) {
+                                MiuixButton(onClick = {}, modifier = Modifier.size(160.dp, 44.dp)
+                                    .testTag("assistant-corner-reference"),
+                                    insideMargin = PaddingValues(0.dp),
+                                    colors = ButtonDefaults.buttonColors(color = assistantFill)) {}
+                                AssistantPreviewButton("", {}, Modifier.width(160.dp)
+                                    .testTag("assistant-corner-actual"), primary = true)
+                                MiuixButton(onClick = {}, modifier = Modifier.size(160.dp, 44.dp)
+                                    .testTag("agent-corner-reference"),
+                                    insideMargin = PaddingValues(0.dp),
+                                    colors = ButtonDefaults.buttonColors(color = agentFill)) {}
+                                ConversationAgentButton("", primary = true, primaryColor = agentFill,
+                                    modifier = Modifier.width(160.dp).testTag("agent-corner-actual"), onClick = {})
+                            }
+                        }
+                    }
+                }
+            }
+            awaitUniqueTag("agent-corner-actual")
+            for ((family, fill) in listOf("assistant" to assistantFill, "agent" to agentFill)) {
+                val reference = captureScreenNode(node("$family-corner-reference")).toPixelMap()
+                val actual = captureScreenNode(node("$family-corner-actual")).toPixelMap()
+                assertTrue("$family width", kotlin.math.abs(reference.width - actual.width) <= 1)
+                assertTrue("$family height", kotlin.math.abs(reference.height - actual.height) <= 1)
+                for (bottom in listOf(false, true)) for (right in listOf(false, true)) {
+                    for (row in 1 until minOf(reference.height, actual.height) / 2) {
+                        val expectedInset = cornerInset(reference, row, bottom, right, backdrop, fill)
+                        val actualInset = cornerInset(actual, row, bottom, right, backdrop, fill)
+                        assertTrue("$family dark=$dark scale=$scale bottom=$bottom right=$right row=$row: " +
+                            "$actualInset != $expectedInset",
+                            kotlin.math.abs(expectedInset - actualInset) <= 1)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun cornerInset(pixels: PixelMap, row: Int, bottom: Boolean, right: Boolean,
+        backdrop: Color, fill: Color): Int {
+        val y = if (bottom) pixels.height - 1 - row else row
+        fun distance(a: Color, b: Color): Float =
+            (a.red - b.red) * (a.red - b.red) + (a.green - b.green) * (a.green - b.green) +
+                (a.blue - b.blue) * (a.blue - b.blue)
+        return (0 until pixels.width / 2).firstOrNull { inset ->
+            val x = if (right) pixels.width - 1 - inset else inset
+            distance(pixels[x, y], fill) <= distance(pixels[x, y], backdrop)
+        } ?: pixels.width / 2
+    }
+
     fun testPlatformFontScaleIsAppliedOnlyOnceAndTextareasKeepCssMinimums() {
         val promptHeight = AtomicInteger()
         val memoryHeight = AtomicInteger()

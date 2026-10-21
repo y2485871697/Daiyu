@@ -546,9 +546,16 @@ object DaiyuIcons {
     val Skills: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Skills", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
-                moveTo(4f, 20f); lineTo(12.5f, 11.5f)
-                moveTo(16f, 3f); lineTo(17.1f, 6.9f); lineTo(21f, 8f); lineTo(17.1f, 9.1f); lineTo(16f, 13f)
-                lineTo(14.9f, 9.1f); lineTo(11f, 8f); lineTo(14.9f, 6.9f); close()
+                moveTo(5f, 4f); lineTo(9f, 4f); curveTo(9.6f, 4f, 10f, 4.4f, 10f, 5f)
+                lineTo(10f, 9f); curveTo(10f, 9.6f, 9.6f, 10f, 9f, 10f)
+                lineTo(5f, 10f); curveTo(4.4f, 10f, 4f, 9.6f, 4f, 9f)
+                lineTo(4f, 5f); curveTo(4f, 4.4f, 4.4f, 4f, 5f, 4f); close()
+                moveTo(15f, 14f); lineTo(19f, 14f); curveTo(19.6f, 14f, 20f, 14.4f, 20f, 15f)
+                lineTo(20f, 19f); curveTo(20f, 19.6f, 19.6f, 20f, 19f, 20f)
+                lineTo(15f, 20f); curveTo(14.4f, 20f, 14f, 19.6f, 14f, 19f)
+                lineTo(14f, 15f); curveTo(14f, 14.4f, 14.4f, 14f, 15f, 14f); close()
+                moveTo(14f, 7f); lineTo(20f, 7f); moveTo(17f, 4f); lineTo(17f, 10f)
+                moveTo(4f, 17f); lineTo(10f, 17f); moveTo(7f, 14f); lineTo(7f, 20f)
             }
         }.build()
     }

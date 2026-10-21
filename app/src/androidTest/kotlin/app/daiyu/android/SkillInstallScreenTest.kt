@@ -4,6 +4,18 @@ import app.daiyu.android.ui.screens.settings.RetainedSkillRemovalCancel
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.icons.SkillIcons
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -138,6 +150,109 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         assertEquals(old, skills.user.list().single())
         ui.onNodeWithText("取消").performClick()
         node("skills-confirm-remove").assertDoesNotExist()
+    }
+
+    fun testProductImportCardWholeRowLaunchesPickerOnceAndCancelDoesNotInstall() {
+        val picker = LocalZipPicker()
+        mainThread { activity.setContent {
+            CompositionLocalProvider(androidx.activity.compose.LocalActivityResultRegistryOwner provides picker) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    SkillManagementScreen(managementFactory = { skills.manager }, onBack = {})
+                }
+            }
+        } }
+        ready("skills-import-zip")
+        node("skills-global").assertDoesNotExist()
+        ui.onNodeWithText("从 ZIP 导入").assertExists()
+        ui.onNodeWithText("选择包含 SKILL.md 的 Skill 包").assertExists()
+        reveal("skills-import-zip", "技能").assertHasClickAction().performTouchInput {
+            click(androidx.compose.ui.geometry.Offset(width - 4f, height / 2f))
+        }
+        ui.runOnIdle { assertEquals(1, picker.launchCount) }
+        mainThread { picker.result(null) }
+        ready("skills-import-zip")
+        node("skills-confirm-local-install").assertDoesNotExist()
+        assertTrue(skills.user.list().isEmpty())
+        assertTrue(skills.calls.isEmpty())
+    }
+
+    fun testProductGroupedListAndMenuFitNarrowBothThemesAndLargeTextWithoutChangingInstalledEntries() {
+        val description = "用于验证技能列表的长中文说明与完整阅读，查看和关闭都不应改变已安装内容。".repeat(8)
+        val bundle = app.daiyu.android.skills.SkillBundle(mapOf("SKILL.md" to
+            "---\nname: demo\ndescription: $description\n---\nRead-only layout fixture\n".toByteArray()))
+        val original = skills.user.install(listOf(bundle)).single()
+        val builtin = skills.builtin.install(listOf(bundle)).single()
+        var appDensitySize = 1f
+        var systemDensitySize = 1f
+        fun rawBounds(tag: String): androidx.compose.ui.geometry.Rect {
+            val coordinates = node(tag).fetchSemanticsNode().layoutInfo.coordinates
+            var root = coordinates
+            while (true) root = root.parentLayoutCoordinates ?: break
+            return root.localBoundingBoxOf(coordinates, clipBounds = false)
+        }
+        fun assertUntruncated(tag: String) {
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            node(tag).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            assertFalse(layouts.single().hasVisualOverflow)
+        }
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            mainThread { activity.setContent {
+                val density = LocalDensity.current
+                systemDensitySize = density.density
+                CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                    Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("skill-layout-host")) {
+                        AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                            interfaceScale = scale), applyInterfaceScale = true) {
+                            appDensitySize = LocalDensity.current.density
+                            SkillManagementScreen(managementFactory = { skills.manager }, onBack = {})
+                        }
+                    }
+                }
+            } }
+            ready("skills-import-zip")
+            val host = rawBounds("skill-layout-host")
+            assertEquals(320f * systemDensitySize, host.width, 1f)
+            reveal("skill-row:builtin:demo", "技能").assertIsDisplayed()
+            ui.onNodeWithText("内置").assertExists()
+            node("skill-menu:builtin:demo").performClick()
+            ui.onNodeWithText("删除", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("查看描述").performClick()
+            node("skill-description:builtin:demo").assertTextEquals(description)
+            assertUntruncated("skill-description:builtin:demo")
+            node("skills-details-close").performClick()
+            reveal("skill-row:user:demo", "技能").assertIsDisplayed()
+            val row = rawBounds("skill-row:user:demo")
+            ui.onNodeWithText("用户安装").assertExists()
+            node("skill-menu:user:demo").assertIsDisplayed()
+            val menu = rawBounds("skill-menu:user:demo")
+            val icon = rawBounds("skill-icon:user:demo")
+            assertTrue(row.left >= host.left && row.right <= host.right)
+            // Touch targets remain 48 application dp under the user's existing interface scale.
+            assertTrue(menu.width >= 48f * appDensitySize - 1f && menu.height >= 48f * appDensitySize - 1f)
+            assertTrue(icon.right < menu.left && menu.right <= row.right)
+            node("skill-menu:user:demo").performClick()
+            ui.onNodeWithText("查看描述").performClick()
+            node("skill-description:user:demo").assertTextEquals(original.description)
+            assertUntruncated("skill-description:user:demo")
+            node("skills-details-close").assertIsDisplayed()
+            val close = rawBounds("skills-details-close")
+            assertTrue(close.height >= 48f * appDensitySize - 1f)
+            node("skills-details-close").performClick()
+            node("skill-description:user:demo").assertDoesNotExist()
+            assertEquals(original, skills.user.list().single())
+            assertEquals(builtin, skills.builtin.list().single())
+            assertTrue(skills.calls.isEmpty())
+        }
+    }
+
+    fun testSkillMarksUseDistinctOriginalOutlineFamily() {
+        val marks = listOf(DaiyuIcons.Skills, SkillIcons.Improve, SkillIcons.Create, SkillIcons.Import)
+        assertEquals(4, marks.map { it.name }.toSet().size)
+        marks.forEach { mark ->
+            assertTrue(mark.name.startsWith("Daiyu."))
+            assertEquals(24f, mark.viewportWidth, 0f)
+            assertEquals(24f, mark.viewportHeight, 0f)
+        }
     }
 
     fun testBuiltinDetailsDoNotOfferUserRemoval() {
@@ -428,11 +543,13 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
     private class LocalZipPicker : androidx.activity.result.ActivityResultRegistry(), androidx.activity.result.ActivityResultRegistryOwner {
         override val activityResultRegistry: androidx.activity.result.ActivityResultRegistry get() = this
         var launched: Int? = null
+        var launchCount = 0
         override fun <I, O> onLaunch(requestCode: Int, contract: androidx.activity.result.contract.ActivityResultContract<I, O>,
             input: I, options: androidx.core.app.ActivityOptionsCompat?) {
             check(contract is androidx.activity.result.contract.ActivityResultContracts.OpenDocument)
             check((input as Array<*>).toList() == listOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
             launched = requestCode
+            launchCount++
         }
         fun result(uri: android.net.Uri?) {
             dispatchResult(checkNotNull(launched), if (uri == null) android.app.Activity.RESULT_CANCELED else android.app.Activity.RESULT_OK,

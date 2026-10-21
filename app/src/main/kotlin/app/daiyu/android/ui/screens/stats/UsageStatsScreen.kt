@@ -56,9 +56,8 @@ import app.daiyu.android.R
 import app.daiyu.android.data.repository.ModelUsageModelUi
 import app.daiyu.android.data.repository.ModelUsageSnapshot
 import app.daiyu.android.data.repository.UsageStatsSnapshot
-import app.daiyu.android.data.repository.RecordedUsageProjection
-import app.daiyu.android.data.repository.formatReportedUsage
-import app.daiyu.android.domain.usage.RecordedUsageSummary
+import app.daiyu.android.data.repository.UsageTokenMetrics
+import app.daiyu.android.data.repository.formatUsageTokens
 import app.daiyu.android.data.repository.formatStatCount
 import app.daiyu.android.data.repository.formatTokenCount
 import app.daiyu.android.data.repository.heatmapAlpha
@@ -140,17 +139,9 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
         } else if (selectedTab == UsageStatsTab.Models) {
             item(key = "model-usage") {
                 ModelUsagePane(
-                    usage = stats.modelUsage,
-                    accountingAvailable = stats.tokenAccountingAvailable,
+                    stats = stats,
                     modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)
                         .testTag("usage-model-pane"),
-                )
-            }
-            item(key = "recorded-model-usage") {
-                RecordedUsagePane(
-                    projection = stats.recordedProjection,
-                    modelView = true,
-                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp),
                 )
             }
         } else {
@@ -193,12 +184,13 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                     modifier = Modifier.padding(horizontal = 12.dp).testTag("usage-overview-grid"),
                 )
             }
-            item(key = "recorded-usage") {
-                RecordedUsagePane(
-                    projection = stats.recordedProjection,
-                    modelView = false,
-                    modifier = Modifier.padding(horizontal = 12.dp).padding(top = 12.dp, bottom = 12.dp),
-                )
+            item(key = "usage-scope") {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(if (stats.recordedProjection?.combined?.requestSnapshotCount == 0L) "暂无已报告用量"
+                        else "输入、输出及缓存为已报告小计，可能不完整；— 表示该项未知或无法计算。", color = usagePalette().muted, fontSize = 12.sp)
+                    if (stats.recordedProjection?.attributed?.scanComplete == false)
+                        Text("部分记录尚未读取，仅显示已读取的用量。", color = usagePalette().muted, fontSize = 12.sp)
+                }
             }
         }
     }
@@ -274,16 +266,20 @@ private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
 
 @Composable
 private fun ModelUsagePane(
-    usage: ModelUsageSnapshot,
-    accountingAvailable: Boolean,
+    stats: UsageStatsSnapshot,
     modifier: Modifier = Modifier,
 ) {
+    val usage = stats.modelUsage
     var expandedModels by remember { mutableStateOf(emptySet<String>()) }
     var startBound by remember { mutableStateOf(UsageTimeBound()) }
     var endBound by remember { mutableStateOf(UsageTimeBound()) }
     val filtered = remember(usage, startBound, endBound) {
         usage.filtered(startBound.toMillis(endOfBound = false), endBound.toMillis(endOfBound = true))
     }
+    val timeFiltered = startBound.isSet || endBound.isSet
+    val historical = stats.recordedProjection?.takeIf { it.combined.requestSnapshotCount > 0L }
+    val includesHistorical = !timeFiltered && historical != null
+    val tokens = stats.modelTokens(filtered, timeFiltered)
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -298,44 +294,30 @@ private fun ModelUsagePane(
                 endBound = UsageTimeBound()
             },
         )
-        Card {
-            Column(
-                modifier = Modifier.padding(7.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.stats_model_total_title),
-                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                )
-                ModelMetricRow(
-                    label = stringResource(R.string.stats_page_token_total),
-                    value = if (accountingAvailable) formatTokenCount(filtered.totalTokens) else "—",
-                )
-                ModelMetricRow(
-                    // The value excludes cache reads and writes. The hit rate divides by the
-                    // full prompt, so it is not labelled "input".
-                    label = stringResource(R.string.stats_page_fresh_input_tokens),
-                    value = if (accountingAvailable) formatTokenCount(filtered.totalFreshInputTokens) else "—",
-                )
-                ModelMetricRow(
-                    label = stringResource(R.string.stats_page_output_tokens),
-                    value = if (accountingAvailable) formatTokenCount(filtered.totalOutputTokens) else "—",
-                )
-                ModelMetricRow(
-                    label = stringResource(R.string.stats_page_cached_tokens),
-                    value = if (accountingAvailable) formatTokenCount(filtered.totalCachedTokens) else "—",
-                )
-                ModelMetricRow(
-                    label = stringResource(R.string.stats_page_cache_creation_tokens),
-                    value = if (accountingAvailable) formatTokenCount(filtered.totalCacheCreationTokens) else "—",
-                )
-                ModelMetricRow(
-                    label = stringResource(R.string.stats_model_cache_hit_rate),
-                    value = if (accountingAvailable) formatCacheHitRate(filtered.totalCachedTokens, filtered.totalInputTokens) else "—",
-                )
+        Text("输入、输出及缓存为已报告小计，可能不完整；— 表示该项未知或无法计算。",
+            color = usagePalette().muted, fontSize = 12.sp)
+        Card(Modifier.testTag("usage-model-total")) {
+            Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.stats_model_total_title),
+                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
+                UsageTokenRows(tokens)
+                ModelMetricRow(stringResource(R.string.stats_model_cache_hit_rate),
+                    if (!includesHistorical && stats.tokenAccountingAvailable && filtered.providers.isNotEmpty() && filtered.totalInputTokens > 0L)
+                        formatCacheHitRate(filtered.totalCachedTokens, filtered.totalInputTokens) else "—")
             }
         }
-        if (filtered.providers.isEmpty()) {
+        if (includesHistorical) {
+            Card(Modifier.testTag("usage-model-unattributed")) {
+                Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("未归属历史模型", style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
+                    Text("历史记录未包含模型和时间信息。", color = usagePalette().muted, fontSize = 12.sp)
+                    UsageTokenRows(checkNotNull(historical).tokens)
+                }
+            }
+        } else if (timeFiltered && historical != null) {
+            Text("历史用量缺少时间信息，已排除在时间筛选结果之外。", color = usagePalette().muted, fontSize = 12.sp)
+        }
+        if (filtered.providers.isEmpty() && !includesHistorical) {
             Text(
                 text = stringResource(
                     if (startBound.isSet || endBound.isSet) {
@@ -832,66 +814,17 @@ private fun HeatmapCell(alpha: Float, sizeDp: Int, unknown: Boolean = false) {
 }
 
 @Composable
-internal fun RecordedUsagePane(
-    projection: RecordedUsageProjection?,
-    modelView: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    var details by remember(modelView) { mutableStateOf(false) }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Card {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (modelView) "未归属模型的用量" else "用量统计",
-                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
-                Text(when {
-                    projection == null -> "暂时无法读取用量"
-                    projection.combined.requestSnapshotCount == 0L -> "暂无已报告用量"
-                    else -> "仅统计已记录用量，未报告的数据以 — 显示。"
-                }, style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
-                if (projection != null && !projection.attributed.scanComplete)
-                    Text("部分记录尚未读取，仅显示已读取的用量。", style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
-                if (modelView && projection != null && projection.combined.requestSnapshotCount > 0L)
-                    Text("历史记录未包含模型信息", style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
-            }
-        }
-        if (projection != null && projection.combined.requestSnapshotCount > 0L) {
-            // Unknown historical model is one explicitly unattributed bucket, not today's model.
-            if (modelView) RecordedSummaryCard("未归属历史模型 · 主请求 + 子任务", projection.combined)
-            else {
-                RecordedSummaryCard("合计（不重复计缓存）", projection.combined)
-                UsageAction(if (details) "▾ 详细用量" else "▸ 详细用量", { details = !details },
-                    plain = true, modifier = Modifier.fillMaxWidth().testTag("stats-usage-details"))
-                if (details) {
-                    RecordedSummaryCard("主请求", projection.main)
-                    RecordedSummaryCard("子任务（归父）", projection.child)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecordedSummaryCard(title: String, summary: RecordedUsageSummary) {
-    var cacheExpanded by remember(title) { mutableStateOf(false) }
-    Card {
-        Text(title, style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
-        UsageMetric("已记录请求", formatStatCount(summary.requestSnapshotCount), total = true)
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Coverage is retained per field; never manufacture a total from partial reports.
-            UsageMetric("输入（含缓存）", formatReportedUsage(summary.input))
-            UsageMetric("输出", formatReportedUsage(summary.output))
-        }
-        UsageAction(if (cacheExpanded) "▾ 缓存明细" else "▸ 缓存明细", { cacheExpanded = !cacheExpanded },
-            plain = true, modifier = Modifier.fillMaxWidth())
-        if (cacheExpanded) {
-            UsageMetric("缓存读取", formatReportedUsage(summary.cached))
-            Text("缓存写入 / 独立推理 / 费用：—（未记录）", color = usagePalette().muted, fontSize = 12.sp)
-        }
-    }
+private fun UsageTokenRows(tokens: UsageTokenMetrics) {
+    ModelMetricRow(stringResource(R.string.stats_page_token_total), formatUsageTokens(tokens.total))
+    ModelMetricRow("输入（含缓存）", formatUsageTokens(tokens.input))
+    ModelMetricRow(stringResource(R.string.stats_page_output_tokens), formatUsageTokens(tokens.output))
+    ModelMetricRow(stringResource(R.string.stats_page_cached_tokens), formatUsageTokens(tokens.cached))
+    ModelMetricRow(stringResource(R.string.stats_page_cache_creation_tokens), formatUsageTokens(tokens.creation))
 }
 
 @Composable
 private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
+    val tokens = stats.overviewTokens
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -919,49 +852,17 @@ private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) 
                 ),
             )
         }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            StatCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Rounded.Keyboard,
-                label = stringResource(R.string.stats_page_fresh_input_tokens),
-                value = formatCurrentLifetime(
-                    current = if (stats.tokenAccountingAvailable) formatTokenCount(stats.currentFreshInputTokens) else "—",
-                    lifetime = if (stats.tokenAccountingAvailable) formatTokenCount(stats.lifetimeFreshInputTokens) else "—",
-                ),
-            )
-            StatCard(
-                modifier = Modifier.weight(1f),
-                icon = Icons.AutoMirrored.Rounded.Notes,
-                label = stringResource(R.string.stats_page_output_tokens),
-                value = formatCurrentLifetime(
-                    current = if (stats.tokenAccountingAvailable) formatTokenCount(stats.currentOutputTokens) else "—",
-                    lifetime = if (stats.tokenAccountingAvailable) formatTokenCount(stats.lifetimeOutputTokens) else "—",
-                ),
-            )
+        StatCard(Modifier.fillMaxWidth(), Icons.Rounded.Add,
+            stringResource(R.string.stats_page_token_total), formatUsageTokens(tokens.total))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            StatCard(Modifier.weight(1f), Icons.Rounded.Keyboard, "输入（含缓存）", formatUsageTokens(tokens.input))
+            StatCard(Modifier.weight(1f), Icons.AutoMirrored.Rounded.Notes,
+                stringResource(R.string.stats_page_output_tokens), formatUsageTokens(tokens.output))
         }
-        if (!stats.tokenAccountingAvailable || stats.lifetimeCachedTokens > 0) {
-            StatCard(
-                modifier = Modifier.fillMaxWidth(),
-                icon = Icons.Rounded.Bolt,
-                label = stringResource(R.string.stats_page_cached_tokens),
-                value = formatCurrentLifetime(
-                    current = if (stats.tokenAccountingAvailable) formatTokenCount(stats.currentCachedTokens) else "—",
-                    lifetime = if (stats.tokenAccountingAvailable) formatTokenCount(stats.lifetimeCachedTokens) else "—",
-                ),
-            )
-        }
-        StatCard(
-            modifier = Modifier.fillMaxWidth(),
-            icon = Icons.Rounded.Add,
-            label = stringResource(R.string.stats_page_cache_creation_tokens),
-            value = formatCurrentLifetime(
-                current = if (stats.tokenAccountingAvailable) formatTokenCount(stats.currentCacheCreationTokens) else "—",
-                lifetime = if (stats.tokenAccountingAvailable) formatTokenCount(stats.lifetimeCacheCreationTokens) else "—",
-            ),
-        )
+        StatCard(Modifier.fillMaxWidth(), Icons.Rounded.Bolt,
+            stringResource(R.string.stats_page_cached_tokens), formatUsageTokens(tokens.cached))
+        StatCard(Modifier.fillMaxWidth(), Icons.Rounded.Add,
+            stringResource(R.string.stats_page_cache_creation_tokens), formatUsageTokens(tokens.creation))
         StatCard(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             icon = Icons.Rounded.RocketLaunch,

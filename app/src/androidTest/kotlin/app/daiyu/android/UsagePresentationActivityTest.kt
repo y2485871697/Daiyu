@@ -13,6 +13,11 @@ import app.daiyu.android.data.repository.ModelUsageProviderUi
 import app.daiyu.android.data.repository.ModelUsageSnapshot
 import app.daiyu.android.data.repository.RecordedUsageStats
 import app.daiyu.android.data.repository.UsageStatsSnapshot
+import app.daiyu.android.domain.ModelEvent
+import app.daiyu.android.domain.runtime.RequestCheckpoint
+import app.daiyu.android.domain.runtime.RequestOperation
+import app.daiyu.android.domain.usage.AttributedRequestUsage
+import app.daiyu.android.domain.usage.UsageOrigin
 import app.daiyu.android.domain.usage.aggregateAttributedUsage
 import app.daiyu.android.model.usage.AttributedUsageStats
 import app.daiyu.android.model.usage.ChildUsageCoverage
@@ -30,6 +35,13 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         return UsageStatsSnapshot(attributedUsage = AttributedUsageStats(summary, emptyList(),
             RecordedUsageStats(summary.main, if (incomplete) 1 else 0, 0, 0, 0, 0, if (incomplete) 1 else 0),
             ChildUsageCoverage(0, 0, 0, 0, 0, 0)))
+    }
+    private fun reported(): UsageStatsSnapshot {
+        val row = AttributedRequestUsage("conversation", "parent", "message", "parent", "message", UsageOrigin.Main,
+            RequestCheckpoint("request", "attempt", "owner", RequestOperation.RESUME), ModelEvent.Usage(250, 70, 60, 40))
+        val summary = aggregateAttributedUsage(listOf(row))
+        return UsageStatsSnapshot(attributedUsage = AttributedUsageStats(summary, listOf(row),
+            RecordedUsageStats(summary.main, 1, 1, 0, 0, 0, 0), ChildUsageCoverage(0, 0, 0, 0, 0, 0)))
     }
     private fun show(
         dark: Boolean = false,
@@ -56,8 +68,9 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         usagePage().scrollToDescendant(hasTestTag(tag))
         node(tag).performClick().assertIsSelected()
     }
-    private fun assertMetric(label: Int, value: String) {
-        val tag = "usage-stat:${activity.getString(label)}"
+    private fun assertMetric(label: Int, value: String) = assertMetric(activity.getString(label), value)
+    private fun assertMetric(label: String, value: String) {
+        val tag = "usage-stat:$label"
         usagePage().scrollToDescendant(hasTestTag(tag))
         ui.onNode(hasText(value) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
             .assertIsDisplayed()
@@ -89,7 +102,7 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
     }
 
     fun testOriginalOverviewKeepsAllMetricsOnFullPageAcrossThemesAndScales() {
-        val stats = empty().copy(
+        val stats = reported().copy(
             heatmapAvailable = true, currentDataAvailable = true,
             tokenAccountingAvailable = true, lifetimeAccountingAvailable = true,
             currentConversations = 12, lifetimeConversations = 27,
@@ -112,12 +125,13 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
             ui.onNodeWithText("关闭").assertDoesNotExist()
             assertMetric(R.string.stats_page_total_conversations, "12 / 27")
             assertMetric(R.string.stats_page_total_messages, "35 / 91")
-            assertMetric(R.string.stats_page_fresh_input_tokens, "150 / 420")
-            assertMetric(R.string.stats_page_output_tokens, "70 / 180")
-            assertMetric(R.string.stats_page_cached_tokens, "60 / 100")
-            assertMetric(R.string.stats_page_cache_creation_tokens, "40 / 80")
+            assertMetric("输入（含缓存）", "250")
+            assertMetric(R.string.stats_page_token_total, "320")
+            assertMetric(R.string.stats_page_output_tokens, "70")
+            assertMetric(R.string.stats_page_cached_tokens, "60")
+            assertMetric(R.string.stats_page_cache_creation_tokens, "40")
             assertMetric(R.string.stats_page_launch_count, "8")
-            usagePage().scrollToDescendant(hasText("暂无已报告用量"))
+            ui.onNodeWithText("已记录请求").assertDoesNotExist()
             selectTab(R.string.stats_tab_models)
             node("usage-model-pane").assertExists()
             selectTab(R.string.stats_tab_overview)
@@ -131,9 +145,10 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         show { empty() }
         node("usage-heatmap").assertExists()
         listOf(R.string.stats_page_total_conversations, R.string.stats_page_total_messages,
-            R.string.stats_page_fresh_input_tokens, R.string.stats_page_output_tokens,
+            R.string.stats_page_token_total, R.string.stats_page_output_tokens,
             R.string.stats_page_cached_tokens, R.string.stats_page_cache_creation_tokens,
             R.string.stats_page_launch_count).forEach { assertMetric(it, "—") }
+        assertMetric("输入（含缓存）", "—")
         selectTab(R.string.stats_tab_models)
         node("usage-model-filter").assertExists()
         ui.onAllNodesWithText("0%").assertCountEquals(0)
@@ -175,6 +190,31 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText(clear).performClick()
         usagePage().scrollToDescendant(hasText("400"))
         ui.onAllNodesWithText("400").onFirst().assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testReportedUsageLivesInMainCardsAndUnknownModelBucketRespectsTimeFilter() {
+        show { reported() }
+        assertMetric(R.string.stats_page_token_total, "320")
+        assertMetric("输入（含缓存）", "250")
+        ui.onNodeWithText("已记录请求").assertDoesNotExist()
+        ui.onNodeWithText("已报告", substring = true).assertDoesNotExist()
+        selectTab(R.string.stats_tab_models)
+        usagePage().scrollToDescendant(hasTestTag("usage-model-unattributed"))
+        node("usage-model-unattributed").assertIsDisplayed()
+        val filter = activity.getString(R.string.stats_model_filter_title)
+        usagePage().scrollToDescendant(hasText(filter))
+        ui.onNode(hasText(filter) and hasClickAction()).performClick()
+        val today = activity.getString(R.string.stats_model_filter_preset_today)
+        usagePage().scrollToDescendant(hasText(today) and hasClickAction())
+        ui.onNode(hasText(today) and hasClickAction()).performClick()
+        node("usage-model-unattributed").assertDoesNotExist()
+        usagePage().scrollToDescendant(hasText("历史用量缺少时间信息，已排除在时间筛选结果之外。"))
+        val clear = activity.getString(R.string.stats_model_filter_clear)
+        usagePage().scrollToDescendant(hasText(clear))
+        ui.onNodeWithText(clear).performClick()
+        usagePage().scrollToDescendant(hasTestTag("usage-model-unattributed"))
+        node("usage-model-unattributed").assertIsDisplayed()
         assertEquals(0, fixture.opens.get())
     }
 

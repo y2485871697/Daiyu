@@ -14,6 +14,38 @@ NAMES = {'OPENAI': 'openai', 'CLAUDE': 'claude-color', 'GEMINI': 'gemini-color',
          'DEEPSEEK': 'deepseek-color', 'QWEN': 'qwen-color', 'KIMI': 'kimi-color',
          'GROK': 'grok', 'ZHIPU': 'zhipu-color', 'DOUBAO': 'doubao-color', 'MINIMAX': 'minimax-color'}
 
+def normalize_path(data):
+    arity = {'M': 2, 'L': 2, 'H': 1, 'V': 1, 'C': 6, 'S': 4, 'Q': 4, 'T': 2, 'A': 7}
+    number = re.compile(r'[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?')
+    pos = 0
+    command = None
+    out = []
+    def skip():
+        nonlocal pos
+        while pos < len(data) and data[pos] in ' \t\r\n,': pos += 1
+    while True:
+        skip()
+        if pos == len(data): break
+        if data[pos] in 'MmLlHhVvCcSsQqTtAaZz':
+            command = data[pos]; pos += 1
+            if command.upper() == 'Z':
+                out.append(command); command = None; continue
+        if command is None: raise ValueError('Expected SVG path command')
+        args = []
+        for index in range(arity[command.upper()]):
+            skip()
+            if command.upper() == 'A' and index in (3, 4):
+                if pos == len(data) or data[pos] not in '01': raise ValueError('Invalid SVG arc flag')
+                args.append(data[pos]); pos += 1
+            else:
+                match = number.match(data, pos)
+                if match is None: raise ValueError('Invalid SVG path argument')
+                args.append(match.group()); pos = match.end()
+        out.append(command + ' '.join(args))
+        if command in 'Mm': command = 'l' if command == 'm' else 'L'
+    return ' '.join(out)
+
+
 def number(value):
     return f'{float(value):.8g}f'
 
@@ -62,7 +94,7 @@ internal object ModelBrandVectors {''']
             else:
                 assert kind == 'path', kind
                 data = attrs['d']
-            quoted = json.dumps(data)
+            quoted = json.dumps(normalize_path(data))
             fill = attrs.get('fill','currentColor')
             rule = 'true' if attrs.get('fill-rule') == 'evenodd' else 'false'
             if fill.startswith('url(#'):

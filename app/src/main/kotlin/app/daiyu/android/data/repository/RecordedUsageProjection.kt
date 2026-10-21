@@ -23,6 +23,12 @@ internal data class RecordedUsageProjection(val attributed: AttributedUsageStats
         return app.daiyu.android.ui.model.ConversationTokenUsageUi(known(combined.input), known(combined.output),
             known(combined.cached), known(combined.creation), combined.requestSnapshotCount)
     }
+    val tokens: UsageTokenMetrics get() = UsageTokenMetrics(
+        input = combined.input.reportedTokens, output = combined.output.reportedTokens,
+        cached = combined.cached.reportedTokens, creation = combined.creation.reportedTokens,
+        total = if (combined.input.unknownRequestCount == 0L && combined.output.unknownRequestCount == 0L)
+            sumKnownTokens(combined.input.reportedTokens, combined.output.reportedTokens) else null,
+    )
     // Neither checkpoint usage nor child receipts persist provider/model/time attribution.
     val historicalModelAvailable: Boolean get() = false
     val historicalTimeAvailable: Boolean get() = false
@@ -52,3 +58,19 @@ internal fun formatReportedUsage(value: ReportedTokenSubtotal): String {
     val tokens = value.reportedTokens?.let(::formatTokenCount) ?: "—"
     return "$tokens（已报告 ${value.reportedRequestCount}，未知 ${value.unknownRequestCount}）"
 }
+
+internal data class UsageTokenMetrics(
+    val input: Long? = null, val output: Long? = null,
+    val cached: Long? = null, val creation: Long? = null, val total: Long? = null,
+) {
+    operator fun plus(other: UsageTokenMetrics) = UsageTokenMetrics(
+        sumKnownTokens(input, other.input), sumKnownTokens(output, other.output),
+        sumKnownTokens(cached, other.cached), sumKnownTokens(creation, other.creation),
+        sumKnownTokens(total, other.total),
+    )
+}
+
+private fun sumKnownTokens(a: Long?, b: Long?): Long? =
+    if (a == null || b == null || a > Long.MAX_VALUE - b) null else a + b
+
+internal fun formatUsageTokens(value: Long?): String = value?.let(::formatTokenCount) ?: "—"

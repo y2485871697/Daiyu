@@ -1,9 +1,11 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -11,6 +13,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.graphics.Color
@@ -30,6 +34,7 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.AssistantDisplay
 import app.daiyu.android.ui.components.ConversationSidePaneScaffold
+import app.daiyu.android.ui.components.ConversationPanePreviewPalette
 import app.daiyu.android.ui.model.ConversationFolderUi
 import app.daiyu.android.ui.model.ConversationModeUi
 import app.daiyu.android.ui.model.ConversationPaneUiState
@@ -49,7 +54,9 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
     )
 
     private fun show(scale: Float = 1f, dark: Boolean = false, fontScale: Float = .9f, compact: Boolean = false,
-        loaded: Boolean = true, rows: List<ConversationSummaryUi> = conversations, query: String = "") {
+        loaded: Boolean = true, rows: List<ConversationSummaryUi> = conversations, query: String = "",
+        blurEnabled: Boolean = true, initiallyVisible: Boolean = true,
+        content: @Composable () -> Unit = { Box(Modifier.fillMaxSize()) }) {
         action = null
         val renderGeneration = ++generation
         mainThread {
@@ -57,11 +64,11 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                 key(renderGeneration) {
                     val platform = LocalDensity.current
                     CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
-                        AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                        AgentAppTheme(AppearanceSettings(interfaceScale = scale, blurEnabled = blurEnabled,
                             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                             applyInterfaceScale = true) {
                             density.set(LocalDensity.current)
-                            var visible by remember { mutableStateOf(true) }
+                            var visible by remember { mutableStateOf(initiallyVisible) }
                             var state by remember { mutableStateOf(ConversationPaneUiState(
                                 conversations = rows, selectedConversationId = "first", searchQuery = query,
                                 folders = listOf(ConversationFolderUi("design", "设计")),
@@ -87,13 +94,41 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                                 onOpenSkills = { action = "skills" },
                                 onOpenPermissions = { action = "permissions" },
                                 modifier = Modifier.testTag("drawer-host").then(if (compact) Modifier.widthIn(max = 320.dp) else Modifier),
-                            ) { Box(Modifier.fillMaxSize()) }
+                            ) { content() }
                         }
                     }
                 }
             }
         }
         ui.waitForIdle()
+    }
+
+    fun testDrawerOnlyDimsExposedContentWithoutBlurringInBothThemes() {
+        for (dark in listOf(false, true)) for (blurEnabled in listOf(false, true)) {
+            for (open in listOf(false, true)) {
+                show(dark = dark, compact = true, blurEnabled = blurEnabled, initiallyVisible = open) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val boundary = (size.height / 2).toInt().toFloat()
+                        drawRect(Color.White)
+                        drawRect(Color.Black, topLeft = Offset(0f, boundary),
+                            size = Size(size.width, size.height - boundary))
+                    }
+                }
+                val pixels = node("drawer-host").captureToImage().toPixelMap()
+                val x = pixels.width - (12 * density.get().density).toInt()
+                val boundary = pixels.height / 2
+                for ((base, y) in listOf(Color.White to boundary - 1, Color.Black to boundary)) {
+                    val expected = if (open) ConversationPanePreviewPalette(dark).scrim.compositeOver(base) else base
+                    val actual = pixels[x, y]
+                    val label = "dark=$dark blur=$blurEnabled open=$open y=$y"
+                    assertEquals(label, expected.red, actual.red, .015f)
+                    assertEquals(label, expected.green, actual.green, .015f)
+                    assertEquals(label, expected.blue, actual.blue, .015f)
+                }
+                assertNull(action)
+            }
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testFolderNameUsesInsetRoundedFieldAndPlaceholderWithoutChangingSaveOrCancel() {

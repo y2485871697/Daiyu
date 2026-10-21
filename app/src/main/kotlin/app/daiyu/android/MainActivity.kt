@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.screens.chat.attachments.ImageAttachments
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import app.daiyu.android.ui.components.dialogEnterMotion
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalFocusManager
@@ -2013,7 +2014,7 @@ class MainActivity : ComponentActivity() {
                 val vdEntry = virtualDisplayEditor
                 val vdRequest = virtualDisplayRequest
                 if (vdEntry != null && vdRequest != null) {
-                    androidx.compose.ui.window.Dialog(onDismissRequest = virtualDisplayCancelAction(vdEntry, vdRequest),
+                    app.daiyu.android.ui.components.DaiyuDialog(onDismissRequest = virtualDisplayCancelAction(vdEntry, vdRequest),
                         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
                         androidx.compose.material3.Surface(Modifier.fillMaxSize()) {
                             app.daiyu.android.vdapproval.VirtualDisplayApprovalScreen(vdRequest,
@@ -2028,7 +2029,7 @@ class MainActivity : ComponentActivity() {
                 }
                 generationReceiptNotice?.let { notice ->
                     androidx.compose.ui.window.Popup(alignment = androidx.compose.ui.Alignment.TopCenter) {
-                        androidx.compose.material3.Surface(tonalElevation = 8.dp) {
+                        androidx.compose.material3.Surface(modifier = Modifier.dialogEnterMotion(), tonalElevation = 8.dp) {
                             androidx.compose.material3.TextButton(
                                 modifier = Modifier.testTag("generation-receipt-ack"),
                                 onClick = {
@@ -3098,7 +3099,7 @@ class MainActivity : ComponentActivity() {
         unknownBranchOutcome?.takeIf { voiceForeground }?.let { receipt ->
             val locator = checkNotNull(receipt.locator)
             // Back/outside clicks do not silently consume a controller-owned UNKNOWN receipt.
-            androidx.compose.material3.AlertDialog(onDismissRequest = {},
+            app.daiyu.android.ui.components.DaiyuAlertDialog(onDismissRequest = {},
                 title = { androidx.compose.material3.Text("分支结果未确认") },
                 text = { androidx.compose.material3.Text("目标会话：${locator.conversationId.value}\n静态身份：${locator.staticIdentities.joinToString()}\n只读核实不会重新分支、生成或清理未知文件。此提示仅在当前进程保留，进程重启后请手动核实历史，不要重试。") },
                 confirmButton = { androidx.compose.material3.TextButton(modifier = Modifier.testTag("branch-unknown-inspect"), onClick = {
@@ -3118,7 +3119,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable private fun GenerationSurfaces() {
         generationApproval?.let { entry ->
-            androidx.compose.ui.window.Dialog(onDismissRequest = ::cancelGenerationEditor) {
+            app.daiyu.android.ui.components.DaiyuDialog(onDismissRequest = ::cancelGenerationEditor) {
                 androidx.compose.material3.Surface {
                     Column(Modifier.fillMaxWidth().heightIn(max = 620.dp)
                         .verticalScroll(rememberScrollState()).padding(16.dp)) {
@@ -3162,7 +3163,7 @@ class MainActivity : ComponentActivity() {
         }
         generationOutputs?.let { outputs ->
             val originalStaticVisit = staticGenerationVisit
-            androidx.compose.material3.AlertDialog(onDismissRequest = ::cancelGenerationOutputs,
+            app.daiyu.android.ui.components.DaiyuAlertDialog(onDismissRequest = ::cancelGenerationOutputs,
                 title = { androidx.compose.material3.Text("生成产物") },
                 text = {
                     Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
@@ -3237,7 +3238,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable private fun BrowserDownloadOutputsSurface() {
         browserDownloadOutputs?.takeIf { browserDownloadVisitCurrent(it.visit) }?.let { listing ->
-            androidx.compose.material3.AlertDialog(onDismissRequest = { browserDownloadOutputs = null },
+            app.daiyu.android.ui.components.DaiyuAlertDialog(onDismissRequest = { browserDownloadOutputs = null },
                 title = { androidx.compose.material3.Text("浏览器已完成下载原件") },
                 text = {
                     Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
@@ -3744,7 +3745,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable private fun VirtualDisplayR08Surfaces() {
         virtualDisplayPlanVisit?.let { visit -> key(visit.host) {
-            androidx.compose.ui.window.Dialog(onDismissRequest = { cancelVirtualDisplayPlan(visit) },
+            app.daiyu.android.ui.components.DaiyuDialog(onDismissRequest = { cancelVirtualDisplayPlan(visit) },
                 properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
                 androidx.compose.material3.Surface {
                     R08PlanEditor(visit.host, onFrozen = { freezeVirtualDisplayPlan(visit, it) },
@@ -3754,7 +3755,7 @@ class MainActivity : ComponentActivity() {
         } }
         virtualDisplayCleanupVisit?.let { visit -> key(visit.owner) {
             DisposableEffect(visit.adapter) { onDispose { visit.adapter.close() } }
-            androidx.compose.ui.window.Dialog(onDismissRequest = { closeVirtualDisplayCleanup(visit) },
+            app.daiyu.android.ui.components.DaiyuDialog(onDismissRequest = { closeVirtualDisplayCleanup(visit) },
                 properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
                 androidx.compose.material3.Surface {
                     Column(Modifier.fillMaxSize().padding(16.dp)) {

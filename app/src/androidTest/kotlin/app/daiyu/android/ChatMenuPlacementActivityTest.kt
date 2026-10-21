@@ -19,6 +19,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.composed
+import androidx.compose.ui.platform.LocalDensity
+import app.daiyu.android.ui.components.LocalPopupMotion
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -32,10 +35,11 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
 
 class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
+    private data class MenuDraw(val bounds: Rect, val fraction: Float, val padding: Float)
     fun testMenuFirstDrawUsesMeasuredSizeAndDoesNotJumpAfterOpeningOrReopening() {
         for (direction in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
             for (bottom in listOf(false, true)) {
-                val draws = CopyOnWriteArrayList<Rect>()
+                val draws = CopyOnWriteArrayList<MenuDraw>()
                 val coordinates = AtomicReference<LayoutCoordinates?>()
                 var expanded by mutableStateOf(false)
                 mainThread {
@@ -50,13 +54,18 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                                                 ChatAnchoredMenu(expanded, onDismiss = { expanded = false },
                                                     modifier = Modifier.testTag("menu-position-content")
                                                         .onGloballyPositioned { coordinates.set(it) }
-                                                        .drawWithContent {
-                                                            coordinates.get()?.takeIf { it.isAttached }?.let {
-                                                                val origin = it.positionInRoot()
-                                                                draws += Rect(origin.x, origin.y,
-                                                                    origin.x + size.width, origin.y + size.height)
+                                                        .composed {
+                                                            val motion = checkNotNull(LocalPopupMotion.current)
+                                                            val padding = with(LocalDensity.current) { 6.dp.toPx() }
+                                                            drawWithContent {
+                                                                coordinates.get()?.takeIf { it.isAttached }?.let {
+                                                                    val origin = it.positionInRoot()
+                                                                    draws += MenuDraw(Rect(origin.x, origin.y,
+                                                                        origin.x + size.width, origin.y + size.height),
+                                                                        motion.fraction.value, padding)
+                                                                }
+                                                                drawContent()
                                                             }
-                                                            drawContent()
                                                         }) {
                                                     Box(Modifier.width(180.dp).height(200.dp))
                                                 }
@@ -72,16 +81,20 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                     draws.clear()
                     mainThread { expanded = true }
                     ui.onNodeWithTag("menu-position-content").assertIsDisplayed()
-                    repeat(3) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                    ui.mainClock.advanceTimeBy(1000)
+                    ui.waitForIdle()
                     val stable = ui.onNodeWithTag("menu-position-content").fetchSemanticsNode().boundsInRoot
                     val anchor = ui.onNodeWithTag("menu-position-anchor").fetchSemanticsNode().boundsInRoot
                     val host = ui.onNodeWithTag("menu-position-host").fetchSemanticsNode().boundsInRoot
                     assertTrue("No drawn menu bounds: $direction bottom=$bottom", draws.isNotEmpty())
                     for (draw in draws) {
-                        assertEquals(stable.left, draw.left, 1f)
-                        assertEquals(stable.top, draw.top, 1f)
-                        assertEquals(stable.right, draw.right, 1f)
-                        assertEquals(stable.bottom, draw.bottom, 1f)
+                        val scale = 0.15f + 0.85f * draw.fraction
+                        val pivotX = stable.right + draw.padding
+                        val pivotY = stable.top - draw.padding
+                        assertEquals(pivotX + (stable.left - pivotX) * scale, draw.bounds.left, 1f)
+                        assertEquals(pivotY + (stable.top - pivotY) * scale, draw.bounds.top, 1f)
+                        assertEquals(stable.width, draw.bounds.width, 1f)
+                        assertEquals(stable.height, draw.bounds.height, 1f)
                     }
                     assertTrue(stable.left >= host.left && stable.right <= host.right)
                     assertTrue(stable.top >= host.top && stable.bottom <= host.bottom)
@@ -90,6 +103,8 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                     else ui.onNodeWithTag("menu-position-host").performTouchInput {
                         click(Offset(5f, center.y))
                     }
+                    ui.mainClock.advanceTimeBy(176)
+                    ui.waitForIdle()
                     ui.onNodeWithTag("menu-position-content").assertDoesNotExist()
                 }
             }

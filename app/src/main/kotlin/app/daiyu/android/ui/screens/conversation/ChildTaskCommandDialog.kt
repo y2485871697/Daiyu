@@ -3,7 +3,7 @@ package app.daiyu.android.ui.screens.conversation
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier

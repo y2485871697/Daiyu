@@ -5,10 +5,6 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowManager
-import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.rememberTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -53,7 +49,6 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
-import top.yukonga.miuix.kmp.basic.ListPopupDefaults
 import top.yukonga.miuix.kmp.squircle.addSquircleRect
 import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
 import top.yukonga.miuix.kmp.squircle.squircleBorder
@@ -64,9 +59,7 @@ private val MenuCornerRadius = 12.dp
 private val MenuMinWidth = 180.dp
 private val MenuMaxWidth = 280.dp
 private val MenuScreenMargin = 12.dp
-private const val MenuExitDurationMs = 160L
 private const val MenuDismissGuardMs = 80L
-private val MenuExitAnimationSpec = tween<Float>(durationMillis = 150)
 
 @Stable
 internal class EtaMenuState {
@@ -115,14 +108,16 @@ internal fun EtaDropdownMenu(
         if (expanded) {
             mounted = true
         } else if (mounted) {
-            delay(MenuExitDurationMs)
+            delay(PopupExitRetentionMillis)
             mounted = false
         }
     }
     if (!mounted) return
 
-    val visibleState = remember { MutableTransitionState(false) }
-    visibleState.targetState = expanded
+    val motion = rememberPopupMotion(expanded)
+    val visibleState = motion.visibleState
+    val fraction = motion.fraction
+    val alpha = motion.alpha
 
     val colors = MiuixTheme.colorScheme
     val density = LocalDensity.current
@@ -137,27 +132,6 @@ internal fun EtaDropdownMenu(
     val positionProvider = remember(offsetXPx, offsetYPx, alignEnd, preferAbove, screenMarginPx) {
         EtaMenuPositionProvider(offsetXPx, offsetYPx, alignEnd, preferAbove, screenMarginPx)
     }
-    val transition = rememberTransition(visibleState, label = "EtaDropdownMenu")
-    val fraction = transition.animateFloat(
-        transitionSpec = {
-            if (false isTransitioningTo true) {
-                ListPopupDefaults.FractionAnimationSpec
-            } else {
-                MenuExitAnimationSpec
-            }
-        },
-        label = "etaMenuFraction",
-    ) { visible -> if (visible) 1f else 0f }
-    val alpha = transition.animateFloat(
-        transitionSpec = {
-            if (false isTransitioningTo true) {
-                ListPopupDefaults.AlphaEnterAnimationSpec
-            } else {
-                ListPopupDefaults.AlphaExitAnimationSpec
-            }
-        },
-        label = "etaMenuAlpha",
-    ) { visible -> if (visible) 1f else 0f }
     val transformOrigin = remember(alignEnd, preferAbove) {
         TransformOrigin(
             pivotFractionX = if (alignEnd) 1f else 0f,
@@ -259,17 +233,22 @@ internal fun rememberMenuVisibleHeight(view: View = LocalView.current): Int {
     return height
 }
 
-private fun Modifier.etaMenuClipReveal(
+internal fun Modifier.etaMenuClipReveal(
     fractionProgress: () -> Float,
     preferAbove: Boolean,
     cornerRadius: Dp,
     squircleEnabled: Boolean,
+    clipWhenFullyRevealed: Boolean = true,
 ): Modifier = drawWithCache {
     val path = Path()
     val radiusPx = cornerRadius.toPx()
     onDrawWithContent {
         val progress = fractionProgress().coerceIn(0f, 1f)
         if (progress <= 0f) return@onDrawWithContent
+        if (!clipWhenFullyRevealed && progress >= 1f) {
+            drawContent()
+            return@onDrawWithContent
+        }
         val visibleHeight = size.height * progress
         if (visibleHeight <= 0f) return@onDrawWithContent
         val clipStart = if (preferAbove) size.height * (1f - progress) else 0f

@@ -52,7 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
+import app.daiyu.android.ui.components.DaiyuDialog as Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.daiyu.android.skills.SkillConflict
 import app.daiyu.android.skills.SkillManagement

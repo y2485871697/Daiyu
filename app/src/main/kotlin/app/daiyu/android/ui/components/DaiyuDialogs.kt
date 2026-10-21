@@ -35,7 +35,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import app.daiyu.android.ui.components.DaiyuDialog as Dialog
 import androidx.compose.ui.window.DialogProperties
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -143,9 +143,10 @@ internal fun DaiyuChoiceSheet(
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
+        animateContent = false,
     ) {
         Box(
-            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.32f))
+            Modifier.fillMaxSize().dialogDimBackground(Color.Black.copy(alpha = 0.32f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -153,7 +154,7 @@ internal fun DaiyuChoiceSheet(
                 ).imePadding().navigationBarsPadding(),
         ) {
             Column(
-                modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 640.dp)
+                modifier = Modifier.dialogEnterMotion().align(Alignment.BottomCenter).widthIn(max = 640.dp)
                     .fillMaxWidth().padding(12.dp).heightIn(max = 560.dp)
                     .clip(RoundedCornerShape(20.dp)).background(colors.surfaceContainer)
                     .semantics { paneTitle = title }

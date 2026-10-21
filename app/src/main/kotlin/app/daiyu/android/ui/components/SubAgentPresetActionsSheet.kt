@@ -28,21 +28,24 @@ import app.daiyu.android.ui.haptics.TouchHaptics
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp, dragHandle = { BottomSheetDefaults.DragHandle() }) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)
-            .semantics { contentDescription = "子代理组操作面板" }) {
-            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                    Icon(Icons.Rounded.AccountTree, null, Modifier.padding(14.dp).size(28.dp), tint = MaterialTheme.colorScheme.primary)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    AssistantSheetMotion(entering = sheetState.currentValue == SheetValue.Hidden) {
+        ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp, dragHandle = { BottomSheetDefaults.DragHandle() }) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)
+                .semantics { contentDescription = "子代理组操作面板" }) {
+                Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                        Icon(Icons.Rounded.AccountTree, null, Modifier.padding(14.dp).size(28.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                    Text(preset.name, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 }
-                Text(preset.name, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                SubAgentPresetActionRow("重命名组", Icons.Rounded.Edit, MaterialTheme.colorScheme.onSurface, onRename)
+                SubAgentPresetActionRow("删除组", Icons.Rounded.DeleteOutline, MaterialTheme.colorScheme.error, onDelete)
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-            SubAgentPresetActionRow("重命名组", Icons.Rounded.Edit, MaterialTheme.colorScheme.onSurface, onRename)
-            SubAgentPresetActionRow("删除组", Icons.Rounded.DeleteOutline, MaterialTheme.colorScheme.error, onDelete)
         }
     }
 }

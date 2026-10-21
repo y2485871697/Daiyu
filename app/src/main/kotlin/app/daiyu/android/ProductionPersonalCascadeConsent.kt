@@ -5,7 +5,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
+import app.daiyu.android.ui.components.DaiyuDialog as Dialog
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.voice.personal.PersonalVoiceCascadeBinding

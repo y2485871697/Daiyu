@@ -1,6 +1,7 @@
 package app.daiyu.android.ui
 
 import android.app.Activity
+import app.daiyu.android.ui.components.startDaiyuEnterMotion
 import android.app.AlertDialog
 import android.os.Looper
 import android.view.KeyEvent
@@ -95,7 +96,9 @@ internal class FeatureHubDialog(
             } else false
         }
         window = dialog
+        dialog.window?.setWindowAnimations(0)
         dialog.show()
+        dialog.startDaiyuEnterMotion()
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
             if (window === dialog && dialog.isShowing && !activity.isFinishing && !activity.isDestroyed) render(null)
         }

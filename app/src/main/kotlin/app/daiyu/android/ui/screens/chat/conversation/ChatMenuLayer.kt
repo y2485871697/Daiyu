@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.activity.compose.BackHandler
@@ -20,6 +21,15 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import kotlinx.coroutines.delay
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import app.daiyu.android.ui.components.LocalPopupMotion
+import app.daiyu.android.ui.components.PopupExitRetentionMillis
+import app.daiyu.android.ui.components.rememberPopupMotion
+import app.daiyu.android.ui.components.etaMenuClipReveal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -50,6 +60,7 @@ import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
@@ -62,6 +73,7 @@ import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private class MenuOverlay(
+    val expanded: () -> Boolean,
     val anchor: () -> Rect,
     val onDismiss: () -> Unit,
     val maxHeight: Dp?,
@@ -89,40 +101,64 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
         Box(Modifier.matchParentSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime))
             .onGloballyPositioned { host = it.boundsInRoot() }) {
             state.active?.let { menu ->
-                BackHandler(onBack = menu.onDismiss)
-                Layout(
-                    modifier = Modifier.fillMaxSize(),
-                    content = {
-                        Box(Modifier.fillMaxSize().conversationClickable(onClick = menu.onDismiss))
-                        ChatGlassMenuSurface(backdrop, Modifier.semantics { paneTitle = "会话菜单" }) {
-                            menu.content()
+                key(menu) {
+                    val motion = rememberPopupMotion(menu.expanded())
+                    BackHandler(enabled = menu.expanded(), onBack = menu.onDismiss)
+                    Layout(
+                        modifier = Modifier.fillMaxSize().pointerInput(menu) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (!menu.expanded()) event.changes.forEach { it.consume() }
+                                }
+                            }
+                        },
+                        content = {
+                            Box(Modifier.fillMaxSize().conversationClickable { if (menu.expanded()) menu.onDismiss() })
+                            ChatGlassMenuSurface(backdrop, Modifier
+                                .graphicsLayer {
+                                    val scale = 0.15f + 0.85f * motion.fraction.value
+                                    scaleX = scale
+                                    scaleY = scale
+                                    alpha = motion.alpha.value
+                                    transformOrigin = TransformOrigin(1f, 0f)
+                                }
+                                .etaMenuClipReveal(
+                                    fractionProgress = { if (menu.expanded()) motion.fraction.value else 1f },
+                                    preferAbove = false, cornerRadius = 19.dp, squircleEnabled = false,
+                                    clipWhenFullyRevealed = false,
+                                )
+                                .then(if (menu.expanded()) Modifier.semantics { paneTitle = "会话菜单" }
+                                else Modifier.clearAndSetSemantics {})) {
+                                CompositionLocalProvider(LocalPopupMotion provides motion) { menu.content() }
+                            }
+                        },
+                    ) { measurables, constraints ->
+                        val width = constraints.maxWidth
+                        val height = constraints.maxHeight
+                        val margin = 9.dp.roundToPx()
+                        val widthMargin = menu.screenMargin.roundToPx()
+                        val maxWidth = (width - widthMargin * 2).coerceAtLeast(1)
+                        val availableHeight = (height - margin * 2).coerceAtLeast(1)
+                        val maxHeight = menu.maxHeight?.roundToPx()?.coerceAtMost(availableHeight) ?: availableHeight
+                        val dismiss = measurables[0].measure(Constraints.fixed(width, height))
+                        val surface = measurables[1].measure(Constraints(
+                            minWidth = minOf(156.dp.roundToPx(), maxWidth),
+                            maxWidth = maxWidth,
+                            maxHeight = maxHeight,
+                        ))
+                        val offsetX = menu.offset.x.roundToPx()
+                        val offsetY = menu.offset.y.roundToPx()
+                        layout(width, height) {
+                            dismiss.place(0, 0)
+                            val anchor = menu.anchor().translate(-host.left, -host.top)
+                            val y = (if (anchor.bottom + offsetY + surface.height + margin <= height) anchor.bottom.toInt() + offsetY
+                                else anchor.top.toInt() - offsetY - surface.height).coerceIn(margin,
+                                    (height - surface.height - margin).coerceAtLeast(margin))
+                            val x = (anchor.right.toInt() + offsetX - surface.width).coerceIn(margin,
+                                (width - surface.width - margin).coerceAtLeast(margin))
+                            surface.place(x, y)
                         }
-                    },
-                ) { measurables, constraints ->
-                    val width = constraints.maxWidth
-                    val height = constraints.maxHeight
-                    val margin = 9.dp.roundToPx()
-                    val widthMargin = menu.screenMargin.roundToPx()
-                    val maxWidth = (width - widthMargin * 2).coerceAtLeast(1)
-                    val availableHeight = (height - margin * 2).coerceAtLeast(1)
-                    val maxHeight = menu.maxHeight?.roundToPx()?.coerceAtMost(availableHeight) ?: availableHeight
-                    val dismiss = measurables[0].measure(Constraints.fixed(width, height))
-                    val surface = measurables[1].measure(Constraints(
-                        minWidth = minOf(156.dp.roundToPx(), maxWidth),
-                        maxWidth = maxWidth,
-                        maxHeight = maxHeight,
-                    ))
-                    val offsetX = menu.offset.x.roundToPx()
-                    val offsetY = menu.offset.y.roundToPx()
-                    layout(width, height) {
-                        dismiss.place(0, 0)
-                        val anchor = menu.anchor().translate(-host.left, -host.top)
-                        val y = (if (anchor.bottom + offsetY + surface.height + margin <= height) anchor.bottom.toInt() + offsetY
-                            else anchor.top.toInt() - offsetY - surface.height).coerceIn(margin,
-                                (height - surface.height - margin).coerceAtLeast(margin))
-                        val x = (anchor.right.toInt() + offsetX - surface.width).coerceIn(margin,
-                            (width - surface.width - margin).coerceAtLeast(margin))
-                        surface.place(x, y)
                     }
                 }
             }
@@ -144,16 +180,30 @@ internal fun ChatAnchoredMenu(
     var anchor by remember { mutableStateOf(Rect.Zero) }
     val latestContent by rememberUpdatedState(content)
     val latestDismiss by rememberUpdatedState(onDismiss)
+    val latestExpanded by rememberUpdatedState(expanded)
+    var mounted by remember { mutableStateOf(expanded) }
+    LaunchedEffect(expanded) {
+        if (expanded) mounted = true
+        else if (mounted) {
+            delay(PopupExitRetentionMillis)
+            mounted = false
+        }
+    }
     Box(Modifier.onGloballyPositioned { coordinates ->
         anchor = coordinates.parentLayoutCoordinates?.boundsInRoot() ?: coordinates.boundsInRoot()
     })
-    if (expanded && layer != null) {
-        val menu = remember(maxHeight, offset, screenMargin) { MenuOverlay({ anchor }, { latestDismiss() }, maxHeight, offset, screenMargin) { Box(modifier) { latestContent() } } }
+    if ((expanded || mounted) && layer != null) {
+        val menu = remember(maxHeight, offset, screenMargin) { MenuOverlay({ latestExpanded }, { anchor }, { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin) { Box(modifier) { latestContent() } } }
+        LaunchedEffect(layer, menu, expanded) {
+            if (expanded) {
+                layer.active?.takeIf { it !== menu }?.onDismiss?.invoke()
+                layer.active = menu
+            }
+        }
         DisposableEffect(layer, menu) {
-            layer.active = menu
             onDispose { if (layer.active === menu) layer.active = null }
         }
-    } else if (expanded) {
+    } else if (layer == null && expanded) {
         // Isolated component previews have no page host; production uses ChatMenuLayer.
         androidx.compose.material3.DropdownMenu(expanded = true, onDismissRequest = onDismiss,
             modifier = modifier, containerColor = MiuixTheme.colorScheme.surfaceContainer,

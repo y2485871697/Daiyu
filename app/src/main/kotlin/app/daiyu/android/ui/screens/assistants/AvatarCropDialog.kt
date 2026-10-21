@@ -40,7 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
+import app.daiyu.android.ui.components.DaiyuDialog as Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.daiyu.android.R
 import kotlin.math.max

@@ -1,6 +1,7 @@
 package app.daiyu.android.question
 
 import android.app.Activity
+import app.daiyu.android.ui.components.startDaiyuEnterMotion
 import android.app.AlertDialog
 import android.os.Handler
 import android.os.Looper
@@ -99,6 +100,7 @@ class QuestionHost(private val registry: QuestionRegistry) {
             .setView(ScrollView(activity).apply { addView(content) })
             .setPositiveButton("提交答案", null).setNegativeButton("稍后回答", null).create()
         window.setOnShowListener {
+            window.startDaiyuEnterMotion()
             window.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val checked = group.checkedRadioButtonId
                 val noteText = note?.text?.toString()?.takeIf { it.isNotEmpty() }
@@ -137,6 +139,7 @@ class QuestionHost(private val registry: QuestionRegistry) {
         }
         window.setOnDismissListener { if (dialog === window) dialog = null }
         dialog = window
+        window.window?.setWindowAnimations(0)
         window.show()
     }
 

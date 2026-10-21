@@ -52,7 +52,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
 
-    fun testBlockedOldParseCannotReplaceCurrentRawOrFormattedBody() {
+    fun testBlockedOldParseCannotReplaceCurrentPendingOrFormattedBody() {
         for (mixed in listOf(false, true)) {
             val entered = CountDownLatch(1)
             val release = CountDownLatch(1)
@@ -78,9 +78,9 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 }
                 ui.waitUntil(timeoutMillis = 5_000) { entered.count == 0L }
                 mainThread { current = "**current**" }
-                val raw = annotation(body("race", "**current**"))
-                assertTrue(raw.spanStyles.isEmpty())
-                assertTrue(raw.getLinkAnnotations(0, raw.length).isEmpty())
+                ui.waitForIdle()
+                ui.onNodeWithText("**current**", useUnmergedTree = true).assertDoesNotExist()
+                ui.onNodeWithText("current", useUnmergedTree = true).assertDoesNotExist()
                 ui.onNodeWithText("**old**", useUnmergedTree = true).assertDoesNotExist()
                 release.countDown()
                 val formatted = annotation(body("race", "current"))
@@ -108,11 +108,169 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.waitUntil(timeoutMillis = 5_000) { entered.count == 0L }
             ui.mainClock.advanceTimeBy(100)
             ui.waitForIdle()
-            ui.onNodeWithText("**answer**", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithText("**answer**", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("answer", useUnmergedTree = true).assertDoesNotExist()
             assertTrue(confirmed.none { turn.listKey in it })
             release.countDown()
             awaitNodes(hasText("answer"))
             ui.waitUntil(timeoutMillis = 5_000) { confirmed.any { turn.listKey in it } }
+        } finally { release.countDown() }
+    }
+
+    fun testAppendedBodyKeepsMarkdownGeometryThroughPendingParseAndCompletion() {
+        val first = "First bold paragraph."
+        val second = "Second paragraph."
+        val source = "First **bold** paragraph.\n\n$second"
+        val appended = "$source\n\nThird paragraph."
+        for (mixed in listOf(false, true)) {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val ready = AtomicBoolean(false)
+            val seen = CopyOnWriteArrayList<String>()
+            val parser: (String) -> List<MarkdownBlock> = { text ->
+                assertNotSame(android.os.Looper.getMainLooper().thread, Thread.currentThread())
+                seen += text
+                if (text == appended) { entered.countDown(); release.await() }
+                MarkdownParser.parse(text)
+            }
+            var current by mutableStateOf(source)
+            var status by mutableStateOf(RunStatus.RUNNING)
+            try {
+                show {
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        Column(Modifier.width(320.dp).testTag("stable-body")) {
+                            AssistantTurn(ChatTurnUi.Assistant("stable-$mixed", status = status,
+                                finalText = if (mixed) "" else current,
+                                content = if (mixed) listOf(MessageContentUi.Text("body", current)) else emptyList()),
+                                ChatScreenActions(), onContentReady = { ready.set(it) })
+                        }
+                    }
+                }
+                val firstBounds = body("stable-body", first).fetchSemanticsNode().boundsInRoot
+                val secondBounds = body("stable-body", second).fetchSemanticsNode().boundsInRoot
+                assertTrue(annotation(body("stable-body", first)).spanStyles.any {
+                    it.item.fontWeight == FontWeight.Bold
+                })
+                ui.waitUntil(5_000) { ready.get() }
+                mainThread { current = appended }
+                ui.waitUntil(5_000) { entered.count == 0L }
+                ui.waitForIdle()
+                assertFalse(ready.get())
+                assertEquals(firstBounds, body("stable-body", first).fetchSemanticsNode().boundsInRoot)
+                assertEquals(secondBounds, body("stable-body", second).fetchSemanticsNode().boundsInRoot)
+                ui.onNodeWithText(appended, useUnmergedTree = true).assertDoesNotExist()
+                ui.onNodeWithText("Third paragraph.", useUnmergedTree = true).assertDoesNotExist()
+                mainThread { status = RunStatus.COMPLETED }
+                ui.waitForIdle()
+                assertFalse(ready.get())
+                assertEquals(firstBounds, body("stable-body", first).fetchSemanticsNode().boundsInRoot)
+                assertEquals(secondBounds, body("stable-body", second).fetchSemanticsNode().boundsInRoot)
+                release.countDown()
+                body("stable-body", "Third paragraph.").assertIsDisplayed()
+                ui.waitUntil(5_000) { ready.get() }
+                assertEquals(firstBounds, body("stable-body", first).fetchSemanticsNode().boundsInRoot)
+                assertEquals(secondBounds, body("stable-body", second).fetchSemanticsNode().boundsInRoot)
+                assertEquals(listOf(source, appended), seen.toList())
+                assertTrue(opened.isEmpty())
+            } finally { release.countDown() }
+        }
+    }
+
+    fun testPendingAppendCannotConfirmReadUsingPreviouslyPublishedBody() {
+        val source = "First **paragraph**.\n\nSecond paragraph."
+        val appended = "$source\n\nFinal paragraph."
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val confirmed = CopyOnWriteArrayList<Set<String>>()
+        var turn by mutableStateOf(ChatTurnUi.Assistant("read-append", finalText = source,
+            status = RunStatus.RUNNING))
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == appended) { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
+        try {
+            show {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    ChatMessageList(listOf(turn), false,
+                        ChatScreenActions(onVisibleCompleted = { confirmed += it }))
+                }
+            }
+            awaitNodes(hasText("Second paragraph."))
+            mainThread { turn = turn.copy(finalText = appended, status = RunStatus.COMPLETED) }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.mainClock.advanceTimeBy(100)
+            ui.waitForIdle()
+            ui.onNodeWithText("Second paragraph.", useUnmergedTree = true).assertIsDisplayed()
+            assertTrue(confirmed.none { turn.listKey in it })
+            release.countDown()
+            awaitNodes(hasText("Final paragraph."))
+            ui.waitUntil(5_000) { confirmed.any { turn.listKey in it } }
+        } finally { release.countDown() }
+    }
+
+    fun testReorderedMixedTextKeepsEachPublishedBodyWithItsItemIdentity() {
+        val first = "First **segment**."
+        val second = "Second **segment**."
+        val appended = "$second Appended."
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        var content by mutableStateOf(listOf(
+            MessageContentUi.Text("first", first), MessageContentUi.Text("second", second)))
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == appended) { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
+        try {
+            show {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    AssistantTurn(ChatTurnUi.Assistant("mixed-order", status = RunStatus.RUNNING,
+                        content = content), ChatScreenActions())
+                }
+            }
+            awaitNodes(hasText("First segment."))
+            awaitNodes(hasText("Second segment."))
+            mainThread { content = listOf(MessageContentUi.Text("second", appended),
+                MessageContentUi.Text("first", first)) }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.waitForIdle()
+            val firstNode = ui.onNodeWithText("First segment.", useUnmergedTree = true)
+            val secondNode = ui.onNodeWithText("Second segment.", useUnmergedTree = true)
+            firstNode.assertIsDisplayed()
+            secondNode.assertIsDisplayed()
+            assertTrue(secondNode.fetchSemanticsNode().boundsInRoot.top <
+                firstNode.fetchSemanticsNode().boundsInRoot.top)
+            ui.onNodeWithText(appended, useUnmergedTree = true).assertDoesNotExist()
+            release.countDown()
+            awaitNodes(hasText("Second segment. Appended."))
+            firstNode.assertIsDisplayed()
+        } finally { release.countDown() }
+    }
+
+    fun testDifferentTurnWithAppendedTextCannotReusePublishedBody() {
+        val source = "First **paragraph**."
+        val appended = "$source new owner"
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        var turn by mutableStateOf(ChatTurnUi.Assistant("first-owner", finalText = source,
+            status = RunStatus.RUNNING))
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == appended) { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
+        try {
+            show {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    AssistantTurn(turn, ChatScreenActions())
+                }
+            }
+            awaitNodes(hasText("First paragraph."))
+            mainThread { turn = turn.copy(id = "next-owner", listKey = "next-owner", finalText = appended) }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.waitForIdle()
+            ui.onNodeWithText("First paragraph.", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText(appended, useUnmergedTree = true).assertDoesNotExist()
+            release.countDown()
+            awaitNodes(hasText("First paragraph. new owner"))
         } finally { release.countDown() }
     }
 

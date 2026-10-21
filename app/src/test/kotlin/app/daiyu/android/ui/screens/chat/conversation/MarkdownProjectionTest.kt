@@ -11,6 +11,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownProjectionTest {
+    @Test fun appendedPendingBodyRetainsThePublishedSourceAndAstTogether() {
+        val source = "First **paragraph**.\n\nSecond paragraph."
+        val blocks = MarkdownParser.parse(source)
+        val published = markdownBodySnapshot(source, blocks, null)!!
+        val appended = source + "\n\nThird paragraph."
+        assertSame(published, markdownBodySnapshot(appended, null, published))
+        assertEquals(source, published.text)
+        assertSame(blocks, published.blocks)
+        val completed = markdownBodySnapshot(appended, MarkdownParser.parse(appended), published)!!
+        assertEquals(appended, completed.text)
+        assertEquals(MarkdownParser.parse(appended), completed.blocks)
+    }
+
+    @Test fun initialReplacedTruncatedOrClearedBodiesNeverBorrowOldMarkdown() {
+        val published = MarkdownBodySnapshot("**published**", MarkdownParser.parse("**published**"))
+        assertNull(markdownBodySnapshot("initial", null, null))
+        for (source in listOf("**replacement**", "**pub", "")) {
+            assertNull(markdownBodySnapshot(source, null, published))
+        }
+        val empty = markdownBodySnapshot("", emptyList(), published)!!
+        assertEquals("", empty.text)
+        assertTrue(empty.blocks.isEmpty())
+        assertNull(markdownBodySnapshot("next", null, null))
+    }
+
     @Test fun parsesOffCallerThreadAndRetainsSourceIdentityAndSyntax() = runBlocking {
         val caller = Thread.currentThread()
         val seen = mutableListOf<String>()

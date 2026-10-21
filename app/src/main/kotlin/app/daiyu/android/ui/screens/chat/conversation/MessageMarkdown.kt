@@ -27,6 +27,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
@@ -59,8 +62,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** Shared selectable body; Markdown never loads images, executes HTML or opens a URI on render. */
 @Composable
 internal fun MessageMarkdown(text: String, modifier: Modifier = Modifier, markdown: Boolean = true) {
-    val blocks = if (markdown) rememberMarkdownProjection(listOf(text))?.blocks?.get(text) else null
-    ParsedMessageMarkdown(text, blocks, modifier)
+    if (markdown) {
+        val blocks = rememberMarkdownProjection(listOf(text))?.blocks?.get(text)
+        ProjectedMessageMarkdown(text, blocks, modifier)
+    } else ParsedMessageMarkdown(text, null, modifier)
 }
 
 internal val LocalMarkdownParser = staticCompositionLocalOf<(String) -> List<MarkdownBlock>> { MarkdownParser::parse }
@@ -73,6 +78,17 @@ internal fun rememberMarkdownProjection(sources: List<String>): MarkdownProjecti
     }
     // produceState retains its old value until the replacement effect starts.
     return completed?.takeIf { it.sources == sources && it.parser == parser }
+}
+
+@Composable
+internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, modifier: Modifier = Modifier) {
+    val parser = LocalMarkdownParser.current
+    var published by remember(parser) { mutableStateOf<MarkdownBodySnapshot?>(null) }
+    // Keep the displayed source and AST together while an appended chunk parses off-thread.
+    val body = markdownBodySnapshot(text, blocks, published)
+    SideEffect { published = body }
+    if (body == null) Box(modifier)
+    else ParsedMessageMarkdown(body.text, body.blocks, modifier)
 }
 
 @Composable

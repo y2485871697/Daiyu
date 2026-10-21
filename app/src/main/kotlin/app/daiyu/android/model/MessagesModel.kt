@@ -94,6 +94,8 @@ class MessagesModel internal constructor(
             var configuringRequest = true
             try {
                 checkCancelled()
+                deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan)))
+                checkCancelled()
                 val conn = connect(URL(endpoint))
                 ownedConnection = conn; connection = conn
                 checkCancelled()

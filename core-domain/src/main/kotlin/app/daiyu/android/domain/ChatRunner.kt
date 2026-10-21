@@ -139,6 +139,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         captured.second?.let { LockSupport.unpark(it) }
         reconnectBudget?.finish("stopped")
         cancelSession(captured.first)
+        options.contextRuntime?.cancel()
     }
     /** Nonblocking control call. A tool already executing is allowed to finish its batch. */
     fun pause(): Boolean {
@@ -161,6 +162,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             syncReconnectPause()
             captured.third?.invoke() ?: resumable.disconnectTransport()
         } else cancelSession(captured.first)
+        options.contextRuntime?.cancel()
         return true
     }
     /** Only explicit resume releases a paused boundary; supplements alone never do. */
@@ -248,9 +250,16 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
 
     private suspend fun runBody(initial: Message, history: List<Message>, allowBarrier: Boolean): Message {
         var current = initial
-        val sourceHistory = history.toList()
+        var sourceHistory = history.toList()
         var modelHistory = sourceHistory
         var segmentHistory = RunnerHistorySegments(initial)
+        val contextRuntime = options.contextRuntime
+        var contextState = contextRuntime?.let { RunContextCheckpoint() }
+        var acceptedContextSegments = 0
+        var reopenAfterCompaction = false
+        fun effectiveHistory(message: Message = current): List<Message> = if (contextRuntime == null) modelHistory else modelHistory +
+            MessageHistory.expand(listOf(segmentHistory.project(message).copy(status = RunStatus.COMPLETED, error = null)))
+                .drop(acceptedContextSegments)
         // The active session's small replayable history state lets a batch use a private
         // projection without mutating the accepted segment accumulator.
         var historyBase = initial
@@ -276,11 +285,11 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var pendingCheckpoint: PendingToolCheckpoint? = null
         val records = linkedMapOf<ToolCallId, ToolRecord>()
         fun snapshot(message: Message = current, usageSnapshot: List<RequestUsageCheckpoint> = usage): RunCheckpoint = synchronized(terminalLock) {
-            RunCheckpoint(message, modelHistory,
+            RunCheckpoint(message, effectiveHistory(message),
                 if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
                 records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
                 owner = owner, revision = revision + 1,
-                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot, usageRequests = usageRequests, transport = transportCheckpoint)
+                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot, usageRequests = usageRequests, transport = transportCheckpoint, context = contextState)
         }
         fun checkpoint(next: RunCheckpoint = snapshot()) {
             if (stagingTransportBatch) return
@@ -396,12 +405,75 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 historyProtocol = null
                 segmentHistory = RunnerHistorySegments(sealed)
                 outputs = emptyList()
-                modelHistory = sourceHistory + sealed.copy(status = RunStatus.COMPLETED, error = null)
+                modelHistory = if (contextRuntime == null) sourceHistory + sealed.copy(status = RunStatus.COMPLETED, error = null)
+                    else effectiveHistory()
+                if (contextRuntime != null) acceptedContextSegments = sealed.historySegments.size
                 apply(sealed)
             }
             setPhase(ExecutionPhase.BOUNDARY)
             checkpoint()
             return acceptedUsers != null
+        }
+        fun compactAtBoundary(): Boolean {
+            val runtime = contextRuntime ?: return false
+            val pressure = contextState?.pressure ?: return false
+            if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty()) return false
+            val before = effectiveHistory()
+            val historyLocal = runtime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
+            val anchor = contextState?.calibration
+            val local = anchor?.let { (it.localTokens + historyLocal - it.historyTokens).coerceAtLeast(0) } ?: historyLocal
+            val billed = anchor?.billedTokens?.let { (it + local - anchor.localTokens).coerceAtLeast(0) }
+            val summary = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
+            var admitted = false
+            val compactEpoch = pauseEpoch
+            val cancelled = { compactEpoch != pauseEpoch || stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() }
+            try {
+                val candidate = runtime.compact(before, billed, local, summary, observe = { event ->
+                    check(admitted)
+                    val accepted = RequestUsageCheckpoint(summary, event, UsageRequestSource.SUMMARY)
+                    val next = usage.filterNot { it.request.owner == owner && it.request.requestId == summary.requestId } + accepted
+                    checkpoint(snapshot(usageSnapshot = next)); usage = next
+                }, admit = {
+                    check(!admitted && !cancelled())
+                    contextState = checkNotNull(contextState).copy(pressure = null,
+                        summaries = checkNotNull(contextState).summaries + summary)
+                    checkpoint(); admitted = true
+                }, cancelled = cancelled)
+                if (candidate == null || cancelled()) return false
+                require(candidate.all { it.conversationId == initial.conversationId })
+                val sealed = segmentHistory.sealSession(current, emptyList())
+                historyBase = sealed; historyReasoning.clear(); historyProtocol = null
+                segmentHistory = RunnerHistorySegments(sealed)
+                current = sealed
+                acceptedContextSegments = sealed.historySegments.size
+                sourceHistory = candidate.toList(); modelHistory = sourceHistory
+                outputs = emptyList()
+                transportCheckpoint = null
+                contextState = checkNotNull(contextState).copy(input = null, calibration = null, pressure = null,
+                    compactions = checkNotNull(contextState).compactions + 1)
+                val expected = snapshot()
+                val store = options.runtimeStore
+                try { checkpoint(expected) } catch (failure: PersistenceException) {
+                    val committed = try { (store as? AtomicRuntimeStore)?.readCommittedCheckpoint(expected) } catch (_: Exception) { null }
+                    if (committed != expected) throw failure
+                    revision = expected.revision
+                }
+                reopenAfterCompaction = true
+                return true
+            } catch (failure: Exception) {
+                if (failure is PersistenceException) throw failure
+                if (!admitted && cancelled()) return false
+                if (stopped.get() || terminalReserved) throw InterruptedException()
+                // Soft maintenance failure retains the accepted context and cannot replay this attempt.
+                contextState = checkNotNull(contextState).copy(pressure = null)
+                checkpoint()
+                return false
+            } finally {
+                if (!admitted && !cancelled() && contextState?.pressure == pressure) {
+                    contextState = checkNotNull(contextState).copy(pressure = null)
+                    checkpoint()
+                }
+            }
         }
         fun open(): ModelSession {
             while (true) {
@@ -441,7 +513,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             pauseRequested || supplements.isNotEmpty() || breakStream) false
                         else { session = opened; true }
                     }
-                    if (accept) return opened
+                    if (accept) { reopenAfterCompaction = false; return opened }
                     cancelSession(opened)
                 } finally {
                     synchronized(terminalLock) { requestOpening = false }
@@ -453,6 +525,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             if (stopped.get()) { cancelSession(active); throw InterruptedException() }
             while (round < options.maxRounds) {
                 if (boundary()) { cancelSession(active); active = open() }
+                if (round > 0 && contextState?.pressure != null && compactAtBoundary()) {
+                    cancelSession(active); active = open()
+                }
                 if (stopped.get()) throw InterruptedException()
                 val pending = mutableListOf<ToolInvocation>()
                 var repetition = ReasoningRepetitionGuard()
@@ -518,6 +593,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 var sinkFailure: Exception? = null
                 var accepting = true
                 var attemptFence = 0L
+                if (reopenAfterCompaction) {
+                    cancelSession(active); active = open(); reopenAfterCompaction = false
+                }
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
                     if (pauseRequested || supplements.isNotEmpty() || breakStream) null
@@ -530,6 +608,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 transportCheckpoint = null
                 request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
                 usageRequests = usageRequests + checkNotNull(request)
+                contextState = contextState?.copy(input = null)
                 requestUnconfirmed = true
                 checkpoint()
                 val sink: (ModelEvent) -> Unit = { event ->
@@ -541,6 +620,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     sinkFailure?.let { throw it }
                     repetitiveSurface?.let { throw RepetitiveOutputException(it) }
                     when (event) {
+                        is ModelEvent.InputEstimate -> {
+                            contextState = contextState?.copy(input = RequestInputCheckpoint(checkNotNull(request), event.tokens,
+                                historyTokens = checkNotNull(contextRuntime).localTokens(effectiveHistory(),
+                                    (tool as? CatalogTool)?.definitions.orEmpty())))
+                            checkpoint()
+                        }
                         is ModelEvent.Usage -> {
                             val accepted = RequestUsageCheckpoint(checkNotNull(request), event)
                             val at = usage.indexOfFirst { it.request.owner == accepted.request.owner &&
@@ -548,6 +633,19 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val nextUsage = usage.toMutableList().apply {
                                 if (at < 0) add(accepted) else this[at] = accepted
                             }.toList()
+                            val local = contextState?.input
+                            val window = contextRuntime?.windowTokens
+                            val billed = event.inputTokens
+                            if (window != null) {
+                                val plausible = billed != null && billed > 0 && billed <= window * 130 / 100 &&
+                                    (event.cachedTokens == null || event.cachedTokens <= window)
+                                val state = checkNotNull(contextState)
+                                contextState = state.copy(
+                                    calibration = if (plausible && local?.request == request) local?.copy(billedTokens = billed)
+                                        else state.calibration?.takeUnless { it.request == request },
+                                    pressure = if (plausible && checkNotNull(billed) >= window * 80 / 100) request
+                                        else state.pressure?.takeUnless { it == request })
+                            }
                             checkpoint(snapshot(usageSnapshot = nextUsage))
                             usage = nextUsage
                             try { if (!stagingTransportBatch) options.onUsage(event) } catch (_: Exception) { /* Observer failure cannot invalidate committed usage. */ }
@@ -618,6 +716,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val beforeReasoning = historyReasoning.toMap()
                             val beforeProtocol = historyProtocol
                             val beforeUsage = usage
+                            val beforeContext = contextState
                             val beforeTransport = transportCheckpoint
                             val beforeCalls = calls.toMap()
                             val beforePending = pending.toList()
@@ -659,6 +758,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     historyReasoning.clear(); historyReasoning.putAll(beforeReasoning)
                                     historyProtocol = beforeProtocol
                                     usage = beforeUsage
+                                    contextState = beforeContext
                                     transportCheckpoint = beforeTransport
                                     calls.clear(); calls.putAll(beforeCalls)
                                     pending.clear(); pending.addAll(beforePending)
@@ -721,7 +821,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     val batchSink: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
                                         delivery.deliverAcknowledged { acknowledgedSink(batch) }
                                     }
-                                    if (attempt == 0) checkpointed.nextAcknowledged(outputs, batchSink)
+                                    if (attempt == 0) checkpointed.nextAcknowledged(outputs, sink, batchSink)
                                     else checkpointed.resumeAcknowledged(batchSink)
                                 } else if (attempt == 0) active.next(outputs, attemptSink)
                                 else (active as ResumableModelSession).resume(attemptSink)
@@ -789,6 +889,17 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             }
                             request = checkNotNull(request).copy(attemptId = UUID.randomUUID().toString(), operation = RequestOperation.RESUME)
                             usageRequests = usageRequests.map { if (it.requestId == request?.requestId) checkNotNull(request) else it }
+                            contextState = contextState?.let { state ->
+                                val resumed = checkNotNull(request)
+                                fun anchor(value: RequestInputCheckpoint?): RequestInputCheckpoint? = value?.let {
+                                    if (it.request.owner == resumed.owner && it.request.requestId == resumed.requestId)
+                                        it.copy(request = resumed) else it
+                                }
+                                state.copy(input = anchor(state.input), calibration = anchor(state.calibration),
+                                    pressure = state.pressure?.let {
+                                        if (it.owner == resumed.owner && it.requestId == resumed.requestId) resumed else it
+                                    })
+                            }
                             // Persist the resumed request boundary before invoking transport again.
                             checkpoint()
                         }
@@ -829,6 +940,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
                 if (pending.isEmpty()) {
                     if (boundary()) { cancelSession(active); active = open(); continue }
+                    compactAtBoundary()
+                    if (pauseRequested || breakStream || supplements.isNotEmpty()) continue
                     // Reserve normal completion before leaving the control section. stop() then
                     // cannot race this terminal outcome, while the actual transaction stays outside.
                     val completed = synchronized(terminalLock) {
@@ -982,7 +1095,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     }))
                     ToolOutput(call.id, result)
                 }
-                checkpoint()
+                if (contextRuntime != null && compactAtBoundary()) {
+                    cancelSession(active); active = open(); reopenAfterCompaction = false
+                } else checkpoint()
             }
             throw IllegalStateException("工具续轮达到12轮上限，已停止追加请求")
         } catch (failure: Exception) {

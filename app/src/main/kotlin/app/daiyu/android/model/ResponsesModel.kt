@@ -80,6 +80,12 @@ class ResponsesModel internal constructor(
     ) : CheckpointedResumableModelSession {
         private var decoder = ResponsesStream.State()
         private var resumeAllowed = false
+        private var localSink: ((ModelEvent) -> Unit)? = null
+        override fun nextAcknowledged(outputs: List<ToolOutput>, localSink: (ModelEvent) -> Unit,
+            sink: (ModelEventBatch) -> ModelDeliveryAck) {
+            this.localSink = localSink
+            try { nextAcknowledged(outputs, sink) } finally { this.localSink = null }
+        }
         private var acknowledgedSink: ((ModelEventBatch) -> ModelDeliveryAck)? = null
         override val canResume: Boolean get() = backgroundResume != null && !cancelled.get() && resumeAllowed && decoder.canResume
         @Synchronized
@@ -231,6 +237,9 @@ class ResponsesModel internal constructor(
             var transportStarted = false
             var post: VideoPostRequest? = null
             try {
+                checkCancelled()
+                try { (localSink ?: deliver)(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan))) }
+                catch (failure: Exception) { deliveryFailure = failure; throw failure }
                 checkCancelled()
                 // The payload and all budgets/allowlists are final before asking the UI. Never
                 // acquire a connection merely to prepare an approval dialog. No default approval.

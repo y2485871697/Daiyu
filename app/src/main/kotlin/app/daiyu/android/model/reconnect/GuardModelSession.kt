@@ -13,6 +13,10 @@ fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSes
         override fun resume(sink: (ModelEvent) -> Unit) {
             checkRuntime(); session.resume { checkRuntime(); sink(it) }
         }
+        override fun nextAcknowledged(outputs: List<ToolOutput>, localSink: (ModelEvent) -> Unit,
+            sink: (ModelEventBatch) -> ModelDeliveryAck) {
+            checkRuntime(); session.nextAcknowledged(outputs, { checkRuntime(); localSink(it) }) { checkRuntime(); sink(it) }
+        }
         override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
             checkRuntime(); session.nextAcknowledged(outputs) { checkRuntime(); sink(it) }
         }

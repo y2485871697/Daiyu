@@ -36,6 +36,58 @@ class ContextServiceTest : InstrumentationTestCase() {
         return owner
     }
     private fun reject(block: () -> Unit) { try { block(); fail("must reject") } catch (_: IllegalArgumentException) {} }
+    fun testRuntimeSummaryCommitsWithTerminalAndSurvivesNextTurnAndReopen() {
+        val owner = seed(6)
+        val source = service.displayHistory(owner)
+        val run = RunId("live-run")
+        val user = Message(MessageId("live-user"), owner, run, "user",
+            listOf(MessageBlock.Text("u", "new request")), RunStatus.COMPLETED)
+        val assistant = user.copy(id = MessageId("live-assistant"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
+        db.send(user, assistant)
+        val runtime = app.daiyu.android.storage.SQLiteRuntimeStore.acquire(db, service)
+        try {
+            runtime.recoverPending()
+            var executed = false; var opens = 0
+            val model = ModelPort { history ->
+                opens++
+                if (opens == 2) assertEquals("summary-live", history.first().id.value)
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        assertTrue(outputs.isEmpty())
+                        if (!executed) {
+                            sink(ModelEvent.Usage(900, 10))
+                            sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "read", "{}")))
+                        } else sink(ModelEvent.TextFinal("answer", "finished"))
+                    }
+                    override fun cancel() {}
+                }
+            }
+            val liveContext = object : app.daiyu.android.domain.runtime.RunContextRuntime {
+                override val windowTokens = 1000L
+                override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+                override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                    request: app.daiyu.android.domain.runtime.RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                    admit: () -> Unit, cancelled: () -> Boolean): List<Message> {
+                    admit(); observe(ModelEvent.Usage(20, 2))
+                    val summary = user.copy(id = MessageId("summary-live"), runId = RunId("summary-live"),
+                        blocks = listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\nretained facts\n[摘要结束]")))
+                    return listOf(summary) + history.drop(4)
+                }
+            }
+            val result = ChatRunner(model, db, BatteryTool { executed = true; "done" },
+                app.daiyu.android.domain.runtime.RunnerOptions(runtimeStore = runtime, contextRuntime = liveContext)) {}.run(assistant, source + user)
+            assertEquals(RunStatus.COMPLETED, result.status); assertEquals(2, opens)
+        } finally { runtime.close() }
+        val original = service.displayHistory(owner)
+        assertEquals(source + user, original.dropLast(1))
+        val prepared = ContextService(context, db).prepareSend(owner)
+        assertEquals("live", prepared.archiveId)
+        assertEquals("summary-live", prepared.messages.first().id.value)
+        assertTrue(prepared.messages.last().blocks.any { it is MessageBlock.Text && it.text == "finished" })
+        assertEquals(original.take(4), service.archivePage("live").messages)
+        assertEquals(MessageHistory.expand(original).drop(4), prepared.messages.drop(1))
+    }
+
     fun testTokenTailArchivesLogicalPrefixAndReopensWithoutLosingOriginalRows() {
         val owner = seed(10)
         val original = service.displayHistory(owner)

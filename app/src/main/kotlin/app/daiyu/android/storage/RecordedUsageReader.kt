@@ -52,7 +52,7 @@ internal object RecordedUsageReader {
         var historyRecords = 0
         val liveIdentities = mutableSetOf<Pair<String, String>>()
         var inspected = 0; var absent = 0; var empty = 0; var unreadable = 0; var deferred = 0
-        var mainMissing = 0
+        var mainMissing = 0; var runtimeSummaryTotal = 0; var runtimeSummaryMissing = 0
         var chargedBytes = 0L
         db.rawQuery("SELECT m.id,m.conversation_id,m.run_id,m.status,r.message_id,length(CAST(r.payload AS BLOB)),h.message_id,h.conversation_id,h.run_id" +
             from + " LEFT JOIN runtime_checkpoints r ON r.message_id=m.id" +
@@ -115,6 +115,11 @@ internal object RecordedUsageReader {
                 mainMissing += admitted.count { request -> main.none {
                     it.request.owner == request.owner && it.request.requestId == request.requestId
                 } }
+                val missingSummaries = saved.context?.summaries.orEmpty().filter { request ->
+                    saved.usage.none { it.source == UsageRequestSource.SUMMARY && it.request == request }
+                }
+                runtimeSummaryTotal += saved.context?.summaries.orEmpty().size
+                runtimeSummaryMissing += missingSummaries.size
                 saved.usage.forEach { usage ->
                     snapshots.add(AttributedRequestUsage(saved.message.conversationId.value, saved.message.runId.value,
                         saved.message.id.value, saved.message.runId.value, saved.message.id.value,
@@ -164,8 +169,8 @@ internal object RecordedUsageReader {
         liveIdentities.addAll(snapshots.map { it.request.owner to it.request.requestId })
         snapshots.addAll(historySnapshots.filter { liveIdentities.add(it.request.owner to it.request.requestId) })
         return RecordedUsageStats(aggregateRecordedUsage(snapshots.asSequence().map { it.snapshot }), total, inspected,
-            absent, empty, unreadable, deferred, preparing.total + historyTotal, preparing.inspected + historyInspected,
-            preparing.missingUsage + historyMissing, preparing.unreadable + historyUnreadable, mainMissing, auxiliary.total, auxiliary.inspected, auxiliary.missing, auxiliary.unreadable,
+            absent, empty, unreadable, deferred, preparing.total + historyTotal + runtimeSummaryTotal, preparing.inspected + historyInspected + runtimeSummaryTotal,
+            preparing.missingUsage + historyMissing + runtimeSummaryMissing, preparing.unreadable + historyUnreadable, mainMissing, auxiliary.total, auxiliary.inspected, auxiliary.missing, auxiliary.unreadable,
             title.total, title.inspected, title.missing, title.unreadable,
             manual.total, manual.inspected, manual.missing, manual.unreadable) to snapshots.toList()
     }

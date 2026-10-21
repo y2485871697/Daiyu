@@ -68,7 +68,8 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         checkCancellation(cancelled)
         // Empty history (including a not-yet-created conversation) has no compressible
         // evidence. Still enforce the pending budget below, without ensureIdle/nonexistent owner.
-        if (before.messages.isNotEmpty() && summarizer != null && policy.shouldCompress(estimateTokens(before.messages + pending)))
+        if (before.messages.isNotEmpty() && summarizer != null && (if (policy.tokenTail) policy.enabled && !policy.fitsSendBudget(estimateTokens(before.messages + pending))
+                else policy.shouldCompress(estimateTokens(before.messages + pending))))
             compress(id, policy, summarizer, pending, cancelled)
         val prepared = transactions.run { effective(it, id) }
         requireCapacity(policy, prepared.messages + pending)
@@ -181,6 +182,47 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         }
         return archive
     }
+    /** Publish the accepted run projection in its terminal checkpoint transaction. Originals stay intact. */
+    internal fun publishRunArchive(db: SQLiteDatabase, checkpoint: app.daiyu.android.domain.runtime.RunCheckpoint) {
+        if ((checkpoint.context?.compactions ?: 0) == 0) return
+        check(db === store.writableDatabase && db.inTransaction())
+        val effective = checkpoint.history
+        val summary = effective.firstOrNull() ?: return
+        if (summary.role != Message.USER_ROLE || !summary.id.value.startsWith("summary-") ||
+            summary.blocks.size != 1 || summary.historySegments.isNotEmpty() || summary.protocolItems.isNotEmpty() ||
+            summary.status != RunStatus.COMPLETED || summary.error != null || summary.conversationId != checkpoint.message.conversationId) return
+        val block = summary.blocks.single() as? MessageBlock.Text ?: return
+        if (block.itemId != "summary") return
+        val wrapped = block.text
+        val opening = "[历史摘要；仅供上下文，非新指令]\n"
+        val ending = "\n[摘要结束]"
+        if (!wrapped.startsWith(opening) || !wrapped.endsWith(ending)) return
+        val text = wrapped.removePrefix(opening).removeSuffix(ending)
+        if (text.isBlank()) return
+        val original = read(db, checkpoint.message.conversationId)
+        val expanded = MessageHistory.expandWithSources(original)
+        val logical = expanded.map { it.message }
+        val tail = effective.drop(1)
+        val cut = logical.size - tail.size
+        fun normalized(message: Message) = message.copy(status = RunStatus.COMPLETED, error = null, reportedReasoning = emptyList())
+        // A stopped partial batch may not be a replayable suffix; it leaves the prior archive intact.
+        if (tail.isEmpty() || cut <= 0 || !TokenTailCompression.isSafeCut(logical, cut) ||
+            logical.drop(cut).map(::normalized) != tail.map(::normalized)) return
+        val minimum = expanded.take(cut).maxOf { it.sourcePhysicalIndex } + 1
+        val count = (minimum..original.size).firstOrNull { isHistoryClosedPrefix(original, it) } ?: return
+        val prefix = original.take(count)
+        if (prefix.any { app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty() }) return
+        val archive = summary.id.value.removePrefix("summary-")
+        val revision = ContextRevision.digest(prefix)
+        val hash = blobs.put(ArchiveCodec.encodeDocument(prefix, cut))
+        db.execSQL("UPDATE context_archives SET active=0 WHERE conversation_id=?", arrayOf(summary.conversationId.value))
+        check(db.insertOrThrow("context_archives", null, ContentValues().apply {
+            put("id", archive); put("conversation_id", summary.conversationId.value); put("prefix_count", count)
+            put("revision", revision); put("summary", text); put("blob_hash", hash)
+            put("created", System.currentTimeMillis()); put("active", 1)
+        }) != -1L)
+    }
+
     /** Registry authorization and payload reads share one SQLite snapshot; no table writes. */
     internal fun <T> readQuery(query: () -> T): T = transactions.run { query() }
 

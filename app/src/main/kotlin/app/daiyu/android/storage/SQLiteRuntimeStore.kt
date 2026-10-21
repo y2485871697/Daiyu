@@ -18,7 +18,8 @@ import java.util.UUID
 /** The OS lease is held for the controller worker's entire lifetime, not just for a DB transaction. */
 internal class SQLiteRuntimeStore private constructor(
     private val database: ConversationDatabase, private val path: String,
-    private val file: RandomAccessFile, private val lock: FileLock
+    private val file: RandomAccessFile, private val lock: FileLock,
+    private val contextService: app.daiyu.android.context.ContextService?
 ) : AtomicSupplementRuntimeStore, PreparationRuntimeStore, AutoCloseable {
     private val processOwner = UUID.randomUUID().toString()
     private val transactions = DatabaseTransactions { database.writableDatabase }
@@ -140,6 +141,7 @@ internal class SQLiteRuntimeStore private constructor(
                 "message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?",
                 arrayOf(m.id.value, checkpoint.owner, prior.toString(), processOwner)) == 1)
             database.writeRuntimeMessage(db, m)
+            if (checkpoint.phase == ExecutionPhase.TERMINAL) contextService?.publishRunArchive(db, checkpoint)
         }
     }
     @Synchronized override fun readCommittedCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint? {
@@ -204,6 +206,7 @@ internal class SQLiteRuntimeStore private constructor(
             .put("recovery_source_owner", saved.owner).toString()
         RunCheckpointCodec.checkEncodedSize(encoded.toByteArray(Charsets.UTF_8).size, false)
         if (actual.status == RunStatus.RUNNING) database.writeRuntimeMessage(db, result.message)
+        contextService?.publishRunArchive(db, result)
         check(db.update("runtime_checkpoints", values(result, encoded), "message_id=? AND owner=? AND revision=? AND process_owner=?",
             arrayOf(saved.message.id.value, saved.owner, saved.revision.toString(), prior.processOwner)) == 1)
         return result
@@ -247,7 +250,7 @@ internal class SQLiteRuntimeStore private constructor(
             return Stored(value, metadata[5], recoveryOwner)
         }
         private val leases = mutableSetOf<String>()
-        fun acquire(database: ConversationDatabase): SQLiteRuntimeStore {
+        fun acquire(database: ConversationDatabase, contextService: app.daiyu.android.context.ContextService? = null): SQLiteRuntimeStore {
             val sidecar = database.runtimeLockFile
             val path = sidecar.path
             synchronized(leases) { check(leases.add(path)) { "另一个会话控制器仍拥有运行存储" } }
@@ -256,7 +259,7 @@ internal class SQLiteRuntimeStore private constructor(
                 check(sidecar.parentFile!!.let { it.isDirectory || it.mkdirs() })
                 file = RandomAccessFile(sidecar, "rw")
                 val lock = file.channel.tryLock() ?: error("另一个进程仍拥有运行存储")
-                return SQLiteRuntimeStore(database, path, file, lock)
+                return SQLiteRuntimeStore(database, path, file, lock, contextService)
             } catch (failure: Exception) {
                 try { file?.close() } finally { synchronized(leases) { leases.remove(path) } }
                 throw failure

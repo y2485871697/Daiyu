@@ -51,7 +51,8 @@ data class RunCheckpoint(
     val usage: List<RequestUsageCheckpoint> = emptyList(),
     /** Actual admitted main requests, including ones that never reported Usage. Not snapshots. */
     val usageRequests: List<RequestCheckpoint> = emptyList(),
-    val transport: TransportCheckpoint? = null
+    val transport: TransportCheckpoint? = null,
+    val context: RunContextCheckpoint? = null
 )
 
 /** save must durably commit before returning if durable=true. Implement with a transaction/WAL. */
@@ -154,7 +155,8 @@ class RunnerOptions(
     val receiptBatchExecutor: ReceiptBatchToolExecutor? = null,
     /** Only accepted ReasoningDelta/ReasoningFinal events, after repetition checks.
      * Runs outside the control lock; observer exceptions do not fail the run. */
-    val onReasoning: (ModelEvent) -> Unit = {}
+    val onReasoning: (ModelEvent) -> Unit = {},
+    val contextRuntime: RunContextRuntime? = null
 ) {
     init {
         require(maxRounds in 1..100)

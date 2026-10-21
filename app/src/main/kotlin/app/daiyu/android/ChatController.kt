@@ -1642,7 +1642,7 @@ class ChatController internal constructor(private val application:Application,
     init {executor.execute {
         val failed=try {
             assistantStore.requireReady() // Migration failure closes the send gate without replacing source data.
-            val runtime=SQLiteRuntimeStore.acquire(database)
+            val runtime=SQLiteRuntimeStore.acquire(database, contextService)
             runtimeStore=runtime
             val questions=PrivateQuestionStore(application)
             questionStore=questions
@@ -3443,6 +3443,9 @@ class ChatController internal constructor(private val application:Application,
                     postReconnectNotice("$status · 第${event.round + 1}轮 · ${event.elapsedMs / 1000}秒")
                 },
                     runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
+                    contextRuntime = if (video == null && auxiliaryFrozen == null &&
+                        preparedContext.frozen.policy.enabled && preparedContext.frozen.runtimeModel != null)
+                        app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) else null,
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
                 afterTitleParentPersisted(it, user, assistant, pendingTitle)
                 synchronized(this) {

@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.context.ContextManagementOperation
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.model.ProviderProtocol
@@ -23,12 +24,16 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
     private var confirms = 0
     private var cancels = 0
     private var picks = 0
+    private var operationCancels = 0
+    private var cancellationRequested by mutableStateOf(false)
     private fun initial() = CompressionDialogDraft(true, "deepseek-v4-1-flash", "fixture/model",
         ProviderProtocol.CHAT_COMPLETIONS)
     private fun api(protocol: ProviderProtocol) = node("compression-dialog-api:${protocol.wireName}")
-    private fun show(dark: Boolean, scale: Float = 1f, fontScale: Float = 1f) {
+    private fun show(dark: Boolean, scale: Float = 1f, fontScale: Float = 1f,
+        operation: ContextManagementOperation? = null) {
         mainThread {
             draft = initial()
+            cancellationRequested = false
             activity.setContent {
                 val platform = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
@@ -36,7 +41,10 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = true) {
                         CompressionConversationDialog(draft, onChange = { draft = it },
-                            onChooseModel = { picks++ }, onConfirm = { confirms++ }, onDismiss = { cancels++ })
+                            onChooseModel = { picks++ }, onConfirm = { confirms++ }, onDismiss = { cancels++ },
+                            enabled = operation == null, operation = operation,
+                            cancellationRequested = cancellationRequested,
+                            onCancelOperation = { operationCancels++; cancellationRequested = true })
                     }
                 }
             }
@@ -84,6 +92,40 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
         assertEquals(4, confirms)
         assertEquals(4, cancels)
         assertEquals(4, picks)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPreparationStatesKeepOriginalControlsWithoutExtraProgressOrCancelAction() {
+        for (operation in listOf(null, ContextManagementOperation.REFRESH,
+            ContextManagementOperation.SELECT, ContextManagementOperation.ARCHIVE)) {
+            show(dark = false, operation = operation)
+            node("compression-dialog-operation").assertDoesNotExist()
+            node("context-cancel").assertDoesNotExist()
+            ui.onNodeWithText("正在准备会话信息…").assertDoesNotExist()
+            ui.onNodeWithText("正在核对压缩目标…").assertDoesNotExist()
+            ui.onNodeWithText("取消并等待退出").assertDoesNotExist()
+            node("compression-dialog-custom").assertExists()
+            node("context-compress").assertIsDisplayed()
+            if (operation == null) node("context-compress").assertIsEnabled()
+            else node("context-compress").assertIsNotEnabled()
+            node("context-close").assertIsEnabled().performClick()
+        }
+        assertEquals(4, cancels)
+        assertEquals(0, operationCancels)
+        assertEquals(0, confirms)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testOnlyActualCompressionShowsProgressAndDispatchesOneCancellation() {
+        show(dark = true, operation = ContextManagementOperation.COMPRESS)
+        node("compression-dialog-operation").assertTextContains("正在压缩会话…")
+        node("context-cancel").assertTextContains("取消压缩").performClick()
+        node("context-cancel").assertIsNotEnabled()
+        node("context-compress").assertIsNotEnabled()
+        node("context-close").assertIsEnabled()
+        ui.onNodeWithText("取消并等待退出").assertDoesNotExist()
+        assertEquals(1, operationCancels)
+        assertEquals(0, confirms)
         assertEquals(0, fixture.opens.get())
     }
 

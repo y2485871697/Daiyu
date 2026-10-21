@@ -70,13 +70,9 @@ internal fun CompressionConversationDialog(
     UsageGlassDialog(title = "压缩会话", onDismiss = onDismiss) {
         LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp)
             .testTag("context-management"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (operation != null) item("operation") {
-                Text(when (operation) {
-                    ContextManagementOperation.COMPRESS -> "正在压缩会话…"
-                    ContextManagementOperation.SELECT -> "正在核对压缩目标…"
-                    else -> "正在准备会话信息…"
-                }, Modifier.testTag("compression-dialog-operation"))
-                AssistantPreviewButton("取消并等待退出", onCancelOperation,
+            if (operation == ContextManagementOperation.COMPRESS) item("operation") {
+                Text("正在压缩会话…", Modifier.testTag("compression-dialog-operation"))
+                AssistantPreviewButton("取消压缩", onCancelOperation,
                     Modifier.fillMaxWidth().testTag("context-cancel"), enabled = !cancellationRequested)
             }
             if (confirmation != null) item("confirmation") {

@@ -23,7 +23,8 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
             listOf(message), PreparedContext(listOf(message), 1234, null), configuration, null)
     }
     private inner class Actions(private val holdRefresh: Boolean = false) : ContextManagementControllerAdapter {
-        override val state = MutableStateFlow(ContextManagementState(owner, snapshot = snapshot()))
+        override val state = MutableStateFlow(ContextManagementState(owner,
+            snapshot = if (holdRefresh) null else snapshot()))
         val events = mutableListOf<String>()
         var selection: ContextManagementSelection? = null
         override fun refresh() {
@@ -82,6 +83,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         val actions = Actions(holdRefresh = true); show(actions)
         assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
         assertNull(actions.state.value.snapshot)
+        node("context-management").performScrollToIndex(0)
         node("compression-dialog-operation").assertDoesNotExist()
         node("context-cancel").assertDoesNotExist()
         ui.onNodeWithText("正在准备会话信息…").assertDoesNotExist()
@@ -100,6 +102,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         awaitVisualIdle()
         assertEquals(ContextManagementSelection(null, ProviderProtocol.CHAT_COMPLETIONS), actions.selection)
         assertEquals(listOf("refresh", "select"), actions.events)
+        node("context-management").performScrollToIndex(0)
         node("compression-dialog-operation").assertDoesNotExist()
         node("context-cancel").assertDoesNotExist()
         node("context-compress").assertIsNotEnabled()

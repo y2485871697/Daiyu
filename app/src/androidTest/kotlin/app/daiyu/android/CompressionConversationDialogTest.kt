@@ -99,6 +99,7 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
         for (operation in listOf(null, ContextManagementOperation.REFRESH,
             ContextManagementOperation.SELECT, ContextManagementOperation.ARCHIVE)) {
             show(dark = false, operation = operation)
+            node("context-management").performScrollToIndex(0)
             node("compression-dialog-operation").assertDoesNotExist()
             node("context-cancel").assertDoesNotExist()
             ui.onNodeWithText("正在准备会话信息…").assertDoesNotExist()
@@ -118,13 +119,15 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
 
     fun testOnlyActualCompressionShowsProgressAndDispatchesOneCancellation() {
         show(dark = true, operation = ContextManagementOperation.COMPRESS)
-        node("compression-dialog-operation").assertTextContains("正在压缩会话…")
-        node("context-cancel").assertTextContains("取消压缩").performClick()
+        node("context-management").performScrollToIndex(0)
+        node("compression-dialog-operation").assertIsDisplayed().assertTextContains("正在压缩会话…")
+        node("context-cancel").scrollToVisible().assertIsDisplayed().assertTextContains("取消压缩").performClick()
         node("context-cancel").assertIsNotEnabled()
         node("context-compress").assertIsNotEnabled()
         node("context-close").assertIsEnabled()
         ui.onNodeWithText("取消并等待退出").assertDoesNotExist()
         assertEquals(1, operationCancels)
+        assertEquals(0, cancels)
         assertEquals(0, confirms)
         assertEquals(0, fixture.opens.get())
     }

@@ -74,7 +74,6 @@ import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.draw.blur
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.textureBlur
@@ -322,7 +321,6 @@ internal fun ConversationSidePaneScaffold(
             },
         ) {
             Box(Modifier.fillMaxSize()
-                .blur(if (visible && backdrop != null) 2.dp * conversationPanePreviewScale() else 0.dp)
                 .captureForTopBar(backdrop)) { content() }
         }
         }

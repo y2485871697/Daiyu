@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -60,6 +62,8 @@ internal fun <T> LocalCatalogModelsScreen(
     managementEndpoint: String? = null,
     fetchingModels: Boolean = false,
     onFetchModels: (() -> Unit)? = null,
+    listState: LazyListState = rememberLazyListState(),
+    queryState: MutableState<String> = remember { mutableStateOf("") },
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -70,7 +74,8 @@ internal fun <T> LocalCatalogModelsScreen(
     var loaded by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<CatalogModelSelection<T>?>(null) }
-    var query by remember { mutableStateOf("") }
+    var query by queryState
+    val loadingListState = rememberLazyListState()
     var adding by remember { mutableStateOf<Any?>(null) }
     var deleting by remember { mutableStateOf<CatalogModelSelection<T>?>(null) }
     fun current() = visit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
@@ -178,7 +183,9 @@ internal fun <T> LocalCatalogModelsScreen(
             onConfirm = { if (deleting === selection && current() && matches(selection)) submit(selection, null) },
             onDismiss = { if (deleting === selection) deleting = null })
     }
-    SettingsScaffoldPage(pageTitle, onBack = back) {
+    SettingsScaffoldPage(pageTitle, onBack = back,
+        // The short loading list must not clamp the retained model position to its first rows.
+        listState = if (snapshot == null) loadingListState else listState) {
         headerContent()
         item("catalog-state") {
             val add = if (actions.add != null && enabled && request == null && loaded && snapshot != null)

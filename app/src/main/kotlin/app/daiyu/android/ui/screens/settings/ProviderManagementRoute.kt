@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -42,6 +43,7 @@ private class ProviderDetail(
 ) {
     val live = AtomicBoolean(true)
     val saveOwner = ModelSettingsSaveOwner()
+    var pageUi = ProviderPageUiState()
     var balanceTestJob: kotlinx.coroutines.Job? = null
     fun revoke() { live.set(false); saveOwner.revoke(); balanceTestJob?.cancel(); balanceTestJob = null }
     var draft by mutableStateOf(editing.settings.providerDraft().copy(providerName = name, providerEnabled = providerEnabled,
@@ -51,6 +53,7 @@ private class ProviderDetail(
 private class PausedProviderDraft(
     val editor: ProviderEditorSlot, val editing: EditingSettings, val configurationRevision: Long,
     val draft: ModelSettingsDraftUi, val balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration?,
+    val pageUi: ProviderPageUiState,
 )
 private class NewProviderDraft(protocol: ProviderProtocol) {
     var draft by mutableStateOf(ModelSettingsDraftUi(providerName = "").selectProtocol(protocol))
@@ -88,6 +91,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var registry by remember { mutableStateOf<ProviderRegistrySnapshot?>(null) }
     var summaries by remember { mutableStateOf<Map<String, ProviderCardSummary>>(emptyMap()) }
     var query by remember { mutableStateOf("") }
+    val directoryListState = rememberLazyListState()
     var authentication by remember { mutableStateOf(false) }
     var managing by remember { mutableStateOf<RegisteredProvider?>(null) }
     var detail by remember { mutableStateOf<ProviderDetail?>(null) }
@@ -171,6 +175,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 if (restore != null && restore.editor == loaded.editor && restore.editing == loaded.editing &&
                     restore.configurationRevision == loaded.configurationRevision && restore.balanceConfiguration == loaded.balanceConfiguration) {
                     loaded.draft = restore.draft.copy(protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false, headersReplacementAuthorized = false)
+                    loaded.pageUi = restore.pageUi
                 }
                 if (newProtocol != null) loaded.draft = loaded.draft.selectProtocol(newProtocol)
                 authentication = false
@@ -210,7 +215,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
                 detail?.let {
-                    pausedDraft = PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft, it.balanceConfiguration)
+                    pausedDraft = PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft, it.balanceConfiguration, it.pageUi)
                 }
                 authentication = false
                 resumed = false; permit.revoke(); closeDetail(); checkingRegistry = false
@@ -442,7 +447,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }
         }
         if (d.catalogIdentity == null) {
-            var modelTab by remember { mutableStateOf(false) }
+            var modelTab by d.pageUi.modelTab
             val tabs: LazyListScope.() -> Unit = {
                 item(key = "provider-tabs") {
                     ProviderSettingsTabs(modelTab, enabled) { selected ->
@@ -452,13 +457,15 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }
             if (modelTab) {
                 ProviderEmptyModelsPage(detailTitle, { back() }, tabs,
-                    "请先在配置页保存 Base URL 和 API Key，再添加或拉取模型。")
+                    "请先在配置页保存 Base URL 和 API Key，再添加或拉取模型。",
+                    listState = d.pageUi.modelListState, queryState = d.pageUi.modelQuery)
             } else ModelSettingsScreen(draft, change, save, {}, { back() },
                 modifier = connectionModifier, headerContent = tabs, showCatalog = false,
                 pageTitle = detailTitle, providerName = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
                 credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                 headersUnavailable = d.editing.headersUnavailable,
-                catalogEnabled = false, errorText = notice, testBalance = balanceTest, onDelete = delete)
+                catalogEnabled = false, errorText = notice, testBalance = balanceTest, onDelete = delete,
+                listState = d.pageUi.configurationListState)
         } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
                 if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
@@ -475,7 +482,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             headersUnavailable = d.editing.headersUnavailable,
             testConnection = connection, localModelActions = actions, testBalance = balanceTest,
-            onDelete = delete)
+            onDelete = delete, pageUi = d.pageUi)
     } else if (loading) {
         SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
     } else if (authentication) {
@@ -488,7 +495,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             onAddOpenAi = { if (enabled) authentication = true },
             onAddAnthropic = { if (enabled) creating = NewProviderDraft(ProviderProtocol.MESSAGES) },
             onOpen = { if (enabled) open(it.slotId) },
-            onManage = { if (enabled) managing = it }, modifier = Modifier.testTag("provider-management"))
+            onManage = { if (enabled) managing = it }, modifier = Modifier.testTag("provider-management"),
+            listState = directoryListState)
     }
     val managed = managing
     val managedRegistry = registry

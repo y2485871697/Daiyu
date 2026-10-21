@@ -3,6 +3,8 @@ package app.daiyu.android.ui.screens.settings
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -32,8 +34,9 @@ internal fun ProviderDirectoryPage(
     onBack: () -> Unit, onAddOpenAi: () -> Unit, onAddAnthropic: () -> Unit,
     onOpen: (RegisteredProvider) -> Unit, onManage: (RegisteredProvider) -> Unit,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
-    SettingsScaffoldPage("模型提供商", onBack, modifier) {
+    SettingsScaffoldPage("模型提供商", onBack, modifier, listState = listState) {
         item("provider-search") {
             SettingsSearch(query, onQuery, "搜索提供商", "provider-search")
         }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.platform.testTag
 import top.yukonga.miuix.kmp.basic.TextButton
 import androidx.compose.runtime.key
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -59,6 +60,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     ownerCurrent: () -> Boolean = { true },
     testBalance: ProviderBalanceTester? = null,
     onDelete: (() -> Unit)? = null,
+    pageUi: ProviderPageUiState? = null,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -67,7 +69,11 @@ internal fun <T> ProviderCatalogSettingsScreen(
     DisposableEffect(session, providerIdentity, draft, enabled) {
         onDispose { session.invalidate() }
     }
-    var modelTab by remember(providerIdentity, persistence) { mutableStateOf(false) }
+    val configurationListState = pageUi?.configurationListState ?: rememberLazyListState()
+    val modelListState = pageUi?.modelListState ?: rememberLazyListState()
+    val modelQuery = pageUi?.modelQuery ?: remember(providerIdentity, persistence) { mutableStateOf("") }
+    val selectedTab = pageUi?.modelTab ?: remember(providerIdentity, persistence) { mutableStateOf(false) }
+    var modelTab by selectedTab
     var localRevision by remember { mutableStateOf(0L) }
     val fetch: (ModelSettingsDraftUi) -> Unit = { value ->
             if (ownerCurrent() && enabled && !state.saving) {
@@ -95,12 +101,14 @@ internal fun <T> ProviderCatalogSettingsScreen(
     }
     var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
     if (managingLocal && localModelActions != null) {
-        LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false })
+        LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false },
+            listState = modelListState, queryState = modelQuery)
         return
     }
     if (twoTabs && modelTab && localModelActions != null) {
         key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled && !state.saving,
             onBack = onBack, pageTitle = pageTitle, managementEndpoint = draft.endpoint,
+            listState = modelListState, queryState = modelQuery,
             fetchingModels = state.loading, onFetchModels = if (enabled && !state.loading && !state.saving) ({ fetch(draft) }) else null, headerContent = {
                 tabs()
                 item {
@@ -110,6 +118,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
             }) }
     } else ModelSettingsScreen(
         pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs, providerName = providerName,
+        listState = configurationListState,
         onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
         engineeringUi = engineeringUi,
         testConnection = testConnection?.let { test -> { value, cancelled, deliver ->

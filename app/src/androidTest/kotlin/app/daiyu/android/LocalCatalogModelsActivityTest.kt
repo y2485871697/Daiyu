@@ -172,7 +172,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         node("local-model-delete:extra-local").performClick()
         val stale = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         realPauseResume(activity)
-        awaitModelEditor()
+        awaitUniqueTag("page:主模型服务商")
         openLocalModelTab()
         reveal("local-model-rename:extra-local").performClick()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:extra-local"))

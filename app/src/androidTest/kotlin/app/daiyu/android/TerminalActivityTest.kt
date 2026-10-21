@@ -55,4 +55,45 @@ class TerminalActivityTest : WiredActivityTestCase() {
         assertSame(caller, owner.caller.value)
         assertFalse(owner.host.state.value.ownsResources)
     }
+    fun testNoConversationTasksOpenEmptyWithoutCreatingOrOpeningAnything() {
+        mainThread { activity.select(null) }
+        enterFromMenu()
+        val retained = owner
+        val caller = retained.caller.value
+        node("terminal-tasks").assertIsEnabled().performClick()
+        node("terminal-tasks-dialog").assertIsDisplayed()
+        ui.onNodeWithText("暂无任务").assertIsDisplayed()
+        val field = MainActivity::class.java.getDeclaredField("terminalJobsVisit").apply { isAccessible = true }
+        mainThread {
+            val visit = checkNotNull(field.get(activity))
+            val conversation = visit.javaClass.getDeclaredMethod("getConversation").apply { isAccessible = true }.invoke(visit)
+            assertNull(conversation)
+        }
+        node("terminal-tasks-refresh").performClick()
+        ui.onNodeWithText("暂无任务").assertIsDisplayed()
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        ui.waitForIdle()
+        node("terminal-tasks-dialog").assertDoesNotExist()
+        assertSame(retained, owner); assertSame(caller, owner.caller.value)
+        assertFalse(owner.host.state.value.ownsResources)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testModeSurvivesRecreationWithoutOpeningAndPausedOpenIsRejected() {
+        enterFromMenu()
+        val caller = owner.caller.value
+        node("terminal-mode").performClick()
+        node("terminal-shortcuts").assertIsDisplayed()
+        activity = recreateActivity(activity)
+        awaitTerminal()
+        node("terminal-shortcuts").assertIsDisplayed()
+        node("terminal-input").assertDoesNotExist()
+        val page = MainActivity::class.java.getDeclaredField("terminalPageOwner").apply { isAccessible = true }.get(activity)
+        val open = MainActivity::class.java.getDeclaredMethod("openTerminalAndroid", Any::class.java).apply { isAccessible = true }
+        realPauseResume(activity) { open.invoke(activity, page) }
+        assertSame(caller, owner.caller.value)
+        assertFalse(owner.host.state.value.ownsResources)
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

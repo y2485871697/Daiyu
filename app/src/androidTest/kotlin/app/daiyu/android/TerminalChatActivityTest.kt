@@ -54,8 +54,10 @@ class TerminalChatActivityTest : WiredActivityTestCase() {
         assertTrue(session.entered.await(10, TimeUnit.SECONDS))
         awaitTextSendResult(activity)
         assertDraft("")
-        node("terminal-jobs-entry").performClick()
-        node("terminal-jobs-panel").assertExists()
+        mainThread { retainedControls(activity).onMenuAction(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.OPEN_TERMINAL) }
+        awaitUniqueTag("terminal-screen")
+        node("terminal-tasks").performClick()
+        node("terminal-tasks-dialog").assertExists()
         assertEquals(pending.plan.conversationId, fixture.database.conversations().single().id)
         assertSame(pending.plan, fixture.controller.terminalJobRuns(pending.plan.conversationId).single().plan)
         assertNull(fixture.controller.terminalJobRuns(pending.plan.conversationId).single().jobId)

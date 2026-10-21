@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Mounted production panel with zero live sessions. No shell, real provider or restored control. */
+/** Mounted production task dialog with zero live sessions. No shell, real provider or restored control. */
 class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
     override val engineeringUi: Boolean = true
     private val created = mutableListOf<File>()
@@ -28,8 +28,12 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         return conversation to id
     }
     private fun open(conversation: Conversation): Any {
-        mainThread { activity.select(conversation) }
-        node("terminal-jobs-entry").performClick()
+        mainThread {
+            activity.select(conversation)
+            retainedControls(activity).onMenuAction(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.OPEN_TERMINAL)
+        }
+        awaitUniqueTag("terminal-screen")
+        node("terminal-tasks").performClick()
         awaitControl("history published") {
             val visit = invoke("getTerminalJobsVisit")
             visit != null && !(property(visit, "getBusy") as Boolean)
@@ -42,36 +46,35 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
     }
 
     fun testNoLiveStillShowsUnknownReadOnlyHistoryAndExplicitRefreshAndPagination() {
-        val (conversation, id) = seedHistory("H".repeat(16384) + "tail-only-second-page")
+        val (conversation, _) = seedHistory("H".repeat(16384) + "tail-only-second-page")
         assertTrue(fixture.controller.terminalJobRuns(conversation.id).isEmpty())
         open(conversation)
-        node("terminal-job-history").assertExists()
-        ui.onAllNodesWithText("停止此 job…").assertCountEquals(0)
-        node("terminal-job-stop-confirm").assertDoesNotExist()
-        node("terminal-jobs-panel").scrollToDescendant(hasTestTag("terminal-history-read-$id"))
-        node("terminal-history-read-$id").assertIsEnabled()
+        node("terminal-tasks-dialog").assertExists()
+        node("terminal-task-stop:0").assertDoesNotExist()
+        ui.onNodeWithText("只读记录 · 运行状态未知").assertExists()
+        node("terminal-task-read:0").assertIsEnabled()
             .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitControl("first history page") {
             val visit = checkNotNull(invoke("getTerminalJobsVisit"))
             !(property(visit, "getBusy") as Boolean) && property(visit, "getHasMore") == true
         }
-        node("terminal-job-result").assertTextContains("unknown_after_process_restart", substring = true)
-        node("terminal-job-result").assertTextContains("\"exit_code\": null", substring = true)
-        node("terminal-jobs-panel").scrollToDescendant(hasTestTag("terminal-history-next"))
-        node("terminal-history-next").performClick()
+        node("terminal-task-output").assertTextContains("历史任务状态未知", substring = true)
+        node("terminal-task-output").assertTextContains("H".repeat(32), substring = true)
+        node("terminal-tasks-dialog").scrollToDescendant(hasTestTag("terminal-tasks-next"))
+        node("terminal-tasks-next").performClick()
         awaitControl("second history page") {
             val visit = checkNotNull(invoke("getTerminalJobsVisit"))
             !(property(visit, "getBusy") as Boolean) && property(visit, "getNextOffset") == 16405L
         }
-        node("terminal-job-result").assertTextContains("tail-only-second-page", substring = true)
-        node("terminal-history-next").assertDoesNotExist()
-        node("terminal-jobs-panel").scrollToDescendant(hasTestTag("terminal-jobs-refresh"))
-        node("terminal-jobs-refresh").performClick()
+        node("terminal-task-output").assertTextContains("tail-only-second-page", substring = true)
+        node("terminal-tasks-next").assertDoesNotExist()
+        node("terminal-tasks-dialog").scrollToDescendant(hasTestTag("terminal-tasks-refresh"))
+        node("terminal-tasks-refresh").performClick()
         awaitControl("explicit refresh") {
             val visit = checkNotNull(invoke("getTerminalJobsVisit"))
             !(property(visit, "getBusy") as Boolean) && property(visit, "getHistoryPage") == null
         }
-        node("terminal-job-stop-confirm").assertDoesNotExist()
+        node("terminal-task-stop:0").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 
@@ -99,7 +102,23 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         awaitControl("off-page worker returned") { property(current, "getBusy") == false }
         assertEquals("", property(current, "getOutput"))
         assertNull(invoke("getTerminalJobsVisit"))
-        node("terminal-job-history").assertDoesNotExist()
+        node("terminal-tasks-dialog").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun testReturningToChatRevokesQueuedHistoryVisit() {
+        val (conversation, _) = seedHistory("leaving terminal must revoke history")
+        val old = open(conversation)
+        val record = (property(old, "getHistory") as List<TerminalJobHistoryReader.Record>).single()
+        mainThread {
+            invoke("terminalHistoryPage", old, record, 0L)
+            invoke("setRetainedPage", "chat")
+        }
+        awaitControl("chat return worker drained") { property(old, "getBusy") == false }
+        assertEquals(true, (property(old, "getRevoked") as java.util.concurrent.atomic.AtomicBoolean).get())
+        assertEquals("", property(old, "getOutput"))
+        assertNull(invoke("getTerminalJobsVisit"))
         assertEquals(0, fixture.opens.get())
     }
 
@@ -117,7 +136,38 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         awaitControl("paused history worker returned") { property(old, "getBusy") == false }
         assertEquals("", property(old, "getOutput"))
         assertNull(invoke("getTerminalJobsVisit"))
-        node("terminal-job-history").assertDoesNotExist()
+        node("terminal-tasks-dialog").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testTerminalPageTasksReuseBoundedHistoryAndCannotControlRestartedJobs() {
+        val (conversation, _) = seedHistory("terminal page history")
+        mainThread {
+            activity.select(conversation)
+            retainedControls(activity).onMenuAction(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.OPEN_TERMINAL)
+        }
+        awaitUniqueTag("terminal-screen")
+        val owner = (instrumentation.targetContext.applicationContext as ChatApplication).terminalOwner
+        val caller = owner.caller.value
+        node("terminal-tasks").performClick()
+        awaitControl("terminal task history published") {
+            val visit = invoke("getTerminalJobsVisit")
+            visit != null && property(visit, "getBusy") == false
+        }
+        node("terminal-task-stop:0").assertDoesNotExist()
+        node("terminal-task-read:0").performClick()
+        awaitControl("terminal history page") {
+            val visit = checkNotNull(invoke("getTerminalJobsVisit"))
+            property(visit, "getBusy") == false && property(visit, "getHistoryPage") != null
+        }
+        node("terminal-task-output").assertTextContains("terminal page history")
+        node("terminal-task-output").assertTextContains("历史任务状态未知")
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        ui.waitForIdle()
+        node("terminal-tasks-dialog").assertDoesNotExist()
+        node("terminal-screen").assertIsDisplayed()
+        assertSame(caller, owner.caller.value)
+        assertFalse(owner.host.state.value.ownsResources)
         assertEquals(0, fixture.opens.get())
     }
 

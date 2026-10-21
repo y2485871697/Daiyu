@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
@@ -86,11 +87,21 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
         control("settings-secret-visibility:值").performClick()
         awaitVisualIdle()
         control("model-header-value:0").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Password))
+            .assertEditableText("header-layout-canary")
+        control("settings-secret-visibility:值").assertContentDescriptionEquals("隐藏值").performClick()
+        awaitVisualIdle()
+        control("model-header-value:0").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            .assertEditableText("\u2022".repeat("header-layout-canary".length))
+        control("settings-secret-visibility:值").assertContentDescriptionEquals("显示值").performClick()
+        awaitVisualIdle()
+        control("model-header-value:0").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Password))
+            .assertEditableText("header-layout-canary")
         realPauseResume(activity, atPause = {})
         awaitVisualIdle()
         control("model-header-name:0").assertDoesNotExist()
         open(headers = true)
         control("model-header-value:0").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            .assertEditableText("\u2022".repeat("header-layout-canary".length))
         control("model-header-delete:0").performClick()
         awaitVisualIdle()
         control("model-header-name:0").assertDoesNotExist()
@@ -98,6 +109,28 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
         awaitVisualIdle()
         control("model-header-name:0").assertIsDisplayed()
         assertFalse(draft.headerFieldsValid)
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testVisibilityToggleKeepsFocusedSelectionAndRenderedMask() {
+        val value = "header-layout-canary"
+        mainThread { draft = ModelSettingsDraftUi(customHeaders = """{"X-Project":"$value"}""") }
+        show(headers = true); open(headers = true)
+        control("model-header-value:0").performClick().performTextInputSelection(TextRange(7))
+        for (visible in listOf(true, false, true)) {
+            control("settings-secret-visibility:值").performClick()
+            awaitVisualIdle()
+            control("model-header-value:0").assertIsFocused()
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(7)))
+                .assertEditableText(if (visible) value else "\u2022".repeat(value.length))
+                .assert(if (visible) SemanticsMatcher.keyNotDefined(SemanticsProperties.Password)
+                    else SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            assertEquals(value, draft.headerFieldRows!!.single().value)
+        }
+        control("model-header-value:0").performTextInput("!")
+        awaitVisualIdle()
+        val edited = value.take(7) + "!" + value.drop(7)
+        control("model-header-value:0").assertEditableText(edited)
+        assertEquals(edited, draft.headerFieldRows!!.single().value)
         assertEquals(0, fixture.opens.get())
     }
     fun testBodyUsesTheSameFooterAndDeleteColumnWithoutLosingMultilineJson() {
@@ -131,6 +164,7 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
         control("model-header-delete:0").performClick()
         awaitVisualIdle()
         control("model-header-value:0").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        control("model-header-value:0").assertEditableText("\u2022".repeat("second-value".length))
         assertEquals("X-Second", draft.headerFieldRows!!.single().name)
         assertEquals("second-value", draft.headerFieldRows!!.single().value)
         assertEquals(0, fixture.opens.get())

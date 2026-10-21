@@ -89,8 +89,8 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
             }
             awaitUniqueTag("agent-corner-actual")
             for ((family, fill) in listOf("assistant" to assistantFill, "agent" to agentFill)) {
-                val reference = captureScreenNode(node("$family-corner-reference")).toPixelMap()
-                val actual = captureScreenNode(node("$family-corner-actual")).toPixelMap()
+                val reference = node("$family-corner-reference").captureToImage().toPixelMap()
+                val actual = node("$family-corner-actual").captureToImage().toPixelMap()
                 assertTrue("$family width", kotlin.math.abs(reference.width - actual.width) <= 1)
                 assertTrue("$family height", kotlin.math.abs(reference.height - actual.height) <= 1)
                 for (bottom in listOf(false, true)) for (right in listOf(false, true)) {

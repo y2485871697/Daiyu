@@ -28,8 +28,9 @@ class RecordedUsageProjectionTest {
         assertEquals(UsageTokenMetrics(100, 20, 40, 10, 120), value.tokens)
         val snapshot = UsageStatsSnapshot(attributedUsage = value.attributed)
         assertEquals(value.tokens, snapshot.overviewTokens)
-        assertEquals(value.tokens, snapshot.modelTokens(ModelUsageSnapshot(), false))
-        assertEquals(UsageTokenMetrics(), snapshot.modelTokens(ModelUsageSnapshot(), true))
+        assertEquals(UsageTokenMetrics(), snapshot.modelTokens(ModelUsageSnapshot()))
+        val attributedOnly = snapshot.copy(tokenAccountingAvailable = true)
+        assertEquals(UsageTokenMetrics(), attributedOnly.modelTokens(ModelUsageSnapshot()))
         assertEquals(UsageTokenMetrics(), UsageStatsSnapshot(tokenAccountingAvailable = true,
             currentInputTokens = 900).overviewTokens)
         val partial = projection(listOf(row(false, ModelEvent.Usage(null, 0, null))))
@@ -78,6 +79,14 @@ class RecordedUsageProjectionTest {
         assertEquals(value, snapshot.recordedProjection)
         assertTrue(snapshot.modelUsage.providers.isEmpty())
         assertFalse(snapshot.tokenAccountingAvailable); assertFalse(snapshot.lifetimeAccountingAvailable)
+        assertEquals(value.tokens, snapshot.overviewTokens)
+        assertEquals(UsageTokenMetrics(), snapshot.modelTokens(snapshot.modelUsage))
+        val modelUsage = ModelUsageSnapshot(listOf(ModelUsageProviderUi("provider", "Provider", listOf(
+            ModelUsageModelUi("model", "Model", 100, 20, 1, 1, cachedTokens = 40, cacheCreationTokens = 10),
+        ))))
+        val withModelAccounting = snapshot.copy(tokenAccountingAvailable = true, modelUsage = modelUsage)
+        assertEquals(UsageTokenMetrics(100, 20, 40, 10, 120), withModelAccounting.modelTokens(modelUsage))
+        assertEquals(value.tokens, withModelAccounting.overviewTokens)
     }
 
     @Test fun partialFieldsRemainQualifiedAndReportedZeroIsNotMissing() {

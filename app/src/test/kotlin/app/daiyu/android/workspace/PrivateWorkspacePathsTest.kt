@@ -50,10 +50,44 @@ class PrivateWorkspacePathsTest {
         File(selected, "keep").writeText("preserve")
         assertEquals(selected.canonicalFile, paths.ensureRoot())
         assertEquals("preserve", File(selected, "keep").readText())
-        for (bad in listOf(files, files.parentFile, File(files, "linux-installations/../other"))) {
+        for (bad in listOf(files, files.parentFile, File(files, "linux-installations/../other"),
+            File(files.parentFile, "${files.name}-sibling/rootfs"), File("relative-rootfs"))) {
             try { PrivateWorkspacePaths.existingRoot(files, bad); fail("invalid root accepted: $bad") }
-            catch (_: IllegalArgumentException) { }
+            catch (failure: IllegalArgumentException) { assertEquals("workspace_private_root_required", failure.message) }
         }
+    }
+
+    @Test fun existingRootUsesTrustedStorageAliasWithoutResolvingSelectedLinks() = fixture { files, _ ->
+        val storage = File(files, "storage").apply { mkdir() }
+        File(storage, "env/rootfs").mkdirs()
+        val alias = File(files, "storage-alias")
+        Files.createSymbolicLink(alias.toPath(), storage.toPath())
+        try {
+            for (root in listOf(File(alias, "env/rootfs"), File(alias.canonicalFile, "env/rootfs"))) {
+                val paths = PrivateWorkspacePaths.existingRoot(alias, root)
+                assertTrue(paths.readOnly)
+                assertEquals(alias.canonicalFile, paths.storage)
+                assertEquals(File(alias.canonicalFile, "env/rootfs").canonicalFile, paths.ensureRoot())
+            }
+            val target = File(storage, "other").apply { mkdir() }
+            val link = File(storage, "linked")
+            Files.createSymbolicLink(link.toPath(), target.toPath())
+            try {
+                val paths = PrivateWorkspacePaths.existingRoot(alias, File(alias, "linked/rootfs"))
+                try { paths.ensureRoot(); fail("selected link resolved") }
+                catch (failure: IllegalStateException) { assertEquals("workspace_root_changed", failure.message) }
+                assertFalse(File(target, "rootfs").exists())
+            } finally { Files.delete(link.toPath()) }
+        } finally { Files.delete(alias.toPath()) }
+    }
+
+    @Test fun existingRootNeverReplacesAConflictFile() = fixture { files, _ ->
+        val selected = File(files, "rootfs").apply { writeText("preserve") }
+        val paths = PrivateWorkspacePaths.existingRoot(files, selected)
+        assertTrue(paths.readOnly)
+        try { paths.ensureRoot(); fail("file accepted") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_storage_unavailable", failure.message) }
+        assertEquals("preserve", selected.readText())
     }
 
     @Test fun existingRootRejectsAnIntermediateSymlink() = fixture { files, _ ->

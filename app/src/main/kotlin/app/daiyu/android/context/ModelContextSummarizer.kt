@@ -42,6 +42,7 @@ data class BoundSummaryModel(
     /** Invoked once at summarize entry, never reset by open/next. */
     val startDeadline: () -> SummaryRequestDeadline,
 ) {
+    internal var rebind: ((BoundSummaryUsagePort) -> BoundSummaryModel)? = null
     init { require(contextWindowTokens > 0 && inputBudgetTokens in 1..contextWindowTokens) }
 }
 

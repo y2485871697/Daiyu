@@ -27,6 +27,10 @@ class FrozenMessageImagePlan private constructor(
     private val model: String,
     private val blocks: Map<Pair<Int, Int>, String>,
 ) : ModelImagePlan {
+    internal fun estimateImageSizes(): Map<String, Pair<Int, Int>> = blocks.entries.associate { (position, raw) ->
+        val image = (history[position.first].blocks[position.second] as MessageBlock.Image).reference
+        requireNotNull(app.daiyu.android.model.RequestInputEstimate.payload(JSONObject(raw))) to (image.width to image.height)
+    }
     val hasImages: Boolean get() = blocks.isNotEmpty()
 
     internal fun validate(settings: ModelSettings, selectedProtocol: ProviderProtocol, capability: Boolean?, messages: List<Message>) {

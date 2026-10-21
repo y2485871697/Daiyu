@@ -12,6 +12,9 @@ sealed interface ModelEvent {
      * billing receipt. null is unknown, not zero. Cache reads are a subset of total input,
      * not an additional charge. A later snapshot replaces all fields, even null or lower counts.
      * Providers normalize partial wire observations and apply their own upper count bound. */
+    data class InputEstimate(val tokens: Long) : ModelEvent {
+        init { require(tokens >= 0) }
+    }
     data class Usage(val inputTokens: Long?, val outputTokens: Long?, val cachedTokens: Long? = null,
         val cacheCreationTokens: Long? = null) : ModelEvent {
         init {
@@ -51,6 +54,8 @@ class ModelDeliveryRejectedException : IllegalStateException("Provider delivery 
  * authority to open or recover a session after process death. A batch is one wire sequence;
  * terminal batches include Usage AND ProtocolOutput before their cursor is acknowledged. */
 interface CheckpointedResumableModelSession : ResumableModelSession {
+    fun nextAcknowledged(outputs: List<ToolOutput>, localSink: (ModelEvent) -> Unit,
+        sink: (ModelEventBatch) -> ModelDeliveryAck) = nextAcknowledged(outputs, sink)
     fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck)
     fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck)
     /** Interrupt just the current read. Unlike cancel(), this does not revoke the session. */

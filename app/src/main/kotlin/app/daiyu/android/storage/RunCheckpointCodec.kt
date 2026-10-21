@@ -18,7 +18,7 @@ internal object RunCheckpointCodec {
     fun encode(value: RunCheckpoint): String {
         validate(value)
         fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
-        val version = if (value.usage.any { it.snapshot.cacheCreationTokens != null }) 8 else if (value.transport == null) 6 else 7
+        val version = if (value.context != null) 9 else if (value.usage.any { it.snapshot.cacheCreationTokens != null }) 8 else if (value.transport == null) 6 else 7
         return JSONObject().put("version", version).put("message", messages(listOf(value.message)))
             .put("history", messages(value.history)).put("phase", value.phase.name)
             .put("tools", JSONArray().apply { value.tools.forEach { record -> put(JSONObject()
@@ -31,6 +31,12 @@ internal object RunCheckpointCodec {
             .put("request_unconfirmed", value.requestUnconfirmed).put("message_reconciled", value.messageReconciled)
             .put("owner", value.owner).put("revision", value.revision)
             .put("request", value.request?.let(::encodeRequest) ?: JSONObject.NULL)
+            .apply { value.context?.let { context -> put("context", JSONObject()
+                .put("input", context.input?.let(::encodeInput) ?: JSONObject.NULL)
+                .put("calibration", context.calibration?.let(::encodeInput) ?: JSONObject.NULL)
+                .put("pressure", context.pressure?.let(::encodeRequest) ?: JSONObject.NULL)
+                .put("summaries", JSONArray().apply { context.summaries.forEach { put(encodeRequest(it)) } })
+                .put("compactions", context.compactions)) } }
             .apply { value.transport?.let { put("transport", JSONObject().put("response_id", it.responseId)
                 .put("sequence", it.sequence).put("decoder_state", it.decoderState)) } }
             .put("usage_requests", JSONArray().apply { value.usageRequests.forEach { put(encodeRequest(it)) } })
@@ -51,7 +57,7 @@ internal object RunCheckpointCodec {
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')
         val version = integer(value, "version")
-        require(version in 1L..8L)
+        require(version in 1L..9L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
         val recoveryOwner = if (value.has("recovery_source_owner")) string(value, "recovery_source_owner") else null
@@ -64,8 +70,19 @@ internal object RunCheckpointCodec {
             6L -> keys + arrayOf("pending", "request", "usage", "usage_requests")
             7L -> keys + arrayOf("pending", "request", "usage", "usage_requests", "transport")
             else -> keys + arrayOf("pending", "request", "usage", "usage_requests") +
+                (if (version >= 9) arrayOf("context") else emptyArray()) +
                 (if (value.has("transport")) arrayOf("transport") else emptyArray()) }) +
             if (recoveryOwner == null) emptyArray() else arrayOf("recovery_source_owner")))
+        val context = if (version < 9) null else {
+            val row = value.getJSONObject("context")
+            fields(row, "input", "calibration", "pressure", "summaries", "compactions")
+            val summaries = row.getJSONArray("summaries"); require(summaries.length() <= 100)
+            RunContextCheckpoint(if (row.isNull("input")) null else decodeInput(row.getJSONObject("input")),
+                if (row.isNull("calibration")) null else decodeInput(row.getJSONObject("calibration")),
+                if (row.isNull("pressure")) null else decodeRequest(row.get("pressure")),
+                (0 until summaries.length()).map { decodeRequest(summaries.get(it)) },
+                integer(row, "compactions").also { require(it in 0..100) }.toInt())
+        }
         val transport = if (version < 7L || !value.has("transport") || value.isNull("transport")) null else {
             val row = value.getJSONObject("transport")
             fields(row, "response_id", "sequence", "decoder_state")
@@ -110,7 +127,7 @@ internal object RunCheckpointCodec {
             (0 until outputs.length()).map { i -> val o = outputs.getJSONObject(i)
                 fields(o, "id", "output"); ToolOutput(ToolCallId(string(o, "id")), string(o, "output")) },
             messages("supplements"), round.toInt(), boolean(value, "request_unconfirmed"), boolean(value, "message_reconciled"),
-            string(value, "owner"), integer(value, "revision"), pending, request, usage, usageRequests, transport).also(::validate)
+            string(value, "owner"), integer(value, "revision"), pending, request, usage, usageRequests, transport, context).also(::validate)
     }
     private fun validate(value: RunCheckpoint) {
         require(value.owner.isNotBlank() && value.owner.length <= 200 && value.revision in 1 until Long.MAX_VALUE)
@@ -132,6 +149,19 @@ internal object RunCheckpointCodec {
         value.usageRequests.forEach {
             require(it.operation != RequestOperation.OPEN)
             require(value.phase == ExecutionPhase.TERMINAL || it.owner == value.owner)
+        }
+        value.context?.let { state ->
+            require(state.compactions in 0..state.summaries.size)
+            val main = value.usageRequests.map { it.owner to it.requestId }.toSet()
+            listOfNotNull(state.input, state.calibration).forEach { input ->
+                require(input.request in value.usageRequests)
+            }
+            state.pressure?.let { require(it in value.usageRequests) }
+            require(state.summaries.size <= 100 && state.summaries.map { it.owner to it.requestId }.distinct().size == state.summaries.size)
+            state.summaries.forEach { require(it.operation != RequestOperation.OPEN &&
+                (value.phase == ExecutionPhase.TERMINAL || it.owner == value.owner) && (it.owner to it.requestId) !in main) }
+            value.usage.filter { it.source == UsageRequestSource.SUMMARY && it.request.owner == value.owner }
+                .forEach { require(it.request in state.summaries) }
         }
         require(value.usage.size <= 10_000)
         require(value.usage.map { it.request.owner to it.request.requestId }.distinct().size == value.usage.size)
@@ -164,6 +194,13 @@ internal object RunCheckpointCodec {
     }
     private fun hasResult(disposition: ToolDisposition) = disposition in setOf(
         ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)
+    private fun encodeInput(value: RequestInputCheckpoint) = JSONObject()
+        .put("request", encodeRequest(value.request)).put("local", value.localTokens)
+        .put("billed", value.billedTokens ?: JSONObject.NULL).put("history_local", value.historyTokens)
+    private fun decodeInput(value: JSONObject): RequestInputCheckpoint {
+        fields(value, "request", "local", "billed", "history_local")
+        return RequestInputCheckpoint(decodeRequest(value.get("request")), integer(value, "local"), nullableInteger(value, "billed"), integer(value, "history_local"))
+    }
     private fun encodeRequest(value: RequestCheckpoint) = JSONObject()
         .put("request_id", value.requestId).put("attempt_id", value.attemptId)
         .put("owner", value.owner).put("operation", value.operation.name)

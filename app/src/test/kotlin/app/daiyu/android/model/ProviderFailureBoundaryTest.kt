@@ -121,14 +121,30 @@ class ProviderFailureBoundaryTest {
             var calls = 0
             val conn = Connection(body(protocol), closeFailure = true)
             val session = port(protocol) { calls++; conn }.open(emptyList())
-            assertSame(protocol.name, original, failure { session.next(emptyList()) {
-                if (cancelInSink) session.cancel()
-                throw original
+            assertSame(protocol.name, original, failure { session.next(emptyList()) { event ->
+                if (event !is ModelEvent.InputEstimate) {
+                    if (cancelInSink) session.cancel()
+                    throw original
+                }
             } })
             assertTrue(original.suppressed.isEmpty())
             assertTrue(conn.closed)
             if (!cancelInSink) assertTrue(failure { session.next(emptyList()) {} } is IllegalStateException)
             assertEquals(1, calls)
+        }
+    }
+
+    @Test fun inputEstimateFailureKeepsIdentityAndNeverConnectsOrReposts() {
+        for (protocol in protocols) {
+            var calls = 0
+            val original = IllegalStateException("local persistence failed")
+            val session = port(protocol) { calls++; Connection(body(protocol)) }.open(emptyList())
+            assertSame(original, failure { session.next(emptyList()) { event ->
+                if (event is ModelEvent.InputEstimate) throw original
+            } })
+            assertEquals(0, calls)
+            assertTrue(failure { session.next(emptyList()) {} } is IllegalStateException)
+            assertEquals(0, calls)
         }
     }
 

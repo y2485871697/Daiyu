@@ -84,6 +84,8 @@ class NativeCompletionModel internal constructor(
             var configuringRequest = true
             try {
                 checkCancelled()
+                deliver(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan)))
+                checkCancelled()
                 val conn = connect(URL(endpoint)); owned = conn; connection = conn
                 checkCancelled()
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false

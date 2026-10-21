@@ -61,10 +61,10 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         return layouts.single()
     }
 
-    private fun assertTarget(tag: String, scale: Float, minimumWidth: Boolean = false, reveal: Boolean = true) {
+    private fun assertTarget(tag: String, scale: Float, minimumWidth: Boolean = false, reveal: Boolean = true, minimumHeight: Float = 48f) {
         val target = ui.onNodeWithTag(tag).let { if (reveal) it.scrollToVisible() else it }.assertIsDisplayed()
         val bounds = target.fetchSemanticsNode().boundsInRoot
-        val minimum = 48f * phoneDensity * scale - 1f
+        val minimum = minimumHeight * phoneDensity * scale - 1f
         assertTrue("$tag has insufficient height: $bounds", bounds.height >= minimum)
         if (minimumWidth) assertTrue("$tag has insufficient width: $bounds", bounds.width >= minimum)
     }
@@ -97,8 +97,17 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertEquals(14.sp, body.layoutInput.style.fontSize)
             assertEquals(21.sp, body.layoutInput.style.lineHeight)
             assertFalse(body.hasVisualOverflow)
-            assertTarget("tool-step-technical:readability", scale)
+            assertTarget("tool-step-technical:readability", scale, minimumHeight = 32f)
+            ui.onNodeWithTag("tool-disclosure-arrow:技术详情", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithTag("tool-step-technical:readability").assert(
+                SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
+            val technical = ui.onNodeWithTag("tool-step-technical:readability").fetchSemanticsNode().boundsInRoot
+            val surface = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("Collapsed technical section must not leave a bottom spacer", surface.bottom - technical.bottom <= 12f * phoneDensity * scale + 1f)
             ui.onNodeWithTag("tool-step-technical:readability").performClick()
+            ui.onNodeWithText("收起技术详情").assertDoesNotExist()
+            ui.onNodeWithTag("tool-step-technical:readability").assert(
+                SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
             val args = layout(ui.onNodeWithTag("tool-document:调用参数", useUnmergedTree = true).scrollToVisible())
             assertEquals(13.sp, args.layoutInput.style.fontSize)
             assertEquals(20.sp, args.layoutInput.style.lineHeight)
@@ -116,7 +125,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         assertEquals(1, actionCount)
     }
 
-    fun testOutputHintNeverCoversPreviewAndFullOutputStillOpens() {
+    fun testOutputHintOverlaysPreviewAndFullOutputStillOpens() {
         for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
             show(dark = dark, scale = 1f, fontScale = fontScale, narrow = true)
             val preview = ui.onNodeWithTag("tool-output-preview:标准输出", useUnmergedTree = true).scrollToVisible()
@@ -124,7 +133,10 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertEquals(13.sp, previewLayout.layoutInput.style.fontSize)
             assertEquals(3, previewLayout.lineCount)
             val hint = ui.onNodeWithTag("tool-output-hint:标准输出", useUnmergedTree = true).scrollToVisible()
-            assertTrue(preview.fetchSemanticsNode().boundsInRoot.bottom <= hint.fetchSemanticsNode().boundsInRoot.top)
+            val previewBounds = preview.fetchSemanticsNode().boundsInRoot
+            val hintBounds = hint.fetchSemanticsNode().boundsInRoot
+            assertTrue(hintBounds.top < previewBounds.bottom)
+            assertTrue(hintBounds.bottom <= previewBounds.bottom + 1f)
             ui.onNodeWithTag("tool-document:标准输出").performClick()
             val full = ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(output)
             assertEquals(13.sp, layout(full).layoutInput.style.fontSize)

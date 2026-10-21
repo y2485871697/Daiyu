@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -151,22 +152,28 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                 step.state in setOf(WorkStepState.PENDING, WorkStepState.UNKNOWN)) Text("工具回执未确认 · 不重放", color = colors.muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp))
             AnimatedVisibility(expanded) {
-                Column(Modifier.padding(bottom = 8.dp).then(
-                    if (step.categoryDetails != null) Modifier.testTag("tool-category:${step.category}") else Modifier
-                ), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    step.categoryDetails?.let { ToolCategoryContent(step.category, it) }
-                    if (step.categoryDetails?.rich?.bodyRestricted != true) toolContent(step)
-                    if (step.categoryDetails == null) {
-                        step.sections.forEach { section -> ToolDetailSection(section, step.category in setOf("terminal", "background_job", "files")) }
+                CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext(step.name, stateLabel)) {
+                    Column(Modifier.padding(bottom = 4.dp).then(
+                        if (step.categoryDetails != null) Modifier.testTag("tool-category:${step.category}") else Modifier
+                    ), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        step.categoryDetails?.let { ToolCategoryContent(step.category, it) }
+                        if (step.categoryDetails?.rich?.bodyRestricted != true) toolContent(step)
+                        if (step.categoryDetails == null) {
+                            step.sections.forEach { section -> ToolDetailSection(section, step.category in setOf("terminal", "background_job", "files")) }
+                        }
+                        val inspect = step.categoryDetails?.rich?.technical.orEmpty()
+                        if (inspect.isNotEmpty()) {
+                            Column(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                                HorizontalDivider(thickness = 1.dp, color = colors.line)
+                                ToolDisclosureHeader("技术详情", technical,
+                                    Modifier.testTag("tool-step-technical:${step.toolCallId}"), compact = true) { technical = !technical }
+                                if (technical) Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    inspect.forEach { ToolDocument(it) }
+                                }
+                            }
+                        }
+                        if (step.categoryDetails == null && step.sections.isEmpty() && step.detail.isNotBlank()) ToolDetailSection(ToolDetailSectionUi("详情", step.detail), false)
                     }
-                    val inspect = step.categoryDetails?.rich?.technical.orEmpty()
-                    if (inspect.isNotEmpty()) {
-                        Text(if (technical) "收起技术详情" else "技术详情", Modifier.fillMaxWidth().testTag("tool-step-technical:${step.toolCallId}").heightIn(min = 48.dp)
-                            .conversationClickable { technical = !technical }.padding(vertical = 3.dp),
-                            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp), color = colors.muted)
-                        if (technical) inspect.forEach { ToolDocument(it) }
-                    }
-                    if (step.categoryDetails == null && step.sections.isEmpty() && step.detail.isNotBlank()) ToolDetailSection(ToolDetailSectionUi("详情", step.detail), false)
                 }
             }
         }

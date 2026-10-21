@@ -26,7 +26,7 @@ class ToolCardPresentationTest {
             assertEquals(name, category, card.category)
             assertTrue(card.title.any { it.code > 127 })
         }
-        assertEquals("打开网页", ToolCardPresentations.present("browser_write", "{\"action\":\"navigate\"}", null).title)
+        assertEquals("打开页面", ToolCardPresentations.present("browser_write", "{\"action\":\"navigate\"}", null).title)
         assertEquals("替换子任务", ToolCardPresentations.present("direct_child_task", "{\"kind\":\"REPLACE\"}", null).title)
     }
     @Test fun futureToolsMalformedArgumentsAndUnknownActionsFallBackWithoutLeakingText() {
@@ -99,11 +99,67 @@ class ToolCardPresentationTest {
 
     @Test fun processTitlesMatchCategoriesAndMixedCallsRemainAChain() {
         assertEquals("设备查询", ToolCardPresentations.processTitle(listOf("device_read")))
-        assertEquals("终端", ToolCardPresentations.processTitle(listOf("terminal", "terminal")))
+        assertEquals("终端命令", ToolCardPresentations.processTitle(listOf("terminal", "terminal")))
         assertEquals("工具链", ToolCardPresentations.processTitle(listOf("terminal", "device_read")))
         assertEquals("工具链", ToolCardPresentations.processTitle(emptyList()))
         assertEquals("工具链", ToolCardPresentations.processTitle(listOf("future_category")))
         ToolCardPresentations.categories.forEach { assertNotEquals("工具链", ToolCardPresentations.processTitle(listOf(it))) }
+    }
+
+    @Test fun allRegisteredNamesAndClosedActionBranchesHaveSpecificPresentation() {
+        val groups = mapOf(
+            "memory" to listOf("assistant_memory_search", "assistant_memory_read"),
+            "skills" to listOf("skills_list", "skills_read", "skills_read_resource"),
+            "delegation" to listOf("run_child_models", "start_child_tasks"),
+            "terminal" to listOf("terminal_pty_step", "terminal_pty_read", "shizuku_execute"),
+            "background_job" to listOf("terminal_job_start", "terminal_job_read"),
+            "files" to listOf("list_files", "file_metadata", "read_text_file"),
+            "gui" to listOf("r08_virtual_display_step", "r08_virtual_display_read"),
+            "apps" to listOf("search_apps"),
+            "device_read" to listOf("get_battery_status", "device_status", "network_status", "device_time", "device_audio", "device_environment", "platform_permissions", "last_known_location"),
+            "personal_search" to listOf("search_media", "calendar_events", "search_contacts", "app_notifications", "current_notifications", "notification_history"),
+            "system_action" to listOf("platform_set_alarm", "platform_set_timer", "platform_set_volume", "platform_media_key", "platform_set_wifi"),
+            "generation" to listOf("generate_images", "generate_videos"),
+            "context" to listOf("context_archive_page", "context_usage"),
+            "user_question" to listOf("ask_user"),
+            "mcp" to (0..7).map { "mcp_${it}_call" },
+        )
+        groups.forEach { (category, names) -> names.forEach { name ->
+            assertEquals(name, category, ToolCardPresentations.present(name, "{}", null).category)
+            assertNotEquals(name, "generic", toolOperationGlyph(name, "{}"))
+        } }
+        val branches = listOf(
+            Triple("browser_write", "action", listOf("list_tabs", "get_readable", "get_text", "find_elements", "get_page_info", "get_backbone", "screenshot", "new_tab", "close_tab", "navigate", "click", "type", "hover", "scroll", "execute_js", "fetch", "get_cookies", "set_cookies", "scroll_and_collect", "set_user_agent", "set_viewport", "wait_for_selector", "wait_for_dom_stable", "reload", "go_back", "go_forward")),
+            Triple("screen_action", "operation", listOf("observe", "screenshot", "tap", "long_press", "scroll_forward", "scroll_backward", "input", "back", "home", "recents", "notifications")),
+            Triple("direct_child_task", "kind", listOf("APPEND", "REPLACE", "REDISPATCH")),
+        )
+        branches.forEach { (name, key, actions) -> actions.forEach { action ->
+            val args = org.json.JSONObject().put(key, action).toString()
+            val actualName = when {
+                name == "browser_write" && action in setOf("list_tabs", "get_readable", "get_text", "find_elements", "get_page_info", "get_backbone", "screenshot") -> "browser_read"
+                name == "screen_action" && action in setOf("observe", "screenshot") -> "screen"
+                else -> name
+            }
+            assertNotEquals(action, "generic", ToolCardPresentations.present(actualName, args, null).category)
+            assertNotEquals(action, "generic", toolOperationGlyph(actualName, args))
+        } }
+        assertEquals("generic", ToolCardPresentations.present("mcp_8_call", "{}", null).category)
+        assertEquals("music", toolOperationGlyph("search_media", """{"kind":"audio"}"""))
+        assertEquals("检索音乐", ToolCardPresentations.present("search_media", """{"kind":"audio"}""", null).title)
+    }
+
+    @Test fun presentationAcceptsSchemaSizedArgumentsWithoutDroppingBrowserCategory() {
+        for (length in listOf(32768, 32769, 65536, 65537)) {
+            val seed = org.json.JSONObject().put("action", "execute_js").put("script", "").toString()
+            val args = org.json.JSONObject().put("action", "execute_js")
+                .put("script", "x".repeat(length - seed.length)).toString()
+            assertEquals(length, args.length)
+            assertEquals(if (length <= 65536) "browser" else "generic",
+                ToolCardPresentations.present("browser_write", args, null).category)
+        }
+        mapOf("skills" to "Skills", "delegation" to "子代理委派与结果", "terminal" to "终端命令",
+            "background_job" to "后台与守护任务", "files" to "文件操作", "image_read" to "图片与视频封面")
+            .forEach { (category, title) -> assertEquals(title, ToolCardPresentations.processTitle(listOf(category))) }
     }
 
 }

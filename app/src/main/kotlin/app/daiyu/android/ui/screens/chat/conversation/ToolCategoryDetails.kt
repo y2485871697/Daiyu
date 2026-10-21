@@ -127,6 +127,6 @@ internal object ToolCategoryDetails {
         if (result == null) fields += ToolFieldUi("返回内容", "尚未收到")
         return ToolCategoryDetailsUi(heading, fields.distinct(), items, notice, ToolRichDetails.project(category, toolName, arguments, result))
     }
-    private fun parse(value: String?): JSONObject? = if (value == null || value.length > 32_768 || !value.trimStart().startsWith('{')) null
+    private fun parse(value: String?): JSONObject? = if (value == null || value.length > 65_536 || !value.trimStart().startsWith('{')) null
         else runCatching { JSONObject(value) }.getOrNull()
 }

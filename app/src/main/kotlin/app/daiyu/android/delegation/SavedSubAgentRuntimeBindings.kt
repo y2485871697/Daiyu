@@ -32,21 +32,20 @@ internal class SavedSubAgentRuntimeBindings(
         val selected = requireNotNull(provider.models.singleOrNull { it.id == profile.modelId }) { "Unknown child model selection" }
         require(selected.isEnabled && selected.modelId == expectedApiModel && expectedApiModel.isNotBlank()) { "Child model selection mismatch" }
         require(!selected.supportsImageGeneration && !selected.supportsVideoGeneration && !selected.supportsSpeechSynthesis) { "Media children are unsupported" }
-        // Protocol-specific reasoning adapters are outside this first text-only stage.
-        require(selected.defaultReasoning == ReasoningEffort.OFF &&
-            (profile.reasoning ?: selected.defaultReasoning) == ReasoningEffort.OFF && !selected.reasoningMandatory &&
-            selected.reasoningEfforts.isEmpty()) { "Child reasoning policy is not supported yet" }
+        val effort = profile.reasoning ?: ReasoningEffort.DEFAULT
+        require(!selected.reasoningMandatory || effort.enablesReasoning) { "This child model requires reasoning" }
         val saved = ModelFactory.snapshot(resolveSavedModel?.invoke(profile.providerId, profile.modelId) ?: loadSettings())
         if (resolveSavedModel != null) require(saved.model == expectedApiModel) { "Saved model record changed" }
         val options = saved.requestOptions
         val body = if (options.customBody.isEmpty()) org.json.JSONObject() else MessagesRequest.jsonObject(options.customBody, 64)
         require(!body.has("model") || body.get("model") == expectedApiModel) { "Saved custom model conflicts with child selection" }
-        require(listOf("reasoning", "thinking", "reasoning_effort", "output_config", "service_tier").none(body::has)) { "Child reasoning policy is not supported yet" }
+        require(!body.has("service_tier")) { "Child service tier must use its configured speed" }
         val speed = profile.gptSpeedByModel[SubAgentProfile.modelReasoningKey(profile.providerId, profile.modelId)] ?: options.speedMode
         if (speed != null || options.codex) require(saved.protocol == ProviderProtocol.RESPONSES && selected.supportsGptSpeed &&
             GptServiceTier.isGptSpeedModel(expectedApiModel)) { "Child GPT policy is unsupported" }
-        val child = ModelFactory.snapshot(saved.asModelSettings().copy(model = expectedApiModel,
+        val childBase = ModelFactory.snapshot(saved.asModelSettings().copy(model = expectedApiModel,
             batteryEnabled = false, deviceStatusEnabled = false, requestOptions = options.copy(speedMode = speed, openAiWebSearchEnabled = false)))
+        val child = ReasoningRequestPolicy.freeze(childBase, effort)
         val detached = profile.copy(reasoningByModel = profile.reasoningByModel.toMap(), gptSpeedByModel = profile.gptSpeedByModel.toMap())
         owned[profile.id] = Approval(detached, saved, child, resolveSavedModel, selected.displayName.ifBlank { child.model })
     }

@@ -6,9 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -29,14 +26,8 @@ import top.yukonga.miuix.kmp.window.WindowDialog
         ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight)) {
             Column(Modifier.fillMaxWidth().padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
                 ConversationAgentHandle()
-                Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(20.dp))
-                    }
+                Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp, lineHeight = 26.sp), modifier = Modifier.weight(1f))
-                    ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Rounded.Close, "关闭", Modifier.size(20.dp))
-                    }
                 }
                 content()
             }

@@ -50,8 +50,9 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
     }
     val media = if (profile.isMedia && config != null) MediaReasoningSettings.resolve(config, profile.role) else null
     val canThink = config != null && (!profile.isMedia || media?.status == MediaReasoningSettings.Status.SUPPORTED)
-    val effective = config?.let { SubAgentPreferences.applyReasoning(profile, it).effectiveReasoningEffort }
-    val efforts = if (profile.isMedia) media?.efforts.orEmpty() else config?.reasoningCapabilities?.selectableEfforts.orEmpty()
+    val thinking = config?.let { subAgentThinkingPreference(profile, it, LocalConversationAgentStyle.current) }
+    val effective = thinking?.effort
+    val efforts = thinking?.options.orEmpty()
     val thinkingLabel = when {
         config == null -> "未选择模型"
         profile.isMedia && !canThink -> media?.label ?: "当前接口未适配"

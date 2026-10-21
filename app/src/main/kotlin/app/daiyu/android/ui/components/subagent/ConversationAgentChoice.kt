@@ -7,8 +7,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,7 +34,6 @@ import top.yukonga.miuix.kmp.window.WindowDialog
                 else listOf(androidx.compose.ui.graphics.Color(0xe8ffffff), androidx.compose.ui.graphics.Color(0xeaf7f3fb))))) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, Modifier.weight(1f), fontSize = 12.sp, lineHeight = 18.sp, color = colors.accent)
-                    ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(29.dp)) { Icon(Icons.Rounded.Close, "关闭", Modifier.size(16.dp), tint = colors.muted) }
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 12.dp), color = colors.line)
                 Box(Modifier.padding(6.dp)) { content() }

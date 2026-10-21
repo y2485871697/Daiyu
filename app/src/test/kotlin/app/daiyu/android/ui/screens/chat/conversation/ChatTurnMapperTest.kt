@@ -109,7 +109,7 @@ class ChatTurnMapperTest {
         val user = message(text("user", "Question")).copy(id = MessageId("user"), role = Message.USER_ROLE)
         val assistant = message().copy(status = RunStatus.FAILED, error = "Offline")
         val ignored = user.copy(role = "system")
-        val turns = ChatTurnMapper.map(listOf(user, assistant, ignored)) { "12:34" }
+        val turns = ChatTurnMapper.map(listOf(user, assistant, ignored), timestamp = { "12:34" })
         assertEquals(2, turns.size)
         val userTurn = turns.first() as ChatTurnUi.User
         assertEquals("user", userTurn.id)
@@ -186,7 +186,7 @@ class ChatTurnMapperTest {
         assertEquals(4, turns.map { it.listKey }.toSet().size)
         assertEquals(listOf("0", "1", "2").map { "turn:12:conversation3:run9:assistant1:$it" },
             assistantTurns.map { it.listKey })
-        assertEquals(turns.map { it.listKey }, ChatTurnMapper.map(listOf(owner)) { "different timestamp" }.map { it.listKey })
+        assertEquals(turns.map { it.listKey }, ChatTurnMapper.map(listOf(owner), timestamp = { "different timestamp" }).map { it.listKey })
     }
 
     @Test fun emptyListIsEmptyAndToolFirstCreatesOneSegment() {

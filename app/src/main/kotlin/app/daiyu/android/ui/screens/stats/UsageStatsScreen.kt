@@ -184,14 +184,6 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                     modifier = Modifier.padding(horizontal = 12.dp).testTag("usage-overview-grid"),
                 )
             }
-            item(key = "usage-scope") {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text(if (stats.recordedProjection?.combined?.requestSnapshotCount == 0L) "暂无已报告用量"
-                        else "输入、输出及缓存为已报告子集，可能不完整；— 表示该项未知或无法计算。", color = usagePalette().muted, fontSize = 12.sp)
-                    if (stats.recordedProjection?.attributed?.scanComplete == false)
-                        Text("部分记录尚未读取，仅显示已读取的用量。", color = usagePalette().muted, fontSize = 12.sp)
-                }
-            }
         }
     }
 }
@@ -276,10 +268,7 @@ private fun ModelUsagePane(
     val filtered = remember(usage, startBound, endBound) {
         usage.filtered(startBound.toMillis(endOfBound = false), endBound.toMillis(endOfBound = true))
     }
-    val timeFiltered = startBound.isSet || endBound.isSet
-    val historical = stats.recordedProjection?.takeIf { it.combined.requestSnapshotCount > 0L }
-    val includesHistorical = !timeFiltered && historical != null
-    val tokens = stats.modelTokens(filtered, timeFiltered)
+    val tokens = stats.modelTokens(filtered)
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -294,30 +283,17 @@ private fun ModelUsagePane(
                 endBound = UsageTimeBound()
             },
         )
-        Text("输入、输出及缓存为已报告子集，可能不完整；— 表示该项未知或无法计算。",
-            color = usagePalette().muted, fontSize = 12.sp)
         Card(Modifier.testTag("usage-model-total")) {
             Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.stats_model_total_title),
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
                 UsageTokenRows(tokens)
                 ModelMetricRow(stringResource(R.string.stats_model_cache_hit_rate),
-                    if (!includesHistorical && stats.tokenAccountingAvailable && filtered.providers.isNotEmpty() && filtered.totalInputTokens > 0L)
+                    if (stats.tokenAccountingAvailable && filtered.providers.isNotEmpty() && filtered.totalInputTokens > 0L)
                         formatCacheHitRate(filtered.totalCachedTokens, filtered.totalInputTokens) else "—")
             }
         }
-        if (includesHistorical) {
-            Card(Modifier.testTag("usage-model-unattributed")) {
-                Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("未归属历史模型", style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
-                    Text("历史记录未包含模型和时间信息。", color = usagePalette().muted, fontSize = 12.sp)
-                    UsageTokenRows(checkNotNull(historical).tokens)
-                }
-            }
-        } else if (timeFiltered && historical != null) {
-            Text("历史用量缺少时间信息，已排除在时间筛选结果之外。", color = usagePalette().muted, fontSize = 12.sp)
-        }
-        if (filtered.providers.isEmpty() && !includesHistorical) {
+        if (filtered.providers.isEmpty()) {
             Text(
                 text = stringResource(
                     if (startBound.isSet || endBound.isSet) {

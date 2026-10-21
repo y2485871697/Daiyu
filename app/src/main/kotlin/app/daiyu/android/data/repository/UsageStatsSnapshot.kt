@@ -29,19 +29,11 @@ internal data class UsageStatsSnapshot(
 ) {
     val recordedProjection: RecordedUsageProjection? get() = attributedUsage?.let(::RecordedUsageProjection)
     val overviewTokens: UsageTokenMetrics get() = recordedProjection?.tokens ?: UsageTokenMetrics()
-    fun modelTokens(filtered: ModelUsageSnapshot, timeFiltered: Boolean): UsageTokenMetrics {
-        val known = if (tokenAccountingAvailable && filtered.providers.isNotEmpty()) UsageTokenMetrics(
+    fun modelTokens(filtered: ModelUsageSnapshot): UsageTokenMetrics =
+        if (tokenAccountingAvailable && filtered.providers.isNotEmpty()) UsageTokenMetrics(
             filtered.totalInputTokens, filtered.totalOutputTokens, filtered.totalCachedTokens,
-            filtered.totalCacheCreationTokens, filtered.totalTokens) else null
-        val historical = if (timeFiltered) null else recordedProjection
-            ?.takeIf { it.combined.requestSnapshotCount > 0L }?.tokens
-        return when {
-            known != null && historical != null -> known + historical
-            known != null -> known
-            historical != null -> historical
-            else -> UsageTokenMetrics()
-        }
-    }
+            filtered.totalCacheCreationTokens, filtered.totalTokens,
+        ) else UsageTokenMetrics()
     val totalConversations: Int get() = currentConversations
     val totalMessages: Int get() = currentMessages
     val totalInputTokens: Long get() = lifetimeInputTokens

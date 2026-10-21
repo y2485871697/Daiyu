@@ -32,11 +32,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** Local usage/context presentation only. Never installs a theme above settings. */
 internal data class UsagePalette(val dark: Boolean) {
     val text = Color(if (dark) 0xffe0dce8 else 0xff36333f)
-    val muted = Color(if (dark) 0xff7a7786 else 0xffa19aa9)
-    val accent = Color(if (dark) 0xffb4a3f7 else 0xff7663bd)
+    val muted = Color(if (dark) 0xff918997 else 0xff968b9f)
+    val accent = Color(if (dark) 0xffc6b6d5 else 0xff82718f)
     val toolbar = Color(if (dark) 0xffb2a9c7 else 0xff716a82)
-    val line = Color(if (dark) 0xff2b283a else 0xffece7f5)
-    val bubble = Color(if (dark) 0xff26233d else 0xfff0ecfc)
+    val line = Color(if (dark) 0xff393540 else 0xffe6e1e8)
+    val bubble = Color(if (dark) 0xff28262f else 0xfff1eff3)
     val background = Color(if (dark) 0xff101218 else 0xffffffff)
     val sheet = listOf(Color(if (dark) 0xf22e283b else 0xf0ffffff), Color(if (dark) 0xf21b1825 else 0xf0f8f4ff))
     val edge = Color(if (dark) 0x26dccdff else 0xedffffff)

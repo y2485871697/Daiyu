@@ -84,18 +84,15 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         pending.completeExceptionally(IllegalStateException("private synthetic error details"))
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("usage-error").fetchSemanticsNodes().size == 1 }
         node("usage-loading").assertDoesNotExist()
-        ui.onNodeWithText("暂无已报告用量").assertDoesNotExist()
         ui.onNodeWithText("private synthetic error details").assertDoesNotExist()
         node("usage-retry").performClick()
         ui.waitUntil(5_000) { calls.get() == 2 && ui.onAllNodesWithTag("usage-error").fetchSemanticsNodes().isEmpty() }
-        usagePage().scrollToDescendant(hasText("暂无已报告用量"))
-        ui.onNodeWithText("暂无已报告用量").assertExists()
         assertEquals(0, fixture.opens.get())
     }
     fun testIncompleteScanHasShortCoverageNoticeWithoutRawDiagnostics() {
         show { empty(incomplete = true) }
-        usagePage().scrollToDescendant(hasText("部分记录尚未读取，仅显示已读取的用量。"))
-        ui.onNodeWithText("部分记录尚未读取，仅显示已读取的用量。").assertExists()
+        ui.onNodeWithText("部分记录尚未读取，仅显示已读取的用量。").assertDoesNotExist()
+        ui.onNodeWithText("输入、输出及缓存为已报告子集", substring = true).assertDoesNotExist()
         ui.onNodeWithText("缺 checkpoint", substring = true).assertDoesNotExist()
         ui.onNodeWithText("预算延后", substring = true).assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
@@ -194,16 +191,18 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testReportedUsageLivesInMainCardsAndUnknownModelBucketRespectsTimeFilter() {
+    fun testModelUsageDoesNotMixUnattributedHistoricalUsageOrShowExplanatoryCopy() {
         show { reported() }
         assertMetric(R.string.stats_page_token_total, "320")
         assertMetric("输入（含缓存）", "250")
         ui.onNodeWithText("已记录请求").assertDoesNotExist()
-        usagePage().scrollToDescendant(hasText("输入、输出及缓存为已报告子集，可能不完整；— 表示该项未知或无法计算。"))
-        ui.onNodeWithText("输入、输出及缓存为已报告子集，可能不完整；— 表示该项未知或无法计算。").assertIsDisplayed()
         selectTab(R.string.stats_tab_models)
-        usagePage().scrollToDescendant(hasTestTag("usage-model-unattributed"))
-        node("usage-model-unattributed").assertIsDisplayed()
+        node("usage-model-unattributed").assertDoesNotExist()
+        ui.onNodeWithText("历史记录未包含模型和时间信息。").assertDoesNotExist()
+        ui.onNodeWithText("历史用量缺少时间信息，已排除在时间筛选结果之外。").assertDoesNotExist()
+        usagePage().scrollToDescendant(hasTestTag("usage-model-total"))
+        node("usage-model-total").assertIsDisplayed()
+        ui.onAllNodesWithText("320").assertCountEquals(0)
         val filter = activity.getString(R.string.stats_model_filter_title)
         usagePage().scrollToDescendant(hasText(filter))
         ui.onNode(hasText(filter) and hasClickAction()).performClick()
@@ -211,12 +210,10 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         usagePage().scrollToDescendant(hasText(today) and hasClickAction())
         ui.onNode(hasText(today) and hasClickAction()).performClick()
         node("usage-model-unattributed").assertDoesNotExist()
-        usagePage().scrollToDescendant(hasText("历史用量缺少时间信息，已排除在时间筛选结果之外。"))
         val clear = activity.getString(R.string.stats_model_filter_clear)
         usagePage().scrollToDescendant(hasText(clear))
         ui.onNodeWithText(clear).performClick()
-        usagePage().scrollToDescendant(hasTestTag("usage-model-unattributed"))
-        node("usage-model-unattributed").assertIsDisplayed()
+        node("usage-model-unattributed").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 

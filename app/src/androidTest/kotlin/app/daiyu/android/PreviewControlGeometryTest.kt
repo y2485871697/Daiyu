@@ -125,7 +125,7 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
             } }
             awaitUniqueTag("agent-default-primary")
             fun sample(tag: String): Color {
-                val pixels = captureScreenNode(node(tag)).toPixelMap()
+                val pixels = node(tag).captureToImage().toPixelMap()
                 return pixels[pixels.width / 2, (pixels.height * .15f).toInt()]
             }
             fun matches(expected: Color, actual: Color) {

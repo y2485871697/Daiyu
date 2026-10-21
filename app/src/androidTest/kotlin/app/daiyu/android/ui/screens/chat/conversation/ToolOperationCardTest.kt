@@ -27,16 +27,17 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         } }
         ui.waitForIdle()
     }
-    private fun source(mixed: Boolean): Message {
-        val owner = MessageImageOwner("conversation", "message")
+    private fun source(mixed: Boolean, fixtureKey: String = ""): Message {
+        val messageId = "message$fixtureKey"
+        val owner = MessageImageOwner("conversation", messageId)
         val image = MessageBlock.Image(MessageImageReference(owner, "00000000-0000-0000-0000-000000000001", "image/png", 10, "b".repeat(64), 2, 2))
         val blocks = buildList {
             add(MessageBlock.Text("before", "before operation"))
             if (mixed) add(image)
-            add(MessageBlock.Tool(ToolInvocation(ToolCallId("card-call"), "terminal_pty_read", "{}"), "{\"wait_status\":0,\"stdout\":\"secret-output\"}"))
+            add(MessageBlock.Tool(ToolInvocation(ToolCallId("card-call$fixtureKey"), "terminal_pty_read", "{}"), "{\"wait_status\":0,\"stdout\":\"secret-output\"}"))
             add(MessageBlock.Text("after", "final answer"))
         }
-        return Message(MessageId("message"), ConversationId("conversation"), RunId("run"), Message.ASSISTANT_ROLE, blocks, RunStatus.COMPLETED)
+        return Message(MessageId(messageId), ConversationId("conversation"), RunId("run"), Message.ASSISTANT_ROLE, blocks, RunStatus.COMPLETED)
     }
     fun testBothProductionPathsRenderCallOnceAndDisclosureNeverRetries() {
         var executions = 0
@@ -98,7 +99,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val name = if (device) "device_time" else "platform_set_wifi"
             val result = if (device) """{"ok":true,"data":{"local_iso":"2026-04-18T21:22:00+08:00","timezone":"Asia/Shanghai","epoch_ms":1}}"""
                 else """{"ok":true,"message":"系统已记录请求"}"""
-            val message = source(mixed).copy(blocks = source(mixed).blocks.map { block ->
+            val original = source(mixed, "-compact-$mixed-$device")
+            val message = original.copy(blocks = original.blocks.map { block ->
                 if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = name,
                     arguments = """{"enabled":true}"""), result = result) else block
             })
@@ -145,7 +147,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             assertEquals(expected.green, actual.green, .025f)
             assertEquals(expected.blue, actual.blue, .025f)
             ui.onNodeWithTag("tool-document:标准输出").performClick()
-            ui.onNodeWithTag("tool-output-text").assertTextEquals("hello")
+            ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals("hello")
             ui.onNodeWithTag("tool-output-close").performClick()
             ui.onNodeWithText("运行回执").assertDoesNotExist()
         }

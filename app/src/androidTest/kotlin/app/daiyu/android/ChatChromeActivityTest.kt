@@ -263,15 +263,28 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 val expected = if (label == "追加消息") colors.appendContainer else colors.sendContainer
                 val tag = if (label == "发送" || label == "追加消息") "chat-send" else "chat-control"
                 val pixels = node(tag).assertIsEnabled().captureToImage().toPixelMap()
-                val matches = (0 until pixels.width).filter { x ->
-                    val color = pixels[x, pixels.height / 2]
+                fun distance(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Float {
+                    val red = a.red - b.red
+                    val green = a.green - b.green
+                    val blue = a.blue - b.blue
+                    return red * red + green * green + blue * blue
+                }
+                val y = pixels.height / 2
+                val exactFill = (0 until pixels.width).any { x ->
+                    val color = pixels[x, y]
                     abs(color.red - expected.red) < .025f &&
                         abs(color.green - expected.green) < .025f &&
                         abs(color.blue - expected.blue) < .025f
                 }
-                assertTrue("$label must draw its circular surface in dark=$dark, scale=$scale", matches.isNotEmpty())
-                val diameter = (matches.last() - matches.first() + 1) / density
-                assertEquals("$label visible circle must not shrink with its 32dp touch slot", 28f, diameter, 1.5f)
+                assertTrue("$label must draw its circular surface in dark=$dark, scale=$scale", exactFill)
+                val covered = (0 until pixels.width).filter { x ->
+                    val background = pixels[if (x < pixels.width / 2) 0 else pixels.width - 1, y]
+                    distance(pixels[x, y], expected) < distance(pixels[x, y], background)
+                }
+                assertTrue("$label must have a measurable circular surface", covered.isNotEmpty())
+                val diameter = (covered.last() - covered.first() + 1) / density
+                assertEquals("$label circle dark=$dark scale=$scale density=$density bitmap=${pixels.width}x${pixels.height}",
+                    28f, diameter, 1.5f)
             }
         }
     }

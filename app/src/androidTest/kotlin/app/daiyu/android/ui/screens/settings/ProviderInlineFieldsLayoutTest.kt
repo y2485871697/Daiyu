@@ -115,6 +115,7 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
         val value = "header-layout-canary"
         mainThread { draft = ModelSettingsDraftUi(customHeaders = """{"X-Project":"$value"}""") }
         show(headers = true); open(headers = true)
+        val beforeToggle = draft
         control("model-header-value:0").performClick().performTextInputSelection(TextRange(7))
         for (visible in listOf(true, false, true)) {
             control("settings-secret-visibility:值").performClick()
@@ -124,7 +125,7 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
                 .assertEditableText(if (visible) value else "\u2022".repeat(value.length))
                 .assert(if (visible) SemanticsMatcher.keyNotDefined(SemanticsProperties.Password)
                     else SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-            assertEquals(value, draft.headerFieldRows!!.single().value)
+            assertSame(beforeToggle, draft)
         }
         control("model-header-value:0").performTextInput("!")
         awaitVisualIdle()

@@ -6,6 +6,7 @@ import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import app.daiyu.android.ui.haptics.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -75,6 +76,8 @@ internal fun ChatModelPicker(
     var searchCollapsed by remember(query) { mutableStateOf(emptySet<String>()) }
     val colors = usagePalette()
     val search = query.trim()
+    val listState = rememberLazyListState()
+    LaunchedEffect(search) { listState.scrollToItem(0) }
     val groups = remember(state.providers, state.models, state.providerId, search) {
         state.providers.ifEmpty {
             listOf(ChatModelProviderUi(state.providerId, "当前供应商", state.models))
@@ -105,10 +108,10 @@ internal fun ChatModelPicker(
                         .semantics { contentDescription = "搜索模型或供应商" }
                         .onFocusChanged { searchFocused = it.isFocused }
                         .heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(colors.background)
-                        .border(1.dp, if (searchFocused) colors.accent else colors.line, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                        .border(1.dp, if (searchFocused) colors.accent else colors.line, RoundedCornerShape(14.dp)),
                     decorationBox = { input ->
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Icon(DaiyuIcons.Search, null, Modifier.size(20.dp), tint = colors.muted)
                             Box(Modifier.weight(1f)) {
                                 if (query.isEmpty()) Text("搜索模型 / 供应商", color = colors.muted, fontSize = 14.sp, lineHeight = 22.sp)
@@ -120,7 +123,8 @@ internal fun ChatModelPicker(
                 Spacer(Modifier.height(16.dp))
                 if (status != null) Text(status, color = colors.muted, fontSize = 13.sp, lineHeight = 20.sp,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
-                LazyColumn(Modifier.testTag("chat-model-list").fillMaxWidth().weight(1f).padding(end = 2.dp)) {
+                LazyColumn(Modifier.testTag("chat-model-list").fillMaxWidth().weight(1f).padding(end = 2.dp),
+                    state = listState) {
                     groups.forEach { provider ->
                         val open = if (search.isNotEmpty()) provider.id !in searchCollapsed else expanded == provider.id
                         val surface = Color.White.copy(alpha = if (colors.dark) .012f else .14f)

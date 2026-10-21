@@ -92,8 +92,8 @@ class OtherPagePositionActivityTest : WiredActivityTestCase() {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
                 WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access, engineeringUi = true)
             } } }
-            awaitUniqueTag("workspace-browse:0")
             node("page:工作区").scrollToDescendant(hasTestTag("workspace-browse:0"))
+            awaitUniqueTag("workspace-browse:0")
             node("workspace-browse:0").performClick()
             ui.waitUntil(5_000) { queries.get() == 1 && ui.onAllNodesWithText("正在读取目录").fetchSemanticsNodes().isEmpty() }
             node("page:工作区").scrollToDescendant(hasTestTag("workspace-file:30"))

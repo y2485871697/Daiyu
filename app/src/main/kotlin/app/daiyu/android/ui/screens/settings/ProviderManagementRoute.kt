@@ -215,6 +215,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
                 detail?.let {
+                    it.pageUi.checkpointModelPositionForResume()
                     pausedDraft = PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft, it.balanceConfiguration, it.pageUi)
                 }
                 authentication = false

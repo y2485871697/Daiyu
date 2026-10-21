@@ -134,6 +134,18 @@ for attempt in $(seq 1 60); do
   sleep 2
 done
 test "$stable" -ge 15
+# Large native framebuffer permits the phone-density fixture; all other tests keep the original canvas.
+verify_display_baseline() {
+  local phase=$1
+  adb_stage display-size-state 15 shell wm size | tr -d '\r' > "smoke/display-size-$phase.txt"
+  adb_stage display-density-state 15 shell wm density | tr -d '\r' > "smoke/display-density-$phase.txt"
+  grep -Fx 'Physical size: 1216x2432' "smoke/display-size-$phase.txt"
+  grep -Fx 'Override size: 320x640' "smoke/display-size-$phase.txt"
+  awk '/Physical density:/ {density=$NF} /Override density:/ {density=$NF} END {exit density != 160}' "smoke/display-density-$phase.txt"
+}
+adb_stage display-size 15 shell wm size 320x640
+adb_stage display-density 15 shell wm density 160
+verify_display_baseline before
 adb_stage memory 15 shell cat /proc/meminfo > smoke/memory-start.txt
 if test -n "${EMULATOR_RAM_MB:-}"; then
   awk -v expected="$EMULATOR_RAM_MB" '/^MemTotal:/ {found=1; if ($2 < expected * 1024 * 0.9) exit 1} END {if (!found) exit 1}' smoke/memory-start.txt
@@ -165,6 +177,7 @@ PYSELECTION
 else
   printf '%s skip phase=instrumentation reason=filtered-empty-shard\n' "$(date -u +%FT%TZ)" | tee -a smoke/stages.txt >&3
 fi
+verify_display_baseline after
 adb_stage packages 20 shell pm list packages > smoke/packages.txt
 if grep -q 'package:io.github.mangi.eta$' smoke/packages.txt; then exit 1; fi
 # Verify a fresh application launch, independent of instrumentation Activity state.

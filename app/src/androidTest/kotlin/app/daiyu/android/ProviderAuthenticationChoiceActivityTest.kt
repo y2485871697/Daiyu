@@ -44,6 +44,10 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("page:empty-catalog fixture")
         reveal("model-save", "empty-catalog fixture", "model_save").assertTextContains("保存配置")
         reveal("provider-delete", "empty-catalog fixture", "provider_delete").performClick()
+        awaitUniqueTag("dialog-confirm")
+        awaitNodeWindowFocus(node("dialog-confirm"))
+        awaitVisualIdle()
+        node("dialog-confirm").assertIsDisplayed().assertIsEnabled()
         node("dialog-confirm").performClick()
         awaitControl("new provider deleted") {
             fixture.controller.providers.snapshot().providers == before.providers

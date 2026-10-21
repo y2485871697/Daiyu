@@ -179,7 +179,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-document:标准输出").performClick()
             ui.onNodeWithText(body).assertExists()
             ui.onNodeWithText("读取输出 · 输出").assertExists()
-            ui.onNodeWithTag("tool-output-meta").assertTextContains("1 行")
+            ui.onNodeWithTag("tool-output-meta").assertTextEquals("1 行 · 成功")
             ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assert(
                 SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsActions.OnClick))
             ui.onNodeWithTag("tool-output-close").assertHasClickAction()

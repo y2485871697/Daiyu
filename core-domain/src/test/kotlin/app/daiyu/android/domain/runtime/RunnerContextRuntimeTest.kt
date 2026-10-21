@@ -109,4 +109,70 @@ class RunnerContextRuntimeTest {
             if (correction == null || !estimate) assertNull(store.snapshots.last().context!!.calibration)
         }
     }
+    @Test fun reconnectRemapsContextAnchorsBeforeResumeAdmission() {
+        val store = Store(); var opens = 0; var nexts = 0; var resumes = 0
+        lateinit var original: RequestCheckpoint
+        val checkedStore = object : AtomicRuntimeStore {
+            override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+                checkpoint.context?.let { state ->
+                    listOfNotNull(state.input?.request, state.calibration?.request, state.pressure)
+                        .forEach { require(it in checkpoint.usageRequests) }
+                }
+                store.commitCheckpoint(checkpoint)
+            }
+            override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint = error("no recovery")
+        }
+        fun assertAnchors(checkpoint: RunCheckpoint, request: RequestCheckpoint) {
+            val state = checkNotNull(checkpoint.context)
+            assertEquals(RequestInputCheckpoint(request, 100L, historyTokens = 70L), state.input)
+            assertEquals(RequestInputCheckpoint(request, 100L, 900L, 70L), state.calibration)
+            assertEquals(request, state.pressure)
+            assertEquals(listOf(request), checkpoint.usageRequests)
+        }
+        val runtime = object : RunContextRuntime {
+            override val windowTokens = 1000L
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 70L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? = error("pressure was cleared")
+        }
+        val model = ModelPort {
+            opens++
+            object : ResumableModelSession {
+                override val canResume = true
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    nexts++; assertTrue(outputs.isEmpty())
+                    original = checkNotNull(store.snapshots.last().request)
+                    assertEquals(RequestOperation.NEXT, original.operation)
+                    sink(ModelEvent.InputEstimate(100)); sink(ModelEvent.Usage(900, 10))
+                    assertAnchors(store.snapshots.last(), original)
+                    throw ModelRequestException(ModelFailure.NETWORK)
+                }
+                override fun resume(sink: (ModelEvent) -> Unit) {
+                    resumes++
+                    val admitted = store.snapshots.last(); val resumed = checkNotNull(admitted.request)
+                    assertEquals(ExecutionPhase.STREAMING, admitted.phase); assertTrue(admitted.requestUnconfirmed)
+                    assertEquals(RequestOperation.RESUME, resumed.operation)
+                    assertEquals(original.requestId, resumed.requestId); assertEquals(original.owner, resumed.owner)
+                    assertNotEquals(original.attemptId, resumed.attemptId); assertAnchors(admitted, resumed)
+                    sink(ModelEvent.Usage(100, 12)); sink(ModelEvent.TextFinal("answer", "ok"))
+                }
+                override fun cancel() {}
+            }
+        }
+        val result = ChatRunner(model, object : ConversationStore {
+            override fun save(message: Message) = error("atomic only")
+        }, BatteryTool { error("no tools") }, RunnerOptions(reconnect = ReconnectPolicy(1),
+            runtimeStore = checkedStore, contextRuntime = runtime)) {}.run(initial, emptyList())
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals("ok", result.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+        assertEquals(1, opens); assertEquals(1, nexts); assertEquals(1, resumes)
+        assertTrue(store.snapshots.any { it.phase == ExecutionPhase.RECONNECTING })
+        val last = store.snapshots.last(); val request = checkNotNull(last.request)
+        assertEquals(ExecutionPhase.TERMINAL, last.phase); assertFalse(last.requestUnconfirmed)
+        assertEquals(RequestOperation.RESUME, request.operation)
+        assertEquals(RequestInputCheckpoint(request, 100L, 100L, 70L), last.context!!.calibration)
+        assertNull(last.context!!.pressure)
+        assertEquals(RequestUsageCheckpoint(request, ModelEvent.Usage(100, 12)), last.usage.single())
+    }
 }

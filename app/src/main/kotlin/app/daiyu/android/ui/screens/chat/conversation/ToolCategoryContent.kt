@@ -50,12 +50,14 @@ internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsU
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         when (category) {
             "terminal", "background_job" -> {
+                val documents = rich.documents.filter { it.title != "工作目录" }
+                documents.forEach { CategoryDocument(it) }
+                if (documents.none { it.title != "命令" && it.title != "会话输入" }) rich.prose?.let { Document(it) }
+                Fields((details.fields + rich.fields).filter { it.label in setOf("退出码", "返回状态", "命令完成确认") }.distinct())
                 Disclosure("运行环境", "tool-runtime") {
-                    Fields(rich.fields)
+                    Fields((rich.fields + details.fields).filter { it.label !in setOf("退出码", "返回状态", "命令完成确认") }.distinct())
                     rich.documents.filter { it.title == "工作目录" }.forEach { Document(it) }
                 }
-                Fields(details.fields)
-                rich.documents.filter { it.title != "工作目录" }.forEach { CategoryDocument(it) }
             }
             "delegation", "child_control" -> {
                 Fields(details.fields + rich.fields)
@@ -95,7 +97,10 @@ internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsU
                 EntryList(rich.entries, "媒体记录")
                 rich.documents.forEach { CategoryDocument(it) }
             }
-            "device_read", "system_action", "context" -> {
+            "device_read", "system_action" -> {
+                rich.prose?.let { Document(it) }
+            }
+            "context" -> {
                 Fields(rich.fields + details.fields)
                 EntryList(rich.entries, "记录")
                 rich.documents.forEach { CategoryDocument(it) }
@@ -164,20 +169,21 @@ private fun Document(document: ToolDisclosureUi) {
     val preview = toolOutputPreview(document.text, tail = log)
     val tappable = log || preview.truncated
     val colors = conversationColors()
-    val style = MiuixTheme.textStyles.footnote1.copy(fontSize = if (document.code) 8.5.sp else 8.sp,
-        lineHeight = if (document.code) 14.sp else 13.6.sp,
-        fontFamily = if (document.code) FontFamily.Monospace else FontFamily.Default)
+    val code = document.code || log || preview.truncated
+    val style = MiuixTheme.textStyles.footnote1.copy(fontSize = if (code) 8.5.sp else 8.sp,
+        lineHeight = if (code) 14.sp else 13.6.sp,
+        fontFamily = if (code) FontFamily.Monospace else FontFamily.Default)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SectionTitle(document.title)
+        if (document.title.isNotBlank()) SectionTitle(document.title)
         val shape = RoundedCornerShape(8.dp)
         // A prose return is a paragraph, not another nested card.
-        val surface = if (document.code || log) Modifier.fillMaxWidth().clip(shape)
+        val surface = if (code) Modifier.fillMaxWidth().clip(shape)
             .background(colors.soft).border(1.dp, colors.line, shape)
         else Modifier.fillMaxWidth()
         if (tappable) Box(surface.testTag("tool-document:${document.title}")
             .conversationClickable(onClickLabel = "查看${document.title}") { opened = true }) {
             Text(preview.text, modifier = Modifier.fillMaxWidth()
-                .padding(start = 9.dp, end = 9.dp, top = 8.dp, bottom = 26.dp)
+                .padding(start = 9.dp, end = 9.dp, top = 8.dp, bottom = 14.dp)
                 .testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = colors.text)
             val hintBackground = if (colors.dark) Color(0xFF191B23) else Color(0xFFFAF9FC)
@@ -187,8 +193,8 @@ private fun Document(document: ToolDisclosureUi) {
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 13.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.End), color = colors.muted)
         } else SelectionContainer {
-            Text(document.text, if (document.code) surface.padding(horizontal = 9.dp, vertical = 8.dp)
-                else surface.padding(vertical = 2.dp), style = style, color = colors.text)
+            Text(document.text, (if (code) surface.padding(horizontal = 9.dp, vertical = 8.dp)
+                else surface.padding(vertical = 2.dp)).testTag("tool-document:${document.title}"), style = style, color = colors.text)
         }
     }
     if (opened) PreviewDialog({ opened = false }) {

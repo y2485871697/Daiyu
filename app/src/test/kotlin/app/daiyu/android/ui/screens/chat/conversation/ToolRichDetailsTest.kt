@@ -13,6 +13,59 @@ class ToolRichDetailsTest {
             assertTrue(category, value.documents.any { it.text.contains("unique receipt body") })
         }
     }
+    @Test fun compactDeviceProseKeepsOnlyReturnedValuesAndTechnicalReceipt() {
+        val time = ToolRichDetails.project("device_read", "device_time", "{}",
+            """{"ok":true,"data":{"local_iso":"2026-04-18T21:22:00+08:00","timezone":"Asia/Shanghai","epoch_ms":1}}""")
+        assertEquals("2026-04-18T21:22:00+08:00 · Asia/Shanghai", time.prose!!.text)
+        assertFalse(time.prose!!.text.contains("epoch_ms"))
+        assertTrue(time.technical.any { it.title == "调用回执" && it.text.contains("epoch_ms") })
+        val location = ToolRichDetails.project("device_read", "last_known_location", "{}",
+            """{"ok":true,"data":{"latitude":31.2,"longitude":121.4,"accuracy_m":20,"age_ms":6000}}""")
+        assertEquals("最近位置：31.2, 121.4 · 精度 20米 · 样本距读取时 6000毫秒", location.prose!!.text)
+        val absent = ToolRichDetails.project("device_read", "last_known_location", "{}",
+            """{"ok":false,"status":"no_cached_location","error":"no_cached_location"}""")
+        assertEquals("没有可用的最近位置缓存", absent.prose!!.text)
+        assertEquals("等待执行回执", ToolRichDetails.project("device_read", "device_time", "{}", null).prose!!.text)
+        for (payload in listOf("""{"ok":true,"data":{"latitude":"unknown","longitude":121}}""",
+            """{"ok":true,"data":{"latitude":999,"longitude":121}}""")) {
+            assertFalse(ToolRichDetails.project("device_read", "last_known_location", "{}", payload).prose!!.text.contains("最近位置"))
+        }
+        val private = ToolRichDetails.project("device_read", "last_known_location", "{}",
+            """{"privacy_redacted":true,"status":"private_result_withheld","data":{"latitude":31,"longitude":121}}""")
+        assertEquals("结果未获展示授权", private.prose!!.text)
+    }
+
+    @Test fun systemActionProseNeverPromotesRequestedValuesToConfirmation() {
+        val pending = ToolRichDetails.project("system_action", "platform_set_wifi", """{"enabled":true}""",
+            """{"accepted":true}""")
+        assertEquals("已收到系统回执，详情见技术详情", pending.prose!!.text)
+        assertFalse(pending.prose!!.text.contains("true"))
+        assertTrue(pending.technical.any { it.title == "调用参数" && it.text.contains("enabled") })
+        val receipt = ToolRichDetails.project("system_action", "platform_set_wifi", """{"api_key":"PRIVATE_KEY"}""",
+            """{"ok":true,"message":"PRIVATE_KEY request recorded"}""")
+        assertEquals("[已隐藏] request recorded", receipt.prose!!.text)
+        val denied = ToolRichDetails.project("system_action", "platform_set_wifi", "{}",
+            """{"ok":false,"status":"permission_denied"}""")
+        assertEquals("缺少本次操作所需权限", denied.prose!!.text)
+    }
+
+    @Test fun terminalMetadataRemainsTechnicalWhileCommandAndLogsKeepCodeStyle() {
+        for (category in listOf("terminal", "background_job")) {
+            val value = ToolRichDetails.project(category, "terminal_pty_step", """{"command":"printf hello","cwd":"/tmp"}""",
+                """{"opened":true,"command_completion":"unknown","stdout":""}""")
+            assertEquals(setOf("命令", "工作目录"), value.documents.map { it.title }.toSet())
+            assertTrue(value.documents.all { it.code })
+            assertEquals("已收到运行回执，未返回输出", value.prose!!.text)
+            assertTrue(value.technical.any { it.text.contains("command_completion") })
+            val logged = ToolRichDetails.project(category, "terminal_pty_read", "{}", """{"stdout":"hello","exit_code":0}""")
+            assertEquals("hello", logged.documents.single { it.title == "标准输出" && it.code }.text)
+            assertFalse(logged.documents.any { it.title == "运行回执" })
+            val plain = ToolRichDetails.project(category, "terminal_pty_read", "{}", "actual receipt")
+            assertEquals("actual receipt", plain.documents.single().text)
+            assertFalse(plain.documents.single().code)
+        }
+    }
+
     @Test fun cookieCardsExposeOnlyWhitelistedMetadata() {
         val value = ToolRichDetails.project("browser", "browser_use", """{"action":"get_cookies"}""",
             """{"cookies":[{"name":"session","domain":"example.com","secure":true,"value":"COOKIE_VALUE","content":"COOKIE_CONTENT"}]}""")

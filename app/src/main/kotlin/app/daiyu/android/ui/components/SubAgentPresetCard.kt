@@ -70,7 +70,10 @@ internal fun SubAgentPresetDirectoryStatus(directory: SubAgentPresetDirectory) {
     when {
         directory.error != null -> {
             Text("子代理组读取或保存失败：${directory.error}", color = MaterialTheme.colorScheme.error)
-            TextButton(onClick = { TouchHaptics.click(view); directory.retry() }) { Text("重试读取子代理组") }
+            val retry = { TouchHaptics.click(view); directory.retry() }
+            if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
+                app.daiyu.android.ui.components.subagent.ConversationAgentButton("重试读取子代理组", onClick = retry)
+            } else TextButton(onClick = retry) { Text("重试读取子代理组") }
         }
         directory.loading -> Text("正在读取子代理组…")
         directory.entries.isEmpty() -> Text("还没有子代理组，可在设置中添加。")

@@ -97,11 +97,12 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(themeMode = mode), false) {
                     val colors = chatActionColors()
+                    val buttons = app.daiyu.android.ui.screens.assistants.assistantPreviewPalette()
                     SideEffect {
-                        assertEquals(if (mode == AppearanceThemeMode.DARK) androidx.compose.ui.graphics.Color(0xFF7862ED)
-                            else androidx.compose.ui.graphics.Color(0xFFE9E3FB), colors.sendContainer)
-                        assertEquals(if (mode == AppearanceThemeMode.DARK) androidx.compose.ui.graphics.Color(0xFFF1ECFF)
-                            else androidx.compose.ui.graphics.Color(0xFF8D7AC9), colors.sendContent)
+                        assertEquals(if (mode == AppearanceThemeMode.DARK) buttons.primary else buttons.soft, colors.sendContainer)
+                        assertEquals(if (mode == AppearanceThemeMode.DARK) buttons.onPrimary else buttons.accent, colors.sendContent)
+                        assertEquals(buttons.primary, colors.appendContainer)
+                        assertEquals(buttons.onPrimary, colors.appendContent)
                     }
                 }
             } }

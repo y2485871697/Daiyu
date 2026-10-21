@@ -38,10 +38,10 @@ internal fun conversationColors(): ConversationColors {
     val dark = MiuixTheme.colorScheme.surfaceVariant.luminance() < 0.5f
     return if (dark) ConversationColors(true, Color(0xFFE0DCE8), Color(0xFF8F879B),
         Color(0xFFBBAACB), Color(0xFF26233D), Color(0x85282331), Color(0x24C2ADDB),
-        Color(0x13BEA8D7), Color(0xFF9DBAAA), Color(0xFFD29BAA), Color(0xFFC3AF8A))
+        Color(0x13BEA8D7), Color(0xFF9AB3A4), Color(0xFFD896A1), Color(0xFFC3AF8A))
     else ConversationColors(false, Color(0xFF36333F), Color(0xFF918997),
         Color(0xFF756980), Color(0xFFF0ECFC), Color(0x8CFAF8FC), Color(0x2692819F),
-        Color(0x108A779A), Color(0xFF6B8574), Color(0xFFB87987), Color(0xFFA48D65))
+        Color(0x108A779A), Color(0xFF6B8574), Color(0xFFAD626E), Color(0xFFA48D65))
 }
 
 /** Keep native click semantics and interaction tracking, without a ripple indication. */

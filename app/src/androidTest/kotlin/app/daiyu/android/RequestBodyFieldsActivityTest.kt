@@ -39,7 +39,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     }
     private fun fieldControl(tag: String, list: String = "model-body-field-editor-list"): SemanticsNodeInteraction {
         dismissIme()
-        node(list).performScrollToNode(hasTestTag(tag))
+        node(list).scrollToDescendant(hasTestTag(tag))
         return node(tag).assertIsDisplayed()
     }
     private fun beginField(name: String, type: String, value: String) {

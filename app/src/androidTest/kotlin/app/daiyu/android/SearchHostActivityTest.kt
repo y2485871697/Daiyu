@@ -94,7 +94,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         val tag = "search:message:${target.id.value}:${older.id.value}:0"
         awaitTag(tag)
         node("search:message:${other.id.value}:${otherMessage.id.value}:0").assertDoesNotExist()
-        node("search-history-results").performScrollToNode(hasTestTag(tag))
+        node("search-history-results").scrollToDescendant(hasTestTag(tag))
         node(tag).performClick()
         node("chat-title").assertTextEquals("较早命中所在会话")
         awaitTag("chat-turn:${older.id.value}")
@@ -208,13 +208,13 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         replaceSearchQuery("分页UI命中")
         awaitTag("search:message:${conversation.id.value}:paging-ui-user-0:0")
         val lastTag = "search:message:${conversation.id.value}:${last.id.value}:0"
-        node("search-history-results").performScrollToNode(hasTestTag("search:more"))
+        node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
         node("search:more").performClick()
         ui.waitUntil(5_000) {
             ui.onAllNodesWithTag("search:more").fetchSemanticsNodes().isEmpty() &&
                 ui.onAllNodesWithTag("search:loading").fetchSemanticsNodes().isEmpty()
         }
-        node("search-history-results").performScrollToNode(hasTestTag(lastTag))
+        node("search-history-results").scrollToDescendant(hasTestTag(lastTag))
         node(lastTag).performClick()
         node("search-history-dialog").assertDoesNotExist()
         awaitTag("chat-turn:${last.id.value}")

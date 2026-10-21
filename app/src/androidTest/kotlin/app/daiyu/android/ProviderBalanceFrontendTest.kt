@@ -70,6 +70,11 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
     private fun deliver(request: Request, result: BalanceResult = success) {
         mainThread { request.deliver(result) }; ui.waitForIdle()
     }
+    private fun awaitReceipt(expected: String) {
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(expected).fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithText(expected).assertExists()
+    }
     private fun noReceipt() { ui.onAllNodesWithText("仅本次测试", substring = true).assertCountEquals(0) }
 
     fun testFourTemplatesUseIndependentConfigurationAndOnlyDisplayTestReceiptsInBothThemes() {
@@ -104,9 +109,9 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
             assertEquals(mapOf("X-Balance" to "only-header"), config.customHeaders)
             reveal("provider-balance-test", title).assertIsNotEnabled()
             deliver(fake.last)
-            ui.onNodeWithText("余额测试成功：CNY 12.34（仅本次测试，未保存）").assertExists()
+            awaitReceipt("余额测试成功：CNY 12.34（仅本次测试，未保存）")
             start(); deliver(fake.last, BalanceResult.Failed(BalanceFailure.AUTHORIZATION))
-            ui.onNodeWithText("余额查询未授权；请检查独立密钥（仅本次测试，未保存）").assertExists()
+            awaitReceipt("余额查询未授权；请检查独立密钥（仅本次测试，未保存）")
             assertSame(before, draft)
             reveal("settings-switch:余额", title).performClick()
             node("provider-balance-test").assertDoesNotExist()

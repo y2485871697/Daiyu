@@ -53,12 +53,12 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
     private fun tab(label: Int) = "usage-tab:${activity.getString(label)}"
     private fun selectTab(label: Int) {
         val tag = tab(label)
-        usagePage().performScrollToNode(hasTestTag(tag))
+        usagePage().scrollToDescendant(hasTestTag(tag))
         node(tag).performClick().assertIsSelected()
     }
     private fun assertMetric(label: Int, value: String) {
         val tag = "usage-stat:${activity.getString(label)}"
-        usagePage().performScrollToNode(hasTestTag(tag))
+        usagePage().scrollToDescendant(hasTestTag(tag))
         ui.onNode(hasText(value) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
             .assertIsDisplayed()
     }
@@ -75,13 +75,13 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("private synthetic error details").assertDoesNotExist()
         node("usage-retry").performClick()
         ui.waitUntil(5_000) { calls.get() == 2 && ui.onAllNodesWithTag("usage-error").fetchSemanticsNodes().isEmpty() }
-        usagePage().performScrollToNode(hasText("暂无已报告用量"))
+        usagePage().scrollToDescendant(hasText("暂无已报告用量"))
         ui.onNodeWithText("暂无已报告用量").assertExists()
         assertEquals(0, fixture.opens.get())
     }
     fun testIncompleteScanHasShortCoverageNoticeWithoutRawDiagnostics() {
         show { empty(incomplete = true) }
-        usagePage().performScrollToNode(hasText("部分记录尚未读取，仅显示已读取的用量。"))
+        usagePage().scrollToDescendant(hasText("部分记录尚未读取，仅显示已读取的用量。"))
         ui.onNodeWithText("部分记录尚未读取，仅显示已读取的用量。").assertExists()
         ui.onNodeWithText("缺 checkpoint", substring = true).assertDoesNotExist()
         ui.onNodeWithText("预算延后", substring = true).assertDoesNotExist()
@@ -117,7 +117,7 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
             assertMetric(R.string.stats_page_cached_tokens, "60 / 100")
             assertMetric(R.string.stats_page_cache_creation_tokens, "40 / 80")
             assertMetric(R.string.stats_page_launch_count, "8")
-            usagePage().performScrollToNode(hasText("暂无已报告用量"))
+            usagePage().scrollToDescendant(hasText("暂无已报告用量"))
             selectTab(R.string.stats_tab_models)
             node("usage-model-pane").assertExists()
             selectTab(R.string.stats_tab_overview)
@@ -156,24 +156,24 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
             empty().copy(tokenAccountingAvailable = true, modelUsage = usage)
         }
         selectTab(R.string.stats_tab_models)
-        usagePage().performScrollToNode(hasText("Visual model"))
+        usagePage().scrollToDescendant(hasText("Visual model"))
         ui.onNode(hasText("Visual model") and hasClickAction()).performClick()
         val activeDays = activity.getString(R.string.stats_model_active_days)
-        usagePage().performScrollToNode(hasText(activeDays))
+        usagePage().scrollToDescendant(hasText(activeDays))
         ui.onNodeWithText(activeDays).assertIsDisplayed()
         val filterTitle = activity.getString(R.string.stats_model_filter_title)
-        usagePage().performScrollToNode(hasText(filterTitle))
+        usagePage().scrollToDescendant(hasText(filterTitle))
         ui.onNode(hasText(filterTitle) and hasClickAction()).performClick()
         val preset = activity.getString(R.string.stats_model_filter_preset_today)
-        usagePage().performScrollToNode(hasText(preset) and hasClickAction())
+        usagePage().scrollToDescendant(hasText(preset) and hasClickAction())
         ui.onNode(hasText(preset) and hasClickAction()).performClick()
-        usagePage().performScrollToNode(hasText("140"))
+        usagePage().scrollToDescendant(hasText("140"))
         ui.onAllNodesWithText("140").onFirst().assertIsDisplayed()
         ui.onAllNodesWithText("400").assertCountEquals(0)
         val clear = activity.getString(R.string.stats_model_filter_clear)
-        usagePage().performScrollToNode(hasText(clear))
+        usagePage().scrollToDescendant(hasText(clear))
         ui.onNodeWithText(clear).performClick()
-        usagePage().performScrollToNode(hasText("400"))
+        usagePage().scrollToDescendant(hasText("400"))
         ui.onAllNodesWithText("400").onFirst().assertIsDisplayed()
         assertEquals(0, fixture.opens.get())
     }

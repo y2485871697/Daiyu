@@ -105,7 +105,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
     }
 
     private fun setField(tag: String, value: String) {
-        tagged(tag).performScrollTo().performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString(value)) }
+        tagged(tag).scrollToVisible().performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString(value)) }
         tagged(tag).assertTextEquals(value)
     }
 
@@ -114,7 +114,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             show(scale, dark)
             ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
             ui.onNodeWithContentDescription("返回").assertHasClickAction()
-            tagged("assistant-edit-name").performScrollTo()
+            tagged("assistant-edit-name").scrollToVisible()
             assertType(text(R.string.assistant_editor_title), 18.sp, 26.sp)
             assertType(text(R.string.assistant_editor_name), 13.sp, 20.sp)
             assertType("Visual editor", 14.sp, 21.sp)
@@ -127,15 +127,15 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             assertEquals(44f, dp(save.height), .6f)
             assertEquals(8f, dp(save.left - cancel.right), .6f)
             assertEquals(dp(cancel.width), dp(save.width), .6f)
-            tagged("assistant-skill-visual-skill").performScrollTo().assertIsOff()
+            tagged("assistant-skill-visual-skill").scrollToVisible().assertIsOff()
             assertType(text(R.string.assistant_skills_caption), 12.sp, 18.sp)
             assertType("Visual skill", 13.sp, 20.sp)
             assertType("Skill description", 11.sp, 16.sp)
-            tagged("assistant-memory-switch").performScrollTo().assertIsOff()
+            tagged("assistant-memory-switch").scrollToVisible().assertIsOff()
             val toggle = tagged("assistant-memory-switch").fetchSemanticsNode().boundsInRoot
             assertEquals(36f, dp(toggle.width), .6f)
             assertEquals(22f, dp(toggle.height), .6f)
-            tagged("assistant-edit-memory").performScrollTo().assertIsDisplayed()
+            tagged("assistant-edit-memory").scrollToVisible().assertIsDisplayed()
             assertType(text(R.string.assistant_memory_content), 13.sp, 20.sp)
             assertEquals(footer, tagged("assistant-sheet-footer").fetchSemanticsNode().boundsInRoot)
             assertEquals(0, writes.get())
@@ -148,11 +148,11 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
 
     fun testTogglesStayInDraftUntilRevisionCheckedSave() {
         show()
-        tagged("assistant-skill-visual-skill").performScrollTo().performClick()
+        tagged("assistant-skill-visual-skill").scrollToVisible().performClick()
         tagged("assistant-edit-save").assertIsEnabled()
         assertEquals(0, writes.get())
         assertTrue(store.list().single().enabledSkillIds.isEmpty())
-        tagged("assistant-memory-switch").performScrollTo().performClick()
+        tagged("assistant-memory-switch").scrollToVisible().performClick()
         tagged("assistant-edit-save").assertIsEnabled()
         assertEquals(0, saved.get())
         assertFalse(store.list().single().memoryEnabled)
@@ -177,7 +177,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
     fun testToggleOnlySaveAndRevertingToOriginalClearsDirtyState() {
         for (tag in listOf("assistant-skill-visual-skill", "assistant-memory-switch")) {
             show()
-            tagged(tag).performScrollTo().performClick()
+            tagged(tag).scrollToVisible().performClick()
             tagged("assistant-edit-save").assertIsEnabled()
             tagged(tag).performClick()
             tagged("assistant-edit-save").assertIsNotEnabled()
@@ -199,7 +199,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
         val longMemory = (1..80).joinToString("\n") { "Memory line $it" }
         setField("assistant-edit-memory", longMemory)
         for (tag in listOf("assistant-edit-prompt", "assistant-edit-memory")) {
-            val field = tagged(tag).performScrollTo()
+            val field = tagged(tag).scrollToVisible()
             val pageRange = tagged("assistant-editor").fetchSemanticsNode()
                 .config[SemanticsProperties.VerticalScrollAxisRange]
             val beforePage = pageRange.value()
@@ -220,7 +220,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             }
         }
         // A new gesture outside a field must restore ordinary page scrolling.
-        tagged("assistant-skills").performScrollTo()
+        tagged("assistant-skills").scrollToVisible()
         val range = tagged("assistant-editor").fetchSemanticsNode()
             .config[SemanticsProperties.VerticalScrollAxisRange]
         val before = range.value()
@@ -250,7 +250,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                 }
             }
         }
-        tagged("assistant-edit-description").performScrollTo().assertTextEquals("擅长整理资料")
+        tagged("assistant-edit-description").scrollToVisible().assertTextEquals("擅长整理资料")
         tagged("assistant-edit-save").assertIsNotEnabled()
         assertEquals(1, writes.get())
     }
@@ -308,8 +308,8 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
 
     fun testCancelDiscardsUnsavedFields() {
         show()
-        tagged("assistant-skill-visual-skill").performScrollTo().performClick()
-        tagged("assistant-memory-switch").performScrollTo().performClick()
+        tagged("assistant-skill-visual-skill").scrollToVisible().performClick()
+        tagged("assistant-memory-switch").scrollToVisible().performClick()
         setField("assistant-edit-name", "Unsaved name")
         setField("assistant-edit-description", "Unsaved description")
         setField("assistant-edit-prompt", "Unsaved prompt")

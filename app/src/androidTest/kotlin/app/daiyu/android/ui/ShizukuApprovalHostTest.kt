@@ -32,12 +32,12 @@ class ShizukuApprovalHostTest : WiredActivityTestCase() {
     }
 
     private fun ownPreview(): ControllerShizukuPreparation {
-        ui.onNodeWithTag("shizuku-text-enable").performScrollTo().performClick()
+        ui.onNodeWithTag("shizuku-text-enable").scrollToVisible().performClick()
         ui.onNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）"))
-            .performScrollTo().performTextReplacement("2000")
+            .scrollToVisible().performTextReplacement("2000")
         ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
-            .performScrollTo().performTextReplacement("printf own")
-        ui.onNodeWithText("预览命令及本次运行").performScrollTo().performClick()
+            .scrollToVisible().performTextReplacement("printf own")
+        ui.onNodeWithText("预览命令及本次运行").scrollToVisible().performClick()
         ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() != null }
         return checkNotNull(fixture.controller.shizukuPreparation())
     }

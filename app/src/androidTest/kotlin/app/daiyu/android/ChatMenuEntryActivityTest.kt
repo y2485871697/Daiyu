@@ -25,7 +25,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("更多").performClick()
         if (action == ChatMenuAction.OPEN_TERMINAL) node("chat-menu:${action.name}").assertTextContains("打开终端")
         if (action == ChatMenuAction.OPEN_BROWSER) node("chat-menu:${action.name}").assertTextContains("打开浏览器")
-        node("chat-menu:${action.name}").performScrollTo().performClick()
+        node("chat-menu:${action.name}").scrollToVisible().performClick()
     }
 
     private fun context(action: ChatMenuAction) {
@@ -146,7 +146,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
             ui.waitUntil(5_000) {
                 ui.onAllNodes(hasTestTag("chat-menu:AUTO_COMPRESS") and isEnabled()).fetchSemanticsNodes().size == 1
             }
-            node("chat-menu:AUTO_COMPRESS").performScrollTo().performClick()
+            node("chat-menu:AUTO_COMPRESS").scrollToVisible().performClick()
             awaitControl("automatic compression saved") { !store.snapshot().automatic }
             node("chat-overflow-menu").assertIsDisplayed()
             node("page:上下文压缩").assertDoesNotExist()

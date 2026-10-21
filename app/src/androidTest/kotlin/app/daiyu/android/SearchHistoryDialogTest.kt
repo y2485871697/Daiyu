@@ -91,7 +91,7 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
         node("search:query").performTextReplacement("历史")
         dismissIme()
         awaitUniqueTag("search:message:current:result-0:1")
-        node("search-history-results").performScrollToNode(hasTestTag("search:message:current:result-30:1"))
+        node("search-history-results").scrollToDescendant(hasTestTag("search:message:current:result-30:1"))
         node("search:message:current:result-30:1").assertIsDisplayed()
         node("search:query").assertIsDisplayed()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)

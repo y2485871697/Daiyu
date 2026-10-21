@@ -36,12 +36,12 @@ class ShizukuApprovalScreenTest : WiredActivityTestCase() {
         val session = ShizukuRunSession("session", "run")
         val opens = AtomicInteger()
         show(session, opens)
-        node("shizuku-approve").performScrollTo().assertIsNotEnabled()
+        node("shizuku-approve").scrollToVisible().assertIsNotEnabled()
         node("shizuku-open").assertDoesNotExist()
-        node("shizuku-select-shell").performScrollTo().performClick()
-        node("shizuku-script").performScrollTo().performTextReplacement("printf exact")
-        node("shizuku-approve").performScrollTo().performClick()
-        node("shizuku-open").performScrollTo().assertIsEnabled()
+        node("shizuku-select-shell").scrollToVisible().performClick()
+        node("shizuku-script").scrollToVisible().performTextReplacement("printf exact")
+        node("shizuku-approve").scrollToVisible().performClick()
+        node("shizuku-open").scrollToVisible().assertIsEnabled()
         assertEquals(ShizukuApprovalStatus.APPROVED, session.state.status)
         assertEquals(2000, session.state.selectedUid)
         assertEquals(0, opens.get())
@@ -55,14 +55,14 @@ class ShizukuApprovalScreenTest : WiredActivityTestCase() {
             approve(state)
         }
         show(session)
-        node("shizuku-timeout").performScrollTo().performTextReplacement("")
+        node("shizuku-timeout").scrollToVisible().performTextReplacement("")
         assertTrue(session.allowedWrites.isEmpty())
         node("shizuku-open").assertDoesNotExist()
-        node("shizuku-approve").performScrollTo().assertIsNotEnabled()
-        node("shizuku-timeout").performScrollTo().performTextReplacement("1001")
-        node("shizuku-approve").performScrollTo().performClick()
+        node("shizuku-approve").scrollToVisible().assertIsNotEnabled()
+        node("shizuku-timeout").scrollToVisible().performTextReplacement("1001")
+        node("shizuku-approve").scrollToVisible().performClick()
         assertEquals(setOf(RunShizukuCommands.writeEffect(2000, "printf exact", 1001)), session.allowedWrites)
-        node("shizuku-select-root").performScrollTo().performClick()
+        node("shizuku-select-root").scrollToVisible().performClick()
         assertEquals(0, session.state.selectedUid)
         assertTrue(session.allowedWrites.isEmpty())
         node("shizuku-open").assertDoesNotExist()
@@ -74,10 +74,10 @@ class ShizukuApprovalScreenTest : WiredActivityTestCase() {
             approve(state)
         }
         show(session)
-        node("shizuku-revoke").performScrollTo().performClick()
+        node("shizuku-revoke").scrollToVisible().performClick()
         node("shizuku-open").assertDoesNotExist()
         node("shizuku-approve").assertDoesNotExist()
-        node("shizuku-script").performScrollTo().assertIsNotEnabled()
+        node("shizuku-script").scrollToVisible().assertIsNotEnabled()
         assertTrue(session.allowedWrites.isEmpty())
         assertEquals(ShizukuApprovalStatus.REVOKED, session.state.status)
     }
@@ -98,8 +98,8 @@ class ShizukuApprovalScreenTest : WiredActivityTestCase() {
                 }
             }
         }
-        ui.onNodeWithText("结果未知：lost_receipt。禁止自动重放；请人工确认设备实际状态。").performScrollTo().assertExists()
-        ui.onNodeWithText("关闭未确认：permission_revoked。不能视为已释放资源。").performScrollTo().assertExists()
+        ui.onNodeWithText("结果未知：lost_receipt。禁止自动重放；请人工确认设备实际状态。").scrollToVisible().assertExists()
+        ui.onNodeWithText("关闭未确认：permission_revoked。不能视为已释放资源。").scrollToVisible().assertExists()
         node("shizuku-open").assertDoesNotExist()
     }
 }

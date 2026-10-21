@@ -15,7 +15,7 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         } } }
         awaitModelEditor()
     }
-    private fun control(tag: String) = reveal(tag).performScrollTo()
+    private fun control(tag: String) = reveal(tag).scrollToVisible()
     fun testBodyUsesRawJsonInputAndBlocksInvalidSaveWithoutLosingRowsOnRemount() {
         render()
         addInlineBodyField("temperature", "not-json")

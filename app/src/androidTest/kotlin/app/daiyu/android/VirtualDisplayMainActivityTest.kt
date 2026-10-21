@@ -19,7 +19,7 @@ class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
 
     private fun prepare(): ControllerVirtualDisplayEntry {
         setDraft(text)
-        node("vd-prepare-entry").performScrollTo().performClick()
+        node("vd-prepare-entry").scrollToVisible().performClick()
         node("r08-plan-freeze").performClick()
         awaitControl("original VD location frozen to background") {
             fixture.controller.virtualDisplayEntry()?.taskSurface?.ready(app.daiyu.android.tasksurface.TaskSurface.BACKGROUND) != null
@@ -30,7 +30,7 @@ class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
     fun testForegroundPreferenceHasNoEquivalentVdBackendAndCannotSubmit() {
         check(fixture.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.FOREGROUND))
         setDraft(text)
-        node("vd-prepare-entry").performScrollTo().performClick()
+        node("vd-prepare-entry").scrollToVisible().performClick()
         node("r08-plan-freeze").performClick()
         awaitControl("foreground VD plan rejected without fallback") { fixture.controller.virtualDisplayEntry() == null }
         node("vd-submit").assertDoesNotExist()
@@ -43,7 +43,7 @@ class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
     fun testCancelledLocationAndRetainedResolvedCallbackCannotDefaultToForegroundOrChangeNewEntry() {
         check(fixture.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.ASK))
         setDraft(text)
-        node("vd-prepare-entry").performScrollTo().performClick()
+        node("vd-prepare-entry").scrollToVisible().performClick()
         node("r08-plan-freeze").performClick()
         awaitControl("VD location question pending before acceptance") {
             fixture.controller.virtualDisplayEntry()?.taskSurface?.decision() === app.daiyu.android.tasksurface.TaskSurfaceDecision.AskPending
@@ -123,7 +123,7 @@ class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
         executor.execute { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
         assertTrue(entered.await(5, TimeUnit.SECONDS))
         try {
-            node("vd-submit").performScrollTo().performClick()
+            node("vd-submit").scrollToVisible().performClick()
             assertTrue(entry.submitted)
             activity = recreateActivity(activity)
             assertTrue(entry.revoked)

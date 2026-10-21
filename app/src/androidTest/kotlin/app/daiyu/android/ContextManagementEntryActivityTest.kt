@@ -110,7 +110,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("更多").assertIsDisplayed().performClick()
         awaitUniqueTag("chat-overflow-menu")
         awaitUniqueTag("chat-menu:COMPRESS_CONTEXT")
-        node("chat-menu:COMPRESS_CONTEXT").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        node("chat-menu:COMPRESS_CONTEXT").scrollToVisible().assertIsDisplayed().assertIsEnabled().performClick()
         awaitUniqueTag("context-management")
         lateinit var result: ContextManagementControllerAdapter
         mainThread { result = adapter() }
@@ -148,6 +148,10 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         val savedSelection = preferences.all.toMap()
         val adapter = openAndAwait()
         mainThread { offerConfirmationMetadata(adapter) }
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasTestTag("compression-dialog-custom") and isOn()).fetchSemanticsNodes().size == 1
+        }
         node("compression-dialog-custom").assertIsOn()
         node("context-refresh").assertDoesNotExist()
         node("context-advanced").assertDoesNotExist()
@@ -177,7 +181,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         seedAndSelect()
         val before = fixture.database.exportBackup()
         val adapter = openAndAwait()
-        node("context-view").performScrollTo().performClick()
+        node("context-view").scrollToVisible().performClick()
         node("context-refresh").assertExists().performClick()
         awaitControl("explicit local refresh") { adapter.state.value.operation == null }
         node("context-notice").assertExists()
@@ -205,6 +209,10 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         node("context-select-target").assertIsEnabled().performClick()
         awaitControl("return to target reads only") { adapter.state.value.operation == null }
         mainThread { offerConfirmationMetadata(adapter) }
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasTestTag("compression-dialog-custom") and isOn()).fetchSemanticsNodes().size == 1
+        }
         node("compression-dialog-custom").assertIsOn()
         node("context-compress").performClick()
         node("context-compression-confirmation").assertExists()

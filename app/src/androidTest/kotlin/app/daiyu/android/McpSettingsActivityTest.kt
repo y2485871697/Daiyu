@@ -30,7 +30,7 @@ class McpSettingsActivityTest : WiredActivityTestCase() {
         enter()
         node("mcp-server-bearer").assertDoesNotExist()
         node("mcp-settings-add").performClick()
-        val field = node("mcp-server-bearer").performScrollTo().fetchSemanticsNode()
+        val field = node("mcp-server-bearer").scrollToVisible().fetchSemanticsNode()
         assertEquals("", field.config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
         assertEquals(before, fixture.database.exportBackup())
         assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())

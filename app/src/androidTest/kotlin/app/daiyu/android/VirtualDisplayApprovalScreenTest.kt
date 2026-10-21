@@ -61,7 +61,7 @@ class VirtualDisplayApprovalScreenTest : WiredActivityTestCase() {
     }
 
     private fun revealText(text: String) {
-        node("vd-approval-details").performScrollToNode(hasText(text))
+        node("vd-approval-details").scrollToDescendant(hasText(text))
         ui.onAllNodesWithText(text).onFirst().assertExists()
     }
 

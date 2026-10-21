@@ -23,7 +23,7 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
 
     private fun panelNode(matcher: SemanticsMatcher): SemanticsNodeInteraction {
         val target = matcher and hasAnyAncestor(hasTestTag("shizuku-text-panel"))
-        return ui.onNode(target).performScrollTo().assertIsDisplayed().assertIsEnabled()
+        return ui.onNode(target).scrollToVisible().assertIsDisplayed().assertIsEnabled()
     }
 
     private fun enableTextApproval() {

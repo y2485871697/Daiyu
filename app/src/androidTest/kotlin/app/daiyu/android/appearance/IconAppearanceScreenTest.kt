@@ -122,12 +122,16 @@ class IconAppearanceScreenTest : ComposeActivityTestCase() {
         swatch("light", 0).performClick()
         swatch("dark", 3).performClick()
         swatch("cat", 1).performClick()
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
         mainThread {
             val previews = descendants(activity.window.decorView).filterIsInstance<AppCatIconView>()
             assertEquals(2, previews.size)
             assertEquals(Task17IconCatalog.swatches[0], previews.single { it.contentDescription == "浅色图标预览" }.backgroundColorValue)
             assertEquals(Task17IconCatalog.swatches[3], previews.single { it.contentDescription == "暗色图标预览" }.backgroundColorValue)
-            assertTrue(previews.all { it.catColor == Task17IconCatalog.swatches[1] })
+            previews.forEach { preview ->
+                assertEquals("${preview.contentDescription} catColor", Task17IconCatalog.swatches[1], preview.catColor)
+            }
         }
         assertEquals(IconAppearance(themeMode = IconThemeMode.DARK), first.store.load())
         assertEquals(0, components.writes)
@@ -163,9 +167,19 @@ class IconAppearanceScreenTest : ComposeActivityTestCase() {
         mainThread { click() }
         assertEquals(0, components.writes)
         assertEquals(IconAppearance(), first.store.load())
-        show(coordinator())
+        show(first)
         swatch("cat", 5).assertIsSelected()
         reveal("icon-appearance-confirm", page).assertIsNotEnabled()
+        swatch("cat", 1).performClick()
+        reveal("icon-appearance-confirm", page).assertIsEnabled()
+        mainThread { click() }
+        assertEquals(0, components.writes)
+        assertEquals(IconAppearance(), first.store.load())
+        swatch("cat", 1).assertIsSelected()
+        reveal("icon-appearance-confirm", page).assertIsEnabled()
+        save()
+        assertEquals(Task17IconCatalog.swatches[1], first.store.load().iconCatColor)
+        assertTrue(components.writes > 0)
     }
 
     fun testPausedEditorRejectsRetainedConfirmationAndResumedEditorCanSave() {

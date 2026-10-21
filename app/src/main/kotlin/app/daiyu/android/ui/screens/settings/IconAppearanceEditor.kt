@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -64,6 +65,13 @@ internal fun IconAppearanceEditor(
     val currentExpanded by rememberUpdatedState(expanded)
     DisposableEffect(visit) { onDispose { visit.active = false } }
     fun current() = visit.active && currentExpanded && currentOwner() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    fun confirm() {
+        if (current() && (draft != confirmed || error != null)) {
+            val failure = iconSyncFailureMessage(runCatching { coordinator.saveAndApply(draft) })
+            error = failure?.let { "未能完成图标应用：$it" }
+            if (failure == null) confirmed = draft
+        }
+    }
     if (!expanded) return
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp)
@@ -75,13 +83,10 @@ internal fun IconAppearanceEditor(
         IconSwatches("浅色", "light", draft.iconLightColor) { if (current()) draft = draft.copy(iconLightColor = it) }
         IconSwatches("暗色", "dark", draft.iconDarkColor) { if (current()) draft = draft.copy(iconDarkColor = it) }
         IconSwatches("猫咪颜色", "cat", draft.iconCatColor) { if (current()) draft = draft.copy(iconCatColor = it) }
-        AssistantPreviewButton("确定", onClick = {
-            if (current() && (draft != confirmed || error != null)) {
-                val failure = iconSyncFailureMessage(runCatching { coordinator.saveAndApply(draft) })
-                error = failure?.let { "未能完成图标应用：$it" }
-                if (failure == null) confirmed = draft
-            }
-        }, modifier = Modifier.fillMaxWidth().testTag("icon-appearance-confirm"),
+        AssistantPreviewButton("确定", onClick = { confirm() },
+            modifier = Modifier.fillMaxWidth().testTag("icon-appearance-confirm").semantics {
+                onClick { confirm(); true }
+            },
             primary = true, enabled = draft != confirmed || error != null)
         error?.let { Text(it, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2,
             modifier = Modifier.testTag("icon-appearance-error")) }

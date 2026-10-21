@@ -29,7 +29,7 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
     private fun route() { host("setRetainedPage", "settings"); host("setRetainedPage", "chat") }
     private fun actionControl(tag: String): SemanticsNodeInteraction {
         dismissIme()
-        node("chat-extra-actions").performScrollToNode(hasTestTag(tag))
+        node("chat-extra-actions").scrollToDescendant(hasTestTag(tag))
         return ui.onNodeWithTag(tag).assertIsDisplayed().assertIsEnabled()
     }
     private fun clickAction(tag: String) { actionControl(tag).performClick() }

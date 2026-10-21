@@ -204,11 +204,11 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             assertNull(editor()); assertNull(fixture.controller.virtualDisplayEntry())
             assertEquals(1, gate.availablePermits())
         }
-        node("r08-plan-rows").performScrollToNode(hasTestTag("r08-add-TAP"))
+        node("r08-plan-rows").scrollToDescendant(hasTestTag("r08-add-TAP"))
         node("r08-add-TAP").assertIsDisplayed().performClick()
-        node("r08-plan-rows").performScrollToNode(hasTestTag("r08-plan-2-x"))
+        node("r08-plan-rows").scrollToDescendant(hasTestTag("r08-plan-2-x"))
         node("r08-plan-2-x").performTextReplacement("31")
-        node("r08-plan-rows").performScrollToNode(hasTestTag("r08-plan-2-y"))
+        node("r08-plan-rows").scrollToDescendant(hasTestTag("r08-plan-2-y"))
         node("r08-plan-2-y").performTextReplacement("47")
         node("r08-plan-freeze").performClick()
         mainThread {

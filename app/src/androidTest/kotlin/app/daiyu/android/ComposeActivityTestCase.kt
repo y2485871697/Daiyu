@@ -3,7 +3,10 @@ package app.daiyu.android
 import android.content.Intent
 import android.os.Bundle
 import android.test.InstrumentationTestCase
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -55,7 +58,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         android.util.Log.d("DaiyuTestStep", "node-ancestors:$tag")
         if (found != null && generateSequence(found.parent) { it.parent }.any {
                 it.config.getOrNull(SemanticsProperties.TestTag) == "chat-extra-actions"
-            }) interaction.performScrollTo()
+            }) interaction.scrollToVisible()
         return interaction
     }
     protected fun awaitUniqueTag(tag: String, hostState: () -> String = { "" }) {
@@ -168,13 +171,18 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
         ui.waitForIdle()
     }
-    protected fun reveal(tag: String, page: String = "模型设置"): SemanticsNodeInteraction {
+    protected fun reveal(tag: String, page: String = "模型设置", lazyKey: Any? = null): SemanticsNodeInteraction {
         dismissIme()
         val title = if (page == "模型设置" && ui.onAllNodesWithTag("page:主模型服务商").fetchSemanticsNodes().isNotEmpty())
             "主模型服务商" else page
         awaitUniqueTag("page:$title")
         val pageTag = "page:$title"
         val pageNode = ui.onNodeWithTag(pageTag).assert(hasScrollAction())
+        if (lazyKey != null) {
+            pageNode.performScrollToKey(lazyKey)
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+        }
         val matcher = hasTestTag(tag) and hasAnyAncestor(hasTestTag(pageTag))
         val target = ui.onNode(matcher)
         data class Frame(val viewport: Rect, val target: Rect?, val clipped: Rect?, val scroll: Float)
@@ -188,7 +196,9 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             val container = pageNode.fetchSemanticsNode()
             val matches = ui.onAllNodes(matcher).fetchSemanticsNodes()
             assertTrue("Duplicate target $tag in $pageTag", matches.size <= 1)
-            val found = matches.singleOrNull()
+            val found = matches.singleOrNull()?.takeIf { node ->
+                generateSequence(node) { it.parent }.all { it.layoutInfo.isPlaced }
+            }
             val bounds = container.boundsInRoot
             val bar = ui.onAllNodesWithTag("page-topbar:$title").fetchSemanticsNodes().singleOrNull()?.boundsInRoot
             val viewport = Rect(bounds.left, maxOf(bounds.top, bar?.bottom ?: bounds.top), bounds.right, bounds.bottom)
@@ -201,30 +211,159 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
         }
-        ui.waitUntil(timeoutMillis = 5_000) {
-            val before = frame()
-            val raw = before.target
-            val clipped = before.clipped
-            if (raw != null && clipped != null && clipped.width > 0f && clipped.height > 0f &&
-                before.viewport.contains(raw.center) && before.viewport.contains(clipped.center) && target.isDisplayed()) {
-                true
-            } else {
-                val limit = before.viewport.height * 0.5f
-                val dy = if (raw == null) limit else (raw.center.y - before.viewport.center.y).coerceIn(-limit, limit)
-                assertTrue("Target not reachable by scrolling: $tag; $before", kotlin.math.abs(dy) >= 0.5f)
-                val axis = checkNotNull(pageNode.fetchSemanticsNode().config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
-                pageNode.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
-                    assertTrue("ScrollBy rejected for $tag", scroll(0f, if (axis.reverseScrolling) -dy else dy))
+        val recent = java.util.ArrayDeque<Frame>(8)
+        try {
+            ui.waitUntil(timeoutMillis = 5_000) {
+                val before = frame()
+                if (recent.size == 8) recent.removeFirst()
+                recent.addLast(before)
+                val raw = before.target
+                val clipped = before.clipped
+                if (raw != null && clipped != null && clipped.width > 0f && clipped.height > 0f &&
+                    before.viewport.contains(raw.center) && before.viewport.contains(clipped.center) && target.isDisplayed()) {
+                    true
+                } else {
+                    val limit = before.viewport.height * 0.5f
+                    val dy = if (raw == null) limit else (raw.center.y - before.viewport.center.y).coerceIn(-limit, limit)
+                    assertTrue("Target not reachable by scrolling: $tag; $before", kotlin.math.abs(dy) >= 0.5f)
+                    val axis = checkNotNull(pageNode.fetchSemanticsNode().config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
+                    pageNode.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
+                        assertTrue("ScrollBy rejected for $tag", scroll(0f, if (axis.reverseScrolling) -dy else dy))
+                    }
+                    // ScrollBy accepts a queued coroutine; Espresso idle does not start that task.
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                    val after = frame()
+                    assertTrue("Scroll made no progress for $tag: before=$before after=$after", after != before)
+                    false
                 }
-                // ScrollBy accepts a queued coroutine; Espresso idle does not start that task.
-                ui.mainClock.advanceTimeByFrame()
-                ui.waitForIdle()
-                val after = frame()
-                assertTrue("Scroll made no progress for $tag: before=$before after=$after", after != before)
+            }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("Reveal timed out: tag=$tag page=$pageTag frames=$recent", timeout)
+        }
+        return target.assertIsDisplayed()
+    }
+    /** Drives each accepted scroll before checking progress; the library loops omit that boundary. */
+    protected fun SemanticsNodeInteraction.scrollToVisible(): SemanticsNodeInteraction {
+        val current = fetchSemanticsNode()
+        val parent = generateSequence(current.parent) { it.parent }
+            .firstOrNull { hasScrollAction().matches(it) }
+        assertNotNull("No scrollable ancestor for ${current.config}", parent)
+        val parentId = checkNotNull(parent).id
+        val container = ui.onNode(SemanticsMatcher("scroll ancestor $parentId") { it.id == parentId }, useUnmergedTree = true)
+        scrollWithin(container, this)
+        return this
+    }
+
+    protected fun SemanticsNodeInteraction.scrollToDescendant(matcher: SemanticsMatcher): SemanticsNodeInteraction {
+        assert(hasScrollAction())
+        fun firstMatch(root: androidx.compose.ui.semantics.SemanticsNode): androidx.compose.ui.semantics.SemanticsNode? {
+            if (!root.layoutInfo.isPlaced) return null
+            if (matcher.matches(root)) return root
+            return root.children.firstNotNullOfOrNull(::firstMatch)
+        }
+        fun matched() = fetchSemanticsNode().children.firstNotNullOfOrNull(::firstMatch)
+        fun revealMatch(): Boolean {
+            val found = matched() ?: return false
+            ui.onNode(SemanticsMatcher("matched descendant ${found.id}") { it.id == found.id },
+                useUnmergedTree = true).scrollToVisible()
+            return true
+        }
+        fun advance() {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+        }
+        advance()
+        if (revealMatch()) return this
+        val initial = fetchSemanticsNode()
+        assertTrue("No node found that matches ${matcher.description} in non-lazy scroll container",
+            initial.config.getOrNull(SemanticsActions.ScrollToIndex) != null)
+        val x = initial.config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange)
+        val y = initial.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+        if ((x != null && x.value() != 0f) || (y != null && y.value() != 0f)) {
+            performScrollToIndex(0)
+            advance()
+        }
+        ui.waitUntil(timeoutMillis = 5_000) {
+            if (revealMatch()) true else {
+                val parent = fetchSemanticsNode()
+                val horizontal = parent.config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange)
+                val vertical = parent.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+                val before = Triple(parent.boundsInRoot, horizontal?.value?.invoke(), vertical?.value?.invoke())
+                assertTrue("Target not found before end of scroll container: $before",
+                    (horizontal != null && horizontal.value() < horizontal.maxValue()) ||
+                        (vertical != null && vertical.value() < vertical.maxValue()))
+                val viewport = parent.boundsInRoot
+                assertTrue("Empty scroll viewport: $before", viewport.width > 0f && viewport.height > 0f)
+                performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
+                    assertTrue("Scroll action rejected: $before", scroll(
+                        if (horizontal != null) viewport.width * .5f else 0f,
+                        if (vertical != null) viewport.height * .5f else 0f))
+                }
+                advance()
+                val afterNode = fetchSemanticsNode()
+                val after = Triple(afterNode.boundsInRoot,
+                    afterNode.config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange)?.value?.invoke(),
+                    afterNode.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.value?.invoke())
+                assertTrue("Scroll made no progress: before=$before after=$after", after != before)
                 false
             }
         }
-        return target.assertIsDisplayed()
+        return this
+    }
+
+    private fun scrollWithin(container: SemanticsNodeInteraction, target: SemanticsNodeInteraction) {
+        container.assert(hasScrollAction())
+        data class ScrollFrame(val viewport: Rect, val target: Rect, val x: Float?, val y: Float?)
+        fun frame(): ScrollFrame {
+            val parent = container.fetchSemanticsNode()
+            val coordinates = target.fetchSemanticsNode().layoutInfo.coordinates
+            var root = coordinates
+            while (true) root = root.parentLayoutCoordinates ?: break
+            val parentCoordinates = parent.layoutInfo.coordinates
+            val viewport = parentCoordinates.boundsInParent().translate(
+                parentCoordinates.parentLayoutCoordinates?.positionInRoot() ?: Offset.Zero)
+            return ScrollFrame(viewport, root.localBoundingBoxOf(coordinates, clipBounds = false),
+                parent.config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange)?.value?.invoke(),
+                parent.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.value?.invoke())
+        }
+        fun advance() {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+        }
+        fun delta(start: Float, end: Float): Float =
+            if (start > 0f && end > 0f) minOf(start, end)
+            else if (start < 0f && end < 0f) maxOf(start, end) else 0f
+        advance()
+        ui.waitUntil(timeoutMillis = 5_000) {
+            val before = frame()
+            val viewport = before.viewport
+            assertTrue("Empty scroll viewport: $before", viewport.width > 0f && viewport.height > 0f)
+            val parent = container.fetchSemanticsNode()
+            val horizontal = parent.config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange)
+            val vertical = parent.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+            var dx = 0f
+            var dy = 0f
+            val bounds = before.target
+            if (horizontal != null) {
+                dx = delta(bounds.left - viewport.left, bounds.right - viewport.right)
+                if (horizontal.reverseScrolling) dx = -dx
+                if (parent.layoutInfo.layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) dx = -dx
+            }
+            if (vertical != null) {
+                dy = delta(bounds.top - viewport.top, bounds.bottom - viewport.bottom)
+                if (vertical.reverseScrolling) dy = -dy
+            }
+            if (kotlin.math.abs(dx) < .5f && kotlin.math.abs(dy) < .5f) true else {
+                container.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
+                    assertTrue("Scroll action rejected: $before", scroll(dx, dy))
+                }
+                advance()
+                val after = frame()
+                assertTrue("Scroll made no progress: before=$before after=$after", after != before)
+                false
+            }
+        }
     }
     protected fun retainedSettingsEntry(id: String, page: String = "设置"): () -> Unit {
         val entry = app.daiyu.android.ui.screens.settings.SettingsCatalog.entry(id)
@@ -274,7 +413,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         })
     }
     protected fun saveModel() {
-        reveal("model-save").performClick()
+        reveal("model-save", lazyKey = "model_save").performClick()
         awaitControl("model settings completion") {
             !(instrumentation.targetContext.applicationContext as ChatApplication).controller.dataBusy
         }
@@ -345,7 +484,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun menu(label: String) {
         ui.onNodeWithContentDescription("更多").performSemanticsAction(SemanticsActions.OnClick) { it() }
-        ui.onNodeWithText(label).performScrollTo().performClick()
+        ui.onNodeWithText(label).scrollToVisible().performClick()
     }
     // sendText posts its receipt separately from runner/model events. Waiting for active or
     // Session.entered alone does not guarantee Activity consumption + acknowledgement.

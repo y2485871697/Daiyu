@@ -37,7 +37,7 @@ class ChildTaskCommandRecordsActivityTest : WiredActivityTestCase() {
             node("child-tasks-refresh").fetchSemanticsNode().config.getOrNull(SemanticsProperties.Disabled) == null
         }
         node("page:${activity.getString(R.string.business_task_records)}")
-            .performScrollToNode(hasTestTag("child-task-redispatch:child"))
+            .scrollToDescendant(hasTestTag("child-task-redispatch:child"))
         node("child-task-redispatch:child").performClick()
         node("child-command-execution-warning").assertExists()
         assertEquals(0, calls.get())
@@ -69,7 +69,7 @@ class ChildTaskCommandRecordsActivityTest : WiredActivityTestCase() {
 
     private fun openRedispatch(record: ChildTaskRecord) {
         val tag = "child-task-redispatch:${record.owner.childRunId}"
-        node("page:${activity.getString(R.string.business_task_records)}").performScrollToNode(hasTestTag(tag))
+        node("page:${activity.getString(R.string.business_task_records)}").scrollToDescendant(hasTestTag(tag))
         node(tag).performClick()
     }
 
@@ -157,7 +157,7 @@ class ChildTaskCommandRecordsActivityTest : WiredActivityTestCase() {
             node("child-tasks-refresh").fetchSemanticsNode().config.getOrNull(SemanticsProperties.Disabled) == null
         }
         node("page:${activity.getString(R.string.business_task_records)}")
-            .performScrollToNode(hasTestTag("child-task-redispatch:child"))
+            .scrollToDescendant(hasTestTag("child-task-redispatch:child"))
         node("child-task-redispatch:child").performClick()
         node("child-command-execution-warning").assertDoesNotExist()
         assertEquals(0, calls.get())

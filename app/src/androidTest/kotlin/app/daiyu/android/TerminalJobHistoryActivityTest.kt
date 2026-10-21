@@ -48,7 +48,7 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         node("terminal-job-history").assertExists()
         ui.onAllNodesWithText("停止此 job…").assertCountEquals(0)
         node("terminal-job-stop-confirm").assertDoesNotExist()
-        node("terminal-jobs-panel").performScrollToNode(hasTestTag("terminal-history-read-$id"))
+        node("terminal-jobs-panel").scrollToDescendant(hasTestTag("terminal-history-read-$id"))
         node("terminal-history-read-$id").assertIsEnabled()
             .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitControl("first history page") {
@@ -57,7 +57,7 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         }
         node("terminal-job-result").assertTextContains("unknown_after_process_restart", substring = true)
         node("terminal-job-result").assertTextContains("\"exit_code\": null", substring = true)
-        node("terminal-jobs-panel").performScrollToNode(hasTestTag("terminal-history-next"))
+        node("terminal-jobs-panel").scrollToDescendant(hasTestTag("terminal-history-next"))
         node("terminal-history-next").performClick()
         awaitControl("second history page") {
             val visit = checkNotNull(invoke("getTerminalJobsVisit"))
@@ -65,7 +65,7 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         }
         node("terminal-job-result").assertTextContains("tail-only-second-page", substring = true)
         node("terminal-history-next").assertDoesNotExist()
-        node("terminal-jobs-panel").performScrollToNode(hasTestTag("terminal-jobs-refresh"))
+        node("terminal-jobs-panel").scrollToDescendant(hasTestTag("terminal-jobs-refresh"))
         node("terminal-jobs-refresh").performClick()
         awaitControl("explicit refresh") {
             val visit = checkNotNull(invoke("getTerminalJobsVisit"))

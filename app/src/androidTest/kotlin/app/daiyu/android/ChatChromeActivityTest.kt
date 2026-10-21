@@ -126,13 +126,13 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         touch(button("更多"))
         node("chat-menu:NEW_CHAT").assertIsDisplayed().assertTextContains("新建会话")
         node("chat-menu:SEARCH").assertIsDisplayed().assertTextContains("搜索记录")
-        touch(node("chat-menu:OPEN_TERMINAL").performScrollTo())
+        touch(node("chat-menu:OPEN_TERMINAL").scrollToVisible())
         node("chat-overflow-menu").assertDoesNotExist()
         touch(button("更多"))
         val menu = node("chat-overflow-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue(menu.height > 336 * activity.resources.displayMetrics.density)
-        node("chat-menu:AUTO_COMPRESS").performScrollTo().assertIsDisplayed()
-        touch(ui.onNodeWithText("Token 用量").performScrollTo())
+        node("chat-menu:AUTO_COMPRESS").scrollToVisible().assertIsDisplayed()
+        touch(ui.onNodeWithText("Token 用量").scrollToVisible())
         ui.onNodeWithText("Token 用量").assertDoesNotExist()
         node("chat-context").assertHasNoClickAction()
         touch(node("chat-model")); touch(node("chat-context"))
@@ -252,10 +252,10 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         touch(button("更多"))
         button("更多").assertIsSelected()
         node("chat-menu:COMPRESS_CONTEXT").assertIsDisplayed()
-        node("chat-menu:AUTO_COMPRESS").performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+        node("chat-menu:AUTO_COMPRESS").scrollToVisible().assertIsDisplayed().assertIsNotEnabled()
         ui.onNodeWithTag("chat-menu-switch:AUTO_COMPRESS", useUnmergedTree = true)
             .assertExists().assertWidthIsEqualTo(25.dp).assertHeightIsEqualTo(15.dp)
-        touch(node("chat-menu:NEW_CHAT").performScrollTo())
+        touch(node("chat-menu:NEW_CHAT").scrollToVisible())
         button("更多").assertIsNotSelected()
         node("chat-overflow-menu").assertDoesNotExist()
     }
@@ -297,7 +297,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("chat-menu:") == true
         }).fetchSemanticsNodes().map { it.config[SemanticsProperties.TestTag].removePrefix("chat-menu:") }
         assertEquals(expected, actual)
-        for (action in expected) node("chat-menu:$action").performScrollTo().assertIsDisplayed().assertHeightIsEqualTo(38.dp)
+        for (action in expected) node("chat-menu:$action").scrollToVisible().assertIsDisplayed().assertHeightIsEqualTo(38.dp)
     }
 
     fun testNewChatAndSearchMenuDispatchOnceAndClose() {

@@ -332,7 +332,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         val unsafeText = annotation(ui.onNodeWithText(unsafe, useUnmergedTree = true))
         assertTrue(unsafeText.getLinkAnnotations(0, unsafeText.length).isEmpty())
         assertTrue("rendering must not open links", opened.isEmpty())
-        site.performScrollTo()
+        site.scrollToVisible()
         clickCharacter(site, 0)
         assertEquals(listOf("https://example.test"), opened.toList())
     }

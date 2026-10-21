@@ -13,7 +13,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
     }
     private fun section(title: String) {
         node("voice-section-select").performClick()
-        ui.onNodeWithTag("settings-radio:$title").performScrollTo().performClick()
+        ui.onNodeWithTag("settings-radio:$title").scrollToVisible().performClick()
     }
     private fun systemProfiles() = runBlocking {
         fixture.controller.voiceRuntime.save(VoiceConfiguration(), VoiceProfile.READ_ALOUD)

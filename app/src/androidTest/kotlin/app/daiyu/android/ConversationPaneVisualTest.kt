@@ -98,7 +98,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
     fun testFolderNameUsesInsetRoundedFieldAndPlaceholderWithoutChangingSaveOrCancel() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(scale, dark)
-            node("drawer-folder-new").performScrollTo().performClick()
+            node("drawer-folder-new").scrollToVisible().performClick()
             val field = node("folder-name-input").assertHeightIsEqualTo(48.dp)
             val bounds = field.fetchSemanticsNode().boundsInRoot
             val cancel = node("folder-name-cancel").fetchSemanticsNode().boundsInRoot
@@ -114,7 +114,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertEquals("create-folder:项目资料", action)
             node("folder-name-input").assertDoesNotExist()
             action = null
-            node("drawer-folder-new").performScrollTo().performClick()
+            node("drawer-folder-new").scrollToVisible().performClick()
             node("folder-name-input").assertEditableText("")
             node("folder-name-cancel").performClick()
             assertNull(action)
@@ -214,7 +214,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
     }
 
     private fun assertFolderFill(tag: String, fill: Color) {
-        node(tag).performScrollTo().assertIsDisplayed()
+        node(tag).scrollToVisible().assertIsDisplayed()
         val drawer = bounds("conversation-drawer")
         val chip = bounds(tag)
         val pixels = node("conversation-drawer").captureToImage().toPixelMap()
@@ -257,7 +257,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertFill("drawer-search")
             dismissIme()
             assertFill("drawer-search")
-            node("drawer-list").performScrollToNode(hasTestTag("drawer-conversation:second"))
+            node("drawer-list").scrollToDescendant(hasTestTag("drawer-conversation:second"))
             node("drawer-conversation:second").assertIsDisplayed()
             node("drawer-conversation:first").assertDoesNotExist()
             assertNull(action)
@@ -273,7 +273,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertFolderFill("drawer-folder-unfiled", selected)
             assertFolderFill("drawer-folder:design", idle)
             assertFolderFill("drawer-folder-new", idle)
-            node("drawer-folder:design").performScrollTo().performTouchInput { click() }
+            node("drawer-folder:design").scrollToVisible().performTouchInput { click() }
             assertEquals("folder:design", action)
             assertFolderFill("drawer-folder:design", selected)
             assertFolderFill("drawer-folder-unfiled", idle)
@@ -295,7 +295,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertTrue(bounds("drawer-manage").bottom < bounds("drawer-folder-unfiled").top)
             assertTrue(bounds("drawer-list").height > 0)
             assertTrue(bounds("drawer-list").bottom <= bounds("drawer-footer-border").top)
-            node("drawer-folder-new").performScrollTo().assertIsDisplayed()
+            node("drawer-folder-new").scrollToVisible().assertIsDisplayed()
                 .performTouchInput { click() }
             node("folder-name-input").assertIsDisplayed()
             node("folder-name-cancel").performClick()
@@ -320,7 +320,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         node("drawer-search-input").performSemanticsAction(SemanticsActions.SetText) { assertTrue(it(AnnotatedString("Second"))) }
         node("drawer-search-input").assertEditableText("Second")
         dismissIme()
-        node("drawer-list").performScrollToNode(hasTestTag("drawer-conversation:second"))
+        node("drawer-list").scrollToDescendant(hasTestTag("drawer-conversation:second"))
         node("drawer-conversation:first").assertDoesNotExist()
         node("drawer-conversation:second").assertIsDisplayed().performClick()
         assertEquals("conversation:second", action)

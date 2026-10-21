@@ -100,6 +100,8 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
     }
 
     private fun assertTopBarMoney() {
+        awaitUniqueTag("chat-provider-balance") { "balance=${runtime.state.value.project()}" }
+        ui.waitUntil(5_000) { ui.onNodeWithTag("chat-provider-balance").isDisplayed() }
         node("chat-provider-balance").assertIsDisplayed().assertHasNoClickAction()
         ui.onNode(hasText("CNY 12.34") and hasAnyAncestor(hasTestTag("chat-provider-balance")),
             useUnmergedTree = true).assertIsDisplayed()
@@ -124,10 +126,10 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         val revision = runtime.state.value.revision
         val savedChat = fixture.settings.load()
         openModels()
-        reveal("provider-balance-account").performTextReplacement("unsaved-balance-account")
+        reveal("provider-balance-account", lazyKey = "provider_balance").performTextReplacement("unsaved-balance-account")
         reveal("provider-balance-endpoint").performTextReplacement("https://unsaved-balance.invalid")
         reveal("provider-balance-key").performTextReplacement("unsaved-independent-key")
-        reveal("provider-balance-header-add").performClick()
+        reveal("provider-balance-header-add", lazyKey = "provider_balance").performClick()
         reveal("provider-balance-header-name:0").performTextReplacement("X-Draft-Balance")
         reveal("provider-balance-header-value:0").performTextReplacement("unsaved-header")
         reveal("provider-balance-test").assertIsEnabled().performClick()
@@ -168,9 +170,11 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         openBalance()
         hold.set(true)
         querySaved()
-        runBlocking { withTimeout(5000) { entered.await() } }
+        ui.waitUntil(5_000) { entered.isCompleted }
+        assertTrue("saved query entered", entered.isCompleted)
         mainThread { assertTrue(activity.moveTaskToBack(true)) }
-        runBlocking { withTimeout(5000) { cancelled.await() } }
+        ui.waitUntil(5_000) { cancelled.isCompleted }
+        assertTrue("saved query cancelled after ON_STOP", cancelled.isCompleted)
         ui.waitUntil(timeoutMillis = 5000) {
             var stopped = false
             instrumentation.runOnMainSync {

@@ -174,7 +174,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
             ui.onAllNodesWithTag("skills-replace:demo").fetchSemanticsNodes().isNotEmpty()
         }
         node("skills-confirm-install").assertIsNotEnabled()
-        node("skills-replace:demo").performScrollTo().performClick()
+        node("skills-replace:demo").scrollToVisible().performClick()
         node("skills-confirm-install").assertIsEnabled()
         ui.onNodeWithText("取消").performClick()
         node("skills-confirm-install").assertDoesNotExist()

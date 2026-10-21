@@ -27,7 +27,7 @@ class ProviderHeadersActivityTest : WiredActivityTestCase() {
         }
         awaitModelEditor()
     }
-    private fun control(tag: String) = reveal(tag).performScrollTo()
+    private fun control(tag: String) = reveal(tag).scrollToVisible()
     private fun openEditor() { control("model-custom-headers").performClick() }
     private fun add(name: String, value: String, index: Int = 0) {
         control("model-header-add").performClick()

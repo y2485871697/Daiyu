@@ -22,8 +22,27 @@ import java.util.UUID
 
 class CollaborationEmptyStateTest : WiredActivityTestCase() {
     private var density = 1f
+    private var rootsBeforeShow = ""
+
+    private fun windowRoots(): String {
+        if (android.os.Build.VERSION.SDK_INT < 29) return "unavailable before API29"
+        var roots = ""
+        instrumentation.runOnMainSync {
+            roots = runCatching {
+                android.view.inspector.WindowInspector.getGlobalWindowViews().joinToString { view ->
+                    val params = view.layoutParams as? android.view.WindowManager.LayoutParams
+                    "${view.javaClass.simpleName}@${System.identityHashCode(view)}" +
+                        " attached=${view.isAttachedToWindow} visible=${view.visibility} focused=${view.hasWindowFocus()}" +
+                        " viewAlpha=${view.alpha} size=${view.width}x${view.height}" +
+                        " type=${params?.type} flags=${params?.flags} alpha=${params?.alpha} dim=${params?.dimAmount}"
+                }
+            }.fold({ it }, { "root snapshot failed: $it" })
+        }
+        return roots
+    }
 
     private fun show(id: String?, repository: ConversationSubAgentPreferences, dark: Boolean) {
+        rootsBeforeShow = runCatching { windowRoots() }.fold({ it }, { "root snapshot failed: $it" })
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                 density = LocalDensity.current.density
@@ -44,6 +63,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         assertTrue("No unused area after footer", (card.bottom - footer.bottom) / density < 32f)
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun assertPrimaryFooterWithoutCross(dark: Boolean, label: String) {
         ui.onNodeWithContentDescription("关闭子代理设置", useUnmergedTree = true).assertDoesNotExist()
         val button = node("subagent-collaboration-done").assertIsEnabled().assertHeightIsEqualTo(44.dp)
@@ -52,7 +72,29 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         val pixels = captureScreenNode(button).toPixelMap()
         val expected = AssistantPreviewPalette(dark)
         val background = pixels[(12 * density).toInt(), pixels.height / 2]
-        val colorDiagnostic = "dark=$dark expected=${expected.primary} screen=$background"
+        val mismatch = kotlin.math.abs(expected.primary.red - background.red) > .01f ||
+            kotlin.math.abs(expected.primary.green - background.green) > .01f ||
+            kotlin.math.abs(expected.primary.blue - background.blue) > .01f
+        val captureDiagnostic = if (mismatch) runCatching {
+            val roots = windowRoots()
+            val semantics = button.fetchSemanticsNode()
+            val bounds = semantics.boundsInRoot
+            val composeView = (semantics.root as androidx.compose.ui.platform.ViewRootForTest).view
+            var rootIdentity = ""
+            instrumentation.runOnMainSync {
+                rootIdentity = runCatching { System.identityHashCode(composeView.rootView).toString() }
+                    .fold({ it }, { "root identity failed: $it" })
+            }
+            val windowPixel = if (android.os.Build.VERSION.SDK_INT >= 28) runCatching {
+                val windowPixels = button.captureToImage().toPixelMap()
+                "${windowPixels[(12 * density).toInt(), windowPixels.height / 2]}" +
+                    " size=${windowPixels.width}x${windowPixels.height}"
+            }.fold({ it }, { "capture failed: $it" }) else "unavailable before API28"
+            " windowPixel=$windowPixel screenSize=${pixels.width}x${pixels.height}" +
+                " sample=${(12 * density).toInt()},${pixels.height / 2} bounds=$bounds root=$rootIdentity" +
+                " rootsBeforeShow=[$rootsBeforeShow] rootsAtCapture=[$roots]"
+        }.fold({ it }, { " diagnostic failed: $it" }) else ""
+        val colorDiagnostic = "dark=$dark expected=${expected.primary} screen=$background$captureDiagnostic"
         assertEquals(colorDiagnostic, expected.primary.red, background.red, .01f)
         assertEquals(colorDiagnostic, expected.primary.green, background.green, .01f)
         assertEquals(colorDiagnostic, expected.primary.blue, background.blue, .01f)

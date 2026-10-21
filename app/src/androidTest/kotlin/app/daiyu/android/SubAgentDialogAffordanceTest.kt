@@ -55,6 +55,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         }
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testDraftThinkingSliderSavesOnlyOnConfirmAndRestoresItsRequestedValue() {
         val name = "subagent-affordance-${UUID.randomUUID()}"
         preferencesName = name
@@ -107,7 +108,9 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         node("subagent-thinking-value").assertTextEquals("高")
         node("thinking-depth-slider").scrollToVisible().assertIsDisplayed().performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(0f)) }
         node("subagent-thinking-value").assertTextEquals("关闭")
-        ui.onAllNodes(hasText("关闭") and hasClickAction()).assertCountEquals(0)
+        val sliderRoot = checkNotNull(node("thinking-depth-slider").fetchSemanticsNode().root)
+        val inThinkingPicker = SemanticsMatcher("same root as thinking-depth-slider") { it.root === sliderRoot }
+        ui.onAllNodes(inThinkingPicker and hasText("关闭") and hasClickAction()).assertCountEquals(0)
         assertEquals(ReasoningEffort.HIGH, repository.snapshot(owner).profiles.single().reasoning)
         back()
         node("thinking-depth-slider").assertDoesNotExist()

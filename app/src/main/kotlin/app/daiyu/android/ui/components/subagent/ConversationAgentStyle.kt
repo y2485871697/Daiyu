@@ -9,6 +9,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.draw.alpha
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -88,17 +89,17 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
 }
 
 @Composable internal fun ConversationAgentButton(text: String, enabled: Boolean = true, primary: Boolean = false,
-    modifier: Modifier = Modifier, primaryColor: Color = Color(0xff786c83),
-    onPrimaryColor: Color = Color.White, onClick: () -> Unit) {
+    modifier: Modifier = Modifier, primaryColor: Color = assistantPreviewPalette().primary,
+    onPrimaryColor: Color = assistantPreviewPalette().onPrimary, onClick: () -> Unit) {
     val colors = conversationAgentColors()
-    Box(modifier.defaultMinSize(minHeight = 44.dp)
+    Box(modifier.defaultMinSize(minHeight = 44.dp).alpha(if (enabled) 1f else .4f)
         .squircleSurface(color = if (primary) primaryColor else colors.soft,
             cornerRadius = ButtonDefaults.CornerRadius)
         .squircleBorder(width = 1.dp, color = if (primary) primaryColor else colors.line,
             cornerRadius = ButtonDefaults.CornerRadius)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = (if (primary) onPrimaryColor else colors.accent).copy(alpha = if (enabled) 1f else .4f))
+        Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = if (primary) onPrimaryColor else colors.accent)
     }
 }
 

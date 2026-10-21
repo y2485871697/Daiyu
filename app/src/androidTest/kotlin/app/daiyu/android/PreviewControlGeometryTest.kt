@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -102,6 +103,42 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
                     }
                 }
             }
+        }
+    }
+
+    fun testConversationPrimaryUsesCollaborationPaletteAndDisabledWholeSurface() {
+        for (dark in listOf(false, true)) {
+            var clicks = 0
+            val palette = AssistantPreviewPalette(dark)
+            val backdrop = if (dark) Color(0xFF101218) else Color.White
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                    applyInterfaceScale = false) {
+                    Column(Modifier.background(backdrop).padding(16.dp)) {
+                        ConversationAgentButton("确认", primary = true, modifier = Modifier.width(160.dp)
+                            .testTag("agent-default-primary"), onClick = { clicks++ })
+                        AssistantPreviewButton("完成", {}, Modifier.width(160.dp).testTag("collaboration-primary"), primary = true)
+                        ConversationAgentButton("禁用", primary = true, enabled = false, modifier = Modifier.width(160.dp)
+                            .testTag("agent-disabled-primary"), onClick = { clicks++ })
+                    }
+                }
+            } }
+            awaitUniqueTag("agent-default-primary")
+            fun sample(tag: String): Color {
+                val pixels = captureScreenNode(node(tag)).toPixelMap()
+                return pixels[pixels.width / 2, (pixels.height * .15f).toInt()]
+            }
+            fun matches(expected: Color, actual: Color) {
+                assertEquals(expected.red, actual.red, .025f)
+                assertEquals(expected.green, actual.green, .025f)
+                assertEquals(expected.blue, actual.blue, .025f)
+            }
+            matches(palette.primary, sample("agent-default-primary"))
+            matches(sample("collaboration-primary"), sample("agent-default-primary"))
+            matches(palette.primary.copy(alpha = .4f).compositeOver(backdrop), sample("agent-disabled-primary"))
+            node("agent-disabled-primary").assertIsNotEnabled().performTouchInput { click() }
+            node("agent-default-primary").performClick()
+            assertEquals(1, clicks)
         }
     }
 

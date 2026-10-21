@@ -18,6 +18,7 @@ data class ToolRichDetailsUi(
     val source: String = "本次调用记录 · 非实时监控",
     val operation: String = "调用详情",
     val technical: List<ToolDisclosureUi> = emptyList(),
+    val prose: ToolDisclosureUi? = null,
 )
 
 /** A bounded, read-only projection. No URI resolving, asset loading or execution lives here. */
@@ -270,15 +271,50 @@ internal object ToolRichDetails {
             if (category !in setOf("delegation", "child_control")) document(output, "result", "操作回执")
         }
         if (!cookies && category != "user_question") {
-            if (!outputDocument && entries.isEmpty() && result != null && result.isNotBlank()) {
+            if (!outputDocument && entries.isEmpty() && result != null && result.isNotBlank() &&
+                !(category in setOf("terminal", "background_job") && output != null)) {
                 val cleaned = if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden)
-                docs += ToolDisclosureUi(if (category in setOf("terminal", "background_job")) "运行回执" else "已记录返回", cleaned, category in setOf("terminal", "background_job", "files", "workspace", "mcp", "generic"))
+                docs += ToolDisclosureUi(if (category in setOf("terminal", "background_job")) "操作回执" else "已记录返回", cleaned, category in setOf("files", "workspace", "mcp", "generic"))
             }
         }
         val technical = if (cookies || encodedScreenshot || category == "user_question") emptyList() else buildList {
             if (arguments.isNotBlank()) add(ToolDisclosureUi("调用参数", if (args == null) scrub(arguments, hidden) else scrub(sanitizedJson(args, 0).toString(2), hidden), true))
             if (!result.isNullOrBlank()) add(ToolDisclosureUi("调用回执", if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden), true))
         }
+        val compact = category in setOf("device_read", "system_action", "terminal", "background_job")
+        val prose = if (compact) {
+            val receipt = docs.firstOrNull { it.title in setOf("操作回执", "错误回执") }?.text
+            val failed = envelope?.opt("ok") == false || envelope?.opt("privacy_redacted") == true
+            val failure = when (envelope?.optString("status")) {
+                "permission_denied" -> "缺少本次操作所需权限"
+                "private_result_withheld", "private_result_consent_required" -> "结果未获展示授权"
+                "no_cached_location" -> "没有可用的最近位置缓存"
+                "unsupported" -> "设备不支持本次操作"
+                "unavailable" -> "本次读取不可用"
+                else -> "本次调用未完成，详情见技术详情"
+            }
+            val time = clean(output?.opt("local_iso"))
+            val latitude = (output?.opt("latitude") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() in -90.0..90.0 }?.let { clean(it) }
+            val longitude = (output?.opt("longitude") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() in -180.0..180.0 }?.let { clean(it) }
+            val body = when {
+                result.isNullOrBlank() -> "等待执行回执"
+                failed -> failure
+                receipt != null -> receipt
+                category == "device_read" && time != null -> listOfNotNull(time, clean(output?.opt("timezone"))).joinToString(" · ")
+                category == "device_read" && latitude != null && longitude != null -> {
+                    listOfNotNull("最近位置：$latitude, $longitude",
+                        (output?.opt("accuracy_m") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() >= 0 }?.let { "精度 ${clean(it)}米" },
+                        (output?.opt("age_ms") as? Number)?.takeIf { it.toDouble().isFinite() && it.toDouble() >= 0 }?.let { "样本距读取时 ${clean(it)}毫秒" }).joinToString(" · ")
+                }
+                output == null -> scrub(result, hidden)
+                category == "system_action" -> "已收到系统回执，详情见技术详情"
+                category in setOf("terminal", "background_job") -> "已收到运行回执，未返回输出"
+                else -> fields.filter { it.label in setOf("电量百分比", "充电", "网络", "网络已验证", "Android版本", "设备型号") }
+                    .take(3).joinToString(" · ") { "${it.label}：${it.value}" }
+                    .ifBlank { "已收到设备快照，详情见技术详情" }
+            }
+            ToolDisclosureUi("", body)
+        } else null
         val source = when (category) {
             "context" -> "上下文与用量记录 · 未报告字段不按0处理"
             "delegation", "child_control" -> "工具回执与子任务生命周期分别记录"
@@ -292,7 +328,7 @@ internal object ToolRichDetails {
             (if (cookies) entries.filter { it.group == "Cookie属性" } else entries).map { entry -> entry.copy(fields = entry.fields.map { it.copy(value = privateText(it.value)) },
                 documents = entry.documents.map { it.copy(text = privateText(it.text)) }) },
             (if (cookies) emptyList() else docs).distinctBy { it.title to it.text }.map { it.copy(text = privateText(it.text)) }, source, operation,
-            technical.map { it.copy(text = privateText(it.text)) })
+            technical.map { it.copy(text = privateText(it.text)) }, prose)
     }
 
     private fun maskPersonal(value: String): String = value

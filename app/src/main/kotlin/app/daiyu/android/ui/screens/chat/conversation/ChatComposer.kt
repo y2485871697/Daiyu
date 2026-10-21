@@ -68,7 +68,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     attachmentContent: @Composable () -> Unit = {}) {
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
-    val chrome = chatChromeColors()
+    val chrome = chatChromeColors().copy(accent = conversationColors().accent)
     val dark = colors.background.luminance() < .3f
     val dividerColor = if (dark) Color(0xFFC8B5EB).copy(alpha = .12f) else Color(0xFF9280B5).copy(alpha = .14f)
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
@@ -170,7 +170,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
                             .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
                         maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 16.sp, lineHeight = 24.sp),
-                        cursorBrush = SolidColor(colors.primary),
+                        cursorBrush = SolidColor(chrome.accent),
                         decorationBox = { inner ->
                             Box {
                                 if (references.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
@@ -185,15 +185,15 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 18.dp)
+                                Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 16.dp)
                             ChatIconButton(ChatPreviewIcons.Thought, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
-                                Modifier.size(32.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 20.dp)
+                                Modifier.size(32.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 18.dp)
                             Box(Modifier.size(32.dp).testTag("chat-assistant").clip(CircleShape)
                                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button,
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
                                 contentAlignment = Alignment.Center) {
-                                AssistantAvatar(assistant, 22.dp)
+                                AssistantAvatar(assistant, 18.dp)
                             }
                         }
                         key(state.controlOwnerKey) {
@@ -201,7 +201,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-composer-provider-balance")
                                     .widthIn(max = 60.dp), animateChanges = true,
-                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 30.sp))
+                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 28.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (!textAction) actions.onPrimaryTap()
                                 else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
@@ -210,9 +210,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = (if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                     .copy(alpha = if (primaryEnabled) 1f else .4f),
-                                enabled = primaryEnabled, containerSize = 24.dp,
+                                enabled = primaryEnabled, containerSize = 20.dp,
                                 tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
-                                iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 12.dp else 14.dp,
+                                iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 10.dp else 12.dp,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }
                         }
@@ -252,9 +252,9 @@ private fun Modifier.controlGesture(actions: ChatScreenActions, enabled: Boolean
 @Composable
 internal fun ComposerChip(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
     val colors = MiuixTheme.colorScheme
-    val chrome = chatChromeColors()
+    val chrome = chatChromeColors().copy(accent = conversationColors().accent)
     val contentColor = if (enabled) chrome.toolbar else colors.disabledOnSurface
-    val modelColor = if (colors.background.luminance() < .3f) Color(0xFFA491F1) else Color(0xFF9384D2)
+    val modelColor = chrome.accent
     Row(modifier.heightIn(min = 26.dp).clip(RoundedCornerShape(12.dp))
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
             onClick = onClick, onLongClick = onLongClick),

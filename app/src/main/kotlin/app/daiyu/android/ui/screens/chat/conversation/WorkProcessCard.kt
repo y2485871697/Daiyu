@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
@@ -48,7 +49,11 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, onCopy: ((Wo
     val colors = conversationColors()
     val stepCount = work.segments.sumOf { it.steps.size }
     val shape = RoundedCornerShape(14.dp)
-    Column(modifier.fillMaxWidth().clip(shape).border(1.dp, colors.line, shape).background(colors.surface)) {
+    Column(modifier.fillMaxWidth().clip(shape).background(colors.surface).drawWithContent {
+        drawContent()
+        drawLine(if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF),
+            Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), 1.dp.toPx())
+    }.border(1.dp, colors.line, shape).testTag("work-process-surface")) {
         Row(Modifier.fillMaxWidth().heightIn(min = 35.dp).conversationClickable { expanded = !expanded }
             .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
             .padding(horizontal = 11.dp, vertical = 9.dp),

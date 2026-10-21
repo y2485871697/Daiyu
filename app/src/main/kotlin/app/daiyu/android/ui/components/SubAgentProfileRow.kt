@@ -117,7 +117,8 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                         Text(profile.name, Modifier.weight(1f), fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.text)
                         authorization?.invoke()
-                        IconButton(modifier = Modifier.size(27.dp, 29.dp), enabled = usable, onClick = {
+                        app.daiyu.android.ui.components.subagent.ConversationAgentIconButton(
+                            modifier = Modifier.size(27.dp, 29.dp), enabled = usable, onClick = {
                             if (currentUsable && editor != null) SubAgentProfileDraftSession.open(editor, profile)?.let { TouchHaptics.click(view); profileDraft = it }
                         }) { Icon(Icons.Rounded.MoreHoriz, "配置${profile.name}", Modifier.size(16.dp), tint = colors.accent) }
                     }

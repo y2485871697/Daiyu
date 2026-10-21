@@ -5,6 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toPixelMap
+import app.daiyu.android.data.model.AppearanceThemeMode
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
@@ -41,6 +47,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             if (!mixed) ui.onNodeWithText("工作过程").performClick()
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
             ui.onNodeWithText("读取终端输出").scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithText("原始等待状态").assertDoesNotExist()
+            ui.onNodeWithTag("tool-runtime").scrollToVisible().performClick()
             ui.onNodeWithText("原始等待状态").assertIsDisplayed()
             ui.onNodeWithText("secret-output", substring = true).assertIsDisplayed()
             ui.onNodeWithText("技术详情").scrollToVisible().assertIsDisplayed().performClick()
@@ -81,6 +89,65 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText(details.notice).assertDoesNotExist()
             ui.onNodeWithText(details.rich.source).assertDoesNotExist()
             ui.onNodeWithContentDescription("重试 typed-$category").assertDoesNotExist()
+        }
+    }
+
+    fun testCompactDeviceAndActionBodiesHideTechnicalFieldsInBothProductionPaths() {
+        var executions = 0
+        for (mixed in listOf(false, true)) for (device in listOf(false, true)) {
+            val name = if (device) "device_time" else "platform_set_wifi"
+            val result = if (device) """{"ok":true,"data":{"local_iso":"2026-04-18T21:22:00+08:00","timezone":"Asia/Shanghai","epoch_ms":1}}"""
+                else """{"ok":true,"message":"系统已记录请求"}"""
+            val message = source(mixed).copy(blocks = source(mixed).blocks.map { block ->
+                if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = name,
+                    arguments = """{"enabled":true}"""), result = result) else block
+            })
+            val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
+            show(turn, ChatScreenActions(onRetryStep = { executions++ }))
+            if (!mixed) ui.onNodeWithText("工作过程").performClick()
+            ui.onNodeWithText(if (device) "查询时间" else "切换 Wi-Fi").scrollToVisible().performClick()
+            ui.onNodeWithText(if (device) "2026-04-18T21:22:00+08:00 · Asia/Shanghai" else "系统已记录请求").assertIsDisplayed()
+            ui.onNodeWithText("时间戳").assertDoesNotExist()
+            ui.onNodeWithText("请求启用").assertDoesNotExist()
+            ui.onNodeWithText("已记录返回").assertDoesNotExist()
+            ui.onNodeWithText("调用参数").assertDoesNotExist()
+            ui.onNodeWithText("技术详情").scrollToVisible().performClick()
+            ui.onNodeWithText("调用参数").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("调用回执").scrollToVisible().assertIsDisplayed()
+        }
+        assertEquals(0, executions)
+    }
+
+    fun testCommandAndShortLogKeepLavenderFramesAndMonospace() {
+        for (dark in listOf(false, true)) {
+            val backdrop = if (dark) Color(0xFF101218) else Color.White
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                    applyInterfaceScale = false) {
+                    Column(Modifier.background(backdrop).verticalScroll(rememberScrollState())) {
+                        ToolCategoryContent("terminal", ToolCategoryDetails.project("terminal",
+                            """{"command":"printf hello"}""", """{"stdout":"hello","exit_code":0}"""))
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            for (tag in listOf("tool-document:命令", "tool-output-preview:标准输出")) {
+                val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                ui.onNodeWithTag(tag, useUnmergedTree = true).performSemanticsAction(
+                    androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                assertEquals(androidx.compose.ui.text.font.FontFamily.Monospace, layouts.single().layoutInput.style.fontFamily)
+                assertEquals(8.5.sp, layouts.single().layoutInput.style.fontSize)
+            }
+            val pixels = captureScreenNode(ui.onNodeWithTag("tool-document:命令", useUnmergedTree = true)).toPixelMap()
+            val actual = pixels[pixels.width / 2, (pixels.height * .15f).toInt()]
+            val expected = Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
+            assertEquals(expected.red, actual.red, .025f)
+            assertEquals(expected.green, actual.green, .025f)
+            assertEquals(expected.blue, actual.blue, .025f)
+            ui.onNodeWithTag("tool-document:标准输出").performClick()
+            ui.onNodeWithTag("tool-output-text").assertTextEquals("hello")
+            ui.onNodeWithTag("tool-output-close").performClick()
+            ui.onNodeWithText("运行回执").assertDoesNotExist()
         }
     }
 

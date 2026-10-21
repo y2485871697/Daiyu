@@ -277,6 +277,28 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             }
         }
     }
+    fun testEmptySkillsListShowsZeroUnlessBodyRestricted() {
+        for (restricted in listOf(false, true)) {
+            val payload = if (restricted) """{"privacy_redacted":true,"skills":[]}"""
+                else """{"skills":[]}"""
+            val details = ToolCardPresentations.present("skills_list", "{}", payload).details
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ToolCategoryContent("skills", details)
+                }
+            } }
+            ui.waitForIdle()
+            if (restricted) {
+                ui.onNodeWithText("结果未获展示授权").assertIsDisplayed()
+                ui.onNodeWithText("技能数").assertDoesNotExist()
+                ui.onNodeWithText("0").assertDoesNotExist()
+            } else {
+                ui.onNodeWithText("技能数").assertIsDisplayed()
+                ui.onNodeWithText("0").assertIsDisplayed()
+            }
+        }
+    }
+
     fun testPrivacyWithheldHidesAllCategoryDataAndUnknownCategoryIsNotBlank() {
         for (category in listOf("files", "apps", "browser", "personal_search", "future_category")) {
             val payload = if (category == "future_category") """{"new_result":"unknown visible receipt"}"""

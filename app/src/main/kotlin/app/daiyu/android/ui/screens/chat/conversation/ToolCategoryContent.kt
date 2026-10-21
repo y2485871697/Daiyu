@@ -55,7 +55,7 @@ internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsU
         val primaryLabels = when (category) {
             "memory" -> setOf("列表范围")
             "personal_search" -> setOf("列表范围", "读取范围", "历史可用")
-            "skills" -> setOf("技能", "资源", "名称", "列表范围")
+            "skills" -> setOf("技能", "资源", "名称", "技能数", "列表范围")
             "files" -> setOf("文件名", "格式", "字节", "列表范围")
             "workspace" -> setOf("变更文件数", "冲突数", "列表范围")
             "browser" -> setOf("页面标题", "列表范围")

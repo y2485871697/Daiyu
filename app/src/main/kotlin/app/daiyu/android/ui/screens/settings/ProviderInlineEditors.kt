@@ -3,11 +3,11 @@ package app.daiyu.android.ui.screens.settings
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
+import app.daiyu.android.ui.haptics.material.IconButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Column
@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 internal val RetainedProviderFieldAdd = SemanticsPropertyKey<() -> Unit>("RetainedProviderFieldAdd")
 internal val RetainedProviderGatewayChange =

@@ -1,6 +1,6 @@
 package app.daiyu.android.ui.components
 
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -11,19 +11,18 @@ import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.*
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.SubAgentPreset
-import app.daiyu.android.ui.haptics.TouchHaptics
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,10 +50,9 @@ internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () ->
 }
 @Composable
 private fun SubAgentPresetActionRow(label: String, icon: ImageVector, tint: Color, onClick: () -> Unit) {
-    val view = LocalView.current
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp)
         .clickable(role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
-            TouchHaptics.click(view); onClick()
+            onClick()
         }.padding(horizontal = 28.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(20.dp)) {
         Icon(icon, null, Modifier.size(24.dp), tint = tint)

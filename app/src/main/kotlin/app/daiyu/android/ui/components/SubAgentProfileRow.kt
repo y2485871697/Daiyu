@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectableGroup
@@ -9,10 +9,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.*
+import app.daiyu.android.ui.haptics.material.TextButton
+import app.daiyu.android.ui.haptics.material.IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -21,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.components.subagent.*
-import app.daiyu.android.ui.haptics.TouchHaptics
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -30,7 +30,6 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
     authorization: (@Composable () -> Unit)? = null) {
     val editor = LocalConversationSubAgentEditor.current
     val usable = enabled && editor?.enabled == true
-    val view = LocalView.current
     val currentUsable by rememberUpdatedState(usable)
     var modelPicker by remember(editor, profile.id) { mutableStateOf(false) }
     var thinkingPicker by remember(editor, profile.id) { mutableStateOf(false) }
@@ -66,13 +65,13 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             SubAgentSettingRow("模型", config?.let { it.modelDisplayName.ifBlank { it.model } }
                 ?: if (profile.modelId.isBlank()) "选择模型" else "模型不可用",
                 Icons.Rounded.ViewInAr, "${profile.name}模型", enabled = usable, badge = config?.providerName,
-                onClick = { if (currentUsable) { TouchHaptics.click(view); modelPicker = true } },
-                onLongClick = { if (currentUsable && canThink) { TouchHaptics.longPress(view); thinkingPicker = true } },
+                onClick = { if (currentUsable) { modelPicker = true } },
+                onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } },
                 trailing = { SubAgentGptSpeedButton(profile, providers, usable) })
             Box(Modifier.fillMaxWidth()) {
                 SubAgentSettingRow("职责", profile.roleLabel, Icons.Rounded.Assignment,
                     "选择${profile.name}职责", enabled = usable, dropdown = true,
-                    onClick = { if (currentUsable) { TouchHaptics.click(view); rolePicker = !rolePicker } })
+                    onClick = { if (currentUsable) { rolePicker = !rolePicker } })
                 Box(Modifier.align(Alignment.CenterEnd).size(40.dp)) {
                     if (usable) SubAgentDropdownMenu(rolePicker, { rolePicker = false }, Modifier.selectableGroup()) {
                         listOf("implementation" to "执行", "review" to "审查／总结", "image_generation" to "图片生成", "video_generation" to "视频生成").forEach { (role, label) ->
@@ -88,7 +87,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                 Box(Modifier.fillMaxWidth()) {
                     SubAgentSettingRow("任务分工", profile.tier?.label ?: "未设置分工", Icons.Rounded.AccountTree,
                         "设置${profile.name}任务分工", enabled = usable, dropdown = true,
-                        onClick = { if (currentUsable) { TouchHaptics.click(view); tierPicker = !tierPicker } })
+                        onClick = { if (currentUsable) { tierPicker = !tierPicker } })
                     Box(Modifier.align(Alignment.CenterEnd).size(40.dp)) {
                         if (usable) SubAgentDropdownMenu(tierPicker, { tierPicker = false }, Modifier.selectableGroup()) {
                             (listOf<SubAgentTaskTier?>(null) + SubAgentTaskTier.entries).forEach { tier ->
@@ -104,10 +103,10 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             if (profile.role == "image_generation") {
                 SubAgentSettingRow("默认分辨率", profile.imageResolution?.let(ImageResolutionTier::label) ?: "跟随接口",
                     Icons.Rounded.ViewInAr, "设置${profile.name}分辨率", enabled = usable && config != null,
-                    onClick = { if (currentUsable && config != null) { TouchHaptics.click(view); resolutionPicker = true } })
+                    onClick = { if (currentUsable && config != null) { resolutionPicker = true } })
             }
             SubAgentSettingRow("思考深度", thinkingLabel, Icons.Rounded.AutoAwesome, "调整${profile.name}思考深度", enabled = usable && canThink,
-                onClick = { if (currentUsable && canThink) { TouchHaptics.click(view); thinkingPicker = true } })
+                onClick = { if (currentUsable && canThink) { thinkingPicker = true } })
             SubAgentParallelLimitRow(profile, config, usable)
         } else if (LocalConversationAgentStyle.current) {
             val colors = conversationAgentColors()
@@ -121,15 +120,15 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                         authorization?.invoke()
                         app.daiyu.android.ui.components.subagent.ConversationAgentIconButton(
                             modifier = Modifier.size(27.dp, 29.dp), enabled = usable, onClick = {
-                            if (currentUsable && editor != null) SubAgentProfileDraftSession.open(editor, profile)?.let { TouchHaptics.click(view); profileDraft = it }
+                            if (currentUsable && editor != null) SubAgentProfileDraftSession.open(editor, profile)?.let { profileDraft = it }
                         }) { Icon(Icons.Rounded.MoreHoriz, "配置${profile.name}", Modifier.size(16.dp), tint = colors.accent) }
                     }
                     Row(Modifier.fillMaxWidth().semantics { contentDescription = "${profile.name}模型" }
                         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                            role = Role.Button, enabled = usable, hapticFeedbackEnabled = false,
+                            role = Role.Button, enabled = usable,
                             onClickLabel = "选择${profile.name}模型", onLongClickLabel = "调整${profile.name}思考深度",
-                            onClick = { if (currentUsable) { TouchHaptics.click(view); modelPicker = true } },
-                            onLongClick = { if (currentUsable && canThink) { TouchHaptics.longPress(view); thinkingPicker = true } })
+                            onClick = { if (currentUsable) { modelPicker = true } },
+                            onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } })
                         .padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         Icon(Icons.Rounded.ViewInAr, null, Modifier.size(12.dp), tint = colors.accent)
@@ -145,10 +144,10 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             Row(Modifier.fillMaxWidth().heightIn(min = 88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).heightIn(min = 64.dp).semantics { contentDescription = "${profile.name}模型" }
                     .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                        role = Role.Button, enabled = usable, hapticFeedbackEnabled = false,
+                        role = Role.Button, enabled = usable,
                         onClickLabel = "选择${profile.name}模型", onLongClickLabel = "调整${profile.name}思考深度",
-                        onClick = { if (currentUsable) { TouchHaptics.click(view); modelPicker = true } },
-                        onLongClick = { if (currentUsable && canThink) { TouchHaptics.longPress(view); thinkingPicker = true } }),
+                        onClick = { if (currentUsable) { modelPicker = true } },
+                        onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } }),
                     verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
                     Text(profile.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(config?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (profile.modelId.isBlank()) "无" else "模型不可用",
@@ -158,7 +157,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                 }
                 SubAgentGptSpeedButton(profile, providers, usable)
                 IconButton(modifier = Modifier.size(48.dp), enabled = usable, onClick = {
-                    if (currentUsable && editor != null) SubAgentProfileDraftSession.open(editor, profile)?.let { TouchHaptics.click(view); profileDraft = it }
+                    if (currentUsable && editor != null) SubAgentProfileDraftSession.open(editor, profile)?.let { profileDraft = it }
                 }) { Icon(Icons.Rounded.MoreVert, "配置${profile.name}", Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface) }
             }
         }

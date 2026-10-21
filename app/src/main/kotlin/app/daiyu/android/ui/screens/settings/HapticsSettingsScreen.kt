@@ -5,9 +5,9 @@ import android.os.Looper
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
+import app.daiyu.android.ui.haptics.toggleable
+import androidx.compose.material3.Slider as IntensityPreviewSlider
+import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -66,7 +66,6 @@ internal fun HapticsSettingsScreen(
     fun save(transform: HapticSettings.() -> HapticSettings) {
         if (!canAct()) return
         val old = runtime.store.read()
-        if (old.touch) session.touch()
         val next = old.transform()
         if (!runtime.store.write(next)) {
             settings = runtime.store.read()
@@ -110,7 +109,7 @@ internal fun HapticsSettingsScreen(
                     onClick = if (settings.generationOn) ({
                         if (canAct()) {
                             if (!settings.backgroundOn) { save { copy(background = true) }; expanded = true }
-                            else { session.touch(); expanded = !expanded }
+                            else { expanded = !expanded }
                         }
                     }) else null, trailing = {
                         Switch(checked = settings.backgroundOn, enabled = settings.generationOn,
@@ -129,7 +128,7 @@ internal fun HapticsSettingsScreen(
             SettingsCard {
                 SettingsRow("强度", summary = labels[settings.intensity.ordinal])
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-                    Slider(value = settings.intensity.ordinal.toFloat(), valueRange = 0f..3f, steps = 2,
+                    IntensityPreviewSlider(value = settings.intensity.ordinal.toFloat(), valueRange = 0f..3f, steps = 2,
                         modifier = Modifier.testTag("haptics-intensity"),
                         onValueChange = { value ->
                             val next = HapticIntensity.entries[value.roundToInt().coerceIn(0, 3)]

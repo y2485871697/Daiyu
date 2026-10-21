@@ -12,7 +12,7 @@ import app.daiyu.android.voice.personal.PersonalVoiceCascadeBinding
 import app.daiyu.android.voice.personal.PersonalVoiceCascadeLimits
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 /** Memory-only proposal, NOT permission. Local reference resolution never initiates an upload. */
 internal class PersonalCascadeOffer internal constructor(

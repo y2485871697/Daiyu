@@ -80,7 +80,10 @@ class HapticsRuntime internal constructor(
     /** Confirmed click callbacks only. This path cannot emit generation or bypass app/system gates. */
     fun uiTouch(view: View, kind: HapticKind): HapticDelivery? {
         checkMain()
-        if (closed || !engine.foreground || !store.read().touch || !view.isAttachedToWindow ||
+        val windowType = (view.rootView.layoutParams as? android.view.WindowManager.LayoutParams)?.type
+        val ownedOverlay = windowType == android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY ||
+            windowType == android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        if (closed || (!engine.foreground && !ownedOverlay) || !store.read().touch || !view.isAttachedToWindow ||
             view.windowVisibility != View.VISIBLE) return null
         val port = ownedPort(view)
         return port.play(HapticRequest(kind, store.read().intensity)).also {

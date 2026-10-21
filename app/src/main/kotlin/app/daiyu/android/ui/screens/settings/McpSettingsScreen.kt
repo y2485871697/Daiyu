@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -99,7 +100,7 @@ import kotlinx.coroutines.withContext
     }
     SettingsScaffoldPage(title = selected?.label ?: "MCP 服务器", onBack = { back() },
         modifier = Modifier.testTag("mcp-settings"), actions = {
-            top.yukonga.miuix.kmp.basic.TextButton(
+            app.daiyu.android.ui.haptics.miuix.TextButton(
                 text = if (selected == null) "添加服务器" else "刷新",
                 enabled = !busy && snapshot != null,
                 modifier = Modifier.testTag(if (selected == null) "mcp-settings-add" else "mcp-refresh:${selected.id}"),
@@ -159,9 +160,9 @@ import kotlinx.coroutines.withContext
             OutlinedTextField(bearer, { bearer = it }, label = { Text(if (selected == null) "Bearer 令牌（可选）" else "Bearer 令牌（留空保留）") },
                 visualTransformation = PasswordVisualTransformation(), enabled = !busy,
                 modifier = Modifier.fillMaxWidth().testTag("mcp-server-bearer"))
-            top.yukonga.miuix.kmp.basic.TextButton(text = "保存", onClick = { save(false) },
+            app.daiyu.android.ui.haptics.miuix.TextButton(text = "保存", onClick = { save(false) },
                 enabled = !busy && snapshot != null, modifier = Modifier.testTag("mcp-settings-save"))
-            top.yukonga.miuix.kmp.basic.TextButton(text = "取消", onClick = { editing = false; bearer = "" })
+            app.daiyu.android.ui.haptics.miuix.TextButton(text = "取消", onClick = { editing = false; bearer = "" })
         }
     }
     if (deleting && selected != null) DaiyuConfirmDialog(title = "删除服务器", confirmText = "删除",

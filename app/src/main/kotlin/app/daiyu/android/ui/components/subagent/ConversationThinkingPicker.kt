@@ -96,7 +96,12 @@ import kotlin.math.roundToInt
         contentDescription = "思考深度"
         if (selected >= 0) progressBarRangeInfo = ProgressBarRangeInfo(selected.toFloat(), 0f..maximum.toFloat(), (maximum - 1).coerceAtLeast(0))
         else stateDescription = "尚未选择"
-        setProgress { value -> val index = value.roundToInt().coerceIn(0, maximum); preview(index); commit(index); true }
+        setProgress { value ->
+            val index = value.roundToInt().coerceIn(0, maximum)
+            if (index == selected) false else {
+                TouchHaptics.action(view) { preview(index); commit(index) }; true
+            }
+        }
     }.pointerInput(maximum) {
         awaitEachGesture {
             val down = awaitFirstDown(); down.consume()

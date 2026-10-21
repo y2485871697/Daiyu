@@ -4,7 +4,7 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.layout.*
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.usagePalette
@@ -213,7 +213,7 @@ private fun Document(document: ToolDisclosureUi) {
         Column(Modifier.align(Alignment.Center).width(minOf(maxWidth * .92f, 620.dp, (maxWidth - 24.dp).coerceAtLeast(0.dp)))
             .heightIn(max = viewportHeight * .82f).clip(shape).previewGlassBlur(shape)
             .background(Brush.linearGradient(palette.sheet)).border(1.dp, palette.edge, shape)
-            .conversationClickable {}.padding(16.dp).testTag("tool-output-dialog"),
+            .conversationClickable(clickFeedback = false) {}.padding(16.dp).testTag("tool-output-dialog"),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(document.title, Modifier.weight(1f), fontSize = 16.sp, lineHeight = 24.sp,

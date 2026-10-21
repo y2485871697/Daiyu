@@ -1,6 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.rotate

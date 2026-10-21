@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.R
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.model.MessageSearchHit
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 internal data class MessageSearchRequest(val query: String, val conversationId: String? = null)
 

@@ -1,5 +1,6 @@
 package app.daiyu.android.pet
 
+import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -53,14 +54,14 @@ private class PetPanel(context: Context, controller: PetController, assets: PetR
     init {
         gravity = android.view.Gravity.CENTER_HORIZONTAL
         bubble.setTextColor(0xff1e293b.toInt()); bubble.setBackgroundColor(0xffffffff.toInt())
-        bubble.setPadding(dp(10), dp(8), dp(10), dp(8)); bubble.setOnClickListener { controller.dismissSpeech() }
+        bubble.setPadding(dp(10), dp(8), dp(10), dp(8)); bubble.setHapticClickListener { controller.dismissSpeech() }
         addView(bubble, LayoutParams(dp(220), LayoutParams.WRAP_CONTENT))
         addView(sprite, LayoutParams(dp(128), dp(128)))
         sprite.id = app.daiyu.android.R.id.pet_sprite
-        sprite.setOnClickListener {
+        sprite.setHapticClickListener {
             val snapshot = controller.snapshot()
             if (!isAttachedToWindow || !isShown || snapshot.closed || !snapshot.state.settings.enabled ||
-                snapshot.error?.contains("存储") == true || snapshot.state.thinking || cupboard?.isShowing == true) return@setOnClickListener
+                snapshot.error?.contains("存储") == true || snapshot.state.thinking || cupboard?.isShowing == true) return@setHapticClickListener
             PetCupboardDialog(context, controller, assets, overlay).also { dialog ->
                 cupboard = dialog
                 dialog.setOnDismissListener { if (cupboard === dialog) cupboard = null }
@@ -207,17 +208,20 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
         fun add(view: View) { section.addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)) }
         group("状态与开关")
         add(status); add(permission); add(TextView(context).apply { text = host.resources.status })
-        listOf(enabled, work, global, audio).forEach(::add)
+        listOf(enabled, work, global, audio).forEach { control ->
+            add(control)
+            control.setHapticClickListener {}
+        }
         enabled.setOnCheckedChangeListener { _, value -> if (!rendering) host.setEnabled(value) }
         work.setOnCheckedChangeListener { _, value -> if (!rendering) controller.updateSettings(controller.snapshot().state.settings.copy(workReactions = value)) }
         global.setOnCheckedChangeListener { _, value -> if (!rendering) host.setGlobalVisible(value) }
         audio.setOnCheckedChangeListener { _, value -> if (!rendering) controller.updateSettings(controller.snapshot().state.settings.copy(audioEnabled = value)) }
-        add(Button(context).apply { text = "刷新系统悬浮权限状态（不跳转设置）"; setOnClickListener { host.refreshOverlayPermission() } })
+        add(Button(context).apply { text = "刷新系统悬浮权限状态（不跳转设置）"; setHapticClickListener { host.refreshOverlayPermission() } })
         group("独立模型")
         add(assistant); add(provider); add(model)
-        add(Button(context).apply { text = "保存独立模型选择"; setOnClickListener {
+        add(Button(context).apply { text = "保存独立模型选择"; setHapticClickListener {
             val fields = listOf(assistant.text.toString().trim(), provider.text.toString().trim(), model.text.toString().trim())
-            if (fields.any { it.length > 200 }) { status.text = "ID不能超过200字符"; return@setOnClickListener }
+            if (fields.any { it.length > 200 }) { status.text = "ID不能超过200字符"; return@setHapticClickListener }
             controller.updateSettings(controller.snapshot().state.settings.copy(model = PetModelSelection(fields[0], fields[1], fields[2])))
         } })
         group("投喂")
@@ -231,12 +235,12 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
             val image = ImageButton(context).apply {
                 setImageBitmap(host.resources.food(food.resourceKey)); contentDescription = "投喂${food.displayName}"
                 scaleType = ImageView.ScaleType.FIT_CENTER; setBackgroundColor(0x55ffffff)
-                setOnClickListener { host.feed(food) }; foods.add(this)
+                setHapticClickListener { host.feed(food) }; foods.add(this)
             }
             row.addView(image, LayoutParams(dp(64), dp(64)))
             row.addView(Button(context).apply {
                 text = "${food.displayName} +${food.satiety}（游戏粮食）"; foods.add(this)
-                setOnClickListener { host.feed(food) }
+                setHapticClickListener { host.feed(food) }
             }, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             cupboard.addView(row)
         }
@@ -245,10 +249,10 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
         scale.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { if (fromUser) controller.setScale(.5f + progress * .05f) }
             override fun onStartTrackingTouch(bar: SeekBar?) {}
-            override fun onStopTrackingTouch(bar: SeekBar?) {}
+            override fun onStopTrackingTouch(bar: SeekBar?) { app.daiyu.android.ui.haptics.TouchHaptics.click(bar) }
         })
-        add(Button(context).apply { text = "重置缩放"; setOnClickListener { controller.setScale(1f) } })
-        add(Button(context).apply { text = "清空记忆并取消当前反应"; setOnClickListener { controller.clearMemories() } })
+        add(Button(context).apply { text = "重置缩放"; setHapticClickListener { controller.setScale(1f) } })
+        add(Button(context).apply { text = "清空记忆并取消当前反应"; setHapticClickListener { controller.clearMemories() } })
         add(memories); add(usage)
     }
     override fun onAttachedToWindow() {

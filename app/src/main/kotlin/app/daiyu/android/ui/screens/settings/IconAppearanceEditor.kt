@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.ui.platform.LocalView
+import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -10,7 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.selection.selectable
+import app.daiyu.android.ui.haptics.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.*
@@ -53,6 +55,7 @@ internal fun IconAppearanceEditor(
     expanded: Boolean,
     ownerCurrent: () -> Boolean = { true },
 ) {
+    val feedbackView = LocalView.current
     val initial = remember(coordinator) { runCatching { coordinator.store.load() } }
     var draft by rememberSaveable(coordinator, stateSaver = IconDraftSaver) {
         mutableStateOf(initial.getOrDefault(IconAppearance()))
@@ -85,7 +88,11 @@ internal fun IconAppearanceEditor(
         IconSwatches("猫咪颜色", "cat", draft.iconCatColor) { if (current()) draft = draft.copy(iconCatColor = it) }
         AssistantPreviewButton("确定", onClick = { confirm() },
             modifier = Modifier.fillMaxWidth().testTag("icon-appearance-confirm").semantics {
-                onClick { confirm(); true }
+                onClick {
+                    if ((draft != confirmed || error != null) && current()) {
+                        TouchHaptics.action(feedbackView) { confirm() }; true
+                    } else false
+                }
             },
             primary = true, enabled = draft != confirmed || error != null)
         error?.let { Text(it, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2,

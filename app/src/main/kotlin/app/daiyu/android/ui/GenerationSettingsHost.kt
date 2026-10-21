@@ -20,7 +20,7 @@ import app.daiyu.android.GenerationSettingsEditor
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.screens.settings.GenerationSettingsScreen
 import app.daiyu.android.ui.screens.settings.SettingsNote
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 /** Remember in the settings route, not rememberSaveable. The editor itself never owns a draft;
  * each Host mounting creates its own terminally revocable in-memory Page.

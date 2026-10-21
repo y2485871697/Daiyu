@@ -1,6 +1,6 @@
 package app.daiyu.android.ui.screens.search
 
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.R
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import app.daiyu.android.ui.screens.settings.SettingsTextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 

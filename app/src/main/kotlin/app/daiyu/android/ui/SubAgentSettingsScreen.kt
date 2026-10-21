@@ -11,6 +11,11 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.*
+import app.daiyu.android.ui.haptics.material.TextButton
+import app.daiyu.android.ui.haptics.material.FilledTonalButton
+import app.daiyu.android.ui.haptics.material.IconButton
+import app.daiyu.android.ui.haptics.material.Switch
+import app.daiyu.android.ui.haptics.material.DropdownMenuItem
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,7 +32,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.components.*
-import app.daiyu.android.ui.haptics.TouchHaptics
 import app.daiyu.android.ui.screens.settings.settingsPageBackground
 import app.daiyu.android.ui.layout.horizontalCutoutPadding
 
@@ -80,7 +84,7 @@ internal fun SubAgentSettingsScreen(
                 floatingActionButtonPosition = FabPosition.Center,
                 floatingActionButton = {
                     FilledTonalButton(enabled = editable, onClick = {
-                        TouchHaptics.click(view); name = ""; add = true
+                        name = ""; add = true
                     }, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 168.dp), shape = RoundedCornerShape(50)) {
                         Text("添加子代理组", style = MaterialTheme.typography.bodyLarge)
                     }
@@ -100,7 +104,7 @@ internal fun SubAgentSettingsScreen(
                             } },
                             trailing = {
                                 IconButton(modifier = Modifier.padding(end = 8.dp).size(48.dp), enabled = editable, onClick = {
-                                    if (editable) { TouchHaptics.click(view); actionsPreset = preset }
+                                    if (editable) { actionsPreset = preset }
                                 }) { Icon(Icons.Rounded.MoreVert, "${preset.name}组更多操作") }
                             })
                     }
@@ -159,7 +163,7 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
             floatingActionButtonPosition = FabPosition.Center,
             floatingActionButton = {
                 FilledTonalButton(onClick = {
-                    if (editor.enabled) SubAgentProfileDraftSession.open(editor)?.let { TouchHaptics.click(view); addedDraft = it }
+                    if (editor.enabled) SubAgentProfileDraftSession.open(editor)?.let { addedDraft = it }
                 }, enabled = editable, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 168.dp),
                     shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -201,20 +205,20 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                                             .semantics { contentDescription = "启用${profile.name}" }, contentAlignment = Alignment.Center) {
                                             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
                                                 Switch(profile.enabled, enabled = editable, onCheckedChange = { active ->
-                                                    if (editor.enabled) { TouchHaptics.click(view); editor.updateProfile(profile.id) { it.copy(enabled = active) } }
+                                                    if (editor.enabled) { editor.updateProfile(profile.id) { it.copy(enabled = active) } }
                                                 }, modifier = Modifier.scale(0.7f))
                                             }
                                         }
                                         var expanded by remember(editor, profile.id) { mutableStateOf(false) }
                                         LaunchedEffect(editable) { if (!editable) expanded = false }
                                         Box {
-                                            IconButton(enabled = editable, onClick = { if (editor.enabled) { TouchHaptics.click(view); expanded = true } }) {
+                                            IconButton(enabled = editable, onClick = { if (editor.enabled) { expanded = true } }) {
                                                 Icon(Icons.Rounded.MoreVert, "${profile.name}更多操作")
                                             }
                                             if (editable) SubAgentDropdownMenu(expanded, { expanded = false }) {
                                                 DropdownMenuItem(text = { Text("配置") }, leadingIcon = { Icon(Icons.Rounded.Tune, null) },
                                                     onClick = {
-                                                        if (editor.enabled) SubAgentProfileDraftSession.open(editor, profile)?.let { TouchHaptics.click(view); addedDraft = it }
+                                                        if (editor.enabled) SubAgentProfileDraftSession.open(editor, profile)?.let { addedDraft = it }
                                                         expanded = false
                                                     })
                                                 DropdownMenuItem(text = { Text("重命名") }, leadingIcon = { Icon(Icons.Rounded.Edit, null) },

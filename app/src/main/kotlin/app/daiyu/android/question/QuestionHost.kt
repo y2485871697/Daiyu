@@ -1,5 +1,8 @@
 package app.daiyu.android.question
 
+import app.daiyu.android.ui.haptics.setHapticNegativeButton
+import app.daiyu.android.ui.haptics.setHapticPositiveButton
+import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.app.Activity
 import app.daiyu.android.ui.components.startDaiyuEnterMotion
 import android.app.AlertDialog
@@ -93,15 +96,16 @@ class QuestionHost(private val registry: QuestionRegistry) {
         if (delegateId != -1) group.addView(RadioButton(activity).apply { id = delegateId; text = "由你决定" })
         content.addView(group)
         val other = if (question.allowOther) EditText(activity).apply { hint = "其他答案"; filters = arrayOf(InputFilter.LengthFilter(4000)); visibility = View.GONE; content.addView(this) } else null
+        for (index in 0 until group.childCount) group.getChildAt(index).setHapticClickListener {}
         group.setOnCheckedChangeListener { _, checked -> other?.visibility = if (checked == otherId) View.VISIBLE else View.GONE }
         val note = if (question.allowNote) EditText(activity).apply { hint = "补充说明（可选）"; filters = arrayOf(InputFilter.LengthFilter(4000)); content.addView(this) } else null
         val error = TextView(activity).apply { visibility = View.GONE; content.addView(this) }
         val window = AlertDialog.Builder(activity).setTitle(question.title)
             .setView(ScrollView(activity).apply { addView(content) })
-            .setPositiveButton("提交答案", null).setNegativeButton("稍后回答", null).create()
+            .setHapticPositiveButton("提交答案", null).setHapticNegativeButton("稍后回答", null).create()
         window.setOnShowListener {
             window.startDaiyuEnterMotion()
-            window.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            window.getButton(AlertDialog.BUTTON_POSITIVE).setHapticClickListener {
                 val checked = group.checkedRadioButtonId
                 val noteText = note?.text?.toString()?.takeIf { it.isNotEmpty() }
                 val answer: QuestionAnswer? = when {
@@ -110,7 +114,7 @@ class QuestionHost(private val registry: QuestionRegistry) {
                     checked == delegateId && delegateId != -1 -> QuestionAnswer.Delegate(noteText)
                     else -> null
                 }
-                if (answer == null) { error.text = "请选择一个答案；推荐选项不会自动选择"; error.visibility = View.VISIBLE; return@setOnClickListener }
+                if (answer == null) { error.text = "请选择一个答案；推荐选项不会自动选择"; error.visibility = View.VISIBLE; return@setHapticClickListener }
                 var refreshFailed = false
                 try {
                     registry.submit(record.callId, answer)
@@ -119,11 +123,11 @@ class QuestionHost(private val registry: QuestionRegistry) {
                     refreshFailed = true
                 } catch (_: QuestionException) {
                     error.text = "答案无效或提问已过期，请查看消息中的提问状态"; error.visibility = View.VISIBLE
-                    return@setOnClickListener
+                    return@setHapticClickListener
                 } catch (_: Exception) {
                     // Do not dismiss or disable: preserve selection/note and permit explicit retry.
                     error.text = WRITE_FAILED; error.visibility = View.VISIBLE
-                    return@setOnClickListener
+                    return@setHapticClickListener
                 }
                 submittedCallId = record.callId
                 // From here on the answer is durable. Never offer another submission after refresh failure.

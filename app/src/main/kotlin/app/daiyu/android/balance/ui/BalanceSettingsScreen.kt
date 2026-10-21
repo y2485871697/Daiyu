@@ -14,18 +14,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.Button
+import app.daiyu.android.ui.haptics.material.Button
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
 import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import app.daiyu.android.ui.haptics.material.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle

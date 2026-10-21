@@ -13,7 +13,7 @@ import app.daiyu.android.model.generation.GenerationProtocol
 import app.daiyu.android.model.generation.GenerationSettingsEditingSnapshot
 import app.daiyu.android.model.generation.GenerationSettingsSnapshot
 import app.daiyu.android.model.generation.GenerationSettingsValues
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 /** Memory only. Never rememberSaveable, log, persist as plaintext, or include in a backup. */
 data class GenerationProfileDraftUi(

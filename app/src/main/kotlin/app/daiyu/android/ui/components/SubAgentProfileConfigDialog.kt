@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -7,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,11 +18,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.components.subagent.*
-import app.daiyu.android.ui.haptics.TouchHaptics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
-import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 /** One opening owns one editor, application, expected profile and parallel-pool snapshot. */
@@ -146,7 +147,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     }
     val verifiedGrok = boundConfig?.grokImage ?: false
     val ready = usable && !resolutionPending && session.parallelBoundTo(boundConfig) && session.name.trim().isNotBlank() && session.parallelIsValid() && (session.expectedProfile != null || boundConfig != null)
-    val interact: (() -> Unit) -> Unit = { action -> if (session.canCommit(latestEditor, latestEnabled) && !session.submitting) { TouchHaptics.click(view); action() } }
+    val interact: (() -> Unit) -> Unit = { action -> if (session.canCommit(latestEditor, latestEnabled) && !session.submitting) { action() } }
     val dismiss = { session.dismiss(); latestDismiss() }
     val userDismiss = { if (!session.submitting) dismiss() }
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
@@ -162,7 +163,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     }
                     SubAgentSettingRow("模型", boundConfig?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (draft.modelId.isBlank()) "选择模型" else "模型不可用",
                         Icons.Rounded.ViewInAr, "草稿模型", usable, badge = boundConfig?.providerName,
-                        onClick = { interact { modelPicker = true } }, onLongClick = { if (usable && canThink) { TouchHaptics.longPress(view); thinkingPicker = true } })
+                        onClick = { interact { modelPicker = true } }, onLongClick = { if (usable && canThink) { thinkingPicker = true } })
                     if (canEditSpeed) SubAgentSettingRow("GPT 速度", subAgentGptSpeedDisplayName(draft.gptSpeedForModel()), Icons.Rounded.Speed, "草稿GPT速度", usable, onClick = { interact {
                         session.edit { profile ->
                             if (profile.providerId != draft.providerId || profile.modelId != draft.modelId || profile.role != draft.role) profile
@@ -197,7 +198,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                             try {
                                 val result = session.editor.commitProfileDraft(capturedDraft, capturedExpected, capturedApplication, capturedParallel,
                                     canCommit = { session.canCommit(latestEditor, latestEnabled, capturedTicket) })
-                                if (result is ConversationSubAgentPreferences.WriteResult.Saved && session.isCurrent(latestEditor, latestEnabled)) { TouchHaptics.click(view); dismiss() }
+                                if (result is ConversationSubAgentPreferences.WriteResult.Saved && session.isCurrent(latestEditor, latestEnabled)) { dismiss() }
                                 else if (session.isCurrent(latestEditor, latestEnabled)) session.error = "未保存：配置或模型已变更，请检查后重试；草稿已保留。"
                             } catch (cancelled: CancellationException) { throw cancelled }
                             catch (_: Exception) { session.error = "保存失败，草稿已保留，请重试。" }
@@ -257,13 +258,13 @@ private fun SubAgentDraftDialogActions(confirmEnabled: Boolean, cancelEnabled: B
     if (LocalConversationAgentStyle.current) {
         HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ConversationAgentButton("取消", cancelEnabled, modifier = Modifier.weight(1f)) { TouchHaptics.click(view); onCancel() }
+            ConversationAgentButton("取消", cancelEnabled, modifier = Modifier.weight(1f)) { onCancel() }
             ConversationAgentButton("确认", confirmEnabled, primary = true, modifier = Modifier.weight(1f), onClick = onConfirm)
         }
         return
     }
     Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MiuixTextButton(text = "取消", modifier = Modifier.weight(1f), enabled = cancelEnabled, onClick = { TouchHaptics.click(view); onCancel() })
+        MiuixTextButton(text = "取消", modifier = Modifier.weight(1f), enabled = cancelEnabled, onClick = { onCancel() })
         MiuixTextButton(text = "确认", modifier = Modifier.weight(1f), enabled = confirmEnabled, colors = MiuixButtonDefaults.textButtonColorsPrimary(), onClick = onConfirm)
     }
 }

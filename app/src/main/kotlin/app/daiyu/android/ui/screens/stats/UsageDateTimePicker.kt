@@ -135,7 +135,9 @@ private class SpinnerDatePickerView(
         addPicker(yearPicker, pickerHeight)
         addPicker(monthPicker, pickerHeight)
         addPicker(dayPicker, pickerHeight)
-        val listener = NumberPicker.OnValueChangeListener { _, _, _ -> publish() }
+        val listener = NumberPicker.OnValueChangeListener { picker, _, _ ->
+            if (!publishing) { TouchHaptics.tick(picker); publish() }
+        }
         yearPicker.setOnValueChangedListener(listener)
         monthPicker.setOnValueChangedListener(listener)
         dayPicker.setOnValueChangedListener(listener)

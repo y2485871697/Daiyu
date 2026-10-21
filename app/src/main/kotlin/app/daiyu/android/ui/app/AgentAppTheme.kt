@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.app
 
+import app.daiyu.android.ui.haptics.ProvideTouchHaptics
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -138,7 +139,7 @@ fun AgentAppTheme(
                     extraLarge = RoundedCornerShape(20.dp),
                 ),
             ) {
-                WithoutPressRipple { PreviewBackdropHost(content) }
+                ProvideTouchHaptics { WithoutPressRipple { PreviewBackdropHost(content) } }
             }
         }
     }

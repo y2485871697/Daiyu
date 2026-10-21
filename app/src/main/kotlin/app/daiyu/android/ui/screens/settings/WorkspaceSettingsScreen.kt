@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.ui.platform.LocalView
+import app.daiyu.android.ui.haptics.TouchHaptics
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -29,7 +31,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -186,7 +188,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     // Loading must not measure the retained position against a temporarily shorter list.
     SettingsScaffoldPage(title = pageTitle, onBack = back, modifier = modifier,
         listState = if (showShared && (!loaded || restoringDirectory)) loadingListState else listState, actions = {
-        if (onOpenTerminal != null) top.yukonga.miuix.kmp.basic.IconButton(onClick = {
+        if (onOpenTerminal != null) app.daiyu.android.ui.haptics.miuix.IconButton(onClick = {
             if (current() && !busy && !privateOccupied && pendingTree == null) onOpenTerminal()
         }, modifier = Modifier.size(48.dp).testTag("linux-open-terminal")) {
             app.daiyu.android.ui.icons.DaiyuIcon(app.daiyu.android.ui.icons.DaiyuIcons.Terminal, "终端")
@@ -249,6 +251,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
 
 @Composable
 private fun WorkspaceButton(text: String, tag: String, onClick: () -> Unit) {
+    val feedbackView = LocalView.current
     TextButton(text, onClick = onClick,
-        modifier = Modifier.testTag(tag).semantics { semanticsClick { onClick(); true } })
+        modifier = Modifier.testTag(tag).semantics { semanticsClick { TouchHaptics.action(feedbackView) { onClick() }; true } })
 }

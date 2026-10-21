@@ -9,19 +9,16 @@ import androidx.compose.material.icons.rounded.CallSplit
 import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.*
-import app.daiyu.android.ui.haptics.TouchHaptics
 
 @Composable
 internal fun SubAgentParallelLimitRow(profile: SubAgentProfile, config: SubAgentModelConfig?, enabled: Boolean = true) {
     val editor = LocalConversationSubAgentEditor.current
-    val view = LocalView.current
     val state = editor?.observe()
     val ownerConfig = (state as? SubAgentEditorState.Loaded)?.config
     val usable = enabled && editor?.enabled == true && ownerConfig != null && config != null && config.providerId.isNotBlank() && config.model.isNotBlank()
@@ -38,7 +35,7 @@ internal fun SubAgentParallelLimitRow(profile: SubAgentProfile, config: SubAgent
             limit != null -> limit.toString()
             else -> "模型不可用"
         }, Icons.Rounded.CallSplit, "设置${profile.name}并行上限", enabled = usable, onClick = {
-            if (currentUsable && config != null && limit != null) { TouchHaptics.click(view); value = limit.toString(); open = true }
+            if (currentUsable && config != null && limit != null) { value = limit.toString(); open = true }
         })
         if (state is SubAgentEditorState.Error) {
             Text("子代理配置错误：${state.reason}")

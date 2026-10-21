@@ -30,7 +30,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 internal const val ACCOUNT_PREVIEW_CONFIRMATION =
     "使用当前账户在线新合成固定文本：你好，这是当前账户音色的试听。" +

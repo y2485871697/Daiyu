@@ -23,7 +23,7 @@ import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.icons.ModelBrandIcon
 import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 

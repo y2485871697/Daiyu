@@ -4,12 +4,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import app.daiyu.android.R
-import app.daiyu.android.ui.haptics.TouchHaptics
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
+import app.daiyu.android.ui.haptics.miuix.IconButton
 
 /**
  * 二级页面统一返回按钮，保持图标、语义、RTL 方向与点击区域一致。
@@ -19,10 +17,9 @@ fun MiuixBackButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val view = LocalView.current
     IconButton(
         onClick = {
-            TouchHaptics.click(view)
+
             onClick()
         },
         modifier = modifier,

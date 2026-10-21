@@ -1,11 +1,16 @@
 package app.daiyu.android.ui
 
+import androidx.compose.ui.platform.LocalView
+import app.daiyu.android.ui.haptics.TouchHaptics
 import android.os.Build
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.*
+import app.daiyu.android.ui.haptics.material.Button
+import app.daiyu.android.ui.haptics.material.TextButton
+import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -29,6 +34,7 @@ import org.json.JSONObject
     onAccepted: (ControllerPlatformActionPreparation, Conversation) -> Unit,
     showEntry: Boolean = true,
 ) {
+    val feedbackView = LocalView.current
     var open by remember(owner, visit) { mutableStateOf(false) }
     var kind by remember(owner, visit) { mutableStateOf<PlatformActionKind?>(null) }
     var first by remember(owner, visit) { mutableStateOf("") }
@@ -174,7 +180,7 @@ import org.json.JSONObject
                     modifier = Modifier.testTag("platform-action-confirm").semantics {
                         // Keep the UI callback independent of ClickableNode attachment.
                         onClick {
-                            if (confirmEnabled) { approve(); true } else false
+                            if (confirmEnabled) { TouchHaptics.action(feedbackView) { approve() }; true } else false
                         }
                     }, onClick = approve) { Text("批准精确动作并发送") }
             },

@@ -3,7 +3,7 @@ package app.daiyu.android.ui.components
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.components.DaiyuDialog as Dialog
 import androidx.compose.ui.window.DialogProperties
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -161,6 +161,7 @@ internal fun DaiyuChoiceSheet(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
+                        clickFeedback = false,
                         onClick = {},
                     ).padding(16.dp),
             ) {

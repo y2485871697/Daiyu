@@ -1,6 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.compose.foundation.clickable
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -50,6 +50,7 @@ internal fun Modifier.conversationClickable(
     enabled: Boolean = true,
     role: Role? = Role.Button,
     onClickLabel: String? = null,
+    clickFeedback: Boolean = true,
     onClick: () -> Unit,
 ): Modifier = clickable(
     interactionSource = remember { MutableInteractionSource() },
@@ -57,6 +58,7 @@ internal fun Modifier.conversationClickable(
     enabled = enabled,
     role = role,
     onClickLabel = onClickLabel,
+    clickFeedback = clickFeedback,
     onClick = onClick,
 )
 

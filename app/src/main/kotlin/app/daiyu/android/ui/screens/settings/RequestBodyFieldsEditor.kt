@@ -17,7 +17,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.model.RequestBodyField
 import app.daiyu.android.model.RequestBodyFields
 import app.daiyu.android.model.RequestBodyValueType
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 internal val RetainedRequestBodyFieldApply = SemanticsPropertyKey<() -> Unit>("RetainedRequestBodyFieldApply")

@@ -2,7 +2,7 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.platform.testTag
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 import androidx.compose.runtime.key
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable

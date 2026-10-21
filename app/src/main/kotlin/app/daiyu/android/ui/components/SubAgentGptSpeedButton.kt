@@ -11,7 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.combinedClickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -30,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -40,7 +39,6 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.R
 import app.daiyu.android.delegation.*
 import app.daiyu.android.model.GptSpeedMode
-import app.daiyu.android.ui.haptics.TouchHaptics
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
@@ -69,7 +67,6 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
     val progress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val view = LocalView.current
     val normalColor = MaterialTheme.colorScheme.onSurface
     val contentColor by animateColorAsState(targetValue = subAgentGptSpeedChipColor(mode, normalColor,
         MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimaryContainer),
@@ -82,7 +79,7 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
         else modifier.defaultMinSize(minWidth = SubAgentGptSpeedMinTouchSize, minHeight = SubAgentGptSpeedMinTouchSize))
         .semantics(mergeDescendants = true) { contentDescription = subAgentGptSpeedDescription(profile.name, mode) }
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = usable,
-            role = Role.Button, hapticFeedbackEnabled = false, onLongClick = null, onClick = {
+            role = Role.Button, onLongClick = null, onClick = {
                 val token = gate.request()
                 if (token != 0) scope.launch {
                     try {
@@ -91,7 +88,7 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
                         if (result !is ConversationSubAgentPreferences.WriteResult.Saved) return@launch
                         val savedProfile = result.config.profiles.singleOrNull { it.id == profile.id && it.providerId == profile.providerId && it.modelId == profile.modelId } ?: return@launch
                         val savedMode = savedProfile.gptSpeedForModel(profile.providerId, profile.modelId)
-                        TouchHaptics.click(view)
+
                         Toast.makeText(context, subAgentGptSpeedToastMessage(savedMode), Toast.LENGTH_SHORT).show()
                         progress.snapTo(0f)
                         progress.animateTo(targetValue = 1f, animationSpec = tween(durationMillis = SubAgentGptSpeedAnimationDurationMillis, easing = LinearEasing))

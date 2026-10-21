@@ -17,7 +17,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.LegacyLibraryHost
 import app.daiyu.android.LegacyLibraryState
 import app.daiyu.android.LegacyTextSection
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.haptics.miuix.TextButton
 
 /** A read-only compatibility library, never a chat/model/tool surface. Picker ownership stays in Main. */
 @Composable

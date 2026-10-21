@@ -47,7 +47,7 @@ internal fun MessageContent(
         var imageNumber = 0
         content.forEachIndexed { index, block ->
             when (block) {
-                is MessageContentUi.Text -> {
+                is MessageContentUi.Text -> key(block.itemId) {
                     if (block.text.isNotBlank()) textBody(block.text, Modifier.testTag("message-content-text:$index"))
                 }
                 is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)

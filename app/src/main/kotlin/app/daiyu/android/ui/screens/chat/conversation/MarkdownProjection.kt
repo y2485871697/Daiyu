@@ -13,6 +13,15 @@ internal data class MarkdownProjection(
     val parser: (String) -> List<MarkdownBlock>,
 )
 
+internal data class MarkdownBodySnapshot(val text: String, val blocks: List<MarkdownBlock>)
+
+internal fun markdownBodySnapshot(
+    text: String,
+    blocks: List<MarkdownBlock>?,
+    previous: MarkdownBodySnapshot?,
+): MarkdownBodySnapshot? = if (blocks != null) MarkdownBodySnapshot(text, blocks)
+    else previous?.takeIf { text.startsWith(it.text) }
+
 // One running CPU parse; cancelled snapshots do not accumulate runnable parse work.
 private val markdownDispatcher = Dispatchers.Default.limitedParallelism(1)
 

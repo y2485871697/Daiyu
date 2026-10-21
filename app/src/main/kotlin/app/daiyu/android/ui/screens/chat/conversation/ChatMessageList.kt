@@ -37,6 +37,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -267,7 +268,7 @@ internal fun AssistantTurn(
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
-) {
+) = key(turn.listKey) {
     val sources = remember(turn.content, turn.finalText) {
         if (turn.content.isEmpty()) listOf(turn.finalText)
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { it.text }
@@ -290,7 +291,7 @@ internal fun AssistantTurn(
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent) { text, modifier ->
-                ParsedMessageMarkdown(text, projection?.blocks?.get(text), modifier)
+                ProjectedMessageMarkdown(text, projection?.blocks?.get(text), modifier)
             }
         } else {
             AssistantTextContent(turn, actions, projection, toolContent)
@@ -316,7 +317,7 @@ internal fun AssistantTurn(
 private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, toolContent: @Composable (WorkStepUi) -> Unit) {
     turn.workProcess?.let { WorkProcessCard(it, turn.listKey, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
-        ParsedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText))
+        ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText))
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
         Text("正在思考…", color = conversationColors().muted,
             style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp))

@@ -332,7 +332,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             assertEquals(1, queries.get())
             ui.onNodeWithText("撤销共享授权").assertDoesNotExist()
             workspaceClick("workspace-browse:0")
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-file:0").fetchSemanticsNodes().size == 1 }
+            workspaceControl("workspace-file:0").assertTextContains("local-only.txt")
             assertEquals(2, queries.get())
             assertEquals(listOf(tree), registry.grants())
             assertEquals(0, fixture.opens.get())

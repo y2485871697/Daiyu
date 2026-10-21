@@ -149,7 +149,7 @@ private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
         if (tappable) Box(surface.testTag("tool-document:${document.title}")
             .conversationClickable(onClickLabel = "查看${document.title}") { opened = true }) {
             Text(preview.text, modifier = Modifier.fillMaxWidth()
-                .padding(horizontal = 9.dp, vertical = 8.dp)
+                .padding(start = 9.dp, end = 9.dp, top = 8.dp, bottom = 12.dp)
                 .testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = colors.text)
             val hintBackground = if (colors.dark) Color(0xFF191B23) else Color(0xFFFAF9FC)

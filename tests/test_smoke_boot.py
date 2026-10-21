@@ -234,8 +234,15 @@ case "$*" in
  'install '*) printf 'Success\n'; [ "$CASE" != install-fail ] || exit 7 ;;
  'shell am instrument '*)
   printf '%s\n' "$@" > smoke/instrumentation-args.txt
-  [ "$#" -eq 9 ] && [ "$4" = -w ] && [ "$5" = -r ] && [ "$6" = -e ] && [ "$7" = class ] &&
-   [ "$8" = "$TEST_CLASSES" ] && [ "$9" = app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner ] || exit 11
+  [ "$4" = -w ] && [ "$5" = -r ] || exit 11
+  if [ "$SMOKE_MODE" = candidate ]; then
+   [ "$#" -eq 12 ] && [ "$6" = -e ] && [ "$7" = timeout_msec ] && [ "$8" = 180000 ] || exit 11
+   shift 3
+  else
+   [ "$#" -eq 9 ] || exit 11
+  fi
+  [ "$6" = -e ] && [ "$7" = class ] && [ "$8" = "$TEST_CLASSES" ] &&
+   [ "$9" = app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner ] || exit 11
   if [ "$CASE" = androidx-ok ]; then
    printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=testOne\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 1\n'
    printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=testOne\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_RESULT: stream=\nTime: 0.01\n'
@@ -425,6 +432,10 @@ exit 0
                 extra_sources={'Second.java': JAVA_SECOND_SOURCE}, test_classes=selected,
                 expected_classes=selected, reported_count=4)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
+            args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
+            self.assertEqual(args, ['shell', 'am', 'instrument', '-w', '-r',
+                '-e', 'timeout_msec', '180000', '-e', 'class', selected,
+                'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner'])
             selection = self.selection()
             self.assertEqual(selection['mode'], 'candidate')
             self.assertIs(selection['formal_acceptance'], False)

@@ -128,6 +128,16 @@ class TerminalScreenTest : WiredActivityTestCase() {
         node("terminal-direct-input").assertIsNotEnabled()
     }
     fun testComposingTextMustCommitBeforeShortcutCanSend() {
+        fun awaitInputStage(enabled: Boolean, expectedSent: List<String>) {
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                val gatePublished = listOf("Tab", "Ctrl").all { label ->
+                    ui.onAllNodes(hasTestTag("terminal-key:$label") and
+                        (if (enabled) isEnabled() else isNotEnabled())).fetchSemanticsNodes().size == 1
+                }
+                gatePublished && ui.runOnIdle { sent.toList() } == expectedSent
+            }
+        }
         state = TerminalEnvironmentState(phase = "RUNNING", ownsResources = true, acceptsInput = true)
         show()
         node("terminal-mode").performClick()
@@ -136,14 +146,14 @@ class TerminalScreenTest : WiredActivityTestCase() {
         mainThread {
             connection = checkNotNull(checkNotNull(activity.currentFocus)
                 .onCreateInputConnection(android.view.inputmethod.EditorInfo()))
-            connection.setComposingText("ls", 1)
+            assertTrue(connection.setComposingText("ls", 1))
         }
-        ui.waitForIdle()
+        awaitInputStage(enabled = false, expectedSent = emptyList())
         node("terminal-key:Tab").assertIsNotEnabled()
         node("terminal-key:Ctrl").assertIsNotEnabled()
         ui.runOnIdle { assertTrue(sent.isEmpty()) }
-        mainThread { connection.finishComposingText() }
-        ui.waitForIdle()
+        mainThread { assertTrue(connection.finishComposingText()) }
+        awaitInputStage(enabled = true, expectedSent = listOf("ls"))
         node("terminal-key:Tab").assertIsEnabled().performClick()
         ui.runOnIdle { assertEquals(listOf("ls", "\t"), sent) }
     }

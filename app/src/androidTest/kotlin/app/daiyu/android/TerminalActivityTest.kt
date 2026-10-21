@@ -9,8 +9,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
     private fun awaitTerminal() {
         awaitUniqueTag("terminal-screen") {
             val provider = (instrumentation.targetContext.applicationContext as ChatApplication).terminalProvider
-            val pageOwner = MainActivity::class.java.getDeclaredField("terminalPageOwner")
-                .apply { isAccessible = true }.get(activity)
+            val pageOwner = invokeHost(activity, "getTerminalPageOwner")
             "provider=${provider.state.value.javaClass.simpleName} failure=${provider.initializationFailure} pageOwnerPresent=${pageOwner != null} " +
                 "finishing=${activity.isFinishing} destroyed=${activity.isDestroyed}"
         }
@@ -40,8 +39,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
         awaitTerminal()
         lateinit var oldOpen: () -> Unit
         mainThread {
-            val page = MainActivity::class.java.getDeclaredField("terminalPageOwner")
-                .apply { isAccessible = true }.get(activity)
+            val page = invokeHost(activity, "getTerminalPageOwner")
             val open = MainActivity::class.java.getDeclaredMethod("openTerminalAndroid", Any::class.java)
                 .apply { isAccessible = true }
             oldOpen = { open.invoke(activity, page); Unit }
@@ -63,9 +61,8 @@ class TerminalActivityTest : WiredActivityTestCase() {
         node("terminal-tasks").assertIsEnabled().performClick()
         node("terminal-tasks-dialog").assertIsDisplayed()
         ui.onNodeWithText("暂无任务").assertIsDisplayed()
-        val field = MainActivity::class.java.getDeclaredField("terminalJobsVisit").apply { isAccessible = true }
         mainThread {
-            val visit = checkNotNull(field.get(activity))
+            val visit = checkNotNull(invokeHost(activity, "getTerminalJobsVisit"))
             val conversation = visit.javaClass.getDeclaredMethod("getConversation").apply { isAccessible = true }.invoke(visit)
             assertNull(conversation)
         }
@@ -88,7 +85,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
         awaitTerminal()
         node("terminal-shortcuts").assertIsDisplayed()
         node("terminal-input").assertDoesNotExist()
-        val page = MainActivity::class.java.getDeclaredField("terminalPageOwner").apply { isAccessible = true }.get(activity)
+        val page = invokeHost(activity, "getTerminalPageOwner")
         val open = MainActivity::class.java.getDeclaredMethod("openTerminalAndroid", Any::class.java).apply { isAccessible = true }
         realPauseResume(activity) { open.invoke(activity, page) }
         assertSame(caller, owner.caller.value)

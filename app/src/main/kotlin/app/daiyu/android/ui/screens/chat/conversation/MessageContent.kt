@@ -46,14 +46,17 @@ internal fun MessageContent(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         var imageNumber = 0
         content.forEachIndexed { index, block ->
-            when (block) {
-                is MessageContentUi.Text -> key(block.itemId) {
-                    if (block.text.isNotBlank()) textBody(block.text, Modifier.testTag("message-content-text:$index"))
-                }
-                is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
-                is MessageContentUi.Tool -> {
-                    key(block.step.owner, block.step.toolCallId) {
-                        if (!dedicatedTool(block.step)) WorkStepRow(block.step, toolContent = toolContent)
+            val itemKey = if (block is MessageContentUi.Text) block.itemId else index
+            key(itemKey) {
+                when (block) {
+                    is MessageContentUi.Text -> {
+                        if (block.text.isNotBlank()) textBody(block.text, Modifier.testTag("message-content-text:$index"))
+                    }
+                    is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
+                    is MessageContentUi.Tool -> {
+                        key(block.step.owner, block.step.toolCallId) {
+                            if (!dedicatedTool(block.step)) WorkStepRow(block.step, toolContent = toolContent)
+                        }
                     }
                 }
             }

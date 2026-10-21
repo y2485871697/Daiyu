@@ -17,6 +17,12 @@ import app.daiyu.android.ui.app.AgentAppTheme
 /** Production AssistantTurn rendering, offline component host only. */
 class ReportedReasoningCardTest : WiredActivityTestCase() {
 
+    private fun awaitAnswer(text: String) {
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText(text).fetchSemanticsNodes().size == 1
+        }
+    }
+
     fun testReasoningDisclosureDoesNotConsumeAnswerOrToolAndKeepsExpandedStateOnUpdate() {
         var turn by mutableStateOf(ChatTurnUi.Assistant("assistant", finalText = "answer remains", status = RunStatus.COMPLETED,
             reportedReasoning = listOf(ReportedReasoning("r", "reported summary")),
@@ -25,7 +31,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) }
         } }
-        ui.waitForIdle()
+        awaitAnswer("answer remains")
         ui.onNodeWithText("answer remains").assertIsDisplayed()
         ui.onNodeWithTag("work-process-header").assertIsDisplayed()
         ui.onNodeWithText("reported summary").assertDoesNotExist()
@@ -56,7 +62,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
                 AssistantTurn(ChatTurnUi.Assistant("ordinary", finalText = "ordinary answer"), ChatScreenActions())
             }
         } }
-        ui.waitForIdle()
+        awaitAnswer("ordinary answer")
         ui.onNodeWithText("ordinary answer").assertIsDisplayed()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").assertDoesNotExist()
     }

@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
@@ -19,7 +17,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,7 +30,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.dropShadow
@@ -51,14 +47,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.components.captureForTopBar
 import app.daiyu.android.ui.components.rememberTopBarBackdrop
@@ -91,31 +85,45 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
         CompositionLocalProvider(LocalMenuLayer provides state) {
             Box(Modifier.fillMaxSize().captureForTopBar(backdrop)) { content() }
         }
-        state.active?.let { menu ->
-            BackHandler(onBack = menu.onDismiss)
-            Box(Modifier.matchParentSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime))) {
-                var host by remember { mutableStateOf(Rect.Zero) }
-                Box(Modifier.fillMaxSize().onGloballyPositioned { host = it.boundsInRoot() }) {
-                    Box(Modifier.matchParentSize().conversationClickable(onClick = menu.onDismiss))
-                    var menuSize by remember(menu) { mutableStateOf(IntSize.Zero) }
-                    val density = LocalDensity.current
-                    val margin = with(density) { 9.dp.roundToPx() }
-                    val widthMargin = with(density) { menu.screenMargin.roundToPx() }
-                    val offsetX = with(density) { menu.offset.x.roundToPx() }
-                    val offsetY = with(density) { menu.offset.y.roundToPx() }
-                    val anchor = menu.anchor().translate(-host.left, -host.top)
-                    val maxWidth = with(density) { (host.width - widthMargin * 2).coerceAtLeast(1f).toDp() }
-                    val availableHeight = with(density) { (host.height - margin * 2).coerceAtLeast(1f).toDp() }
-                    val maxHeight = menu.maxHeight?.coerceAtMost(availableHeight) ?: availableHeight
-                    val y = (if (anchor.bottom + offsetY + menuSize.height + margin <= host.height) anchor.bottom.toInt() + offsetY
-                        else anchor.top.toInt() - offsetY - menuSize.height).coerceIn(margin,
-                            (host.height.toInt() - menuSize.height - margin).coerceAtLeast(margin))
-                    val x = (anchor.right.toInt() + offsetX - menuSize.width).coerceIn(margin,
-                        (host.width.toInt() - menuSize.width - margin).coerceAtLeast(margin))
-                    ChatGlassMenuSurface(backdrop, Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset { IntOffset(x, y) }
-                        .widthIn(min = minOf(156.dp, maxWidth), max = maxWidth).heightIn(max = maxHeight)
-                        .onSizeChanged { menuSize = it }
-                        .semantics { paneTitle = "会话菜单" }) { menu.content() }
+        var host by remember { mutableStateOf(Rect.Zero) }
+        Box(Modifier.matchParentSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime))
+            .onGloballyPositioned { host = it.boundsInRoot() }) {
+            state.active?.let { menu ->
+                BackHandler(onBack = menu.onDismiss)
+                Layout(
+                    modifier = Modifier.fillMaxSize(),
+                    content = {
+                        Box(Modifier.fillMaxSize().conversationClickable(onClick = menu.onDismiss))
+                        ChatGlassMenuSurface(backdrop, Modifier.semantics { paneTitle = "会话菜单" }) {
+                            menu.content()
+                        }
+                    },
+                ) { measurables, constraints ->
+                    val width = constraints.maxWidth
+                    val height = constraints.maxHeight
+                    val margin = 9.dp.roundToPx()
+                    val widthMargin = menu.screenMargin.roundToPx()
+                    val maxWidth = (width - widthMargin * 2).coerceAtLeast(1)
+                    val availableHeight = (height - margin * 2).coerceAtLeast(1)
+                    val maxHeight = menu.maxHeight?.roundToPx()?.coerceAtMost(availableHeight) ?: availableHeight
+                    val dismiss = measurables[0].measure(Constraints.fixed(width, height))
+                    val surface = measurables[1].measure(Constraints(
+                        minWidth = minOf(156.dp.roundToPx(), maxWidth),
+                        maxWidth = maxWidth,
+                        maxHeight = maxHeight,
+                    ))
+                    val offsetX = menu.offset.x.roundToPx()
+                    val offsetY = menu.offset.y.roundToPx()
+                    layout(width, height) {
+                        dismiss.place(0, 0)
+                        val anchor = menu.anchor().translate(-host.left, -host.top)
+                        val y = (if (anchor.bottom + offsetY + surface.height + margin <= height) anchor.bottom.toInt() + offsetY
+                            else anchor.top.toInt() - offsetY - surface.height).coerceIn(margin,
+                                (height - surface.height - margin).coerceAtLeast(margin))
+                        val x = (anchor.right.toInt() + offsetX - surface.width).coerceIn(margin,
+                            (width - surface.width - margin).coerceAtLeast(margin))
+                        surface.place(x, y)
+                    }
                 }
             }
         }

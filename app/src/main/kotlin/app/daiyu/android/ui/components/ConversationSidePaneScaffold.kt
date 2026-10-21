@@ -927,7 +927,7 @@ private fun ConversationTextRow(
                     },
                     onLongClick = {
                         TouchHaptics.longPress(view)
-                        if (!managing) showActionMenu = true
+                        showActionMenu = true
                     },
                 )
                 .padding(1.dp)

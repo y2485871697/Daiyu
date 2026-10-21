@@ -3,6 +3,21 @@ package app.daiyu.android
 import androidx.compose.ui.test.*
 
 class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
+    fun testConnectionFieldsStayCompactAndSecretActionSharesTheFieldCenter() {
+        openModels()
+        val name = reveal("provider-name-container").fetchSemanticsNode().boundsInRoot
+        val endpoint = reveal("settings-field:Base URL-container").fetchSemanticsNode().boundsInRoot
+        val key = reveal("settings-field:API Key-container").fetchSemanticsNode().boundsInRoot
+        val eye = node("settings-secret-visibility:API Key").fetchSemanticsNode().boundsInRoot
+        val density = activity.resources.displayMetrics.density
+        assertTrue("name must not reserve multiline space", name.height / density < 80f)
+        assertTrue("URL must not reserve multiline space", endpoint.height / density < 80f)
+        assertTrue("secret must not add a button row", key.height / density < 90f)
+        assertEquals(key.center.y, eye.center.y, 2f)
+        modelField("API Key").assert(SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.Password))
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testInlineNameAndConnectionFieldsHaveNoLegacyModelOrPathControls() {
         val before = fixture.settings.load()
         openModels()

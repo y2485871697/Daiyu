@@ -88,6 +88,28 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         } } finally { super.tearDown() }
     }
 
+    fun testReplyNamesRemainFrozenAfterRebindingAndProfileRename() {
+        val frozen = java.util.Collections.synchronizedList(mutableListOf<AssistantRunContext>())
+        val f = fresh(factory = { _, context -> frozen.add(context); port() })
+        f.controller.assistantStore.save(AssistantProfile("first", "甲助手", ""))
+        f.controller.assistantStore.save(AssistantProfile("second", "乙助手", ""))
+        f.controller.assistantStore.select("first")
+        f.database.draft("first")
+        val conversation = checkNotNull(f.controller.send(null, "first"))
+        await(f) { f.controller.active == null }
+        assertTrue(f.database.bindAssistant(conversation.id, "first", "second"))
+        f.controller.assistantStore.save(AssistantProfile("first", "已改名", ""))
+        f.database.draft(conversation.id, "second")
+        assertNotNull(f.controller.send(conversation, "second"))
+        await(f) { f.controller.active == null }
+        val messages = f.database.messages(conversation.id).map { it.second }.filter { it.role == Message.ASSISTANT_ROLE }
+        assertEquals(listOf("甲助手", "乙助手"), messages.map { f.database.replyIdentity(it)?.name })
+        assertEquals(frozen.map { it.assistantId }, messages.map { f.database.replyIdentity(it)?.assistantId })
+        val reopened = ConversationDatabase(f.app)
+        try { assertEquals(listOf("甲助手", "乙助手"), messages.map { reopened.replyIdentity(it)?.name }) }
+        finally { reopened.close() }
+    }
+
     fun testSessionFactoryGetsCommittedConversationAcrossFirstSendContinuationAndControllerRecreation() {
         val owners = java.util.Collections.synchronizedList(mutableListOf<ConversationId>())
         val frozen = java.util.Collections.synchronizedList(mutableListOf<AssistantRunContext>())

@@ -53,11 +53,7 @@ class SecretVisibilityActivityTest : WiredActivityTestCase() {
         fixture.controller.independentModels.save(slot, saved, null, true, true)
         val binding = fixture.controller.independentModels.record(slot)
         openSettings()
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("辅助视觉模型")))
-            }
-            .assertEditableText("辅助视觉模型")
+        node("settings-search").assertDoesNotExist()
         reveal("settings-row:辅助视觉模型", "设置").performClick()
         awaitUniqueTag("independent-model-vision")
         node("independent-model-configure").assertIsDisplayed()

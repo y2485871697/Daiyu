@@ -41,7 +41,8 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
         val copy = ConversationId(UUID.randomUUID().toString())
         data class Snapshot(val history: List<Message>, val prefix: List<Message>, val mapped: List<Message>,
             val sourceValues: List<JSONObject>, val attachments: List<JSONObject>, val archives: List<JSONObject>,
-            val inputs: List<List<MessageVideoInput>>, val generation: StaticGenerationBranch.Capture?)
+            val inputs: List<List<MessageVideoInput>>, val generation: StaticGenerationBranch.Capture?,
+            val replyIdentities: List<app.daiyu.android.assistants.AssistantReplyIdentity?>)
         fun sourceValues(sql: SQLiteDatabase) = BackupHistoryRows.read(sql, "conversations",
             listOf("id", "title", "folder", "assistant_id", "pinned", "draft", "updated"), " WHERE id=?", arrayOf(id.value))
         fun attachments(sql: SQLiteDatabase) = BackupHistoryRows.read(sql, "neutral_assets",
@@ -69,7 +70,8 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             val capture = generation?.capture(sql, prefix, mapped, checkNotNull(accountScope))
             if (generation == null) requireNoGenerationOriginals(sql, prefix)
             Snapshot(original, prefix, mapped, sourceValues(sql), attachments(sql), archives(sql),
-                original.map { SQLiteMessageVideoStore.readVerified(sql, it) }, capture)
+                original.map { SQLiteMessageVideoStore.readVerified(sql, it) }, capture,
+                prefix.map { AssistantReplyIdentities.read(sql, it) })
         }
         val locator = BranchLocator(copy, snapshot.generation?.outputs?.map { it.identity }.orEmpty())
         var settlement = StaticGenerationSettlement.UNKNOWN
@@ -140,6 +142,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                         check(MessageVideoInputCodec.encode(message, SQLiteMessageVideoStore.readVerified(db, message)) ==
                             MessageVideoInputCodec.encode(message, snapshot.inputs[index])) { "来源视频或witness已变化" }
                     }
+                    check(snapshot.prefix.map { AssistantReplyIdentities.read(db, it) } == snapshot.replyIdentities) { "来源回复身份已变化" }
                     if (generation == null) requireNoGenerationOriginals(db, snapshot.prefix)
                     else snapshot.generation?.let { generation.verifySource(db, it) }
                 }
@@ -154,6 +157,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 check(db.insertOrThrow("conversations", null, values) != -1L)
                 copied.forEachIndexed { position, mapped ->
                     check(db.insertOrThrow("messages", null, ContextService.messageValues(mapped)) != -1L)
+                    snapshot.replyIdentities[position]?.let { AssistantReplyIdentities.insert(db, mapped, it) }
                     SQLiteMessageVideoStore.insert(db, mapped, copiedVideos[position])
                     snapshot.attachments.filter { it.getString("message_id") == snapshot.prefix[position].id.value }.forEach { row ->
                         check(db.insertOrThrow("neutral_assets", null, ContentValues().apply {
@@ -172,6 +176,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 val actual = ContextService.read(db, copy)
                 check(actual == copied)
                 actual.forEachIndexed { index, message ->
+                    check(AssistantReplyIdentities.read(db, message) == snapshot.replyIdentities[index]) { "分支回复身份读回不匹配" }
                     check(MessageVideoInputCodec.encode(message, SQLiteMessageVideoStore.readVerified(db, message)) ==
                         MessageVideoInputCodec.encode(message, copiedVideos[index])) { "分支视频或witness读回不匹配" }
                 }

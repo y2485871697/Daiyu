@@ -15,6 +15,7 @@ object ChatTurnMapper {
         dedicatedTool: (Message, MessageBlock.Tool) -> String? = { _, _ -> null },
         toolReceipt: (Message, MessageBlock.Tool) -> ToolReceiptUi? = { _, _ -> null },
         timestamp: (Message) -> String = { "" },
+        assistantIdentity: (Message, String) -> app.daiyu.android.assistants.AssistantReplyIdentity? = { _, _ -> null },
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
         // retains the segment's message id (especially supplemental user image ownership).
@@ -45,6 +46,7 @@ object ChatTurnMapper {
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
+                    assistantIdentity = assistantIdentity(message, databaseOwners[owner] ?: message.id.value),
                 )
                 else -> null
             }

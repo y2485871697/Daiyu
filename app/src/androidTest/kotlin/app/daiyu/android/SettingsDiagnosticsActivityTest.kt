@@ -19,19 +19,11 @@ import org.junit.Assert.assertArrayEquals
 class SettingsDiagnosticsActivityTest : WiredActivityTestCase() {
     private fun openDiagnostics() {
         openSettings()
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("诊断")))
-            }
-            .assertEditableText("诊断")
+        node("settings-search").assertDoesNotExist()
         awaitControl("diagnostic load") { fixture.diagnostics.state.value.loaded }
     }
     private fun row(title: String): SemanticsNodeInteraction {
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString(title)))
-            }
-            .assertEditableText(title)
+        node("settings-search").assertDoesNotExist()
         return reveal("settings-row:$title", "设置")
     }
     private fun enable() {

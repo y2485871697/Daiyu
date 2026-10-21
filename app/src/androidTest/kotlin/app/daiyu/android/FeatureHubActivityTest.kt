@@ -32,7 +32,10 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     private fun openHub() { openSettings() }
     private fun entry(id: String): SemanticsNodeInteraction {
         val item = entries.single { it.id == id }
-        reveal("settings-search", "设置").performTextReplacement(item.title)
+        if (id in setOf("relay_st", "relay_moyu")) {
+            val parent = reveal("settings-row:自用中转站", "设置")
+            if (ui.onAllNodesWithTag("settings-row:${item.title}").fetchSemanticsNodes().isEmpty()) parent.performClick()
+        }
         return reveal("settings-row:${item.title}", "设置")
     }
     private fun settingsScrollPosition(): Float = node("page:设置").fetchSemanticsNode()
@@ -76,30 +79,21 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testSettingsSearchSurvivesChildPageAndOnlyEditsResetTheList() {
+    fun testGroupedSettingsRetainScrollAcrossChildPagesWithoutSearch() {
         openHub()
+        node("settings-search").assertDoesNotExist()
         entry("usage").performClick()
         awaitUniqueTag("usage-stats-screen")
         backToPage(activity, "page:设置")
-        node("settings-search").assertEditableText("用量统计")
+        node("settings-search").assertDoesNotExist()
         node("settings-row:用量统计").assertIsDisplayed()
-        node("settings-row:模型提供商").assertDoesNotExist()
-        node("settings-search-clear").performClick()
-        ui.waitForIdle()
-        node("settings-search").assertEditableText("")
-        assertEquals(0f, settingsScrollPosition(), .00002f)
-        node("settings-row:外观与主题").assertIsDisplayed()
-        node("page:设置").scrollToDescendant(hasTestTag("settings-row:震动列表"))
+        reveal("settings-row:震动列表", "设置")
         val before = settingsScrollPosition()
         node("settings-row:震动列表").performClick()
         awaitUniqueTag("page:触感反馈")
         backToPage(activity, "page:设置")
         assertEquals(before, settingsScrollPosition(), .00002f)
-        reveal("settings-search", "设置").performTextReplacement("没有这样的设置")
-        dismissIme()
-        ui.waitForIdle()
-        assertEquals(0f, settingsScrollPosition(), .00002f)
-        ui.onNodeWithText("没有匹配的设置").assertIsDisplayed()
+        node("settings-row:震动列表").assertIsDisplayed()
         assertEquals(0, fixture.opens.get())
     }
 
@@ -135,8 +129,8 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
         openHub()
-        reveal("settings-search", "设置").performTextReplacement("运行模式")
-        ui.onNodeWithText("没有匹配的设置").assertExists()
+
+        node("settings-search").assertDoesNotExist()
         node("settings-row:运行模式").assertDoesNotExist()
     }
 
@@ -178,12 +172,12 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
         }
         (unwired + placeholder).forEach { item ->
-            entry(item.id).performClick(); node("page:设置").assertExists()
+            entry(item.id).assertHasNoClickAction(); node("page:设置").assertExists()
             assertUnchanged()
         }
         entry("relay").performClick(); node("page:设置").assertExists(); assertUnchanged()
         for (title in listOf("ST API", "摸鱼")) {
-            reveal("settings-search", "设置").performTextReplacement(title)
+
             reveal("settings-row:$title", "设置").assertExists(); node("page:设置").assertExists()
             assertUnchanged()
         }
@@ -225,7 +219,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         node("settings-radio:后台执行").assertExists()
         node("settings-radio:每次运行询问").assertExists()
         backToPage(activity, "page:设置"); node("page:设置").assertExists()
-        reveal("settings-search", "设置").performTextReplacement("")
+
         reveal("settings-row:Agent任务偏好", "设置").performClick()
         node("page:Agent任务偏好").assertExists()
         backToPage(activity, "page:设置"); node("page:设置").assertExists()
@@ -264,8 +258,8 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         try {
             openHub()
             for (title in listOf("发送消息", "暂停与继续", "停止回复", "交互问答")) {
-                reveal("settings-search", "设置").performTextReplacement(title)
-                ui.onNodeWithText("没有匹配的设置").assertExists()
+
+                node("settings-search").assertDoesNotExist()
                 node("settings-row:$title").assertDoesNotExist()
                 assertEquals(owner.id, fixture.controller.active!!.id)
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)

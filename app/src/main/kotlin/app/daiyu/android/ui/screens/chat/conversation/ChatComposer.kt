@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -43,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -257,7 +260,10 @@ internal fun ComposerChip(label: String, enabled: Boolean, onClick: () -> Unit, 
             onClick = onClick, onLongClick = onLongClick),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         ModelBrandIcon(label, Modifier.size(13.dp).alpha(if (enabled) 1f else .45f), tint = if (enabled) modelColor else contentColor)
-        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp),
+        Text(label, Modifier.weight(1f, fill = false).offset(y = (-.75f).dp).testTag("composer-model-label"),
+            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp,
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Icon(ChatPreviewIcons.Chevron, null, Modifier.size(12.dp), tint = if (enabled) chrome.muted else contentColor)
     }

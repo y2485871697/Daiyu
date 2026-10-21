@@ -1546,12 +1546,14 @@ class ChatController internal constructor(private val application:Application,
             if (!conversationExists(conversation)) return ChildTaskCommandReceipt.Rejected("child_source_stale")
             val key = SubAgentConfigKey.Conversation(conversation.value)
             var frozenAssistantId: String? = null
+            var replyIdentity: AssistantReplyIdentity? = null
             val models = try {
                 val assistantId = database.assistantId(conversation) ?: throw MissingAssistantBindingException()
                 frozenAssistantId = assistantId
                 val profile = assistantStore.read(assistantId)?.let { it.copy(enabledSkillIds = it.enabledSkillIds.toList()) }
                     ?: throw AssistantNotFoundException(assistantId)
                 val assistantContext = AssistantRunContext.capture(assistantStore, assistantId, assistantAssets)
+                replyIdentity = AssistantReplyIdentity.capture(assistantContext, assistantAssets)
                 check(assistantStore.read(assistantId) == profile) { "assistant_profile_changed" }
                 childBindings.freeze(key, childPreferences.snapshot(key)) { provider ->
                     val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversation))
@@ -1566,7 +1568,7 @@ class ChatController internal constructor(private val application:Application,
             val user = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.USER_ROLE,
                 listOf(MessageBlock.Text("child-command", "子任务${command.kind.name}；来源 ${command.source.owner.childRunId}\n${command.instruction}")), RunStatus.COMPLETED, createdAt = acceptedAt)
             val initial = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING, createdAt = acceptedAt)
-            database.send(user, initial, expectedAssistantId = frozenAssistantId, preserveDraft = true)
+            database.send(user, initial, expectedAssistantId = frozenAssistantId, preserveDraft = true, replyIdentity = replyIdentity)
             return ChildTaskCommandHost.run(initial, command, checkNotNull(childSupervisor), models, database, runtime,
                 cancelled = { preparationCancelled(token) }, onChanged = ::backgroundTasksChanged,
                 retain = { tasks -> synchronized(this) {
@@ -3087,6 +3089,9 @@ class ChatController internal constructor(private val application:Application,
         } catch (_:Exception) {
             problem="助手配置或记忆读取失败；草稿保留，未发起请求";notifyChanged();return null
         }
+        val replyIdentity = try { AssistantReplyIdentity.capture(assistantContext, assistantAssets) } catch (_: Exception) {
+            problem="助手头像读取失败；草稿保留，未发起请求";notifyChanged();return null
+        }
         val childModels:Map<String,ChildModelDefinition> = if(!withChildren) emptyMap() else try {
             val key=SubAgentConfigKey.Conversation(checkNotNull(conversation).id.value)
             childBindings.freeze(key,childPreferences.snapshot(key)) { provider ->
@@ -3498,7 +3503,7 @@ class ChatController internal constructor(private val application:Application,
             checkNotNull(token.summaryPreparation).seal()
             if (videoAttempt != null) {
                 val receipt = videoAttempt.commit(database, physicalVideoHistory, checkNotNull(videoPrepared),
-                    checkNotNull(videoPlan), assistantContext.assistantId, frozenDraft,
+                    checkNotNull(videoPlan), assistantContext.assistantId, frozenDraft, replyIdentity = replyIdentity,
                     cancelled = { preparationCancelled(token) || video?.first?.isRevoked() == true },
                     beforeSend = { db ->
                         check(contextService.matchesHistoryRevision(db, conversationId, preparedContext.expectedHistoryRevision))
@@ -3524,7 +3529,7 @@ class ChatController internal constructor(private val application:Application,
                 }
                 ControllerVideoHistory(database).assertCurrent(db, physicalVideoHistory)
                 databaseSendEntered=true
-                    database.send(user,assistant,conversation==null,assistantContext.assistantId)
+                    database.send(user,assistant,conversation==null,assistantContext.assistantId, replyIdentity = replyIdentity)
                 } } catch (failure: Exception) {
                     // A failed pre-write CAS is definitely rejected, not an ambiguous commit.
                     if (browserPreparation != null && !databaseSendEntered) null else throw failure

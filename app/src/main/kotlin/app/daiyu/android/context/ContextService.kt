@@ -312,6 +312,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 historySegments = m.historySegments.map { it.copy(messageId = remap(m, it.messageId)) })
         }
         val prefix = original.take(index + 1)
+        val replyIdentities = prefix.map { app.daiyu.android.storage.AssistantReplyIdentities.read(db, it) }
         // Generation receipts are owner-bound, not transferable references. Never publish a
         // seemingly successful branch which silently loses its registered OR backup originals.
         // Backup history is FK-owned by the physical message, not a live generation_outputs row.
@@ -353,6 +354,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         prefix.zip(copied).forEachIndexed { position, (m, mapped) ->
             val messageId = mapped.id
             check(db.insertOrThrow("messages", null, messageValues(mapped)) != -1L)
+            replyIdentities[position]?.let { app.daiyu.android.storage.AssistantReplyIdentities.insert(db, mapped, it) }
             // Insert the real remapped sidecar AND its witness once. Never overwrite an empty witness.
             app.daiyu.android.storage.SQLiteMessageVideoStore.insert(db, mapped, copiedVideos[position])
             db.rawQuery("SELECT mime,bytes,blob_hash FROM neutral_assets WHERE message_id=?", arrayOf(m.id.value)).use { assets ->
@@ -369,6 +371,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             put("through_message", through.value); put("parent_revision", ContextRevision.digest(original.take(index + 1))) }) != -1L)
         check(read(db, copy) == copied) { "分支消息持久回执不一致" }
         copied.forEachIndexed { position, message ->
+            check(app.daiyu.android.storage.AssistantReplyIdentities.read(db, message) == replyIdentities[position]) { "分支回复身份持久回执不一致" }
             check(app.daiyu.android.storage.MessageVideoInputCodec.encode(message,
                 app.daiyu.android.storage.SQLiteMessageVideoStore.readVerified(db, message)) ==
                 app.daiyu.android.storage.MessageVideoInputCodec.encode(message, copiedVideos[position])) {
@@ -376,6 +379,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             }
         }
         check(read(db, id) == original) { "分支改变了原会话；已回滚" }
+        check(prefix.map { app.daiyu.android.storage.AssistantReplyIdentities.read(db, it) } == replyIdentities) { "分支改变了原回复身份；已回滚" }
         original.forEachIndexed { position, message ->
             check(app.daiyu.android.storage.MessageVideoInputCodec.encode(message,
                 app.daiyu.android.storage.SQLiteMessageVideoStore.readVerified(db, message)) ==

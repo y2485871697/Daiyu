@@ -10,11 +10,11 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
     private fun entry(title: String): SemanticsNodeInteraction {
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString(title)))
-            }
-            .assertEditableText(title)
+        node("settings-search").assertDoesNotExist()
+        if (title in setOf("ST API", "摸鱼")) {
+            val parent = reveal("settings-row:自用中转站", "设置")
+            if (ui.onAllNodesWithTag("settings-row:$title").fetchSemanticsNodes().isEmpty()) parent.performClick()
+        }
         return reveal("settings-row:$title", "设置")
     }
     private fun intercept(action: () -> Unit): List<Intent> {
@@ -58,7 +58,7 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         setDraft("donation placeholder unsent")
         val before = fixture.database.exportBackup()
         openSettings()
-        assertTrue(intercept { entry("给煮波恰饭🍚").performClick() }.isEmpty())
+        assertTrue(intercept { entry("给煮波恰饭🍚").assertHasNoClickAction() }.isEmpty())
         node("page:设置").assertExists()
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())

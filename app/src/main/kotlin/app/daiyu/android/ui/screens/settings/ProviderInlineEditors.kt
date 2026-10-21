@@ -5,6 +5,10 @@ import androidx.compose.ui.semantics.semantics
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -99,6 +103,22 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
         trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.rotate(if (expanded) 180f else 0f)) })
     if (expanded) {
         rows.forEachIndexed { index, row -> key(row.id) {
+            if (headers) {
+                Column(Modifier.fillMaxWidth()) {
+                    SettingsTextField("名称", row.name, { value ->
+                        update(rows.map { if (it.id == row.id) it.copy(name = value) else it })
+                    }, enabled = enabled, compact = true, tag = "$prefix-name:$index")
+                    SettingsTextField("值", row.value, { value ->
+                        update(rows.map { if (it.id == row.id) it.copy(value = value) else it })
+                    }, password = true, enabled = enabled, compact = true, secretTextButton = true,
+                        tag = "$prefix-value:$index", secretLabel = "值")
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
+                        TextButton("删除", enabled = enabled, modifier = Modifier.testTag("$prefix-delete:$index"), onClick = {
+                            update(rows.filter { it.id != row.id })
+                        })
+                    }
+                }
+            } else {
             Row {
                 Column(Modifier.weight(1f)) {
                     SettingsTextField(if (headers) "名称" else "字段名", row.name, { value ->
@@ -112,6 +132,7 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
                     update(rows.filter { it.id != row.id })
                 })
             }
+            }
         } }
         notice?.let { SettingsNote(it, error = true) }
         if (parsed.isFailure) TextButton("清除无效配置", enabled = enabled, onClick = { update(emptyList()) })
@@ -119,7 +140,7 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
             if (current() && rows.size < 32) update(rows + ProviderFieldRow(nextId, "", ""))
         }
         TextButton(if (headers) "添加请求头" else "添加请求体字段", enabled = enabled && rows.size < 32,
-            modifier = Modifier.testTag("$prefix-add").semantics { this[RetainedProviderFieldAdd] = add },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("$prefix-add").semantics { this[RetainedProviderFieldAdd] = add },
             onClick = add)
     }
 }

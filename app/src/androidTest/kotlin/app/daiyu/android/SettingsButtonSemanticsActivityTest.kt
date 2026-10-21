@@ -9,11 +9,7 @@ import app.daiyu.android.voice.offline.OfflineSpeechPack
 class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
     private fun entry(id: String) {
         val title = SettingsCatalog.entry(id).title
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString(title)))
-            }
-            .assertEditableText(title)
+        node("settings-search").assertDoesNotExist()
         reveal("settings-row:$title", "设置").performClick()
     }
     fun testOfflineSpeechIsReachableFromVoiceSettingsWithoutEnablingOrDownloading() {

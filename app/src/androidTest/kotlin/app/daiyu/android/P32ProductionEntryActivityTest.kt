@@ -62,7 +62,7 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
         openSettings()
         node("open-voice-settings").assertDoesNotExist()
         val title = SettingsCatalog.entry("voice").title
-        reveal("settings-search", "设置").performTextReplacement(title)
+
         reveal("settings-row:$title", "设置").performClick()
         node("voice-profile-switch").assertDoesNotExist()
         node("voice-profile-migrate").assertDoesNotExist()

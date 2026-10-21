@@ -21,11 +21,7 @@ class PlatformToolSettingsActivityTest : WiredActivityTestCase() {
         } } }
         ui.waitForIdle()
         for (title in listOf("平台只读工具与私密出站", "权限检查", "浏览器")) {
-            node("settings-search")
-                .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                    assertTrue(setText(AnnotatedString(title)))
-                }
-                .assertEditableText(title)
+            node("settings-search").assertDoesNotExist()
             node("settings-row:$title").assertDoesNotExist()
         }
         ui.runOnIdle { assertTrue(events.isEmpty()) }

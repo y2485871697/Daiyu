@@ -6,18 +6,13 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.delegation.ReasoningEffort
 
 class DefaultReasoningSettingsActivityTest : WiredActivityTestCase() {
-    private fun assertRemovedFromSearch(query: String) {
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString(query)))
-            }
-            .assertEditableText(query)
+    private fun assertRemovedFromHome() {
+        node("settings-search").assertDoesNotExist()
         node("settings-row:默认启用推理").assertDoesNotExist()
         node("reasoning-default-select").assertDoesNotExist()
-        ui.onNodeWithText("没有匹配的设置").assertIsDisplayed()
     }
 
-    fun testRemovedEntryIsAbsentFromHomeAndSearchWithoutChangingSettingsOrDraft() {
+    fun testRemovedEntryIsAbsentFromHomeWithoutChangingSettingsOrDraft() {
         setDraft("removed reasoning entry draft")
         val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
@@ -25,8 +20,8 @@ class DefaultReasoningSettingsActivityTest : WiredActivityTestCase() {
         openSettings()
         node("settings-row:外观与主题").assertIsDisplayed()
         node("settings-row:默认启用推理").assertDoesNotExist()
-        for (query in listOf("默认启用推理", "推理")) assertRemovedFromSearch(query)
-        node("settings-search-clear").performClick()
+        assertRemovedFromHome()
+        node("settings-search-clear").assertDoesNotExist()
         node("settings-row:外观与主题").assertIsDisplayed()
         node("settings-row:默认启用推理").assertDoesNotExist()
         backToChat(activity); assertDraft("removed reasoning entry draft")
@@ -47,7 +42,7 @@ class DefaultReasoningSettingsActivityTest : WiredActivityTestCase() {
         repeat(2) { visit ->
             openSettings()
             node("settings-row:默认启用推理").assertDoesNotExist()
-            assertRemovedFromSearch("默认启用推理")
+            assertRemovedFromHome()
             backToChat(activity); assertDraft("reasoning settings draft")
             assertEquals(ReasoningEffort.LOW, fixture.controller.reasoningPreference.snapshot(null))
             assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(conversation.id.value))

@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Dp
@@ -41,6 +43,7 @@ fun MiuixScaffoldPage(
     listModifier: Modifier = Modifier,
     editorScrollIsolation: EditorScrollIsolation? = null,
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
+    containerColor: Color = MiuixTheme.colorScheme.surface,
     content: LazyListScope.() -> Unit,
 ) {
     val pageScrollConnection = remember(scrollBehavior, editorScrollIsolation) {
@@ -49,14 +52,15 @@ fun MiuixScaffoldPage(
     val editorOwnsGesture = editorScrollIsolation?.editorOwnsGesture == true
     val pageGestures = editorScrollIsolation?.let { Modifier.editorPageGestures(it) } ?: Modifier
     val pageScrollEffects = if (editorOwnsGesture) Modifier else Modifier.scrollEndHaptic().overScrollVertical()
-    val backdrop = rememberTopBarBackdrop()
-    val topBarColor = topBarContainerColor(backdrop)
+    val backdrop = rememberTopBarBackdrop(containerColor)
+    val topBarColor = topBarContainerColor(backdrop, containerColor)
 
     WithoutPressRipple {
     Scaffold(
+        containerColor = containerColor,
         modifier = modifier.fillMaxSize().then(pageGestures),
         topBar = {
-            TopBarBackdrop(backdrop) {
+            TopBarBackdrop(backdrop, containerColor) {
                 AdaptiveTopAppBar(
                     title = title,
                     modifier = topBarModifier.testTag("page-topbar:$title"),
@@ -104,6 +108,7 @@ fun MiuixScaffold(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
+    containerColor: Color = MiuixTheme.colorScheme.surface,
     content: @Composable (
         paddingValues: PaddingValues,
         scrollBehavior: ScrollBehavior,
@@ -111,13 +116,14 @@ fun MiuixScaffold(
     ) -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
-    val backdrop = rememberTopBarBackdrop()
-    val topBarColor = topBarContainerColor(backdrop)
+    val backdrop = rememberTopBarBackdrop(containerColor)
+    val topBarColor = topBarContainerColor(backdrop, containerColor)
 
     Scaffold(
+        containerColor = containerColor,
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopBarBackdrop(backdrop) {
+            TopBarBackdrop(backdrop, containerColor) {
                 AdaptiveTopAppBar(
                     title = title,
                     color = topBarColor,

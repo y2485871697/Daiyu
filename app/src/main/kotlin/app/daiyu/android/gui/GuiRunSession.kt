@@ -6,6 +6,10 @@ import androidx.annotation.MainThread
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.TaskAuthorization
 import app.daiyu.android.domain.tools.WriteEffect
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.Collections
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -132,9 +136,12 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
     override fun close() {
         ioFence.close()
         closed.set(true)
-        if (Looper.myLooper() === Looper.getMainLooper()) closeOnMain()
-        else try { GuiRuntime.main.post { closeOnMain() } }
-        catch (_: Exception) { /* false/exception is NOT a drain receipt */ }
+        try {
+            CoroutineScope(Dispatchers.Main.immediate).launch(
+                start = if (Looper.myLooper() === Looper.getMainLooper()) CoroutineStart.UNDISPATCHED
+                    else CoroutineStart.DEFAULT
+            ) { closeOnMain() }
+        } catch (_: Exception) { /* scheduling failure is NOT a drain receipt */ }
     }
     @MainThread
     private fun closeOnMain() {

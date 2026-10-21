@@ -16,6 +16,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -27,27 +29,37 @@ import app.daiyu.android.delegation.SubAgentPreset
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    AssistantSheetMotion(entering = sheetState.currentValue == SheetValue.Hidden) {
-        ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp, dragHandle = { BottomSheetDefaults.DragHandle() }) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)
-                .semantics { contentDescription = "子代理组操作面板" }) {
-                Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                        Icon(Icons.Rounded.AccountTree, null, Modifier.padding(14.dp).size(28.dp), tint = MaterialTheme.colorScheme.primary)
-                    }
-                    Text(preset.name, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+    val density = LocalDensity.current
+    // Start at the settled anchor so Material does not add a second entry translation.
+    // Its gesture, hide and predictive-back state machine remains unchanged.
+    val sheetState = remember(preset.id, density) {
+        SheetState(
+            skipPartiallyExpanded = true,
+            positionalThreshold = { with(density) { 56.dp.toPx() } },
+            velocityThreshold = { with(density) { 125.dp.toPx() } },
+            initialValue = SheetValue.Expanded,
+        )
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
+        modifier = Modifier.dialogEnterMotion().testTag("subagent-preset-actions-sheet"),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp, dragHandle = { BottomSheetDefaults.DragHandle() }) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)
+            .semantics { contentDescription = "子代理组操作面板" }) {
+            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Icon(Icons.Rounded.AccountTree, null, Modifier.padding(14.dp).size(28.dp), tint = MaterialTheme.colorScheme.primary)
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                SubAgentPresetActionRow("重命名组", Icons.Rounded.Edit, MaterialTheme.colorScheme.onSurface, onRename)
-                SubAgentPresetActionRow("删除组", Icons.Rounded.DeleteOutline, MaterialTheme.colorScheme.error, onDelete)
+                Text(preset.name, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
             }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+            SubAgentPresetActionRow("重命名组", Icons.Rounded.Edit, MaterialTheme.colorScheme.onSurface, onRename)
+            SubAgentPresetActionRow("删除组", Icons.Rounded.DeleteOutline, MaterialTheme.colorScheme.error, onDelete)
         }
     }
 }
+
 @Composable
 private fun SubAgentPresetActionRow(label: String, icon: ImageVector, tint: Color, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp)

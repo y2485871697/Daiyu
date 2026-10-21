@@ -4,15 +4,10 @@ import androidx.compose.animation.core.animate
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MotionScheme
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.drawWithContent
 import top.yukonga.miuix.kmp.anim.DecelerateEasing
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.AlertDialog as MaterialAlertDialog
 import androidx.compose.material3.AlertDialogDefaults
@@ -128,22 +123,4 @@ internal fun DaiyuAlertDialog(
         titleContentColor = titleContentColor, textContentColor = textContentColor,
         tonalElevation = tonalElevation, properties = properties,
     )
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-internal fun AssistantSheetMotion(entering: Boolean, content: @Composable () -> Unit) {
-    val inherited = MaterialTheme.motionScheme
-    val indication = LocalIndication.current
-    val motion = remember(inherited, entering) {
-        if (!entering) inherited else object : MotionScheme by inherited {
-            override fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> =
-                spring(dampingRatio = 0.88f, stiffness = 450f)
-            override fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> =
-                tween(300, easing = DecelerateEasing(1.5f))
-        }
-    }
-    MaterialTheme(motionScheme = motion) {
-        CompositionLocalProvider(LocalIndication provides indication, content = content)
-    }
 }

@@ -34,6 +34,7 @@ internal fun SettingsScaffoldPage(
 ) {
     CompositionLocalProvider(LocalSettingsPageStyle provides true) {
         MiuixScaffoldPage(title = title, onBack = onBack, modifier = modifier, actions = actions,
+            containerColor = settingsPageBackground(),
             listModifier = Modifier.background(settingsPageBackground()), content = content)
     }
 }
@@ -46,7 +47,7 @@ internal fun SettingsScaffold(
     content: @Composable (PaddingValues, ScrollBehavior, Dp) -> Unit,
 ) {
     CompositionLocalProvider(LocalSettingsPageStyle provides true) {
-        MiuixScaffold(title = title, onBack = onBack, modifier = modifier) { padding, scrollBehavior, sidePadding ->
+        MiuixScaffold(title = title, onBack = onBack, modifier = modifier, containerColor = settingsPageBackground()) { padding, scrollBehavior, sidePadding ->
             Box(Modifier.fillMaxSize().background(settingsPageBackground())) {
                 content(padding, scrollBehavior, sidePadding)
             }

@@ -234,7 +234,8 @@ internal class ControllerVideoAttempt(
     @Synchronized fun commit(database: ConversationDatabase, snapshot: ControllerVideoHistorySnapshot,
         prepared: PreparedControllerVideoSend, plan: ControllerVideoModelPlan,
         expectedAssistantId: String?, expectedDraftText: String,
-        cancelled: () -> Boolean, beforeSend: (SQLiteDatabase) -> Unit = {}): VideoDraftReceipt {
+        cancelled: () -> Boolean, beforeSend: (SQLiteDatabase) -> Unit = {},
+        replyIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null): VideoDraftReceipt {
         check(reserved && !settled && !databaseEntered)
         check(!database.writableDatabase.inTransaction()) { "video_outer_transaction_forbidden" }
         return try {
@@ -258,7 +259,7 @@ internal class ControllerVideoAttempt(
                 journal.phase(this, "DB_ENTERED")
                 databaseEntered = true
                 val conversation = database.send(prepared.user, prepared.assistant, request.conversation == null,
-                    expectedAssistantId, videoInputs = prepared.inputs)
+                    expectedAssistantId, videoInputs = prepared.inputs, replyIdentity = replyIdentity)
                 // Same OUTERMOST transaction. Parent must also wire all ordinary sends/imports;
                 // insert-or-verify permits parent DB wiring without replacing existing evidence.
                 ControllerVideoManifestWitness.insert(db, prepared.user, prepared.inputs)

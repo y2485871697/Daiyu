@@ -28,6 +28,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import app.daiyu.android.ui.components.AssistantAvatar
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateMapOf
@@ -272,15 +276,14 @@ internal fun AssistantTurn(
     SideEffect { onContentReady(projection != null) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false) } }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // The turn carries a role, not a profile name or avatar. Never invent an identity.
-        Row(Modifier.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
+        val identity = turn.assistantIdentity
+        val avatar by produceState<android.graphics.Bitmap?>(null, identity?.avatarPng) {
+            value = withContext(Dispatchers.IO) { runCatching { identity?.avatarBitmap() }.getOrNull() }
+        }
+        Row(Modifier.testTag("reply-identity:${turn.listKey}").padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Box(Modifier.size(26.dp).background(conversationColors().surface, CircleShape),
-                contentAlignment = Alignment.Center) {
-                Text("助", color = conversationColors().accent,
-                    style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
-            }
-            Text("助手", color = conversationColors().text,
+            AssistantAvatar(bitmap = avatar, size = 26.dp)
+            Text(identity?.name ?: "助手", color = conversationColors().text,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }
         ReportedReasoningCard(turn.listKey, turn.reportedReasoning)

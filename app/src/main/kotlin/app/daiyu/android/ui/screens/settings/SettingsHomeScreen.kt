@@ -18,7 +18,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,7 +45,6 @@ import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.daiyuIconColor
 import app.daiyu.android.ui.icons.DaiyuIcons
-import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -153,12 +151,10 @@ internal fun DaiyuSettingsScreen(
     val release = rememberSettingsReleaseCheck(releaseChecker, BuildConfig.VERSION_NAME,
         ownerCurrent = { visit.active && localPage == null },
         onNotice = onReleaseNotice ?: { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
-    var query by rememberSaveable { mutableStateOf("") }
     var relayExpanded by rememberSaveable { mutableStateOf(false) }
     val catalogGroups = remember(engineeringUi) { SettingsCatalog.visibleGroups(engineeringUi) }
-    val groups = remember(query, catalogGroups) { filterSettingsGroups(query, catalogGroups) }
+    val groups = catalogGroups
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     val openedPage = localPage
     if (openedPage != null) {
         val localBack: () -> Unit = {
@@ -205,33 +201,19 @@ internal fun DaiyuSettingsScreen(
             else -> entry.route?.let(onRoute)
         }
     }
-    val homeBackground = if (MiuixTheme.colorScheme.background == Color.Black) Color.Black
-        else MiuixTheme.colorScheme.surfaceContainerHigh
     MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier, listState = listState,
-        scrollBehavior = scrollBehavior,
-        listModifier = Modifier.background(homeBackground)
+        scrollBehavior = scrollBehavior, containerColor = settingsPageBackground(),
+        listModifier = Modifier.background(settingsPageBackground())
             .then(if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier),
     ) {
-        item(key = "settings_search") {
-            SettingsSearch(query, onQueryChange = {
-                if (query != it) {
-                    query = it
-                    scope.launch { listState.scrollToItem(0) }
-                }
-            }, containerColor = MiuixTheme.colorScheme.surfaceContainerHighest)
-        }
-        if (query.isNotBlank()) item(key = "search_heading") {
-            SettingsHomeSection("搜索结果 · ${groups.sumOf { it.entries.size }}", "settings-search-heading")
-        }
-        if (groups.isEmpty()) item(key = "settings_empty") { SettingsNote("没有匹配的设置") }
         groups.forEach { group ->
             item(key = "settings_group_${group.id}") { SettingsHomeSection(group.title, "settings-section:${group.id}") }
             item(key = "settings_entries_${group.id}") {
                 SettingsHomeCard(group.id) {
                     group.entries.forEach { entry ->
                         when {
-                            entry.id in setOf("relay_st", "relay_moyu") && query.isBlank() -> Unit
-                            entry.id == "relay" && query.isBlank() -> {
+                            entry.id in setOf("relay_st", "relay_moyu") -> Unit
+                            entry.id == "relay" -> {
                                 SettingsRow(entry.title, summary = entry.summary, leading = { SettingsIcon(entry.icon) }, onClick = { open(entry) },
                                     trailing = {
                                         DaiyuIcon(if (relayExpanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,

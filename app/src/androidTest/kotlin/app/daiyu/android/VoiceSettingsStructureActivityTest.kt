@@ -7,7 +7,7 @@ import kotlinx.coroutines.runBlocking
 class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
     private fun enter() {
         openSettings()
-        reveal("settings-search", "设置").performTextReplacement("语音")
+
         reveal("settings-row:语音", "设置").performClick()
         node("voice-settings").assertExists()
     }

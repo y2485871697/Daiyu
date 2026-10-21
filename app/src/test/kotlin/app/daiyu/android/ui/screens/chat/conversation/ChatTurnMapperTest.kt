@@ -23,6 +23,19 @@ class ChatTurnMapperTest {
     )
     private fun mapped(message: Message) = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
 
+    @Test fun replyIdentityBelongsToEachMessageInsteadOfTheCurrentAssistant() {
+        val a = message(text("a", "first"))
+        val b = message(text("b", "second")).copy(id = MessageId("second"), runId = RunId("second-run"))
+        val alice = app.daiyu.android.assistants.AssistantReplyIdentity("a", "甲")
+        val bob = app.daiyu.android.assistants.AssistantReplyIdentity("b", "乙")
+        val identities = mapOf(a.id.value to alice, b.id.value to bob)
+        val turns = ChatTurnMapper.map(listOf(a, b), assistantIdentity = { _, owner -> identities[owner] })
+            .filterIsInstance<ChatTurnUi.Assistant>()
+        assertEquals(listOf(alice, bob), turns.map { it.assistantIdentity })
+        assertNull(mapped(a).assistantIdentity)
+        assertEquals(ChatTurnMapper.map(listOf(a, b)).map { it.listKey }, turns.map { it.listKey })
+    }
+
     @Test fun browserScreenshotFlagUsesOnlyExactToolAndAction() {
         for (name in listOf("browser_read", "browser_write", "screen", "search")) {
             for (args in listOf("{\"action\":\"screenshot\"}", "{\"action\":\"navigate\"}", "bad json")) {

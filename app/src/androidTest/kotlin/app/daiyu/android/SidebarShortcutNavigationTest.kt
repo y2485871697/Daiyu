@@ -57,12 +57,18 @@ class SidebarShortcutNavigationTest : WiredActivityTestCase() {
                 Triple("skills", "Skills", "page:技能"),
             )) {
                 openSettings()
-                reveal("settings-search", "设置").performTextReplacement(title)
-                reveal("settings-row:$title", "设置").performClick()
+
+                val row = reveal("settings-row:$title", "设置")
+                val before = row.fetchSemanticsNode().boundsInRoot
+                val scroll = node("page:设置").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange].value()
+                row.performClick()
                 awaitUniqueTag(page)
                 backOnce(system)
                 node("page:设置").assertIsDisplayed()
-                node("settings-search").assertEditableText(title)
+                node("settings-search").assertDoesNotExist()
+                val restored = node("settings-row:$title").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                assertEquals(before.top, restored.top, 2f)
+                assertEquals(scroll, node("page:设置").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange].value(), .00002f)
                 backOnce(system)
                 assertChat()
                 // Re-entry from the dock must overwrite the prior settings parent.

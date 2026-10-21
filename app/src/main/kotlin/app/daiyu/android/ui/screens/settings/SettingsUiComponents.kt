@@ -170,6 +170,7 @@ internal fun SettingsTextField(
     tag: String = "settings-field:$label",
     secretLabel: String = "密钥",
     compact: Boolean = false,
+    secretTextButton: Boolean = false,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var secretVisible by remember(password) { mutableStateOf(false) }
@@ -180,19 +181,28 @@ internal fun SettingsTextField(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    val container = if (compact) Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
-        .clip(RoundedCornerShape(16.dp)).background(MiuixTheme.colorScheme.surfaceVariant)
-        .padding(horizontal = 16.dp, vertical = 10.dp)
-    else Modifier.fillMaxWidth().padding(16.dp)
-    Column(container, verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, style = if (compact) MiuixTheme.textStyles.body2.copy(fontSize = 12.sp, lineHeight = 16.sp) else MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
-            if (password && !compact) TextButton(text = if (secretVisible) "隐藏$secretLabel" else "显示$secretLabel",
-                enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = {
-                    if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) secretVisible = !secretVisible
-                })
+    val toggleSecret: () -> Unit = {
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) secretVisible = !secretVisible
+    }
+    val labelContent: @Composable () -> Unit = {
+        Text(label, style = if (compact) MiuixTheme.textStyles.body2.copy(fontSize = 12.sp, lineHeight = 16.sp) else MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    }
+    val visibilityButton: @Composable () -> Unit = {
+        if (!compact || secretTextButton) TextButton(
+            text = if (secretVisible) "隐藏$secretLabel" else "显示$secretLabel",
+            enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = toggleSecret,
+        ) else androidx.compose.material3.IconButton(
+            enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = toggleSecret,
+        ) {
+            androidx.compose.material3.Icon(
+                if (secretVisible) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                contentDescription = if (secretVisible) "隐藏$secretLabel" else "显示$secretLabel",
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
         }
+    }
+    val field: @Composable () -> Unit = {
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -209,31 +219,32 @@ internal fun SettingsTextField(
                     .background(MiuixTheme.colorScheme.surfaceVariant).padding(14.dp))
                 .semantics { contentDescription = label },
             decorationBox = { editor ->
-                if (!compact) Box {
+                Box(contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) Text(hint, style = MiuixTheme.textStyles.body1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     editor()
-                } else Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        if (value.isEmpty()) Text(hint, style = MiuixTheme.textStyles.body1,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                        editor()
-                    }
-                    if (password && compact) androidx.compose.material3.IconButton(
-                        enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"),
-                        onClick = {
-                            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) secretVisible = !secretVisible
-                        },
-                    ) {
-                        androidx.compose.material3.Icon(
-                            if (secretVisible) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
-                            contentDescription = if (secretVisible) "隐藏$secretLabel" else "显示$secretLabel",
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                    }
                 }
             },
         )
+    }
+    if (compact) {
+        Row(Modifier.testTag("$tag-container").fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(16.dp)).background(MiuixTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                labelContent()
+                field()
+            }
+            if (password) visibilityButton()
+        }
+    } else {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { labelContent() }
+                if (password) visibilityButton()
+            }
+            field()
+        }
     }
 }
 

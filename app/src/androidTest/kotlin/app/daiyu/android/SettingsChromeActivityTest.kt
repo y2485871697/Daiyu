@@ -147,30 +147,30 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         assertEquals(Color.Black, pixels[x, y])
     }
 
-    fun testSearchUsesOriginalButtonsAndMcpHasARealIndependentRoute() {
+    fun testSettingsTopBarAndPageUseTheSameBackground() {
+        for (dark in listOf(false, true)) {
+            showHome(mutableListOf(), dark = dark)
+            val pixels = ui.onRoot().captureToImage().toPixelMap()
+            val bar = node("page-topbar:设置").fetchSemanticsNode().boundsInRoot
+            val page = node("page:设置").fetchSemanticsNode().boundsInRoot
+            val x = (page.left + 2).toInt()
+            val top = pixels[x, (bar.center.y).toInt()]
+            val body = pixels[x, (bar.bottom + 4).toInt()]
+            assertEquals(top.red, body.red, .015f)
+            assertEquals(top.green, body.green, .015f)
+            assertEquals(top.blue, body.blue, .015f)
+        }
+    }
+
+    fun testGroupedHomeHasNoSearchAndKeepsRealIndependentRoutes() {
         val events = mutableListOf<String>()
         showHome(events)
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("MCP")))
-            }
-            .assertEditableText("MCP")
-        val mcp = reveal("settings-row:MCP 服务器", "设置").assertIsEnabled().assertHasClickAction()
-        mcp.performClick()
+        node("settings-search").assertDoesNotExist()
+        node("settings-search-clear").assertDoesNotExist()
+        reveal("settings-row:MCP 服务器", "设置").assertIsEnabled().assertHasClickAction().performClick()
         ui.runOnIdle { assertEquals(listOf("MCP_SETTINGS"), events) }
         ui.onNodeWithText("待接入").assertDoesNotExist()
-        node("settings-search-clear").performClick()
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("发送消息")))
-            }
-            .assertEditableText("发送消息")
-        ui.onNodeWithText("没有匹配的设置").assertExists()
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("Skills")))
-            }
-            .assertEditableText("Skills")
+        node("settings-row:发送消息").assertDoesNotExist()
         reveal("settings-row:Skills", "设置").performClick()
         ui.runOnIdle { assertEquals(listOf("MCP_SETTINGS", "SKILLS"), events) }
     }

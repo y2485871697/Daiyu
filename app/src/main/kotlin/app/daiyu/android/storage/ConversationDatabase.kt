@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 23), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 24), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -47,6 +47,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         app.daiyu.android.platform.NotificationHistoryStore.installSchema(db)
         ConversationCompletionMarkers.installSchema(db)
         RecordedUsageHistory.install(db)
+        AssistantReplyIdentities.install(db)
     }
     private fun installGenerationSchema(db: SQLiteDatabase) {
         SQLiteGenerationAttemptStore.installSchema(db)
@@ -57,12 +58,13 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..22 && newVersion == 23) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..23 && newVersion == 24) { "不支持此数据库版本，保留原数据" }
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
         app.daiyu.android.platform.NotificationHistoryStore.installSchema(db)
         ConversationCompletionMarkers.installSchema(db)
         RecordedUsageHistory.install(db)
+        AssistantReplyIdentities.install(db)
         // No backfill: conversation.updated is not evidence of any message's creation time.
         // Existing-column check also supports old-schema test fixtures retaining newer columns.
         val hasMessageTime = db.rawQuery("PRAGMA table_info(messages)", null).use { c ->
@@ -303,9 +305,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
     fun send(user:Message,assistant:Message,newConversation:Boolean=false,
         expectedAssistantId:String? = if(newConversation) selectedAssistantId() else assistantId(user.conversationId),
         videoInputs: List<app.daiyu.android.model.videos.MessageVideoInput> = emptyList(),
-        preserveDraft: Boolean = false):Conversation {
+        preserveDraft: Boolean = false,
+        replyIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
         require(!preserveDraft || !newConversation)
+        require(replyIdentity == null || replyIdentity.assistantId == expectedAssistantId)
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)
         var conversation:Conversation?=null
         transaction { db ->
@@ -330,6 +334,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             check(userRowId != -1L) {"用户消息未持久化"}
             val assistantRowId=db.insertOrThrow("messages",null,values(assistant))
             check(assistantRowId != -1L) {"运行消息未持久化"}
+            if (replyIdentity != null) AssistantReplyIdentities.insert(db, assistant, replyIdentity)
             afterSendRowsWritten()
             SQLiteMessageVideoStore.insert(db, user, videoInputs)
             SQLiteMessageVideoStore.insert(db, assistant, emptyList())
@@ -340,6 +345,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 // Reuse the chunked reader rather than putting large blocks in one CursorWindow.
                 check(storedMessage(db,message.conversationId,message.id.value)==message) {"发送消息内容不匹配"}
             }
+            check(AssistantReplyIdentities.read(db, assistant) == replyIdentity) { "发送回复身份回执不一致" }
             validateRunHistory(db,user.conversationId,user.runId)
             app.daiyu.android.ControllerVideoHistory(this).assertAppended(db, videoHistory, user, assistant, videoInputs)
             conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0,assistant_id FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
@@ -356,6 +362,9 @@ class ConversationDatabase internal constructor(context: Context, private val af
         }
         return checkNotNull(conversation)
     }
+    fun replyIdentity(message: Message): app.daiyu.android.assistants.AssistantReplyIdentity? =
+        AssistantReplyIdentities.read(readableDatabase, message)
+
     override fun save(message:Message) {
         try { transaction { db ->
             require(message.role == Message.ASSISTANT_ROLE) { "仅允许保存 assistant 运行回执" }
@@ -472,6 +481,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 val rawSegments=c.getString(8)
                 val segments=MessageHistoryCodec.decode(JSONArray(rawSegments))
                 val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments,createdAt=createdAt)
+                AssistantReplyIdentities.encode(db, projection)?.let { value.put("reply_identity", it) }
                 MessageHistoryCodec.validate(projection)
                 MessageImages.validate(projection)
                 SQLiteMessageVideoStore.readVerified(db, projection)
@@ -514,9 +524,13 @@ class ConversationDatabase internal constructor(context: Context, private val af
             Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"),assistantId)
         }
         val restored=(0 until messages.length()).map {i->val m=messages.getJSONObject(i)
-            require((m.keys().asSequence().toSet() - MessageTimeCodec.FIELD).let {it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol") || it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol","history_segments")})
+            require((m.keys().asSequence().toSet() - MessageTimeCodec.FIELD - "reply_identity").let {it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol") || it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol","history_segments")})
             val id=identity(string(m,"id"));require(messageIds.add(id));val conversation=identity(string(m,"conversation_id"));require(conversation in ids)
             val role=string(m,"role");require(role in setOf("user","assistant"))
+            if (m.has("reply_identity")) {
+                require(role == Message.ASSISTANT_ROLE)
+                AssistantReplyIdentities.decode(m.getJSONObject("reply_identity"))
+            }
             val status=RunStatus.valueOf(string(m,"status"));val encoded=m.getJSONArray("blocks");validateBlocks(encoded);val blocks=decode(encoded)
             val protocol=m.getJSONArray("protocol")
             blocks.forEach {b->when(b) {
@@ -543,7 +557,20 @@ class ConversationDatabase internal constructor(context: Context, private val af
         MessageHistory.validate(restored)
         return Triple(imported,restored,string(data,"draft"))
     }
-    internal fun preflightBackup(text:String) { parseBackup(text) }
+    private fun backupReplyIdentities(text: String, rows: List<Message>): Map<String, app.daiyu.android.assistants.AssistantReplyIdentity> {
+        val messages = backupObject(string(backupObject(text), "payload")).getJSONArray("messages")
+        return buildMap {
+            repeat(messages.length()) { index ->
+                val value = messages.getJSONObject(index)
+                if (value.has("reply_identity")) {
+                    val row = rows[index]
+                    require(row.role == Message.ASSISTANT_ROLE)
+                    put(row.id.value, AssistantReplyIdentities.decode(value.getJSONObject("reply_identity")))
+                }
+            }
+        }
+    }
+    internal fun preflightBackup(text:String) { val (_, rows, _) = parseBackup(text); backupReplyIdentities(text, rows) }
     fun importBackup(text:String):Pair<Int,Int> = importBackup(text, deferVideoWitness = false)
     internal fun importBackupForVideoAssets(db: SQLiteDatabase, text: String): Pair<Int, Int> {
         check(db === writableDatabase && db.inTransaction())
@@ -551,6 +578,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
     }
     private fun importBackup(text: String, deferVideoWitness: Boolean): Pair<Int, Int> {
         val (imported,restored,draft)=parseBackup(text)
+        val replyIdentities = backupReplyIdentities(text, restored)
         transaction {db->
             // Append only. Any identity collision aborts the entire transaction.
             imported.forEach {c->check(db.insertOrThrow("conversations",null,ContentValues().apply {
@@ -558,6 +586,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             }) != -1L) { "备份会话未写入" }}
             restored.forEach {
                 check(db.insertOrThrow("messages",null,values(it)) != -1L) { "备份消息未写入" }
+                replyIdentities[it.id.value]?.let { identity -> AssistantReplyIdentities.insert(db, it, identity) }
                 if (!deferVideoWitness) SQLiteMessageVideoStore.insert(db, it, emptyList())
             }
             val existing=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
@@ -566,6 +595,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             check(db.rawQuery("SELECT 1 FROM composer WHERE id=1 AND draft=?",
                 arrayOf(if (existing.isEmpty()) draft else existing)).use { it.moveToFirst() })
             verifyBackupRows(db, imported, restored, verifyVideoWitness = !deferVideoWitness)
+            restored.forEach { check(AssistantReplyIdentities.read(db, it) == replyIdentities[it.id.value]) { "回复身份导入回执不一致" } }
         }
         return imported.size to restored.size
     }
@@ -573,6 +603,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
         check(db === writableDatabase && db.inTransaction())
         val (imported, restored, _) = parseBackup(text)
         verifyBackupRows(db, imported, restored)
+        val identities = backupReplyIdentities(text, restored)
+        restored.forEach { check(AssistantReplyIdentities.read(db, it) == identities[it.id.value]) { "回复身份导入回执不一致" } }
     }
     internal fun verifyImportedVideoWitnesses(db: SQLiteDatabase, text: String) {
         check(db === writableDatabase && db.inTransaction())

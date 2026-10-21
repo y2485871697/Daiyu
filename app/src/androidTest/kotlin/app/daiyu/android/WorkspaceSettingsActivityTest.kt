@@ -35,14 +35,11 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
     }
     private fun workspaceClick(tag: String) {
         workspaceControl(tag).performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        awaitVisualIdle()
     }
     private fun openWorkspace() {
         openSettings()
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("工作区与文件")))
-            }
-            .assertEditableText("工作区与文件")
+        node("settings-search").assertDoesNotExist()
         reveal("settings-row:工作区与文件", "设置").performClick()
         awaitUniqueTag("page:工作区")
     }
@@ -230,7 +227,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
                 WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access, engineeringUi = true)
             } } }
             workspaceControl("workspace-revoke:0")
-            workspaceClick("workspace-revoke:0"); node("dialog-confirm").performClick()
+            workspaceClick("workspace-revoke:0"); node("dialog-confirm").performClick(); awaitVisualIdle()
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             realPauseResume(activity, atPause = { reads.clear() })
             release.countDown()

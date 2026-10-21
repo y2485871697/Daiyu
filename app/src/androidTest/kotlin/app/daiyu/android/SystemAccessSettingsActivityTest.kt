@@ -16,7 +16,7 @@ class SystemAccessSettingsActivityTest : WiredActivityTestCase() {
             "Root 与系统增强" -> openRetainedSettingsEntry("enhancements", "page:Root 与系统增强")
             "悬浮窗权限" -> openRetainedSettingsEntry("overlay", "page:悬浮窗权限")
             else -> {
-                reveal("settings-search", "设置").performTextReplacement(title)
+
                 reveal("settings-row:$title", "设置").performClick()
             }
         }

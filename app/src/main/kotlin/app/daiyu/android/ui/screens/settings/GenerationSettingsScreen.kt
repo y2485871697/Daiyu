@@ -122,7 +122,7 @@ fun GenerationSettingsScreen(
                     }
                     SettingsTextField("完整生成 endpoint", profile.endpoint, { update(index, profile.copy(endpoint = it)) }, enabled = enabled)
                     SettingsTextField("生成模型名", profile.model, { update(index, profile.copy(model = it)) }, enabled = enabled)
-                    SettingsTextField("生成 API Key", profile.apiKey, { update(index, profile.copy(apiKey = it)) }, password = true, enabled = enabled)
+                    SettingsTextField("生成 API Key", profile.apiKey, { update(index, profile.copy(apiKey = it)) }, password = true, enabled = enabled, compact = true)
                     TextButton(text = "移除此配置", enabled = enabled && draft.profiles.size > 1,
                         onClick = { onDraftChange(draft.copy(profiles = draft.profiles.filterIndexed { i, _ -> i != index })) },
                         modifier = Modifier.fillMaxWidth().padding(12.dp))

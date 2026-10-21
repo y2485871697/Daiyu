@@ -58,10 +58,10 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
     fun testHiddenGuiSearchAndRetainedEntryAfterRecreationCannotGrantOrOpenAnything() {
         setDraft("GUI 搜索与重建")
         openSettings()
-        reveal("settings-search", "设置").performTextReplacement("无障碍")
+
         val title = SettingsCatalog.entry("accessibility").title
         node("settings-row:$title").assertDoesNotExist()
-        ui.onNodeWithText("没有匹配的设置").assertExists()
+        node("settings-search").assertDoesNotExist()
         val stale = retainedSettingsEntry("accessibility")
         openRetainedSettingsEntry("accessibility", "page:$page")
         assertNoGuiPreparation()

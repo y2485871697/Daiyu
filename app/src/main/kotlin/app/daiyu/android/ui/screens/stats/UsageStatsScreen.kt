@@ -187,7 +187,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
             item(key = "usage-scope") {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Text(if (stats.recordedProjection?.combined?.requestSnapshotCount == 0L) "暂无已报告用量"
-                        else "输入、输出及缓存为已报告小计，可能不完整；— 表示该项未知或无法计算。", color = usagePalette().muted, fontSize = 12.sp)
+                        else "输入、输出及缓存为已报告子集，可能不完整；— 表示该项未知或无法计算。", color = usagePalette().muted, fontSize = 12.sp)
                     if (stats.recordedProjection?.attributed?.scanComplete == false)
                         Text("部分记录尚未读取，仅显示已读取的用量。", color = usagePalette().muted, fontSize = 12.sp)
                 }
@@ -294,7 +294,7 @@ private fun ModelUsagePane(
                 endBound = UsageTimeBound()
             },
         )
-        Text("输入、输出及缓存为已报告小计，可能不完整；— 表示该项未知或无法计算。",
+        Text("输入、输出及缓存为已报告子集，可能不完整；— 表示该项未知或无法计算。",
             color = usagePalette().muted, fontSize = 12.sp)
         Card(Modifier.testTag("usage-model-total")) {
             Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

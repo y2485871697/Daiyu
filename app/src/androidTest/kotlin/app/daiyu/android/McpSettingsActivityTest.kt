@@ -9,11 +9,7 @@ import app.daiyu.android.mcp.McpSettingsOwner
 class McpSettingsActivityTest : WiredActivityTestCase() {
     private fun enter() {
         openSettings()
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("MCP")))
-            }
-            .assertEditableText("MCP")
+        node("settings-search").assertDoesNotExist()
         reveal("settings-row:MCP 服务器", "设置").performClick()
         node("mcp-settings").assertExists()
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("mcp-settings-status").fetchSemanticsNodes().isNotEmpty() }
@@ -41,11 +37,7 @@ class McpSettingsActivityTest : WiredActivityTestCase() {
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         ui.waitForIdle(); assertFalse(old.current())
         node("page:设置").assertExists()
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("MCP")))
-            }
-            .assertEditableText("MCP")
+        node("settings-search").assertDoesNotExist()
         reveal("settings-row:MCP 服务器", "设置").performClick()
         val replacement = currentOwner(); assertNotSame(old, replacement); assertTrue(replacement.current())
         activity = recreateActivity(activity)

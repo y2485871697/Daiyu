@@ -203,6 +203,12 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val modelText = layout(state.modelLabel)
             assertEquals(13.sp, modelText.layoutInput.style.fontSize)
             assertEquals(18.sp, modelText.layoutInput.style.lineHeight)
+            assertEquals(false, modelText.layoutInput.style.platformStyle?.includeFontPadding)
+            assertEquals(androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                modelText.layoutInput.style.lineHeightStyle?.alignment)
+            val chip = node("chat-model").fetchSemanticsNode().boundsInRoot
+            val label = ui.onNodeWithTag("composer-model-label", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals(chip.center.y - .75f * density, label.center.y, 1f)
             assertEquals(12.sp, layout("37% 上下文").layoutInput.style.fontSize)
             assertEquals(18.sp, layout("37% 上下文").layoutInput.style.lineHeight)
             val placeholder = layout("给代鱼发消息")

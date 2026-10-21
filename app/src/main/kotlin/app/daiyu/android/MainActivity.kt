@@ -1215,6 +1215,36 @@ class MainActivity : ComponentActivity() {
     private val supplementDraft = PausedSupplementDraft()
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
+    private data class ReplyOwner(val conversation: String, val run: String, val message: String)
+    private data class ReplyIdentityKey(val owners: Set<ReplyOwner>, val dataRevision: Long)
+    private var replyIdentityKey: ReplyIdentityKey? = null
+    private var replyIdentityRequest: ReplyIdentityKey? = null
+    private var replyIdentityJob: Job? = null
+    private var replyIdentities = emptyMap<String, app.daiyu.android.assistants.AssistantReplyIdentity>()
+    private fun refreshReplyIdentities() {
+        val messages = shown.map { it.second }.filter { it.role == Message.ASSISTANT_ROLE }
+        val key = ReplyIdentityKey(messages.map { ReplyOwner(it.conversationId.value, it.runId.value, it.id.value) }.toSet(), controller.dataRevision)
+        if (replyIdentityRequest != null && replyIdentityRequest != key) {
+            replyIdentityJob?.cancel()
+            replyIdentityRequest = null
+        }
+        if (key == replyIdentityKey || key == replyIdentityRequest) return
+        replyIdentityRequest = key
+        replyIdentityJob = lifecycleScope.launch {
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    messages.mapNotNull { message -> controller.database.replyIdentity(message)?.let { message.id.value to it } }.toMap()
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { emptyMap() }
+            if (replyIdentityRequest == key) {
+                replyIdentityKey = key
+                replyIdentityRequest = null
+                replyIdentities = result
+                publishChat()
+            }
+        }
+    }
     private data class QuestionRowUi(val message: Message, val retryCleanup: Boolean)
     private var questionRows by mutableStateOf<Map<String, QuestionRowUi>>(emptyMap())
     private var questionCards by mutableStateOf<Map<Pair<WorkStepOwnerUi, String>, ChatController.QuestionProjection>>(emptyMap())
@@ -5376,6 +5406,7 @@ class MainActivity : ComponentActivity() {
         // Also catches new-chat -> persisted conversation after sending, without auto-playing.
         speechHost.syncConversation(selected?.id?.value)
         imageHost.syncConversation(selected?.id?.value)
+        if (rowsChanged) refreshReplyIdentities()
         if (rowsChanged) questionRows = shown.mapNotNull { (_, message) ->
             val retryCleanup = controller.canRetryQuestionCleanup(message)
             if (!retryCleanup) null else message.id.value to QuestionRowUi(message, retryCleanup)
@@ -5395,7 +5426,7 @@ class MainActivity : ComponentActivity() {
         val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
-            turns = if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, dedicatedTool = { message, block ->
+            turns = if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey
             }, timestamp = { message ->

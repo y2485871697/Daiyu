@@ -22,9 +22,8 @@ import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun rememberTopBarBackdrop(): LayerBackdrop? {
+internal fun rememberTopBarBackdrop(surfaceColor: Color = MiuixTheme.colorScheme.surface): LayerBackdrop? {
     if (Build.VERSION.SDK_INT < 33 || !LocalBlurEnabled.current || !isRuntimeShaderSupported()) return null
-    val surfaceColor = MiuixTheme.colorScheme.surface
     return rememberLayerBackdrop {
         drawRect(surfaceColor)
         drawContent()
@@ -34,9 +33,9 @@ internal fun rememberTopBarBackdrop(): LayerBackdrop? {
 @Composable
 internal fun TopBarBackdrop(
     backdrop: LayerBackdrop?,
+    surfaceColor: Color = MiuixTheme.colorScheme.surface,
     content: @Composable () -> Unit,
 ) {
-    val surfaceColor = MiuixTheme.colorScheme.surface
     val modifier = when {
         Build.VERSION.SDK_INT < 33 || backdrop == null -> Modifier.background(surfaceColor)
         LocalTopBarBlurStyle.current == AppearanceTopBarBlurStyle.PROGRESSIVE -> {
@@ -72,8 +71,8 @@ internal fun Modifier.captureForTopBar(backdrop: LayerBackdrop?): Modifier =
     if (Build.VERSION.SDK_INT < 33 || backdrop == null) this else layerBackdrop(backdrop)
 
 @Composable
-internal fun topBarContainerColor(backdrop: LayerBackdrop?): Color =
-    if (Build.VERSION.SDK_INT < 33 || backdrop == null) MiuixTheme.colorScheme.surface else Color.Transparent
+internal fun topBarContainerColor(backdrop: LayerBackdrop?, surfaceColor: Color = MiuixTheme.colorScheme.surface): Color =
+    if (Build.VERSION.SDK_INT < 33 || backdrop == null) surfaceColor else Color.Transparent
 
 private const val TopBarBlurRadius = 25f
 private const val TopBarSurfaceAlpha = 0.8f

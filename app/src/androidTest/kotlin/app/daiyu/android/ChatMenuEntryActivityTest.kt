@@ -429,11 +429,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
     fun testSettingsVoiceRowEntersExistingConfiguration() {
         selectDraft()
         openSettings()
-        node("settings-search")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("语音")))
-            }
-            .assertEditableText("语音")
+        node("settings-search").assertDoesNotExist()
         reveal("settings-row:语音", "设置").performClick()
         node("voice-settings").assertExists()
         node("voice-universal-control").assertDoesNotExist()

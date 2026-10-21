@@ -70,6 +70,7 @@ sealed interface ChatTurnUi {
         override val ownerMessageId: String = id,
         override val segmentIndex: Int = 0,
         val reportedReasoning: List<app.daiyu.android.domain.ReportedReasoning> = emptyList(),
+        val assistantIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null,
     ) : ChatTurnUi
 }
 

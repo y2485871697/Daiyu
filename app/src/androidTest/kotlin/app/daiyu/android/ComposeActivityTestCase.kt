@@ -76,6 +76,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.waitForIdle()
         instrumentation.waitForIdleSync()
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     protected fun captureScreenNode(target: SemanticsNodeInteraction): ImageBitmap {
         awaitVisualIdle()
         val node = target.assertIsDisplayed().fetchSemanticsNode()
@@ -86,7 +87,31 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         val top = floor(bounds.top.toDouble()).toInt()
         val right = ceil(bounds.right.toDouble()).toInt()
         val bottom = ceil(bounds.bottom.toDouble()).toInt()
-        val screen = checkNotNull(instrumentation.uiAutomation.takeScreenshot()) { "截图未返回图像" }
+        val view = (node.root as androidx.compose.ui.platform.ViewRootForTest).view
+        val drawingEnabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
+        val frame = java.util.concurrent.CountDownLatch(1)
+        var drawListener: android.view.ViewTreeObserver.OnDrawListener? = null
+        val screen = try {
+            if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+            instrumentation.runOnMainSync {
+                if (android.os.Build.VERSION.SDK_INT >= 29 && view.isHardwareAccelerated) {
+                    view.viewTreeObserver.registerFrameCommitCallback { frame.countDown() }
+                } else {
+                    drawListener = object : android.view.ViewTreeObserver.OnDrawListener {
+                        override fun onDraw() {
+                            view.post { frame.countDown() }
+                        }
+                    }
+                    view.viewTreeObserver.addOnDrawListener(drawListener)
+                }
+                view.invalidate()
+            }
+            check(frame.await(2, java.util.concurrent.TimeUnit.SECONDS)) { "截图前未提交绘制帧" }
+            checkNotNull(instrumentation.uiAutomation.takeScreenshot()) { "截图未返回图像" }
+        } finally {
+            instrumentation.runOnMainSync { drawListener?.let { view.viewTreeObserver.removeOnDrawListener(it) } }
+            if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+        }
         var cropped: Bitmap? = null
         try {
             check(left >= 0 && top >= 0 && right <= screen.width && bottom <= screen.height && right > left && bottom > top) {

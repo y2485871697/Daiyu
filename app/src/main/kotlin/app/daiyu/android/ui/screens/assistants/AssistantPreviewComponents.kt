@@ -41,7 +41,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.squircle.squircleBorder
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -157,12 +160,16 @@ internal fun AssistantPreviewButton(
 ) {
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
-    val shape = RoundedCornerShape(11.dp * s)
+    val cornerRadius = ButtonDefaults.CornerRadius * s
+    val surface = if (actionRow) Modifier.clip(RoundedCornerShape(11.dp * s)) else Modifier
+        .squircleSurface(color = when { primary -> colors.primary; danger -> Color(0x0BAE687A); else -> colors.soft },
+            cornerRadius = cornerRadius)
+        .squircleBorder(width = 1.dp,
+            color = when { primary -> colors.primary; danger -> Color(0x40AE687A); else -> colors.line },
+            cornerRadius = cornerRadius)
     val foreground = when { danger -> colors.danger; primary -> colors.onPrimary; else -> colors.accent }
     Row(modifier.heightIn(min = (if (actionRow) 48 else 44).dp * s).alpha(if (enabled) 1f else .4f)
-        .clip(shape).background(when { actionRow -> Color.Transparent; primary -> colors.primary
-            danger -> Color(0x0BAE687A); else -> colors.soft })
-        .border(1.dp, when { actionRow -> Color.Transparent; primary -> colors.primary; danger -> Color(0x40AE687A); else -> colors.line }, shape)
+        .then(surface)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
         .padding(1.dp).padding(horizontal = 10.dp * s, vertical = 8.dp * s),
         verticalAlignment = Alignment.CenterVertically,

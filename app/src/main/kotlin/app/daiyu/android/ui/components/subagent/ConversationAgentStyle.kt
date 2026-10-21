@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.squircle.squircleBorder
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,10 +91,11 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
     modifier: Modifier = Modifier, primaryColor: Color = Color(0xff786c83),
     onPrimaryColor: Color = Color.White, onClick: () -> Unit) {
     val colors = conversationAgentColors()
-    val shape = RoundedCornerShape(10.dp)
-    Box(modifier.defaultMinSize(minHeight = 44.dp).clip(shape)
-        .background(if (primary) primaryColor else colors.soft)
-        .border(1.dp, if (primary) primaryColor else colors.line, shape)
+    Box(modifier.defaultMinSize(minHeight = 44.dp)
+        .squircleSurface(color = if (primary) primaryColor else colors.soft,
+            cornerRadius = ButtonDefaults.CornerRadius)
+        .squircleBorder(width = 1.dp, color = if (primary) primaryColor else colors.line,
+            cornerRadius = ButtonDefaults.CornerRadius)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
         Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = (if (primary) onPrimaryColor else colors.accent).copy(alpha = if (enabled) 1f else .4f))

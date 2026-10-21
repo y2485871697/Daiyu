@@ -2266,13 +2266,6 @@ class MainActivity : ComponentActivity() {
             }
         }
         return ChatScreenActions(
-        onCopyToolSummary = { requested ->
-            if (editorMatches() && voiceForeground && retainedPage == "chat" && !sidebarVisible) {
-                ToolCardPresentations.copySummary(chatState.turns, requested)?.let { summary ->
-                    getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("代鱼操作摘要", summary))
-                }
-            }
-        },
         onVisibleCompleted = completionReadAction(),
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onMore = { if (currentChat()) refreshAutomaticCompression() },
@@ -4470,6 +4463,7 @@ class MainActivity : ComponentActivity() {
             toast("记录已变化，请重新打开")
             return
         }
+        if (step.categoryDetails?.rich?.bodyRestricted == true) return
         val owner = step.owner ?: return
         when (request.action) {
             ToolCardAction.READ_TASK_RESULT -> guard { openChildTaskRecords(owner.conversationId) }

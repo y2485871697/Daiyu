@@ -53,7 +53,7 @@ internal fun MessageContent(
                 is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                 is MessageContentUi.Tool -> {
                     key(block.step.owner, block.step.toolCallId) {
-                        if (!dedicatedTool(block.step)) WorkStepRow(block.step, actions.onCopyToolSummary, toolContent = toolContent)
+                        if (!dedicatedTool(block.step)) WorkStepRow(block.step, toolContent = toolContent)
                     }
                 }
             }

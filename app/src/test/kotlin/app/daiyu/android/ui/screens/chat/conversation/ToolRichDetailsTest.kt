@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ToolRichDetailsTest {
-    private fun text(value: ToolRichDetailsUi): String = (value.documents + value.technical + value.entries.flatMap { it.documents })
+    private fun text(value: ToolRichDetailsUi): String = (value.documents + value.technical + listOfNotNull(value.prose) + value.entries.flatMap { it.documents })
         .joinToString("\n") { it.text } + value.entries.joinToString { it.title } + value.fields.joinToString { it.value } + value.entries.flatMap { it.fields }.joinToString { it.value }
 
     @Test fun inputDocumentsNeverSuppressPlainTextReceipts() {
@@ -16,12 +16,12 @@ class ToolRichDetailsTest {
     @Test fun compactDeviceProseKeepsOnlyReturnedValuesAndTechnicalReceipt() {
         val time = ToolRichDetails.project("device_read", "device_time", "{}",
             """{"ok":true,"data":{"local_iso":"2026-04-18T21:22:00+08:00","timezone":"Asia/Shanghai","epoch_ms":1}}""")
-        assertEquals("2026-04-18T21:22:00+08:00 · Asia/Shanghai", time.prose!!.text)
+        assertEquals("2026-04-18 21:22:00\nAsia/Shanghai · UTC+08:00", time.prose!!.text)
         assertFalse(time.prose!!.text.contains("epoch_ms"))
         assertTrue(time.technical.any { it.title == "调用回执" && it.text.contains("epoch_ms") })
         val location = ToolRichDetails.project("device_read", "last_known_location", "{}",
             """{"ok":true,"data":{"latitude":31.2,"longitude":121.4,"accuracy_m":20,"age_ms":6000}}""")
-        assertEquals("最近位置：31.2, 121.4 · 精度 20米 · 样本距读取时 6000毫秒", location.prose!!.text)
+        assertEquals("31.2, 121.4\n精度 20m · 6 秒前", location.prose!!.text)
         val absent = ToolRichDetails.project("device_read", "last_known_location", "{}",
             """{"ok":false,"status":"no_cached_location","error":"no_cached_location"}""")
         assertEquals("没有可用的最近位置缓存", absent.prose!!.text)
@@ -38,7 +38,7 @@ class ToolRichDetailsTest {
     @Test fun systemActionProseNeverPromotesRequestedValuesToConfirmation() {
         val pending = ToolRichDetails.project("system_action", "platform_set_wifi", """{"enabled":true}""",
             """{"accepted":true}""")
-        assertEquals("已收到系统回执，详情见技术详情", pending.prose!!.text)
+        assertEquals("请求已受理，结果未确认", pending.prose!!.text)
         assertFalse(pending.prose!!.text.contains("true"))
         assertTrue(pending.technical.any { it.title == "调用参数" && it.text.contains("enabled") })
         val receipt = ToolRichDetails.project("system_action", "platform_set_wifi", """{"api_key":"PRIVATE_KEY"}""",
@@ -163,6 +163,99 @@ class ToolRichDetailsTest {
             """{"data_base64":"PRIVATE_IMAGE_ENCODING"}""")
         assertFalse(text(value).contains("PRIVATE_IMAGE_ENCODING"))
         assertTrue(value.technical.isEmpty())
+    }
+    @Test fun formattedTimeUsesReturnedOffsetAndHandlesFractionalUtcAndInvalidValues() {
+        for ((iso, expected) in listOf(
+            "2026-04-18T21:22:00.123-03:30" to "2026-04-18 21:22:00\nUTC-03:30",
+            "2026-04-18T21:22:00Z" to "2026-04-18 21:22:00\nUTC",
+            "invalid time" to "invalid time")) {
+            val value = ToolRichDetails.project("device_read", "device_time", "{}",
+                org.json.JSONObject().put("data", org.json.JSONObject().put("local_iso", iso)).toString())
+            assertEquals(expected, value.prose!!.text)
+        }
+    }
+    @Test fun systemActionBodyUsesReturnedValuesWithoutPromotingTheRequest() {
+        val value = ToolRichDetails.project("system_action", "platform_set_wifi", """{"enabled":true}""",
+            """{"enabled":false,"read_back":true}""")
+        assertEquals("返回启用值：否\n回读确认：是", value.prose!!.text)
+        val volume = ToolRichDetails.project("system_action", "platform_set_volume", """{"index":90}""",
+            """{"stream":"music","index":3,"read_back":true}""")
+        assertTrue(volume.prose!!.text.contains("返回音量：3"))
+        assertFalse(volume.prose!!.text.contains("90"))
+    }
+    @Test fun nestedDeviceSnapshotsAndAudioChannelsHaveReadableBodies() {
+        val status = ToolRichDetails.project("device_read", "device_status", "{}",
+            """{"ok":true,"battery":{"ok":true,"percent":78,"charging":true},"android":{"api_level":36,"release":"16"},"memory":{"ok":true,"total_bytes":8000,"available_bytes":4000},"storage":{"ok":false,"error":"no_sample"}}""")
+        assertTrue(status.prose!!.text.contains("电量百分比：78"))
+        assertTrue(status.prose!!.text.contains("内存可用字节：4000"))
+        assertTrue(status.prose!!.text.contains("存储：本次采样不可用"))
+        val audio = ToolRichDetails.project("device_read", "device_audio", "{}",
+            """{"ok":true,"data":{"streams":{"music":{"level":3,"minimum":0,"maximum":15}}}}""")
+        assertEquals("音频通道", audio.entries.single().group)
+        assertTrue(audio.entries.single().fields.any { it.label == "当前音量" && it.value == "3" })
+    }
+    @Test fun knownStructuredReceiptsStayTechnicalAndUnknownToolsKeepFallback() {
+        for (category in ToolCardPresentations.categories - setOf("generic", "user_question")) {
+            val value = ToolRichDetails.project(category, "fixture", "{}", """{"future_shape":{"value":42}}""")
+            assertFalse(category, value.documents.any { it.title == "已记录返回" })
+            assertTrue(category, value.technical.any { it.text.contains("future_shape") })
+        }
+        val unknown = ToolRichDetails.project("future_category", "future_tool", "{}", """{"new_value":42}""")
+        assertTrue(unknown.documents.any { it.text.contains("new_value") })
+    }
+    @Test fun hiddenMetadataStillHasAnExplicitReadableReceipt() {
+        for ((category, payload) in listOf("memory" to """{"revision":"r1"}""",
+            "files" to """{"data":{"scope":"complete"}}""")) {
+            val value = ToolRichDetails.project(category, "fixture", "{}", payload)
+            assertEquals("已收到回执，详情见技术详情", value.prose!!.text)
+            assertFalse(value.documents.any { it.title == "已记录返回" })
+            assertTrue(value.technical.any { it.title == "调用回执" })
+        }
+    }
+    @Test fun failedOuterAndInnerReceiptsRestrictCategoryBodiesButKeepDiagnostics() {
+        for (category in listOf("apps", "browser", "files", "personal_search", "device_read", "system_action")) {
+            for (state in listOf("\"ok\":false" to "本次调用未完成，详情见技术详情",
+                "\"status\":\"permission_denied\"" to "缺少本次操作所需权限")) {
+                for (nested in listOf(false, true)) {
+                    val body = "{" + state.first + ",\"text\":\"FAILED_BODY\"}"
+                    val payload = if (nested) "{\"data\":" + body + "}" else body
+                    val value = ToolRichDetails.project(category, "fixture", "{}", payload)
+                    assertTrue(category, value.bodyRestricted)
+                    assertEquals(state.second, value.prose!!.text)
+                    assertTrue(value.technical.any { it.text.contains("FAILED_BODY") })
+                }
+            }
+        }
+    }
+    @Test fun privacyWithheldNeverKeepsUnauthorizedDataInAnyDisclosure() {
+        for (category in listOf("apps", "browser", "files", "personal_search", "device_read", "system_action")) {
+            for (state in listOf("\"privacy_redacted\":true", "\"status\":\"private_result_withheld\"",
+                "\"status\":\"private_result_consent_required\"", "\"privacy_redacted\":true,\"status\":\"permission_denied\"")) {
+                for (nested in listOf(false, true)) {
+                    val body = "{" + state + ",\"text\":\"PRIVATE_BODY\",\"items\":[{\"content\":\"PRIVATE_ITEM\"}]}"
+                    val payload = if (nested) "{\"data\":" + body + "}" else body
+                    val value = ToolRichDetails.project(category, "fixture", "{}", payload)
+                    assertTrue(category, value.bodyRestricted)
+                    assertEquals("结果未获展示授权", value.prose!!.text)
+                    assertTrue(value.fields.isEmpty()); assertTrue(value.entries.isEmpty()); assertTrue(value.documents.isEmpty())
+                    assertFalse(text(value).contains("PRIVATE_BODY")); assertFalse(text(value).contains("PRIVATE_ITEM"))
+                }
+            }
+            val mixed = ToolRichDetails.project(category, "fixture", "{}",
+                """{"ok":false,"status":"permission_denied","data":{"privacy_redacted":true,"text":"PRIVATE_BODY"}}""")
+            assertEquals("结果未获展示授权", mixed.prose!!.text)
+            assertFalse(text(mixed).contains("PRIVATE_BODY"))
+        }
+    }
+    @Test fun aliasesAndEntryIdentityAreNotDuplicatedButOutputChannelsStaySeparate() {
+        val file = ToolRichDetails.project("files", "read_text_file", "{}", """{"text":"same body","content":"same body"}""")
+        assertEquals(1, file.documents.count { it.text == "same body" })
+        val terminal = ToolRichDetails.project("terminal", "terminal_pty_read", "{}", """{"stdout":"same body","output":"same body","stderr":"same body"}""")
+        assertEquals(setOf("标准输出", "标准错误"), terminal.documents.map { it.title }.toSet())
+        val listing = ToolRichDetails.project("files", "list_directory", "{}", """{"entries":[{"name":"example.txt","text":"one body","content":"one body"}]}""")
+        assertEquals("example.txt", listing.entries.single().title)
+        assertFalse(listing.entries.single().fields.any { it.value == "example.txt" })
+        assertEquals(1, listing.entries.single().documents.size)
     }
     @Test fun documentDebugStringNeverContainsContent() {
         assertFalse(ToolDisclosureUi("正文", "PRIVATE_CONTENT").toString().contains("PRIVATE_CONTENT"))

@@ -1,0 +1,138 @@
+package app.daiyu.android.ui.screens.chat.conversation
+
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.daiyu.android.WiredActivityTestCase
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.ui.app.AgentAppTheme
+
+class ToolCardReadabilityTest : WiredActivityTestCase() {
+    private val phoneDensity = 525f / 160f
+    private val prose = "已收到设备快照，详情见技术详情"
+    private val title = "查询设备状态和当前系统内存使用情况"
+    private val output = "first line\nsecond line\nthird line\nfourth line"
+    private var actionCount = 0
+
+    private fun show(dark: Boolean, scale: Float, fontScale: Float, narrow: Boolean = false) {
+        val step = WorkStepUi("readability", title, "", WorkStepState.UNKNOWN,
+            owner = WorkStepOwnerUi("fixture", "run", "message"), category = "device_read",
+            activity = ToolActivityUi.INTERRUPTED,
+            categoryDetails = ToolCategoryDetailsUi("设备", notice = "", rich = ToolRichDetailsUi(
+                prose = ToolDisclosureUi("", prose),
+                technical = listOf(ToolDisclosureUi("调用参数", "{}", true)))))
+        mainThread { activity.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(phoneDensity, fontScale)) {
+                key(dark, scale, fontScale, narrow) {
+                    AgentAppTheme(AppearanceSettings(
+                        themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                        interfaceScale = scale), applyInterfaceScale = true) {
+                        Column(Modifier.width(((if (narrow) 320f else 1216f / phoneDensity) / scale - 28f).dp)
+                            .verticalScroll(rememberScrollState()).testTag("readability-list")) {
+                            WorkProcessCard(WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "已中断"),
+                                ownerKey = "readability")
+                            ToolDocument(ToolDisclosureUi("标准输出", output, true))
+                            ToolMiniAction("保存原件", Modifier.testTag("readability-action")) { actionCount++ }
+                        }
+                    }
+                }
+            }
+        } }
+        ui.waitForIdle()
+    }
+
+    private fun layout(target: SemanticsNodeInteraction): TextLayoutResult {
+        val layouts = mutableListOf<TextLayoutResult>()
+        target.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        return layouts.single()
+    }
+
+    private fun assertTarget(tag: String, scale: Float, minimumWidth: Boolean = false, reveal: Boolean = true) {
+        val target = ui.onNodeWithTag(tag).let { if (reveal) it.scrollToVisible() else it }.assertIsDisplayed()
+        val bounds = target.fetchSemanticsNode().boundsInRoot
+        val minimum = 48f * phoneDensity * scale - 1f
+        assertTrue("$tag has insufficient height: $bounds", bounds.height >= minimum)
+        if (minimumWidth) assertTrue("$tag has insufficient width: $bounds", bounds.width >= minimum)
+    }
+
+    fun testPhoneDensityFontScaleAndNarrowLargeTextRemainReadable() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) for (large in listOf(false, true)) for (narrow in listOf(false, true)) {
+            val fontScale = if (large) 1.3f else .9f
+            show(dark, scale, fontScale, narrow = narrow)
+            assertTarget("work-process-header", scale)
+            val heading = layout(ui.onNodeWithText("设备查询", useUnmergedTree = true))
+            assertEquals(14.sp, heading.layoutInput.style.fontSize)
+            assertEquals(phoneDensity * scale, heading.layoutInput.density.density, .001f)
+            assertEquals(fontScale, heading.layoutInput.density.fontScale, .001f)
+            val icon = ui.onNodeWithTag("work-process-icon", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals(22f * phoneDensity * scale, icon.width, 1f)
+            ui.onNodeWithTag("work-process-header").performClick()
+            assertTarget("tool-step-header:readability", scale)
+            val titleNode = ui.onNodeWithText(title, useUnmergedTree = true).assertIsDisplayed()
+            assertEquals(14.sp, layout(titleNode).layoutInput.style.fontSize)
+            val stateNode = ui.onNodeWithText("所属运行已中断", useUnmergedTree = true).assertIsDisplayed()
+            val titleBounds = titleNode.fetchSemanticsNode().boundsInRoot
+            val stateBounds = stateNode.fetchSemanticsNode().boundsInRoot
+            assertTrue("Long title must not overlap state", titleBounds.right <= stateBounds.left)
+            assertFalse(layout(stateNode).hasVisualOverflow)
+            val headerBounds = ui.onNodeWithTag("tool-step-header:readability").fetchSemanticsNode().boundsInRoot
+            assertTrue(titleBounds.left >= headerBounds.left && stateBounds.right <= headerBounds.right)
+            ui.onNodeWithTag("tool-step-header:readability").performClick()
+            ui.onNodeWithContentDescription("复制安全摘要").assertDoesNotExist()
+            val body = layout(ui.onNodeWithText(prose, useUnmergedTree = true).scrollToVisible())
+            assertEquals(14.sp, body.layoutInput.style.fontSize)
+            assertEquals(21.sp, body.layoutInput.style.lineHeight)
+            assertFalse(body.hasVisualOverflow)
+            assertTarget("tool-step-technical:readability", scale)
+            ui.onNodeWithTag("tool-step-technical:readability").performClick()
+            val args = layout(ui.onNodeWithTag("tool-document:调用参数", useUnmergedTree = true).scrollToVisible())
+            assertEquals(13.sp, args.layoutInput.style.fontSize)
+            assertEquals(20.sp, args.layoutInput.style.lineHeight)
+            ui.onNodeWithTag("tool-step-technical:readability").scrollToVisible().performClick()
+            ui.onNodeWithTag("tool-document:调用参数").assertDoesNotExist()
+            assertTarget("readability-action", scale, minimumWidth = true)
+        }
+        assertEquals("Disclosure must not copy or run an action", 0, actionCount)
+    }
+
+    fun testMiniActionIsClickableAndDispatchesOnce() {
+        show(dark = true, scale = .8f, fontScale = 1.3f, narrow = true)
+        assertTarget("readability-action", .8f, minimumWidth = true)
+        ui.onNodeWithTag("readability-action").performClick()
+        assertEquals(1, actionCount)
+    }
+
+    fun testOutputHintNeverCoversPreviewAndFullOutputStillOpens() {
+        for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
+            show(dark = dark, scale = 1f, fontScale = fontScale, narrow = true)
+            val preview = ui.onNodeWithTag("tool-output-preview:标准输出", useUnmergedTree = true).scrollToVisible()
+            val previewLayout = layout(preview)
+            assertEquals(13.sp, previewLayout.layoutInput.style.fontSize)
+            assertEquals(3, previewLayout.lineCount)
+            val hint = ui.onNodeWithTag("tool-output-hint:标准输出", useUnmergedTree = true).scrollToVisible()
+            assertTrue(preview.fetchSemanticsNode().boundsInRoot.bottom <= hint.fetchSemanticsNode().boundsInRoot.top)
+            ui.onNodeWithTag("tool-document:标准输出").performClick()
+            val full = ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(output)
+            assertEquals(13.sp, layout(full).layoutInput.style.fontSize)
+            assertTarget("tool-output-close", 1f, minimumWidth = true, reveal = false)
+            assertTarget("tool-output-copy", 1f, minimumWidth = true, reveal = false)
+            ui.onNodeWithTag("tool-output-close").performClick()
+            ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
+        }
+        assertEquals(0, actionCount)
+    }
+}

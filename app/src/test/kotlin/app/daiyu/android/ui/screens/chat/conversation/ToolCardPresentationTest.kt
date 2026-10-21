@@ -60,21 +60,6 @@ class ToolCardPresentationTest {
         assertFalse(card.toString().contains("token=secret"))
         assertEquals(call, source.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation)
     }
-    @Test fun copyingReResolvesCurrentOwnerAndNeverUsesStaleOrForgedText() {
-        val step = WorkStepUi("call", "读取终端输出", "current safe text", WorkStepState.UNKNOWN,
-            WorkStepOwnerUi("chat", "run", "message"), "terminal_pty_read")
-        val turns = listOf(ChatTurnUi.Assistant("message", content = listOf(MessageContentUi.Tool(step))))
-        assertTrue(ToolCardPresentations.copySummary(turns, step.copy(detail = "forged secret"))!!.contains("current safe text"))
-        assertFalse(ToolCardPresentations.copySummary(turns, step.copy(detail = "forged secret"))!!.contains("forged secret"))
-        assertNull(ToolCardPresentations.copySummary(emptyList(), step))
-        assertNull(ToolCardPresentations.copySummary(turns, step.copy(owner = step.owner!!.copy(runId = "other"))))
-        assertNull(ToolCardPresentations.copySummary(turns, step.copy(owner = step.owner!!.copy(conversationId = "other"))))
-        assertNull(ToolCardPresentations.copySummary(turns, step.copy(owner = null)))
-        assertNull(ToolCardPresentations.copySummary(turns, step.copy(toolName = "other")))
-        val summaryTurn = ChatTurnUi.Assistant("message", workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "结果未确认"))
-        assertEquals(ToolCardPresentations.copySummary(turns, step), ToolCardPresentations.copySummary(listOf(summaryTurn), step))
-    }
-
     @Test fun actualTaskArraysAndTerminalFlagsAreBoundedMetadataNotSuccessInference() {
         val queued = ToolCardPresentations.present("start_child_tasks", "{\"tasks\":[{\"prompt\":\"private\"}]}",
             "{\"accepted\":true,\"completed\":false,\"tasks\":[{\"child_run_id\":\"secret\"}]}")
@@ -112,14 +97,13 @@ class ToolCardPresentationTest {
             .fields.containsAll(listOf(ToolFieldUi("百分比", "0"), ToolFieldUi("已启用", "否"))))
     }
 
-    @Test fun copyIncludesTypedZeroCountsAndRevalidatesCurrentIdentity() {
-        val display = ToolCardPresentations.present("skills_list", "{}", "{\"skills\":[]}")
-        val step = WorkStepUi("call", display.title, display.summary, WorkStepState.OK,
-            WorkStepOwnerUi("conversation", "run", "message"), "skills_list", display.category,
-            display.sections, categoryDetails = display.details)
-        val turn = ChatTurnUi.Assistant("message", content = listOf(MessageContentUi.Tool(step)))
-        assertTrue(ToolCardPresentations.copySummary(listOf(turn), step)!!.contains("技能数：0"))
-        assertNull(ToolCardPresentations.copySummary(listOf(turn), step.copy(owner = WorkStepOwnerUi("other", "run", "message"))))
+    @Test fun processTitlesMatchCategoriesAndMixedCallsRemainAChain() {
+        assertEquals("设备查询", ToolCardPresentations.processTitle(listOf("device_read")))
+        assertEquals("终端", ToolCardPresentations.processTitle(listOf("terminal", "terminal")))
+        assertEquals("工具链", ToolCardPresentations.processTitle(listOf("terminal", "device_read")))
+        assertEquals("工具链", ToolCardPresentations.processTitle(emptyList()))
+        assertEquals("工具链", ToolCardPresentations.processTitle(listOf("future_category")))
+        ToolCardPresentations.categories.forEach { assertNotEquals("工具链", ToolCardPresentations.processTitle(listOf(it))) }
     }
 
 }

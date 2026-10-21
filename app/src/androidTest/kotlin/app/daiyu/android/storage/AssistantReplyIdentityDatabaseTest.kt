@@ -49,12 +49,12 @@ class AssistantReplyIdentityDatabaseTest : InstrumentationTestCase() {
                     copyAssets = { _, mapped -> mapped }).conversationId
                 else service.branch(conversation.id, replies.last().id)
                 val copy = branch()
-                val copied = database.messages(copy).filter { it.role == Message.ASSISTANT_ROLE }
+                val copied = database.messages(copy).map { it.second }.filter { it.role == Message.ASSISTANT_ROLE }
                 assertEquals(2, copied.size)
                 assertEquals(identity, database.replyIdentity(copied.first()))
                 assertNull(database.replyIdentity(copied.last()))
                 assertEquals(original, database.messages(conversation.id))
-                assertTrue(copied.none { candidate -> original.any { it.id == candidate.id } })
+                assertTrue(copied.none { candidate -> original.any { it.second.id == candidate.id } })
                 database.writableDatabase.execSQL("""CREATE TRIGGER reject_branch_reply BEFORE INSERT ON assistant_reply_identities
                     WHEN NEW.conversation_id != '${conversation.id.value}' BEGIN SELECT RAISE(ABORT,'identity'); END""")
                 val before = database.conversations().map { it.id }.toSet()

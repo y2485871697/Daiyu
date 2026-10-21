@@ -44,7 +44,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         val owner = database.create("default").id
         repeat(4) { n ->
             val user = Message(MessageId("old-u-$n-${owner.value}"), owner, RunId("old-$n-${owner.value}"), "user",
-                listOf(MessageBlock.Text("u", "fact $n ".repeat(120))), RunStatus.COMPLETED)
+                listOf(MessageBlock.Text("u", "fact $n ".repeat(1200))), RunStatus.COMPLETED)
             val assistant = user.copy(id = MessageId("old-a-$n-${owner.value}"), role = "assistant", status = RunStatus.RUNNING)
             database.send(user, assistant); database.save(assistant.copy(status = RunStatus.COMPLETED))
         }
@@ -70,7 +70,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
             "offline-fixture-only", false, protocol = ProviderProtocol.RESPONSES))
         val config = SummaryProviderConfiguration(binding, provider, binding.modelId, 128000, 127104, 256, 128, 512, 60000)
         val coordinator = ContextPreparationCoordinator(ContextService(context, database),
-            { ProductionCompressionSettings(true, 4000, 1000, summaryModel = binding).coordinatorSettings() },
+            { ProductionCompressionSettings(true, 32000, 1000, summaryModel = binding).coordinatorSettings() },
             ProductionCompressionPolicyResolver,
             ProviderSummaryModelResolver({ config }, { wire }, deadlines))
         return Submission(user, assistant, cancellation, usage, coordinator,

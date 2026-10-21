@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewField
@@ -200,6 +201,8 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
         setField("assistant-edit-memory", longMemory)
         for (tag in listOf("assistant-edit-prompt", "assistant-edit-memory")) {
             val field = tagged(tag).scrollToVisible()
+            field.performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(0, 0, false)) }
+            awaitVisualIdle()
             val pageRange = tagged("assistant-editor").fetchSemanticsNode()
                 .config[SemanticsProperties.VerticalScrollAxisRange]
             val beforePage = pageRange.value()
@@ -259,19 +262,24 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) {
             val background = if (dark) Color(0xFF24202C) else Color.White
             val fill = if (dark) Color(0x22C4ACD7) else Color(0x1FA18DB9)
+            val fieldHeight = AtomicInteger()
             mainThread {
                 activity.setContent {
                     AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = false) {
                         Box(Modifier.fillMaxWidth().background(background).padding(24.dp)) {
+                            density.set(LocalDensity.current)
                             AssistantPreviewField("", {}, "", minHeight = 48.dp,
-                                fieldModifier = Modifier.testTag("tinted-input"))
+                                fieldModifier = Modifier.onSizeChanged { fieldHeight.set(it.height) }.testTag("tinted-input"))
                         }
                     }
                 }
             }
             awaitUniqueTag("tinted-input")
-            val field = tagged("tinted-input").assertHeightIsEqualTo(48.dp)
+            ui.waitUntil(5_000) { fieldHeight.get() > 0 }
+            assertEquals(48f, fieldHeight.get() / density.get().density, .5f)
+            val field = tagged("tinted-input")
+            awaitVisualIdle()
             val pixels = captureScreenNode(field).toPixelMap()
             val actual = pixels[pixels.width / 2, pixels.height / 2]
             val expected = fill.compositeOver(background)
@@ -297,10 +305,11 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                 }
             }
             awaitUniqueTag("assistant-section-legend:Skills")
+            awaitVisualIdle()
             val pixels = captureScreenNode(tagged("assistant-section-legend:Skills")).toPixelMap()
             // The legend's horizontal padding must show its real parent, not a white mask.
             for (x in listOf(1, pixels.width - 2)) {
-                val pixel = pixels[x, 1]
+                val pixel = pixels[x, pixels.height / 2]
                 assertEquals(background.red, pixel.red, .01f)
                 assertEquals(background.green, pixel.green, .01f)
                 assertEquals(background.blue, pixel.blue, .01f)

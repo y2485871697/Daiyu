@@ -13,6 +13,7 @@ import android.os.ParcelFileDescriptor
 import android.test.mock.MockContentResolver
 import androidx.compose.ui.test.*
 import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.balance.*
 import app.daiyu.android.storage.ModelSettingsStore
 import java.io.File
 import java.util.UUID
@@ -51,6 +52,7 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
     }
     private lateinit var application: ChatApplication
     private lateinit var fixture: FixtureApplication
+    private lateinit var balances: ProviderBalanceRuntimeHost
     private lateinit var controller: ChatController
     private lateinit var preferences: SelectionPreferences
     private lateinit var provider: Documents
@@ -72,8 +74,15 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         val resolver = MockContentResolver(instrumentation.targetContext).apply { addProvider("activity-lifecycle", provider) }
         fixture = FixtureApplication(context, resolver)
         preferences = SelectionPreferences(fixture.getSharedPreferences("conversation-ui", 0))
+        balances = ProviderBalanceRuntimeHost(
+            draftQuery = BalanceQuery { error("Unexpected lifecycle balance request") },
+            factory = { BalanceRuntime(ProviderBalanceStore(object : BalancePersistence {
+                private var bytes: ByteArray? = null
+                override fun read() = bytes?.clone()
+                override fun write(record: ByteArray?) { bytes = record?.clone() }
+            }), BalanceQuery { error("Unexpected lifecycle balance request") }) })
         controller = ChatController(fixture, ConversationDatabase(fixture), ModelSettingsStore(fixture, aliasPrefix), preferences,
-            { modelCalls.incrementAndGet(); error("no model request permitted") })
+            { modelCalls.incrementAndGet(); error("no model request permitted") }, providerBalanceHost = { balances })
         awaitControl("ready") { controller.ready }; assertNull(controller.problem)
         val historical = controller.database.create(); controller.database.rename(historical.id, "historical fixture")
         File(directory, "import.json").writeText(controller.database.exportBackup()); controller.database.delete(historical.id)
@@ -98,6 +107,7 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
             } finally {
                 try { if (::controller.isInitialized) controller.close() }
                 finally {
+                    if (::balances.isInitialized) balances.close()
                     if (::fixture.isInitialized) {
                         fixture.deleteDatabase("conversations.db")
                         fixture.getSharedPreferences("conversation-ui", 0).edit().clear().commit()

@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -115,11 +116,14 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
         node("search:query").performTextReplacement("初始")
         awaitUniqueTag(tag)
         val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val setQueryText = checkNotNull(node("search:query").fetchSemanticsNode().config[SemanticsActions.SetText].action)
         try {
-            node("search:query").performTextReplacement("慢查询")
+            mainThread {
+                assertTrue(setQueryText(AnnotatedString("慢查询")))
+                oldClick()
+            }
             ui.mainClock.advanceTimeBy(200)
             ui.waitUntil(5_000) { started.count == 0L }
-            mainThread { oldClick() }
             assertNull(opened)
             node("search:query").performTextReplacement("新查询")
             awaitUniqueTag(tag)

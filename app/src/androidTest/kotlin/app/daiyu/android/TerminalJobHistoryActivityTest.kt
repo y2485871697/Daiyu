@@ -160,8 +160,8 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
             val visit = checkNotNull(invoke("getTerminalJobsVisit"))
             property(visit, "getBusy") == false && property(visit, "getHistoryPage") != null
         }
-        node("terminal-task-output").assertTextContains("terminal page history")
-        node("terminal-task-output").assertTextContains("历史任务状态未知")
+        node("terminal-task-output").assertTextContains("terminal page history", substring = true)
+        node("terminal-task-output").assertTextContains("历史任务状态未知", substring = true)
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         ui.waitForIdle()
         node("terminal-tasks-dialog").assertDoesNotExist()

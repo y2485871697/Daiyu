@@ -5,6 +5,11 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.AnnotatedString
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.domain.*
+import app.daiyu.android.context.Utf8Payload
+import app.daiyu.android.ui.RetainedConversationData
+import app.daiyu.android.ui.model.MessageSearchHit
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /** Exercises the real MainActivity routes + SQLite adapter, not a replacement setContent host. */
@@ -178,34 +183,37 @@ class SearchHostActivityTest : WiredActivityTestCase() {
     }
 
     fun testLoadMoreOpens201stPersistedMessageWithoutTruncation() {
-        lateinit var conversation: Conversation
-        lateinit var last: Message
-        mainThread {
-            conversation = fixture.database.create("default")
-            repeat(201) { index ->
-                val user = Message(MessageId("paging-ui-user-$index"), conversation.id, RunId("paging-ui-run-$index"),
-                    "user", listOf(MessageBlock.Text("paging-ui-text-$index", "分页UI命中 $index")), RunStatus.COMPLETED)
-                val answer = user.copy(id = MessageId("paging-ui-answer-$index"), role = "assistant",
-                    blocks = emptyList(), status = RunStatus.RUNNING)
-                fixture.database.send(user, answer)
-                fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
-                last = user
-            }
-            repeat(30) { index ->
-                val user = Message(MessageId("paging-tail-user-$index"), conversation.id, RunId("paging-tail-run-$index"),
-                    "user", listOf(MessageBlock.Text("paging-tail-text-$index", "后续不匹配正文 $index")), RunStatus.COMPLETED)
-                val answer = user.copy(id = MessageId("paging-tail-answer-$index"), role = "assistant",
-                    blocks = emptyList(), status = RunStatus.RUNNING)
-                fixture.database.send(user, answer)
-                fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
-            }
-            activity.select(conversation)
+        // Import real physical owners once instead of replaying full-history send CAS for every row.
+        val conversationId = ConversationId("paging-ui-conversation")
+        val messages = JSONArray()
+        fun appendTurn(key: String, index: Int, body: String) {
+            fun row(id: String, role: String, blocks: JSONArray) = JSONObject()
+                .put("id", id).put("conversation_id", conversationId.value).put("run_id", "$key-run-$index")
+                .put("role", role).put("blocks", blocks).put("status", RunStatus.COMPLETED.name)
+                .put("error", JSONObject.NULL).put("protocol", JSONArray())
+            val blocks = JSONArray().put(JSONObject().put("type", "text").put("item", "$key-text-$index").put("text", body))
+            messages.put(row("$key-user-$index", "user", blocks))
+            messages.put(row("$key-answer-$index", "assistant", JSONArray()))
         }
+        repeat(201) { index -> appendTurn("paging-ui", index, "分页UI命中 $index") }
+        repeat(30) { index -> appendTurn("paging-tail", index, "后续不匹配正文 $index") }
+        val payload = JSONObject()
+            .put("conversations", JSONArray().put(JSONObject().put("id", conversationId.value)
+                .put("title", "新会话").put("draft", "").put("updated", 1L).put("folder", "")
+                .put("pinned", false).put("assistant_id", "default")))
+            .put("messages", messages).put("draft", "").toString()
+        val backup = JSONObject().put("format", "daiyu-neutral-text").put("version", 2)
+            .put("conversation_count", 1).put("message_count", messages.length())
+            .put("sha256", Utf8Payload.sha256(payload)).put("payload", payload).toString()
+        assertEquals(1 to 462, fixture.database.importBackup(backup))
+        val conversation = fixture.database.conversations().single { it.id == conversationId }
+        val lastId = MessageId("paging-ui-user-200")
+        mainThread { activity.select(conversation) }
         setDraft("分页跳转前草稿")
         openMessages()
         replaceSearchQuery("分页UI命中")
         awaitTag("search:message:${conversation.id.value}:paging-ui-user-0:0")
-        val lastTag = "search:message:${conversation.id.value}:${last.id.value}:0"
+        val lastTag = "search:message:${conversation.id.value}:${lastId.value}:0"
         node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
         node("search:more").performClick()
         ui.waitUntil(5_000) {
@@ -215,8 +223,8 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         node("search-history-results").scrollToDescendant(hasTestTag(lastTag))
         node(lastTag).performClick()
         node("search-history-dialog").assertDoesNotExist()
-        awaitTag("chat-turn:${last.id.value}")
-        node("chat-turn:${last.id.value}").assertIsDisplayed()
+        awaitTag("chat-turn:${lastId.value}")
+        node("chat-turn:${lastId.value}").assertIsDisplayed()
         assertDraft("分页跳转前草稿")
         assertEquals(0, fixture.opens.get())
     }
@@ -273,10 +281,28 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         replaceSearchQuery("暂停前搜索词")
         val tag = "search:message:${conversation.id.value}:${message.id.value}:0"
         awaitTag(tag)
-        val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        realPauseResume(activity, atPause = { oldClick() })
+        lateinit var oldClick: () -> Unit
+        mainThread {
+            val page = checkNotNull(invokeHost(activity, "getSearchPage"))
+            @Suppress("UNCHECKED_CAST")
+            val open = invokeHost(activity, "historySearchHitAction", page) as (MessageSearchHit) -> Unit
+            val hit = (invokeHost(activity, "getRetainedData") as RetainedConversationData)
+                .searchPage("暂停前搜索词", conversation.id.value).results.single {
+                    it.messageId == message.id.value && it.segmentIndex == 0
+                }
+            oldClick = { open(hit) }
+        }
+        val generation = MainActivity::class.java.getDeclaredField("editorGeneration").apply { isAccessible = true }
+        fun replayOldHit() {
+            val before = generation.getLong(activity)
+            oldClick()
+            assertEquals(before, generation.getLong(activity))
+            assertNull(invokeHost(activity, "getSearchPage"))
+            assertEquals("chat", invokeHost(activity, "getRetainedPage"))
+        }
+        realPauseResume(activity, atPause = { replayOldHit() })
         node("search-history-dialog").assertDoesNotExist()
-        mainThread { oldClick() }
+        mainThread { replayOldHit() }
         assertDraft("暂停保留草稿")
         assertEquals(0, fixture.opens.get())
     }

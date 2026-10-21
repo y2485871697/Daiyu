@@ -1977,13 +1977,7 @@ class MainActivity : ComponentActivity() {
                             }, ownerCurrent = {
                                 activityUsable() && searchPage === page && retainedPage == page.route &&
                                     selected?.id?.value == page.conversationId
-                            }, onOpenHit = { hit ->
-                                if (activityUsable() && searchPage === page && retainedPage == page.route &&
-                                    selected?.id?.value == page.conversationId && hit.conversationId == page.conversationId &&
-                                    lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
-                                    guard { openHistoryHit(hit) }
-                                }
-                            }, onDismiss = { closeSearch(page) })
+                            }, onOpenHit = historySearchHitAction(page), onDismiss = { closeSearch(page) })
                     }
                 }
                 if (retainedPage == "context-management") {
@@ -2542,7 +2536,7 @@ class MainActivity : ComponentActivity() {
         val hasImages = images.items.isNotEmpty() || videoHost.state.items.isNotEmpty() || videoSending
         val generation = editorGeneration
         val revision = draftRevision
-        val available = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
+        val available = chatState.composer.enabled && activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
             controller.ready && !controller.dataBusy && controller.active == null &&
             !imageHost.busy && !shizukuWritesBlocked && !hasImages && draft.isNotBlank() && terminalEditor == null
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
@@ -4954,6 +4948,14 @@ class MainActivity : ComponentActivity() {
         // Transition first: dismissSidebar must not briefly make hidden chat speech visible.
         retainedPage = route
         dismissSidebar()
+    }
+
+    private fun historySearchHitAction(page: SearchPage): (MessageSearchHit) -> Unit = { hit ->
+        if (activityUsable() && searchPage === page && retainedPage == page.route &&
+            selected?.id?.value == page.conversationId && hit.conversationId == page.conversationId &&
+            lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            guard { openHistoryHit(hit) }
+        }
     }
 
     private fun closeSearch(page: SearchPage) {

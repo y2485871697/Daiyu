@@ -83,7 +83,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         noHeaderNavigation()
         ui.onNodeWithContentDescription("草稿思考深度").assertIsEnabled().performClick()
         noHeaderNavigation()
-        node("thinking-depth-slider").assertIsDisplayed()
+        node("thinking-depth-slider").performScrollTo().assertIsDisplayed()
         node("subagent-thinking-value").assertTextEquals("选择思考深度")
         assertNull(repository.snapshot(owner).profiles.single().reasoning)
         node("thinking-depth-slider").performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(4f)) }
@@ -97,7 +97,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         mainThread { active = checkNotNull(SubAgentProfileDraftSession.open(editor, repository.snapshot(owner).profiles.single())) }
         ui.onNodeWithContentDescription("草稿思考深度").performClick()
         node("subagent-thinking-value").assertTextEquals("高")
-        node("thinking-depth-slider").performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(0f)) }
+        node("thinking-depth-slider").performScrollTo().assertIsDisplayed().performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(0f)) }
         node("subagent-thinking-value").assertTextEquals("关闭")
         ui.onAllNodes(hasText("关闭") and hasClickAction()).assertCountEquals(0)
         assertEquals(ReasoningEffort.HIGH, repository.snapshot(owner).profiles.single().reasoning)

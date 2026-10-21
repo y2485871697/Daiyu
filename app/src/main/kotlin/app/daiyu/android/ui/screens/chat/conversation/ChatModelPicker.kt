@@ -64,6 +64,8 @@ internal fun ChatModelPicker(
     onSelect: (String) -> Unit,
     onDismiss: () -> Unit,
     onSelectOtherProvider: (String, String) -> Unit = { _, _ -> },
+    title: String = "选择模型",
+    modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
     var searchFocused by remember { mutableStateOf(false) }
@@ -88,99 +90,101 @@ internal fun ChatModelPicker(
         !state.enabled -> "当前任务结束后可切换模型"
         else -> null
     }
-    ChatSelectionSheet(height = 500.dp, title = "选择模型", showCloseButton = false, onDismiss = onDismiss) {
-        Column(Modifier.testTag("chat-model-picker").semantics {
-            stateDescription = if (state.loading) "正在读取模型目录" else "模型目录读取完成"
-        }.fillMaxSize()) {
-            BasicTextField(
-                value = query, onValueChange = { query = it }, singleLine = true,
-                textStyle = TextStyle(color = colors.text, fontSize = 11.sp, lineHeight = 18.15.sp),
-                cursorBrush = SolidColor(colors.accent),
-                modifier = Modifier.testTag("chat-model-search").fillMaxWidth()
-                    .semantics { contentDescription = "搜索模型或供应商" }
-                    .onFocusChanged { searchFocused = it.isFocused }
-                    .heightIn(min = 36.dp).clip(RoundedCornerShape(12.dp)).background(colors.background)
-                    .border(1.dp, if (searchFocused) colors.accent else colors.line, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 10.dp, vertical = 9.dp),
-                decorationBox = { input ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(DaiyuIcons.Search, null, Modifier.size(14.dp), tint = colors.muted)
-                        Box(Modifier.weight(1f)) {
-                            if (query.isEmpty()) Text("搜索模型 / 供应商", color = colors.muted, fontSize = 11.sp)
-                            input()
-                        }
-                    }
-                },
-            )
-            Spacer(Modifier.height(13.dp))
-            if (status != null) Text(status, color = colors.muted, fontSize = 10.sp,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 7.dp))
-            LazyColumn(Modifier.testTag("chat-model-list").fillMaxWidth().weight(1f).padding(end = 2.dp)) {
-                groups.forEach { provider ->
-                    val open = if (search.isNotEmpty()) provider.id !in searchCollapsed else expanded == provider.id
-                    val surface = Color.White.copy(alpha = if (colors.dark) .012f else .14f)
-                    item(key = "heading:${provider.id}") {
-                        Row(Modifier.testTag("chat-model-provider:${provider.id}").fillMaxWidth()
-                            .modelGroupSurface(top = true, bottom = !open, surface = surface, line = colors.line)
-                            .clickable(role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                                if (search.isNotEmpty()) searchCollapsed = if (open) searchCollapsed + provider.id else searchCollapsed - provider.id
-                                else expanded = if (open) null else provider.id
+    ChatSelectionSheet(height = 500.dp, title = title, showCloseButton = false, onDismiss = onDismiss) {
+        Box(modifier.fillMaxSize()) {
+            Column(Modifier.testTag("chat-model-picker").semantics {
+                stateDescription = if (state.loading) "正在读取模型目录" else "模型目录读取完成"
+            }.fillMaxSize()) {
+                BasicTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    textStyle = TextStyle(color = colors.text, fontSize = 11.sp, lineHeight = 18.15.sp),
+                    cursorBrush = SolidColor(colors.accent),
+                    modifier = Modifier.testTag("chat-model-search").fillMaxWidth()
+                        .semantics { contentDescription = "搜索模型或供应商" }
+                        .onFocusChanged { searchFocused = it.isFocused }
+                        .heightIn(min = 36.dp).clip(RoundedCornerShape(12.dp)).background(colors.background)
+                        .border(1.dp, if (searchFocused) colors.accent else colors.line, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                    decorationBox = { input ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(DaiyuIcons.Search, null, Modifier.size(14.dp), tint = colors.muted)
+                            Box(Modifier.weight(1f)) {
+                                if (query.isEmpty()) Text("搜索模型 / 供应商", color = colors.muted, fontSize = 11.sp)
+                                input()
                             }
-                            .semantics { heading(); stateDescription = if (open) "已展开" else "已折叠" }
-                            .padding(start = 11.dp, end = 11.dp, top = 12.dp, bottom = if (open) 9.dp else 13.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(provider.name, color = colors.toolbar, fontSize = 10.sp, modifier = Modifier.weight(1f),
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${provider.models.size}", color = colors.muted, fontSize = 9.sp,
-                                modifier = Modifier.testTag("chat-model-count:${provider.id}"))
-                            provider.balance?.let { balance ->
-                                Icon(DaiyuIcons.Balance, null, Modifier.size(11.dp), tint = colors.muted)
-                                Text(balance, color = colors.muted, fontSize = 9.sp,
-                                    modifier = Modifier.widthIn(max = 80.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp).rotate(if (open) 0f else -90f), tint = colors.muted)
                         }
-                    }
-                    if (open) itemsIndexed(provider.models, key = { _, model -> "model:${provider.id}:${model.id}" }) { index, model ->
-                        val selected = provider.id == state.providerId && model.id == state.current
-                        val tag = if (provider.id == state.providerId) "chat-model-option:${model.id}"
-                            else "chat-model-option:${provider.id}:${model.id}"
-                        Box(Modifier.fillMaxWidth()
-                            .modelGroupSurface(top = false, bottom = index == provider.models.lastIndex, surface = surface, line = colors.line)
-                            .padding(start = 4.dp, end = 4.dp, bottom = if (index == provider.models.lastIndex) 4.dp else 2.dp)) {
-                            Row(Modifier.testTag(tag).fillMaxWidth().alpha(if (canSelect) 1f else .45f)
-                                .clip(RoundedCornerShape(10.dp)).background(if (selected) colors.bubble else Color.Transparent)
-                                .selectable(selected = selected, enabled = canSelect, role = Role.RadioButton,
-                                    interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                    onClick = {
-                                        if (provider.id == state.providerId) onSelect(model.id)
-                                        else onSelectOtherProvider(provider.id, model.id)
-                                    })
-                                .heightIn(min = 44.dp).padding(horizontal = 9.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                ModelBrandIcon(model.id, Modifier.size(17.dp), displayName = model.displayName, tint = colors.accent)
-                                Column(Modifier.weight(1f)) {
-                                    Text(model.displayName, color = if (selected) colors.accent else colors.text,
-                                        fontSize = 11.sp, lineHeight = 16.5.sp,
-                                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    if (model.displayName != model.id) Text(model.id, color = colors.muted,
-                                        fontSize = 9.sp, lineHeight = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(top = 1.dp))
+                    },
+                )
+                Spacer(Modifier.height(13.dp))
+                if (status != null) Text(status, color = colors.muted, fontSize = 10.sp,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 7.dp))
+                LazyColumn(Modifier.testTag("chat-model-list").fillMaxWidth().weight(1f).padding(end = 2.dp)) {
+                    groups.forEach { provider ->
+                        val open = if (search.isNotEmpty()) provider.id !in searchCollapsed else expanded == provider.id
+                        val surface = Color.White.copy(alpha = if (colors.dark) .012f else .14f)
+                        item(key = "heading:${provider.id}") {
+                            Row(Modifier.testTag("chat-model-provider:${provider.id}").fillMaxWidth()
+                                .modelGroupSurface(top = true, bottom = !open, surface = surface, line = colors.line)
+                                .clickable(role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                                    if (search.isNotEmpty()) searchCollapsed = if (open) searchCollapsed + provider.id else searchCollapsed - provider.id
+                                    else expanded = if (open) null else provider.id
                                 }
-                                Box(Modifier.size(17.dp).clip(CircleShape)
-                                    .background(if (selected) colors.accent else Color.Transparent), contentAlignment = Alignment.Center) {
-                                    if (selected) Icon(DaiyuIcons.Check, "当前模型", Modifier.size(10.dp),
-                                        tint = if (colors.dark) Color(0xFF211735) else Color.White)
+                                .semantics { heading(); stateDescription = if (open) "已展开" else "已折叠" }
+                                .padding(start = 11.dp, end = 11.dp, top = 12.dp, bottom = if (open) 9.dp else 13.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(provider.name, color = colors.toolbar, fontSize = 10.sp, modifier = Modifier.weight(1f),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${provider.models.size}", color = colors.muted, fontSize = 9.sp,
+                                    modifier = Modifier.testTag("chat-model-count:${provider.id}"))
+                                provider.balance?.let { balance ->
+                                    Icon(DaiyuIcons.Balance, null, Modifier.size(11.dp), tint = colors.muted)
+                                    Text(balance, color = colors.muted, fontSize = 9.sp,
+                                        modifier = Modifier.widthIn(max = 80.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp).rotate(if (open) 0f else -90f), tint = colors.muted)
+                            }
+                        }
+                        if (open) itemsIndexed(provider.models, key = { _, model -> "model:${provider.id}:${model.id}" }) { index, model ->
+                            val selected = provider.id == state.providerId && model.id == state.current
+                            val tag = if (provider.id == state.providerId) "chat-model-option:${model.id}"
+                                else "chat-model-option:${provider.id}:${model.id}"
+                            Box(Modifier.fillMaxWidth()
+                                .modelGroupSurface(top = false, bottom = index == provider.models.lastIndex, surface = surface, line = colors.line)
+                                .padding(start = 4.dp, end = 4.dp, bottom = if (index == provider.models.lastIndex) 4.dp else 2.dp)) {
+                                Row(Modifier.testTag(tag).fillMaxWidth().alpha(if (canSelect) 1f else .45f)
+                                    .clip(RoundedCornerShape(10.dp)).background(if (selected) colors.bubble else Color.Transparent)
+                                    .selectable(selected = selected, enabled = canSelect, role = Role.RadioButton,
+                                        interactionSource = remember { MutableInteractionSource() }, indication = null,
+                                        onClick = {
+                                            if (provider.id == state.providerId) onSelect(model.id)
+                                            else onSelectOtherProvider(provider.id, model.id)
+                                        })
+                                    .heightIn(min = 44.dp).padding(horizontal = 9.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    ModelBrandIcon(model.id, Modifier.size(17.dp), displayName = model.displayName, tint = colors.accent)
+                                    Column(Modifier.weight(1f)) {
+                                        Text(model.displayName, color = if (selected) colors.accent else colors.text,
+                                            fontSize = 11.sp, lineHeight = 16.5.sp,
+                                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        if (model.displayName != model.id) Text(model.id, color = colors.muted,
+                                            fontSize = 9.sp, lineHeight = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(top = 1.dp))
+                                    }
+                                    Box(Modifier.size(17.dp).clip(CircleShape)
+                                        .background(if (selected) colors.accent else Color.Transparent), contentAlignment = Alignment.Center) {
+                                        if (selected) Icon(DaiyuIcons.Check, "当前模型", Modifier.size(10.dp),
+                                            tint = if (colors.dark) Color(0xFF211735) else Color.White)
+                                    }
                                 }
                             }
                         }
+                        item(key = "gap:${provider.id}") { Spacer(Modifier.height(9.dp)) }
                     }
-                    item(key = "gap:${provider.id}") { Spacer(Modifier.height(9.dp)) }
-                }
-                if (groups.isEmpty() && search.isNotEmpty() && !state.loading) item(key = "empty") {
-                    Text("没有找到匹配的模型", color = colors.muted, fontSize = 11.sp,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
+                    if (groups.isEmpty() && search.isNotEmpty() && !state.loading) item(key = "empty") {
+                        Text("没有找到匹配的模型", color = colors.muted, fontSize = 11.sp,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
+                    }
                 }
             }
         }

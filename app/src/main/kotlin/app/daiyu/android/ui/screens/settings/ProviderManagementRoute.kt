@@ -269,8 +269,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 if (enabled && creating === newProvider && newProvider.draft === submitted && expected != null) {
                     val value = runCatching {
                         ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
-                        submitted.balanceConfiguration?.validate()
-                        require(!submitted.balanceOption.enabled || submitted.balanceConfiguration != null)
+                        submitted.providerBalanceConfiguration()?.validateProviderBinding()
+                        require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null)
                         require(submitted.headerFieldsValid && submitted.bodyFieldsValid)
                         require(submitted.protocol == submitted.savedProtocol || submitted.protocolChangeAuthorized)
                         submitted.providerSettings(ModelSettings("", "", "", false)).also { it.validateConnection() }
@@ -282,10 +282,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     }) { repo, revision, admit ->
                         val created = repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
                             submitted.protocolChangeAuthorized, enabled = submitted.providerEnabled, admit = admit)
-                        submitted.balanceConfiguration?.let { configuration ->
+                        submitted.providerBalanceConfiguration()?.let {
                             val added = created.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
                             val runtime = kotlinx.coroutines.runBlocking { controller.providerBalances.get(added.slotId) }
-                            repo.withEditor(repo.editor(added.slotId)) { admit(); runtime.store.save(configuration) }
+                            repo.withEditor(repo.editor(added.slotId)) { admit(); kotlinx.coroutines.runBlocking { runtime.save(checkNotNull(submitted.providerBalanceConfiguration(added.slotId))) } }
                         }
                         created
                     }
@@ -293,10 +293,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }, onFetchCatalog = {}, onBack = { back() }, pageTitle = "添加提供商", providerName = "",
             headerContent = tabs, showCatalog = false, enabled = enabled, errorText = notice,
             testBalance = { value, requestCancelled, deliver ->
-                val configuration = value.balanceConfiguration
+                val configuration = value.providerBalanceConfiguration()
                 if (!current(p) || !enabled || creating !== newProvider || newProvider.draft !== value ||
                     requestCancelled() || configuration == null || !configuration.queryEnabled ||
-                    runCatching { configuration.validate() }.isFailure) false
+                    runCatching { configuration.validateProviderBinding() }.isFailure) false
                 else {
                     newProvider.revoke()
                     newProvider.balanceTestJob = scope.launch {
@@ -335,8 +335,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         "原请求头不可用；替换或清除需要明确确认"
                     }
                     ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
-                    submitted.balanceConfiguration?.validate()
-                    require(!submitted.balanceOption.enabled || submitted.balanceConfiguration != null) { "请填写独立余额配置" }
+                    submitted.providerBalanceConfiguration()?.validateProviderBinding()
+                    require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null) { "请完善余额查询设置" }
                     submitted.providerSettings(saved).also { it.validateConnection() }
                 }
                 if (value.isFailure) {
@@ -349,8 +349,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             headersReplacementAuthorized = submitted.headersReplacementAuthorized,
                             providerName = submitted.providerName.orEmpty().trim(),
                             providerEnabled = submitted.providerEnabled,
-                            replaceBalanceConfiguration = submitted.balanceConfiguration != d.balanceConfiguration,
-                            balanceConfiguration = submitted.balanceConfiguration, expectedBalanceConfiguration = d.balanceConfiguration) { success ->
+                            replaceBalanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId) != d.balanceConfiguration,
+                            balanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId), expectedBalanceConfiguration = d.balanceConfiguration) { success ->
                             if (busy === ticket) busy = null
                             if (live()) {
                                 if (success && d.editor.slotId == ProviderRegistry.PRIMARY) {
@@ -367,7 +367,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             d.balanceTestJob?.cancel(); d.balanceTestJob = null; d.draft = it
         } }
         val balanceTest: ProviderBalanceTester = { value, requestCancelled, deliver ->
-            val configuration = value.balanceConfiguration?.takeIf { runCatching { it.validate(); it.queryEnabled }.getOrDefault(false) }
+            val configuration = value.providerBalanceConfiguration(d.editor.slotId)?.takeIf { runCatching { it.validateProviderBinding(); it.queryEnabled }.getOrDefault(false) }
             if (!live() || !enabled || d.draft !== value || requestCancelled() || configuration == null) false
             else {
                 d.balanceTestJob?.cancel()

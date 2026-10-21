@@ -122,28 +122,26 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         assertTopBarMoney()
     }
 
-    fun testProviderDraftUsesIndependentInjectedQueryWithoutSavingOrReplacingTopBar() {
+    fun testProviderDraftUsesProviderBoundInjectedQueryWithoutSavingOrReplacingTopBar() {
         val savedBalance = runtime.store.configurationForEditing()
         val revision = runtime.state.value.revision
         val savedChat = fixture.settings.load()
         openModels()
-        reveal("provider-balance-account", lazyKey = "provider_balance").performTextReplacement("unsaved-balance-account")
-        reveal("provider-balance-endpoint").performTextReplacement("https://unsaved-balance.invalid")
-        reveal("provider-balance-key").performTextReplacement("unsaved-independent-key")
-        reveal("provider-balance-header-add", lazyKey = "provider_balance").performClick()
-        reveal("provider-balance-header-name:0").performTextReplacement("X-Draft-Balance")
-        reveal("provider-balance-header-value:0").performTextReplacement("unsaved-header")
+        reveal("provider-balance-token", lazyKey = "provider_balance").performTextReplacement("unsaved-access-token")
+        node("provider-balance-account").assertDoesNotExist()
+        node("provider-balance-endpoint").assertDoesNotExist()
+        node("provider-balance-key").assertDoesNotExist()
         reveal("provider-balance-test").assertIsEnabled().performClick()
         ui.waitUntil(5_000) {
             ui.onAllNodesWithText("余额测试成功：CNY 56.78（仅本次测试，未保存）").fetchSemanticsNodes().isNotEmpty()
         }
         assertEquals(1, draftCalls.get())
         val seen = checkNotNull(draftConfiguration.get())
-        assertEquals("unsaved-balance-account", seen.accountId)
-        assertEquals("https://unsaved-balance.invalid", seen.endpoint)
-        assertEquals("unsaved-independent-key", seen.apiKey)
-        assertEquals("unsaved-independent-key", seen.resolvedToken())
-        assertEquals(mapOf("X-Draft-Balance" to "unsaved-header"), seen.customHeaders)
+        assertEquals(ProviderRegistry.PRIMARY, seen.accountId)
+        assertEquals(savedChat.endpoint.trim(), seen.endpoint)
+        assertEquals(savedChat.apiKey, seen.apiKey)
+        assertEquals("unsaved-access-token", seen.resolvedToken())
+        assertTrue(seen.customHeaders.isEmpty())
         assertEquals(savedBalance, runtime.store.configurationForEditing())
         assertEquals(revision, runtime.state.value.revision)
         assertEquals("CNY 12.34", runtime.state.value.project().balanceText)

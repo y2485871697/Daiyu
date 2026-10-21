@@ -23,6 +23,36 @@ class RecordedUsageProjectionTest {
         if (child) UsageOrigin.Child("child", "review-profile-not-model", "group") else UsageOrigin.Main,
         RequestCheckpoint("same-wire-request-id", "latest-attempt", if (child) "child-owner" else "parent-owner", RequestOperation.RESUME), value)
 
+    @Test fun settingsMetricsKeepReportedSubtotalsAndDoNotCountCacheTwice() {
+        val value = projection(listOf(row(false, ModelEvent.Usage(100, 20, 40, 10))))
+        assertEquals(UsageTokenMetrics(100, 20, 40, 10, 120), value.tokens)
+        val snapshot = UsageStatsSnapshot(attributedUsage = value.attributed)
+        assertEquals(value.tokens, snapshot.overviewTokens)
+        assertEquals(value.tokens, snapshot.modelTokens(ModelUsageSnapshot(), false))
+        assertEquals(UsageTokenMetrics(), snapshot.modelTokens(ModelUsageSnapshot(), true))
+        assertEquals(UsageTokenMetrics(), UsageStatsSnapshot(tokenAccountingAvailable = true,
+            currentInputTokens = 900).overviewTokens)
+        val partial = projection(listOf(row(false, ModelEvent.Usage(null, 0, null))))
+        assertNull(partial.tokens.input)
+        assertEquals(0L, partial.tokens.output)
+        assertNull(partial.tokens.total)
+        val zero = projection(listOf(row(false, ModelEvent.Usage(0, 0, 0, 0))))
+        assertEquals(UsageTokenMetrics(0, 0, 0, 0, 0), zero.tokens)
+        val missing = projection(listOf(row(false, ModelEvent.Usage(7, null)), row(true, ModelEvent.Usage(null, 8))))
+        assertEquals(7L, missing.tokens.input); assertEquals(8L, missing.tokens.output)
+        assertNull(missing.tokens.total)
+    }
+
+    @Test fun metricOverflowRemainsUnknownWithoutCrashingTheScreen() {
+        val max = UsageTokenMetrics(Long.MAX_VALUE, 1, 0, 0, Long.MAX_VALUE)
+        val sum = max + UsageTokenMetrics(1, 2, 0, 0, 1)
+        assertNull(sum.input)
+        assertNull(sum.total)
+        assertEquals(3L, sum.output)
+        val value = projection(listOf(row(false, ModelEvent.Usage(Long.MAX_VALUE, 1))))
+        assertNull(value.tokens.total)
+    }
+
     @Test fun compactConversationProjectionUsesCompleteFieldsAndNeverSyntheticZeros() {
         val records = listOf(row(false, ModelEvent.Usage(17, 8, 5, 2)))
         val summary = aggregateAttributedUsage(records)

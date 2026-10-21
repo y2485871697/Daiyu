@@ -125,12 +125,16 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         assertEquals(9L, summary.output.reportedTokens); assertEquals(2L, summary.cached.reportedTokens)
         assertFalse(snapshot.tokenAccountingAvailable); assertFalse(snapshot.lifetimeAccountingAvailable)
         assertTrue(snapshot.modelUsage.providers.isEmpty())
+        assertEquals(7L, snapshot.overviewTokens.input); assertEquals(9L, snapshot.overviewTokens.output)
+        assertEquals(2L, snapshot.overviewTokens.cached); assertNull(snapshot.overviewTokens.total)
         database.close(); database = ConversationDatabase(scoped)
         data = RetainedConversationData(database, ContextService(scoped, database))
         assertEquals(snapshot.recordedUsage, data.stats().recordedUsage)
+        assertEquals(snapshot.overviewTokens, data.stats().overviewTokens)
         data.deleteAll(); val empty = data.stats().recordedUsage!!
         assertEquals(0L, empty.summary.requestSnapshotCount); assertNull(empty.summary.output.reportedTokens)
         assertTrue(empty.scanComplete)
+        assertNull(data.stats().overviewTokens.input)
     }
     fun testDeleteAllRollsBackEarlierDeletesWhenLaterDeleteFails() {
         val first = database.create(); val second = database.create()

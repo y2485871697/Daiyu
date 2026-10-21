@@ -40,9 +40,7 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
     private fun validDraft(): ModelSettingsDraftUi {
         val option = BalanceOption(enabled = true, apiPath = "/balance", resultPath = "balance")
         return ModelSettingsDraftUi(providerName = title, providerEnabled = true,
-            endpoint = "https://chat.invalid", apiKey = "chat-key-never-used", balanceOption = option,
-            balanceConfiguration = BalanceConfiguration("balance-account", "https://balance.invalid",
-                "independent-key", "", "CNY", option, mapOf("X-Balance" to "only-header")))
+            endpoint = "https://chat.invalid/v1", apiKey = "provider-key", balanceOption = option)
     }
     private fun show(fake: Fake, dark: Boolean = false, initial: ModelSettingsDraftUi =
         ModelSettingsDraftUi(providerName = title, providerEnabled = true)) {
@@ -77,7 +75,7 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
     }
     private fun noReceipt() { ui.onAllNodesWithText("仅本次测试", substring = true).assertCountEquals(0) }
 
-    fun testFourTemplatesUseIndependentConfigurationAndOnlyDisplayTestReceiptsInBothThemes() {
+    fun testFourTemplatesUseProviderCredentialsAndOnlyDisplayTestReceiptsInBothThemes() {
         val saved = fixture.settings.load()
         val registry = fixture.controller.providers.snapshot()
         for (dark in listOf(false, true)) {
@@ -95,18 +93,19 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
             assertEquals("/my/balance", draft.balanceOption.apiPath)
             preset("new_api"); edit("provider-balance-token", "independent-token")
             reveal("provider-balance-test", title).assertIsNotEnabled()
-            edit("provider-balance-account", "preview-account")
-            edit("provider-balance-endpoint", "https://balance.invalid")
-            edit("provider-balance-key", "independent-key"); edit("provider-balance-currency", "CNY")
-            reveal("provider-balance-header-add", title).performClick()
-            edit("provider-balance-header-name:0", "X-Balance"); edit("provider-balance-header-value:0", "only-header")
+            mainThread { draft = draft.copy(endpoint = "https://provider.invalid/v1", apiKey = "provider-key") }
+            ui.waitForIdle()
+            node("provider-balance-account").assertDoesNotExist()
+            node("provider-balance-endpoint").assertDoesNotExist()
+            node("provider-balance-key").assertDoesNotExist()
+            node("provider-balance-currency").assertDoesNotExist()
             val before = draft
             start()
             assertEquals(1, fake.requests.size); assertSame(before, fake.last.draft)
-            val config = checkNotNull(fake.last.draft.balanceConfiguration)
-            assertEquals("preview-account", config.accountId); assertEquals("https://balance.invalid", config.endpoint)
-            assertEquals("independent-key", config.apiKey); assertEquals("independent-token", config.resolvedToken())
-            assertEquals(mapOf("X-Balance" to "only-header"), config.customHeaders)
+            val config = checkNotNull(fake.last.draft.providerBalanceConfiguration())
+            assertEquals("balance-preview", config.accountId); assertEquals("https://provider.invalid/v1", config.endpoint)
+            assertEquals("provider-key", config.apiKey); assertEquals("independent-token", config.resolvedToken())
+            assertTrue(config.customHeaders.isEmpty())
             reveal("provider-balance-test", title).assertIsNotEnabled()
             deliver(fake.last)
             awaitReceipt("余额测试成功：CNY 12.34（仅本次测试，未保存）")
@@ -123,11 +122,11 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
     fun testEditingOrDisablingBalanceCancelsReceiptsWithoutSaving() {
         val saved = fixture.settings.load(); val fake = Fake(); show(fake, initial = validDraft())
         start(); val old = fake.last
-        edit("provider-balance-account", "changed-account")
+        edit("provider-balance-path", "/changed-balance")
         assertTrue(old.cancelled()); deliver(old); noReceipt()
         start(); val disabled = fake.last
         reveal("settings-switch:余额", title).performClick(); ui.waitForIdle()
-        assertFalse(checkNotNull(draft.balanceConfiguration).queryEnabled)
+        assertFalse(checkNotNull(draft.providerBalanceConfiguration()).queryEnabled)
         assertTrue(disabled.cancelled()); deliver(disabled); noReceipt()
         node("provider-balance-test").assertDoesNotExist()
         assertEquals(saved, fixture.settings.load()); assertEquals(0, fixture.opens.get())

@@ -41,8 +41,8 @@ internal object ProviderUsage {
     fun messages(input: Long?, output: Long?, cached: Long?, creation: Long?): ModelEvent.Usage? {
         val total = if (input != null && cached != null && creation != null) input + cached + creation else null
         if (total != null && total > MAX_TOKENS) invalid()
-        return if (total == null && output == null && cached == null) null
-            else ModelEvent.Usage(total, output, cached)
+        return if (total == null && output == null && cached == null && creation == null) null
+            else ModelEvent.Usage(total, output, cached, creation)
     }
 
     private fun invalid(): Nothing = throw ModelRequestException(ModelFailure.PROTOCOL)

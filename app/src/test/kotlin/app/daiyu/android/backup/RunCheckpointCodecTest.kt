@@ -21,10 +21,28 @@ class RunCheckpointCodecTest {
         val empty=value.copy(history=emptyList(),supplements=emptyList(),tools=emptyList(),outputs=emptyList())
         assertEquals(empty,RunCheckpointCodec.decode(RunCheckpointCodec.encode(empty)))
     }
+    @Test fun cacheCreationRoundTripsAndOldSnapshotsRemainUnknown() {
+        val request = RequestCheckpoint("request", "attempt", "owner", RequestOperation.NEXT)
+        for (creation in listOf(0L, 2L)) {
+            val value = checkpoint().copy(usage = listOf(RequestUsageCheckpoint(request,
+                ModelEvent.Usage(17, 8, 5, creation))), usageRequests = listOf(request))
+            val wire = RunCheckpointCodec.encode(value)
+            assertEquals(8, JSONObject(wire).getInt("version"))
+            assertEquals(value, RunCheckpointCodec.decode(wire))
+            val legacy = JSONObject(wire).put("version", 6)
+            legacy.getJSONArray("usage").getJSONObject(0).remove("cache_creation_tokens")
+            assertNull(RunCheckpointCodec.decode(legacy.toString()).usage.single().snapshot.cacheCreationTokens)
+            for (bad in listOf<Any>(-1, "2", 1.5, true, 13)) {
+                val invalid = JSONObject(wire)
+                invalid.getJSONArray("usage").getJSONObject(0).put("cache_creation_tokens", bad)
+                reject { RunCheckpointCodec.decode(invalid.toString()) }
+            }
+        }
+    }
     private fun reject(block:()->Unit) {try {block();fail("invalid checkpoint accepted")} catch(_:Exception) {}}
     @Test fun strictVersionTypesBoundsAndOwnership() {
         val text=RunCheckpointCodec.encode(checkpoint())
-        val mutations=listOf<(JSONObject)->Unit>({it.put("version",7)}, {it.put("revision","4")},
+        val mutations=listOf<(JSONObject)->Unit>({it.put("version",9)}, {it.put("revision","4")},
             {it.put("owner","")},{it.put("round",101)},{it.put("message_reconciled",false)},
             {it.put("phase","TERMINAL")},{it.put("extra",true)}, {it.put("request_unconfirmed",1)})
         mutations.forEach {mutate-> val json=JSONObject(text);mutate(json);reject {RunCheckpointCodec.decode(json.toString())}}

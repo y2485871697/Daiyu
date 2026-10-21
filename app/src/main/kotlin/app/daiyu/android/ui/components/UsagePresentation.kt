@@ -19,6 +19,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -48,14 +50,17 @@ internal fun UsageGlassDialog(
     title: String,
     onDismiss: () -> Unit,
     compact: Boolean = false,
+    adaptiveWidth: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
     PreviewDialog(onDismiss) {
+        val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+        val cardWidth = if (adaptiveWidth) 218.dp * fontScale else 218.dp
         val available = (maxHeight - 30.dp).coerceAtLeast(0.dp)
         Column(
             Modifier.align(if (compact) Alignment.Center else Alignment.BottomCenter)
-                .padding(10.dp).widthIn(max = if (compact) 218.dp else 550.dp).fillMaxWidth()
+                .padding(10.dp).widthIn(max = if (compact) cardWidth else 550.dp).fillMaxWidth()
                 .heightIn(max = minOf(if (compact) 620.dp else 550.dp, available))
                 .clip(RoundedCornerShape(if (compact) 16.dp else 25.dp))
                 .previewGlassBlur(RoundedCornerShape(if (compact) 16.dp else 25.dp))
@@ -89,7 +94,8 @@ internal fun UsageMetric(label: String, value: String, modifier: Modifier = Modi
         verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), fontSize = if (total) 14.sp else 13.sp,
             color = if (total) colors.toolbar else colors.text, lineHeight = 20.sp)
-        Text(value, fontSize = if (total) 16.sp else 14.sp, fontWeight = FontWeight.Medium,
+        Text(value, fontSize = if (total) 16.sp else 14.sp, fontWeight = if (total) FontWeight.SemiBold else FontWeight.Medium,
+            textAlign = TextAlign.End,
             color = if (total) colors.text else colors.accent, lineHeight = 22.sp)
     }
 }

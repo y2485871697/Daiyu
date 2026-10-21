@@ -182,7 +182,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         }
     }
 
-    fun testPreparedConversationFileUsesV5AndExcludesGlobalConfiguration() {
+    fun testPreparedConversationFileUsesV6AndExcludesGlobalConfiguration() {
         val (_, source, backup) = fresh(); val owner = seed(source, 1)
         backup.setNonSecretConfiguration(mapOf("model" to "global-only"))
         val binary = ByteArray(60_003) { it.toByte() }
@@ -190,7 +190,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         val (_, target, importer) = fresh()
         backup.prepareExport(conversationId = owner).use { prepared ->
             val envelope = JSONObject(prepared.file.readText())
-            assertEquals(5, envelope.getInt("version"))
+            assertEquals(6, envelope.getInt("version"))
             assertEquals(0, JSONObject(envelope.getString("payload")).getJSONObject("config").length())
             assertEquals(1, prepared.file.inputStream().use(backup::preflight).attachments)
             assertFalse(importer.importPackageFrom { prepared.file.inputStream() }.alreadyImported)
@@ -311,7 +311,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
     }
     fun testConfigurationCaptureReplacesSnapshotAndClearsRemovedPreferences() {
         val (context, db, backup) = fresh()
-        assertEquals(22, db.writableDatabase.version)
+        assertEquals(23, db.writableDatabase.version)
         val preferences = context.getSharedPreferences("model-settings", Context.MODE_PRIVATE)
         val full = linkedMapOf<String, Any>("endpoint" to "https://example.org", "model" to "model",
             "responses-path" to "/v1/responses", "battery" to true, "device-status" to false)
@@ -350,7 +350,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
     }
     fun testSecondConfigurationInsertFailureRollsBackSnapshotAfterReopen() {
         val (context, db, backup) = fresh(); seed(db, 1)
-        assertEquals(22, db.writableDatabase.version)
+        assertEquals(23, db.writableDatabase.version)
         backup.setNonSecretConfiguration(mapOf("model" to "existing", "battery" to false))
         val old = backup.importedConfiguration().toString(); val before = backup.exportPackage()
         db.writableDatabase.execSQL("""CREATE TRIGGER fail_second_configuration_insert BEFORE INSERT ON neutral_config
@@ -367,7 +367,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         db.close()
         val reopened = ConversationDatabase(context)
         try {
-            assertEquals(22, reopened.readableDatabase.version)
+            assertEquals(23, reopened.readableDatabase.version)
             val restored = NeutralBackupService(context, reopened)
             assertEquals(old, restored.importedConfiguration().toString()); assertEquals(before, restored.exportPackage())
             assertEquals(2, reopened.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) })

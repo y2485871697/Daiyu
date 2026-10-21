@@ -23,6 +23,19 @@ class RecordedUsageProjectionTest {
         if (child) UsageOrigin.Child("child", "review-profile-not-model", "group") else UsageOrigin.Main,
         RequestCheckpoint("same-wire-request-id", "latest-attempt", if (child) "child-owner" else "parent-owner", RequestOperation.RESUME), value)
 
+    @Test fun compactConversationProjectionUsesCompleteFieldsAndNeverSyntheticZeros() {
+        val records = listOf(row(false, ModelEvent.Usage(17, 8, 5, 2)))
+        val summary = aggregateAttributedUsage(records)
+        val value = RecordedUsageProjection(AttributedUsageStats(summary, records,
+            RecordedUsageStats(summary.main, 1, 1, 0, 0, 0, 0), ChildUsageCoverage(0, 0, 0, 0, 0, 0)))
+        assertEquals(25L, value.conversationUsage.totalTokens)
+        assertEquals(10L, value.conversationUsage.freshInputTokens)
+        assertEquals(2L, value.conversationUsage.cacheCreationTokens)
+        val partial = value.copy(attributed = value.attributed.copy(parentCoverage = value.attributed.parentCoverage.copy(mainRequestsWithoutUsage = 1)))
+        assertTrue(partial.conversationUsage.hasUsage)
+        assertNull(partial.conversationUsage.totalTokens)
+        assertNull(partial.conversationUsage.cachedTokens)
+    }
     @Test fun consumesExistingAttributionWithoutDoubleCountingCacheOrGuessingHistoricalModels() {
         val value = projection(listOf(row(false, ModelEvent.Usage(100, 20, 40)), row(true, ModelEvent.Usage(10, 3, 2))))
         assertEquals(100L, value.main.input.reportedTokens)

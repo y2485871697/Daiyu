@@ -15,18 +15,19 @@ data class RecordedUsageSummary(
     val input: ReportedTokenSubtotal,
     val output: ReportedTokenSubtotal,
     val cached: ReportedTokenSubtotal,
+    val creation: ReportedTokenSubtotal = ReportedTokenSubtotal(null, 0, requestSnapshotCount),
 )
 
 /** Each item must already be the latest snapshot of a distinct host request.
  * No time, provider, model, billing or unreported-request identity is inferred here. */
 fun aggregateRecordedUsage(snapshots: Sequence<ModelEvent.Usage>): RecordedUsageSummary {
-    val input = TokenSubtotal(); val output = TokenSubtotal(); val cached = TokenSubtotal()
+    val input = TokenSubtotal(); val output = TokenSubtotal(); val cached = TokenSubtotal(); val creation = TokenSubtotal()
     var requests = 0L
     snapshots.forEach {
         requests = Math.addExact(requests, 1)
-        input.add(it.inputTokens); output.add(it.outputTokens); cached.add(it.cachedTokens)
+        input.add(it.inputTokens); output.add(it.outputTokens); cached.add(it.cachedTokens); creation.add(it.cacheCreationTokens)
     }
-    return RecordedUsageSummary(requests, input.result(), output.result(), cached.result())
+    return RecordedUsageSummary(requests, input.result(), output.result(), cached.result(), creation.result())
 }
 
 private class TokenSubtotal {

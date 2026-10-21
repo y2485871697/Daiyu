@@ -115,7 +115,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             ?: if (conversationId == null) store.exportBackup() else store.exportConversationBackup(conversationId)
         store.preflightBackup(text)
         val tables = JSONObject()
-        columnsFor(5).forEach { (table, columns) -> tables.put(table,
+        columnsFor(6).forEach { (table, columns) -> tables.put(table,
             if (table == "context_usage") BackupUsageCodec.export(db, conversationId?.value) else readTable(db, table, columns, conversationId)) }
         val config = if (configuration == null) readConfig(db) else projectConfiguration(configuration).first
         validateConfig(config)
@@ -226,8 +226,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         if (videos.sidecars.isNotEmpty()) payload.put("message_videos", videoManifest)
         val inventory = inventory(payload)
         payload.put("inventory", inventoryJson(inventory))
-        validatePayload(5, "export-validation", payload, originals)
-        return PreparedExport(spool, spool.write(5, payload))
+        validatePayload(6, "export-validation", payload, originals)
+        return PreparedExport(spool, spool.write(6, payload))
     }
     fun preflight(text: String): BackupInventory {
         Utf8Payload.byteCount(text, MAX_PACKAGE)
@@ -659,7 +659,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         private val BOOLEAN_KEYS = setOf("battery", "device-status")
         private val CONFIG_KEYS = setOf("endpoint", "model", "responses-path", "protocol") + BOOLEAN_KEYS
         private fun columnsFor(version: Long): Map<String, List<String>> = LinkedHashMap(COLUMNS).apply {
-            put("context_usage", if (version >= 3) BackupUsageCodec.columns else BackupUsageCodec.legacyColumns)
+            put("context_usage", if (version >= 6) BackupUsageCodec.columns else if (version >= 3) BackupUsageCodec.typedColumns else BackupUsageCodec.legacyColumns)
         }
         private val COLUMNS = linkedMapOf(
             "context_branches" to listOf("conversation_id", "parent_id", "through_message", "parent_revision"),

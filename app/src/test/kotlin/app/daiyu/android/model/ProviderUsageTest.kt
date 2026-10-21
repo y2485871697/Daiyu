@@ -84,7 +84,7 @@ class ProviderUsageTest {
         val events = mutableListOf<ModelEvent>()
         MessagesStream.read(messages(usage("input_tokens" to 10, "cache_read_input_tokens" to 5,
             "cache_creation_input_tokens" to 2, "output_tokens" to 1), usage("output_tokens" to 8)).reader().buffered(), { false }, events::add)
-        assertEquals(listOf(ModelEvent.Usage(17, 8, 5)), events.filterIsInstance<ModelEvent.Usage>())
+        assertEquals(listOf(ModelEvent.Usage(17, 8, 5, 2)), events.filterIsInstance<ModelEvent.Usage>())
     }
     @Test fun messagesRejectsCoercedAndOversizedUsageBeforeToolConfirmation() {
         for (bad in listOf<Any>("1", 1.5, -1, 1_000_000_000_001L, true)) {
@@ -103,7 +103,12 @@ class ProviderUsageTest {
         events.clear()
         MessagesStream.read(messages(usage("input_tokens" to 0, "cache_read_input_tokens" to 0,
             "cache_creation_input_tokens" to 0)).reader().buffered(), { false }, events::add)
-        assertEquals(listOf(ModelEvent.Usage(0, null, 0)), events.filterIsInstance<ModelEvent.Usage>())
+        assertEquals(listOf(ModelEvent.Usage(0, null, 0, 0)), events.filterIsInstance<ModelEvent.Usage>())
+    }
+    @Test fun creationOnlyAndExplicitZeroArePreserved() {
+        assertEquals(ModelEvent.Usage(null, null, null, 9), ProviderUsage.messages(null, null, null, 9))
+        assertEquals(ModelEvent.Usage(0, 0, 0, 0), ProviderUsage.messages(0, 0, 0, 0))
+        assertNull(ProviderUsage.responses(JSONObject().put("usage", JSONObject().put("input_tokens_details", JSONObject()))))
     }
     @Test fun integerRuntimeTypesAndLimitsAreExact() {
         assertEquals(ProviderUsage.MAX_TOKENS, ProviderUsage.count(usage("n" to ProviderUsage.MAX_TOKENS), "n"))

@@ -50,7 +50,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                     put("request_owner", record.request.owner); put("attempt_id", record.request.attemptId)
                     put("operation", record.request.operation.name); put("checkpoint_revision", checkpoint.revision)
                     put("input_tokens", record.snapshot.inputTokens); put("output_tokens", record.snapshot.outputTokens)
-                    put("cached_tokens", record.snapshot.cachedTokens); put("usage_source", record.source.name)
+                    put("cached_tokens", record.snapshot.cachedTokens); put("cache_creation_tokens", record.snapshot.cacheCreationTokens); put("usage_source", record.source.name)
                 }
                 if (record.request.requestId in priorIds) {
                     check(db.update(TABLE, values, "task_id=? AND request_id=?",
@@ -68,7 +68,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 "task_id TEXT NOT NULL REFERENCES child_tasks(task_id) ON DELETE CASCADE," +
                 "request_id TEXT NOT NULL,request_owner TEXT NOT NULL,attempt_id TEXT NOT NULL," +
                 "operation TEXT NOT NULL,checkpoint_revision INTEGER NOT NULL," +
-                "input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER,usage_source TEXT NOT NULL DEFAULT 'MAIN'," +
+                "input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER,cache_creation_tokens INTEGER,usage_source TEXT NOT NULL DEFAULT 'MAIN'," +
                 "PRIMARY KEY(task_id,request_id))")
         }
 
@@ -102,7 +102,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                     if (count > 100) { unreadable++; continue }
                     if (count > maxRequests - result.size) { deferred++; continue }
                     val snapshots = try {
-                        db.rawQuery("SELECT request_id,request_owner,attempt_id,operation,input_tokens,output_tokens,cached_tokens,usage_source" +
+                        db.rawQuery("SELECT request_id,request_owner,attempt_id,operation,input_tokens,output_tokens,cached_tokens,usage_source,cache_creation_tokens" +
                             " FROM $TABLE WHERE task_id=? ORDER BY rowid", arrayOf(taskId)).use { usage ->
                             buildList {
                                 while (usage.moveToNext()) {
@@ -116,7 +116,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                                     require(request.operation != RequestOperation.OPEN)
                                     add(AttributedRequestUsage(tasks.getString(1), tasks.getString(2), tasks.getString(3),
                                         taskId, tasks.getString(4), UsageOrigin.Child(taskId, tasks.getString(5), tasks.getString(6)),
-                                        request, ModelEvent.Usage(token(4), token(5), token(6)),
+                                        request, ModelEvent.Usage(token(4), token(5), token(6), token(8)),
                                         app.daiyu.android.domain.runtime.UsageRequestSource.valueOf(usage.getString(7))))
                                 }
                             }

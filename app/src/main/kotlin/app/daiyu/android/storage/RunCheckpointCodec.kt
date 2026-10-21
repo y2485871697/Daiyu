@@ -18,7 +18,8 @@ internal object RunCheckpointCodec {
     fun encode(value: RunCheckpoint): String {
         validate(value)
         fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
-        return JSONObject().put("version", if (value.transport == null) 6 else 7).put("message", messages(listOf(value.message)))
+        val version = if (value.usage.any { it.snapshot.cacheCreationTokens != null }) 8 else if (value.transport == null) 6 else 7
+        return JSONObject().put("version", version).put("message", messages(listOf(value.message)))
             .put("history", messages(value.history)).put("phase", value.phase.name)
             .put("tools", JSONArray().apply { value.tools.forEach { record -> put(JSONObject()
                 .put("id", record.invocation.id.value).put("name", record.invocation.name)
@@ -37,7 +38,8 @@ internal object RunCheckpointCodec {
                 .put("request", encodeRequest(record.request)).put("source", record.source.name)
                 .put("input_tokens", record.snapshot.inputTokens ?: JSONObject.NULL)
                 .put("output_tokens", record.snapshot.outputTokens ?: JSONObject.NULL)
-                .put("cached_tokens", record.snapshot.cachedTokens ?: JSONObject.NULL)) } })
+                .put("cached_tokens", record.snapshot.cachedTokens ?: JSONObject.NULL)
+                .apply { if (version >= 8) put("cache_creation_tokens", record.snapshot.cacheCreationTokens ?: JSONObject.NULL) }) } })
             .put("pending", value.pending?.let { JSONObject().put("call_id", it.callId.value) }
                 ?: JSONObject.NULL).toString().also {
                 checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)
@@ -49,7 +51,7 @@ internal object RunCheckpointCodec {
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')
         val version = integer(value, "version")
-        require(version in 1L..7L)
+        require(version in 1L..8L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
         val recoveryOwner = if (value.has("recovery_source_owner")) string(value, "recovery_source_owner") else null
@@ -60,9 +62,11 @@ internal object RunCheckpointCodec {
         fields(value, *((when (version) { 1L -> keys; 2L -> keys + "pending"; 3L -> keys + arrayOf("pending", "request");
             4L, 5L -> keys + arrayOf("pending", "request", "usage")
             6L -> keys + arrayOf("pending", "request", "usage", "usage_requests")
-            else -> keys + arrayOf("pending", "request", "usage", "usage_requests", "transport") }) +
+            7L -> keys + arrayOf("pending", "request", "usage", "usage_requests", "transport")
+            else -> keys + arrayOf("pending", "request", "usage", "usage_requests") +
+                (if (value.has("transport")) arrayOf("transport") else emptyArray()) }) +
             if (recoveryOwner == null) emptyArray() else arrayOf("recovery_source_owner")))
-        val transport = if (version < 7L || value.isNull("transport")) null else {
+        val transport = if (version < 7L || !value.has("transport") || value.isNull("transport")) null else {
             val row = value.getJSONObject("transport")
             fields(row, "response_id", "sequence", "decoder_state")
             TransportCheckpoint(string(row, "response_id"), integer(row, "sequence"), string(row, "decoder_state"))
@@ -82,10 +86,11 @@ internal object RunCheckpointCodec {
             (0 until rows.length()).map { i ->
                 val row = rows.getJSONObject(i)
                 val usageKeys = arrayOf("request", "input_tokens", "output_tokens", "cached_tokens")
-                fields(row, *(if (version < 5L) usageKeys else usageKeys + "source"))
+                fields(row, *((if (version < 5L) usageKeys else usageKeys + "source") +
+                    if (version >= 8L) arrayOf("cache_creation_tokens") else emptyArray()))
                 RequestUsageCheckpoint(decodeRequest(row.get("request")), ModelEvent.Usage(
                     nullableInteger(row, "input_tokens"), nullableInteger(row, "output_tokens"),
-                    nullableInteger(row, "cached_tokens")),
+                    nullableInteger(row, "cached_tokens"), if (version >= 8L) nullableInteger(row, "cache_creation_tokens") else null),
                     if (version < 5L) UsageRequestSource.MAIN else UsageRequestSource.valueOf(string(row, "source")))
             }
         }

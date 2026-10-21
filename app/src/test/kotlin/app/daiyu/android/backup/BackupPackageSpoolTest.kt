@@ -20,7 +20,7 @@ class BackupPackageSpoolTest {
         .put("extra", JSONObject().put("null", JSONObject.NULL).put("boolean", true).put("number", 9L))
         .put("blobs", JSONArray().put(JSONObject().put("sha256", digest(bytes)).put("bytes", bytes.size)
             .put("data", Base64.getEncoder().encodeToString(bytes))))
-    private fun envelope(payload: String, version: Long = 5) = JSONObject().put("format", "daiyu-neutral-complete")
+    private fun envelope(payload: String, version: Long = 6) = JSONObject().put("format", "daiyu-neutral-complete")
         .put("version", version).put("sha256", digest(payload.toByteArray())).put("payload", payload).toString()
     private fun rejected(text: String) {
         BackupPackageSpool(temp.root).use { spool ->
@@ -40,7 +40,7 @@ class BackupPackageSpoolTest {
         }
         BackupPackageSpool(temp.root).use { spool ->
             val parsed = spool.read(source)
-            assertEquals(5L, parsed.version)
+            assertEquals(6L, parsed.version)
             assertEquals(payload(bytes).getString("text_backup"), parsed.payload.getString("text_backup"))
             assertFalse(parsed.payload.getJSONArray("blobs").getJSONObject(0).has("data"))
             assertArrayEquals(bytes, spool.bytes.getValue(digest(bytes)))
@@ -48,12 +48,12 @@ class BackupPackageSpoolTest {
         }
         assertTrue(temp.root.listFiles()!!.isEmpty())
     }
-    @Test fun streamedWriteUsesV5EnvelopeHashAndIsReadableByExistingJsonParser() {
+    @Test fun streamedWriteUsesV6EnvelopeHashAndIsReadableByExistingJsonParser() {
         val bytes = ByteArray(32771) { (it % 137).toByte() }
         BackupPackageSpool(temp.root).use { spool ->
             spool.include(digest(bytes), bytes)
             val metadata = payload(bytes).also { it.getJSONArray("blobs").getJSONObject(0).remove("data") }
-            val result = spool.write(5, metadata)
+            val result = spool.write(6, metadata)
             val envelope = JSONObject(result.readText())
             val raw = envelope.getString("payload")
             assertEquals(digest(raw.toByteArray()), envelope.getString("sha256"))
@@ -66,7 +66,7 @@ class BackupPackageSpoolTest {
         }
     }
     @Test fun everyLegacyVersionRetainsTheActualPayloadDigest() {
-        for (version in 1L..5L) BackupPackageSpool(temp.root).use { spool ->
+        for (version in 1L..6L) BackupPackageSpool(temp.root).use { spool ->
             val raw = payload().toString(); val parsed = spool.read(envelope(raw, version).byteInputStream())
             assertEquals(version, parsed.version); assertEquals(digest(raw.toByteArray()), parsed.id)
         }

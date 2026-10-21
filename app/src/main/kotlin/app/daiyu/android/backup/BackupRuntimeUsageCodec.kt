@@ -13,7 +13,7 @@ import org.json.JSONObject
 internal object BackupRuntimeUsageCodec {
     private val parentColumns = RecordedUsageHistory.parentColumns
     private val requestColumns = RecordedUsageHistory.requestColumns
-    private val tokens = listOf("input_tokens", "output_tokens", "cached_tokens")
+    private val tokens = listOf("input_tokens", "output_tokens", "cached_tokens", "cache_creation_tokens")
     data class Validated(val checkpoints: List<JSONObject>, val requests: List<JSONObject>,
         val conversations: Set<String>)
     private fun key(row: JSONObject) = BackupHistoryRows.text(row, "request_owner") to BackupHistoryRows.text(row, "request_id")
@@ -95,11 +95,12 @@ internal object BackupRuntimeUsageCodec {
                 val snapshot = if (presence == 0L) null else app.daiyu.android.domain.ModelEvent.Usage(
                     if (p.isNull("input_tokens")) null else number(p, "input_tokens"),
                     if (p.isNull("output_tokens")) null else number(p, "output_tokens"),
-                    if (p.isNull("cached_tokens")) null else number(p, "cached_tokens"))
+                    if (p.isNull("cached_tokens")) null else number(p, "cached_tokens"),
+                    if (p.isNull("cache_creation_tokens")) null else number(p, "cache_creation_tokens"))
                 add(observation("PREPARATION", message, owner, run, parent, request, UsageRequestSource.SUMMARY, snapshot))
             }
         }
-        JSONObject().put("version", 1).put("checkpoints", JSONArray(parents.toSortedMap().values.toList()))
+        JSONObject().put("version", 2).put("checkpoints", JSONArray(parents.toSortedMap().values.toList()))
             .put("requests", JSONArray(requests.values.sortedWith(compareBy({ text(it, "request_owner") }, { text(it, "request_id") }))))
     }
 
@@ -110,12 +111,19 @@ internal object BackupRuntimeUsageCodec {
         .put("attempt_id", request.attemptId).put("operation", request.operation.name).put("usage_source", source.name)
         .put("has_usage", if (usage == null) 0 else 1).put("input_tokens", usage?.inputTokens ?: JSONObject.NULL)
         .put("output_tokens", usage?.outputTokens ?: JSONObject.NULL).put("cached_tokens", usage?.cachedTokens ?: JSONObject.NULL)
+        .put("cache_creation_tokens", usage?.cacheCreationTokens ?: JSONObject.NULL)
 
     fun validate(value: JSONObject?, conversations: Set<String>, messages: JSONArray): Validated = with(BackupHistoryRows) {
         if (value == null) return Validated(emptyList(), emptyList(), conversations.toSet())
-        fields(value, listOf("version", "checkpoints", "requests")); require(number(value, "version") == 1L)
+        fields(value, listOf("version", "checkpoints", "requests")); val version = number(value, "version"); require(version in 1L..2L)
         require(value.toString().toByteArray(Charsets.UTF_8).size <= MAX_METADATA_BYTES)
-        val parents = rows(value.getJSONArray("checkpoints")); val requests = rows(value.getJSONArray("requests"))
+        val parents = rows(value.getJSONArray("checkpoints")); val requests = rows(value.getJSONArray("requests")).map { row ->
+            fields(row, if (version == 1L) requestColumns - "cache_creation_tokens" else requestColumns)
+            JSONObject().apply {
+                row.keys().forEach { put(it, row.get(it)) }
+                if (version == 1L) put("cache_creation_tokens", JSONObject.NULL)
+            }
+        }
         val physical = messageMap(messages); val parentMap = mutableMapOf<String, JSONObject>()
         parents.forEach { p ->
             fields(p, parentColumns); require(id(p, "conversation_id") in conversations)
@@ -134,6 +142,9 @@ internal object BackupRuntimeUsageCodec {
             val presence = number(r, "has_usage"); require(presence in 0L..1L)
             tokens.forEach { if (!r.isNull(it)) require(number(r, it) >= 0) }
             if (!r.isNull("input_tokens") && !r.isNull("cached_tokens")) require(number(r, "cached_tokens") <= number(r, "input_tokens"))
+            fun token(key: String): Long? = if (r.isNull(key)) null else number(r, key)
+            app.daiyu.android.domain.ModelEvent.Usage(token("input_tokens"), token("output_tokens"),
+                token("cached_tokens"), token("cache_creation_tokens"))
             require(presence == 1L || tokens.all { r.isNull(it) })
             if (physical.containsKey(message)) {
                 owner(r, physical, "conversation_id", "message_id", "run_id")

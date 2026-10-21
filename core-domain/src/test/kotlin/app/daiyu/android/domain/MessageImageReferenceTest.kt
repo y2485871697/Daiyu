@@ -61,6 +61,23 @@ class MessageImageReferenceTest {
         }
     }
 
+    @Test fun unsegmentedExpansionValidatesImageLimitsWithoutReplacingValidHistory() {
+        val image = MessageBlock.Image(reference())
+        rejected { MessageHistory.expand(listOf(message(listOf(image, image)))) }
+        rejected { MessageHistory.expand(listOf(message((0 until 9).map { MessageBlock.Image(reference(it)) }))) }
+        rejected {
+            MessageHistory.expand(listOf(message((0 until 4).map {
+                MessageBlock.Image(reference(it).copy(bytes = MessageImageReference.MAX_IMAGE_BYTES))
+            })))
+        }
+        val eightImages = listOf(message((0 until 8).map { MessageBlock.Image(reference(it)) }))
+        assertSame(eightImages, MessageHistory.expand(eightImages))
+        val exactByteLimit = listOf(message((0 until 4).map {
+            MessageBlock.Image(reference(it).copy(bytes = if (it < 3) MessageImageReference.MAX_IMAGE_BYTES else 4 * 1024 * 1024))
+        }))
+        assertSame(exactByteLimit, MessageHistory.expand(exactByteLimit))
+    }
+
     @Test fun segmentOwnershipUsesTheUserSegmentNotTheAssistantRowAndPreservesOrder() {
         val blocks = listOf(MessageBlock.Image(reference()), MessageBlock.Text("text", "question"), MessageBlock.Image(reference(1)))
         val segment = MessageHistorySegment(MessageId("user"), Message.USER_ROLE, blocks)

@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -30,10 +32,11 @@ internal fun SettingsScaffoldPage(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
+    listState: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit,
 ) {
     CompositionLocalProvider(LocalSettingsPageStyle provides true) {
-        MiuixScaffoldPage(title = title, onBack = onBack, modifier = modifier, actions = actions,
+        MiuixScaffoldPage(title = title, onBack = onBack, modifier = modifier, actions = actions, listState = listState,
             containerColor = settingsPageBackground(),
             listModifier = Modifier.background(settingsPageBackground()), content = content)
     }

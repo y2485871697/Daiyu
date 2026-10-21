@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -115,6 +117,7 @@ internal fun ModelSettingsScreen(
     providerName: String? = null,
     testBalance: ProviderBalanceTester? = null,
     onDelete: (() -> Unit)? = null,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val latestDraft by rememberUpdatedState(draft)
     val latestEnabled by rememberUpdatedState(enabled)
@@ -128,7 +131,7 @@ internal fun ModelSettingsScreen(
             it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders &&
             it.openAiWebSearchEnabled == draft.openAiWebSearchEnabled
     } == true
-    SettingsScaffoldPage(title = pageTitle, onBack = { connection.cancel(); balance.cancel(); onBack() }, modifier = modifier) {
+    SettingsScaffoldPage(title = pageTitle, onBack = { connection.cancel(); balance.cancel(); onBack() }, modifier = modifier, listState = listState) {
         headerContent()
         item(key = "model_connection") {
             SettingsSectionTitle("连接配置")

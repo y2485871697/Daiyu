@@ -1,6 +1,9 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,9 +29,12 @@ internal fun ProviderModelManagementCard(endpoint: String, loading: Boolean = fa
 
 @Composable
 internal fun ProviderEmptyModelsPage(title: String, onBack: () -> Unit,
-    tabs: LazyListScope.() -> Unit, notice: String) {
-    var query by remember { mutableStateOf("") }
-    SettingsScaffoldPage(title, onBack) {
+    tabs: LazyListScope.() -> Unit, notice: String,
+    listState: LazyListState = rememberLazyListState(),
+    queryState: MutableState<String> = remember { mutableStateOf("") },
+) {
+    var query by queryState
+    SettingsScaffoldPage(title, onBack, listState = listState) {
         tabs()
         item("model-management") { ProviderModelManagementCard("") }
         item("model-search") { SettingsSearch(query, { query = it }, "搜索模型", "local-model-search") }

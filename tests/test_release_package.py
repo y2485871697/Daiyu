@@ -95,6 +95,15 @@ class ReleasePackageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'release_apk_pair_missing'):
                 package.verify_delivery('apkanalyzer', 'apksigner', root, env, run)
 
+    def test_release_budget_covers_cold_cache_without_weakening_required_checks(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        release = workflow.split('  release:\n', 1)[1].split('  synthetic:\n', 1)[0]
+        budget = int(re.search(r'^    timeout-minutes: (\d+)$', release, re.MULTILINE).group(1))
+        self.assertGreaterEqual(budget, 45)
+        self.assertLessEqual(budget, 60)
+        self.assertIn(':core-domain:test :app:testReleaseUnitTest :app:lintRelease', release)
+        self.assertIn(':app:assembleRelease :app:assembleReleaseAndroidTest', release)
+
     def test_release_checks_use_the_same_signed_production_configuration_as_packaging(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         release = workflow.split('  release:\n', 1)[1].split('  synthetic:\n', 1)[0]

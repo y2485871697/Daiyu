@@ -28,11 +28,13 @@ internal class PrivateWorkspacePaths private constructor(private val filesDir: F
         /** The caller supplies an approved Rootfs; missing directories are never created. */
         fun existingRoot(filesDir: File, root: File): PrivateWorkspacePaths {
             val storage = filesDir.canonicalFile.toPath()
+            val suppliedStorage = filesDir.absoluteFile.toPath().normalize()
             val selected = root.toPath()
-            require(selected.isAbsolute && selected.normalize() == selected && selected.startsWith(storage) && selected != storage) {
+            val base = if (selected.startsWith(storage)) storage else suppliedStorage
+            require(selected.isAbsolute && selected.normalize() == selected && selected.startsWith(base) && selected != base) {
                 "workspace_private_root_required"
             }
-            val parts = storage.relativize(selected).map { it.toString() }
+            val parts = base.relativize(selected).map { it.toString() }
             require(parts.none { it.isBlank() || it == "." || it == ".." || '\\' in it || '\u0000' in it })
             return PrivateWorkspacePaths(filesDir, parts, false)
         }

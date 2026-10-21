@@ -10,7 +10,9 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
     private fun openPicker(fromSettings: Boolean) {
         if (fromSettings) {
             openSettings()
-            openRetainedSettingsEntry("assistants", "assistant-list")
+            node("page:设置").scrollToDescendant(hasTestTag("settings-row:助手"))
+            node("settings-row:助手").assertIsDisplayed().assertIsEnabled().performClick()
+            awaitUniqueTag("assistant-list")
         } else {
             node("chat-assistant").performClick()
             awaitUniqueTag("assistant-list")

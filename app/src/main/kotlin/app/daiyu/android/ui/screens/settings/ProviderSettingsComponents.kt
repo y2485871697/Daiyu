@@ -54,7 +54,7 @@ internal fun ProviderSettingsTabs(modelTab: Boolean, enabled: Boolean, onSelect:
 @Composable
 internal fun ProviderProtocolFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     onChange: (ModelSettingsDraftUi) -> Unit) {
-    if (draft.savedProtocol == ProviderProtocol.MESSAGES) return
+    if (draft.protocol == ProviderProtocol.MESSAGES || draft.savedProtocol == ProviderProtocol.MESSAGES) return
     val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES)
     val modes = listOf("Chat Completions API", "Responses API")
     val tags = listOf("settings-radio:OpenAI Chat Completions", "settings-radio:OpenAI Responses")

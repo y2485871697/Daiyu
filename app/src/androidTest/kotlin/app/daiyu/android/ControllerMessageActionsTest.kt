@@ -701,7 +701,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         }
         assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs")); assertEquals(0, f.opens.get())
         val text = service.exportPackage(); val envelope = org.json.JSONObject(text)
-        assertEquals(5, envelope.getInt("version")); assertEquals(3, service.preflight(text).staticGenerationOutputs)
+        assertEquals(6, envelope.getInt("version")); assertEquals(3, service.preflight(text).staticGenerationOutputs)
         val to = fresh(configured = false)
         val importedAssets = app.daiyu.android.media.StaticGenerationAssets(File(to.app.filesDir, "static-generation-assets"))
         val importer = app.daiyu.android.backup.NeutralBackupService(to.app, to.db).withStaticAssets(importedAssets)

@@ -86,9 +86,14 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         show()
         fetch()
         assertEquals(listOf(old), catalog.current()!!.models)
-        node("provider-model-option:existing").performClick()
-        node("provider-model-option:add").performClick()
-        node("dialog-confirm").performClick()
+        node("provider-model-option:existing").assertIsOff()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
+        node("provider-model-option:existing").assertIsOn()
+        node("provider-model-option:add").assertIsOff()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
+        node("provider-model-option:add").assertIsOn()
+        node("dialog-confirm").assertIsEnabled()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
         ui.waitUntil(5_000) { catalog.current()!!.models.size == 2 }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isEmpty() }
         assertEquals(listOf(old, SavedCatalogModel("add", "add", "defaults")), catalog.current()!!.models)
@@ -117,12 +122,18 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
     fun testRevisionChangeWhileDialogOpenFailsClosed() {
         show()
         fetch()
-        node("provider-model-option:add").performClick()
+        node("provider-model-option:add").assertIsOff()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
+        node("provider-model-option:add").assertIsOn()
         catalog.configurationChange { }
-        node("dialog-confirm").performClick()
+        node("dialog-confirm").assertIsEnabled()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isEmpty() }
         assertEquals(listOf(old), catalog.current()!!.models)
-        ui.onNodeWithText("服务商或目录已变化，请重新获取").assertExists()
+        node("page:模型设置").performScrollToIndex(1)
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
+        ui.onNodeWithText("服务商或目录已变化，请重新获取").assertIsDisplayed()
         ui.runOnIdle { assertEquals("existing", draft.model); assertEquals(0, saves) }
     }
 

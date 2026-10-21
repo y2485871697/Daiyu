@@ -36,6 +36,7 @@ class ActivityTest : WiredActivityTestCase() {
         assertEquals("stream reaches actual scroll end", followingRange.maxValue(), followingRange.value(), 0.01f)
         node("chat-messages").performTouchInput { swipeDown(startY = height * 0.7f, endY = height * 0.9f) }
         node("chat-messages").performScrollToIndex(8)
+        ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
         val candidates = ui.onAllNodes(SemanticsMatcher("turn tag") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("chat-turn:") == true

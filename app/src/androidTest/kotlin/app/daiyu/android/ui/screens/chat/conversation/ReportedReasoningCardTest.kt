@@ -27,7 +27,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         } }
         ui.waitForIdle()
         ui.onNodeWithText("answer remains").assertIsDisplayed()
-        ui.onNodeWithText("工作过程").assertIsDisplayed()
+        ui.onNodeWithTag("work-process-header").assertIsDisplayed()
         ui.onNodeWithText("reported summary").assertDoesNotExist()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
         val summary = ui.onNodeWithText("reported summary").assertIsDisplayed()
@@ -36,7 +36,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         assertEquals(16.sp, layouts.single().layoutInput.style.fontSize)
         assertEquals(26.sp, layouts.single().layoutInput.style.lineHeight)
         ui.onNodeWithText("answer remains").assertIsDisplayed()
-        ui.onNodeWithText("工作过程").performClick()
+        ui.onNodeWithTag("work-process-header").performClick()
         ui.onNodeWithText("fixture tool").assertIsDisplayed()
         ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
         ui.onNodeWithText("reported summary").assertDoesNotExist()

@@ -204,7 +204,7 @@ class ResponsesTest:InstrumentationTestCase() {
                 val session=ResponsesModel(settings) {connection}.open(emptyList())
                 try {
                     session.next(emptyList()) {event ->
-                        if((event is ModelEvent.ProtocolOutput)==protocol) throw exception
+                        if(event !is ModelEvent.InputEstimate && (event is ModelEvent.ProtocolOutput)==protocol) throw exception
                     }
                     fail("sink must fail")
                 } catch(failure:java.io.IOException) {assertSame(exception,failure)}

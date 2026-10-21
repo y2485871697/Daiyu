@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
@@ -27,12 +28,16 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
     private var edited: String? = null
 
     private fun show(scale: Float = 1f, dark: Boolean = false) {
+        val fixtureKey = Any()
         val assets = FileAssistantAssets(instrumentation.targetContext)
         val profiles = listOf(
             AssistantProfile("visual-a", "Visual A", "First description", createdAt = 1L),
             AssistantProfile("visual-b", "Visual B", "Second description", createdAt = 2L),
         )
         mainThread {
+            selected = null
+            dismissed = false
+            edited = null
             activity.setContent {
                 val platform = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(platform.density, .9f)) {
@@ -40,8 +45,10 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = true) {
                         density.set(LocalDensity.current)
-                        AssistantPickerDialog(true, profiles, "visual-a", { selected = it }, { edited = it }, { dismissed = true },
-                            onCopy = {}, onDelete = {}, assets = assets)
+                        key(fixtureKey) {
+                            AssistantPickerDialog(true, profiles, "visual-a", { selected = it }, { edited = it }, { dismissed = true },
+                                onCopy = {}, onDelete = {}, assets = assets)
+                        }
                     }
                 }
             }
@@ -91,7 +98,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertEquals(40f, dp(avatar.width), .6f)
             assertEquals(40f, dp(avatar.height), .6f)
             assertEquals(11f, dp(avatar.left - first.left), .6f)
-            assertEquals(18f, dp(avatar.top - first.top), .6f)
+            assertEquals(first.center.y, avatar.center.y, .51f)
             assertEquals(44f, dp(newButton.height), .6f)
             assertEquals(44f, dp(done.height), .6f)
             assertEquals(dp(newButton.width), dp(done.width), .6f)

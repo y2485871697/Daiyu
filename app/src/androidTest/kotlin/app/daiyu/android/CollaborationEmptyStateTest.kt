@@ -47,7 +47,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
     private fun assertPrimaryFooterWithoutCross(dark: Boolean, label: String) {
         ui.onNodeWithContentDescription("关闭子代理设置", useUnmergedTree = true).assertDoesNotExist()
         val button = node("subagent-collaboration-done").assertIsEnabled().assertHeightIsEqualTo(44.dp)
-        val pixels = button.captureToImage().toPixelMap()
+        val pixels = captureScreenNode(button).toPixelMap()
         val expected = AssistantPreviewPalette(dark)
         val background = pixels[(12 * density).toInt(), pixels.height / 2]
         assertEquals(expected.primary.red, background.red, .01f)

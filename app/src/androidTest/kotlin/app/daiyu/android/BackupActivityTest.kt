@@ -104,6 +104,14 @@ class BackupActivityTest:ComposeActivityTestCase() {
     private lateinit var directory:File
     private var original:ChatController?=null
     private var activity:MainActivity?=null
+    private val fixtureBalanceHost = app.daiyu.android.balance.ProviderBalanceRuntimeHost(
+        draftQuery = app.daiyu.android.balance.BalanceQuery { error("Unexpected fixture balance request") },
+        factory = { app.daiyu.android.balance.BalanceRuntime(
+            app.daiyu.android.balance.ProviderBalanceStore(object : app.daiyu.android.balance.BalancePersistence {
+                private var bytes: ByteArray? = null
+                override fun read() = bytes?.clone()
+                override fun write(record: ByteArray?) { bytes = record?.clone() }
+            }), app.daiyu.android.balance.BalanceQuery { error("Unexpected fixture balance request") }) })
     private val modelCalls=AtomicInteger()
     private val textUri=Uri.parse("content://activity-backup/text.json")
     private val completeUri=Uri.parse("content://activity-backup/complete.json")
@@ -134,7 +142,8 @@ class BackupActivityTest:ComposeActivityTestCase() {
         fixtureApp=FixtureApplication(context,resolver)
         val database=ConversationDatabase(fixtureApp)
         controller=ChatController(fixtureApp,database,ModelSettingsStore(fixtureApp,"unused-activity-$id"),
-            fixtureApp.getSharedPreferences("conversation-ui",0),{modelCalls.incrementAndGet();error("must not execute imported history")})
+            fixtureApp.getSharedPreferences("conversation-ui",0),{modelCalls.incrementAndGet();error("must not execute imported history")},
+            providerBalanceHost = { fixtureBalanceHost })
         awaitState {controller.ready}
         assertNull(controller.problem)
         // Small real backup with historical messages/tool result; importing must not replay them.
@@ -161,7 +170,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             main {activity?.finish()}
             instrumentation.waitForIdleSync()
             main {original?.let {application.controller=it}}
-            controller.close();fixtureApp.deleteDatabase("conversations.db")
+            controller.close();fixtureBalanceHost.close();fixtureApp.deleteDatabase("conversations.db")
             fixtureApp.getSharedPreferences("conversation-ui",0).edit().clear().commit()
             fixtureApp.getSharedPreferences("model-settings",0).getString("key-alias",null)?.let {alias->
                 if(alias.startsWith("unused-activity-")) java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null)}.deleteEntry(alias)
@@ -282,7 +291,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             assertTrue(text.contains("historical answer"))
             val envelope=org.json.JSONObject(text)
             assertEquals("daiyu-neutral-complete",envelope.getString("format"))
-            assertEquals(5,envelope.getInt("version"))
+            assertEquals(6,envelope.getInt("version"))
             NeutralBackupService(fixtureApp,controller.database).preflight(text)
             controller.database.conversations().forEach {controller.database.delete(it.id)}
             // Reset only revision for the second independent UI route; format fixtures stay tiny.

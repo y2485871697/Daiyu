@@ -447,7 +447,11 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             assertTrue(summaryBody.contains("fact 0"))
             assertFalse("pending GUI is not old summary evidence", summaryBody.contains("gui_confirmed_action"))
             assertFalse(summaryBody.contains("x".repeat(4000)))
-            assertEquals(sentHistory, checkpoint(f, entry).history)
+            val stagedCheckpoint = checkpoint(f, entry)
+            val emptyAssistant = Message(entry.assistantId, entry.conversationId, entry.runId,
+                Message.ASSISTANT_ROLE, emptyList(), RunStatus.COMPLETED, createdAt = user.createdAt)
+            assertEquals(emptyAssistant.copy(status = RunStatus.RUNNING), stagedCheckpoint.message)
+            assertEquals(sentHistory + emptyAssistant, stagedCheckpoint.history)
             val staged = usage(f, entry.conversationId)
             val summaryRequest = staged.requests.single { it.source == UsageRequestSource.SUMMARY }
             assertEquals(entry.runId.value, summaryRequest.parentRunId)
@@ -465,7 +469,13 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             assertCatalogDrained(entry)
             val final = checkpoint(f, entry)
             assertEquals(RunStatus.COMPLETED, final.message.status)
-            assertEquals(sentHistory, final.history)
+            assertEquals(entry.assistantId, final.message.id)
+            assertEquals(entry.conversationId, final.message.conversationId)
+            assertEquals(entry.runId, final.message.runId)
+            assertNull(final.message.error)
+            assertEquals("done", final.message.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+            assertEquals(sentHistory + MessageHistory.expand(listOf(
+                final.message.copy(status = RunStatus.COMPLETED, error = null))), final.history)
             assertEquals(1, final.usage.count { it.source == UsageRequestSource.SUMMARY })
             assertEquals(1, final.usage.count { it.source == UsageRequestSource.MAIN })
             val total = usage(f, entry.conversationId)

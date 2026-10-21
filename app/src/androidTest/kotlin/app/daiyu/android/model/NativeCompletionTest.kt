@@ -426,7 +426,9 @@ class NativeCompletionTest : InstrumentationTestCase() {
         protocols.forEach { protocol ->
             val conn = Connection(text(protocol)); val session = NativeCompletionModel(settings(protocol), { conn }).open(input())
             val expected = IllegalArgumentException("caller-owned")
-            try { session.next(emptyList()) { session.cancel(); throw expected }; fail("sink failure") }
+            try { session.next(emptyList()) { event ->
+                if (event is ModelEvent.TextDelta) { session.cancel(); throw expected }
+            }; fail("sink failure") }
             catch (actual: Exception) { assertSame(expected, actual) }
             assertTrue(conn.disconnected)
         }

@@ -112,6 +112,7 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         openBalance()
         val revision = runtime.state.value.revision
         activity = recreateActivity(activity)
+        reveal("balance-settings-title", "独立余额设置").assertIsDisplayed()
         ui.onNodeWithText("独立余额设置").assertIsDisplayed()
         assertSame(runtime, runBlocking { testHost.get(ProviderRegistry.PRIMARY) })
         assertEquals(revision, runtime.state.value.revision)

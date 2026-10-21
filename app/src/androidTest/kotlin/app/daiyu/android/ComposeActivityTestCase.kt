@@ -297,8 +297,8 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 assertTrue("Empty scroll viewport: $before", viewport.width > 0f && viewport.height > 0f)
                 performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
                     assertTrue("Scroll action rejected: $before", scroll(
-                        if (horizontal != null) viewport.width * .5f else 0f,
-                        if (vertical != null) viewport.height * .5f else 0f))
+                        if (horizontal != null) viewport.width else 0f,
+                        if (vertical != null) viewport.height else 0f))
                 }
                 advance()
                 val afterNode = fetchSemanticsNode()

@@ -27,7 +27,7 @@ class ImageInputEncoder(
         checkCancelled(isCancelled)
         if (protocol == ProviderProtocol.UNKNOWN) throw UnsupportedProviderException(protocol.wireName)
         val frozen = images.toList()
-        require(frozen.isEmpty() || protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)) { "当前协议尚不支持图片输入" }
+        require(frozen.isEmpty() || protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)) { "当前协议尚不支持图片输入" }
         requireSupported(frozen.isNotEmpty(), imageInputSupported)
         if (frozen.isEmpty()) return emptyList()
         require(role == "user") { "Image input requires user content" }
@@ -60,7 +60,9 @@ class ImageInputEncoder(
                     .put("image_url", "data:${image.mime};base64,$data")
                 ProviderProtocol.MESSAGES -> JSONObject().put("type", "image")
                     .put("source", JSONObject().put("type", "base64").put("media_type", image.mime).put("data", data))
-                ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> throw IllegalArgumentException("当前协议尚不支持图片输入")
+                ProviderProtocol.CHAT_COMPLETIONS -> JSONObject().put("type", "image_url")
+                    .put("image_url", JSONObject().put("url", "data:${image.mime};base64,$data"))
+                ProviderProtocol.GEMINI -> throw IllegalArgumentException("当前协议尚不支持图片输入")
                 ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(protocol.wireName)
             }
         }

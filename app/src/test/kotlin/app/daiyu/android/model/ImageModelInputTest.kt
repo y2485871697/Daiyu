@@ -23,14 +23,21 @@ import java.util.Base64
 import javax.net.ssl.HttpsURLConnection
 
 class ImageModelInputTest {
-    private val protocols = listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)
+    private val protocols = listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)
     private val rawCodeInterpreterImage = """{"type":"code_interpreter_call","id":"ci_1","container_id":"cntr_1","status":"completed","code":"print(1)","outputs":[{"type":"image","url":"https://example.invalid/x.png"}]}"""
     private val original = byteArrayOf(1, 2, 3, 4)
     private val digest = MessageDigest.getInstance("SHA-256").digest(original)
         .joinToString("") { "%02x".format(it.toInt() and 255) }
     private val encoder = ImageInputEncoder(ImageInspector { ImageDimensions("image/png", 2, 2) })
+    private fun endpoint(protocol: ProviderProtocol, host: String = "example.invalid") =
+        "https://$host/v1/" + when (protocol) {
+            ProviderProtocol.RESPONSES -> "responses"
+            ProviderProtocol.MESSAGES -> "messages"
+            ProviderProtocol.CHAT_COMPLETIONS -> "chat/completions"
+            else -> error("fixture")
+        }
     private fun settings(protocol: ProviderProtocol) = ModelSettings(
-        "https://example.invalid/v1/${protocol.wireName}", "fixture", "synthetic-key", false, protocol = protocol)
+        endpoint(protocol), "fixture", "synthetic-key", false, protocol = protocol)
     private fun reference(message: String) = MessageImageReference(MessageImageOwner("c", message),
         "00000000-0000-0000-0000-000000000001", "image/png", original.size, digest, 2, 2)
     private fun row(id: String = "u") = Message(MessageId(id), ConversationId("c"), RunId("r"), "user", listOf(
@@ -84,6 +91,15 @@ class ImageModelInputTest {
             return (if (tool) "data: ${JSONObject().put("type", "response.output_item.done").put("item", call)}\n\n" else "") +
                 "data: $done\n\n"
         }
+        if (protocol == ProviderProtocol.CHAT_COMPLETIONS) {
+            val delta = JSONObject().put("role", "assistant")
+            if (tool) delta.put("tool_calls", JSONArray().put(JSONObject().put("index", 0).put("id", "call")
+                .put("type", "function").put("function", JSONObject().put("name", "lookup").put("arguments", toolInput))))
+            else delta.put("content", "ok")
+            val chunk = JSONObject().put("id", "fixture").put("choices", JSONArray().put(JSONObject()
+                .put("index", 0).put("delta", delta).put("finish_reason", if (tool) "tool_calls" else "stop")))
+            return "data: $chunk\n\n" + "data: [DONE]\n\n"
+        }
         val block = if (tool) JSONObject().put("type", "tool_use").put("id", "call")
             .put("name", "lookup").put("input", JSONObject(toolInput)) else JSONObject().put("type", "text").put("text", "ok")
         return listOf(
@@ -99,6 +115,7 @@ class ImageModelInputTest {
                       connect: (URL) -> HttpsURLConnection): ModelPort = when (config.protocol) {
         ProviderProtocol.RESPONSES -> ResponsesModel(config, connect, capability)
         ProviderProtocol.MESSAGES -> MessagesModel(config, 4096, connect, capability)
+        ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionModel(config, connect, imageInputSupported = capability)
         else -> error("fixture")
     }
     private fun rejected(work: () -> Unit): Throwable {
@@ -107,7 +124,7 @@ class ImageModelInputTest {
         return failure!!
     }
     @Test fun ignoredSyntaxCannotBypassRawMediaAndReplayedSyntaxRemainsStrict() {
-        for (protocol in protocols) {
+        for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)) {
             val ignored = row().copy(role = "assistant", blocks = emptyList(), status = RunStatus.STOPPED,
                 protocolItems = listOf("{"))
             FrozenMessageImagePlan.rejectRawImages(listOf(ignored), protocol)
@@ -133,6 +150,27 @@ class ImageModelInputTest {
             listOf(user), ProviderProtocol.MESSAGES) } is org.json.JSONException)
     }
 
+    private fun history(protocol: ProviderProtocol, rows: List<Message>, images: FrozenMessageImagePlan? = null): JSONArray =
+        when (protocol) {
+            ProviderProtocol.RESPONSES -> ResponsesRequest.history(rows, images)
+            ProviderProtocol.MESSAGES -> MessagesRequest.history(rows, images)
+            ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionRequest.history(protocol, rows, images = images)
+            else -> error("fixture")
+        }
+    private fun body(config: ModelSettings, rows: JSONArray): JSONObject = when (config.protocol) {
+        ProviderProtocol.RESPONSES -> ResponsesRequest.body(config.model, rows, emptyList())
+        ProviderProtocol.MESSAGES -> MessagesRequest.body(config.model, rows, emptyList(), 4096)
+        ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionRequest.body(config, rows, emptyList(), null)
+        else -> error("fixture")
+    }
+    private fun arguments(protocol: ProviderProtocol, item: JSONObject): String = when (protocol) {
+        ProviderProtocol.RESPONSES -> item.getString("arguments")
+        ProviderProtocol.MESSAGES -> item.getJSONArray("content").getJSONObject(0).getJSONObject("input").toString()
+        ProviderProtocol.CHAT_COMPLETIONS -> item.getJSONArray("tool_calls").getJSONObject(0)
+            .getJSONObject("function").getString("arguments")
+        else -> error("fixture")
+    }
+
     private fun content(protocol: ProviderProtocol, body: JSONObject, index: Int = 0): JSONArray =
         body.getJSONArray(if (protocol == ProviderProtocol.RESPONSES) "input" else "messages")
             .getJSONObject(index).getJSONArray("content")
@@ -145,6 +183,14 @@ class ImageModelInputTest {
             assertEquals("input_text", content.getJSONObject(0).getString("type"))
             assertEquals("input_image", image.getString("type"))
             assertEquals("data:image/png;base64,${Base64.getEncoder().encodeToString(original)}", image.getString("image_url"))
+        } else if (protocol == ProviderProtocol.CHAT_COMPLETIONS) {
+            assertEquals("text", content.getJSONObject(0).getString("type"))
+            assertEquals("text", content.getJSONObject(2).getString("type"))
+            assertEquals("image_url", image.getString("type"))
+            val url = image.getJSONObject("image_url").getString("url")
+            assertEquals("data:image/png;base64,${Base64.getEncoder().encodeToString(original)}", url)
+            assertArrayEquals(original, Base64.getDecoder().decode(url.substringAfter("base64,")))
+            assertFalse(image.has("source"))
         } else {
             assertEquals("text", content.getJSONObject(0).getString("type"))
             assertEquals("image", image.getString("type"))
@@ -153,7 +199,7 @@ class ImageModelInputTest {
         }
     }
 
-    @Test fun actualBuildersAndBothTransportsPreserveMixedOrderAndExactOwners() {
+    @Test fun actualBuildersAndAllTransportsPreserveMixedOrderAndExactOwners() {
         protocols.forEach { protocol ->
             val config = settings(protocol).copy(requestOptions = ProviderRequestOptions("""{"metadata":{"note":"中文"}}"""))
             // Same reference id in different messages must NOT be globally deduplicated.
@@ -161,10 +207,8 @@ class ImageModelInputTest {
             val resolver = Resolver()
             val plan = plan(config, history, resolver)
             assertEquals(listOf("first", "second"), resolver.owners.map { it.messageId })
-            val messages = if (protocol == ProviderProtocol.RESPONSES) ResponsesRequest.history(history, plan)
-                else MessagesRequest.history(history, plan)
-            val base = if (protocol == ProviderProtocol.RESPONSES) ResponsesRequest.body(config.model, messages, emptyList())
-                else MessagesRequest.body(config.model, messages, emptyList(), 4096)
+            val messages = history(protocol, history, plan)
+            val base = body(config, messages)
             val expectedBytes = ImageRequestPreflight.bytes(config.requestOptions.apply(base, protocol), config, plan) { false }
             val conn = Connection(events(protocol))
             var connections = 0
@@ -194,8 +238,7 @@ class ImageModelInputTest {
             val resolver = Resolver()
             val frozen = plan(settings(protocol), history, resolver)
             assertEquals(listOf("first", "second"), resolver.owners.map { it.messageId })
-            val items = if (protocol == ProviderProtocol.RESPONSES) ResponsesRequest.history(history, frozen)
-                else MessagesRequest.history(history, frozen)
+            val items = history(protocol, history, frozen)
             assertEquals(3, items.length())
             assertMixed(protocol, items.getJSONObject(0).getJSONArray("content"))
             assertEquals("assistant", items.getJSONObject(1).getString("role"))
@@ -236,7 +279,7 @@ class ImageModelInputTest {
             val session = model(config) { connections++; error("no network") }.open(history, emptyList<ToolDefinition>(), plan)
             rejected { session.next(emptyList()) {} }
             assertEquals(0, connections)
-            listOf(config.copy(model = "other"), config.copy(endpoint = "https://other.invalid/v1/${protocol.wireName}"))
+            listOf(config.copy(model = "other"), config.copy(endpoint = endpoint(protocol, "other.invalid")))
                 .forEach { changed -> rejected { model(changed) { connections++; error("no network") }
                     .open(history, emptyList<ToolDefinition>(), plan) } }
             val otherProtocol = settings(protocols.first { it != protocol })
@@ -249,6 +292,8 @@ class ImageModelInputTest {
         protocols.forEach { protocol ->
             val raw = if (protocol == ProviderProtocol.RESPONSES)
                 """{"role":"user","content":[{"type":"input_image","image_url":"https://image.invalid"}]}"""
+                else if (protocol == ProviderProtocol.CHAT_COMPLETIONS)
+                    """{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AQ=="}}]}"""
                 else """{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AQ=="}}]}"""
             listOf(row().copy(protocolItems = listOf(raw)), row().copy(blocks = emptyList(), protocolItems = listOf(raw)))
                 .forEach { historyRow ->
@@ -276,6 +321,11 @@ class ImageModelInputTest {
                     .put("arguments", business).put("metadata", metadata).toString(),
                 JSONObject().put("type", "function_call_output").put("call_id", "saved-call")
                     .put("output", business).toString()
+            ) else if (protocol == ProviderProtocol.CHAT_COMPLETIONS) listOf(
+                JSONObject().put("role", "assistant").put("metadata", metadata).put("content", JSONObject.NULL)
+                    .put("tool_calls", JSONArray().put(JSONObject().put("id", "saved-call").put("type", "function")
+                        .put("function", JSONObject().put("name", "lookup").put("arguments", business)))).toString(),
+                JSONObject().put("role", "tool").put("tool_call_id", "saved-call").put("content", business).toString()
             ) else listOf(
                 JSONObject().put("role", "assistant").put("metadata", metadata).put("content", JSONArray().put(
                     JSONObject().put("type", "tool_use").put("id", "saved-call").put("name", "lookup")
@@ -288,8 +338,7 @@ class ImageModelInputTest {
             val resolver = Resolver()
             assertFalse(plan(config, history, resolver, capability = null).hasImages)
             assertTrue(resolver.owners.isEmpty())
-            val built = if (protocol == ProviderProtocol.RESPONSES) ResponsesRequest.history(history)
-                else MessagesRequest.history(history)
+            val built = history(protocol, history)
             assertEquals(2, built.length())
             val connections = listOf(Connection(events(protocol, true, business)), Connection(events(protocol)))
             var count = 0
@@ -304,15 +353,30 @@ class ImageModelInputTest {
                 val item = body.getJSONArray(if (protocol == ProviderProtocol.RESPONSES) "input" else "messages")
                     .getJSONObject(0)
                 assertEquals(business, item.getJSONObject("metadata").getJSONObject("asset").toString())
-                val arguments = if (protocol == ProviderProtocol.RESPONSES) item.getString("arguments")
-                    else item.getJSONArray("content").getJSONObject(0).getJSONObject("input").toString()
+                val arguments = arguments(protocol, item)
                 assertEquals(business, arguments)
             }
             val continued = JSONObject(connections[1].sent.toString("UTF-8"))
                 .getJSONArray(if (protocol == ProviderProtocol.RESPONSES) "input" else "messages").getJSONObject(2)
-            assertEquals(business, if (protocol == ProviderProtocol.RESPONSES) continued.getString("arguments")
-                else continued.getJSONArray("content").getJSONObject(0).getJSONObject("input").toString())
+            assertEquals(business, arguments(protocol, continued))
         }
+    }
+
+    @Test fun chatSupportDoesNotAuthorizeGeminiOrLoosenMalformedHistory() {
+        val attachment = app.daiyu.android.media.MessageImageReference(
+            app.daiyu.android.media.MessageImageOwner("c", "u"), reference("u").id,
+            "image/png", original.size, digest, 2, 2).asAttachment()
+        val frozen = FrozenImageAttachment(attachment, original)
+        rejected { encoder.encode(ProviderProtocol.GEMINI, listOf(frozen), true) }
+        rejected { encoder.encode(ProviderProtocol.UNKNOWN, listOf(frozen), true) }
+        rejected { encoder.encode(ProviderProtocol.CHAT_COMPLETIONS, listOf(frozen), true, role = "assistant") }
+        assertTrue(rejected { FrozenMessageImagePlan.rejectRawImages(listOf(row().copy(role = "assistant",
+            blocks = emptyList(), status = RunStatus.STOPPED, protocolItems = listOf("{"))),
+            ProviderProtocol.CHAT_COMPLETIONS) } is org.json.JSONException)
+        val block = encoder.encode(ProviderProtocol.CHAT_COMPLETIONS, listOf(frozen), true).single()
+        assertEquals("image_url", block.getString("type"))
+        assertEquals("data:image/png;base64,AQIDBA==", block.getJSONObject("image_url").getString("url"))
+        assertArrayEquals(original, frozen.bytes())
     }
 
     @Test fun protocolContentImagesStillRejectIncludingNestedToolResultsAndEnvelopes() {
@@ -520,8 +584,8 @@ class ImageModelInputTest {
         }
     }
 
-    @Test fun oversizedContinuationFailsBeforeSecondConnectionForBothProtocols() {
-        protocols.forEach { protocol ->
+    @Test fun oversizedContinuationFailsBeforeSecondConnectionForResponsesAndMessages() {
+        listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES).forEach { protocol ->
             val config = settings(protocol)
             val history = listOf(row())
             var count = 0
@@ -537,4 +601,27 @@ class ImageModelInputTest {
             assertEquals(1, count) // failed preflight does not become an automatic retry
         }
     }
+
+    @Test fun chatOversizedNativeResultFailsBeforeSecondConnection() {
+        val protocol = ProviderProtocol.CHAT_COMPLETIONS
+        val config = settings(protocol)
+        val history = listOf(row())
+        var count = 0
+        val first = Connection(events(protocol, true))
+        val session = model(config) { count++; first }.open(history,
+            listOf(ToolDefinition("lookup", "fixture", """{"type":"object","properties":{}}""")), plan(config, history))
+        session.next(emptyList()) {}
+        assertEquals(1, count)
+        val limit = 1_000_000
+        val overhead = NativeCompletionRequest.result(protocol, "call", "lookup", "").toString().length
+        val output = "x".repeat(limit + 1 - overhead)
+        assertEquals(limit + 1, NativeCompletionRequest.result(protocol, "call", "lookup", output).toString().length)
+        val failure = rejected { session.next(listOf(ToolOutput(ToolCallId("call"), output))) {} }
+        assertTrue(failure is IllegalArgumentException)
+        assertEquals("工具结果超过原生历史存储上限", failure.message)
+        assertEquals(1, count)
+        rejected { session.next(listOf(ToolOutput(ToolCallId("call"), "small"))) {} }
+        assertEquals(1, count)
+    }
+
 }

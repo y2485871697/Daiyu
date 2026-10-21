@@ -2,6 +2,7 @@ package app.daiyu.android.model
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.model.images.FrozenMessageImagePlan
 import app.daiyu.android.model.sessiongateway.SessionGateway
 import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 import java.net.URL
@@ -14,24 +15,31 @@ class NativeCompletionModel internal constructor(
     private val connect: (URL) -> HttpsURLConnection,
     private val instructions: String? = null,
     private val sessionContext: SessionGatewayContext? = null,
+    private val imageInputSupported: Boolean? = null,
 ) : ModelPort {
     internal constructor(snapshot: ProviderSnapshot, instructions: String? = null, sessionContext: SessionGatewayContext? = null) :
-        this(snapshot.asModelSettings(), { it.openConnection() as HttpsURLConnection }, instructions, sessionContext)
+        this(snapshot.asModelSettings(), { it.openConnection() as HttpsURLConnection }, instructions, sessionContext,
+            imageInputSupported = snapshot.imageInputSupported)
 
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history, NativeCompletionRequest.definitions(tools))
-    override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession = Session(history, definitions.toList())
-    override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession {
-        require(images is app.daiyu.android.model.images.FrozenMessageImagePlan && !images.hasImages) { "当前协议尚不支持图片输入" }
-        return open(history, definitions)
-    }
+    override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
+        Session(history, definitions.toList(), null)
+    override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
+        Session(history, definitions.toList(), images)
 
     init { require(settings.protocol in setOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)) { "Unsupported native completion protocol" } }
 
-    private inner class Session(history: List<Message>, private val tools: List<ToolDefinition>) : ModelSession {
+    private inner class Session(
+        history: List<Message>,
+        private val tools: List<ToolDefinition>,
+        images: ModelImagePlan?,
+    ) : ModelSession {
         private val endpoint = settings.also { it.validate() }.requestEndpoint()
-        private val rows = NativeCompletionRequest.history(settings.protocol,
-            app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history))
+        private val historySnapshot = FrozenMessageImagePlan.snapshot(history)
+        private val imagePlan = ImageRequestPreflight.history(
+            settings, settings.protocol, imageInputSupported, historySnapshot, images)
+        private val rows = NativeCompletionRequest.history(settings.protocol, historySnapshot, images = imagePlan)
         private val ownItems = mutableListOf<String>()
         private val cancelled = AtomicBoolean(false)
         @Volatile private var connection: HttpsURLConnection? = null
@@ -66,7 +74,7 @@ class NativeCompletionModel internal constructor(
             else require(!settings.requestOptions.sessionGateway.matches(settings.model, endpoint)) { "Gemini 不支持 OpenAI 会话网关请求字段" }
             ReasoningRequestPolicy.validate(request, settings.protocol, settings.reasoningOverride)
             val headers = SessionGateway.headers(endpoint, sessionContext)
-            val bytes = ImageRequestPreflight.bytes(request, settings, null, cancelled::get)
+            val bytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->
                 checkCancelled()

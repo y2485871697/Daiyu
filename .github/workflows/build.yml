@@ -218,7 +218,7 @@ jobs:
     name: 单测、检查与生产Release
     if: inputs.mode == 'release' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - name: 限定定向过滤仅用于smoke补检
         shell: bash

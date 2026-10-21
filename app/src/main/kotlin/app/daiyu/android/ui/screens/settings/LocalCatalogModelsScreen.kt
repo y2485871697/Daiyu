@@ -43,7 +43,6 @@ internal class LocalCatalogModelActions<T>(
     val currentModelId: String,
     val rename: (CatalogModelSelection<T>, String, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit,
     val delete: (CatalogModelSelection<T>, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit,
-    val select: ((CatalogModelSelection<T>, () -> Boolean, (Boolean) -> Unit) -> Unit)? = null,
     val form: ((SavedCatalogModel<T>) -> CatalogModelEdit)? = null,
     val update: ((CatalogModelSelection<T>, CatalogModelEdit, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit)? = null,
     val add: ((SavedModelCatalogSnapshot<T>, CatalogModelEdit, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit)? = null,
@@ -141,18 +140,6 @@ internal fun <T> LocalCatalogModelsScreen(
                 ?: complete(CatalogLocalEditResult.FAILED)
         } catch (_: Exception) { complete(CatalogLocalEditResult.FAILED) }
     }
-    fun choose(selection: CatalogModelSelection<T>?) {
-        if (!current() || !currentEnabled || request != null || selection == null || !matches(selection) ||
-            selection.record.id == actions.currentModelId) return
-        val token = AtomicBoolean(false); request = token
-        val complete: (Boolean) -> Unit = { success ->
-            if (current() && request === token && !token.get()) {
-                request = null; notice = if (success) "当前模型已切换" else "模型未切换，请重新选择"; reload()
-            }
-        }
-        try { actions.select?.invoke(selection, { token.get() || !visit.get() }, complete) ?: complete(false) }
-        catch (_: Exception) { complete(false) }
-    }
     DisposableEffect(lifecycle, visit) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) cancel()
@@ -217,7 +204,6 @@ internal fun <T> LocalCatalogModelsScreen(
                     val selected = model.id == actions.currentModelId
                     Column {
                         SettingsRow(model.displayName, summary = model.id, tag = "local-model:${model.id}",
-                            onClick = if (enabled && request == null && actions.select != null) ({ choose(selection) }) else null,
                             trailing = {
                                 if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型")
                                 Box(Modifier.size(40.dp).testTag("local-model-rename:${model.id}")

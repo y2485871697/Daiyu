@@ -415,21 +415,6 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 if (live() && !requestCancelled()) controller.deleteProviderCatalogModel(d.editor, selection,
                     { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
                 else complete(CatalogLocalEditResult.CANCELLED)
-            }, select = { selection, requestCancelled, complete ->
-                if (live() && enabled && !requestCancelled()) {
-                    val ticket = Any(); busy = ticket
-                    try {
-                        controller.selectProviderCatalogModel(d.editor, saved, selection,
-                            { cancelled() || requestCancelled() }) { success ->
-                            if (busy === ticket) busy = null
-                            if (live() && !requestCancelled()) {
-                                complete(success)
-                                if (success) open(d.editor.slotId)
-                                else { closeDetail(); notice = "模型未切换，请重新打开详情核对。"; refresh() }
-                            }
-                        }
-                    } catch (_: Exception) { if (busy === ticket) busy = null; complete(false) }
-                } else complete(false)
             }, form = { app.daiyu.android.model.catalog.CatalogModelEdit.from(it) },
             update = { selection, value, requestCancelled, complete ->
                 if (live() && enabled && !requestCancelled()) controller.updateProviderCatalogModel(d.editor, selection, value,

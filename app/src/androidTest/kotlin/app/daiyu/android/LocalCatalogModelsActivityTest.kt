@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import android.content.ContextWrapper
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import app.daiyu.android.model.catalog.CatalogCommitResult
@@ -37,6 +38,48 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         openModels()
         openLocalModelTab()
     }
+    fun testModelRowsIgnoreTitleAndBlankAreaTouchesWhileSettingsButtonStillEdits() {
+        setDraft("model management stays unsent")
+        openLocalModels()
+        val saved = fixture.settings.load()
+        val before = checkNotNull(fixture.settings.localModelCatalogSnapshot())
+        val messages = fixture.database.exportBackup()
+        fun assertNoModelSelection() {
+            ui.waitForIdle()
+            node("catalog-model-editor").assertDoesNotExist()
+            ui.onNodeWithText("当前模型已切换").assertDoesNotExist()
+            ui.onNodeWithText("模型未切换，请重新选择").assertDoesNotExist()
+            assertEquals(saved, fixture.settings.load())
+            assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+        }
+        for (modelId in listOf("extra-local", saved.model)) {
+            val tag = "local-model:$modelId"
+            reveal(tag)
+            val row = ui.onNodeWithTag(tag, useUnmergedTree = true).assertHasNoClickAction()
+            val name = before.models.single { it.id == modelId }.displayName
+            ui.onAllNodes(hasText(name) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+                .onFirst().performTouchInput { click(center) }
+            assertNoModelSelection()
+            row.performTouchInput { click(Offset(8f, center.y)) }
+            assertNoModelSelection()
+        }
+        val editTag = "local-model-rename:extra-local"
+        reveal(editTag)
+        ui.onNodeWithTag(editTag, useUnmergedTree = true).assertHasClickAction().performClick()
+        node("catalog-model-editor").assertExists()
+        node("settings-field:展示名称").assertEditableText("Extra local model")
+        node("dialog-cancel").performClick()
+        assertEquals(saved, fixture.settings.load())
+        assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+        assertEquals(messages, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
+        backToPage(activity, "page:模型提供商")
+        backToPage(activity, "page:设置")
+        backToChat(activity)
+        assertDraft("model management stays unsent")
+    }
+
     fun testCustomModelDialogMatchesFieldsAndSavesOnlyAnExplicitValidModel() {
         openLocalModels()
         val saved = fixture.settings.load()

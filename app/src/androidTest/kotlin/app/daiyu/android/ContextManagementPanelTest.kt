@@ -22,13 +22,15 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         return ContextManagementSnapshot(owner.conversationId, ContextRevision.digest(listOf(message)),
             listOf(message), PreparedContext(listOf(message), 1234, null), configuration, null)
     }
-    private inner class Actions : ContextManagementControllerAdapter {
+    private inner class Actions(private val holdRefresh: Boolean = false) : ContextManagementControllerAdapter {
         override val state = MutableStateFlow(ContextManagementState(owner, snapshot = snapshot()))
         val events = mutableListOf<String>()
         var selection: ContextManagementSelection? = null
         override fun refresh() {
             events.add("refresh")
-            state.value = state.value.copy(operation = null, requiresRefresh = false, notice = null)
+            state.value = state.value.copy(snapshot = if (holdRefresh) null else state.value.snapshot,
+                operation = if (holdRefresh) ContextManagementOperation.REFRESH else null,
+                requiresRefresh = false, notice = null)
         }
         override fun selectCompression(selection: ContextManagementSelection): Boolean {
             events.add("select"); this.selection = selection
@@ -76,13 +78,30 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         assertEquals(listOf("refresh"), actions.events)
         assertEquals(0, fixture.opens.get())
     }
+    fun testOpeningWhileRefreshIsPendingHasNoExtraWaitControlsAndCanClose() {
+        val actions = Actions(holdRefresh = true); show(actions)
+        assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
+        assertNull(actions.state.value.snapshot)
+        node("compression-dialog-operation").assertDoesNotExist()
+        node("context-cancel").assertDoesNotExist()
+        ui.onNodeWithText("正在准备会话信息…").assertDoesNotExist()
+        ui.onNodeWithText("取消并等待退出").assertDoesNotExist()
+        node("compression-dialog-custom").assertExists()
+        node("context-compress").assertIsNotEnabled()
+        node("context-close").assertIsEnabled().performClick()
+        awaitVisualIdle()
+        assertEquals(listOf("refresh", "close"), actions.events)
+        assertNull(actions.selection)
+        assertEquals(0, fixture.opens.get())
+    }
     fun testSelectionAndSeparateConfirmationRetainExactTargetAndCancellation() {
         val actions = Actions(); show(actions)
         node("context-compress").performClick()
         awaitVisualIdle()
         assertEquals(ContextManagementSelection(null, ProviderProtocol.CHAT_COMPLETIONS), actions.selection)
         assertEquals(listOf("refresh", "select"), actions.events)
-        node("compression-dialog-operation").assertExists()
+        node("compression-dialog-operation").assertDoesNotExist()
+        node("context-cancel").assertDoesNotExist()
         node("context-compress").assertIsNotEnabled()
         mainThread { actions.selected() }
         node("context-management").scrollToDescendant(hasTestTag("context-confirm-compress"))

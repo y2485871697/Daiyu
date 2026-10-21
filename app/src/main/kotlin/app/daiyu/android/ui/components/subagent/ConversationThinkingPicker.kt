@@ -48,7 +48,7 @@ import kotlin.math.roundToInt
     val choices = if (subagent) options else options.filter { it != ReasoningEffort.DEFAULT }
     if (choices.isEmpty()) return
     var selected by remember(show, effort, choices) {
-        mutableIntStateOf(if (subagent) choices.indexOf(effort).coerceAtLeast(0) else choices.indexOf(effort))
+        mutableIntStateOf(choices.indexOf(effort))
     }
     val maxHeight = (appWindowSize().height - 50.dp).coerceAtLeast(0.dp)
     if (subagent) {
@@ -56,15 +56,13 @@ import kotlin.math.roundToInt
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ConversationThinkingMark(Modifier.size(34.dp))
-                Text(choices[selected].displayName, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.padding(top = 14.dp))
+                Text(choices.getOrNull(selected)?.displayName ?: "选择思考深度", fontSize = 22.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.testTag("subagent-thinking-value").padding(top = 14.dp))
             }
             if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { selected = it }, { index ->
                 if (choices[index] != effort) onEffortChange(choices[index])
             })
             if (description != null) Text(description, fontSize = 9.sp, lineHeight = 15.sp, color = colors.muted, modifier = Modifier.padding(top = 15.dp))
             }
-            androidx.compose.material3.HorizontalDivider(Modifier.padding(top = 10.dp), color = colors.line)
-            ConversationAgentButton("关闭", modifier = Modifier.fillMaxWidth().padding(top = 10.dp), onClick = onDismiss)
         }
         return
     }

@@ -5,6 +5,7 @@ import app.daiyu.android.model.*
 import app.daiyu.android.storage.ModelSettings
 import org.junit.Assert.*
 import org.junit.Test
+import org.json.JSONObject
 
 class SavedSubAgentRuntimeBindingsTest {
     private val owner = SubAgentConfigKey.Conversation("conversation")
@@ -36,7 +37,7 @@ class SavedSubAgentRuntimeBindingsTest {
         assertFalse(bindings.toString().contains("fixture-key")); assertTrue(loads >= 3)
     }
 
-    @Test fun unknownDisabledMediaAndUnsupportedReasoningRejectBeforeCredentialLoad() {
+    @Test fun unknownDisabledMediaAndMandatoryOffRejectBeforeCredentialLoad() {
         var loads = 0
         val bindings = SavedSubAgentRuntimeBindings({ loads++; saved })
         val attempts = listOf(
@@ -46,8 +47,7 @@ class SavedSubAgentRuntimeBindingsTest {
             profile to provider.copy(models = listOf(child.copy(isEnabled = false))),
             profile to provider.copy(models = listOf(child.copy(supportsImageGeneration = true))),
             profile.copy(role = "implementation") to provider,
-            profile.copy(reasoning = ReasoningEffort.HIGH) to provider,
-            profile.copy(reasoning = ReasoningEffort.OFF) to provider.copy(models = listOf(child.copy(defaultReasoning = ReasoningEffort.HIGH, reasoningCanDisable = true)))
+            profile.copy(reasoning = ReasoningEffort.OFF) to provider.copy(models = listOf(child.copy(reasoningMandatory = true)))
         )
         attempts.forEach { (p, source) ->
             assertThrows(IllegalArgumentException::class.java) { bindings.authorizePrimaryModel(owner, p, child.modelId, source) }
@@ -114,4 +114,70 @@ class SavedSubAgentRuntimeBindingsTest {
         bindings.revoke(owner, second.id)
         assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, configured) }
     }
+    private fun childSnapshot(selectedProfile: SubAgentProfile, settings: ModelSettings): ProviderSnapshot {
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings({ settings }) { snapshot ->
+            captured += snapshot
+            ModelPort { error("no network") }
+        }
+        bindings.authorizePrimaryModel(owner, selectedProfile, child.modelId, provider)
+        bindings.freeze(owner, config.copy(profiles = listOf(selectedProfile))).getValue(selectedProfile.id).create()
+        return captured.single()
+    }
+
+    @Test fun explicitTextReasoningIsFrozenIntoExactChildWithoutChangingSavedSettings() {
+        val high = profile.copy(reasoning = ReasoningEffort.HIGH)
+        val responses = childSnapshot(high, saved)
+        val reasoning = JSONObject(responses.requestOptions.customBody).getJSONObject("reasoning")
+        assertEquals("high", reasoning.getString("effort"))
+        assertEquals("auto", reasoning.getString("summary"))
+        assertEquals(child.modelId, responses.model)
+        assertEquals("", saved.requestOptions.customBody)
+        val messages = childSnapshot(high, saved.copy(protocol = ProviderProtocol.MESSAGES))
+        val body = JSONObject(messages.requestOptions.customBody)
+        assertEquals(8192, body.getJSONObject("thinking").getInt("budget_tokens"))
+        assertEquals(12288, body.getInt("max_tokens"))
+    }
+
+    @Test fun unsetAndDefaultDoNotBecomeOffAndExplicitOffUsesProtocolDisable() {
+        assertEquals("", childSnapshot(profile, saved).requestOptions.customBody)
+        assertEquals("", childSnapshot(profile.copy(reasoning = ReasoningEffort.DEFAULT), saved).requestOptions.customBody)
+        val off = profile.copy(reasoning = ReasoningEffort.OFF)
+        assertEquals("none", JSONObject(childSnapshot(off, saved).requestOptions.customBody)
+            .getJSONObject("reasoning").getString("effort"))
+        assertEquals("disabled", JSONObject(childSnapshot(off, saved.copy(protocol = ProviderProtocol.MESSAGES))
+            .requestOptions.customBody).getJSONObject("thinking").getString("type"))
+        val custom = saved.copy(requestOptions = ProviderRequestOptions("""{"reasoning":{"effort":"low"}}"""))
+        for (request in listOf(profile, profile.copy(reasoning = ReasoningEffort.DEFAULT))) {
+            assertEquals("low", JSONObject(childSnapshot(request, custom).requestOptions.customBody)
+                .getJSONObject("reasoning").getString("effort"))
+        }
+    }
+
+    @Test fun unsupportedOrConflictingReasoningRevokesGrantBeforeModelCreation() {
+        val attempts = listOf(
+            ReasoningEffort.MAX to saved,
+            ReasoningEffort.XHIGH to saved.copy(protocol = ProviderProtocol.MESSAGES),
+            ReasoningEffort.HIGH to saved.copy(protocol = ProviderProtocol.CHAT_COMPLETIONS),
+            ReasoningEffort.HIGH to saved.copy(reasoningOverride = false),
+            ReasoningEffort.HIGH to saved.copy(requestOptions = ProviderRequestOptions("""{"reasoning":{"effort":"low"}}""")),
+            ReasoningEffort.DEFAULT to saved.copy(requestOptions = ProviderRequestOptions("""{"reasoning":{"effort":"invalid"}}""")),
+            ReasoningEffort.DEFAULT to saved.copy(requestOptions = ProviderRequestOptions("""{"service_tier":"priority"}"""))
+        )
+        for ((effort, replacement) in attempts) {
+            var current = saved
+            var creates = 0
+            val bindings = SavedSubAgentRuntimeBindings({ current }) { creates++; ModelPort { error("no network") } }
+            bindings.authorizePrimaryModel(owner, profile, child.modelId, provider)
+            current = replacement
+            val changed = profile.copy(reasoning = effort)
+            assertThrows(IllegalArgumentException::class.java) {
+                bindings.authorizePrimaryModel(owner, changed, child.modelId, provider)
+            }
+            current = saved
+            assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config) }
+            assertEquals(0, creates)
+        }
+    }
+
 }

@@ -135,8 +135,9 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     val canEditSpeed = boundConfig != null && supportsGptSpeedBinding(speedProvider, speedModel)
     val media = if (draft.isMedia && boundConfig != null) MediaReasoningSettings.resolve(boundConfig, draft.role) else null
     val canThink = boundConfig != null && (!draft.isMedia || media?.status == MediaReasoningSettings.Status.SUPPORTED)
-    val effective = boundConfig?.let { SubAgentPreferences.applyReasoning(draft, it).effectiveReasoningEffort }
-    val efforts = if (draft.isMedia) media?.efforts.orEmpty() else boundConfig?.reasoningCapabilities?.selectableEfforts.orEmpty()
+    val thinking = boundConfig?.let { subAgentThinkingPreference(draft, it, LocalConversationAgentStyle.current) }
+    val effective = thinking?.effort
+    val efforts = thinking?.options.orEmpty()
     val thinkingLabel = when {
         boundConfig == null -> "未选择有效模型"
         !canThink -> media?.label ?: "当前接口未适配"

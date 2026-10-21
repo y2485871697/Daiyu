@@ -71,7 +71,8 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         val db = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.image.$id"
         val settings = ModelSettingsStore(app, alias)
-        settings.save(ModelSettings("https://example.invalid", "image-fixture", "fixture-key", false, protocol = protocol))
+        settings.save(ModelSettings("https://example.invalid", "image-fixture", "fixture-key", false, protocol = protocol),
+            protocolChangeAuthorized = protocol != ProviderProtocol.RESPONSES)
         val probe = Probe()
         lateinit var controller: ChatController
         controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0),

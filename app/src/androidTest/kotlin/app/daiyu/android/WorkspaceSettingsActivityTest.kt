@@ -40,8 +40,11 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
     private fun openWorkspace() {
         openSettings()
         node("settings-search").assertDoesNotExist()
-        reveal("settings-row:工作区与文件", "设置").performClick()
-        awaitUniqueTag("page:工作区")
+        node("settings-row:工作区与文件").assertDoesNotExist()
+        reveal("settings-row:Linux 工具环境", "设置").performClick()
+        awaitUniqueTag("linux-tab:files")
+        node("linux-tab:files").performClick().assertIsSelected()
+        awaitUniqueTag("page:Linux 工具环境")
     }
     fun testRealWorkspaceEntryPreservesChatAndDoesNotReadOrChangeModelConfiguration() {
         setDraft("workspace unsent draft")
@@ -53,6 +56,20 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
         backToPage(activity, "page:设置"); backToChat(activity)
         assertDraft("workspace unsent draft")
+    }
+    fun testLinuxFileToolbarReturnsFromTerminalWithoutOpeningASessionOrLosingDraft() {
+        setDraft("linux files unsent draft")
+        openWorkspace()
+        node("linux-open-terminal").assertIsDisplayed().performClick()
+        awaitUniqueTag("terminal-sessions")
+        assertEquals(0, fixture.opens.get())
+        backToPage(activity, "page:Linux 工具环境")
+        node("linux-tab:basic").assertIsSelected()
+        node("linux-tab:files").performClick().assertIsSelected()
+        node("workspace-private-import").assertExists()
+        backToPage(activity, "page:设置"); backToChat(activity)
+        assertDraft("linux files unsent draft")
+        assertEquals(0, fixture.opens.get())
     }
     fun testCancelledOrInvalidPickerDoesNotAddAnyApplicationGrant() {
         val registry = PlatformSafGrants(instrumentation.targetContext)
@@ -237,4 +254,94 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             assertTrue(registry.grants().isEmpty()); assertEquals(0, fixture.opens.get())
         } finally { release.countDown(); context.deleteSharedPreferences(name) }
     }
+    fun testIntegratedSharedRefreshRestartsAfterLocationSwitch() {
+        val context = instrumentation.targetContext
+        val name = "workspace-refresh-scope-${UUID.randomUUID()}"
+        val tree = Uri.parse("content://workspace.test/tree/root")
+        val reads = mutableListOf<Uri>()
+        val blockNext = AtomicBoolean(false); val queries = AtomicInteger()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val registry = PlatformSafGrants(context.getSharedPreferences(name, Context.MODE_PRIVATE),
+            {
+                queries.incrementAndGet()
+                val snapshot = reads.toList()
+                if (blockNext.getAndSet(false)) {
+                    entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+                }
+                snapshot
+            }, { reads += it }, { reads.remove(it); Unit })
+        assertTrue(registry.accept(Intent().setData(tree).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION), true))
+        val access = WorkspaceFilesAccess(registry) { _, _ -> error("must not read directory") }
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
+                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access, integratedLinux = true)
+            } } }
+            workspaceClick("linux-files:shared")
+            workspaceControl("workspace-browse:0")
+            val before = queries.get()
+            blockNext.set(true); workspaceClick("workspace-refresh"); assertTrue(entered.await(5, TimeUnit.SECONDS))
+            workspaceClick("linux-files:rootfs")
+            mainThread { reads.clear() }
+            workspaceClick("linux-files:shared")
+            ui.waitUntil(5_000) { ui.onAllNodesWithText("还没有共享目录或文件").fetchSemanticsNodes().size == 1 }
+            assertTrue(queries.get() >= before + 2)
+            ui.onNodeWithText("正在读取共享状态").assertDoesNotExist()
+            node("workspace-grant:0").assertDoesNotExist()
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            blockNext.set(false); release.countDown()
+            mainThread { activity.setContent {} }
+            ui.waitForIdle()
+            context.deleteSharedPreferences(name)
+        }
+    }
+    fun testIntegratedScopeSwitchRejectsRetainedSharedActionsAndLateDirectoryResult() {
+        val context = instrumentation.targetContext
+        val name = "workspace-scope-${UUID.randomUUID()}"
+        val tree = Uri.parse("content://workspace.test/tree/root")
+        val reads = mutableListOf<Uri>()
+        val registry = PlatformSafGrants(context.getSharedPreferences(name, Context.MODE_PRIVATE),
+            { reads.toList() }, { reads += it }, { reads.remove(it); Unit })
+        assertTrue(registry.accept(Intent().setData(tree).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION), true))
+        val entered = CountDownLatch(1); val release = CountDownLatch(1); val returned = CountDownLatch(1)
+        val queries = AtomicInteger()
+        val access = WorkspaceFilesAccess(registry) { _, _ ->
+            if (queries.incrementAndGet() == 1) { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)); returned.countDown() }
+            JSONObject().put("ok", true).put("data", JSONObject().put("items", JSONArray().put(JSONObject()
+                .put("uri", "content://workspace.test/tree/root/document/a").put("name", "local-only.txt")
+                .put("mime_type", "text/plain"))).put("truncated", false))
+        }
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
+                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access, integratedLinux = true)
+            } } }
+            workspaceClick("linux-files:shared")
+            val browse = checkNotNull(workspaceControl("workspace-browse:0").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            val revoke = checkNotNull(workspaceControl("workspace-revoke:0").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            workspaceClick("workspace-browse:0"); assertTrue(entered.await(5, TimeUnit.SECONDS))
+            workspaceClick("linux-files:rootfs")
+            mainThread { browse(); revoke() }
+            assertEquals(1, queries.get())
+            ui.onNodeWithText("撤销共享授权").assertDoesNotExist()
+            release.countDown(); assertTrue(returned.await(5, TimeUnit.SECONDS)); ui.waitForIdle()
+            node("workspace-file:0").assertDoesNotExist()
+            workspaceClick("linux-files:shared")
+            mainThread { browse(); revoke() }
+            assertEquals(1, queries.get())
+            ui.onNodeWithText("撤销共享授权").assertDoesNotExist()
+            workspaceClick("workspace-browse:0")
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-file:0").fetchSemanticsNodes().size == 1 }
+            assertEquals(2, queries.get())
+            assertEquals(listOf(tree), registry.grants())
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            release.countDown()
+            mainThread { activity.setContent {} }
+            ui.waitForIdle()
+            context.deleteSharedPreferences(name)
+        }
+    }
+
 }

@@ -209,4 +209,87 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         assertTrue(bytes.contentEquals(File(workspace, name).readBytes()))
         assertEquals(setOf(name), workspace.list()!!.toSet())
     }
+    fun testReadOnlyRootfsWalkKeepsOpenedDirectoryAfterRenameAndRejectsStaleRealReplacement() = fixture { files, _ ->
+        val root = File(files.canonicalFile, "linux-installations/env/rootfs").apply { mkdirs() }
+        File(root, "original").writeText("keep")
+        val access = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(files, root))
+        val moved = File(root.parentFile, "opened-rootfs")
+        var checks = 0
+        val listing = access.list(cancelled = {
+            if (++checks == 2) {
+                assertTrue(root.renameTo(moved)); assertTrue(root.mkdir())
+                File(root, "replacement").writeText("not-the-open-directory")
+            }
+            false
+        })
+        assertTrue(checks >= 2)
+        assertEquals(listOf("original"), listing.entries.map { it.name })
+        assertEquals("keep", File(moved, "original").readText())
+        try { access.list(listing.directory); fail("stale root accepted") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_entry_changed", failure.message) }
+        assertEquals(listOf("replacement"), access.list().entries.map { it.name })
+    }
+
+    fun testReadOnlyRootfsAndIntermediateSymlinksAreRejectedBeforeListing() = fixture { files, _ ->
+        val root = File(files.canonicalFile, "linux-installations/env/rootfs").apply { mkdirs() }
+        val outside = File(files.canonicalFile, "outside").apply { mkdir() }
+        File(outside, "secret").writeText("untouched")
+        val access = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(files, root))
+        val movedRoot = File(root.parentFile, "saved-rootfs")
+        assertTrue(root.renameTo(movedRoot))
+        java.nio.file.Files.createSymbolicLink(root.toPath(), outside.toPath())
+        try {
+            try { access.list(); fail("linked root accepted") }
+            catch (failure: IllegalStateException) { assertEquals("workspace_root_changed", failure.message) }
+        } finally { java.nio.file.Files.delete(root.toPath()); assertTrue(movedRoot.renameTo(root)) }
+        val parent = root.parentFile
+        val movedParent = File(parent.parentFile, "saved-env")
+        assertTrue(parent.renameTo(movedParent))
+        java.nio.file.Files.createSymbolicLink(parent.toPath(), outside.toPath())
+        try {
+            try { access.list(); fail("linked ancestor accepted") }
+            catch (failure: IllegalStateException) { assertEquals("workspace_root_changed", failure.message) }
+        } finally { java.nio.file.Files.delete(parent.toPath()); assertTrue(movedParent.renameTo(parent)) }
+        assertEquals("untouched", File(outside, "secret").readText())
+    }
+
+    fun testRootfsReadOnlyBrowserPinsNestedRootAndNeverFollowsLinksOrAllowsWrites() = fixture { files, _ ->
+        val root = File(files.canonicalFile, "linux-installations/env/generation/rootfs").apply { mkdirs() }
+        val directory = File(root, "etc").apply { mkdir() }
+        File(directory, "config").writeText("keep")
+        val outside = File(files, "outside").apply { mkdir() }
+        File(outside, "secret").writeText("outside")
+        val link = File(root, "linked")
+        java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath())
+        try {
+            val access = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(files, root))
+            val listing = access.list()
+            val selected = listing.entries.single { it.name == "etc" }
+            val nested = access.list(selected)
+            assertEquals("etc", nested.directory.relative)
+            val file = nested.entries.single()
+            var exported = false
+            try { access.exportFile(file, { exported = true; ByteArrayOutputStream() }); fail("Rootfs export allowed") }
+            catch (failure: IllegalStateException) { assertEquals("workspace_read_only", failure.message) }
+            assertFalse(exported)
+            assertEquals("", access.parent(selected).directory.relative)
+            val symbolic = listing.entries.single { it.name == "linked" }
+            assertTrue(symbolic.symbolicLink); assertFalse(symbolic.directory)
+            try { access.list(symbolic); fail("followed link") } catch (_: IllegalStateException) { }
+            var opened = false
+            try { access.importFile(listing.directory, "new", { opened = true; ByteArrayInputStream(byteArrayOf(1)) }); fail("Rootfs import allowed") }
+            catch (failure: IllegalStateException) { assertEquals("workspace_read_only", failure.message) }
+            assertFalse(opened)
+            try { access.delete(selected); fail("Rootfs delete allowed") }
+            catch (failure: IllegalStateException) { assertEquals("workspace_read_only", failure.message) }
+            val renamed = File(root, "old-etc")
+            assertTrue(directory.renameTo(renamed))
+            java.nio.file.Files.createSymbolicLink(directory.toPath(), outside.toPath())
+            try { access.list(selected); fail("stale folder followed") } catch (_: Exception) { }
+            finally { java.nio.file.Files.delete(directory.toPath()) }
+            assertEquals("outside", File(outside, "secret").readText())
+            assertEquals("keep", File(renamed, "config").readText())
+        } finally { java.nio.file.Files.delete(link.toPath()) }
+    }
+
 }

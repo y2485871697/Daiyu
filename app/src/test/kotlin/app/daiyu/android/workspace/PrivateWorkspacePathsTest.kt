@@ -39,4 +39,33 @@ class PrivateWorkspacePathsTest {
             assertTrue(Files.isSymbolicLink(paths.root.toPath()))
         } finally { Files.delete(paths.root.toPath()) }
     }
+
+    @Test fun existingRootIsReadOnlyNestedAndNeverCreatesOrReplacesDirectories() = fixture { files, _ ->
+        val selected = File(files, "linux-installations/env/generation/rootfs")
+        val paths = PrivateWorkspacePaths.existingRoot(files, selected)
+        assertFalse(selected.exists())
+        try { paths.ensureRoot(); fail("missing Rootfs created") } catch (_: IllegalStateException) { }
+        assertFalse(File(files, "linux-installations").exists())
+        selected.mkdirs()
+        File(selected, "keep").writeText("preserve")
+        assertEquals(selected.canonicalFile, paths.ensureRoot())
+        assertEquals("preserve", File(selected, "keep").readText())
+        for (bad in listOf(files, files.parentFile, File(files, "linux-installations/../other"))) {
+            try { PrivateWorkspacePaths.existingRoot(files, bad); fail("invalid root accepted: $bad") }
+            catch (_: IllegalArgumentException) { }
+        }
+    }
+
+    @Test fun existingRootRejectsAnIntermediateSymlink() = fixture { files, _ ->
+        val outside = File(files, "other").apply { mkdir() }
+        val link = File(files, "linked")
+        Files.createSymbolicLink(link.toPath(), outside.toPath())
+        try {
+            val paths = PrivateWorkspacePaths.existingRoot(files, File(link, "rootfs"))
+            try { paths.ensureRoot(); fail("linked ancestor accepted") }
+            catch (failure: IllegalStateException) { assertEquals("workspace_root_changed", failure.message) }
+            assertFalse(File(outside, "rootfs").exists())
+        } finally { Files.delete(link.toPath()) }
+    }
+
 }

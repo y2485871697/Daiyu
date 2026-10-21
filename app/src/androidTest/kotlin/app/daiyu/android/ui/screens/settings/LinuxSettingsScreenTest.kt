@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.settings
 import androidx.activity.compose.setContent
 import app.daiyu.android.runningmode.*
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.terminal.*
@@ -18,10 +19,12 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         override fun read() = value
         override fun write(value: String) { this.value = value }
     })
-    private fun show() {
+    private var owner: LinuxSettingsPageOwner? = null
+    private val loads = AtomicInteger()
+    private fun show(entries: List<LinuxInstallation> = emptyList(), onOpenTerminal: (() -> Unit)? = null) {
         val catalog = object : LinuxSettingsCatalogAccess {
             override fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval { writes.incrementAndGet(); error("no configuration writes") }
-            override suspend fun load() = emptyList<LinuxInstallation>()
+            override suspend fun load(): List<LinuxInstallation> { loads.incrementAndGet(); return entries }
             override suspend fun approve(approval: FrozenLinuxApproval): List<LinuxInstallation> { writes.incrementAndGet(); error("no approval") }
             override suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation> { writes.incrementAndGet(); error("no installation") }
             override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = false
@@ -30,11 +33,12 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()))
         settings = controller
         val page = controller.enterPage()
+        owner = page
         ui.waitUntil(5_000) { page.state.value.listConfirmed }
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    LinuxSettingsScreen(controller, page, onBack = {}, runningModeStore = modes)
+                    LinuxSettingsScreen(controller, page, onBack = {}, runningModeStore = modes, onOpenTerminal = onOpenTerminal)
                 }
             }
         }
@@ -47,15 +51,81 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         show()
         node("linux-distribution-choice").assertIsDisplayed()
         revealLinux("linux-execution-choice").assertIsDisplayed()
-        revealLinux("linux-workspace").assertHasClickAction()
-        revealLinux("linux-shared-folders").assertHasClickAction()
-        revealLinux("linux-file-browser").assertHasClickAction()
+        node("linux-tab:basic").assertIsSelected()
+        node("linux-tab:files").assertHasClickAction()
+        for (tag in listOf("linux-workspace", "linux-shared-folders", "linux-file-browser")) node(tag).assertDoesNotExist()
         revealLinux("linux-tool-install:0").assertIsNotEnabled()
         for (text in listOf("预览安装（不下载）", "安装说明与诊断", "手工登记环境（高级）", "固定发行版 proot 安装（不自动注册）", "已安装")) {
             ui.onAllNodesWithText(text).assertCountEquals(0)
         }
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
+    }
+    fun testFileTabsEmbedAllThreeScopesWithoutRevokingLinuxOwnerOrStartingAnything() {
+        show()
+        val reads = loads.get()
+        node("linux-distribution-choice").performClick()
+        ui.onNodeWithText("软件兼容性更好的 glibc 环境").performClick()
+        node("linux-tab:files").performClick().assertIsSelected()
+        node("linux-files:workspace").assertIsSelected()
+        revealLinux("workspace-private-import").assertHasClickAction()
+        revealLinux("linux-files:rootfs").performClick().assertIsSelected()
+        ui.onNodeWithText("当前环境暂无可浏览的 Rootfs").assertExists()
+        node("workspace-private-import").assertDoesNotExist()
+        revealLinux("linux-files:shared").performClick().assertIsSelected()
+        revealLinux("workspace-pick-directory").assertHasClickAction()
+        revealLinux("workspace-pick-file").assertHasClickAction()
+        ui.onNodeWithText("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。").assertExists()
+        node("linux-tab:basic").performClick().assertIsSelected()
+        node("linux-distribution-choice").assertTextContains("Debian")
+        assertFalse(checkNotNull(owner).state.value.revoked)
+        assertEquals(reads, loads.get())
+        assertEquals(0, writes.get())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testBasicActionsRetainedAcrossTabsCannotChangeSelectionOrOpenTerminal() {
+        val terminalNavigations = AtomicInteger()
+        show(onOpenTerminal = { terminalNavigations.incrementAndGet() })
+        val oldTerminal = checkNotNull(node("linux-open-terminal").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        node("linux-distribution-choice").performClick()
+        val oldDebian = checkNotNull(ui.onNodeWithText("软件兼容性更好的 glibc 环境")
+            .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        ui.onNodeWithText("轻量的 musl 环境").performClick()
+        node("linux-tab:files").performClick()
+        mainThread { oldDebian(); oldTerminal() }
+        assertEquals(0, terminalNavigations.get())
+        node("linux-tab:basic").performClick()
+        mainThread { oldDebian(); oldTerminal() }
+        node("linux-distribution-choice").assertTextContains("Alpine")
+        assertEquals(0, terminalNavigations.get())
+        node("linux-open-terminal").performClick()
+        assertEquals(1, terminalNavigations.get())
+        assertFalse(checkNotNull(owner).state.value.revoked)
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+    fun testApprovedRootfsListsRealDirectoriesReadOnlyAndReturnsToParent() {
+        val root = java.io.File(instrumentation.targetContext.filesDir.canonicalFile, "rootfs-layout-${java.util.UUID.randomUUID()}").apply { mkdir() }
+        val child = java.io.File(root, "etc").apply { mkdir() }
+        java.io.File(child, "config").writeText("keep")
+        try {
+            show(listOf(LinuxInstallation("alpine", "fixture", "one", root)))
+            node("linux-tab:files").performClick()
+            revealLinux("linux-files:rootfs").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("linux-rootfs-entry:etc").fetchSemanticsNodes().size == 1 }
+            revealLinux("linux-rootfs-entry:etc").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("linux-rootfs-entry:etc/config").fetchSemanticsNodes().size == 1 }
+            node("workspace-private-import").assertDoesNotExist()
+            revealLinux("linux-rootfs-entry:etc/config").assertHasNoClickAction()
+            revealLinux("linux-rootfs-parent").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("linux-rootfs-entry:etc").fetchSemanticsNodes().size == 1 }
+            assertEquals("keep", java.io.File(child, "config").readText())
+            assertFalse(checkNotNull(owner).state.value.revoked)
+            assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+        } finally {
+            mainThread { activity.setContent {} }
+            ui.waitForIdle()
+            root.deleteRecursively()
+        }
     }
     fun testDistributionAndModePopupsOnlyChangeTheInstallChoice() {
         show()

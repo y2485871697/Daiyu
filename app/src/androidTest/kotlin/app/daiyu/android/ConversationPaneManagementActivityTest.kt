@@ -29,6 +29,15 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         node("drawer-conversation:${first.id.value}").performClick().assertIsSelected()
         node("drawer-conversation:${second.id.value}").performClick().assertIsSelected()
         node("drawer-selection-count").assertTextEquals("已选择 2 项")
+        node("drawer-conversation:${second.id.value}").performTouchInput { longClick() }
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.action_rename)).assertIsDisplayed()
+        node("drawer-selection-count").assertTextEquals("已选择 2 项")
+        node("drawer-conversation:${first.id.value}").assertIsSelected()
+        node("drawer-conversation:${second.id.value}").assertIsSelected()
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.action_rename)).assertDoesNotExist()
+        ui.onNodeWithText("完成管理").assertIsDisplayed()
+        node("drawer-selection-count").assertTextEquals("已选择 2 项")
         assertEquals(owner, mainThreadValue { MainActivity::class.java.getDeclaredField("selected").apply { isAccessible = true }.get(activity) })
         assertEquals("chat", mainThreadValue { hostValue("getRetainedPage") })
         assertEquals(before, fixture.database.exportBackup())

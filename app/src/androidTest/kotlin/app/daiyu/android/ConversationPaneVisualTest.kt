@@ -383,6 +383,41 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         assertEquals("conversation:second", action)
     }
 
+    fun testLongPressMenuWorksNormallyAndInManageModeWithoutChangingSelectionOrOpeningConversation() {
+        for (dark in listOf(false, true)) {
+            show(dark = dark)
+            val normalBounds = bounds("drawer-conversation:second")
+            node("drawer-conversation:second").performTouchInput { longClick() }
+            ui.onNodeWithText(text(R.string.action_rename)).assertIsDisplayed()
+            assertEquals(normalBounds, bounds("drawer-conversation:second"))
+            assertNull(action)
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            node("drawer-manage").performClick()
+            node("drawer-conversation:first").performClick().assertIsSelected()
+            node("drawer-selection-count").assertTextEquals("已选择 1 项")
+            val before = bounds("drawer-conversation:second")
+            node("drawer-conversation:second").performTouchInput { longClick() }
+            ui.onNodeWithText(text(R.string.action_rename)).assertIsDisplayed()
+            ui.onNodeWithText(text(R.string.conversation_pin)).assertIsDisplayed()
+            ui.onNodeWithText(text(R.string.conversation_export)).assertIsDisplayed()
+            ui.onNodeWithText(text(R.string.drawer_move_to_folder)).assertIsDisplayed()
+            ui.onNodeWithText(text(R.string.action_delete)).assertIsDisplayed()
+            node("drawer-conversation:second").assertIsNotSelected()
+            node("drawer-conversation:first").assertIsSelected()
+            node("drawer-selection-count").assertTextEquals("已选择 1 项")
+            assertEquals(before, bounds("drawer-conversation:second"))
+            assertNull(action)
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            ui.onNodeWithText(text(R.string.action_rename)).assertDoesNotExist()
+            node("drawer-selection-count").assertTextEquals("已选择 1 项")
+            node("drawer-conversation:first").performTouchInput { longClick() }
+            ui.onNodeWithText(text(R.string.action_rename)).performClick()
+            assertEquals("rename:first", action)
+            node("drawer-selection-count").assertTextEquals("已选择 1 项")
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testShortcutsStillDispatchTheirOriginalDestinations() {
         for ((tag, expected) in listOf("drawer-new" to "new", "drawer-assistant" to "assistants",
             "drawer-dock-permissions" to "permissions", "drawer-dock-models" to "models",

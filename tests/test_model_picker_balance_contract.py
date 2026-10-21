@@ -27,8 +27,8 @@ class ModelPickerBalanceContract(unittest.TestCase):
         header = picker.split('provider.balance?.let { balance ->', 1)[1].split('Icon(DaiyuIcons.ChevronDown', 1)[0]
         self.assertIn('ProviderBalanceIndicator(state = balance,', header)
         self.assertIn('chat-model-provider-balance:${provider.id}', header)
-        self.assertIn('widthIn(max = 80.dp)', header)
-        self.assertIn('TextStyle(fontSize = 9.sp)', header)
+        self.assertIn('widthIn(max = 96.dp)', header)
+        self.assertIn('TextStyle(fontSize = 12.sp, lineHeight = 18.sp)', header)
         for forbidden in ('Text(balance', 'animateChanges = true', 'statusText', 'result.reason', 'clickable('):
             self.assertNotIn(forbidden, header)
         self.assertNotIn('DaiyuIcons.Balance', picker)

@@ -41,7 +41,7 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                 mainThread {
                     activity.setContent {
                         CompositionLocalProvider(LocalLayoutDirection provides direction) {
-                            AgentAppTheme(AppearanceSettings(blurEnabled = false)) {
+                            AgentAppTheme(AppearanceSettings(blurEnabled = false), applyInterfaceScale = false) {
                                 Box(Modifier.width(320.dp).height(480.dp).padding(17.dp, 23.dp, 11.dp, 7.dp)) {
                                     ChatMenuLayer(Modifier.fillMaxSize().testTag("menu-position-host")) {
                                         Box(Modifier.fillMaxSize()) {
@@ -88,7 +88,7 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                     if (bottom) assertTrue(stable.bottom <= anchor.top) else assertTrue(stable.top >= anchor.bottom)
                     if (it == 0) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
                     else ui.onNodeWithTag("menu-position-host").performTouchInput {
-                        click(Offset(5f, size.height / 2f))
+                        click(Offset(5f, center.y))
                     }
                     ui.onNodeWithTag("menu-position-content").assertDoesNotExist()
                 }

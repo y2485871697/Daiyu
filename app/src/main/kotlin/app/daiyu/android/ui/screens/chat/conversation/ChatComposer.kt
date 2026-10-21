@@ -185,15 +185,15 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 16.dp)
+                                Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 24.dp)
                             ChatIconButton(ChatPreviewIcons.Thought, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
-                                Modifier.size(32.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 18.dp)
+                                Modifier.size(32.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 24.dp)
                             Box(Modifier.size(32.dp).testTag("chat-assistant").clip(CircleShape)
                                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button,
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
                                 contentAlignment = Alignment.Center) {
-                                AssistantAvatar(assistant, 18.dp)
+                                AssistantAvatar(assistant, 18.dp, Modifier.testTag("chat-assistant-avatar"))
                             }
                         }
                         key(state.controlOwnerKey) {
@@ -210,9 +210,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = (if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                     .copy(alpha = if (primaryEnabled) 1f else .4f),
-                                enabled = primaryEnabled, containerSize = 20.dp,
+                                enabled = primaryEnabled, containerSize = 28.dp,
                                 tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
-                                iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 10.dp else 12.dp,
+                                iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 14.dp else 16.dp,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }
                         }

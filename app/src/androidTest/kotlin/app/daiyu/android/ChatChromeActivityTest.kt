@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
@@ -22,6 +24,8 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
 import app.daiyu.android.ui.screens.chat.conversation.ChatComposer
+import app.daiyu.android.ui.screens.chat.conversation.ChatActionColors
+import app.daiyu.android.ui.screens.chat.conversation.chatActionColors
 import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
 import app.daiyu.android.ui.screens.chat.conversation.ChatTopBar
 import app.daiyu.android.ui.screens.chat.conversation.ComposerPhase
@@ -30,6 +34,8 @@ import kotlin.math.abs
 
 /** UI geometry and action dispatch; real run ownership stays covered by RunControlActivityTest. */
 class ChatChromeActivityTest : WiredActivityTestCase() {
+    private var actionColors: ChatActionColors? = null
+
     private fun composer() = ComposerUi(
         text = "  下一条消息  ", phase = ComposerPhase.RUNNING,
         modelLabel = "超长模型名称-provider/model-".repeat(20),
@@ -45,6 +51,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                     AgentAppTheme(AppearanceSettings(interfaceScale = interfaceScale,
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = true) {
+                        val colors = chatActionColors()
+                        SideEffect { actionColors = colors }
                         ChatMenuLayer(Modifier.fillMaxSize()) {
                             Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
                                 ChatTopBar("测试会话", null, actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
@@ -216,6 +224,55 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(16.sp, placeholder.layoutInput.style.fontSize)
             assertEquals(24.sp, placeholder.layoutInput.style.lineHeight)
             assertEquals(.9f, placeholder.layoutInput.density.fontScale, .001f)
+        }
+    }
+
+    fun testComposerVisibleControlsStayBalancedWithAvatarAcrossActionStates() {
+        val states = listOf(
+            Triple(composer().copy(text = "消息", phase = ComposerPhase.IDLE), "发送", 16f),
+            Triple(composer().copy(text = "", phase = ComposerPhase.RUNNING), "暂停", 14f),
+            Triple(composer().copy(text = "", phase = ComposerPhase.PAUSED), "继续", 14f),
+            Triple(composer().copy(text = "补充", phase = ComposerPhase.PAUSED,
+                supplementAvailable = true), "追加消息", 16f),
+        )
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            for ((state, label, iconDp) in states) {
+                show(state, fontScale = if (scale == 1f) 1f else 1.3f,
+                    interfaceScale = scale, dark = dark)
+                awaitVisualIdle()
+                val density = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f
+                fun assertGraphic(description: String, sizeDp: Float) {
+                    val graphic = ui.onNode(hasContentDescription(description) and !hasClickAction(),
+                        useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                    val slot = button(description).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                    assertEquals(sizeDp, graphic.width / density, .75f)
+                    assertEquals(sizeDp, graphic.height / density, .75f)
+                    assertEquals(32f, slot.width / density, .75f)
+                    assertEquals(32f, slot.height / density, .75f)
+                    assertEquals(slot.center.x, graphic.center.x, 1f)
+                    assertEquals(slot.center.y, graphic.center.y, 1f)
+                }
+                assertGraphic("附件", 24f)
+                assertGraphic("推理强度，当前为 高", 24f)
+                assertGraphic(label, iconDp)
+                val avatar = ui.onNodeWithTag("chat-assistant-avatar", useUnmergedTree = true)
+                    .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                assertEquals(18f, avatar.width / density, .75f)
+                assertEquals(18f, avatar.height / density, .75f)
+                val colors = requireNotNull(actionColors)
+                val expected = if (label == "追加消息") colors.appendContainer else colors.sendContainer
+                val tag = if (label == "发送" || label == "追加消息") "chat-send" else "chat-control"
+                val pixels = node(tag).assertIsEnabled().captureToImage().toPixelMap()
+                val matches = (0 until pixels.width).filter { x ->
+                    val color = pixels[x, pixels.height / 2]
+                    abs(color.red - expected.red) < .025f &&
+                        abs(color.green - expected.green) < .025f &&
+                        abs(color.blue - expected.blue) < .025f
+                }
+                assertTrue("$label must draw its circular surface in dark=$dark, scale=$scale", matches.isNotEmpty())
+                val diameter = (matches.last() - matches.first() + 1) / density
+                assertEquals("$label visible circle must not shrink with its 32dp touch slot", 28f, diameter, 1.5f)
+            }
         }
     }
 

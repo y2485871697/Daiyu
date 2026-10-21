@@ -1,6 +1,8 @@
 package app.daiyu.android.gui
 
 import android.os.Looper
+import androidx.annotation.AnyThread
+import androidx.annotation.MainThread
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.TaskAuthorization
 import app.daiyu.android.domain.tools.WriteEffect
@@ -126,15 +128,17 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         }
     }
     /** Synchronously closes admission; main-loop cleanup releases only this lease, never another owner. */
+    @AnyThread
     override fun close() {
         ioFence.close()
         closed.set(true)
-        val cleanup = Runnable {
-            try { GuiRuntime.close(lease) { released.set(true) } }
-            catch (_: Exception) { /* keep retention; cleanup failure is never a release receipt */ }
-        }
-        if (Looper.myLooper() === Looper.getMainLooper()) cleanup.run()
-        else try { GuiRuntime.main.post(cleanup) }
+        if (Looper.myLooper() === Looper.getMainLooper()) closeOnMain()
+        else try { GuiRuntime.main.post { closeOnMain() } }
         catch (_: Exception) { /* false/exception is NOT a drain receipt */ }
+    }
+    @MainThread
+    private fun closeOnMain() {
+        try { GuiRuntime.close(lease) { released.set(true) } }
+        catch (_: Exception) { /* keep retention; cleanup failure is never a release receipt */ }
     }
 }

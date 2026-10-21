@@ -141,6 +141,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(conversation.id, next.state.value.owner.conversationId)
         assertEquals(0, fixture.opens.get())
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testCompressionChoicesStayLocalUntilConfirmationAndPickerBackKeepsConversation() {
         seedAndSelect()
         val before = fixture.database.exportBackup()
@@ -165,6 +166,15 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         node("compression-dialog-custom").performClick().assertIsOn()
         node("compression-dialog-model").performClick()
         awaitUniqueTag("settings-model-picker")
+        val pickerView = (node("settings-model-picker").fetchSemanticsNode().root
+            as androidx.compose.ui.platform.ViewRootForTest).view
+        ui.waitUntil(5_000) {
+            var focused = false
+            instrumentation.runOnMainSync {
+                focused = pickerView.isAttachedToWindow && pickerView.hasWindowFocus()
+            }
+            focused
+        }
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         awaitUniqueTag("context-management")
         node("compression-dialog-api:${protocol.wireName}").assertIsSelected()

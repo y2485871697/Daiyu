@@ -146,7 +146,9 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
             // READ needs successful headers so that EOF, not HTTP status, is exercised.
             val connection=Connection("",block,status=if(block==Block.HEADERS) 503 else 200)
             val session=ResponsesModel(settings) {connection}.open(emptyList())
-            val worker=Worker {session.next(emptyList()) {fail("no terminal events")}}
+            val worker=Worker {session.next(emptyList()) {
+                assertTrue("only local estimate is allowed", it is ModelEvent.InputEstimate)
+            }}
             try {
                 assertTrue(connection.entered.await(5,TimeUnit.SECONDS));session.cancel()
                 assertTrue(worker.join());assertTrue(worker.failure.get() is InterruptedException)
@@ -291,7 +293,7 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
         connection.cleanupFailure=IllegalStateException("cleanup")
         val session=ResponsesModel(settings) {connection}.open(emptyList())
         val original=IOException("sink")
-        try {session.next(emptyList()) {throw original};fail("sink must fail")}
+        try {session.next(emptyList()) {if(it is ModelEvent.TextFinal) throw original};fail("sink must fail")}
         catch(caught:Exception) {assertSame(original,caught)}
         assertTrue(connection.disconnected.get())
     }

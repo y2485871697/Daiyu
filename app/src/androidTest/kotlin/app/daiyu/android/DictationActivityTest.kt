@@ -130,12 +130,25 @@ class DictationActivityTest : WiredActivityTestCase() {
         val first = platform.listeners.last()
         ui.onNodeWithContentDescription("语音输入").assertExists() // A click/PREPARING is not listening.
         assertFalse(host.state.value.listening)
-        first.onReadyForSpeech(Bundle())
-        instrumentation.waitForIdleSync()
+        val firstTarget = checkNotNull(host.state.value.target)
+        mainThread { first.onReadyForSpeech(Bundle()) }
+        awaitControl("same owned recognizer listening") {
+            host.state.value.let { it.target == firstTarget && it.listening }
+        }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithContentDescription("停止语音输入")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
         ui.onNodeWithContentDescription("停止语音输入").assertExists()
         assertTrue(host.state.value.listening)
-        first.onEndOfSpeech()
-        instrumentation.waitForIdleSync()
+        mainThread { first.onEndOfSpeech() }
+        awaitControl("same recognizer waiting for final, not capturing") {
+            host.state.value.let { it.target == firstTarget && !it.listening }
+        }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithContentDescription("语音输入")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
         ui.onNodeWithContentDescription("语音输入").assertExists() // Waiting for final is not capture.
         assertFalse(host.state.value.listening)
         mainThread { activity.select(null) } // Same nullable conversation, a different editor owner.

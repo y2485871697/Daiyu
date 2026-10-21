@@ -86,7 +86,9 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
     fun testLongCatalogRemainsLazyAndRunningStateDisablesSelection() {
         val many = (0..999).map { ModelCatalogEntryUi("model-$it", "长模型名称 $it") }
         show(ChatModelPickerState("model-999", many, enabled = false), font = 1.3f)
-        node("chat-model-list").scrollToDescendant(hasTestTag("chat-model-option:model-999"))
+        node("chat-model-list").performScrollToIndex(many.size)
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
         node("chat-model-option:model-999").assertIsDisplayed().assertIsSelected().assertIsNotEnabled()
         node("chat-model-option:model-0").assertDoesNotExist()
         assertTrue(selected.isEmpty())

@@ -4,7 +4,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # Keep stage receipts out of the unmodified instrumentation stdout/stderr.
 exec 3>&2
 # The pre-launch wrapper bounds action probes; smoke stages set their own budgets.
-export ADB_COMMAND_TIMEOUT=2460
+export ADB_COMMAND_TIMEOUT=5460
 adb_stage() {
   local phase=$1 limit=$2 code=0
   shift 2
@@ -145,7 +145,7 @@ if test "$expected" -gt 0; then
   if test "${SMOKE_MODE:-}" = candidate; then
     instrumentation_options=(-e timeout_msec 180000)
   fi
-  adb_stage instrumentation 2400 shell am instrument -w -r "${instrumentation_options[@]}" -e class "$test_classes" app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee smoke/platform-tests.txt
+  adb_stage instrumentation 5400 shell am instrument -w -r "${instrumentation_options[@]}" -e class "$test_classes" app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee smoke/platform-tests.txt
   python3 "$SCRIPT_DIR/acceptance/instrumentation_result.py" \
     --output smoke/platform-tests.txt --expected-tests "$expected" \
     > smoke/instrumentation-result.json

@@ -156,8 +156,18 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
     private fun retainCancel(entry: ControllerVirtualDisplayEntry, request: VirtualDisplayApprovalRequest?): () -> Unit =
         invokeMain("virtualDisplayCancelAction", entry, request) as () -> Unit
 
+    private fun awaitEnabled(tag: String) {
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasTestTag(tag) and isEnabled())
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+    }
+
     private fun prepare(text: String): ControllerVirtualDisplayEntry {
+        awaitEnabled("chat-draft")
         setDraft(text)
+        assertDraft(text)
+        awaitEnabled("vd-prepare-entry")
         node("vd-prepare-entry").assertIsDisplayed().assertIsEnabled().performClick()
         // Real R08 editor visit freezes inputs before the unchanged Controller prepare seam.
         node("r08-plan-freeze").assertExists().performClick()

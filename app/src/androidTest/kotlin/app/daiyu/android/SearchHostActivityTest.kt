@@ -15,7 +15,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
                 assertTrue(setText(AnnotatedString(query)))
             }
             .assertEditableText(query)
-        dismissIme(activity.window.decorView)
+        dismissIme()
     }
     private fun text(id: Int) = activity.getString(id)
     private fun page(id: Int) = node("page:${text(id)}")
@@ -37,7 +37,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.SEARCH) }
         awaitTag("search-history-dialog")
     }
-    private fun seed(title: String, key: String, body: String, later: Int = 0): Pair<Conversation, Message> {
+    private fun seed(title: String, key: String, body: String, later: Int = 0, segmentedFirstAnswer: Boolean = false): Pair<Conversation, Message> {
         lateinit var conversation: Conversation
         lateinit var first: Message
         mainThread {
@@ -47,7 +47,14 @@ class SearchHostActivityTest : WiredActivityTestCase() {
                     listOf(MessageBlock.Text("text", if (index == 0) body else "后续消息 $index")), RunStatus.COMPLETED)
                 val answer = user.copy(id = MessageId("$key-answer-$index"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
                 fixture.database.send(user, answer)
-                fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+                val segments = if (segmentedFirstAnswer && index == 0) listOf(
+                    MessageHistorySegment(answer.id, "assistant", listOf(MessageBlock.Text("first", "相同词前段"))),
+                    MessageHistorySegment(MessageId("supplement"), "user", listOf(MessageBlock.Text("supplement", "补充定位词"))),
+                    MessageHistorySegment(answer.id, "assistant", listOf(MessageBlock.Text("last", "相同词后段"))),
+                ) else emptyList()
+                fixture.database.save(answer.copy(status = RunStatus.COMPLETED,
+                    blocks = segments.filter { it.role == "assistant" }.flatMap { it.blocks },
+                    historySegments = segments))
                 if (index == 0) first = user
             }
             fixture.database.rename(conversation.id, title)
@@ -105,18 +112,9 @@ class SearchHostActivityTest : WiredActivityTestCase() {
     }
 
     fun testSearchHitOpensSupplementAndLaterRepeatedAssistantSegment() {
-        val (conversation, _) = seed("分段检索", "segments", "普通提问", later = 30)
+        val (conversation, _) = seed("分段检索", "segments", "普通提问", later = 30, segmentedFirstAnswer = true)
         val ownerId = MessageId("segments-answer-0")
-        val owner = fixture.database.messages(conversation.id, Long.MAX_VALUE, 100)
-            .single { it.second.id == ownerId }.second
-        mainThread {
-            fixture.database.save(owner.copy(historySegments = listOf(
-                MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Text("first", "相同词前段"))),
-                MessageHistorySegment(MessageId("supplement"), "user", listOf(MessageBlock.Text("supplement", "补充定位词"))),
-                MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Text("last", "相同词后段"))),
-            )))
-            activity.select(conversation)
-        }
+        mainThread { activity.select(conversation) }
         setDraft("分段检索草稿")
         openMessages()
         replaceSearchQuery("补充定位词")

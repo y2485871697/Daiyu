@@ -219,10 +219,9 @@ internal fun AssistantPreviewField(
             textStyle = textStyle, cursorBrush = SolidColor(colors.accent),
             modifier = fieldModifier.fillMaxWidth().heightIn(min = minHeight, max = maxHeight).onFocusChanged { focused = it.isFocused }
                 .clip(RoundedCornerShape(11.dp * s)).background(colors.fieldBackground)
-                .border(1.dp, if (focused) colors.accent else colors.line, RoundedCornerShape(11.dp * s))
-                .padding(1.dp).padding(horizontal = 10.dp * s, vertical = 9.dp * s),
+                .border(1.dp, if (focused) colors.accent else colors.line, RoundedCornerShape(11.dp * s)),
             decorationBox = { innerTextField ->
-                Box {
+                Box(Modifier.padding(1.dp).padding(horizontal = 10.dp * s, vertical = 9.dp * s)) {
                     if (value.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, color = colors.muted,
                         fontSize = textStyle.fontSize, lineHeight = textStyle.lineHeight,
                         fontFamily = textStyle.fontFamily)

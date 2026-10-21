@@ -117,7 +117,8 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
         val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         try {
             node("search:query").performTextReplacement("慢查询")
-            assertTrue(started.await(5, TimeUnit.SECONDS))
+            ui.mainClock.advanceTimeBy(200)
+            ui.waitUntil(5_000) { started.count == 0L }
             mainThread { oldClick() }
             assertNull(opened)
             node("search:query").performTextReplacement("新查询")

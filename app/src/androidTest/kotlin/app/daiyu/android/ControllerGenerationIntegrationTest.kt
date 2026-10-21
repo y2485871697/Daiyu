@@ -882,7 +882,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
                         protocol = GenerationProtocol.OPENAI_IMAGES_JSON, endpoint = "https://example.invalid/images/generations",
                         model = "offline", apiKey = "synthetic-memory-only")), 0, false, emptySet()), null)
             assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("完整中立备份已导出"))
-            assertEquals(5, org.json.JSONObject(file.readText()).getInt("version"))
+            assertEquals(6, org.json.JSONObject(file.readText()).getInt("version"))
             assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("已导入"))
             val historicalCopy = branchThroughProduction(target.controller, image.conversation.id)
             val historicalDisplay = staticThroughProduction(target.controller, historicalCopy.id)

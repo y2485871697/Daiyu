@@ -182,21 +182,22 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
             }
         }
         for ((text, size) in listOf("助手确认" to 14.sp, "代理确认" to 14.sp,
-            "用量确认" to 14.sp, "工具确认" to 8.sp, "用户正文" to 16.sp)) {
+            "用量确认" to 14.sp, "工具确认" to 13.sp, "用户正文" to 16.sp)) {
             val results = mutableListOf<TextLayoutResult>()
             ui.onNodeWithText(text, useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
             assertEquals(size, results.single().layoutInput.style.fontSize)
             assertEquals(.9f, results.single().layoutInput.density.fontScale)
             if (text == "用户正文") assertEquals(26.sp, results.single().layoutInput.style.lineHeight)
+            if (text == "工具确认") assertEquals(20.sp, results.single().layoutInput.style.lineHeight)
         }
-        node("tool-mini").assertHeightIsEqualTo(27.dp)
+        node("tool-mini").assertHeightIsEqualTo(48.dp)
         node("prompt-area").assertExists()
         node("memory-area").assertExists()
         ui.waitForIdle()
         val density = checkNotNull(fieldDensity.get()).density
         assertTrue(promptHeight.get() > 0 && memoryHeight.get() > 0)
-        // Measure the decorated field; text semantics exclude its 9dp vertical padding.
+        // Measure the complete decorated field in the theme density.
         assertEquals(110f, promptHeight.get() / density, .5f)
         assertEquals(90f, memoryHeight.get() / density, .5f)
     }

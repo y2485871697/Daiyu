@@ -66,6 +66,12 @@ class CandidatePackageTests(unittest.TestCase):
         self.assertIn('定向候选编译（非正式交付）', body)
         self.assertIn(':app:assembleDebug :app:assembleDebugAndroidTest', body)
         self.assertIn('--verify-revision-only', body)
+        for test_class in (
+                'app.daiyu.android.delegation.SavedSubAgentRuntimeBindingsTest',
+                'app.daiyu.android.ui.components.subagent.SubAgentThinkingPreferenceTest',
+                'app.daiyu.android.ui.screens.chat.conversation.MarkdownProjectionTest',
+                'app.daiyu.android.ui.screens.terminal.TerminalTaskOutputTest'):
+            self.assertIn("--tests '" + test_class + "'", body)
         self.assertIn('test -z "$SOURCE_RUN_ID"', body)
         self.assertIn('test -z "$SOURCE_SHA"', body)
         self.assertIn('test "$SOURCE_VARIANT" = debug', body)

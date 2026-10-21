@@ -74,16 +74,30 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
     }
 
     fun testOpenIsMemoryOnlyThenProductionReadUsesExistingOwnerAndLeavesDraftAndMessagesIntact() {
-        val f = fresh()
+        val creations = AtomicInteger()
+        val f = fresh { context, service ->
+            check(Looper.myLooper() != Looper.getMainLooper()) { "Management backend created on UI" }
+            creations.incrementAndGet()
+            ContextManagementWorker.production(context, service)
+        }
         val before = f.db.exportBackup()
-        val lazyService = field(f.controller, "contextService\$delegate") as Lazy<*>
-        assertFalse(lazyService.isInitialized())
+        // Recovery already opens the shared service on its worker; opening this visit must
+        // neither construct its backend nor change archive storage.
+        val blobRoot = File(f.app.filesDir, "neutral-context-blobs")
+        assertTrue(blobRoot.isDirectory)
+        val archiveFiles = blobRoot.walkTopDown().filter { it.isFile }.associate {
+            it.relativeTo(blobRoot).path to it.readBytes().toList()
+        }
+        assertEquals(0, creations.get())
         val adapter = open(f)
-        assertFalse(lazyService.isInitialized())
+        assertEquals(archiveFiles, blobRoot.walkTopDown().filter { it.isFile }.associate {
+            it.relativeTo(blobRoot).path to it.readBytes().toList()
+        })
+        assertEquals(0, creations.get())
         assertNull(preparation(f)) // Opening registers a visit, not a reservation.
         controlMain { adapter.refresh() }
         awaitControl("production snapshot") { adapter.state.value.operation == null && adapter.state.value.snapshot != null }
-        assertTrue(lazyService.isInitialized())
+        assertEquals(1, creations.get())
         assertEquals(f.conversation.id, adapter.state.value.snapshot!!.conversationId)
         assertEquals(2, adapter.state.value.snapshot!!.originals.size)
         assertEquals(before, f.db.exportBackup())

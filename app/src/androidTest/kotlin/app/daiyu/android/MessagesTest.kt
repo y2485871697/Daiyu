@@ -362,7 +362,9 @@ class MessagesTest : InstrumentationTestCase() {
             val connection = Connection("private service body", status)
             var opened = 0
             val session = MessagesModel(settings) { opened++; connection }.open(emptyList())
-            expectFailure(expected) { session.next(emptyList()) { fail("no events on HTTP error") } }
+            expectFailure(expected) { session.next(emptyList()) {
+                assertTrue("only local estimate is allowed on HTTP error", it is ModelEvent.InputEstimate)
+            } }
             assertEquals(1, opened); assertTrue(connection.disconnected); assertFalse(connection.instanceFollowRedirects)
         }
         for ((type, expected) in listOf("overloaded_error" to ModelFailure.SERVER, "rate_limit_error" to ModelFailure.RATE_LIMIT)) {
@@ -431,7 +433,9 @@ class MessagesTest : InstrumentationTestCase() {
         val session = MessagesModel(settings) { connection }.open(emptyList())
         val original = org.json.JSONException("caller-owned")
         try {
-            session.next(emptyList()) { session.cancel(); throw original }
+            session.next(emptyList()) { event ->
+                if (event is ModelEvent.TextFinal) { session.cancel(); throw original }
+            }
             fail("sink exception")
         } catch (caught: Exception) { assertSame(original, caught) }
         assertTrue(connection.inputClosed); assertTrue(connection.disconnected)

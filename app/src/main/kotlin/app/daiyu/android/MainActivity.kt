@@ -130,7 +130,7 @@ class MainActivity : ComponentActivity() {
     private val terminalProvider get() = (application as ChatApplication).terminalProvider
     private var linuxSettingsVisit: Any? = null
     private var linuxSettingsPageOwner by mutableStateOf<app.daiyu.android.terminal.LinuxSettingsPageOwner?>(null)
-    private var terminalPageOwner: Any? = null
+    private var terminalPageOwner by mutableStateOf<Any?>(null)
     private var terminalReturnPage = "settings"
     private val mcpSettings by lazy { app.daiyu.android.mcp.McpSettingsStore(applicationContext) }
     private var mcpSettingsPageOwner: app.daiyu.android.mcp.McpSettingsOwner? = null

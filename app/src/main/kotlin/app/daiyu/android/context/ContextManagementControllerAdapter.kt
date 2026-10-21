@@ -63,8 +63,8 @@ internal class ControlledContextManagementAdapter(
         launch(ContextManagementOperation.REFRESH, { backend.snapshot(it) }) { snapshot ->
             mutable.value = mutable.value.copy(snapshot = snapshot, archive = null, requiresRefresh = false,
                 notice = when {
-                    snapshot.configuration == null -> "压缩配置不可用；本机会话仍可查看，请明确重新保存设置"
-                    snapshot.summaryTarget == null -> "摘要目标或版本不可用；本机会话仍可查看，请重新保存独立摘要 profile 后刷新"
+                    snapshot.configuration == null -> "压缩配置不可用，请重新保存设置"
+                    snapshot.configuration.summaryModel != null && snapshot.summaryTarget == null -> "所选压缩模型不可用，请重新选择"
                     else -> null
                 })
         }
@@ -124,8 +124,8 @@ internal class ControlledContextManagementAdapter(
             state.snapshot !== expected) return
         launch(ContextManagementOperation.COMPRESS, { backend.compress(it, expected) }) { receipt ->
             mutable.value = mutable.value.copy(requiresRefresh = true, archive = null,
-                notice = if (receipt.archiveId == null) "没有可安全压缩的完整历史前缀；未发起摘要请求。请刷新查看。"
-                else "压缩已提交，原始消息保留。档案 ID：${receipt.archiveId}；请刷新查看当前上下文。")
+                notice = if (receipt.archiveId == null) "暂无可压缩内容。"
+                else "会话已压缩，原始消息保留。")
         }
     }
 

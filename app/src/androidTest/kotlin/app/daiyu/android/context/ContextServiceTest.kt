@@ -36,6 +36,28 @@ class ContextServiceTest : InstrumentationTestCase() {
         return owner
     }
     private fun reject(block: () -> Unit) { try { block(); fail("must reject") } catch (_: IllegalArgumentException) {} }
+    fun testTokenTailArchivesLogicalPrefixAndReopensWithoutLosingOriginalRows() {
+        val owner = seed(10)
+        val original = service.displayHistory(owner)
+        val policy = CompressionPolicy(contextTokens = 10000, reserveTokens = 0, tokenTail = true)
+        val expanded = MessageHistory.expand(original)
+        val cut = TokenTailCompression.selectStart(expanded, policy.contextTokens)
+        assertTrue(cut > 0)
+        var supplied: List<Message>? = null
+        val archive = service.compress(owner, policy, ContextSummarizer {
+            supplied = it.originals; "事实摘要"
+        })!!
+        assertEquals(expanded.take(cut), supplied)
+        assertEquals(original, service.displayHistory(owner))
+        val prepared = ContextService(context, db).prepareSend(owner)
+        assertEquals(archive, prepared.archiveId)
+        assertEquals(expanded.drop(cut), prepared.messages.drop(1))
+        assertEquals(original.take(cut), service.archivePage(archive).messages)
+        val hash = db.readableDatabase.rawQuery("SELECT blob_hash FROM context_archives WHERE id=?", arrayOf(archive))
+            .use { it.moveToFirst(); it.getString(0) }
+        assertEquals(cut, ArchiveCodec.decodeDocument(PrivateBlobs(context).read(hash)).logicalPrefixCount)
+    }
+
     fun testBranchAndPhysicalReviseDriveDisplayAndSendIdentically() {
         val owner = seed(); val old = service.displayHistory(owner); val copy = service.branch(owner, old[3].id)
         assertEquals(old, service.displayHistory(owner)); assertEquals(4, db.messages(copy).size)

@@ -122,7 +122,7 @@ internal class PetOverlayHost(
         if (update()) onState(PetOverlayState.VISIBLE, null)
     }
     internal fun createWindow(): FrameLayout = DragWindow(context).apply {
-        addView(PetViewFactory.createPet(context, controller, this@PetOverlayHost.resources, true, onOpenSettings),
+        addView(PetViewFactory.createPet(context, controller, this@PetOverlayHost.resources, true),
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
             if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {

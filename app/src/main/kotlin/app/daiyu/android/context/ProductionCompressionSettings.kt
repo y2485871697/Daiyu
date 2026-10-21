@@ -7,97 +7,92 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.util.WeakHashMap
 
-/** V2: retention counts complete user/assistant turns, not physical message rows.
- * Pressure uses (window - reserve) * triggerPercent / 100, exactly as ContextPolicy does.
- * A null window stays unknown, even when automatic is selected. */
+/** Production uses the original token tail; reserve affects send capacity, not the 80% trigger. */
 data class ProductionCompressionSettings(
     val automatic: Boolean = false,
     val contextWindowTokens: Long? = null,
     val reserveTokens: Long = 4096,
     val triggerPercent: Int = 80,
-    val keepTurns: Int = 4,
     val summaryModel: SummaryModelBinding? = null,
 ) {
     init {
+        require(triggerPercent == 80)
         CompressionPolicy(automatic && contextWindowTokens != null, contextWindowTokens,
-            triggerPercent, reserveTokens, keepTurns)
+            triggerPercent, reserveTokens, tokenTail = true)
     }
 
     internal fun coordinatorSettings() = CompressionSettings(
         automatic = automatic, contextWindowTokens = contextWindowTokens,
         reserveTokens = reserveTokens, triggerPercent = triggerPercent,
-        summaryModel = summaryModel, keepTurns = keepTurns)
+        summaryModel = summaryModel, tokenTail = true)
 }
 
-/** This adapter deliberately has no v1 message-to-turn conversion. */
 internal object ProductionCompressionPolicyResolver : CompressionPolicyResolver {
-    override fun resolve(settings: CompressionSettings): CompressionPolicy {
-        val policy = CompressionPolicy(
-            enabled = settings.automaticWithKnownWindow,
-            contextTokens = settings.contextWindowTokens,
-            triggerPercent = settings.triggerPercent,
-            reserveTokens = settings.reserveTokens,
-            keepTurns = requireNotNull(settings.keepTurns) { "旧版保留消息数不等于轮数；请明确重新保存压缩设置" })
-        if (policy.enabled && settings.summaryModel == null)
-            throw SummaryProfileUnavailableException(SummaryProfileUnavailableReason.MISSING)
-        return policy
-    }
+    override fun resolve(settings: CompressionSettings) = CompressionPolicy(
+        enabled = settings.automaticWithKnownWindow, contextTokens = settings.contextWindowTokens,
+        triggerPercent = 80, reserveTokens = settings.reserveTokens, tokenTail = true)
 }
 
-/** One atomic v2 record in the historical compression namespace. Explicit save is the only
- * migration: it removes v1 without interpreting its keepRecent field. No credentials here. */
+internal class CompressionSettingsWriteUnconfirmed : IllegalStateException("压缩设置写入未确认；请重新保存")
+
+/** Strict legacy decoding precedes a single atomic v3 write. Mixed records never choose a winner. */
 class ProductionCompressionSettingsStore(private val preferences: SharedPreferences) {
     constructor(context: Context) : this(context.getSharedPreferences(NAMESPACE, Context.MODE_PRIVATE))
 
     fun snapshot(): ProductionCompressionSettings = synchronized(lock) {
-        check(fenced[preferences] != true) { "压缩设置写入未确认；请重新保存" }
-        check(!preferences.contains(CompressionSettingsStore.KEY)) {
-            "旧版压缩配置使用消息数；请选择保留轮数并明确重新保存"
-        }
-        val raw = preferences.getString(KEY, null) ?: return@synchronized ProductionCompressionSettings()
+        if (fenced[preferences] == true) throw CompressionSettingsWriteUnconfirmed()
+        val present = listOf(KEY, V2_KEY, CompressionSettingsStore.KEY).filter(preferences::contains)
+        check(present.size <= 1) { "压缩配置版本冲突；请重新保存" }
+        if (present.isEmpty()) return@synchronized ProductionCompressionSettings()
+        val key = present.single()
+        val raw = requireNotNull(preferences.getString(key, null))
         val json = configurationObject(raw)
-        json.requireFields(setOf("version", "automatic", "window", "reserve", "trigger", "keepTurns", "summaryModel"))
-        require(json.configurationLong("version") == 2L) { "压缩配置版本不可用；请重新保存" }
-        ProductionCompressionSettings(
+        val legacy = key != KEY
+        val retention = if (key == CompressionSettingsStore.KEY) "keepRecent" else "keepTurns"
+        val fields = setOf("version", "automatic", "window", "reserve", "trigger", "summaryModel")
+        json.requireFields(if (legacy) fields + retention else fields)
+        require(json.configurationLong("version") == when (key) {
+            KEY -> 3L; V2_KEY -> 2L; else -> 1L
+        }) { "压缩配置版本无效" }
+        val trigger = json.configurationInt("trigger")
+        require(trigger in 10..95 && (legacy || trigger == 80))
+        if (legacy) require(json.configurationInt(retention) in
+            if (key == CompressionSettingsStore.KEY) 0..100 else 1..100)
+        val settings = ProductionCompressionSettings(
             automatic = json.configurationBoolean("automatic"),
             contextWindowTokens = if (json.isNull("window")) null else json.configurationLong("window"),
             reserveTokens = json.configurationLong("reserve"),
-            triggerPercent = json.configurationInt("trigger"),
-            keepTurns = json.configurationInt("keepTurns"),
             summaryModel = if (json.isNull("summaryModel")) null else decodeBinding(json.getJSONObject("summaryModel")))
+        if (legacy) save(settings)
+        settings
     }
 
     fun changeAutomatic(expected: Boolean): ProductionCompressionSettings = synchronized(lock) {
         val before = snapshot()
         check(before.automatic == expected) { "compression_configuration_changed" }
-        if (!expected) check(before.contextWindowTokens != null && before.summaryModel != null) {
-            "compression_configuration_incomplete"
-        }
         val next = before.copy(automatic = !expected)
         save(next)
         snapshot().also { check(it == next) { "compression_write_unconfirmed" } }
     }
 
     fun save(settings: ProductionCompressionSettings) = synchronized(lock) {
-        val raw = JSONObject().put("version", 2).put("automatic", settings.automatic)
+        val raw = JSONObject().put("version", 3).put("automatic", settings.automatic)
             .put("window", settings.contextWindowTokens ?: JSONObject.NULL)
-            .put("reserve", settings.reserveTokens).put("trigger", settings.triggerPercent)
-            .put("keepTurns", settings.keepTurns)
+            .put("reserve", settings.reserveTokens).put("trigger", 80)
             .put("summaryModel", settings.summaryModel?.let(::encodeBinding) ?: JSONObject.NULL).toString()
         fenced[preferences] = true
-        check(preferences.edit().putString(KEY, raw).remove(CompressionSettingsStore.KEY).commit()) {
-            "压缩设置未持久化；请重新保存"
-        }
-        check(preferences.getString(KEY, null) == raw && !preferences.contains(CompressionSettingsStore.KEY)) {
-            "压缩设置写入未确认；请重新保存"
-        }
+        val confirmed = preferences.edit().putString(KEY, raw).remove(V2_KEY)
+            .remove(CompressionSettingsStore.KEY).commit()
+        if (!confirmed || preferences.getString(KEY, null) != raw || preferences.contains(V2_KEY) ||
+            preferences.contains(CompressionSettingsStore.KEY)) throw CompressionSettingsWriteUnconfirmed()
         fenced.remove(preferences)
         Unit
     }
 
     companion object {
         internal const val NAMESPACE = "context-compression"
-        internal const val KEY = "compression-settings-v2"
+        internal const val KEY = "compression-settings-v3"
+        internal const val V2_KEY = "compression-settings-v2"
         private val lock = Any()
         private val fenced = WeakHashMap<SharedPreferences, Boolean>()
     }

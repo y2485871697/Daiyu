@@ -19,8 +19,8 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
     private lateinit var database: ConversationDatabase
     private lateinit var service: ContextService
     private val binding = SummaryModelBinding("independent-summary", "exact-model")
-    private var configuration = CompressionSettings(automatic = false, contextWindowTokens = 1_000_000,
-        reserveTokens = 1000, summaryModel = binding, keepTurns = 1)
+    private var configuration = ProductionCompressionSettings(automatic = false, contextWindowTokens = 1_000_000,
+        reserveTokens = 1000, summaryModel = binding).coordinatorSettings()
     private var resolutions = 0
     private var requests = 0
     private var cancellations = 0
@@ -121,7 +121,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         val lease = seed()
         val selected = worker.selectCompression(lease, worker.snapshot(lease),
             ContextManagementSelection(null, app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS))
-        configuration = configuration.copy(keepTurns = 2)
+        configuration = configuration.copy(reserveTokens = 2000)
         failure { worker.compress(lease, selected) }
         assertEquals(0, resolutions); assertEquals(0, requests)
     }
@@ -221,8 +221,11 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         assertEquals(1, resolutions); assertEquals(1, requests)
         assertFalse(configuration.automatic)
         assertEquals(expected.originals, service.displayHistory(id))
-        assertEquals(expected.originals.takeLast(2), service.prepareSend(id).messages.takeLast(2))
-        assertEquals(expected.originals.dropLast(2), service.archivePage(receipt.archiveId!!, expectedOwner = id).messages)
+        val logical = MessageHistory.expand(expected.originals)
+        val cut = TokenTailCompression.selectStart(logical, configuration.contextWindowTokens)
+        assertTrue(cut > 0)
+        assertEquals(logical.drop(cut), service.prepareSend(id).messages.drop(1))
+        assertEquals(expected.originals.take(cut), service.archivePage(receipt.archiveId!!, expectedOwner = id).messages)
         assertTrue(cancellations > 0)
     }
 
@@ -262,7 +265,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         priorArchive(lease)
         failure { worker.compress(lease, changed) }
         val archived = worker.snapshot(lease)
-        configuration = configuration.copy(keepTurns = 2)
+        configuration = configuration.copy(reserveTokens = 2000)
         failure { worker.compress(lease, archived) }
         val current = worker.snapshot(lease)
         lease.current = false
@@ -274,8 +277,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
     fun testUnknownWindowMissingAndWrongIndependentCandidateNeverFallbackOrRequest() {
         val lease = seed()
         val saved = configuration
-        for (invalid in listOf(saved.copy(contextWindowTokens = null), saved.copy(summaryModel = null),
-            saved.copy(keepTurns = null))) {
+        for (invalid in listOf(saved.copy(contextWindowTokens = null), saved.copy(summaryModel = null))) {
             configuration = invalid
             val snapshot = worker.snapshot(lease)
             assertFalse(snapshot.canCompress)
@@ -331,6 +333,10 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
 
     fun testNoSafePrefixAndPreCancelledPreparationNeverOpenTransport() {
         val lease = seed(1)
+        DatabaseTransactions { database.writableDatabase }.run { sql ->
+            sql.delete("messages", "conversation_id=? AND role='assistant'", arrayOf(lease.owner.conversationId.value))
+        }
+        assertEquals(1, service.displayHistory(lease.owner.conversationId).size)
         assertNull(worker.compress(lease, worker.snapshot(lease)).archiveId)
         assertEquals(0, requests)
         val snapshot = worker.snapshot(lease)
@@ -354,7 +360,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         val selected = CatalogSummaryBindings.encode(app.daiyu.android.storage.ProviderCatalogRunTarget(
             editor, catalog.providerIdentity, catalog.revision, record.settings.localIdentity, record.id, settings.protocol))
         ProductionCompressionSettingsStore(appContext).save(ProductionCompressionSettings(automatic = false,
-            contextWindowTokens = 1_000_000, reserveTokens = 1000, keepTurns = 1, summaryModel = selected))
+            contextWindowTokens = 1_000_000, reserveTokens = 1000, summaryModel = selected))
         appContext.getSharedPreferences("model-settings", Context.MODE_PRIVATE).edit()
             .putString("key", "malformed-private-ciphertext").commit()
         val lease = seed()

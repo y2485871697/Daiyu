@@ -17,8 +17,8 @@ import kotlin.math.roundToInt
 /** Retained Views. Every view releases observers and animation on detach. Use PetHost to mount. */
 internal object PetViewFactory {
     fun createPet(context: Context, controller: PetController, resources: PetResourcePort,
-        overlay: Boolean = false, onOpenSettings: () -> Unit): View =
-        PetPanel(context, controller, resources, overlay, onOpenSettings)
+        overlay: Boolean = false): View =
+        PetPanel(context, controller, resources, overlay)
     fun createSettings(context: Context, host: PetHost): View = PetSettingsView(context, host)
 }
 private abstract class ObservedPetLayout(context: Context, protected val controller: PetController) : LinearLayout(context) {
@@ -41,7 +41,9 @@ private abstract class ObservedPetLayout(context: Context, protected val control
     protected fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 }
 private class PetPanel(context: Context, controller: PetController, assets: PetResourcePort,
-    private val overlay: Boolean, onOpenSettings: () -> Unit) : ObservedPetLayout(context, controller) {
+    private val overlay: Boolean) : ObservedPetLayout(context, controller) {
+    private var cupboard: PetCupboardDialog? = null
+    private val assets = assets
     private val bubble = TextView(context)
     private val sprite = PetSpriteView(context, assets)
     private var previousX = 0f; private var previousY = 0f
@@ -54,7 +56,24 @@ private class PetPanel(context: Context, controller: PetController, assets: PetR
         bubble.setPadding(dp(10), dp(8), dp(10), dp(8)); bubble.setOnClickListener { controller.dismissSpeech() }
         addView(bubble, LayoutParams(dp(220), LayoutParams.WRAP_CONTENT))
         addView(sprite, LayoutParams(dp(128), dp(128)))
-        sprite.setOnClickListener { onOpenSettings() }
+        sprite.id = app.daiyu.android.R.id.pet_sprite
+        sprite.setOnClickListener {
+            val snapshot = controller.snapshot()
+            if (!isAttachedToWindow || !isShown || snapshot.closed || !snapshot.state.settings.enabled ||
+                snapshot.error?.contains("存储") == true || snapshot.state.thinking || cupboard?.isShowing == true) return@setOnClickListener
+            PetCupboardDialog(context, controller, assets, overlay).also { dialog ->
+                cupboard = dialog
+                dialog.setOnDismissListener { if (cupboard === dialog) cupboard = null }
+                try { dialog.show() }
+                catch (failure: android.view.WindowManager.BadTokenException) {
+                    cupboard = null; dialog.dismiss()
+                    android.util.Log.w("DaiyuPet", "Cupboard window unavailable", failure)
+                } catch (failure: SecurityException) {
+                    cupboard = null; dialog.dismiss()
+                    android.util.Log.w("DaiyuPet", "Cupboard overlay permission unavailable", failure)
+                }
+            }
+        }
         sprite.setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { startX = e.rawX; startY = e.rawY; previousX = startX; previousY = startY; moved = false; true }
@@ -83,6 +102,7 @@ private class PetPanel(context: Context, controller: PetController, assets: PetR
         // Parent mounting layer arbitrates in-app/overlay visibility, allowing permission-denied fallback.
         val visible = !snapshot.closed && s.settings.enabled && snapshot.error?.contains("存储") != true
         visibility = if (visible) VISIBLE else GONE
+        if (!visible) cupboard?.dismiss()
         bubble.text = s.speech; bubble.visibility = if (s.speechVisible) VISIBLE else GONE
         val displayedSpeech = if (visible && s.speechVisible) s.speech else null
         if (displayedSpeech != fadingSpeech) {
@@ -99,7 +119,16 @@ private class PetPanel(context: Context, controller: PetController, assets: PetR
             y = (if (s.settings.y < 0) (host.height * .62f).roundToInt() else s.settings.y).coerceIn(0, (host.height - height).coerceAtLeast(0)).toFloat()
         }
     }
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (!isShown) cupboard?.dismiss()
+    }
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != VISIBLE) cupboard?.dismiss()
+    }
     override fun onDetachedFromWindow() {
+        cupboard?.dismiss(); cupboard = null
         bubble.animate().cancel(); fadingSpeech = null; sprite.setRunning(false); super.onDetachedFromWindow()
     }
 }

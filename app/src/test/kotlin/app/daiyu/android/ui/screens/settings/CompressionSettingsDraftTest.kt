@@ -16,7 +16,6 @@ class CompressionSettingsDraftTest {
         assertNull(result.contextWindowTokens)
         assertFalse(result.automatic)
         assertNull(result.summaryModel)
-        assertEquals(4, result.keepTurns)
     }
 
     @Test fun explicitFieldsKeepStableBindingAndExactBudgets() {
@@ -30,9 +29,21 @@ class CompressionSettingsDraftTest {
         assertEquals(binding, draft.copy(window = "40000").summary()!!.binding)
     }
 
+    @Test fun turningCustomSummaryOffAndOnRetainsTheSelectedBinding() {
+        val selected = app.daiyu.android.context.CompressionSettingsEditor.Snapshot(
+            app.daiyu.android.context.ProductionCompressionSettings(summaryModel = binding), null)
+            .toDraft(SummaryModelBinding("unused", "placeholder"))
+        val disabled = selected.copy(configureSummary = false).compression()
+        assertNull(disabled.summaryModel)
+        val readBack = app.daiyu.android.context.CompressionSettingsEditor.Snapshot(disabled, null)
+            .toDraft(selected.binding)
+        assertFalse(readBack.configureSummary)
+        assertEquals(binding, readBack.copy(configureSummary = true).compression().summaryModel)
+    }
+
     @Test fun invalidNumbersNeverTurnIntoDefaults() {
         assertTrue(runCatching { CompressionSettingsDraftUi(binding, window = "unknown").compression() }.isFailure)
-        assertTrue(runCatching { CompressionSettingsDraftUi(binding, keepTurns = "0").compression() }.isFailure)
+        assertTrue(runCatching { CompressionSettingsDraftUi(binding, reserve = "-1").compression() }.isFailure)
         assertTrue(runCatching { CompressionSettingsDraftUi(binding, configureSummary = true).summary() }.isFailure)
     }
 

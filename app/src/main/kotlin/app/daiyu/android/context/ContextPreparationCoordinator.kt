@@ -2,18 +2,14 @@ package app.daiyu.android.context
 
 import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.Message
+import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.domain.context.CompressionPolicy
 import app.daiyu.android.domain.context.ContextRevision
 import java.util.Collections
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Required host adapter. It must reject mappings it cannot preserve, not invent capacities.
- * The legacy keepRecentMessages counts messages and allows zero; ContextPolicy counts turns.
- * Production v2 explicitly supplies keepTurns and adopts ContextPolicy's reserve-adjusted
- * threshold. A v1 record must be explicitly re-saved, never silently approximated.
- */
+/** Host adapter keeps legacy reference settings separate from production token-tail policy. */
 fun interface CompressionPolicyResolver {
     fun resolve(settings: CompressionSettings): CompressionPolicy
 }
@@ -98,6 +94,7 @@ class ContextPreparationCoordinator(
     private val settingsSnapshot: () -> CompressionSettings,
     private val policies: CompressionPolicyResolver,
     private val models: SummaryModelResolver,
+    private val chatModel: ((ProviderSnapshot, Long, BoundSummaryUsagePort?) -> BoundSummaryModel)? = null,
 ) {
     constructor(service: ContextService, settings: CompressionSettingsStore,
         policies: CompressionPolicyResolver, models: SummaryModelResolver) :
@@ -105,7 +102,8 @@ class ContextPreparationCoordinator(
 
     fun freeze(conversationId: ConversationId, pendingMessages: List<Message>,
         cancellation: ContextPreparationCancellation = ContextPreparationCancellation(),
-        summaryUsage: BoundSummaryUsagePort? = null, contextWindowOverride: Int? = null): FrozenContextPreparation {
+        summaryUsage: BoundSummaryUsagePort? = null, contextWindowOverride: Int? = null,
+        chatProvider: ProviderSnapshot? = null): FrozenContextPreparation {
         cancellation.check()
         val pending = freezeContextMessages(pendingMessages)
         require(pending.all { it.conversationId == conversationId }) { "待发送消息不属于当前会话" }
@@ -119,8 +117,14 @@ class ContextPreparationCoordinator(
         require(policy.enabled == settings.automaticWithKnownWindow)
         require(policy.contextTokens == settings.contextWindowTokens && policy.reserveTokens == settings.reserveTokens)
         val binding = settings.summaryModel
-        val bound = if (policy.enabled && binding != null) models.resolve(binding, summaryUsage) else null
-        require(bound == null || bound.binding == binding) { "摘要模型绑定已变化；未回退主模型" }
+        val bound = when {
+            !policy.enabled -> null
+            binding != null -> models.resolve(binding, summaryUsage)
+            else -> checkNotNull(chatModel) { "当前聊天摘要解析器不可用" }.invoke(
+                checkNotNull(chatProvider) { "需要本次冻结的聊天模型" },
+                checkNotNull(settings.contextWindowTokens), summaryUsage)
+        }
+        require(binding == null || bound == null || bound.binding == binding) { "摘要模型绑定已变化；未回退主模型" }
         cancellation.check()
         return FrozenContextPreparation(this, conversationId, settings, policy, pending,
             bound?.let { ModelContextSummarizer(it, cancellation) }, cancellation)

@@ -66,6 +66,31 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
         models: SummaryModelResolver = SummaryModelResolver { bound() }) =
         ContextPreparationCoordinator(service, settings, policies, models)
 
+    fun testDefaultSummaryUsesFrozenChatAndCustomResolverRemainsStrict() {
+        val owner = seed(1)
+        val snapshot = app.daiyu.android.storage.ModelSettings("https://frozen.invalid", "frozen-model", "fixture-key", false).requestSnapshot()
+        val saved = settings().copy(summaryModel = null)
+        var defaults = 0
+        var custom = 0
+        val coordinator = ContextPreparationCoordinator(service, { saved }, policies,
+            SummaryModelResolver { custom++; error("custom must not resolve") },
+            chatModel = { provider, window, usage ->
+                assertSame(snapshot, provider); assertEquals(saved.contextWindowTokens, window)
+                assertNull(usage); defaults++; bound()
+            })
+        val frozen = coordinator.freeze(owner, emptyList(), chatProvider = snapshot)
+        assertNotNull(frozen.summarizer); assertEquals(1, defaults); assertEquals(0, custom)
+        val disabled = ContextPreparationCoordinator(service, { saved.copy(automatic = false) }, policies,
+            SummaryModelResolver { error("disabled custom") }, chatModel = { _, _, _ -> error("disabled default") })
+        assertNull(disabled.freeze(owner, emptyList(), chatProvider = snapshot).summarizer)
+        val explicit = ContextPreparationCoordinator(service, { saved.copy(summaryModel = binding) }, policies,
+            SummaryModelResolver { custom++; throw IllegalArgumentException("bad custom") },
+            chatModel = { _, _, _ -> error("must not fall back") })
+        try { explicit.freeze(owner, emptyList(), chatProvider = snapshot); fail("custom failure must remain") }
+        catch (failure: IllegalArgumentException) { assertEquals("bad custom", failure.message) }
+        assertEquals(1, custom); assertEquals(1, defaults)
+    }
+
     fun testRunWindowOverridesSavedCapacityWithoutMutatingPreferences() {
         val owner = seed(1)
         val saved = settings().copy(automatic = false, contextWindowTokens = 100000)
@@ -118,18 +143,16 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
         }
     }
 
-    fun testMissingOrUnavailableBindingNeverFallsBackAndStillEnforcesBudget() {
+    fun testUnavailableCustomBindingNeverFallsBackAndStillEnforcesBudget() {
         val owner = seed(); val original = service.displayHistory(owner)
-        for (missing in listOf(false, true)) {
-            var resolved = 0
-            val config = settings().copy(summaryModel = if (missing) null else binding)
-            val coordinator = coordinator({ config }, SummaryModelResolver { resolved++; null })
-            try { coordinator.prepare(coordinator.freeze(owner, listOf(pending(owner)))); fail() }
-            catch (_: ContextCapacityExceededException) { }
-            assertEquals(if (missing) 0 else 1, resolved)
-            assertEquals(original, service.displayHistory(owner))
-            assertNull(service.prepareSend(owner).archiveId)
-        }
+        var resolved = 0
+        val coordinator = ContextPreparationCoordinator(service, { settings() }, policies,
+            SummaryModelResolver { resolved++; null }, chatModel = { _, _, _ -> error("custom cannot fall back") })
+        try { coordinator.prepare(coordinator.freeze(owner, listOf(pending(owner)))); fail() }
+        catch (_: ContextCapacityExceededException) { }
+        assertEquals(1, resolved)
+        assertEquals(original, service.displayHistory(owner))
+        assertNull(service.prepareSend(owner).archiveId)
     }
 
     fun testKnownBudgetIsEnforcedEvenWhenAutomaticCompressionIsDisabled() {

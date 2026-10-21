@@ -3235,7 +3235,7 @@ class ChatController internal constructor(private val application:Application,
             val modelUser = if (gui == null) user else app.daiyu.android.gui.GuiConfirmedModelPort.project(
                 user, checkNotNull(gui.delivery))
             val frozen = coordinator.freeze(conversationId,listOf(modelUser),token.cancellation, summaryUsage = summary.usagePort,
-                contextWindowOverride = requestProvider.contextWindowOverride)
+                contextWindowOverride = requestProvider.contextWindowOverride, chatProvider = requestProvider)
             if (video == null) coordinator.prepare(frozen) else {
                 // A video run must not silently replace physical/retained history with a text summary.
                 // Keep the same policy/budget and acceptance revision, but send every physical row.

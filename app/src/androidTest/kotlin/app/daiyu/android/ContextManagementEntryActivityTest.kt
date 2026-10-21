@@ -83,15 +83,16 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
     @Suppress("UNCHECKED_CAST")
     private fun offerConfirmationMetadata(adapter: ContextManagementControllerAdapter) {
         // Test-only presentation probe: retain the REAL production read/owner/adapter, but supply
-        // non-secret, unsaved target metadata so the REAL Panel can arm its confirmation callback.
+        // non-secret, unsaved target metadata for the compact dialog and lifecycle revocation probe.
         // No profile/settings/credentials are read or saved here. This is NOT a summary I/O test.
         val mutable = adapter.javaClass.getDeclaredField("mutable").apply { isAccessible = true }
             .get(adapter) as MutableStateFlow<ContextManagementState>
         val binding = SummaryModelBinding("entry-stop-fixture", "entry-stop-model")
         val state = mutable.value
+        val configuration = CompressionSettings(automatic = false, contextWindowTokens = 10000,
+            reserveTokens = 1000, keepTurns = 1, summaryModel = binding)
         mutable.value = state.copy(snapshot = checkNotNull(state.snapshot).copy(
-            configuration = CompressionSettings(automatic = false, contextWindowTokens = 10000,
-                reserveTokens = 1000, keepTurns = 1, summaryModel = binding),
+            configuration = configuration, savedConfiguration = configuration,
             summaryTarget = SummaryProfileDescriptor(binding, "entry-stop-revision",
                 "https://entry-stop.invalid/v1/responses", "entry-stop-api-model")))
     }
@@ -177,47 +178,37 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testMissingSummaryConfigurationStillAllowsLocalContextAndExplicitRefresh() {
+    fun testUnavailableSelectionOffersOnlyCompactNoticeAndExplicitRefresh() {
         seedAndSelect()
         val before = fixture.database.exportBackup()
         val adapter = openAndAwait()
-        node("context-view").scrollToVisible().performClick()
-        node("context-refresh").assertExists().performClick()
-        awaitControl("explicit local refresh") { adapter.state.value.operation == null }
-        node("context-notice").assertExists()
-        assertFalse(adapter.state.value.confirmingCompression)
-        assertEquals(before, fixture.database.exportBackup())
-        assertEquals(0, fixture.opens.get())
-    }
-
-    fun testSelectionFailureCanRefreshAndReturnToTargetWithoutAutomaticRequest() {
-        seedAndSelect()
-        val before = fixture.database.exportBackup()
-        val adapter = openAndAwait()
-        mainThread { offerConfirmationMetadata(adapter) }
-        node("compression-dialog-custom").performClick().assertIsOff()
+        mainThread {
+            // Force a deterministic unavailable configuration without using any installed profile.
+            val mutable = adapter.javaClass.getDeclaredField("mutable").apply { isAccessible = true }
+                .get(adapter) as MutableStateFlow<ContextManagementState>
+            val snapshot = requireNotNull(mutable.value.snapshot)
+            mutable.value = mutable.value.copy(snapshot = snapshot.copy(configuration = null, savedConfiguration = null))
+        }
+        node("context-view").assertDoesNotExist()
+        node("context-refresh").assertDoesNotExist()
+        node("context-advanced").assertDoesNotExist()
         node("context-compress").performClick()
-        awaitControl("failed one-shot selection") {
+        awaitControl("unavailable selection requires refresh") {
             adapter.state.value.operation == null && adapter.state.value.requiresRefresh
         }
-        assertFalse(adapter.state.value.confirmingCompression)
-        node("context-select-target").assertIsNotEnabled()
-        node("context-refresh").performClick()
-        awaitControl("refresh after selection failure") {
+        awaitUniqueTag("compression-dialog-refresh")
+        node("context-compress").assertIsNotEnabled()
+        node("context-compression-confirmation").assertDoesNotExist()
+        node("context-notice").assertExists()
+        node("compression-dialog-refresh").scrollToVisible().performClick()
+        awaitControl("explicit refresh returns to compact choices") {
             adapter.state.value.operation == null && !adapter.state.value.requiresRefresh
         }
-        node("context-select-target").assertIsEnabled().performClick()
-        awaitControl("return to target reads only") { adapter.state.value.operation == null }
-        mainThread { offerConfirmationMetadata(adapter) }
-        ui.mainClock.advanceTimeByFrame()
-        ui.waitUntil(5_000) {
-            ui.onAllNodes(hasTestTag("compression-dialog-custom") and isOn()).fetchSemanticsNodes().size == 1
-        }
-        node("compression-dialog-custom").assertIsOn()
-        node("context-compress").performClick()
-        node("context-compression-confirmation").assertExists()
-        assertTrue(adapter.state.value.confirmingCompression)
+        node("compression-dialog-custom").assertExists()
+        node("context-compress").assertIsEnabled()
+        assertFalse(adapter.state.value.confirmingCompression)
         assertEquals(before, fixture.database.exportBackup())
+        assertDraft("retained unsent draft")
         assertEquals(0, fixture.opens.get())
     }
 
@@ -374,10 +365,10 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         }
         node("context-management").assertDoesNotExist()
         val old = openAndAwait()
-        mainThread { offerConfirmationMetadata(old) }
-        node("context-compress").assertIsDisplayed().performClick()
+        mainThread { offerConfirmationMetadata(old); old.requestCompression() }
+        awaitUniqueTag("context-confirm-compress")
         mainThread { assertTrue(old.state.value.confirmingCompression) }
-        // This is the same adapter method retained by the actual Panel's confirmation button.
+        // This is the same adapter method retained by the actual dialog's confirmation button.
         val oldConfirm: () -> Unit = old::confirmCompression
         stopped {
             assertNoVisit()

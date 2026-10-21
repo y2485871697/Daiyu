@@ -16,6 +16,12 @@ internal object ProductionContextPreparation {
                 ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
             },
             policies = ProductionCompressionPolicyResolver,
+            chatModel = { snapshot, window, usage ->
+                requireWorker()
+                check(usage != null) { "production_summary_requires_runtime_preparation" }
+                val configuration = CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, window)
+                requireNotNull(ProviderSummaryModelResolver { configuration }.resolve(configuration.binding, usage))
+            },
             models = object : SummaryModelResolver {
                 private val provider = ProviderSummaryModelResolver { binding ->
                     requireWorker()

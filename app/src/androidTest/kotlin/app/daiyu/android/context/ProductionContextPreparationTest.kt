@@ -55,9 +55,9 @@ class ProductionContextPreparationTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync { result.set(ProductionContextPreparation.create(context, service)) }
         assertTrue(reads.isEmpty())
         // Persist after create: the factory must not have captured stale defaults.
-        ProductionCompressionSettingsStore(base).save(ProductionCompressionSettings(keepTurns = 7))
+        ProductionCompressionSettingsStore(base).save(ProductionCompressionSettings(reserveTokens = 7000))
         val frozen = result.get().freeze(ConversationId("fixture"), emptyList())
-        assertEquals(7, frozen.policy.keepTurns)
+        assertEquals(7000L, frozen.policy.reserveTokens)
         assertEquals(listOf(ProductionCompressionSettingsStore.NAMESPACE), reads)
     }
 

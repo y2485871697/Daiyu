@@ -49,13 +49,14 @@ object ContextRevision {
 }
 
 data class CompressionPolicy(val enabled: Boolean = false, val contextTokens: Long? = null,
-    val triggerPercent: Int = 80, val reserveTokens: Long = 4096, val keepTurns: Int = 4) {
+    val triggerPercent: Int = 80, val reserveTokens: Long = 4096, val keepTurns: Int = 4,
+    val tokenTail: Boolean = false) {
     init { require(contextTokens == null || contextTokens in 1024..10_000_000)
         require(triggerPercent in 10..95 && reserveTokens >= 0 && keepTurns in 1..100)
         require(contextTokens == null || reserveTokens < contextTokens) }
     /** Unknown provider window remains unknown; never guess a capacity for automatic compression. */
     fun shouldCompress(estimatedTokens: Long): Boolean = enabled && contextTokens != null &&
-        estimatedTokens >= (contextTokens - reserveTokens) * triggerPercent / 100
+        estimatedTokens >= (if (tokenTail) contextTokens else contextTokens - reserveTokens) * triggerPercent / 100
 
     /** Sending capacity is independent of automatic compression. Unknown stays unknown. */
     val sendBudgetTokens: Long? get() = contextTokens?.minus(reserveTokens)

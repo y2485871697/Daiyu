@@ -111,10 +111,16 @@ class ProviderModelSelectionDialogTest : WiredActivityTestCase() {
     fun testHostFailureKeepsSelectionOpenForCancelWithoutSecondConfirm() {
         show(failConfirmation = true)
         node("provider-model-option:alpha").performClick()
-        node("dialog-confirm").performClick()
-        ui.onNodeWithText("导入失败，原目录保留").assertExists()
+        node("dialog-confirm").assertIsEnabled().assertIsDisplayed().performClick()
+        ui.runOnIdle {
+            assertEquals("one real confirmation callback", 1, confirmations.size)
+            assertEquals(setOf("alpha"), confirmations.single().selectedIds)
+            assertEquals(0, dismissals)
+        }
+        ui.onNodeWithText("导入失败，原目录保留").assertExists().assertIsDisplayed()
         node("provider-model-option:alpha").assertIsOn()
-        node("dialog-cancel").performClick()
+        node("dialog-cancel").assertIsEnabled().assertIsDisplayed().performClick()
+        node("provider-model-selection").assertDoesNotExist()
         ui.runOnIdle { assertEquals(1, confirmations.size); assertEquals(1, dismissals) }
     }
 

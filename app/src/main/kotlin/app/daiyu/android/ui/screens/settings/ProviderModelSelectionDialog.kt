@@ -76,7 +76,7 @@ internal fun ProviderModelSelectionDialog(
                 Text(if (selection.totalCount == 0) "远端模型目录为空" else "没有匹配的模型",
                     modifier = Modifier.padding(vertical = 16.dp).testTag("provider-model-empty"))
             } else {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp).testTag("provider-model-list")) {
+                LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 360.dp).testTag("provider-model-list")) {
                     items(selection.visibleModels, key = { it.id }) { model ->
                         val checked = model.id in selection.selectedIds
                         SettingsRow(

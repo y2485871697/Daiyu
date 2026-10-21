@@ -14,6 +14,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
+import app.daiyu.android.ui.haptics.hapticClick
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.runningmode.*
 import app.daiyu.android.terminal.*
@@ -64,6 +67,9 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     var tabScope by remember(page) { mutableStateOf(Any()) }
     val renderedTabScope = tabScope
     fun basicCurrent() = tab == LinuxSettingsTab.BASIC && tabScope === renderedTabScope && !page.state.value.revoked
+    val choiceScope = remember(page, runningMode) { Any() }
+    val currentChoiceScope = rememberUpdatedState(choiceScope)
+    fun choiceCurrent() = basicCurrent() && currentChoiceScope.value === choiceScope
     var confirmInstall by remember(page) { mutableStateOf(false) }
     var confirmUse by remember(page) { mutableStateOf(false) }
     var confirmPending by remember(page) { mutableStateOf(false) }
@@ -88,7 +94,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     else installation
 
     fun choose(nextDistribution: String, nextMode: LinuxExecutionMode) {
-        if (!basicCurrent() || !choiceEnabled || nextMode == LinuxExecutionMode.CHROOT && runningModeStore.mode.value != RunningMode.ROOT) return
+        if (!choiceCurrent() || !choiceEnabled || nextMode == LinuxExecutionMode.CHROOT && runningModeStore.mode.value != RunningMode.ROOT) return
         confirmInstall = false
         confirmUse = false
         distributionDraft = nextDistribution
@@ -117,8 +123,14 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                 WorkspaceSettingsScreen(onBack = leave, pageTitle = "Linux 工具环境", integratedLinux = true,
                     rootfs = rootfs, onOpenTerminal = onOpenTerminal)
             } else SettingsScaffoldPage("Linux 工具环境", leave, actions = {
-                if (onOpenTerminal != null) app.daiyu.android.ui.haptics.miuix.IconButton(onClick = { if (basicCurrent()) onOpenTerminal() },
-                    modifier = Modifier.size(48.dp).testTag("linux-open-terminal")) { DaiyuIcon(DaiyuIcons.Terminal, "终端") }
+                if (onOpenTerminal != null) {
+                    val openTerminal: () -> Unit = { if (basicCurrent()) onOpenTerminal() }
+                    val semanticOpenTerminal = hapticClick(true, openTerminal)
+                    app.daiyu.android.ui.haptics.miuix.IconButton(onClick = openTerminal,
+                        modifier = Modifier.size(48.dp).testTag("linux-open-terminal").semantics {
+                            onClick { semanticOpenTerminal(); true }
+                        }) { DaiyuIcon(DaiyuIcons.Terminal, "终端") }
+                }
             }) {
                 item("linux-status") {
                     SettingsCard(Modifier.padding(top = 12.dp)) {
@@ -173,11 +185,13 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                         LinuxChoiceRow("Linux 发行版", distributionName(distribution), "linux-distribution-choice", choiceEnabled,
                             choices = listOf("Alpine" to "轻量的 musl 环境", "Debian" to "软件兼容性更好的 glibc 环境"),
                             selectedIndex = if (distribution.equals("debian", true)) 1 else 0,
+                            popupScope = choiceScope, ownerCurrent = ::choiceCurrent,
                             onSelect = { choose(if (it == 0) "alpine" else "debian", mode) })
                         LinuxChoiceRow("运行方式", modeName(mode), "linux-execution-choice", choiceEnabled,
                             choices = listOf("普通模式 · PRoot" to "无需 Root，使用独立的私有 Linux 环境") +
                                 if (rootMode) listOf("Root 模式 · chroot" to "使用 Root 与独立挂载空间，保留已有环境") else emptyList(),
                             selectedIndex = if (mode == LinuxExecutionMode.CHROOT) 1 else 0,
+                            popupScope = choiceScope, ownerCurrent = ::choiceCurrent,
                             onSelect = { choose(distribution, if (it == 0) LinuxExecutionMode.PROOT else LinuxExecutionMode.CHROOT) })
                     }
                 }
@@ -236,12 +250,12 @@ private fun modeName(mode: LinuxExecutionMode) = if (mode == LinuxExecutionMode.
 
 @Composable
 private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: Boolean,
-    choices: List<Pair<String, String>>, selectedIndex: Int, onSelect: (Int) -> Unit) {
+    choices: List<Pair<String, String>>, selectedIndex: Int, popupScope: Any, ownerCurrent: () -> Boolean, onSelect: (Int) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val colors = MiuixTheme.colorScheme
     Box(Modifier.fillMaxWidth()) {
         Row(Modifier.testTag(tag).fillMaxWidth().heightIn(min = 72.dp)
-            .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null) { expanded = true }
+            .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null) { if (ownerCurrent()) expanded = true }
             .padding(horizontal = 16.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title, modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1)
             Text(value, style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary)
@@ -251,17 +265,25 @@ private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: B
             }
         }
         Box(Modifier.align(Alignment.BottomEnd)) {
-            WithoutPressRipple {
-                DropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.widthIn(max = 300.dp),
-                    shape = RoundedCornerShape(22.dp), containerColor = colors.surface) {
-                    choices.forEachIndexed { index, choice ->
-                        DropdownMenuItem(text = {
-                            Column(Modifier.widthIn(max = 232.dp).padding(vertical = 8.dp)) {
-                                Text(choice.first, style = MiuixTheme.textStyles.body1)
-                                Text(choice.second, style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary)
+            key(popupScope) {
+                WithoutPressRipple {
+                    DropdownMenu(expanded, onDismissRequest = { if (ownerCurrent()) expanded = false }, modifier = Modifier.widthIn(max = 300.dp),
+                        shape = RoundedCornerShape(22.dp), containerColor = colors.surface) {
+                        choices.forEachIndexed { index, choice ->
+                            val selectChoice: () -> Unit = {
+                                if (enabled && expanded && ownerCurrent()) { expanded = false; onSelect(index) }
                             }
-                        }, trailingIcon = { if (index == selectedIndex) DaiyuIcon(DaiyuIcons.Check, "已选择", Modifier.size(22.dp)) },
-                            onClick = { expanded = false; onSelect(index) })
+                            val semanticSelectChoice = hapticClick(enabled, selectChoice)
+                            DropdownMenuItem(text = {
+                                Column(Modifier.widthIn(max = 232.dp).padding(vertical = 8.dp)) {
+                                    Text(choice.first, style = MiuixTheme.textStyles.body1)
+                                    Text(choice.second, style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary)
+                                }
+                            }, trailingIcon = { if (index == selectedIndex) DaiyuIcon(DaiyuIcons.Check, "已选择", Modifier.size(22.dp)) },
+                                enabled = enabled,
+                                modifier = Modifier.semantics { onClick { semanticSelectChoice(); true } },
+                                onClick = selectChoice)
+                        }
                     }
                 }
             }

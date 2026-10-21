@@ -22,6 +22,33 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 
 class ToolCardReadabilityTest : WiredActivityTestCase() {
+    private var displayRestore: String? = null
+
+    private fun displaySize(command: String): String =
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
+            .bufferedReader().use { it.readText() }
+
+    override fun setUp() {
+        val sizes = displaySize("wm size")
+        val original = Regex("Override size: (\\d+x\\d+)").find(sizes)?.groupValues?.get(1) ?: "reset"
+        check(Regex("Physical size: \\d+x\\d+").containsMatchIn(sizes)) { sizes }
+        displayRestore = original
+        check(displaySize("wm size 1216x2432").isBlank())
+        instrumentation.waitForIdleSync()
+        super.setUp()
+    }
+
+    override fun cleanupAfterLegacy() {
+        try { super.cleanupAfterLegacy() }
+        finally {
+            displayRestore?.let { original ->
+                check(displaySize("wm size $original").isBlank())
+                displayRestore = null
+                instrumentation.waitForIdleSync()
+            }
+        }
+    }
+
     private val phoneDensity = 525f / 160f
     private val prose = "已收到设备快照，详情见技术详情"
     private val title = "查询设备状态和当前系统内存使用情况"
@@ -53,6 +80,9 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             }
         } }
         ui.waitForIdle()
+        val expectedWidth = ((if (narrow) 320f else 1216f / phoneDensity) / scale - 28f) * phoneDensity * scale
+        val actual = node("readability-list").fetchSemanticsNode().boundsInRoot
+        assertEquals("Fixture must provide the requested phone-density canvas", expectedWidth, actual.width, 1f)
     }
 
     private fun layout(target: SemanticsNodeInteraction): TextLayoutResult {
@@ -93,7 +123,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertTrue(titleBounds.left >= headerBounds.left && stateBounds.right <= headerBounds.right)
             ui.onNodeWithTag("tool-step-header:readability").performClick()
             ui.onNodeWithContentDescription("复制安全摘要").assertDoesNotExist()
-            val body = layout(ui.onNodeWithText(prose, useUnmergedTree = true).scrollToVisible())
+            val body = layout(ui.onNodeWithText(prose, useUnmergedTree = true).scrollToVisible().assertIsDisplayed())
             assertEquals(14.sp, body.layoutInput.style.fontSize)
             assertEquals(21.sp, body.layoutInput.style.lineHeight)
             assertFalse(body.hasVisualOverflow)
@@ -108,7 +138,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             ui.onNodeWithText("收起技术详情").assertDoesNotExist()
             ui.onNodeWithTag("tool-step-technical:readability").assert(
                 SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
-            val args = layout(ui.onNodeWithTag("tool-document:调用参数", useUnmergedTree = true).scrollToVisible())
+            val args = layout(ui.onNodeWithTag("tool-document:调用参数", useUnmergedTree = true).scrollToVisible().assertIsDisplayed())
             assertEquals(13.sp, args.layoutInput.style.fontSize)
             assertEquals(20.sp, args.layoutInput.style.lineHeight)
             ui.onNodeWithTag("tool-step-technical:readability").scrollToVisible().performClick()
@@ -136,7 +166,10 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             val previewBounds = preview.fetchSemanticsNode().boundsInRoot
             val hintBounds = hint.fetchSemanticsNode().boundsInRoot
             assertTrue(hintBounds.top < previewBounds.bottom)
-            assertTrue(hintBounds.bottom <= previewBounds.bottom + 1f)
+            val documentBounds = ui.onNodeWithTag("tool-document:标准输出").fetchSemanticsNode().boundsInRoot
+            assertTrue("Hint must stay inside the output surface", hintBounds.bottom <= documentBounds.bottom + 1f)
+            assertTrue("The first two preview lines must stay clear",
+                hintBounds.top + 1f >= previewBounds.top + previewLayout.getLineBottom(1))
             ui.onNodeWithTag("tool-document:标准输出").performClick()
             val full = ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(output)
             assertEquals(13.sp, layout(full).layoutInput.style.fontSize)

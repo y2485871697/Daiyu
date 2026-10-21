@@ -151,12 +151,39 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         modes.save(RunningMode.ROOT); ui.waitForIdle()
         revealLinux("linux-execution-choice").performClick()
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertExists()
+        val oldChroot = checkNotNull(ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境")
+            .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         modes.save(RunningMode.NORMAL); ui.waitForIdle()
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
         ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
+        mainThread { oldChroot() }
+        revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
+        modes.save(RunningMode.ROOT); ui.waitForIdle()
+        mainThread { oldChroot() }
+        revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
+    }
+
+
+    fun testOpenModePopupRebuildsAcrossRunningModesWithoutSelectingAnything() {
+        show()
+        modes.save(RunningMode.ROOT); ui.waitForIdle()
+        revealLinux("linux-execution-choice").performClick()
+        val oldChroot = checkNotNull(ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境")
+            .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        modes.save(RunningMode.SHIZUKU); ui.waitForIdle()
+        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
+        ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").assertIsDisplayed()
+        mainThread { oldChroot() }
+        modes.save(RunningMode.ROOT); ui.waitForIdle()
+        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertIsDisplayed()
+        mainThread { oldChroot() }
+        ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
+        revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
+        assertFalse(checkNotNull(owner).state.value.revoked)
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
     }
 
     override fun tearDown() {

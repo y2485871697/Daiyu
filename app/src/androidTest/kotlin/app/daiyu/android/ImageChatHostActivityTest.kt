@@ -152,18 +152,18 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
     private fun waitImages(count: Int) {
         ui.waitUntil(10_000) { host().session.attachments.state.value.ready.size == count }
     }
-    private fun authorize() {
-        node("image-host-authorize").assertDoesNotExist()
-        ui.onNodeWithContentDescription("附件").performClick()
-        node("image-host-authorize").scrollToVisible().performClick()
-        ui.waitUntil(10_000) { ui.onAllNodesWithTag("dialog-confirm").fetchSemanticsNodes().isNotEmpty() }
-        node("dialog-confirm").performClick()
-        ui.waitUntil(10_000) { host().authorizationLabel.startsWith("已声明") }
+    private fun setImageCapability(supported: Boolean? = true) {
+        settings.modelCatalogSnapshot()
+        settings.modelCatalog.updateRegisteredModel(settings.load().model) { current ->
+            val record = checkNotNull(current)
+            record.copy(settings = record.settings.copy(visionOverride = supported))
+        }
+        assertEquals(supported, controller.providers.freezeActive().settings.visionOverride)
     }
 
     fun testPureImageMainSendUsesRealImageDraftAndAcceptsExactlyOnce() {
         assertDraft("")
-        pick(1); waitImages(1); authorize()
+        pick(1); waitImages(1); setImageCapability()
         val owner = host().session.owner
         node("chat-send").assertIsEnabled().performClick()
         // Retained callbacks cannot enqueue a second send while the original is preparing.
@@ -184,7 +184,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
 
     fun testCurrentPageCancelPreparationWinsBeforeCommitAndStaleAttemptCannotCancelNext() {
         setDraft("取消前的草稿")
-        pick(1); waitImages(1); authorize()
+        pick(1); waitImages(1); setImageCapability()
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         beforeFactory = { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
         val session = host().session
@@ -212,18 +212,21 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         assertDraft("")
     }
 
-    fun testRealPickerOrderedImportExplicitCapabilitySendAndHistoryRead() {
+    fun testRealPickerOrderedImportUsesCatalogCapabilityAndHistoryRead() {
         setDraft("正文在图片之前")
         pick(2); waitImages(2)
         val owner = host().session.owner
         val ordered = host().session.attachments.state.value.ready.map { it.attachment.id }
         assertEquals(2, documents.opens.get())
-        // Unknown capability never submits, including a plausible model name.
-        node("chat-send").performClick()
-        ui.waitUntil(10_000) { !host().sending }
-        assertEquals(0, calls.get()); assertEquals(2, host().session.attachments.state.value.ready.size)
-        assertDraft("正文在图片之前")
-        authorize()
+        // Unknown or explicitly unsupported catalog capability must retain the draft without submitting.
+        for (supported in listOf<Boolean?>(null, false)) {
+            setImageCapability(supported)
+            node("chat-send").performClick()
+            ui.waitUntil(10_000) { !host().sending }
+            assertEquals(0, calls.get()); assertEquals(2, host().session.attachments.state.value.ready.size)
+            assertDraft("正文在图片之前")
+        }
+        setImageCapability()
         node("chat-send").performClick()
         awaitControl("one image request") { calls.get() == 1 && controller.active == null }
         ui.waitUntil(10_000) { !host().sending && host().session.attachments.state.value.items.isEmpty() }
@@ -258,7 +261,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
 
     fun testUnknownReceiptRetainsExactDraftAndDisablesResend() {
         setDraft("不能重发")
-        pick(1); waitImages(1); authorize()
+        pick(1); waitImages(1); setImageCapability()
         val owner = host().session.owner
         val before = host().session.attachments.state.value.ready.map { it.attachment }
         controller.database.writableDatabase.execSQL("CREATE TRIGGER fail_image_host BEFORE INSERT ON messages WHEN NEW.role='assistant' BEGIN SELECT RAISE(IGNORE); END")
@@ -287,10 +290,13 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         controller.database.writableDatabase.execSQL("DROP TRIGGER fail_image_host")
     }
 
-    fun testChangedExactModelDoesNotReuseCapabilityDeclaration() {
+    fun testChangedExactModelDoesNotReusePreviousModelCatalogCapability() {
         setDraft("保留")
-        pick(1); waitImages(1); authorize()
+        pick(1); waitImages(1); setImageCapability()
+        val previousModel = settings.load().model
         settings.save(settings.load().copy(model = "different-exact-model"))
+        assertEquals(true, settings.modelCatalog.readRegisteredModel(previousModel)?.settings?.visionOverride)
+        assertNull(controller.providers.freezeActive().settings.visionOverride)
         node("chat-send").performClick()
         ui.waitUntil(10_000) { !host().sending }
         assertDraft("保留")
@@ -334,7 +340,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
 
     private fun lostReceiptRecoveryPreservesNewEditor(injectDisabledSelection: Boolean) {
         setDraft("原进程正文")
-        pick(2); waitImages(2); authorize()
+        pick(2); waitImages(2); setImageCapability()
         val oldHost = host()
         val owner = oldHost.session.owner
         val ordered = oldHost.session.attachments.state.value.ready.map { it.attachment.id }
@@ -422,7 +428,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val conversation = controller.database.create("default")
         mainThread { activity.select(conversation) }
         setDraft("已有会话中已接受的正文")
-        pick(1); waitImages(1); authorize()
+        pick(1); waitImages(1); setImageCapability()
         val oldHost = host()
         val oldOwner = oldHost.session.owner
         val queue = ReceiptQueue()
@@ -486,7 +492,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             assertDraft("")
             assertEquals(successor, host().session.owner)
             assertEquals(frozen.revision, revisionField.getLong(activity))
-            pick(1); waitImages(1); authorize()
+            pick(1); waitImages(1); setImageCapability()
             val newImage = host().session.attachments.state.value.ready.single().attachment
             node("chat-send").performClick()
             ui.waitUntil(10_000) { !host().sending && controller.active == null && calls.get() == 2 }
@@ -514,7 +520,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         assertNull(controller.preferences.getString("selected", null))
         assertTrue(controller.database.conversations().isEmpty())
         setDraft("新会话的非空正文")
-        pick(1); waitImages(1); authorize()
+        pick(1); waitImages(1); setImageCapability()
         val acceptedOwner = host().session.owner
         val acceptedImages = host().session.attachments.state.value.ready.map { it.attachment }
         val conversationId = ConversationId(acceptedOwner.conversationId)
@@ -549,7 +555,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
 
             // This is a new user send, not a retry of the already committed request.
             setDraft("后续新会话正文")
-            pick(1); waitImages(1); authorize()
+            pick(1); waitImages(1); setImageCapability()
             assertEquals(newOwner, host().session.owner)
             val newImages = host().session.attachments.state.value.ready.map { it.attachment }
             assertTrue(newImages.all { it.owner == newOwner })
@@ -578,7 +584,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val conversation = controller.database.create("default")
         mainThread { activity.select(conversation) }
         setDraft("仅发送一次")
-        pick(1); waitImages(1); authorize()
+        pick(1); waitImages(1); setImageCapability()
         val queue = ReceiptQueue()
         val handlerField = ChatController::class.java.getDeclaredField("imageReceiptHandler").apply { isAccessible = true }
         val originalHandler = handlerField.get(controller)

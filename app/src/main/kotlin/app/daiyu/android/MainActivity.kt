@@ -1267,8 +1267,7 @@ class MainActivity : ComponentActivity() {
     // Prompts are one-shot capabilities, not saved state. A replaced/dismissed prompt cannot commit.
     private sealed interface Prompt { val backup: Boolean }
     private class InputPrompt(val title: String, val initial: String, val hint: String,
-        val confirm: String, val action: (String) -> Unit, override val backup: Boolean = false,
-        val compactInput: Boolean = false) : Prompt
+        val confirm: String, val action: (String) -> Unit, override val backup: Boolean = false) : Prompt
     private class ChoicePrompt(val title: String, val options: List<String>, val action: (Int) -> Unit,
         override val backup: Boolean = false) : Prompt
     private class ConfirmPrompt(val title: String, val message: String, val confirm: String,
@@ -2200,32 +2199,6 @@ class MainActivity : ComponentActivity() {
             } })
         fun currentChat() = editorMatches() && draftRevision == renderedDraftRevision && controller.ready &&
             !controller.dataBusy && voiceForeground && retainedPage == "chat" && !sidebarVisible
-        fun pathReferenceCurrent() = currentChat() &&
-            renderedContextEntryEpoch == contextManagementEntryEpoch && controller.active == null &&
-            !imageHost.busy && !imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending &&
-            !shizukuWritesBlocked && terminalEditor == null && virtualDisplayEditor == null &&
-            virtualDisplayPlanVisit == null && guiEditor == null && shizukuEditor == null &&
-            browserApproval == null && !browserPreparing && generationApproval == null &&
-            mcpApproval == null && !mcpPreparing
-        fun openPathReference() {
-            if (!pathReferenceCurrent() || prompt != null) return
-            val originalText = draft
-            prompt = InputPrompt("输入路径引用", "",
-                "输入路径", "加入草稿", { raw ->
-                    if (!pathReferenceCurrent() || draft != originalText) return@InputPrompt
-                    if (raw.isBlank() || raw.length > 2048 || raw.any { it.code < 0x20 || it.code == 0x7f }) {
-                        toast("请输入不超过2048字符的单行路径引用；未修改草稿")
-                        return@InputPrompt
-                    }
-                    val reference = "路径引用（未读取）：$raw"
-                    val next = if (originalText.isEmpty()) reference else "$originalText\n$reference"
-                    updateDraft(next)
-                    if (draft == next) {
-                        selectionStart = next.length; selectionEnd = next.length
-                        publishChat(rowsChanged = false)
-                    } else toast("路径引用未加入；原草稿保留")
-                }, compactInput = true)
-        }
         fun requestDictation() {
             if (!VoiceSettingsPreferences(applicationContext).enabled("input")) { toast("请先在语音设置中启用语音输入"); return }
             if (editorMatches() && terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending &&
@@ -2347,10 +2320,6 @@ class MainActivity : ComponentActivity() {
                         contextManagementEntryEpoch)
                 }
             }
-            ChatMenuAction.DECLARE_IMAGE_SUPPORT -> if (currentChat() && selectionReady &&
-                controller.ready && !controller.dataBusy && controller.active == null && !imageHost.busy)
-                declareImageSupport()
-            ChatMenuAction.ATTACH_PATH -> openPathReference()
             ChatMenuAction.ATTACH_FILE -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) pickChatReference(false)
             ChatMenuAction.ATTACH_FOLDER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) pickChatReference(true)
             ChatMenuAction.INTERACTIVE_MODE -> if (currentChat())
@@ -4124,21 +4093,6 @@ class MainActivity : ComponentActivity() {
         cancelBrowserEditor()
         imageHost.requestSelection(imageHost.session.attachments.state.value.draft, ::launchImagePicker)
     }
-    private fun declareImageSupport() {
-        val generation = editorGeneration
-        imageHost.readSettings { configuration ->
-            if (!activityUsable() || retainedPage != "chat" || generation != editorGeneration) return@readSettings
-            if (configuration == null) { toast("请先配置模型提供商"); return@readSettings }
-            val saved = configuration.settings
-            prompt = ConfirmPrompt("声明图片能力", "仅当你已确认当前提供商的精确模型“${saved.model}”支持图片输入时继续。" +
-                "此声明不通过模型名称推测能力，配置变更后失效。", "确认支持", action = {
-                if (activityUsable() && retainedPage == "chat" && generation == editorGeneration) {
-                    imageHost.authorize(configuration) { ok -> toast(if (ok) "已授权当前模型的图片输入及图片历史续发" else "授权未生效；请检查配置后重试") }
-                }
-            })
-        }
-    }
-
     private fun sendImageDraft(text: String) {
         if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!selectionReady || retainedPage != "chat" || sidebarVisible || controller.active != null || text != draft) return
@@ -4288,7 +4242,7 @@ class MainActivity : ComponentActivity() {
         fun valid() = activityUsable() && prompt === current
         when (current) {
             is InputPrompt -> DaiyuTextInputDialog(current.title, current.initial, current.hint, current.confirm,
-                preview = retainedPage == "chat", compactInput = current.compactInput,
+                preview = retainedPage == "chat",
                 onConfirm = { value -> confirmInputPrompt(current, value) },
                 onDismiss = { if (valid()) { if (current === mcpInput) cancelMcpEditor() else prompt = null } })
             is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options, preview = retainedPage == "chat",
@@ -5261,7 +5215,7 @@ class MainActivity : ComponentActivity() {
                 dataRevision = controller.dataRevision
                 cancelShizukuEditor()
                 cancelBrowserEditor()
-                imageHost.configurationChanged()
+                controller.revokeImageProvider()
                 imageHost.enter(selected?.id?.value)
                 val latest = selected?.id?.let { id -> controller.database.conversations().firstOrNull { it.id == id } }
                 if (selected != null && latest == null) { select(null); return@guard }
@@ -5555,7 +5509,7 @@ class MainActivity : ComponentActivity() {
                 cancelled = { cancelled.get() }) { success ->
                 if (activityUsable()) {
                     if (success) {
-                        imageHost.configurationChanged()
+                        controller.revokeImageProvider()
                         refreshConfirmedModelLabel()
                     }
                     if (chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
@@ -5619,7 +5573,7 @@ class MainActivity : ComponentActivity() {
             value.validate() // Unknown retention/keySource may be saved, but never executed.
             val next = editing.settings.copy(requestOptions = editing.settings.requestOptions.copy(sessionGateway = value))
             controller.saveProviderSettings(checkNotNull(gatewayProviderEditor), next, editing, false, gatewayReplacementAuthorized, owner) { success ->
-                if (success && activityUsable()) imageHost.configurationChanged()
+                if (success && activityUsable()) controller.revokeImageProvider()
                 if (gatewayCurrent(owner)) {
                     if (success) retainedPage = "settings"
                     else gatewayError = "设置未保存；配置或页面可能已变化，请返回后重试"
@@ -5659,7 +5613,7 @@ class MainActivity : ComponentActivity() {
             controller.saveModelSettings(value.toSettings(editing.settings), value.protocolChangeAuthorized,
                 value.requestOptionsReplacementAuthorized, editing, saveOwner) { success ->
                 if (activityUsable()) {
-                    if (success) imageHost.configurationChanged()
+                    if (success) controller.revokeImageProvider()
                     if (retainedPage == "models" && modelEditingOwner === owner && editingSettings === editing) {
                         if (success) returnToChat() else modelError = "设置未保存"
                     }
@@ -5991,7 +5945,7 @@ class MainActivity : ComponentActivity() {
                 backupGuard {
                     check(configurationRestorePreview === preview)
                     try { controller.restoreImportedConfiguration(preview, authorized = true) { success ->
-                        if (success && activityUsable()) imageHost.configurationChanged()
+                        if (success && activityUsable()) controller.revokeImageProvider()
                     } }
                     finally { cancelRestorePreview() }
                 }

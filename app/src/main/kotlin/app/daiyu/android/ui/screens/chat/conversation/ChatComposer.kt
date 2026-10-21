@@ -112,7 +112,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
             ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
-            Row(Modifier.widthIn(max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
+            Row(Modifier.widthIn(max = 144.dp).heightIn(min = 26.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
                 .border(1.dp, chrome.line, RoundedCornerShape(12.dp))
                 .padding(1.dp).padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {

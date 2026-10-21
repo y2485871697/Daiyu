@@ -50,8 +50,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         node("page:设置").performTouchInput { swipeUp() }
         for ((title, page) in listOf("用量统计" to "usage-stats-screen", "Agent任务偏好" to "page:Agent任务偏好")) {
             val tag = "settings-row:$title"
-            node("page:设置").scrollToDescendant(hasTestTag(tag))
-            node(tag).assertIsDisplayed()
+            reveal(tag, "设置").assertIsDisplayed()
             ui.waitForIdle()
             val position = settingsScrollPosition()
             val bounds = node(tag).fetchSemanticsNode().boundsInRoot

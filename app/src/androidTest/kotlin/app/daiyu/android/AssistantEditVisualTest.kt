@@ -201,8 +201,12 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
         setField("assistant-edit-memory", longMemory)
         for (tag in listOf("assistant-edit-prompt", "assistant-edit-memory")) {
             val field = tagged(tag).scrollToVisible()
-            field.performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(0, 0, false)) }
+            field.performClick()
+            field.performTextInputSelection(androidx.compose.ui.text.TextRange.Zero)
             awaitVisualIdle()
+            field.assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange,
+                androidx.compose.ui.text.TextRange.Zero))
+            dismissIme()
             val pageRange = tagged("assistant-editor").fetchSemanticsNode()
                 .config[SemanticsProperties.VerticalScrollAxisRange]
             val beforePage = pageRange.value()
@@ -309,7 +313,8 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             val pixels = captureScreenNode(tagged("assistant-section-legend:Skills")).toPixelMap()
             // The legend's horizontal padding must show its real parent, not a white mask.
             for (x in listOf(1, pixels.width - 2)) {
-                val pixel = pixels[x, pixels.height / 2]
+                // Above the section edge: below it the transparent legend reveals the section gradient.
+                val pixel = pixels[x, pixels.height / 4]
                 assertEquals(background.red, pixel.red, .01f)
                 assertEquals(background.green, pixel.green, .01f)
                 assertEquals(background.blue, pixel.blue, .01f)

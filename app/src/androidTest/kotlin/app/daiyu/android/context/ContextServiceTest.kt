@@ -43,10 +43,10 @@ class ContextServiceTest : InstrumentationTestCase() {
         val user = Message(MessageId("live-user"), owner, run, "user",
             listOf(MessageBlock.Text("u", "new request")), RunStatus.COMPLETED)
         val assistant = user.copy(id = MessageId("live-assistant"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
-        db.send(user, assistant)
         val runtime = app.daiyu.android.storage.SQLiteRuntimeStore.acquire(db, service)
         try {
             runtime.recoverPending()
+            db.send(user, assistant)
             var executed = false; var opens = 0
             val model = ModelPort { history ->
                 opens++
@@ -76,7 +76,7 @@ class ContextServiceTest : InstrumentationTestCase() {
             }
             val result = ChatRunner(model, db, BatteryTool { executed = true; "done" },
                 app.daiyu.android.domain.runtime.RunnerOptions(runtimeStore = runtime, contextRuntime = liveContext)) {}.run(assistant, source + user)
-            assertEquals(RunStatus.COMPLETED, result.status); assertEquals(2, opens)
+            assertEquals(result.error, RunStatus.COMPLETED, result.status); assertEquals(2, opens)
         } finally { runtime.close() }
         val original = service.displayHistory(owner)
         assertEquals(source + user, original.dropLast(1))

@@ -310,7 +310,10 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertEquals(14.sp, search.layoutInput.style.fontSize)
             assertEquals(1.3f, search.layoutInput.density.fontScale, .001f)
             assertFalse(search.hasVisualOverflow)
-            assertFalse(layout(text(R.string.drawer_new_conversation)).hasVisualOverflow)
+            val newChat = layout(text(R.string.drawer_new_conversation))
+            assertFalse("New chat overflows: width=${newChat.didOverflowWidth} height=${newChat.didOverflowHeight} " +
+                "constraints=${newChat.layoutInput.constraints} size=${newChat.size} lines=${newChat.lineCount}",
+                newChat.hasVisualOverflow)
             assertTrue(bounds("drawer-manage").bottom < bounds("drawer-folder-unfiled").top)
             assertTrue(bounds("drawer-list").height > 0)
             assertTrue(bounds("drawer-list").bottom <= bounds("drawer-footer-border").top)

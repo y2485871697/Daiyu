@@ -46,6 +46,9 @@ class ChatUsageDialogTest : WiredActivityTestCase() {
     }
 
     fun testUsageIsConversationOnlyAndUnattachedOrEmptyChatNeverFallsBackToAll() {
+        val cached = activity.getString(R.string.stats_page_cached_tokens)
+        val cacheLabels = listOf(cached, activity.getString(R.string.stats_page_cache_creation_tokens),
+            activity.getString(R.string.stats_model_cache_hit_rate))
         val first = recordUsage(17, 23)
         val second = recordUsage(61, 79)
         val empty = fixture.database.create("default").id
@@ -60,14 +63,16 @@ class ChatUsageDialogTest : WiredActivityTestCase() {
                 ui.onNodeWithText("累计用量").assertIsDisplayed()
                 node("chat-usage-cache-toggle").assertIsDisplayed()
                 ui.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("chat-usage-dialog"))).assertCountEquals(1)
-                ui.onNodeWithText("缓存 Token").assertDoesNotExist()
+                for (label in cacheLabels) ui.onNodeWithText(label).assertDoesNotExist()
                 node("chat-usage-cache-toggle").scrollToVisible().performClick()
-                ui.mainClock.advanceTimeByFrame()
-                for (label in listOf("缓存 Token", "缓存创建", "缓存命中率")) ui.onNodeWithText(label).scrollToVisible().assertIsDisplayed()
+                awaitVisualIdle()
+                node("chat-usage-cache-toggle").assertTextEquals("▾ 缓存明细")
+                for (label in cacheLabels) ui.onNodeWithText(label).scrollToVisible().assertIsDisplayed()
                 for (label in listOf("缓存读取", "主请求输入", "主请求输出", "子任务输入", "子任务输出", "已报告小计；缺报显示 —")) ui.onNodeWithText(label).assertDoesNotExist()
                 node("chat-usage-cache-toggle").scrollToVisible().performClick()
-                ui.mainClock.advanceTimeByFrame()
-                ui.onNodeWithText("缓存 Token").assertDoesNotExist()
+                awaitVisualIdle()
+                node("chat-usage-cache-toggle").assertTextEquals("▸ 缓存明细")
+                for (label in cacheLabels) ui.onNodeWithText(label).assertDoesNotExist()
                 ui.onNodeWithText("78").assertDoesNotExist()
                 ui.onNodeWithText("暂无用量").assertDoesNotExist()
             }

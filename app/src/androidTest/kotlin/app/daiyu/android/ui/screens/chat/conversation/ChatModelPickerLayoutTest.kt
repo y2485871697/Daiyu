@@ -63,6 +63,13 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
 
     private fun search(text: String) {
         node("chat-model-search").performSemanticsAction(SemanticsActions.SetText) { assertTrue(it(AnnotatedString(text))) }
+        awaitVisualIdle()
+    }
+
+    private fun listItem(key: String, tag: String): SemanticsNodeInteraction {
+        node("chat-model-list").performScrollToKey(key)
+        awaitVisualIdle()
+        return node(tag).assertIsDisplayed()
     }
 
     fun testHtmlStructureAndAccordionAcrossThemesAndScales() {
@@ -91,8 +98,8 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
         node("chat-model-provider:b").performClick()
         node("chat-model-option:b:same").assertDoesNotExist()
         search("same")
-        node("chat-model-option:same").assertIsSelected()
-        node("chat-model-option:b:same").assertIsNotSelected()
+        listItem("model:a:same", "chat-model-option:same").assertIsSelected()
+        listItem("model:b:same", "chat-model-option:b:same").assertIsNotSelected()
         search("")
         node("chat-model-provider:a").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
         node("chat-model-option:b:same").assertDoesNotExist()
@@ -120,6 +127,7 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
         ui.onNodeWithTag("chat-model-provider-balance:$provider", useUnmergedTree = true)
 
     private fun assertAmount(provider: String, raw: String) {
+        listItem("heading:$provider", "chat-model-provider:$provider")
         amountNode(provider).assertIsDisplayed().assertHasNoClickAction()
         ui.onNode(hasText(formatBalanceDisplay(raw)) and
             hasAnyAncestor(hasTestTag("chat-model-provider-balance:$provider")), useUnmergedTree = true).assertIsDisplayed()
@@ -139,7 +147,7 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
         node("chat-model-provider:b").performClick()
         assertAmount("a", "17.177208")
         assertAmount("b", "2500.5")
-        node("chat-model-option:b:same").assertIsNotSelected().performClick()
+        listItem("model:b:same", "chat-model-option:b:same").assertIsNotSelected().performClick()
         assertEquals("b" to "same", selected.last())
         search("Beta")
         amountNode("a").assertDoesNotExist()
@@ -149,10 +157,16 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
         amountNode("a").assertDoesNotExist() // Search survives reorder in the same composition.
         assertAmount("b", "2500.5")
         search("")
+        node("chat-model-list").performScrollToIndex(0)
+        awaitVisualIdle()
         node("chat-model-provider:b").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
-        val beta = node("chat-model-provider:b").fetchSemanticsNode().boundsInRoot
-        val alpha = node("chat-model-provider:a").fetchSemanticsNode().boundsInRoot
+        node("chat-model-provider:b").performClick()
+        node("chat-model-list").performScrollToIndex(0)
+        awaitVisualIdle()
+        val beta = node("chat-model-provider:b").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val alpha = node("chat-model-provider:a").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue(beta.top < alpha.top)
+        node("chat-model-provider:b").performClick()
         mainThread {
             updates.value = updates.value.copy(providers = updates.value.providers.map {
                 if (it.id == "b") it.copy(balance = BalanceState(result = money("0"))) else it
@@ -161,7 +175,7 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
         ui.waitForIdle()
         assertAmount("b", "0")
         assertAmount("a", "17.177208")
-        node("chat-model-provider:b").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+        listItem("heading:b", "chat-model-provider:b").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
         assertEquals("USD 17.177208", providers.first().balance?.project()?.balanceText)
     }
 

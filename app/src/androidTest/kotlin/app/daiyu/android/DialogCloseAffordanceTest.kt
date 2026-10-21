@@ -54,8 +54,12 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
         for (text in listOf("模型设置", "刷新", "取消", "当前供应商 · 本地目录", "暂无可选模型")) {
             ui.onNodeWithText(text).assertDoesNotExist()
         }
+        awaitNodeWindowFocus(node("chat-model-picker"))
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        ui.waitForIdle()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
         node("chat-model-picker").assertDoesNotExist()
         assertEquals(1, closes)
     }

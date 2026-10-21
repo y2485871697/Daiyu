@@ -50,6 +50,10 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         assertTrue("delete keeps a full-width touch target", delete.width / density > 200f && delete.height / density >= 48f)
         assertTrue("delete is below save", delete.top >= save.bottom)
         node("provider-delete").performClick()
+        awaitUniqueTag("dialog-confirm")
+        awaitNodeWindowFocus(node("dialog-confirm"))
+        awaitVisualIdle()
+        node("dialog-confirm").assertIsDisplayed().assertIsEnabled()
         ui.onNodeWithText("不会自动切换", substring = true).assertExists()
         node("dialog-cancel").performClick()
         assertEquals(before, fixture.controller.providers.snapshot())
@@ -58,6 +62,10 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
     fun testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToChat() {
         openModels()
         reveal("provider-delete", lazyKey = "provider_delete").performClick()
+        awaitUniqueTag("dialog-confirm")
+        awaitNodeWindowFocus(node("dialog-confirm"))
+        awaitVisualIdle()
+        node("dialog-confirm").assertIsDisplayed().assertIsEnabled()
         node("dialog-confirm").performClick()
         awaitControl("provider deleted") { fixture.controller.providers.snapshot().providers.isEmpty() }
         awaitUniqueTag("chat-top-bar")

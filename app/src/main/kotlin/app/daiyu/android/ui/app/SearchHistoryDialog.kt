@@ -20,7 +20,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.onClick as semanticsClick
+import androidx.compose.ui.semantics.semantics
+import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,6 +58,7 @@ internal fun SearchHistoryDialog(
     ownerCurrent: () -> Boolean,
 ) {
     val scope = rememberCoroutineScope()
+    val feedbackView = LocalView.current
     val requests = remember(scope) { MessageSearchRequestState(scope) }
     val snapshot by requests.state.collectAsState()
     val latestSearch by rememberUpdatedState(onSearchPage)
@@ -152,16 +157,18 @@ internal fun SearchHistoryDialog(
                             key = { index, hit -> "${hit.messageId.length}:${hit.messageId}:${hit.segmentIndex}:$index" },
                         ) { _, hit ->
                             val generation = snapshot.generation
+                            val openHit: () -> Unit = {
+                                val now = requests.state.value
+                                if (available() && now.generation == generation && now.request == request &&
+                                    now.phase == SearchPhase.Results && hit.conversationId == conversationId) {
+                                    TouchHaptics.action(feedbackView) { onOpenHit(hit) }
+                                }
+                            }
                             Column(Modifier.fillMaxWidth().heightIn(min = 44.dp)
                                 .testTag("search:message:${hit.conversationId}:${hit.messageId}:${hit.segmentIndex}")
-                                .clickable {
-                                    val now = requests.state.value
-                                    if (available() && now.generation == generation && now.request == request &&
-                                        now.phase == SearchPhase.Results && hit.conversationId == conversationId) {
-                                        // The host closes only after resolving the persisted owner and window.
-                                        onOpenHit(hit)
-                                    }
-                                }.padding(vertical = 10.dp, horizontal = 4.dp)) {
+                                .semantics { semanticsClick { openHit(); true } }
+                                .clickable(clickFeedback = false, onClick = openHit)
+                                .padding(vertical = 10.dp, horizontal = 4.dp)) {
                                 Text("${hit.roleLabel} · ${hit.snippet}", fontSize = 14.sp, lineHeight = 21.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                     maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -177,9 +184,18 @@ internal fun SearchHistoryDialog(
                                     TextButton(text = stringResource(R.string.search_refresh), onClick = { search() })
                                 }
                                 SearchAppendPhase.Cancelled, SearchAppendPhase.Idle -> if (snapshot.nextCursor != null) {
+                                    val generation = snapshot.generation
+                                    val loadNextPage: () -> Unit = {
+                                        val now = requests.state.value
+                                        if (available() && now.generation == generation && now.request == request &&
+                                            now.phase == SearchPhase.Results && now.nextCursor != null) {
+                                            TouchHaptics.action(feedbackView) { requests.loadMore() }
+                                        }
+                                    }
                                     TextButton(text = stringResource(R.string.search_load_more),
-                                        modifier = Modifier.testTag("search:more"),
-                                        onClick = { if (available()) requests.loadMore() })
+                                        modifier = Modifier.testTag("search:more").semantics {
+                                            semanticsClick { loadNextPage(); true }
+                                        }, onClick = loadNextPage)
                                 }
                             }
                         }

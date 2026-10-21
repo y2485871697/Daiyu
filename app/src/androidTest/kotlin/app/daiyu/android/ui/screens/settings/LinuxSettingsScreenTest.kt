@@ -127,13 +127,16 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
             root.deleteRecursively()
         }
     }
+    private fun setRunningMode(mode: RunningMode) {
+        mainThread { assertTrue(modes.save(mode)) }
+    }
+
     fun testDistributionAndModePopupsOnlyChangeTheInstallChoice() {
         show()
         node("linux-distribution-choice").performClick()
         ui.onNodeWithText("软件兼容性更好的 glibc 环境").performClick()
         node("linux-distribution-choice").assertTextContains("Debian")
-        modes.save(RunningMode.ROOT)
-        ui.waitForIdle()
+        setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").performClick()
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").performClick()
         revealLinux("linux-execution-choice").assertTextContains("Root 模式 · chroot")
@@ -143,23 +146,23 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
     fun testChrootChoiceIsOnlyVisibleInRootModeAndOldPopupCannotSelectIt() {
         show()
         for (mode in listOf(RunningMode.NORMAL, RunningMode.SHIZUKU)) {
-            modes.save(mode); ui.waitForIdle()
+            setRunningMode(mode)
             revealLinux("linux-execution-choice").performClick()
             ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
             ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
         }
-        modes.save(RunningMode.ROOT); ui.waitForIdle()
+        setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").performClick()
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertExists()
         val oldChroot = checkNotNull(ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境")
             .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        modes.save(RunningMode.NORMAL); ui.waitForIdle()
+        setRunningMode(RunningMode.NORMAL)
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
         ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
         mainThread { oldChroot() }
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
-        modes.save(RunningMode.ROOT); ui.waitForIdle()
+        setRunningMode(RunningMode.ROOT)
         mainThread { oldChroot() }
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
         assertEquals(0, writes.get())
@@ -169,15 +172,15 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
 
     fun testOpenModePopupRebuildsAcrossRunningModesWithoutSelectingAnything() {
         show()
-        modes.save(RunningMode.ROOT); ui.waitForIdle()
+        setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").performClick()
         val oldChroot = checkNotNull(ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境")
             .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        modes.save(RunningMode.SHIZUKU); ui.waitForIdle()
+        setRunningMode(RunningMode.SHIZUKU)
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
         ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").assertIsDisplayed()
         mainThread { oldChroot() }
-        modes.save(RunningMode.ROOT); ui.waitForIdle()
+        setRunningMode(RunningMode.ROOT)
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertIsDisplayed()
         mainThread { oldChroot() }
         ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()

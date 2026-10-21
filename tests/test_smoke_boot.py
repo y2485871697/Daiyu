@@ -36,6 +36,18 @@ JAVA_SECOND_SOURCE = (
 
 
 class SourceTests(unittest.TestCase):
+    def test_native_framebuffer_does_not_change_default_test_canvas(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        hook = workflow.split('          pre-emulator-launch-script: |', 1)[1].split('          disable-animations:', 1)[0]
+        self.assertIn("'hw.lcd.width': '1216'", hook)
+        self.assertIn("'hw.lcd.height': '2432'", hook)
+        self.assertIn("'hw.lcd.density': '160'", hook)
+        self.assertLess(hook.index('path.write_text('), hook.index('cp "$ANDROID_AVD_HOME/test.avd/config.ini"'))
+        self.assertNotIn('          resolution:', workflow)
+        script = (ROOT / 'scripts/smoke_boot.sh').read_text()
+        self.assertLess(script.index('verify_display_baseline before'), script.index('adb_stage install-app'))
+        self.assertLess(script.index('verify_display_baseline after'), script.index('adb_stage launch'))
+
     def test_smoke_nested_and_outer_budgets_cover_all_stages(self):
         script = (ROOT / 'scripts/smoke_boot.sh').read_text()
         workflow = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:', 1)[1]
@@ -157,6 +169,20 @@ class ProcessTests(unittest.TestCase):
         path.chmod(0o755)
         return path
 
+    def test_display_baseline_is_applied_and_leaks_are_rejected(self):
+        for api in (26, 37):
+            with self.subTest(api=api):
+                result = self.smoke(api=api)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = (self.root / 'smoke/adb-calls.txt').read_text()
+                self.assertLess(calls.index('shell wm size 320x640'), calls.index('shell am instrument'))
+                self.assertIn('Override size: 320x640', (self.root / 'smoke/display-size-after.txt').read_text())
+        for case in ('display-fail', 'wrong-native-display', 'wrong-density', 'display-leak'):
+            with self.subTest(case=case):
+                result = self.smoke(case=case)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('shell am start', (self.root / 'smoke/adb-calls.txt').read_text())
+
     def test_wrapper_timeout_and_stdout(self):
         wrapper = self.bin / 'adb'
         shutil.copy(ROOT / 'scripts/adb_bounded.sh', wrapper)
@@ -193,7 +219,7 @@ class ProcessTests(unittest.TestCase):
         source_root = self.root / 'app/src/androidTest'
         shutil.rmtree(source_root, ignore_errors=True)
         source_root.mkdir(parents=True, exist_ok=True)
-        for name in ('adb-calls.txt', 'instrumentation-args.txt', 'launch-args.txt'):
+        for name in ('adb-calls.txt', 'instrumentation-args.txt', 'launch-args.txt', 'display-size-state', 'display-density-state'):
             (self.root / 'smoke' / name).unlink(missing_ok=True)
         sources = {
             source_name: source_text if source_text is not None else
@@ -228,6 +254,14 @@ class ProcessTests(unittest.TestCase):
         self.executable('adb', r'''#!/bin/sh
 printf '%s\n' "$*" >> smoke/adb-calls.txt
 case "$*" in
+ 'shell wm size 320x640') [ "$CASE" != display-fail ] || exit 7; printf '320x640' > smoke/display-size-state ;;
+ 'shell wm density 160') printf '160' > smoke/display-density-state ;;
+ 'shell wm size')
+  physical=1216x2432; [ "$CASE" != wrong-native-display ] || physical=320x640
+  printf 'Physical size: %s\nOverride size: %s\n' "$physical" "$(cat smoke/display-size-state)" ;;
+ 'shell wm density')
+  density=$(cat smoke/display-density-state); [ "$CASE" != wrong-density ] || density=320
+  printf 'Physical density: 160\nOverride density: %s\n' "$density" ;;
  'shell getprop ro.build.version.sdk') printf '%s\n' "$API" ;;
  'shell getprop sys.boot_completed') printf '1\n' ;;
  *pidof*) printf '123\n456\n' ;;
@@ -271,6 +305,7 @@ case "$*" in
   [ "$CASE" != duplicate-terminal ] || printf 'INSTRUMENTATION_CODE: -1\n'
   [ "$CASE" != after-terminal ] || printf 'INSTRUMENTATION_STATUS_CODE: 0\n'
   case "$CASE" in instrument-timeout) exit 124 ;; instrument-fail) exit 9 ;; esac
+  [ "$CASE" != display-leak ] || printf '1216x2432' > smoke/display-size-state
   : > smoke/fake-app-running ;;
  'shell am start '*)
   printf '%s\n' "$@" > smoke/launch-args.txt

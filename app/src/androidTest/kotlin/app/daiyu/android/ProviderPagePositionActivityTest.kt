@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.content.ContextWrapper
 import android.content.Intent
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.lifecycle.Lifecycle
 import app.daiyu.android.model.catalog.CatalogCommitResult
@@ -35,8 +36,16 @@ class ProviderPagePositionActivityTest : WiredActivityTestCase() {
     private fun assertPositionWithoutScrolling(tag: String, before: Position) {
         // Neither reveal() nor awaitModelEditor(): they would scroll and hide a restore failure.
         awaitUniqueTag("page:主模型服务商")
-        ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag(tag).fetchSemanticsNodes().size == 1 && node(tag).isDisplayed()
+        try {
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag(tag).fetchSemanticsNodes().size == 1 && node(tag).isDisplayed()
+            }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            val page = node("page:主模型服务商").fetchSemanticsNode()
+            val range = page.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+            throw AssertionError("restore tag=$tag before=$before scroll=${range?.value?.invoke()} " +
+                "focus=${activity.window.decorView.hasWindowFocus()}\n" +
+                node("page:主模型服务商").printToString(), timeout)
         }
         val after = position(tag)
         assertEquals("list scroll stays at its old offset", before.scroll, after.scroll, .001f)
@@ -50,6 +59,7 @@ class ProviderPagePositionActivityTest : WiredActivityTestCase() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         }
         ui.waitUntil(5_000) { activity.lifecycle.currentState == Lifecycle.State.RESUMED }
+        awaitHostWindowFocus(activity)
     }
 
     fun testConfigurationPositionSurvivesBothPauseAndFullBackgrounding() {

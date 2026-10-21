@@ -185,10 +185,11 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         var appDensitySize = 1f
         var systemDensitySize = 1f
         fun rawBounds(tag: String): androidx.compose.ui.geometry.Rect {
-            val coordinates = node(tag).fetchSemanticsNode().layoutInfo.coordinates
-            var root = coordinates
-            while (true) root = root.parentLayoutCoordinates ?: break
-            return root.localBoundingBoxOf(coordinates, clipBounds = false)
+            val semantics = node(tag).fetchSemanticsNode()
+            val origin = semantics.positionInRoot
+            val size = semantics.size
+            return androidx.compose.ui.geometry.Rect(origin.x, origin.y,
+                origin.x + size.width, origin.y + size.height)
         }
         fun assertUntruncated(tag: String) {
             val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
@@ -236,7 +237,8 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
             assertUntruncated("skill-description:user:demo")
             node("skills-details-close").assertIsDisplayed()
             val close = rawBounds("skills-details-close")
-            assertTrue(close.height >= 48f * appDensitySize - 1f)
+            assertTrue("close target: dark=$dark scale=$scale density=$appDensitySize host=$host close=$close",
+                close.height >= 48f * appDensitySize - 1f)
             node("skills-details-close").performClick()
             node("skill-description:user:demo").assertDoesNotExist()
             assertEquals(original, skills.user.list().single())

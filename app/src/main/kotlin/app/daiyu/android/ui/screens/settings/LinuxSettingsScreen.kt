@@ -252,6 +252,7 @@ private fun modeName(mode: LinuxExecutionMode) = if (mode == LinuxExecutionMode.
 private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: Boolean,
     choices: List<Pair<String, String>>, selectedIndex: Int, popupScope: Any, ownerCurrent: () -> Boolean, onSelect: (Int) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val currentChoices = rememberUpdatedState(choices)
     val colors = MiuixTheme.colorScheme
     Box(Modifier.fillMaxWidth()) {
         Row(Modifier.testTag(tag).fillMaxWidth().heightIn(min = 72.dp)
@@ -269,7 +270,7 @@ private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: B
                 WithoutPressRipple {
                     DropdownMenu(expanded, onDismissRequest = { if (ownerCurrent()) expanded = false }, modifier = Modifier.widthIn(max = 300.dp),
                         shape = RoundedCornerShape(22.dp), containerColor = colors.surface) {
-                        choices.forEachIndexed { index, choice ->
+                        currentChoices.value.forEachIndexed { index, choice ->
                             val selectChoice: () -> Unit = {
                                 if (enabled && expanded && ownerCurrent()) { expanded = false; onSelect(index) }
                             }

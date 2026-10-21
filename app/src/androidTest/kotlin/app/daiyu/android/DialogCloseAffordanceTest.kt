@@ -99,11 +99,15 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
         assertEquals(1, closes)
     }
 
-    fun testImageCapabilityEntryDismissesAttachmentSheetAndRoutesOnlyExplicitAction() {
+    fun testImagePickerEntryDismissesAttachmentSheetAndRoutesOnlyItsAction() {
         var action: app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction? = null
         show { dismiss -> ChatAttachmentSheet(dismiss) { action = it } }
-        node("image-host-authorize").scrollToVisible().performClick()
-        assertEquals(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.DECLARE_IMAGE_SUPPORT, action)
+        node("image-host-authorize").assertDoesNotExist()
+        node("chat-attachment-path-toggle").assertDoesNotExist()
+        ui.onNodeWithText("声明图片能力").assertDoesNotExist()
+        ui.onNodeWithText("输入文件路径").assertDoesNotExist()
+        node("chat-attachment:ATTACH_IMAGE").performClick()
+        assertEquals(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.ATTACH_IMAGE, action)
         assertEquals(1, closes)
         node("chat-attachment:ATTACH_IMAGE").assertDoesNotExist()
     }

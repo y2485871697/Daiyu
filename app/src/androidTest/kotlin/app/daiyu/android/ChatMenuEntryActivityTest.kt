@@ -1,9 +1,6 @@
 package app.daiyu.android
 
-import androidx.compose.ui.unit.dp
-
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import android.app.Instrumentation
 import android.content.Intent
 import androidx.compose.ui.test.*
@@ -287,141 +284,32 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertNull(fixture.controller.active)
     }
 
-    private fun openPathReference(value: String): () -> Unit {
-        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.ATTACH_PATH) }
-        awaitUniqueTag("prompt-input")
-        node("prompt-input").performTextReplacement(value)
-        return retainedClick(activity, "dialog-confirm")
-    }
-
-    fun testPathReferenceRealAttachmentMenuCancelDoesNotReadGrantOrSend() {
+    fun testAttachmentMenuContainsOnlyPickersAndBackPreservesDraftConfigurationAndGrants() {
         selectDraft()
         val before = fixture.database.exportBackup()
         val settings = fixture.settings.load()
         val grants = PlatformSafGrants(instrumentation.targetContext).grants()
         ui.onNodeWithContentDescription("附件").performClick()
-        node("chat-attachment:ATTACH_PATH").assertDoesNotExist()
-        node("chat-attachment-path-toggle").performClick()
-        node("chat-attachment:ATTACH_PATH").assertDoesNotExist()
-        awaitUniqueTag("prompt-input")
-        ui.onNodeWithContentDescription("关闭", useUnmergedTree = true).assertDoesNotExist()
-        ui.onNodeWithText("仅将路径文字加入草稿，不读取文件或授予权限；之后点击发送才会交给模型。").assertDoesNotExist()
-        ui.onNode(hasText("输入路径") and hasAnyAncestor(hasTestTag("prompt-input")), useUnmergedTree = true)
-            .assertIsDisplayed()
-        node("prompt-input").assertHeightIsEqualTo(48.dp)
-            .performTextReplacement("content://not-granted.invalid/never-read")
-        node("dialog-cancel").performClick()
+        for (action in listOf(ChatMenuAction.ATTACH_IMAGE, ChatMenuAction.ATTACH_VIDEO,
+            ChatMenuAction.ATTACH_FILE, ChatMenuAction.ATTACH_FOLDER)) {
+            node("chat-attachment:${action.name}").assertIsDisplayed()
+        }
+        ui.onAllNodes(SemanticsMatcher("attachment picker entry") {
+            it.config.contains(SemanticsProperties.TestTag) &&
+                it.config[SemanticsProperties.TestTag].startsWith("chat-attachment:")
+        }).assertCountEquals(4)
+        node("image-host-authorize").assertDoesNotExist()
+        node("chat-attachment-path-toggle").assertDoesNotExist()
+        ui.onNodeWithText("声明图片能力").assertDoesNotExist()
+        ui.onNodeWithText("输入文件路径").assertDoesNotExist()
         node("prompt-input").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
+        node("chat-attachment:ATTACH_IMAGE").assertDoesNotExist()
+        assertDraft("menu draft stays unsent")
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(settings, fixture.settings.load())
         assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
-        assertEquals(0, fixture.opens.get())
-        assertNull(fixture.controller.active)
-    }
-
-    fun testPathReferenceConfirmationAppendsLiteralTextOnceAndSurvivesRecreation() {
-        selectDraft()
-        val conversation = fixture.database.conversations().single()
-        val messages = fixture.database.messages(conversation.id)
-        val settings = fixture.settings.load()
-        val grants = PlatformSafGrants(instrumentation.targetContext).grants()
-        val raw = "/workspace/中文 空格/'\";not-a-command"
-        val expected = "menu draft stays unsent\n路径引用（未读取）：$raw"
-        val confirm = openPathReference(raw)
-        mainThread { confirm(); confirm() }
-        assertDraft("menu draft stays unsent")
-        node("chat-reference:0").assertIsDisplayed()
-        assertSelection("menu draft stays unsent".length, "menu draft stays unsent".length)
-        val reopened = app.daiyu.android.storage.ConversationDatabase(fixture.application)
-        try {
-            assertEquals(expected, reopened.conversations().single { it.id == conversation.id }.draft)
-            assertEquals(messages, reopened.messages(conversation.id))
-        } finally {
-            reopened.close()
-        }
-        activity = recreateActivity(activity)
-        awaitUniqueTag("chat-draft")
-        assertDraft("menu draft stays unsent")
-        node("chat-reference:0").assertIsDisplayed()
-        mainThread { confirm() }
-        assertDraft("menu draft stays unsent")
-        node("chat-reference:0").assertIsDisplayed()
-        assertEquals(messages, fixture.database.messages(conversation.id))
-        assertEquals(settings, fixture.settings.load())
-        assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
-        assertEquals(0, fixture.opens.get())
-        assertNull(fixture.controller.active)
-    }
-
-    fun testPathReferenceRejectsBlankLongAndControlCharactersWithoutTruncation() {
-        selectDraft()
-        val before = fixture.database.exportBackup()
-        for (raw in listOf("  ", "x".repeat(2049), "a\nb", "a\tb", "a\u007fb")) {
-            mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.ATTACH_PATH) }
-            awaitUniqueTag("prompt-input")
-            // Invoke the actual host capability: a single-line widget may normalize control input.
-            mainThread {
-                val prompt = MainActivity::class.java.getDeclaredMethod("getPrompt")
-                    .apply { isAccessible = true }.invoke(activity)
-                MainActivity::class.java.declaredMethods.single { it.name == "confirmInputPrompt" }
-                    .apply { isAccessible = true }.invoke(activity, prompt, raw)
-            }
-            node("prompt-input").assertDoesNotExist()
-            assertDraft("menu draft stays unsent")
-            assertEquals(before, fixture.database.exportBackup())
-        }
-        assertEquals(0, fixture.opens.get())
-        assertNull(fixture.controller.active)
-    }
-
-    fun testPathReferenceOldMenuAndConfirmationStayRevokedAfterRealPauseResume() {
-        selectDraft()
-        val menu = retainedControls(activity).onMenuAction
-        val confirm = openPathReference("/never-read/pause")
-        val before = fixture.database.exportBackup()
-        realPauseResume(activity, atPause = { menu(ChatMenuAction.ATTACH_PATH) })
-        mainThread { confirm(); menu(ChatMenuAction.ATTACH_PATH) }
-        node("prompt-input").assertDoesNotExist()
-        assertDraft("menu draft stays unsent")
-        assertEquals(before, fixture.database.exportBackup())
-        val fresh = openPathReference("/fresh-after-resume")
-        mainThread { fresh() }
-        assertDraft("menu draft stays unsent")
-        node("chat-reference:0").assertIsDisplayed()
-        assertEquals("menu draft stays unsent\n路径引用（未读取）：/fresh-after-resume",
-            fixture.database.conversations().single().draft)
-        assertEquals(0, fixture.opens.get())
-    }
-
-    fun testPathReferenceDraftChangeRejectsOldConfirmation() {
-        selectDraft()
-        val confirm = openPathReference("/never-read/old-draft")
-        mainThread { retainedControls(activity).onTextChange("newer unsent draft") }
-        val changed = fixture.database.exportBackup()
-        mainThread { confirm() }
-        node("prompt-input").assertDoesNotExist()
-        assertDraft("newer unsent draft")
-        assertEquals(changed, fixture.database.exportBackup())
-        assertEquals(0, fixture.opens.get())
-    }
-
-    fun testPathReferenceNavigationAndSameConversationReentryRejectOldCapabilities() {
-        selectDraft()
-        val conversation = fixture.database.conversations().single()
-        val menu = retainedControls(activity).onMenuAction
-        val confirm = openPathReference("/never-read/old-page")
-        mainThread { menu(ChatMenuAction.SETTINGS); confirm() }
-        awaitUniqueTag("page:设置")
-        backToChat(activity)
-        mainThread { menu(ChatMenuAction.ATTACH_PATH) }
-        node("prompt-input").assertDoesNotExist()
-        val second = openPathReference("/never-read/old-editor")
-        mainThread { activity.select(conversation) }
-        val reentered = fixture.database.exportBackup()
-        mainThread { second() }
-        node("prompt-input").assertDoesNotExist()
-        assertDraft("menu draft stays unsent")
-        assertEquals(reentered, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
         assertNull(fixture.controller.active)
     }

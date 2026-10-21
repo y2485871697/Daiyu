@@ -502,18 +502,30 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         assertEquals(2, f.db.messages(receipt.conversation.id).size)
     }
 
-    fun testChangedProviderCannotConnectOrAcceptTextWithOldImageHistoryUntilAuthorized() {
+    fun testChangedProviderCannotUseOldImageHistoryWithoutCurrentModelCatalogCapability() {
         val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor")
         val image = image(f, owner)
         assertTrue(submit(f, conversation, owner, 1, listOf(ImageSendPart.Image(image))) is ImageSendResult.Accepted)
         await(f) { f.controller.active == null }
         f.settings.save(f.settings.load().copy(model = "another-exact-model"))
+        f.settings.modelCatalogSnapshot()
         f.db.draft(conversation.id, "keep this text")
-        assertNull(f.controller.send(conversation, "keep this text"))
-        assertEquals(1, f.probe.opens.get()); assertEquals(2, f.db.messages(conversation.id).size)
-        assertEquals("keep this text", f.db.conversations().single().draft)
-        main { assertTrue(f.controller.authorizeImageProvider(provider(f))) }
+        for (supported in listOf<Boolean?>(null, false)) {
+            f.settings.modelCatalog.updateRegisteredModel(f.settings.load().model) { current ->
+                val record = checkNotNull(current)
+                record.copy(settings = record.settings.copy(visionOverride = supported))
+            }
+            assertEquals(supported, f.controller.providers.freezeActive().settings.visionOverride)
+            assertNull(f.controller.send(conversation, "keep this text"))
+            assertEquals(1, f.probe.opens.get()); assertEquals(2, f.db.messages(conversation.id).size)
+            assertEquals("keep this text", f.db.conversations().single().draft)
+        }
+        f.settings.modelCatalog.updateRegisteredModel(f.settings.load().model) { current ->
+            val record = checkNotNull(current)
+            record.copy(settings = record.settings.copy(visionOverride = true))
+        }
+        assertEquals(true, f.controller.providers.freezeActive().settings.visionOverride)
         assertNotNull(f.controller.send(conversation, "keep this text"))
         await(f) { f.controller.active == null }
         assertEquals(2, f.probe.opens.get())

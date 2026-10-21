@@ -53,17 +53,15 @@ internal fun DaiyuTextInputDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
     preview: Boolean = false,
-    compactInput: Boolean = false,
 ) {
     // Do not trim or reject empty text: moving out of a folder and clearing search need it.
     var value by remember(title, initial) { mutableStateOf(initial) }
     if (preview) {
-        ChatSelectionSheet(title, onDismiss, showCloseButton = !compactInput, footer = {
+        ChatSelectionSheet(title, onDismiss, footer = {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("dialog-cancel"))
             AssistantPreviewButton(confirmText, { onConfirm(value) }, Modifier.weight(1f).testTag("dialog-confirm"), primary = true)
         }) {
-            if (compactInput) CompactDialogTextField(value, { value = it }, hint, Modifier.testTag("prompt-input"))
-            else AssistantPreviewField(value, { value = it }, hint, Modifier.fillMaxWidth(), fieldModifier = Modifier.testTag("prompt-input"))
+            AssistantPreviewField(value, { value = it }, hint, Modifier.fillMaxWidth(), fieldModifier = Modifier.testTag("prompt-input"))
         }
         return
     }

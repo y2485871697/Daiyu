@@ -1278,20 +1278,7 @@ class ChatController internal constructor(private val application:Application,
         }}
     }
 
-    /** Host capability grant for this exact saved endpoint/protocol/model/configuration.
-     * Unknown/false is deliberately not upgraded based on a model name. */
-    private var imageProviderAuthorization = Any()
-    internal fun authorizeImageProvider(provider:ProviderSnapshot, configuration: ProviderRunConfiguration? = null):Boolean {
-        val authorization = synchronized(this) { imageProviderAuthorization }
-        val frozen = try { configuration ?: providers.freezeActive() } catch (_: Exception) { return false }
-        val matches = provider.asModelSettings() == frozen.settings && providers.isCurrentActive(frozen)
-        return synchronized(this) {
-            if(!idleAvailable() || !matches || imageProviderAuthorization !== authorization) false
-            else { imageProvider=provider; imageProviderConfiguration=frozen; true }
-        }
-    }
     @Synchronized internal fun revokeImageProvider() {
-        imageProviderAuthorization = Any()
         imageProvider = null; imageProviderConfiguration = null
     }
     private var recoveryFailed=false

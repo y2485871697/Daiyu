@@ -303,7 +303,7 @@ class ContextManagementControllerAdapterTest {
         f.worker.runOne(); f.ui.runOne()
         assertEquals(1, f.backend.compressions)
         assertTrue(f.adapter.state.value.requiresRefresh)
-        assertTrue(f.adapter.state.value.notice!!.contains("new-archive"))
+        assertEquals("会话已压缩，原始消息保留。", f.adapter.state.value.notice)
         f.startCompression()
         assertEquals(0, f.worker.size)
     }

@@ -12,7 +12,7 @@ class CatalogSummaryExecutionPolicyTest {
         deviceStatusEnabled = true, contextWindowOverride = 32768)
 
     @Test fun defaultChatSummaryKeepsFrozenIdentityAndProjectsChatOptions() {
-        val settings = ModelSettings("https://chat.invalid/v1/responses", "chat-model", "fixture-key",
+        val settings = ModelSettings("https://api.openai.com/v1/responses", "chat-model", "fixture-key",
             batteryEnabled = true, deviceStatusEnabled = true, contextWindowOverride = 64000,
             requestOptions = ProviderRequestOptions(
                 customBody = """{"reasoning":{"effort":"low"},"max_output_tokens":9000,"temperature":0.5}""",

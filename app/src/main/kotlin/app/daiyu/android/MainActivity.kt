@@ -5464,7 +5464,7 @@ class MainActivity : ComponentActivity() {
                 val groups = registry.providers.filter { it.enabled }.map { provider ->
                     ChatModelProviderUi(provider.slotId, provider.name,
                         choices[provider.slotId]?.catalog?.models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) },
-                        balance = controller.providerBalances.get(provider.slotId).state.value.project().balanceText)
+                        balance = controller.providerBalances.get(provider.slotId).state.value)
                 }
                 ChatModelCatalogLoad(registry.activeSlotId?.let { ProviderEditorSlot(it, registry.revision) }, choices, groups)
             } }

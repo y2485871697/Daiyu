@@ -864,7 +864,7 @@ class MainActivity : ComponentActivity() {
                 browserSettingsPageOwner?.revoke()
                 browserSettingsPageOwner = null
             }
-            if (value != "chat") { revokeTerminalJobsVisit(); dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
+            if (value != "chat") { dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
             retainedPageState = value
@@ -1594,8 +1594,8 @@ class MainActivity : ComponentActivity() {
                             val caller by owner.caller.collectAsStateWithLifecycle()
                             app.daiyu.android.ui.screens.terminal.TerminalScreen(
                                 host = owner.host, caller = caller,
-                                isCurrent = { activityUsable() && retainedPage == "terminal" && terminalPageOwner === page },
-                                onOpenTasks = if (selected?.id == null) null else ({ openTerminalTasks(page) }),
+                                isCurrent = { terminalPageCurrent(page) },
+                                onOpenTasks = { openTerminalTasks(page) },
                                 onOpenAndroid = { openTerminalAndroid(page) },
                                 onOpenLinux = { reference -> openTerminalLinux(page, reference) },
                                 onBack = {
@@ -2746,7 +2746,6 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun TerminalComposerEntry() {
-        TerminalJobsPanel()
         val appState by terminalProvider.state.collectAsStateWithLifecycle()
         val application = (appState as? app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
         val canEnter = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
@@ -2909,11 +2908,11 @@ class MainActivity : ComponentActivity() {
         publishChat()
     }
 
-    private class TerminalJobsVisit(val conversation: ConversationId, val editorGeneration: Long,
-        sessions: List<app.daiyu.android.integration.tools.TerminalJobSession>, val terminalPage: Any? = null) {
+    private class TerminalJobsVisit(val conversation: ConversationId?, val editorGeneration: Long,
+        sessions: List<app.daiyu.android.integration.tools.TerminalJobSession>, val terminalPage: Any) {
         var sessions by mutableStateOf(sessions)
         var history by mutableStateOf(emptyList<app.daiyu.android.terminal.TerminalJobHistoryReader.Record>())
-        var historyNotice by mutableStateOf("正在只读扫描本会话历史…")
+        var historyError by mutableStateOf<String?>(null)
         var historyPage by mutableStateOf<app.daiyu.android.terminal.TerminalJobHistoryReader.Record?>(null)
         var nextOffset by mutableStateOf(0L)
         var hasMore by mutableStateOf(false)
@@ -2927,20 +2926,19 @@ class MainActivity : ComponentActivity() {
         terminalJobsVisit?.revoked?.set(true)
         terminalJobsVisit = null
     }
-    private fun terminalJobsCurrent(visit: TerminalJobsVisit) = activityUsable() && voiceForeground &&
-        (if (visit.terminalPage == null) retainedPage == "chat" else retainedPage == "terminal" && terminalPageOwner === visit.terminalPage) &&
-        !sidebarVisible && terminalJobsVisit === visit && !visit.revoked.get() &&
+    private fun terminalJobsCurrent(visit: TerminalJobsVisit) = terminalPageCurrent(visit.terminalPage) &&
+        terminalJobsVisit === visit && !visit.revoked.get() &&
         selected?.id == visit.conversation && editorGeneration == visit.editorGeneration
     private fun openTerminalTasks(page: Any) {
-        val conversation = selected?.id ?: return
-        if (!activityUsable() || !voiceForeground || retainedPage != "terminal" || terminalPageOwner !== page) return
+        val conversation = selected?.id
+        if (!terminalPageCurrent(page)) return
         revokeTerminalJobsVisit()
-        val visit = TerminalJobsVisit(conversation, editorGeneration, controller.terminalJobRuns(conversation), page)
+        val visit = TerminalJobsVisit(conversation, editorGeneration, conversation?.let(controller::terminalJobRuns).orEmpty(), page)
         terminalJobsVisit = visit
         refreshTerminalJobs(visit)
     }
     @Composable private fun TerminalTasksSurface() {
-        val visit = terminalJobsVisit?.takeIf { it.terminalPage != null && terminalJobsCurrent(it) } ?: return
+        val visit = terminalJobsVisit?.takeIf { terminalJobsCurrent(it) } ?: return
         app.daiyu.android.ui.screens.terminal.TerminalTasksDialog(
             busy = visit.busy,
             rows = visit.sessions.map { session -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
@@ -2950,126 +2948,60 @@ class MainActivity : ComponentActivity() {
             } + visit.history.mapIndexed { index, record -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
                 "历史任务 ${index + 1}", "只读记录 · 运行状态未知",
                 onRead = { if (terminalJobsCurrent(visit)) terminalHistoryPage(visit, record, 0) }) },
-            output = terminalTaskOutput(visit.output),
-            error = visit.historyNotice.takeIf { it.startsWith("历史读取") || it.startsWith("历史日志") },
+            output = app.daiyu.android.ui.screens.terminal.terminalTaskOutput(visit.output),
+            error = visit.historyError,
             onRefresh = { if (terminalJobsCurrent(visit)) refreshTerminalJobs(visit) },
             onNext = if (visit.historyPage != null && visit.hasMore) ({
                 visit.historyPage?.let { if (terminalJobsCurrent(visit)) terminalHistoryPage(visit, it, visit.nextOffset) }
             }) else null,
             onDismiss = { if (terminalJobsVisit === visit) revokeTerminalJobsVisit() })
         val stop = visit.stop
-        if (stop != null) app.daiyu.android.ui.components.DaiyuConfirmDialog("停止任务？", stop.plan.command,
+        if (stop != null) app.daiyu.android.ui.components.DaiyuConfirmDialog("停止任务？",
+            stop.plan.command + "\n仅停止原会话 Shell；不保证派生进程已退出。",
             "停止", true, onConfirm = {
                 if (terminalJobsCurrent(visit) && !visit.busy && visit.stop === stop) {
                     visit.stop = null; terminalJobAction(visit, stop, true)
                 }
             }, onDismiss = { visit.stop = null })
     }
-    private fun terminalTaskOutput(raw: String): String {
-        if (raw.isBlank()) return ""
-        val result = try { org.json.JSONObject(raw) } catch (_: Exception) { return raw }
-        val output = result.optString("stdout")
-        if (output.isNotEmpty()) return output
-        return if (!result.optBoolean("ok")) "任务状态或日志暂不可读取。" else when (result.optString("state")) {
-            "running" -> "任务正在运行，暂无输出。"
-            "exited" -> "任务已退出。"
-            else -> "请求已处理，暂无日志；具体退出状态尚未确认。"
-        }
-    }
-    @Composable private fun TerminalJobsPanel() {
-        val conversation = selected?.id ?: return
-        val generation = editorGeneration
-        if (engineeringUi || controller.terminalJobRuns(conversation).isNotEmpty()) {
-            androidx.compose.material3.TextButton(modifier = Modifier.testTag("terminal-jobs-entry"), onClick = {
-                if (activityUsable() && retainedPage == "chat" && selected?.id == conversation && editorGeneration == generation) {
-                    revokeTerminalJobsVisit()
-                    val opened = TerminalJobsVisit(conversation, generation, controller.terminalJobRuns(conversation))
-                    terminalJobsVisit = opened
-                    refreshTerminalJobs(opened)
-                }
-            }) { androidx.compose.material3.Text("本会话终端 jobs / 日志 / 停止") }
-        }
-        val visit = terminalJobsVisit?.takeIf { it.conversation == conversation && it.editorGeneration == generation } ?: return
-        Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())
-            .testTag("terminal-jobs-panel")) {
-            androidx.compose.material3.Text("原句柄 job 与磁盘只读历史分区；重启不恢复进程句柄或执行授权。停止只核验并作用于原 owned shell，不保证后代退出。历史一律 UNKNOWN，不自动重发。")
-            androidx.compose.material3.TextButton(enabled = !visit.busy,
-                modifier = Modifier.testTag("terminal-jobs-refresh"), onClick = {
-                    if (terminalJobsCurrent(visit) && !visit.busy) refreshTerminalJobs(visit)
-                }) { androidx.compose.material3.Text("刷新本会话 jobs / 只读历史") }
-            androidx.compose.material3.Text("本进程原句柄 jobs")
-            if (visit.sessions.isEmpty()) androidx.compose.material3.Text("本进程没有保留本会话的 job；下方仍可读取重启历史。")
-            visit.sessions.forEach { session ->
-                androidx.compose.material3.Text("${session.plan.mode} · run=${session.plan.runId.value} · job=${session.jobId ?: "未派发或未知"}")
-                androidx.compose.material3.TextButton(enabled = !visit.busy, onClick = {
-                    if (terminalJobsCurrent(visit) && !visit.busy) terminalJobAction(visit, session, false)
-                }) { androidx.compose.material3.Text("读取此 job 的真实状态和首个16KiB日志") }
-                androidx.compose.material3.TextButton(enabled = !visit.busy && session.jobId != null, onClick = {
-                    if (terminalJobsCurrent(visit) && !visit.busy) visit.stop = session
-                }) { androidx.compose.material3.Text("停止此 job…") }
-            }
-            val stopping = visit.stop
-            if (stopping != null) androidx.compose.material3.Button(enabled = !visit.busy,
-                modifier = Modifier.testTag("terminal-job-stop-confirm"), onClick = {
-                    if (terminalJobsCurrent(visit) && visit.stop === stopping && !visit.busy) {
-                        visit.stop = null; terminalJobAction(visit, stopping, true)
-                    }
-                }) { androidx.compose.material3.Text("确认停止原 job ${stopping.jobId}（仅 owned shell）") }
-            Column(Modifier.testTag("terminal-job-history")) {
-                androidx.compose.material3.Text("只读历史 · UNKNOWN（unknown_after_process_restart）；不证明当前运行或退出，无停止/重跑/继续能力。")
-                androidx.compose.material3.Text(visit.historyNotice)
-                visit.history.forEach { record ->
-                    androidx.compose.material3.Text("${record.mode} · run=${record.scope} · job=${record.jobId} · UNKNOWN")
-                    androidx.compose.material3.TextButton(enabled = !visit.busy,
-                        modifier = Modifier.testTag("terminal-history-read-${record.jobId}"), onClick = {
-                            if (terminalJobsCurrent(visit) && !visit.busy) terminalHistoryPage(visit, record, 0)
-                        }) { androidx.compose.material3.Text("只读首个16KiB日志") }
-                }
-                val record = visit.historyPage
-                if (record != null && visit.hasMore) androidx.compose.material3.TextButton(enabled = !visit.busy,
-                    modifier = Modifier.testTag("terminal-history-next"), onClick = {
-                        if (terminalJobsCurrent(visit) && !visit.busy) terminalHistoryPage(visit, record, visit.nextOffset)
-                    }) { androidx.compose.material3.Text("下一页16KiB（字节偏移 ${visit.nextOffset}）") }
-            }
-            androidx.compose.material3.Text(visit.output, modifier = Modifier.testTag("terminal-job-result"))
-            androidx.compose.material3.TextButton(onClick = { if (terminalJobsVisit === visit) revokeTerminalJobsVisit() }) {
-                androidx.compose.material3.Text("关闭 jobs（不停止 daemon）")
-            }
-        }
-    }
     private fun refreshTerminalJobs(visit: TerminalJobsVisit) {
         if (!terminalJobsCurrent(visit) || visit.busy) return
+        val conversation = visit.conversation ?: run {
+            visit.sessions = emptyList(); visit.history = emptyList(); visit.historyPage = null
+            visit.hasMore = false; visit.nextOffset = 0; visit.output = ""; visit.historyError = null
+            return
+        }
         visit.busy = true
         visit.stop = null
+        visit.historyError = null
         visit.historyPage = null; visit.hasMore = false; visit.nextOffset = 0
         lifecycleScope.launch {
             try {
                 val snapshot = withContext(Dispatchers.IO) {
-                    controller.terminalJobsOnWorker(visit.conversation) { !visit.revoked.get() }
+                    controller.terminalJobsOnWorker(conversation) { !visit.revoked.get() }
                 }
                 if (terminalJobsCurrent(visit)) {
                     visit.sessions = snapshot.sessions
                     visit.history = snapshot.history
                     visit.output = ""
-                    visit.historyNotice = when {
-                        snapshot.error != null -> "历史读取受限：${snapshot.error}；不影响原句柄 job。"
-                        snapshot.history.isEmpty() -> "没有可读取的本会话历史。隔离条目：${snapshot.skipped}"
-                        else -> "本会话只读历史 ${snapshot.history.size} 条；隔离条目：${snapshot.skipped}"
-                    }
+                    visit.historyError = snapshot.error?.let { "历史读取受限：$it；不影响原句柄任务。" }
                 }
             } catch (_: Exception) {
-                if (terminalJobsCurrent(visit)) visit.historyNotice = "历史读取未受理；可明确刷新，不恢复执行能力。"
+                if (terminalJobsCurrent(visit)) {
+                    visit.historyError = "历史读取未受理；可明确刷新，不恢复执行能力。"
+                }
             } finally { visit.busy = false }
         }
     }
     private fun terminalHistoryPage(visit: TerminalJobsVisit,
         record: app.daiyu.android.terminal.TerminalJobHistoryReader.Record, offset: Long) {
         if (!terminalJobsCurrent(visit) || visit.busy || record !in visit.history) return
+        val conversation = visit.conversation ?: return
         visit.busy = true
         lifecycleScope.launch(Dispatchers.Main) {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    controller.terminalJobHistoryPageOnWorker(visit.conversation, record, offset, 16384) { !visit.revoked.get() }
+                    controller.terminalJobHistoryPageOnWorker(conversation, record, offset, 16384) { !visit.revoked.get() }
                 }
                 if (terminalJobsCurrent(visit)) {
                     visit.output = result.toString(2) // Replace one bounded page; never accumulate the whole log.
@@ -3088,14 +3020,15 @@ class MainActivity : ComponentActivity() {
     private fun terminalJobAction(visit: TerminalJobsVisit,
         session: app.daiyu.android.integration.tools.TerminalJobSession, stop: Boolean) {
         if (!terminalJobsCurrent(visit) || visit.busy || session !in visit.sessions) return
+        val conversation = visit.conversation ?: return
         visit.historyPage = null; visit.hasMore = false; visit.nextOffset = 0
         visit.busy = true
         lifecycleScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     // Recheck UI capability before worker admission; the original session/owner is immutable.
-                    if (stop) controller.stopTerminalJobOnWorker(visit.conversation, session) { !visit.revoked.get() }
-                    else controller.inspectTerminalJobOnWorker(visit.conversation, session)
+                    if (stop) controller.stopTerminalJobOnWorker(conversation, session) { !visit.revoked.get() }
+                    else controller.inspectTerminalJobOnWorker(conversation, session)
                 }
                 if (terminalJobsCurrent(visit)) visit.output = result.toString(2)
             } catch (_: Exception) {
@@ -4835,15 +4768,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun terminalPageCurrent(page: Any) = activityUsable() && voiceForeground &&
+        retainedPage == "terminal" && terminalPageOwner === page && !sidebarVisible
     private fun openTerminalAndroid(page: Any) {
-        if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
-            (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)
-                ?.application?.terminalOwner?.openAndroid(selected?.id)
+        if (!terminalPageCurrent(page)) return
+        val owner = (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)
+            ?.application?.terminalOwner ?: return
+        if (!owner.openAndroid(selected?.id)) toast("新建会话未受理，请先关闭当前会话或等待清理完成")
     }
     private fun openTerminalLinux(page: Any, reference: app.daiyu.android.terminal.LinuxGenerationRef) {
-        if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
-            (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)
-                ?.application?.openLinux(reference, selected?.id)
+        if (!terminalPageCurrent(page)) return
+        val application = (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)
+            ?.application ?: return
+        if (!application.openLinux(reference, selected?.id)) toast("新建 Linux 会话未受理，请检查所选环境与运行权限")
     }
     private fun openTerminal() {
         requireActivityUsable()

@@ -35,6 +35,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.daiyu.android.balance.BalanceState
+import app.daiyu.android.balance.ui.ProviderBalanceIndicator
 import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.icons.ModelBrandIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -45,7 +47,7 @@ internal data class ChatModelProviderUi(
     val id: String,
     val name: String,
     val models: List<ModelCatalogEntryUi>,
-    val balance: String? = null,
+    val balance: BalanceState? = null,
 )
 
 internal data class ChatModelPickerState(
@@ -132,16 +134,16 @@ internal fun ChatModelPicker(
                                 .semantics { heading(); stateDescription = if (open) "已展开" else "已折叠" }
                                 .padding(start = 11.dp, end = 11.dp, top = 12.dp, bottom = if (open) 9.dp else 13.dp),
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(provider.name, color = colors.toolbar, fontSize = 10.sp, modifier = Modifier.weight(1f),
+                                Text(provider.name, color = colors.toolbar, fontSize = 10.sp, modifier = Modifier.weight(1f).testTag("chat-model-provider-name:${provider.id}"),
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text("${provider.models.size}", color = colors.muted, fontSize = 9.sp,
                                     modifier = Modifier.testTag("chat-model-count:${provider.id}"))
                                 provider.balance?.let { balance ->
-                                    Icon(DaiyuIcons.Balance, null, Modifier.size(11.dp), tint = colors.muted)
-                                    Text(balance, color = colors.muted, fontSize = 9.sp,
-                                        modifier = Modifier.widthIn(max = 80.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    ProviderBalanceIndicator(state = balance,
+                                        modifier = Modifier.testTag("chat-model-provider-balance:${provider.id}").widthIn(max = 80.dp),
+                                        textStyle = TextStyle(fontSize = 9.sp))
                                 }
-                                Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp).rotate(if (open) 0f else -90f), tint = colors.muted)
+                                Icon(DaiyuIcons.ChevronDown, null, Modifier.testTag("chat-model-provider-expand:${provider.id}").size(10.dp).rotate(if (open) 0f else -90f), tint = colors.muted)
                             }
                         }
                         if (open) itemsIndexed(provider.models, key = { _, model -> "model:${provider.id}:${model.id}" }) { index, model ->

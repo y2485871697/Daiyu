@@ -3,30 +3,46 @@ package app.daiyu.android
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
-import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
-import android.view.inputmethod.InputMethodManager
-import androidx.compose.ui.platform.AbstractComposeView
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.test.*
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import kotlin.math.abs
 
 class ChatComposerImeActivityTest : WiredActivityTestCase() {
-    private fun composeHost(view: View): View? {
-        if (view is AbstractComposeView) return view
-        if (view is ViewGroup) for (index in 0 until view.childCount) {
-            composeHost(view.getChildAt(index))?.let { return it }
-        }
-        return null
-    }
+    private data class Frame(val decorBottom: Int, val imeBottom: Int,
+        val composerBottom: Float, val headerBottom: Float)
 
-    private fun screenBottom(tag: String): Float {
-        val bounds = node(tag).fetchSemanticsNode().boundsInRoot
-        val location = IntArray(2)
-        mainThread { checkNotNull(composeHost(activity.window.decorView)).getLocationOnScreen(location) }
-        return bounds.bottom + location[1]
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun settledFrame(visible: Boolean, before: Frame? = null): Frame {
+        val surface = node("chat-composer-surface").fetchSemanticsNode()
+        val header = node("chat-top-bar").fetchSemanticsNode()
+        assertSame(surface.root, header.root)
+        val view = (surface.root as ViewRootForTest).view
+        val decor = view.rootView
+        val token = view.windowToken
+        val density = activity.resources.displayMetrics.density
+        return awaitStableWindowFrame(view) {
+            val insets = ViewCompat.getRootWindowInsets(view)
+            if (insets == null || view.windowToken != token || !surface.layoutInfo.isPlaced ||
+                !header.layoutInfo.isPlaced || insets.isVisible(WindowInsetsCompat.Type.ime()) != visible) null
+            else {
+                val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+                val location = IntArray(2)
+                decor.getLocationOnScreen(location)
+                fun bottom(node: androidx.compose.ui.semantics.SemanticsNode) =
+                    node.positionOnScreen.y + node.size.height
+                val frame = Frame(location[1] + decor.height, imeBottom, bottom(surface), bottom(header))
+                val valid = if (visible) {
+                    val keyboardTop = checkNotNull(before).decorBottom - imeBottom
+                    val gap = keyboardTop - frame.composerBottom
+                    imeBottom > 0 && gap >= -2f && gap <= 32f * density
+                } else imeBottom == 0 && (before == null ||
+                    abs(frame.composerBottom - before.composerBottom) <= 2f)
+                if (valid) frame else null
+            }
+        }
     }
 
     private fun assertRealApi26ImeBinding() {
@@ -53,58 +69,35 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
     fun testKeyboardKeepsComposerAboveImeAndDoesNotPanHeader() {
         assertEquals(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
             activity.window.attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST)
+        val emptyWindow = settledFrame(visible = false)
         setDraft("键盘位置回归草稿")
+        // Finish the show initiated by text replacement before requesting the baseline hide.
+        awaitImeFrame(node("chat-draft"), visible = true)
         dismissIme()
-        val before = screenBottom("chat-composer-surface")
-        val headerBefore = screenBottom("chat-top-bar")
+        val before = settledFrame(visible = false, before = emptyWindow)
         val database = fixture.database.exportBackup()
         repeat(2) {
             node("chat-draft").performClick()
-            mainThread {
-                val root = activity.window.decorView
-                val focus = checkNotNull(root.findFocus())
-                activity.getSystemService(InputMethodManager::class.java)
-                    .showSoftInput(focus, InputMethodManager.SHOW_IMPLICIT)
-            }
-            ui.waitUntil(5_000) {
-                var visible = false
-                instrumentation.runOnMainSync {
-                    visible = ViewCompat.getRootWindowInsets(activity.window.decorView)
-                        ?.isVisible(WindowInsetsCompat.Type.ime()) == true
-                }
-                visible
-            }
-            ui.waitForIdle()
+            node("chat-draft").assertIsFocused()
             assertRealApi26ImeBinding()
-            var keyboardTop = 0
-            mainThread {
-                val decor = activity.window.decorView
-                val location = IntArray(2)
-                decor.getLocationOnScreen(location)
-                val insets = checkNotNull(ViewCompat.getRootWindowInsets(decor))
-                keyboardTop = location[1] + decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            }
-            val bottom = screenBottom("chat-composer-surface")
+            val shown = settledFrame(visible = true, before = before)
+            val keyboardTop = before.decorBottom - shown.imeBottom
+            val bottom = shown.composerBottom
             val density = activity.resources.displayMetrics.density
             val gap = keyboardTop - bottom
+            android.util.Log.d("DaiyuImeGeometry", "round=$it before=$before shown=$shown")
             assertTrue("Composer must sit just above IME, gap=$gap", gap >= -2f && gap <= 32f * density)
-            assertTrue("Keyboard must lift composer", bottom < before - 48f * density)
-            assertEquals("Header must not pan off-screen", headerBefore, screenBottom("chat-top-bar"), 2f)
+            assertTrue("Keyboard must lift composer: before=$before shown=$shown", bottom < before.composerBottom - 48f * density)
+            assertEquals("Header must not pan off-screen", before.headerBottom, shown.headerBottom, 2f)
             node("chat-draft").assertIsDisplayed()
             if (it == 0) {
                 instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-                ui.waitUntil(5_000) {
-                    var visible = true
-                    instrumentation.runOnMainSync {
-                        visible = ViewCompat.getRootWindowInsets(activity.window.decorView)
-                            ?.isVisible(WindowInsetsCompat.Type.ime()) != false
-                    }
-                    !visible
-                }
-                awaitHostWindowFocus(activity)
-                node("chat-top-bar").assertIsDisplayed()
             } else dismissIme()
-            ui.waitUntil(5_000) { abs(screenBottom("chat-composer-surface") - before) <= 2f }
+            val restored = settledFrame(visible = false, before = before)
+            assertEquals("Composer returns after IME hides", before.composerBottom, restored.composerBottom, 2f)
+            assertFalse(activity.isFinishing)
+            assertFalse(activity.isDestroyed)
+            node("chat-top-bar").assertIsDisplayed()
             assertDraft("键盘位置回归草稿")
             assertEquals(database, fixture.database.exportBackup())
             assertEquals(0, fixture.opens.get())

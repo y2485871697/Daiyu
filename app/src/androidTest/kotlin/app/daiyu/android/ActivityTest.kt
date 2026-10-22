@@ -88,18 +88,30 @@ class ActivityTest : WiredActivityTestCase() {
         assertDraft(text); assertEquals(text, fixture.database.draft()); assertEquals(0, fixture.opens.get())
     }
 
+    fun testSelectionSemanticsKeepTraversalAndToolbarRangesAndCollapsedCursor() {
+        setDraft("选择范围回归")
+        setSelection(1, 3, relativeToOriginalText = true)
+        setSelection(2, 4, relativeToOriginalText = false)
+        node("chat-draft").assertIsFocused()
+        setSelection(4, 4, relativeToOriginalText = false)
+        setSelection(1, 3, relativeToOriginalText = true)
+        assertDraft("选择范围回归")
+        assertSelection(1, 3)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testDraftSlotsRunningSwitchAndActivityRecreation() {
         val preferences = fixture.application.getSharedPreferences("model-settings", 0)
         val original = fixture.settings.load()
         preferences.edit().remove("iv").commit()
         val unattached = " 未创建\n草稿  "
-        setDraft(unattached); setSelection(2, 4); node("chat-send").performClick()
+        setDraft(unattached); setSelection(2, 4, relativeToOriginalText = true); node("chat-send").performClick()
         awaitTextSendResult(activity)
         assertDraft(unattached); assertSelection(2, 4); assertTrue(fixture.database.conversations().isEmpty())
         val a = fixture.database.create("default"); val b = fixture.database.create("default")
-        mainThread { activity.select(a) }; setDraft("A草稿"); setSelection(1, 2)
+        mainThread { activity.select(a) }; setDraft("A草稿"); setSelection(1, 2, relativeToOriginalText = true)
         val firstAEditor = retainedControls(activity)
-        mainThread { activity.select(b) }; setDraft(" B草稿\n "); setSelection(0, 1)
+        mainThread { activity.select(b) }; setDraft(" B草稿\n "); setSelection(0, 1, relativeToOriginalText = true)
         val oldBEditor = retainedControls(activity)
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; ui.waitForIdle()
         mainThread { oldBEditor.onTextChange("stale B"); oldBEditor.onSelectionChange(0, 0) }
@@ -123,7 +135,7 @@ class ActivityTest : WiredActivityTestCase() {
         node("chat-draft").assertEditableText(""); assertSelection(0, 0)
         setDraft("A下一条")
         mainThread { activity.select(b) }; assertDraft(" B草稿\n ")
-        setDraft(" B新稿\n "); setSelection(1, 2)
+        setDraft(" B新稿\n "); setSelection(1, 2, relativeToOriginalText = true)
         node("chat-control").assertDoesNotExist()
         node("chat-send").performClick() // Existing send rejects another active owner; no new run.
         awaitTextSendResult(activity)

@@ -6,6 +6,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.Conversation
 import app.daiyu.android.ui.model.ConversationPaneUiState
+import app.daiyu.android.ui.model.searchResults
 
 /** Ordinary selection changes the owner in place; management only changes its checkbox selection. */
 class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
@@ -16,8 +17,19 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
     private fun paneState() = (MainActivity::class.java.getDeclaredField("paneState\$delegate")
         .apply { isAccessible = true }.get(activity) as MutableState<ConversationPaneUiState>).value
 
+    private fun editorGeneration() = MainActivity::class.java.getDeclaredField("editorGeneration")
+        .apply { isAccessible = true }.getLong(activity)
+
     private fun selectedConversation() = MainActivity::class.java.getDeclaredField("selected")
         .apply { isAccessible = true }.get(activity) as Conversation?
+
+    private fun revealConversation(conversation: Conversation) {
+        val tag = "drawer-conversation:${conversation.id.value}"
+        node("drawer-list").performScrollToKey(conversation.id.value)
+        ui.mainClock.advanceTimeByFrame()
+        awaitUniqueTag(tag)
+        node(tag).assertIsDisplayed().performClick()
+    }
 
     private fun assertSelectedWithSidebarOpen(conversation: Conversation, expectedDraft: String) {
         awaitControl("selected owner published without closing sidebar") {
@@ -64,9 +76,19 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         node("drawer-search").performClick()
         node("drawer-search-input").performTextReplacement("保留侧栏")
         dismissIme()
+        val expectedResults = setOf(first.id.value, second.id.value)
+        awaitControl("both filtered conversations published") {
+            paneState().conversationsLoaded && paneState().searchQuery == "保留侧栏" &&
+                paneState().searchResults().map { it.id }.toSet() == expectedResults
+        }
         for (conversation in listOf(second, second, first)) {
-            node("drawer-conversation:${conversation.id.value}").performClick()
+            val generation = editorGeneration()
+            revealConversation(conversation)
+            awaitControl("each selection including reselection gets a fresh editor") {
+                editorGeneration() > generation
+            }
             assertSelectedWithSidebarOpen(conversation, if (conversation.id == first.id) "甲编辑后的草稿" else "乙草稿")
+            mainThread { assertEquals(expectedResults, paneState().searchResults().map { it.id }.toSet()) }
         }
         assertEquals(before, fixture.database.exportBackup())
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
@@ -82,7 +104,7 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
 
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         node("drawer-search-input").assertEditableText("保留侧栏")
-        node("drawer-conversation:${second.id.value}").performClick()
+        revealConversation(second)
         assertSelectedWithSidebarOpen(second, "乙草稿")
         val drawer = node("conversation-drawer")
         awaitNodeWindowFocus(drawer)

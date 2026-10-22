@@ -73,6 +73,27 @@ class SidebarSelectionContractTest(unittest.TestCase):
                          'assertDraft(" B新稿\\n "); assertSelection(1, 2)']:
             self.assertIn(fragment, test)
 
+    def test_drawer_reveal_uses_lazy_key_and_reselection_requires_fresh_generation(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneManagementActivityTest.kt').read_text()
+        helper = test.split('private fun revealConversation(', 1)[1].split('private fun assertSelectedWithSidebarOpen', 1)[0]
+        self.assertLess(helper.index('performScrollToKey(conversation.id.value)'), helper.index('awaitUniqueTag(tag)'))
+        self.assertLess(helper.index('awaitUniqueTag(tag)'), helper.index('assertIsDisplayed().performClick()'))
+        self.assertIn('getDeclaredField("editorGeneration")', test)
+        self.assertIn('editorGeneration() > generation', test)
+        self.assertIn('paneState().searchResults().map { it.id }.toSet() == expectedResults', test)
+
+    def test_slot_restore_isolates_toolbar_without_changing_semantics_default(self):
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ActivityTest.kt').read_text()
+        self.assertIn('relativeToOriginalText: Boolean = false', fixture)
+        self.assertIn('it(start, end, relativeToOriginalText)', fixture)
+        body = test.split('fun testDraftSlotsRunningSwitchAndActivityRecreation()', 1)[1].split('\n    fun ', 1)[0]
+        self.assertEqual(4, body.count('relativeToOriginalText = true'))
+        self.assertIn('assertSelection(1, 2)', body)
+        self.assertIn('testSelectionSemanticsKeepTraversalAndToolbarRangesAndCollapsedCursor', test)
+        self.assertIn('setSelection(2, 4, relativeToOriginalText = false)', test)
+        self.assertIn('setSelection(4, 4, relativeToOriginalText = false)', test)
+
 
 if __name__ == '__main__':
     unittest.main()

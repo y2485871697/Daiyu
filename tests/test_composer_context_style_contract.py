@@ -13,8 +13,8 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.badge = self.text.split('Row(Modifier.widthIn(max = 120.dp)', 1)[1].split('Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp)', 1)[0]
 
     def test_badge_wraps_its_content_inside_compact_limits(self):
-        self.assertIn('heightIn(min = 24.dp).testTag("chat-context")', self.badge)
-        self.assertIn('.padding(1.dp).padding(horizontal = 4.dp, vertical = 2.dp)', self.badge)
+        self.assertIn('heightIn(min = 22.dp).testTag("chat-context")', self.badge)
+        self.assertIn('.padding(1.dp).padding(horizontal = 3.dp, vertical = 2.dp)', self.badge)
         self.assertIn('Arrangement.spacedBy(4.dp)', self.badge)
         self.assertIn('Modifier.weight(1f, fill = false).width(IntrinsicSize.Max).testTag("chat-context-label")', self.badge)
         self.assertNotIn('fillMaxWidth', self.badge)
@@ -30,12 +30,34 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertIn('val chrome = chatChromeColors().copy(accent = conversationColors().accent)', self.text)
 
     def test_typography_and_icon_proportions_stay_local(self):
-        self.assertIn('Modifier.size(18.dp).testTag("chat-context-icon")', self.badge)
+        self.assertIn('Modifier.size(15.dp).testTag("chat-context-icon")', self.badge)
         self.assertIn('fontSize = 10.sp, lineHeight = 14.sp', self.badge)
+        self.assertEqual(2, self.badge.count('RoundedCornerShape(11.dp)'))
         self.assertIn('FontWeight.Normal', self.badge)
         self.assertIn('PlatformTextStyle(includeFontPadding = false)', self.badge)
         self.assertIn('LineHeightStyle.Alignment.Center', self.badge)
         self.assertNotIn('LocalDensity', self.text)
+
+    def test_toolbar_graphics_are_optically_sized_inside_unchanged_touch_slots(self):
+        attach = self.text.split('ChatIconButton(ChatPreviewIcons.Attach,', 1)[1].split('ChatIconButton(ChatPreviewIcons.Thought,', 1)[0]
+        thought = self.text.split('ChatIconButton(ChatPreviewIcons.Thought,', 1)[1].split('Box(Modifier.size(32.dp).testTag("chat-assistant")', 1)[0]
+        assistant = self.text.split('Box(Modifier.size(32.dp).testTag("chat-assistant")', 1)[1].split('key(state.controlOwnerKey)', 1)[0]
+        self.assertIn('Modifier.size(32.dp)', attach)
+        self.assertIn('iconSize = 22.5.dp', attach)
+        self.assertIn('Modifier.size(32.dp).testTag("chat-reasoning")', thought)
+        self.assertIn('iconSize = 24.dp', thought)
+        self.assertIn('actions.onOpenReasoning', thought)
+        self.assertIn('AssistantAvatar(assistant, 18.dp,', assistant)
+        self.assertIn('onClick = actions.onOpenAssistant', assistant)
+
+    def test_balance_moves_left_by_layout_spacing_not_a_visual_offset(self):
+        controls = self.text.split('key(state.controlOwnerKey)', 1)[1].split('SpeechMorphButton(', 1)[0]
+        self.assertIn('Arrangement.spacedBy(15.dp)', controls)
+        self.assertIn('.widthIn(max = 72.dp)', controls)
+        self.assertIn('animateChanges = true, iconSize = 16.dp', controls)
+        self.assertIn('fontSize = 14.sp, lineHeight = 28.sp', controls)
+        self.assertIn('Modifier.size(32.dp).testTag(if (textAction', controls)
+        self.assertNotIn('.offset(', controls)
 
     def test_fraction_and_read_only_contracts_are_unchanged(self):
         self.assertIn('state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)', self.badge)

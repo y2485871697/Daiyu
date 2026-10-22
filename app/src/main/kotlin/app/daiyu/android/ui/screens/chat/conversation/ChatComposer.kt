@@ -126,12 +126,12 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
             ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
-            Row(Modifier.widthIn(max = 120.dp).heightIn(min = 24.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
-                .border(1.dp, chrome.line, RoundedCornerShape(12.dp))
-                .padding(1.dp).padding(horizontal = 4.dp, vertical = 2.dp),
+            Row(Modifier.widthIn(max = 120.dp).heightIn(min = 22.dp).testTag("chat-context").clip(RoundedCornerShape(11.dp))
+                .border(1.dp, chrome.line, RoundedCornerShape(11.dp))
+                .padding(1.dp).padding(horizontal = 3.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
-                ChatContextMark(fraction, contextColor, Modifier.size(18.dp).testTag("chat-context-icon"))
+                ChatContextMark(fraction, contextColor, Modifier.size(15.dp).testTag("chat-context-icon"))
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
                     modifier = Modifier.weight(1f, fill = false).width(IntrinsicSize.Max).testTag("chat-context-label"),
                     style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 14.sp,
@@ -204,7 +204,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 24.dp)
+                                Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 22.5.dp)
                             ChatIconButton(ChatPreviewIcons.Thought, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
                                 Modifier.size(32.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 24.dp)
                             Box(Modifier.size(32.dp).testTag("chat-assistant").clip(CircleShape)
@@ -212,11 +212,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
                                 contentAlignment = Alignment.Center) {
-                                AssistantAvatar(assistant, 24.dp, Modifier.testTag("chat-assistant-avatar"))
+                                AssistantAvatar(assistant, 18.dp, Modifier.testTag("chat-assistant-avatar"))
                             }
                         }
                         key(state.controlOwnerKey) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-composer-provider-balance")
                                     .widthIn(max = 72.dp), animateChanges = true, iconSize = 16.dp,

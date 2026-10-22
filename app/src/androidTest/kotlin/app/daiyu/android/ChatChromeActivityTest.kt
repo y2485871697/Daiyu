@@ -105,8 +105,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
 
     private fun contextHeightPx(text: TextLayoutResult): Float {
         val density = text.layoutInput.density.density
-        return maxOf((24f * density).roundToInt(),
-            maxOf((18f * density).roundToInt(), text.size.height) +
+        return maxOf((22f * density).roundToInt(),
+            maxOf((15f * density).roundToInt(), text.size.height) +
                 2 * (1f * density).roundToInt() + 2 * (2f * density).roundToInt()).toFloat()
     }
 
@@ -223,8 +223,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
     }
 
     fun testEnlargedComposerFitsControlsWithoutDoubleScalingText() {
-        for ((density, expected) in listOf(1f to 5f, .8f to 3f, 1.25f to 6f, 1.5f to 7f)) {
-            val context = maxOf((24f * density).roundToInt(), (18f * density).roundToInt() +
+        for ((density, expected) in listOf(1f to 6f, .8f to 4f, 1.25f to 7f, 1.5f to 9f)) {
+            val context = maxOf((22f * density).roundToInt(), (15f * density).roundToInt() +
                 2 * density.roundToInt() + 2 * (2f * density).roundToInt())
             assertEquals(expected, contextBottomGapPx(density, context), 0f)
         }
@@ -242,7 +242,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(16f, (host.bottom - surface.bottom) / density, .75f)
             assertEquals(144f, surface.height / density, 1.5f)
             assertEquals(contextHeightPx(layout("37% 上下文")), context.height, 0f)
-            assertEquals(13f, (context.top - surface.top) / density, .75f)
+            assertEquals(14f, (context.top - surface.top) / density, .75f)
             assertEquals(14f, (surface.right - context.right) / density, .75f)
             assertEquals(13f, (divider.left - surface.left) / density, .75f)
             val contextText = layout("37% 上下文")
@@ -299,14 +299,14 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 assertEquals(font, text.layoutInput.density.fontScale, .001f)
                 assertEquals(1, text.lineCount)
                 assertNoTextOverflow(text)
-                assertEquals(18f, icon.width / density, .75f)
-                assertEquals(18f, icon.height / density, .75f)
+                assertEquals(15f, icon.width / density, .75f)
+                assertEquals(15f, icon.height / density, .75f)
                 assertEquals(contextHeightPx(text), badge.height, 0f)
                 assertTrue("compact context max width", badge.width / density <= 120f + 1f)
                 if (font <= 1f) assertTrue("default-font badge stays compact", badge.width / density < 92f)
-                assertEquals(5f, (icon.left - badge.left) / density, .75f)
+                assertEquals(4f, (icon.left - badge.left) / density, .75f)
                 assertEquals(4f, (label.left - icon.right) / density, .75f)
-                assertEquals(5f, (badge.right - label.right) / density, .75f)
+                assertEquals(4f, (badge.right - label.right) / density, .75f)
                 assertEquals(badge.center.y, icon.center.y, 1f)
                 assertEquals(icon.center.y, label.center.y, 1f)
                 assertEquals(model.center.y, badge.center.y, 1f)
@@ -341,7 +341,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         val icon = ui.onNodeWithTag("chat-context-icon", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val label = ui.onNodeWithTag("chat-context-label", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertEquals(120f, badge.width / density, 1f)
-        assertEquals(18f, icon.width / density, .75f)
+        assertEquals(15f, icon.width / density, .75f)
         assertTrue(label.right <= badge.right + 1f)
         assertTrue(layout("100% " + "上下文使用情况".repeat(20)).isLineEllipsized(0))
         assertTrue(node("chat-model").fetchSemanticsNode().boundsInRoot.width > 0f)
@@ -373,13 +373,13 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                     assertEquals(slot.center.x, graphic.center.x, 1f)
                     assertEquals(slot.center.y, graphic.center.y, 1f)
                 }
-                assertGraphic("附件", 24f)
+                assertGraphic("附件", 22.5f)
                 assertGraphic("推理强度，当前为 高", 24f)
                 assertGraphic(label, iconDp)
                 val avatar = ui.onNodeWithTag("chat-assistant-avatar", useUnmergedTree = true)
                     .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-                assertEquals(24f, avatar.width / density, .75f)
-                assertEquals(24f, avatar.height / density, .75f)
+                assertEquals(18f, avatar.width / density, .75f)
+                assertEquals(18f, avatar.height / density, .75f)
                 val assistantSlot = node("chat-assistant").assertIsDisplayed()
                     .assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp)
                     .fetchSemanticsNode().boundsInRoot
@@ -521,7 +521,9 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val voice = button("语音输入").assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp).fetchSemanticsNode().boundsInRoot
             val send = node("chat-send").assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp).fetchSemanticsNode().boundsInRoot
             assertTrue("balance clears centered voice", voice.right <= indicator.left + 1f)
-            assertTrue("balance stays before send", indicator.right <= send.left + 1f)
+            assertEquals("balance-to-send gap", 15f, (send.left - indicator.right) / dp, .75f)
+            assertEquals("send keeps its right anchor", 22f,
+                (node("chrome-host").fetchSemanticsNode().boundsInRoot.right - send.right) / dp, .75f)
             assertTrue("send stays inside composer", send.right <= node("chrome-host").fetchSemanticsNode().boundsInRoot.right + 1f)
             node("chat-send").performClick()
             assertEquals(listOf("ready"), sent)
@@ -544,7 +546,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val voice = button("语音输入").assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp).fetchSemanticsNode().boundsInRoot
             val send = node("chat-send").assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp).fetchSemanticsNode().boundsInRoot
             assertTrue(voice.right <= indicator.left + 1f)
-            assertTrue(indicator.right <= send.left + 1f)
+            assertEquals(15f, (send.left - indicator.right) / dp, .75f)
+            assertEquals(22f, (node("chrome-host").fetchSemanticsNode().boundsInRoot.right - send.right) / dp, .75f)
         }
     }
 

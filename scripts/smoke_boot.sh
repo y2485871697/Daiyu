@@ -17,7 +17,7 @@ adb_stage() {
 APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
 test -n "$APK"
 mkdir -p smoke
-rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/hwui-before.txt smoke/hwui-renderer.txt
+rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/logcat-before.txt smoke/properties-before.txt smoke/hwui-renderer.txt
 rm -rf smoke/settings-ui
 # Explicitly name every source test class: legacy default discovery scans all dependency DEX.
 target_spec=$(python3 - <<'PYCOUNT'
@@ -120,16 +120,9 @@ collect_diagnostics() {
 trap collect_diagnostics EXIT
 adb_stage device 60 wait-for-device
 api=$(adb_stage api 15 shell getprop ro.build.version.sdk | tr -d '\r')
-# Android O's legacy OpenGL renderer aborts in the preinstalled launcher.
-# Restart existing renderer processes after choosing the supported Skia GL pipeline.
-if test "$api" = 26; then
-  adb_stage hwui-log-before 20 logcat -d -b all > smoke/hwui-before.txt
-  adb_stage hwui-root 15 root
-  adb_stage hwui-device 30 wait-for-device
-  adb_stage hwui-configure 20 shell 'setprop debug.hwui.renderer skiagl && stop && setprop sys.boot_completed 0 && start'
-  adb_stage hwui-state 15 shell getprop debug.hwui.renderer | tr -d '\r' > smoke/hwui-renderer.txt
-  grep -Fx skiagl smoke/hwui-renderer.txt
-fi
+# Observe the image's renderer without restarting framework processes or hiding startup crashes.
+adb_stage image-state 15 shell getprop > smoke/properties-before.txt
+adb_stage hwui-state 15 shell getprop debug.hwui.renderer | tr -d '\r' > smoke/hwui-renderer.txt
 # Current gfxstream images crash in gesture-bar region sampling before app install.
 if test "$api" -ge 36; then
   adb_stage navigation 15 shell cmd overlay enable com.android.internal.systemui.navbar.threebutton
@@ -188,6 +181,8 @@ adb_stage memory 15 shell cat /proc/meminfo > smoke/memory-start.txt
 if test -n "${EMULATOR_RAM_MB:-}"; then
   awk -v expected="$EMULATOR_RAM_MB" '/^MemTotal:/ {found=1; if ($2 < expected * 1024 * 0.9) exit 1} END {if (!found) exit 1}' smoke/memory-start.txt
 fi
+adb_stage logcat-before 20 logcat -d -b all > smoke/logcat-before.txt
+if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat-before.txt; then exit 1; fi
 adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt
 adb_stage install-tests 120 install delivery/tests/platform-test.apk 2>&1 | tee smoke/test-install.txt
 if test "$expected" -gt 0; then
@@ -252,8 +247,8 @@ for attempt in $(seq 1 20); do
 done
 test "$ready" = 1
 adb_stage activity 20 shell dumpsys activity activities > smoke/activity.txt
-adb_stage logcat 20 logcat -d > smoke/logcat.txt
-if grep -q 'FATAL EXCEPTION' smoke/logcat.txt; then exit 1; fi
+adb_stage logcat 20 logcat -d -b all > smoke/logcat.txt
+if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat.txt; then exit 1; fi
 if test "$api" -ge 36; then
   adb_stage screenshot 20 emu screenrecord screenshot "$(pwd)/smoke"
   screenshot=$(find smoke -maxdepth 1 -name 'Screenshot_*.png' -print -quit)

@@ -33,6 +33,41 @@ class SettingsDiagnosticsActivityTest : WiredActivityTestCase() {
     private fun awaitNotice(text: String) {
         ui.waitUntil(5_000) { ui.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
+    private fun assertActionSummaries() {
+        for ((title, summary) in listOf(
+            "导出日志" to "导出诊断事件 JSON；不包含聊天、密钥或路径",
+            "清除日志" to "只清除诊断日志，不影响聊天与执行记录",
+        )) {
+            row(title)
+            val actionableRow = hasTestTag("settings-row:$title") and hasClickAction()
+            ui.waitUntil(5_000) { ui.onAllNodes(actionableRow).fetchSemanticsNodes().isNotEmpty() }
+            node("settings-row:$title").assertIsEnabled().assertHasClickAction()
+            ui.onNode(hasText(summary) and hasAnyAncestor(hasTestTag("settings-row:$title")),
+                useUnmergedTree = true).assertIsDisplayed()
+        }
+    }
+    fun testActionSummariesStayFixedAcrossLoggingToggleAndClearCancellation() {
+        val databaseBefore = fixture.database.exportBackup()
+        openDiagnostics()
+        row("记录诊断日志").assertIsOff()
+        assertActionSummaries()
+        enable()
+        row("记录诊断日志").assertIsOn()
+        assertActionSummaries()
+        row("记录诊断日志").performClick()
+        awaitControl("logging disabled") { !fixture.diagnostics.state.value.enabled }
+        row("记录诊断日志").assertIsOff()
+        assertActionSummaries()
+        val saved = fixture.diagnostics.exportSnapshot()
+        row("清除日志").performClick()
+        node("dialog-confirm").assertExists()
+        node("dialog-cancel").performClick()
+        assertActionSummaries()
+        assertFalse(fixture.diagnostics.state.value.enabled)
+        assertArrayEquals(saved, fixture.diagnostics.exportSnapshot())
+        assertEquals(databaseBefore, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
     fun testRealProducerEnablePauseResumeAndClearPreserveDraftDatabaseAndOtherRecords() {
         setDraft("diagnostics unsent private-canary")
         val before = fixture.database.exportBackup()
@@ -65,6 +100,9 @@ class SettingsDiagnosticsActivityTest : WiredActivityTestCase() {
     fun testExportWritesOnlyStructuredSnapshotToAnExplicitDocumentTarget() {
         openDiagnostics(); enable()
         fixture.diagnostics.record(DiagnosticEvent.RUN_FAILED)
+        row("记录诊断日志").performClick()
+        awaitControl("logging disabled before export") { !fixture.diagnostics.state.value.enabled }
+        assertActionSummaries()
         val provider = instrumentation.context.packageManager.getPackageInfo(instrumentation.context.packageName,
             PackageManager.GET_PROVIDERS).providers.orEmpty().single { it.name == DiagnosticExportTestProvider::class.java.name }
         val uri = Uri.Builder().scheme("content").authority(provider.authority).appendPath(UUID.randomUUID().toString()).build()
@@ -81,6 +119,8 @@ class SettingsDiagnosticsActivityTest : WiredActivityTestCase() {
         instrumentation.addMonitor(monitor)
         try {
             row("导出日志").performClick(); awaitNotice("诊断日志已导出")
+            assertActionSummaries()
+            assertFalse(fixture.diagnostics.state.value.enabled)
             assertEquals(1, launches.get())
             val actual = activity.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
             assertArrayEquals(fixture.diagnostics.exportSnapshot(), actual)

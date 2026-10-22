@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
@@ -109,14 +110,17 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
 
 @Composable
 private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
-    modifier: Modifier = Modifier, checked: Boolean? = null, enabled: Boolean = true, previewStyle: Boolean = false) {
+    modifier: Modifier = Modifier, checked: Boolean? = null, enabled: Boolean = true, previewStyle: Boolean = false,
+    dismissOnAction: Boolean = true, selectionBackground: Color? = null) {
     val colors = chatChromeColors()
     val scheme = MiuixTheme.colorScheme
     val dark = scheme.background.luminance() < .3f
     Row(modifier.testTag("chat-menu:${entry.action.name}").fillMaxWidth().heightIn(min = 38.dp)
         .clip(RoundedCornerShape(11.dp))
+        .background(if (checked == true) selectionBackground ?: Color.Transparent else Color.Transparent)
+        .semantics { if (selectionBackground != null) selected = checked == true }
         .conversationClickable(enabled = enabled) {
-            if (entry.action != ChatMenuAction.INTERACTIVE_MODE && entry.action != ChatMenuAction.AUTO_COMPRESS) onDismiss()
+            if (dismissOnAction && entry.action != ChatMenuAction.INTERACTIVE_MODE && entry.action != ChatMenuAction.AUTO_COMPRESS) onDismiss()
             onAction(entry.action)
         }
         .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -205,14 +209,19 @@ internal fun UserTurnMenu(expanded: Boolean, onDismiss: () -> Unit, id: String, 
 internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
     selected: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
     available: Set<ChatMenuAction> = setOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO)) {
-    ChatAnchoredMenu(expanded, onDismiss) {
-        Column {
-            listOf(
-                MenuEntry("语音输入", DaiyuIcons.Voice, ChatMenuAction.VOICE_INPUT),
-                MenuEntry("语音对话", DaiyuIcons.Speak, ChatMenuAction.VOICE_CHAT),
-                MenuEntry("豆包实时通话", DaiyuIcons.Voice, ChatMenuAction.VOICE_DOUBAO),
-            ).filter { it.action in available }.forEach { entry ->
-                ChatMenuItem(entry, onDismiss, onAction, checked = entry.action == selected)
+    val entries = listOf(
+        MenuEntry("语音输入", DaiyuIcons.Voice, ChatMenuAction.VOICE_INPUT),
+        MenuEntry("语音对话", DaiyuIcons.Speak, ChatMenuAction.VOICE_CHAT),
+        MenuEntry("豆包实时通话", DaiyuIcons.Voice, ChatMenuAction.VOICE_DOUBAO),
+    ).filter { it.action in available }
+    if (entries.isEmpty()) return
+    val colors = usagePalette()
+    val selectionBackground = if (colors.dark) colors.bubble else Color(0xFFEFEDFB)
+    ChatAnchoredMenu(expanded, onDismiss, Modifier.testTag("chat-voice-mode-menu")) {
+        Column(Modifier.padding(1.dp)) {
+            entries.forEach { entry ->
+                ChatMenuItem(entry, onDismiss, onAction, checked = entry.action == selected, previewStyle = true,
+                    dismissOnAction = false, selectionBackground = selectionBackground)
             }
         }
     }

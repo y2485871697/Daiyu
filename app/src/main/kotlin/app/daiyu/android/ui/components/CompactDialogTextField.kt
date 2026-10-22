@@ -34,8 +34,8 @@ internal fun CompactDialogTextField(
             onValueChange = onValueChange,
             singleLine = true,
             textStyle = style,
-            cursorBrush = SolidColor(colors.primary),
-            modifier = modifier.fillMaxWidth().heightIn(min = 48.dp)
+            cursorBrush = imeCursorBrush(colors.primary),
+            modifier = modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp)
                 .semantics { contentDescription = placeholder }
                 .clip(RoundedCornerShape(16.dp)).background(colors.surfaceVariant),
             decorationBox = { editor ->

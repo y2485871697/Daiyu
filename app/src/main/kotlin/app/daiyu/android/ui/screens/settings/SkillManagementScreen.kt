@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.components.materialImeCursorColor
+
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -146,7 +149,9 @@ internal fun SkillManagementScreen(
                     Text("从公开 GitHub 仓库安装", color = colors.onSurface)
                     OutlinedTextField(value = controller.url, onValueChange = { controller.url = it },
                         enabled = !controller.busy, label = { Text("https://github.com/owner/repo") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("skills-install-url"))
+                        modifier = Modifier.managedInput().fillMaxWidth().testTag("skills-install-url"),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
                     SkillActionButton("检查仓库", controller::inspect, primary = true,
                         enabled = !controller.busy && controller.url.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().testTag("skills-inspect"))

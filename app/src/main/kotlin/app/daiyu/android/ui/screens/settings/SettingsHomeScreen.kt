@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import android.widget.Toast
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.background
@@ -72,8 +75,8 @@ internal fun SettingsSearch(query: String, onQueryChange: (String) -> Unit,
         DaiyuIcon(DaiyuIcons.Search, null, tint = colors.onSurfaceVariantSummary, size = 20.dp)
         BasicTextField(value = query, onValueChange = onQueryChange, singleLine = true,
             textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 15.sp),
-            cursorBrush = SolidColor(colors.primary),
-            modifier = Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 14.dp)
+            cursorBrush = imeCursorBrush(colors.primary),
+            modifier = Modifier.managedInput().weight(1f).padding(horizontal = 10.dp, vertical = 14.dp)
                 .testTag(tag).semantics { contentDescription = placeholder },
             decorationBox = { editor ->
                 Box {

@@ -78,7 +78,7 @@ internal fun DaiyuChatScreen(
     var draftFocused by remember { mutableStateOf(false) }
     var inputDismissInProgress by remember { mutableStateOf(false) }
     val dismissInputOnTap = chatInputDismissTapModifier {
-        if (draftFocused) {
+        if (draftFocused && !app.daiyu.android.ui.components.InputDismissal.insideInput) {
             inputDismissInProgress = true
             try {
                 hideChatInputIme(focus, keyboard, view)

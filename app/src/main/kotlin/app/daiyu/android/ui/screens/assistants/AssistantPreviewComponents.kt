@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.assistants
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
@@ -216,8 +219,8 @@ internal fun AssistantPreviewField(
         }
         BasicTextField(value, onValueChange, enabled = enabled, readOnly = readOnly,
             singleLine = singleLine, minLines = minLines, maxLines = maxLines,
-            textStyle = textStyle, cursorBrush = SolidColor(colors.accent),
-            modifier = fieldModifier.fillMaxWidth().heightIn(min = minHeight, max = maxHeight).onFocusChanged { focused = it.isFocused }
+            textStyle = textStyle, cursorBrush = imeCursorBrush(colors.accent),
+            modifier = fieldModifier.managedInput().fillMaxWidth().heightIn(min = minHeight, max = maxHeight).onFocusChanged { focused = it.isFocused }
                 .clip(RoundedCornerShape(11.dp * s)).background(colors.fieldBackground)
                 .border(1.dp, if (focused) colors.accent else colors.line, RoundedCornerShape(11.dp * s)),
             decorationBox = { innerTextField ->

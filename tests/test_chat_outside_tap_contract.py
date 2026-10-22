@@ -36,7 +36,7 @@ class ChatOutsideTapContractTest(unittest.TestCase):
 
     def test_only_non_composer_content_uses_observer(self):
         text = (CHAT / 'ChatScreen.kt').read_text()
-        self.assertIn('if (draftFocused) {', text)
+        self.assertIn('if (draftFocused && !app.daiyu.android.ui.components.InputDismissal.insideInput) {', text)
         dismiss = text.split('val dismissInputOnTap = chatInputDismissTapModifier {', 1)[1].split('ChatMenuLayer(', 1)[0]
         self.assertLess(dismiss.index('inputDismissInProgress = true'), dismiss.index('hideChatInputIme(focus, keyboard, view)'))
         self.assertIn('finally {', dismiss)
@@ -57,7 +57,7 @@ class ChatOutsideTapContractTest(unittest.TestCase):
         self.assertIn('.onFocusChanged { onInputFocusChanged(it.isFocused) }', text)
         self.assertIn('lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)', text)
         self.assertIn('isInputDismissInProgress: () -> Boolean = { false }', text)
-        self.assertIn('if ((!lifecycleDismissInProgress && !isInputDismissInProgress() || value.text != references.text) &&', text)
+        self.assertIn('if (((!lifecycleDismissInProgress && !isInputDismissInProgress() && !app.daiyu.android.ui.components.InputDismissal.inProgress) || value.text != references.text) &&', text)
         self.assertIn('editingValue = TextFieldValue(projected.text, selection, composition)', text)
         self.assertNotIn('if (value.selection.collapsed)', text)
 

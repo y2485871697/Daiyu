@@ -75,7 +75,9 @@ internal fun DaiyuTextInputDialog(
                 label = hint,
                 useLabelAsPlaceholder = true,
                 singleLine = true,
-                modifier = Modifier.testTag("prompt-input").fillMaxWidth(),
+                modifier = Modifier.managedInput().testTag("prompt-input").fillMaxWidth(),
+
+                cursorBrush = imeCursorBrush(top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.primary),
             )
             MiuixDialogActions(
                 confirmText = confirmText,

@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.components.subagent
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -44,7 +47,9 @@ import top.yukonga.miuix.kmp.window.WindowDialog
         Text(label, fontSize = 13.sp, lineHeight = 20.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
         BasicTextField(value, onValueChange, enabled = enabled, singleLine = true, keyboardOptions = keyboardOptions,
             textStyle = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = colors.text),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).background(colors.field, RoundedCornerShape(10.dp))
-                .border(1.dp, colors.line, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 12.dp))
+            modifier = Modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp).background(colors.field, RoundedCornerShape(10.dp))
+                .border(1.dp, colors.line, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 12.dp),
+                cursorBrush = imeCursorBrush(androidx.compose.ui.graphics.Color.Black),
+            )
     }
 }

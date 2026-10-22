@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.components.managedInput
+
 import app.daiyu.android.ui.icons.ChatContextMark
 import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.layout.height
@@ -122,7 +124,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         state.phase == ComposerPhase.RUNNING -> "暂停"
         else -> "发送"
     }
-    Column(modifier.fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = 10.dp, bottom = 16.dp)) {
+    Column(modifier.managedInput().fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = 10.dp, bottom = 16.dp)) {
         ChatComposerSurface(backdrop) {
         // Include the transparent 1dp CSS border in the composer box model.
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),
@@ -167,7 +169,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         value = renderedValue,
                         onValueChange = { value ->
                             // Explicit dismissal and ON_STOP must not write back a collapsed selection.
-                            if ((!lifecycleDismissInProgress && !isInputDismissInProgress() || value.text != references.text) &&
+                            if (((!lifecycleDismissInProgress && !isInputDismissInProgress() && !app.daiyu.android.ui.components.InputDismissal.inProgress) || value.text != references.text) &&
                                 lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
                                 mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
                                 val bodyChanged = value.text != references.text

@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -103,7 +106,9 @@ private fun CatalogModelField(label: String, value: String, enabled: Boolean,
         enabled = enabled, useLabelAsPlaceholder = false,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
         colors = TextFieldDefaults.textFieldColors(backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh),
-        modifier = Modifier.fillMaxWidth().testTag("settings-field:$label").semantics { contentDescription = label })
+        modifier = Modifier.managedInput().fillMaxWidth().testTag("settings-field:$label").semantics { contentDescription = label },
+                cursorBrush = imeCursorBrush((TextFieldDefaults.textFieldColors(backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh)).borderColor),
+            )
 }
 
 @Composable

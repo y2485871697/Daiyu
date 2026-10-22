@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
@@ -106,8 +109,8 @@ internal fun ChatModelPicker(
                 BasicTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
                     textStyle = TextStyle(color = colors.text, fontSize = 14.sp, lineHeight = 22.sp),
-                    cursorBrush = SolidColor(colors.accent),
-                    modifier = Modifier.testTag("chat-model-search").fillMaxWidth()
+                    cursorBrush = imeCursorBrush(colors.accent),
+                    modifier = Modifier.managedInput().testTag("chat-model-search").fillMaxWidth()
                         .semantics { contentDescription = "搜索模型或供应商" }
                         .onFocusChanged { searchFocused = it.isFocused }
                         .heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(colors.background)

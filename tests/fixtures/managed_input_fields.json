@@ -1,0 +1,118 @@
+[
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/MainActivity.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/ShizukuApprovalHost.kt",
+    "calls": 3
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/BrowserApprovalHost.kt",
+    "calls": 2
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/GenerationApprovalHost.kt",
+    "calls": 4
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/ChildBrowserApprovalHost.kt",
+    "calls": 3
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/PlatformActionApprovalHost.kt",
+    "calls": 6
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/vdapproval/R08PlanEditor.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/balance/ui/BalanceSettingsScreen.kt",
+    "calls": 8
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/components/DaiyuDialogs.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/components/EtaFormTextField.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/components/SubAgentParallelLimitRow.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/components/ConversationSidePaneScaffold.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/components/CompactDialogTextField.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/assistants/AssistantPickerDialogs.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/assistants/AssistantPreviewComponents.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/settings/SettingsUiComponents.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/settings/SkillManagementScreen.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/settings/ProviderModelSelectionDialog.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/settings/McpSettingsScreen.kt",
+    "calls": 3
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/settings/SettingsHomeScreen.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/settings/CatalogModelEditorDialog.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/conversation/ChildTaskCommandDialog.kt",
+    "calls": 2
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/terminal/TerminalScreen.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/QuestionCard.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatModelPicker.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/ui/components/subagent/ConversationAgentForm.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/browser/ported/ui/browser/BrowserSheet.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/browser/ported/ui/browser/BrowserHistorySheet.kt",
+    "calls": 1
+  },
+  {
+    "path": "app/src/main/kotlin/app/daiyu/android/browser/ported/ui/browser/BrowserSettingsSheet.kt",
+    "calls": 5
+  }
+]

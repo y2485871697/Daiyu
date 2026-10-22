@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.background
@@ -356,12 +359,12 @@ private fun QuestionInput(
     val focused by interaction.collectIsFocusedAsState()
     BasicTextField(value = value, onValueChange = { onValueChange(questionTextLimit(it)) }, enabled = enabled,
         interactionSource = interaction,
-        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)
+        modifier = modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)
             .alpha(if (fadeDisabled && !enabled) .5f else 1f).clip(shape).background(colors.soft)
             .border(1.dp, if (focused) colors.accent else colors.line, shape)
             .padding(horizontal = 11.dp, vertical = 10.dp),
         textStyle = questionTextStyle(10, 1.6f).copy(color = colors.text),
-        cursorBrush = SolidColor(colors.text),
+        cursorBrush = imeCursorBrush(colors.text),
         decorationBox = { inner ->
             Box {
                 if (value.isEmpty()) Text(hint, color = colors.muted, style = questionTextStyle(10, 1.6f))

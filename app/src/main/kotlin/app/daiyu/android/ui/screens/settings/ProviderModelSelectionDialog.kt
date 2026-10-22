@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -56,7 +59,9 @@ internal fun ProviderModelSelectionDialog(
                 label = "搜索模型",
                 useLabelAsPlaceholder = true,
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("provider-model-search"),
+                modifier = Modifier.managedInput().fillMaxWidth().testTag("provider-model-search"),
+
+                cursorBrush = imeCursorBrush(top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.primary),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(text = "全选", enabled = editable && selection.visibleCount > 0,

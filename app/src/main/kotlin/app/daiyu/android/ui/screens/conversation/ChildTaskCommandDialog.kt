@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.conversation
 
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.components.materialImeCursorColor
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -60,9 +63,14 @@ internal fun ChildTaskCommandDialog(source: ChildTaskRecord, kind: ChildTaskComm
                 if (risk) Text("重要：旧请求可能已经执行或已计费，即使没有结果或请求停止也不能撤销。新派可能重复执行及产生重复费用；仅本次确认允许新请求。",
                     modifier = Modifier.testTag("child-command-execution-warning"))
                 if (source.status == ChildTaskStatus.NOT_EXECUTED) Text("旧任务明确未执行；本次操作明确派发一个新请求。")
-                OutlinedTextField(profile, { if (!busy && !consumed) profile = it }, label = { Text("已绑定的子模型配置 ID") }, enabled = !busy && !consumed)
+                OutlinedTextField(profile, { if (!busy && !consumed) profile = it }, label = { Text("已绑定的子模型配置 ID") }, enabled = !busy && !consumed,
+                modifier = Modifier.managedInput(),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
                 OutlinedTextField(instruction, { if (!busy && !consumed) instruction = it }, label = { Text("本次指令") }, enabled = !busy && !consumed,
-                    modifier = Modifier.testTag("child-command-instruction"))
+                    modifier = Modifier.managedInput().testTag("child-command-instruction"),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             }
         }, confirmButton = {
             TextButton(if (risk) "确认可能已执行，仍新派一次" else "确认派发新请求", enabled = valid && !busy && !consumed,

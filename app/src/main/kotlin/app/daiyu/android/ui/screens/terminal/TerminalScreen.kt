@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.terminal
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -163,14 +166,16 @@ fun TerminalScreenContent(
                         .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(24.dp))
                         .padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         BasicTextField(value = input, onValueChange = { if (it.length <= 16000) input = it },
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(vertical = 14.dp).testTag("terminal-input"),
+                            modifier = Modifier.managedInput().weight(1f).heightIn(min = 48.dp).padding(vertical = 14.dp).testTag("terminal-input"),
                             maxLines = 4, textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface, fontFamily = FontFamily.Monospace),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { send() }),
                             decorationBox = { field -> Box {
                                 if (input.isEmpty()) Text(if (current?.running == true) "向运行中的命令发送输入" else "输入命令",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                                 field()
-                            } })
+                            } },
+                cursorBrush = imeCursorBrush(androidx.compose.ui.graphics.Color.Black),
+            )
                         PlainToolButton(DaiyuIcons.JumpUp, "发送", "terminal-send", sendable && input.isNotBlank()) { send() }
                     }
                 }

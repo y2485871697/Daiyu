@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.assistants
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -101,9 +104,9 @@ fun AssistantPickerDialog(
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
             Icon(AssistantPreviewIcons.Search, null, Modifier.size(18.dp * s), tint = colors.muted)
             BasicTextField(searchQuery, { searchQuery = it }, singleLine = true,
-                modifier = Modifier.weight(1f).heightIn(min = 42.dp * s)
+                modifier = Modifier.managedInput().weight(1f).heightIn(min = 42.dp * s)
                     .testTag("assistant-search-input").onFocusChanged { searchFocused = it.isFocused },
-                cursorBrush = SolidColor(colors.accent),
+                cursorBrush = imeCursorBrush(colors.accent),
                 textStyle = TextStyle(color = colors.text, fontSize = (14f * s).sp, lineHeight = (20f * s).sp),
                 decorationBox = { innerTextField ->
                     Box(Modifier.padding(horizontal = 2.dp * s, vertical = 1.dp * s), contentAlignment = Alignment.CenterStart) {

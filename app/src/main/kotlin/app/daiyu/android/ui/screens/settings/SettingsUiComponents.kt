@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import androidx.compose.ui.platform.LocalView
 import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.foundation.background
@@ -234,18 +237,20 @@ internal fun SettingsTextField(
             BasicTextField(
                 value = if (editorValue.text == value) editorValue else editorValue.copy(text = value, composition = null),
                 onValueChange = { updated ->
-                    editorValue = updated
-                    if (updated.text != value) onValueChange(updated.text)
+                    if (!app.daiyu.android.ui.components.InputDismissal.inProgress || updated.text != editorValue.text) {
+                        editorValue = updated
+                        if (updated.text != value) onValueChange(updated.text)
+                    }
                 },
                 enabled = enabled,
                 singleLine = !multiline,
                 minLines = if (multiline) 4 else 1,
                 maxLines = if (multiline) 8 else 1,
                 textStyle = MiuixTheme.textStyles.body1.copy(color = MiuixTheme.colorScheme.onSurface),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                cursorBrush = imeCursorBrush(MiuixTheme.colorScheme.primary),
                 visualTransformation = if (password && !secretVisible) PasswordVisualTransformation() else VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
-                modifier = Modifier.testTag(tag).fillMaxWidth()
+                modifier = Modifier.managedInput().testTag(tag).fillMaxWidth()
                     .focusRequester(focusRequester).onFocusChanged { fieldFocused = it.isFocused }
                     .then(if (embedded) Modifier.padding(vertical = 12.dp) else Modifier)
                     .then(if (compact) Modifier else Modifier.clip(RoundedCornerShape(12.dp))
@@ -262,7 +267,7 @@ internal fun SettingsTextField(
         }
     }
     if (compact) {
-        Row(Modifier.testTag("$tag-container").fillMaxWidth()
+        Row(Modifier.managedInput().testTag("$tag-container").fillMaxWidth()
             .then(if (embedded) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
             .clip(RoundedCornerShape(16.dp)).background(MiuixTheme.colorScheme.surfaceVariant)
             .padding(start = if (embedded) 12.dp else 16.dp,

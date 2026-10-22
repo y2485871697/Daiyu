@@ -3,6 +3,9 @@
 // Local/private integration; see app/src/main/assets/licenses/openminis/NOTICE.md.
 package app.daiyu.android.browser.ported.ui.browser
 
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.components.materialImeCursorColor
+
 import app.daiyu.android.R
 import androidx.compose.ui.res.stringResource
 import app.daiyu.android.ui.haptics.clickable
@@ -111,12 +114,14 @@ fun BrowserHistorySheet(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 placeholder = { Text(stringResource(R.string.om_browser_history_search)) },
-                modifier = Modifier
+                modifier = Modifier.managedInput()
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 singleLine = true,
                 shape = RoundedCornerShape(20.dp),
                 textStyle = MaterialTheme.typography.bodySmall,
+
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
             )
 
             Spacer(Modifier.height(8.dp))

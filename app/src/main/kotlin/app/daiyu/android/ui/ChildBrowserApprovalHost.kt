@@ -1,5 +1,8 @@
 package app.daiyu.android.ui
 
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.components.materialImeCursorColor
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -43,12 +46,20 @@ internal fun ChildBrowserApprovalHost(
         Text("普通 run_child_models 仍是 text-only。本入口仅批准以下一个预冻结子任务；标签隔离不等于 WebView 全局 cookie／账户隔离。cookie 和 history 始终拒绝。")
         if (enabled && plan == null) {
             OutlinedTextField(prompt, { prompt = it }, enabled = editable,
-                label = { Text("独立子任务完整提示词") }, modifier = Modifier.testTag("child-browser-prompt"))
+                label = { Text("独立子任务完整提示词") }, modifier = Modifier.managedInput().testTag("child-browser-prompt"),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             OutlinedTextField(reads, { reads = it }, enabled = editable,
-                label = { Text("明确选择子读取动作（如 list_tabs；英文逗号分隔）") })
+                label = { Text("明确选择子读取动作（如 list_tabs；英文逗号分隔）") },
+                modifier = Modifier.managedInput(),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             OutlinedTextField(writes, { writes = it }, enabled = editable,
                 label = { Text("子写操作完整 JSON（每行一个；无默认写授权）") },
-                supportingText = { Text("fetch 必须给完整 URL 和 tab_id；不允许 headers／cookie／destination。") })
+                supportingText = { Text("fetch 必须给完整 URL 和 tab_id；不允许 headers／cookie／destination。") },
+                modifier = Modifier.managedInput(),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             TextButton(enabled = editable && prompt.isNotBlank(), modifier = Modifier.testTag("child-browser-preview"), onClick = {
                 try {
                     val raw = writes.lineSequence().filter { it.isNotBlank() }.toList()

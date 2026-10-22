@@ -39,6 +39,7 @@ data class TerminalEnvironmentState(
     val environment: String? = null,
     val output: String = "",
     val outputTruncated: Boolean = false,
+    val outputStart: Long = 0,
     val waitStatus: Int? = null,
     val terminationConfirmed: Boolean = false,
     val ownsResources: Boolean = false,
@@ -80,6 +81,10 @@ class TerminalEnvironmentHost internal constructor(
     private class Run(val request: TerminalOpenRequest) {
         val token = Any()
         var sequence = 0L
+        var controlSequence = 0L
+        var pendingUtf8 = ByteArray(0)
+        val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE)
         @Volatile var closeRequested = false
         var resource: TerminalOwnedResource? = null // worker only
         var closeAttempted = false
@@ -123,7 +128,7 @@ class TerminalEnvironmentHost internal constructor(
             run = next
             mutableState.value = mutableState.value.copy(phase = "OPENING",
                 environment = "${if (request.linux == null) "Android" else "Linux"}: ${owner.environmentId}/${owner.generation}",
-                output = "", outputTruncated = false,
+                output = "", outputTruncated = false, outputStart = 0,
                 waitStatus = null, terminationConfirmed = false, ownsResources = true, acceptsInput = false,
                 error = null, lastOperation = null)
             worker.execute { start(next) }
@@ -169,6 +174,17 @@ class TerminalEnvironmentHost internal constructor(
             acceptsInput = it.acceptsInput && !current.closeRequested,
             phase = if (current.closeRequested) "UNKNOWN" else it.phase) }
         answer
+    }
+
+    fun resize(caller: TaskAuthorization, rows: Int, columns: Int): CompletableFuture<TerminalOperationResult> = operation {
+        val current = synchronized(lock) { run }
+        if (current == null || caller !== current.request.owner.authorization || current.closeRequested ||
+            !state.value.acceptsInput) return@operation refusal("pty_run_owner_mismatch")
+        if (rows !in 1..500 || columns !in 1..500) return@operation refusal("invalid_terminal_size")
+        val sequence = current.controlSequence++
+        val result = checkNotNull(current.resource).resize(caller, "resize-$sequence", sequence, rows, columns)
+        TerminalOperationResult(result.optBoolean("ok"), result.optString("execution", "unknown"),
+            result.optString("error").takeIf { it.isNotEmpty() })
     }
 
     /** Owner-checked close request, never a blocking join. It also fences a creation still in flight. */
@@ -247,6 +263,29 @@ class TerminalEnvironmentHost internal constructor(
     }
 
     private fun read(current: Run, resource: TerminalOwnedResource) {
+        val available = resource.readAvailable(current.request.owner.authorization)
+        if (available != null) {
+            check(available.optBoolean("ok")) { "pty_read_failed" }
+            val bytes = Base64.getDecoder().decode(available.getString("stdout_base64"))
+            val dropped = available.optBoolean("ui_dropped")
+            if (dropped) { current.pendingUtf8 = ByteArray(0); current.decoder.reset() }
+            val input = java.nio.ByteBuffer.wrap(current.pendingUtf8 + bytes)
+            val chars = java.nio.CharBuffer.allocate(input.remaining() + 2)
+            current.decoder.decode(input, chars, false)
+            current.pendingUtf8 = ByteArray(input.remaining()).also { input.get(it) }
+            chars.flip()
+            val delta = chars.toString()
+            val phase = when (available.optString("state")) { "exited" -> "EXITED"; "unknown" -> "UNKNOWN"; else -> "RUNNING" }
+            val wait = if (available.isNull("wait_status")) null else available.getInt("wait_status")
+            publish {
+                val appended = it.appendOutput(delta)
+                appended.copy(outputTruncated = appended.outputTruncated || dropped,
+                    waitStatus = wait, phase = if (current.closeRequested) "CLOSING" else phase,
+                    acceptsInput = phase == "RUNNING" && !current.closeRequested && !it.disposed,
+                    error = if (available.isNull("error")) it.error else available.optString("error"))
+            }
+            return
+        }
         // The underlying bounded PTY log is at most 256 KiB. Decode a complete byte prefix each
         // time, avoiding corruption of UTF-8 sequences split across frames/read pages.
         val bytes = java.io.ByteArrayOutputStream()
@@ -270,8 +309,24 @@ class TerminalEnvironmentHost internal constructor(
             error = if (result.isNull("error")) it.error else result.optString("error")) }
     }
 
+    private fun TerminalEnvironmentState.appendOutput(delta: String): TerminalEnvironmentState {
+        val combined = output + delta
+        var removed = (combined.length - 262144).coerceAtLeast(0)
+        if (removed > 0 && removed < combined.length && combined[removed].isLowSurrogate()) removed++
+        return copy(output = combined.substring(removed), outputStart = outputStart + removed,
+            outputTruncated = outputTruncated || removed > 0)
+    }
+
     private fun finish(current: Run, phase: String, confirmed: Boolean) = synchronized(lock) {
         check(run === current)
+        if (current.pendingUtf8.isNotEmpty()) {
+            val tail = java.nio.CharBuffer.allocate(current.pendingUtf8.size + 2)
+            current.decoder.decode(java.nio.ByteBuffer.wrap(current.pendingUtf8), tail, true)
+            current.decoder.flush(tail)
+            tail.flip()
+            mutableState.value = mutableState.value.appendOutput(tail.toString())
+            current.pendingUtf8 = ByteArray(0)
+        }
         // This is the only point an owned resource may be forgotten, and callers with a resource
         // reach it ONLY after awaitTermination returned true. The no-launch paths own nothing.
         run = null
@@ -326,6 +381,9 @@ internal interface TerminalEnvironmentBackend {
 internal interface TerminalOwnedResource {
     fun read(caller: TaskAuthorization, offset: Int, limit: Int): JSONObject
     fun write(caller: TaskAuthorization, requestId: String, sequence: Long, bytes: ByteArray): JSONObject
+    fun readAvailable(caller: TaskAuthorization): JSONObject? = null
+    fun resize(caller: TaskAuthorization, requestId: String, sequence: Long, rows: Int, columns: Int): JSONObject =
+        JSONObject().put("ok", false).put("execution", "not_executed").put("error", "pty_resize_unavailable")
     fun close()
     fun awaitTermination(timeoutMillis: Long): Boolean
 }
@@ -365,7 +423,7 @@ private class AndroidTerminalEnvironmentBackend(
                     val temp = File(root, "tmp").apply { check(mkdirs() || isDirectory) }
                     val session = AndroidPtyHost.openLinux(context, request.owner, store, request.linux,
                         temp, cwd, File(root, "journal"), request.sessionScope)
-                    TerminalResource(session::read, session::write, session::close, session::awaitTermination)
+                    TerminalResource(session::read, session::write, session::close, session::awaitTermination, session::resize, session::readAvailable)
                 }
             }
             val home = File(root, "home").apply { check(mkdirs() || isDirectory) }
@@ -375,7 +433,7 @@ private class AndroidTerminalEnvironmentBackend(
             val session = AndroidPtyHost.open(context, request.owner, listOf("/system/bin/sh"),
                 mapOf("HOME" to home.absolutePath, "TMPDIR" to home.absolutePath, "PATH" to "/system/bin:/system/xbin",
                     "TERM" to "xterm-256color"), cwd, journal, request.sessionScope)
-            return TerminalResource(session::read, session::write, session::close, session::awaitTermination)
+            return TerminalResource(session::read, session::write, session::close, session::awaitTermination, session::resize, session::readAvailable)
         } catch (failure: LinuxPtyStartupFailure) {
             throw TerminalOwnedStartupFailure(cleanup(failure.cleanup::requestClose, failure.cleanup::awaitTermination), failure)
         } catch (failure: PtyStartupFailure) {
@@ -450,9 +508,15 @@ private class TerminalResource(
     private val writeOperation: (TaskAuthorization, String, Long, ByteArray) -> JSONObject,
     private val closeOperation: () -> Unit,
     private val awaitOperation: (Long) -> Boolean,
+    private val resizeOperation: ((TaskAuthorization, String, Long, Int, Int) -> JSONObject)? = null,
+    private val availableOperation: ((TaskAuthorization) -> JSONObject)? = null,
 ) : TerminalOwnedResource {
     override fun read(caller: TaskAuthorization, offset: Int, limit: Int) = readOperation(caller, offset, limit)
     override fun write(caller: TaskAuthorization, requestId: String, sequence: Long, bytes: ByteArray) = writeOperation(caller, requestId, sequence, bytes)
+    override fun readAvailable(caller: TaskAuthorization) = availableOperation?.invoke(caller)
+    override fun resize(caller: TaskAuthorization, requestId: String, sequence: Long, rows: Int, columns: Int) =
+        resizeOperation?.invoke(caller, requestId, sequence, rows, columns)
+            ?: super.resize(caller, requestId, sequence, rows, columns)
     override fun close() = closeOperation()
     override fun awaitTermination(timeoutMillis: Long) = awaitOperation(timeoutMillis)
 }

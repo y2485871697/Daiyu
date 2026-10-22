@@ -19,6 +19,9 @@ class LinuxPtySession private constructor(
     fun read(caller: TaskAuthorization, offset: Int = 0, limit: Int = 16384): JSONObject =
         session.read(caller, offset, limit)
 
+    internal fun readAvailable(caller: TaskAuthorization): JSONObject =
+        session.readAvailable(caller)
+
     fun write(caller: TaskAuthorization, requestId: String, inputSequence: Long, bytes: ByteArray): JSONObject =
         session.write(caller, requestId, inputSequence, bytes)
 

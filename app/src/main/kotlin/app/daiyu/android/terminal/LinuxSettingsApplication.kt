@@ -20,7 +20,17 @@ class LinuxSettingsApplication private constructor(
     private val terminalSelection: TerminalTrustedLinuxSelection,
     private val executionModes: Map<LinuxGenerationRef, LinuxExecutionMode>,
     private val allowChroot: () -> Boolean,
+    private val terminalOwnerFactory: () -> TerminalUiOwner,
 ) : AutoCloseable {
+    val terminalSessions = TerminalSessionWorkspace(terminalOwner,
+        createOwner = { terminalOwnerFactory() },
+        admitLinux = { reference, open ->
+            executionModes[reference]?.let { mode ->
+                LinuxRuntimePlatform.unavailableReason(mode) == null &&
+                    (mode != LinuxExecutionMode.CHROOT || allowChroot())
+            } == true && admission.admit(reference, open)
+        })
+
     /**
      * All parent Linux open callbacks must use this entry, not terminalOwner.openLinux directly.
      * The admission lock spans the owner's check AND host admission, so a concurrent revocation
@@ -57,7 +67,7 @@ class LinuxSettingsApplication private constructor(
     /** Real application teardown only. A settings page must only close its own page handle. */
     override fun close() {
         settings.close()
-        terminalOwner.close()
+        terminalSessions.close()
     }
 
     companion object {
@@ -81,7 +91,9 @@ class LinuxSettingsApplication private constructor(
                 chrootInstallation = chrootInstallation, allowChroot = allowChroot)
             val selection = TerminalTrustedLinuxSelection(File(context.filesDir, "user-terminal/linux-selection"), snapshot,
                 chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations"))
-            return LinuxSettingsApplication(owner, settings, admission, selection, modes, allowChroot)
+            return LinuxSettingsApplication(owner, settings, admission, selection, modes, allowChroot) {
+                TerminalUiOwner(TerminalEnvironmentHost.android(context.applicationContext, snapshot), admission::current)
+            }
         }
     }
 }

@@ -6,6 +6,50 @@ import java.nio.file.Files
 
 /** Explicit host-only integration test; requires the independently built helper path. */
 class PtySessionHostTest : TestCase() {
+    fun testIncrementalUiReaderContinuesAfterSnapshotIsFullWithoutDuplicatingBytes() {
+        val root = Files.createTempDirectory("daiyu-pty-delta").toFile()
+        val input = java.io.PipedInputStream(2_097_152)
+        val output = java.io.PipedOutputStream(input)
+        val eof = java.util.concurrent.CountDownLatch(1)
+        val fake = object : Process() {
+            @Volatile var alive = true
+            override fun getInputStream() = input
+            override fun getOutputStream() = java.io.ByteArrayOutputStream()
+            override fun getErrorStream() = java.io.ByteArrayInputStream(ByteArray(0))
+            override fun waitFor(): Int { eof.await(); return 0 }
+            override fun exitValue(): Int { if (alive) throw IllegalThreadStateException(); return 0 }
+            override fun isAlive() = alive
+            override fun destroy() { alive = false; eof.countDown(); output.close() }
+        }
+        val session = PtySession(fake, hostJournal(root, "delta"))
+        fun frame(type: Char, bytes: ByteArray) {
+            val data = java.io.DataOutputStream(output)
+            data.writeByte(type.code); data.writeInt(bytes.size); data.write(bytes); data.flush()
+        }
+        fun await(condition: () -> Boolean) {
+            val end = System.nanoTime() + 2_000_000_000L
+            while (!condition() && System.nanoTime() < end) Thread.sleep(5)
+            assertTrue(condition())
+        }
+        try {
+            frame('H', "DPTY1".toByteArray())
+            await { session.read().optString("state") == "running" }
+            assertEquals("", session.readAvailable().getString("stdout_base64"))
+            repeat(5) { frame('O', ByteArray(65_536) { 'a'.code.toByte() }) }
+            val consumed = java.io.ByteArrayOutputStream()
+            await {
+                consumed.write(java.util.Base64.getDecoder().decode(session.readAvailable().getString("stdout_base64")))
+                consumed.size() == 327_680
+            }
+            assertEquals(262_144, session.read(0, 1).getInt("total_bytes"))
+            assertTrue(session.read(0, 1).getBoolean("log_truncated"))
+            frame('O', "tail".toByteArray())
+            await { java.util.Base64.getDecoder().decode(session.readAvailable().getString("stdout_base64")).contentEquals("tail".toByteArray()) }
+            assertEquals("", session.readAvailable().getString("stdout_base64"))
+            assertEquals("a", session.read(0, 1).getString("stdout"))
+        } finally { session.close(); root.deleteRecursively() }
+    }
+
     fun testQueuedInputCannotCrossUnknownDeliveryFence() = assertQueuedInputFence(false)
     fun testInterruptedWriterCannotRunQueuedInputBeforeUnknownFence() = assertQueuedInputFence(true)
 

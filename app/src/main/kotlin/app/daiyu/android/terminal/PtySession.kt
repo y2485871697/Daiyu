@@ -29,6 +29,10 @@ class PtySession internal constructor(
     private val output = ByteArray(262144)
     private var retained = 0
     private var truncated = false
+    private val uiOutput = ArrayDeque<ByteArray>()
+    private var uiBytes = 0
+    private var uiDropped = false
+    private var uiEnabled = false
     @Volatile private var started = false
     @Volatile private var closed = false
     @Volatile private var failure: String? = null
@@ -107,6 +111,23 @@ class PtySession internal constructor(
             .put("pty", true).put("persistent_shell", true)
     }
 
+    /** One UI consumer only; model/tool snapshot offsets keep their original bounded semantics. */
+    internal fun readAvailable(): JSONObject = synchronized(lock) {
+        if (!uiEnabled) {
+            uiEnabled = true
+            if (retained > 0) { uiOutput.addLast(output.copyOf(retained)); uiBytes = retained }
+            uiDropped = truncated
+        }
+        val status = read(0, 1)
+        val output = java.io.ByteArrayOutputStream(uiBytes)
+        uiOutput.forEach { output.write(it) }
+        uiOutput.clear(); uiBytes = 0
+        status.put("stdout_base64", java.util.Base64.getEncoder().encodeToString(output.toByteArray()))
+            .put("ui_dropped", uiDropped).put("log_truncated", uiDropped)
+        uiDropped = false
+        status
+    }
+
     internal fun startupDiagnostics(): JSONObject {
         val exit = try { process.exitValue() } catch (_: Exception) { null }
         return JSONObject().put("session_created", true)
@@ -155,6 +176,14 @@ class PtySession internal constructor(
                                 bytes.copyInto(output, retained, 0, keep)
                                 retained += keep
                                 if (keep < bytes.size) truncated = true
+                                if (uiEnabled) {
+                                    uiOutput.addLast(bytes)
+                                    uiBytes += bytes.size
+                                    while (uiBytes > 1_048_576 && uiOutput.size > 1) {
+                                        uiBytes -= uiOutput.removeFirst().size
+                                        uiDropped = true
+                                    }
+                                }
                             }
                         }
                         'T' -> {

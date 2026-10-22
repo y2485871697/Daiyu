@@ -2524,6 +2524,11 @@ class ChatController internal constructor(private val application:Application,
         check(synchronized(this) { original in retainedTerminalJobs && original.plan.conversationId == conversation })
         return original.inspectOnWorker()
     }
+    internal fun terminalJobLogOnWorker(conversation: ConversationId, original: TerminalJobSession): org.json.JSONObject {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        check(synchronized(this) { !closed && original in retainedTerminalJobs && original.plan.conversationId == conversation })
+        return original.logTailOnWorker()
+    }
     internal fun stopTerminalJobOnWorker(conversation: ConversationId, original: TerminalJobSession,
         admit: () -> Boolean = { false }): org.json.JSONObject {
         check(Looper.myLooper() != Looper.getMainLooper())

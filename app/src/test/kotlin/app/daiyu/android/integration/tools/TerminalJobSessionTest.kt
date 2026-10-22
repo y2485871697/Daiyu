@@ -47,6 +47,7 @@ class TerminalJobSessionTest {
         }
         override fun inspect(id: String) = JSONObject().put("ok", true).put("job_id", id)
             .put("stdout", "original log").put("execution", "unknown")
+        override fun inspectTail(id: String) = JSONObject().put("ok", true).put("job_id", id).put("stdout", "tail log")
         override fun stop(id: String) = JSONObject().put("ok", true).put("job_id", id).put("stopped", false)
         override fun close() { closes.incrementAndGet() }
         override fun awaitOrdinaryTermination(timeoutMillis: Long): Boolean { waits.incrementAndGet(); return exited }
@@ -110,6 +111,7 @@ class TerminalJobSessionTest {
         f.call()
         assertEquals(RunCatalogCloseResult.Drained, f.close())
         assertEquals(f.backend.id, f.session.inspectOnWorker().getString("job_id"))
+        assertEquals("tail log", f.session.logTailOnWorker().getString("stdout"))
         assertFalse(f.session.stopOnWorker().getBoolean("stopped"))
         assertEquals("daemon", f.backend.calls.last().second.getString("mode"))
         assertEquals(2, f.backend.calls.size)

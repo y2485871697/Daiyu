@@ -55,6 +55,8 @@ LEGACY_SMOKE_PRELAUNCH = '          pre-emulator-launch-script: |\n            "
 SMOKE_PRELAUNCH = '          pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"\n'
 SMOKE_HOST_DEPENDENCIES = '      - name: 安装模拟器宿主依赖\n        run: |\n          sudo apt-get update\n          sudo apt-get install --no-install-recommends -y libpulse0\n'
 
+SMOKE_UWB_TRANSPORT = " ${{ matrix.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}"
+
 
 def candidate_workflow_inputs(workflow):
     # Only the reviewed API26 image, candidate-source wiring and 1-to-4 shard migration may differ.
@@ -85,6 +87,9 @@ def candidate_workflow_inputs(workflow):
     # Normalize only the exact reviewed host-only preparation migration.
     smoke = smoke.replace(LEGACY_SMOKE_PRELAUNCH, SMOKE_PRELAUNCH)
     smoke = smoke.replace(SMOKE_HOST_DEPENDENCIES, '')
+    smoke = smoke.replace(SMOKE_UWB_TRANSPORT, '')
+    smoke = smoke.replace('timeout-minutes: 175', 'timeout-minutes: 160')
+    smoke = smoke.replace('timeout-minutes: 185', 'timeout-minutes: 170')
     smoke = smoke.replace('          rm -f smoke/prelaunch-ready.txt\n', '')
     smoke = smoke.replace('test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh',
                           'bash scripts/smoke_boot.sh')

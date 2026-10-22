@@ -75,7 +75,7 @@ class CandidateSourceTests(unittest.TestCase):
                          ("-gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }}", '-gpu host'),
                          ('pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh',
                           'pre-emulator-launch-script: bash scripts/unreviewed.sh'),
-                         ('timeout-minutes: 160', 'timeout-minutes: 170'),
+                         ('timeout-minutes: 175', 'timeout-minutes: 176'),
                          ('"ram":4096', '"ram":8192'),
                          ('"shard":3', '"shard":4'),
                          ('needs.release.result == \'success\'', 'true')]:
@@ -116,6 +116,20 @@ class CandidateSourceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.verify(source_workflow=previous.replace('"hw.lcd.density":"160"',
                                                         '"hw.lcd.density":"525"'))
+
+    def test_uwb_transport_migration_keeps_backend_and_rejects_dropped_or_altered_device(self):
+        self.assertEqual(self.current.count(source.SMOKE_UWB_TRANSPORT), 1)
+        previous = self.current.replace(source.SMOKE_UWB_TRANSPORT, '')
+        previous = previous.replace('timeout-minutes: 175', 'timeout-minutes: 160')
+        previous = previous.replace('timeout-minutes: 185', 'timeout-minutes: 170')
+        self.verify(source_workflow=previous)
+        for old, new in [('virtserialport,chardev=uwb,name=uwb', 'virtconsole,chardev=uwb,name=uwb'),
+                         (' -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb', ''),
+                         ('netsim,id=uwb', 'null,id=uwb'),
+                         ("matrix.api == '37.2' && '-feature -Uwb", "matrix.api == '26' && '-feature -Uwb"),
+                         ('timeout-minutes: 175', 'timeout-minutes: 176')]:
+            with self.subTest(old=old), self.assertRaises(ValueError):
+                self.verify(source_workflow=previous, current_workflow=self.current.replace(old, new))
 
     def archive(self):
         output = io.BytesIO()
@@ -245,7 +259,7 @@ class CandidateSourceTests(unittest.TestCase):
                                     "SMOKE_SHARD_COUNT: ${{ inputs.mode == 'candidate' && 1 || 4 }}")
         self.verify(source_workflow=previous)
         for old, new in [('"ram":4096', '"ram":8192'), ('"shard":0', '"shard":9'),
-                         ('timeout-minutes: 160', 'timeout-minutes: 170')]:
+                         ('timeout-minutes: 175', 'timeout-minutes: 176')]:
             with self.subTest(old=old), self.assertRaises(ValueError):
                 self.verify(source_workflow=previous.replace(old, new))
 

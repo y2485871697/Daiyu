@@ -16,7 +16,7 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertIn('heightIn(min = 24.dp).testTag("chat-context")', self.badge)
         self.assertIn('.padding(1.dp).padding(horizontal = 4.dp, vertical = 2.dp)', self.badge)
         self.assertIn('Arrangement.spacedBy(4.dp)', self.badge)
-        self.assertIn('Modifier.weight(1f, fill = false).testTag("chat-context-label")', self.badge)
+        self.assertIn('Modifier.weight(1f, fill = false).width(IntrinsicSize.Max).testTag("chat-context-label")', self.badge)
         self.assertNotIn('fillMaxWidth', self.badge)
         self.assertIn('maxLines = 1, overflow = TextOverflow.Ellipsis', self.badge)
 

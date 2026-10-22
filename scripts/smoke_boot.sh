@@ -17,7 +17,7 @@ adb_stage() {
 APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
 test -n "$APK"
 mkdir -p smoke
-rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/logcat-before.txt smoke/properties-before.txt smoke/hwui-renderer.txt
+rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/logcat-before.txt smoke/properties-before.txt smoke/hwui-renderer.txt smoke/logcat-first-boot.txt smoke/ime-default-restored.txt smoke/readiness.txt
 rm -rf smoke/settings-ui
 # Explicitly name every source test class: legacy default discovery scans all dependency DEX.
 target_spec=$(python3 - <<'PYCOUNT'
@@ -121,6 +121,8 @@ collect_diagnostics() {
   timeout --kill-after=5 10 adb shell dumpsys window > smoke/window-exit.txt 2>&1 || true
   timeout --kill-after=5 10 adb shell dumpsys input > smoke/input-exit.txt 2>&1 || true
   timeout --kill-after=5 10 adb shell dumpsys package com.google.android.inputmethod.latin > smoke/ime-package.txt 2>&1 || true
+  timeout --kill-after=5 10 adb shell 'getprop vendor.qemu.vport.uwb; ls -l /dev/hvc2 /dev/uwb0; for p in /sys/class/virtio-ports/*; do printf "%s " "$p"; cat "$p/name"; done' > smoke/uwb-transport.txt 2>&1 || true
+  ps axww -o args= | grep '[q]emu-system-' > smoke/qemu-command.txt || true
 }
 trap collect_diagnostics EXIT
 adb_stage device 60 wait-for-device
@@ -137,42 +139,32 @@ if test "$api" -ge 36; then
   adb_stage navigation 15 shell cmd overlay disable com.android.internal.systemui.navbar.gestural
   adb_stage navigation 15 shell cmd overlay list > smoke/navigation-overlays.txt
 fi
-# Boot-completed can precede a framework restart on a freshly created AVD.
-stable=0
-previous=""
-for attempt in $(seq 1 60); do
-  current=$(timeout --kill-after=5 5 adb shell 'pidof system_server && pidof surfaceflinger' 2>/dev/null | tr -d '\r') || current=""
-  if test -n "$current" && test "$current" = "$previous" &&
-     test "$(timeout --kill-after=5 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 &&
-     timeout --kill-after=5 5 adb shell pm path android > smoke/package-ready.txt 2>&1 &&
-     grep -q '^package:' smoke/package-ready.txt; then
-    stable=$((stable + 1))
-  else
-    stable=0
-  fi
-  previous="$current"
-  printf '%s attempt=%s stable=%s pids=%s\n' "$(date -u +%FT%TZ)" "$attempt" "$stable" "$current" | tee -a smoke/readiness.txt >&2
-  if test "$stable" -ge 15; then break; fi
-  sleep 2
-done
-test "$stable" -ge 15
-adb_stage webview-state 15 shell dumpsys webviewupdate | tr -d '\r' > smoke/webview.txt
-provider=$(python3 - <<'PYWEBVIEW'
-from pathlib import Path
-import re
-state = Path("smoke/webview.txt").read_text()
-current = re.findall(r"^\s*Current WebView package \(name, version\): \(([\w.]+), [^)]+\)\s*$", state, re.M)
-assert len(current) == 1, "WebView has no unique current provider"
-for field, value in (("Any WebView package installed", "true"), ("WebView package dirty", "false")):
-    assert re.findall(r"^\s*" + field + r": (\w+)\s*$", state, re.M) == [value], field
-started = re.findall(r"^\s*Number of relros started: (\d+)\s*$", state, re.M)
-finished = re.findall(r"^\s*Number of relros finished: (\d+)\s*$", state, re.M)
-assert len(started) == len(finished) == 1 and started == finished, "WebView relro not ready"
-print(current[0])
-PYWEBVIEW
-)
-adb_stage webview-package 15 shell pm path "$provider" > smoke/webview-package.txt
-grep -q '^package:' smoke/webview-package.txt
+wait_for_framework_ready() {
+  local stable=0 previous="" current current_boot_id boot_changed
+  for attempt in $(seq 1 60); do
+    boot_changed=1
+    if test -n "${previous_boot_id:-}"; then
+      current_boot_id=$(timeout --kill-after=5 5 adb shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r') || current_boot_id=""
+      if ! [[ "$current_boot_id" =~ ^[0-9a-fA-F-]{36}$ ]] || test "$current_boot_id" = "$previous_boot_id"; then
+        boot_changed=0
+      fi
+    fi
+    current=$(timeout --kill-after=5 5 adb shell 'pidof system_server && pidof surfaceflinger' 2>/dev/null | tr -d '\r') || current=""
+    if test "$boot_changed" = 1 && test -n "$current" && test "$current" = "$previous" &&
+       test "$(timeout --kill-after=5 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 &&
+       timeout --kill-after=5 5 adb shell pm path android > smoke/package-ready.txt 2>&1 &&
+       grep -q '^package:' smoke/package-ready.txt; then
+      stable=$((stable + 1))
+    else
+      stable=0
+    fi
+    previous="$current"
+    printf '%s attempt=%s stable=%s boot_changed=%s pids=%s\n' "$(date -u +%FT%TZ)" "$attempt" "$stable" "$boot_changed" "$current" | tee -a smoke/readiness.txt >&2
+    if test "$stable" -ge 15; then break; fi
+    sleep 2
+  done
+  test "$stable" -ge 15
+}
 # Large native framebuffer permits the phone-density fixture; all other tests keep the original canvas.
 verify_display_baseline() {
   local phase=$1
@@ -190,6 +182,39 @@ if test -n "${EMULATOR_RAM_MB:-}"; then
   awk -v expected="$EMULATOR_RAM_MB" '/^MemTotal:/ {found=1; if ($2 < expected * 1024 * 0.9) exit 1} END {if (!found) exit 1}' smoke/memory-start.txt
 fi
 adb_stage logcat-before 20 logcat -d -b all > smoke/logcat-before.txt
+if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat-before.txt; then exit 1; fi
+# API26 preloads launcher/IME at the native tablet size. Reboot once with the
+# persisted logical phone size so their process-local resources start there.
+# Check and retain the first boot's crashes before any restart can remove them.
+if test "$api" = 26; then
+  cp smoke/logcat-before.txt smoke/logcat-first-boot.txt
+  previous_boot_id=$(adb_stage boot-id 15 shell cat /proc/sys/kernel/random/boot_id | tr -d '\r')
+  [[ "$previous_boot_id" =~ ^[0-9a-fA-F-]{36}$ ]]
+  adb_stage display-reboot 30 reboot
+  adb_stage display-device 60 wait-for-device
+fi
+wait_for_framework_ready
+verify_display_baseline before
+adb_stage ime-restored 15 shell settings get secure default_input_method > smoke/ime-default-restored.txt
+cmp smoke/ime-default-before.txt smoke/ime-default-restored.txt
+adb_stage webview-state 15 shell dumpsys webviewupdate | tr -d '\r' > smoke/webview.txt
+provider=$(python3 - <<'PYWEBVIEW'
+from pathlib import Path
+import re
+state = Path("smoke/webview.txt").read_text()
+current = re.findall(r"^\s*Current WebView package \(name, version\): \(([\w.]+), [^)]+\)\s*$", state, re.M)
+assert len(current) == 1, "WebView has no unique current provider"
+for field, value in (("Any WebView package installed", "true"), ("WebView package dirty", "false")):
+    assert re.findall(r"^\s*" + field + r": (\w+)\s*$", state, re.M) == [value], field
+started = re.findall(r"^\s*Number of relros started: (\d+)\s*$", state, re.M)
+finished = re.findall(r"^\s*Number of relros finished: (\d+)\s*$", state, re.M)
+assert len(started) == len(finished) == 1 and started == finished, "WebView relro not ready"
+print(current[0])
+PYWEBVIEW
+)
+adb_stage webview-package 15 shell pm path "$provider" > smoke/webview-package.txt
+grep -q '^package:' smoke/webview-package.txt
+adb_stage logcat-restored 20 logcat -d -b all > smoke/logcat-before.txt
 if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat-before.txt; then exit 1; fi
 adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt
 adb_stage install-tests 120 install delivery/tests/platform-test.apk 2>&1 | tee smoke/test-install.txt

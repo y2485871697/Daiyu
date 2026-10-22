@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -120,7 +122,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
                 ChatContextMark(fraction, contextColor, Modifier.size(18.dp).testTag("chat-context-icon"))
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
-                    modifier = Modifier.weight(1f, fill = false).testTag("chat-context-label"),
+                    modifier = Modifier.weight(1f, fill = false).width(IntrinsicSize.Max).testTag("chat-context-label"),
                     style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 14.sp,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
                         platformStyle = PlatformTextStyle(includeFontPadding = false),

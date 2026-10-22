@@ -76,7 +76,9 @@ class SourceTests(unittest.TestCase):
         job = int(re.search(r'^    timeout-minutes: (\d+)', workflow, re.M).group(1)) * 60
         # 600s emulator boot + all one-shot stages; loops include kill grace.
         maximum = 600 + sum(seconds + 5 for _, seconds in stages)
-        maximum += 60 * (3 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1) + 100
+        maximum += 60 * (4 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1)
+        # EXIT diagnostics, two extra display-function calls, and final UI sleep.
+        maximum += 190 + 80 + 1
         self.assertGreater(step, maximum)
         self.assertGreaterEqual(job - step, 600)
 
@@ -352,6 +354,8 @@ class ProcessTests(unittest.TestCase):
         if case != 'missing-editor':
             ET.SubElement(ui, 'node', {'package': package, 'class': 'android.widget.EditText'})
         ET.SubElement(ui, 'node', {'package': package, 'class': 'android.widget.TextView', 'text': '代鱼'})
+        (self.root / 'smoke/rebooted').unlink(missing_ok=True)
+        (self.root / 'smoke/boot-id-polls').unlink(missing_ok=True)
         fake_ui = self.root / 'fake-ui.xml'
         fake_ui.write_text('<broken' if case == 'malformed-ui' else
                            '代鱼 · 聊天 发送' if case == 'old-title-only' else
@@ -370,6 +374,19 @@ case "$*" in
   printf 'Physical density: 160\nOverride density: %s\n' "$density" ;;
  'shell getprop ro.build.version.sdk') printf '%s\n' "$API" ;;
  'shell getprop sys.boot_completed') printf '1\n' ;;
+ 'shell cat /proc/sys/kernel/random/boot_id')
+  if [ -f smoke/rebooted ] && [ "$CASE" != reboot-unchanged ]; then
+   polls=0; [ ! -f smoke/boot-id-polls ] || polls=$(cat smoke/boot-id-polls)
+   polls=$((polls + 1)); printf '%s' "$polls" > smoke/boot-id-polls
+   if [ "$CASE" = reboot-delayed ] && [ "$polls" -le 20 ]; then
+    printf '11111111-1111-1111-1111-111111111111\n'
+   else printf '22222222-2222-2222-2222-222222222222\n'; fi
+  else printf '11111111-1111-1111-1111-111111111111\n'; fi ;;
+ 'shell settings get secure default_input_method')
+  if [ -f smoke/rebooted ] && [ "$CASE" = reboot-ime-changed ]; then printf 'other/.Ime\n'
+  else printf 'original/.Ime\n'; fi ;;
+ 'reboot') [ "$CASE" != reboot-fail ] || exit 7; touch smoke/rebooted ;;
+
  *pidof*) printf '123\n456\n' ;;
  'shell pm path android') printf 'package:/system/framework/framework-res.apk\n' ;;
  'shell getprop debug.hwui.renderer') printf '\n' ;;
@@ -443,6 +460,8 @@ case "$*" in
  'logcat '*)
   case "$CASE" in
    pre-crash) printf 'FATAL EXCEPTION\n' ;;
+   reboot-crash) [ ! -f smoke/rebooted ] || printf 'Fatal signal 6 (SIGABRT)\n' ;;
+
    pre-native-crash) printf 'Fatal signal 6 (SIGABRT)\n' ;;
    late-pre-native-crash) grep -q 'shell pm path android' smoke/adb-calls.txt && printf 'Fatal signal 6 (SIGABRT)\n'; true ;;
    pre-gl-crash) printf 'GL errors! frameworks/base/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp:110\n' ;;
@@ -513,6 +532,45 @@ exit 0
             self.assertFalse(any('setprop debug.hwui.renderer' in value or 'stop &&' in value for value in calls))
             self.assertLess(calls.index('shell getprop debug.hwui.renderer'), probe)
             self.assertEqual((self.root / 'smoke/hwui-renderer.txt').read_text(), '\n')
+
+    def test_api26_reboots_once_after_override_without_losing_first_boot_crashes(self):
+        for api in (26, 37):
+            with self.subTest(api=api):
+                result = self.smoke(api=api)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+                self.assertEqual(calls.count('reboot'), int(api == 26))
+                if api == 26:
+                    restart = calls.index('reboot')
+                    self.assertLess(calls.index('shell wm size 320x640'), restart)
+                    self.assertLess(calls.index('logcat -d -b all'), restart)
+                    self.assertLess(restart, next(i for i, c in enumerate(calls) if c.startswith('install ')))
+                    self.assertTrue((self.root / 'smoke/logcat-first-boot.txt').exists())
+                    self.assertEqual((self.root / 'smoke/ime-default-before.txt').read_bytes(),
+                                     (self.root / 'smoke/ime-default-restored.txt').read_bytes())
+                self.assertFalse(any('logcat -c' in c or 'force-stop' in c for c in calls))
+
+    def test_api26_waits_for_new_boot_even_when_old_pids_stay_stable(self):
+        result = self.smoke(case='reboot-delayed')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        readiness = [row for row in (self.root / 'smoke/readiness.txt').read_text().splitlines()
+                     if ' attempt=' in row]
+        self.assertEqual(len(readiness), 35)
+        self.assertTrue(all('stable=0 boot_changed=0' in row for row in readiness[:20]))
+        self.assertIn('stable=15 boot_changed=1', readiness[-1])
+        calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+        self.assertEqual(calls.count('reboot'), 1)
+        self.assertLess(calls.index('reboot'), calls.index('install delivery/app.apk'))
+
+    def test_api26_reboot_failure_identity_ime_and_new_crashes_fail_closed(self):
+        for case in ('reboot-fail', 'reboot-unchanged', 'reboot-ime-changed', 'reboot-crash'):
+            with self.subTest(case=case):
+                result = self.smoke(case=case)
+                self.assertNotEqual(result.returncode, 0)
+                calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+                self.assertFalse(any(c.startswith('install ') or 'am instrument' in c for c in calls))
+                self.assertTrue((self.root / 'smoke/logcat-first-boot.txt').exists())
+                self.assertFalse(any('logcat -c' in c for c in calls))
 
     def test_startup_java_and_native_crashes_cannot_start_tests(self):
         for case in ('pre-crash', 'pre-native-crash', 'pre-gl-crash', 'late-pre-native-crash'):

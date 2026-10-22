@@ -39,7 +39,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: LinuxSettingsPageOwner,
     onBack: () -> Unit, modifier: Modifier = Modifier, host: TerminalEnvironmentHost? = null,
     runningModeStore: RunningModeStore = AndroidRunningModeStore.get(LocalContext.current),
-    onOpenTerminal: (() -> Unit)? = null) {
+    filesOnly: Boolean = false, onOpenTerminal: (() -> Unit)? = null) {
     val runningMode by runningModeStore.mode.collectAsState()
     val rootMode = runningMode == RunningMode.ROOT
     val state by page.state.collectAsState()
@@ -55,18 +55,20 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
         else -> null
     }
     val pendingInstall = if (pendingMode == LinuxExecutionMode.CHROOT) chroot else proot.takeIf { pendingMode != null }
-    val distribution = distributionDraft ?: pendingInstall?.prepared?.artifact?.distribution ?: terminal?.linux?.distribution ?: "alpine"
-    val mode = if (rootMode) modeDraft ?: pendingMode ?: selected?.executionMode ?: LinuxExecutionMode.PROOT
-        else LinuxExecutionMode.PROOT
+    val distribution = if (filesOnly) selected?.label ?: terminal?.linux?.distribution ?: "alpine"
+        else distributionDraft ?: pendingInstall?.prepared?.artifact?.distribution ?: terminal?.linux?.distribution ?: "alpine"
+    val mode = if (!rootMode) LinuxExecutionMode.PROOT
+        else if (filesOnly) selected?.executionMode ?: LinuxExecutionMode.PROOT
+        else modeDraft ?: pendingMode ?: selected?.executionMode ?: LinuxExecutionMode.PROOT
     val installation = if (mode == LinuxExecutionMode.CHROOT) chroot else proot
     val otherInstallation = if (mode == LinuxExecutionMode.CHROOT) proot else chroot
     val scope = rememberCoroutineScope()
     var selecting by remember(page) { mutableStateOf(false) }
     var message by remember(page) { mutableStateOf<String?>(null) }
-    var tab by remember(page) { mutableStateOf(LinuxSettingsTab.BASIC) }
+    var tab by remember(page, filesOnly) { mutableStateOf(if (filesOnly) LinuxSettingsTab.FILES else LinuxSettingsTab.BASIC) }
     var tabScope by remember(page) { mutableStateOf(Any()) }
     val renderedTabScope = tabScope
-    fun basicCurrent() = tab == LinuxSettingsTab.BASIC && tabScope === renderedTabScope && !page.state.value.revoked
+    fun basicCurrent() = !filesOnly && tab == LinuxSettingsTab.BASIC && tabScope === renderedTabScope && !page.state.value.revoked
     val choiceScope = remember(page, runningMode) { Any() }
     val currentChoiceScope = rememberUpdatedState(choiceScope)
     fun choiceCurrent() = basicCurrent() && currentChoiceScope.value === choiceScope
@@ -121,7 +123,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
         .navigationBarsPadding().testTag("linux-settings-view")) {
         Box(Modifier.weight(1f)) {
             if (tab == LinuxSettingsTab.FILES) {
-                WorkspaceSettingsScreen(onBack = leave, pageTitle = "Linux 工具环境", integratedLinux = true,
+                WorkspaceSettingsScreen(onBack = leave, pageTitle = if (filesOnly) "工作区" else "Linux 工具环境", integratedLinux = true,
                     rootfs = rootfs, onOpenTerminal = onOpenTerminal)
             } else SettingsScaffoldPage("Linux 工具环境", leave, compactTitle = true, actions = {
                 if (onOpenTerminal != null) {
@@ -212,7 +214,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                 }
             }
         }
-        LinuxSettingsTabs(tab) {
+        if (!filesOnly) LinuxSettingsTabs(tab) {
             if (tabScope === renderedTabScope && tab != it) {
                 tabScope = Any(); confirmInstall = false; confirmUse = false; confirmPending = false; tab = it
             }

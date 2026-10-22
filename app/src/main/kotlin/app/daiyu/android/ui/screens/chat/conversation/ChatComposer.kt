@@ -105,7 +105,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         return true
     }
     var attachments by remember { mutableStateOf(false) }
-    var voiceModes by remember { mutableStateOf(false) }
+    var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes) { mutableStateOf(false) }
+    val voiceMenuEnabled = state.enabled && state.voiceModes.isNotEmpty()
     val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
     val textAction = hasText && state.phase != ComposerPhase.RUNNING
     val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
@@ -246,7 +247,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         SpeechMorphButton(
                             generating = state.showGenerationLoading(),
                             listening = state.listening,
-                            enabled = state.enabled && state.voiceModes.isNotEmpty(),
+                            enabled = voiceMenuEnabled,
                             onClick = {
                                 if (state.voiceMode !in state.voiceModes && state.voiceModes.size != 1) voiceModes = true
                                 else {
@@ -254,9 +255,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     actions.onVoice()
                                 }
                             },
-                            onLongClick = { actions.onVoiceLongPress(); voiceModes = true },
+                            onLongClick = if (voiceMenuEnabled) ({ actions.onVoiceLongPress(); voiceModes = true }) else null,
                         )
-                        ChatVoiceModeMenu(voiceModes, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
+                        ChatVoiceModeMenu(voiceModes && voiceMenuEnabled, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
                     }
                 }
         }

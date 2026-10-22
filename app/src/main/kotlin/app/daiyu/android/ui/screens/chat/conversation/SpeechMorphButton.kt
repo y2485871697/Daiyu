@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -28,7 +29,7 @@ internal fun SpeechMorphButton(
     listening: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val diameter by animateDpAsState(
@@ -37,7 +38,7 @@ internal fun SpeechMorphButton(
         label = "speechDiameter",
     )
     Box(
-        modifier = modifier.size(32.dp).clip(CircleShape)
+        modifier = modifier.testTag("chat-voice").size(32.dp).clip(CircleShape)
             .semantics {
                 contentDescription = if (listening) "停止语音输入" else "语音输入"
                 if (listening) stateDescription = "正在聆听"
@@ -48,7 +49,8 @@ internal fun SpeechMorphButton(
                 role = Role.Button,
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
-                onLongClick = { onLongClick() },
+                onLongClickLabel = if (onLongClick != null) "选择语音功能" else null,
+                onLongClick = onLongClick,
                 onClick = { onClick() },
             ),
         contentAlignment = Alignment.Center,

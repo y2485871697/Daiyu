@@ -88,7 +88,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     val visit = remember { AtomicBoolean(true) }
     var permit by remember { mutableStateOf(ProviderPagePermit()) }
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
-    var registry by remember { mutableStateOf<ProviderRegistrySnapshot?>(null) }
+    var registry by remember { mutableStateOf<ProviderRegistrySnapshot?>(null, referentialEqualityPolicy()) }
     var summaries by remember { mutableStateOf<Map<String, ProviderCardSummary>>(emptyMap()) }
     var query by remember { mutableStateOf("") }
     val directoryListState = rememberLazyListState()

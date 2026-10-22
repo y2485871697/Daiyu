@@ -143,8 +143,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                     style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(stateLabel, Modifier.widthIn(max = 88.dp), color = tint,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp),
-                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp))
                 Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
                     if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(16.dp), tint = colors.muted)
             }

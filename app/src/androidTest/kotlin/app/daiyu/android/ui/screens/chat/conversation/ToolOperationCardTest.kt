@@ -138,12 +138,14 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 assertEquals(androidx.compose.ui.text.font.FontFamily.Monospace, layouts.single().layoutInput.style.fontFamily)
                 assertEquals(13.sp, layouts.single().layoutInput.style.fontSize)
             }
-            val pixels = captureScreenNode(ui.onNodeWithTag("tool-document:命令", useUnmergedTree = true)).toPixelMap()
-            val actual = pixels[pixels.width / 2, (pixels.height * .15f).toInt()]
-            val expected = Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
-            assertEquals(expected.red, actual.red, .025f)
-            assertEquals(expected.green, actual.green, .025f)
-            assertEquals(expected.blue, actual.blue, .025f)
+            for (title in listOf("命令", "标准输出")) {
+                val pixels = captureScreenNode(ui.onNodeWithTag("tool-document-frame:$title", useUnmergedTree = true)).toPixelMap()
+                val actual = pixels[pixels.width / 2, (pixels.height * .15f).toInt()]
+                val expected = Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
+                assertEquals(expected.red, actual.red, .025f)
+                assertEquals(expected.green, actual.green, .025f)
+                assertEquals(expected.blue, actual.blue, .025f)
+            }
             ui.onNodeWithTag("tool-output-hint:标准输出").assertDoesNotExist()
             ui.onNodeWithTag("tool-document:标准输出", useUnmergedTree = true).assertTextEquals("hello")
             ui.onNodeWithText("运行回执").assertDoesNotExist()

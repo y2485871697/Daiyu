@@ -133,7 +133,11 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             val titleBounds = titleNode.fetchSemanticsNode().boundsInRoot
             val stateBounds = stateNode.fetchSemanticsNode().boundsInRoot
             assertTrue("Long title must not overlap state", titleBounds.right <= stateBounds.left)
-            assertFalse(layout(stateNode).hasVisualOverflow)
+            val stateLayout = layout(stateNode)
+            assertFalse("dark=$dark scale=$scale large=$large narrow=$narrow " +
+                "constraints=${stateLayout.layoutInput.constraints} size=${stateLayout.size} " +
+                "lines=${stateLayout.lineCount} overflowWidth=${stateLayout.didOverflowWidth} " +
+                "overflowHeight=${stateLayout.didOverflowHeight}", stateLayout.hasVisualOverflow)
             val headerBounds = ui.onNodeWithTag("tool-step-header:readability").fetchSemanticsNode().boundsInRoot
             assertTrue(titleBounds.left >= headerBounds.left && stateBounds.right <= headerBounds.right)
             ui.onNodeWithTag("tool-step-header:readability").performClick()

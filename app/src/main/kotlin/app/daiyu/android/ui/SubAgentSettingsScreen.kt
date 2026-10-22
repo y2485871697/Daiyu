@@ -85,7 +85,10 @@ internal fun SubAgentSettingsScreen(
                 floatingActionButton = {
                     FilledTonalButton(enabled = editable, onClick = {
                         name = ""; add = true
-                    }, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 168.dp), shape = RoundedCornerShape(50)) {
+                    }, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 168.dp), shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                        elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 3.dp)) {
                         Text("添加子代理组", style = MaterialTheme.typography.bodyLarge)
                     }
                 }) { padding ->

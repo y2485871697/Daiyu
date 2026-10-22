@@ -2119,7 +2119,7 @@ class MainActivity : ComponentActivity() {
                 // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
                 SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = reasoningPreference.get(thinkingOwner),
-                    chatStyle = true,
+                    mainChat = true,
                     options = ReasoningEffort.entries.filter { it != ReasoningEffort.DEFAULT },
                     onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
                         if (activityUsable() && selected?.id?.value == thinkingOwner) {

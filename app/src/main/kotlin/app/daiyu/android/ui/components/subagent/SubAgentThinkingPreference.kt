@@ -9,13 +9,11 @@ import app.daiyu.android.delegation.SubAgentProfile
 internal data class SubAgentThinkingPreference(val effort: ReasoningEffort, val options: List<ReasoningEffort>)
 
 /** Text chat choices are request preferences, not inferred model capabilities. */
-internal fun subAgentThinkingPreference(profile: SubAgentProfile, config: SubAgentModelConfig,
-    chatStyle: Boolean): SubAgentThinkingPreference {
-    if (chatStyle && !profile.isMedia) return SubAgentThinkingPreference(
+internal fun subAgentThinkingPreference(profile: SubAgentProfile, config: SubAgentModelConfig): SubAgentThinkingPreference {
+    if (!profile.isMedia) return SubAgentThinkingPreference(
         profile.reasoning ?: ReasoningEffort.DEFAULT,
         ReasoningEffort.entries.filter { it != ReasoningEffort.DEFAULT },
     )
     return SubAgentThinkingPreference(SubAgentPreferences.applyReasoning(profile, config).effectiveReasoningEffort,
-        if (profile.isMedia) MediaReasoningSettings.resolve(config, profile.role).efforts
-        else config.reasoningCapabilities.selectableEfforts)
+        MediaReasoningSettings.resolve(config, profile.role).efforts)
 }

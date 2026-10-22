@@ -136,7 +136,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     val canEditSpeed = boundConfig != null && supportsGptSpeedBinding(speedProvider, speedModel)
     val media = if (draft.isMedia && boundConfig != null) MediaReasoningSettings.resolve(boundConfig, draft.role) else null
     val canThink = boundConfig != null && (!draft.isMedia || media?.status == MediaReasoningSettings.Status.SUPPORTED)
-    val thinking = boundConfig?.let { subAgentThinkingPreference(draft, it, LocalConversationAgentStyle.current) }
+    val thinking = boundConfig?.let { subAgentThinkingPreference(draft, it) }
     val effective = thinking?.effort
     val efforts = thinking?.options.orEmpty()
     val thinkingLabel = when {

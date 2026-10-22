@@ -55,10 +55,11 @@ internal data class ConversationAgentColors(val dark: Boolean) {
 /** Floating glass sheet with rounded corners. */
 @Composable
 internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, modifier: Modifier = Modifier,
+    bottomSheetMotion: Boolean = true,
     content: @Composable ColumnScope.() -> Unit) {
     val colors = conversationAgentColors()
     val shape = RoundedCornerShape(radius.dp)
-    PreviewDialog(onDismiss, bottomSheet = true) {
+    PreviewDialog(onDismiss, bottomSheet = bottomSheetMotion) {
         Column(modifier.align(Alignment.BottomCenter).heightIn(max = (maxHeight - 20.dp).coerceAtLeast(0.dp)).padding(10.dp).fillMaxWidth().testTag("conversation-agent-sheet")
             .shadow(18.dp, shape, ambientColor = Color(0x24352044), spotColor = Color(0x24352044))
             .clip(shape)

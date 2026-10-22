@@ -33,6 +33,7 @@ import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.components.DaiyuDialog
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.UsageGlassDialog
+import app.daiyu.android.ui.components.subagent.ConversationAgentSheet
 import app.daiyu.android.ui.components.prepareDaiyuCenterMotion
 import app.daiyu.android.ui.haptics.material.TextButton
 
@@ -72,17 +73,20 @@ class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
     }
 
     private fun assertOneShot(animation: Animation, diagnostic: String) {
-        assertEquals("Exit must not repeat: $diagnostic", 0, animation.repeatCount)
+        assertEquals("Fade must not repeat: $diagnostic", 0, animation.repeatCount)
+        assertEquals("Fade starts immediately: $diagnostic", 0L, animation.startOffset)
         if (animation is AnimationSet) animation.animations.forEach { assertOneShot(it, diagnostic) }
     }
 
-    private fun assertStationaryFade(diagnostic: String, create: () -> Animation) {
+    private fun assertStationaryFade(diagnostic: String, entering: Boolean = false,
+        expectedDuration: Long? = null, create: () -> Animation) {
         val identity = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
         for (size in listOf(intArrayOf(320, 640, 1080, 1920), intArrayOf(1080, 1920, 1080, 1920))) {
             val prototype = create().apply { initialize(size[0], size[1], size[2], size[3]) }
             assertOneShot(prototype, diagnostic)
             val duration = prototype.computeDurationHint()
-            assertTrue("Finite positive exit duration: $diagnostic", duration in 1L..10_000L)
+            assertTrue("Finite positive fade duration: $diagnostic", duration in 1L..10_000L)
+            expectedDuration?.let { assertEquals("Short dialog fade: $diagnostic", it, duration) }
             for (step in 0..64) {
                 val loaded = create().apply {
                     initialize(size[0], size[1], size[2], size[3])
@@ -95,23 +99,30 @@ class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
                 val sample = "$diagnostic type=${loaded.javaClass.simpleName} " +
                     "size=${size.contentToString()} step=$step alpha=${transformation.alpha} matrix=${matrix.contentToString()}"
                 for (index in identity.indices) {
-                    assertEquals("Centered exit must have identity matrix: $sample", identity[index], matrix[index], .0001f)
+                    assertEquals("Centered fade must have identity matrix: $sample", identity[index], matrix[index], .0001f)
                 }
                 assertTrue("Finite fade alpha in [0,1]: $sample",
                     transformation.alpha.isFinite() && transformation.alpha in 0f..1f)
-                if (step == 0) assertEquals("Exit starts opaque: $sample", 1f, transformation.alpha, .0001f)
-                if (step == 64) assertEquals("Exit ends transparent: $sample", 0f, transformation.alpha, .0001f)
+                if (step == 0) assertEquals("Fade start: $sample", if (entering) 0f else 1f, transformation.alpha, .0001f)
+                if (step == 64) assertEquals("Fade end: $sample", if (entering) 1f else 0f, transformation.alpha, .0001f)
             }
         }
     }
 
-    private fun assertExitIsAlphaFade(context: Context, animation: Int) {
-        val values = context.obtainStyledAttributes(animation, intArrayOf(android.R.attr.windowExitAnimation))
-        val exit = try { values.getResourceId(0, 0) } finally { values.recycle() }
-        assertTrue("Dialog style supplies an exit animation", exit != 0)
-        val diagnostic = "style=${context.resources.getResourceName(animation)} exit=${context.resources.getResourceName(exit)}"
-        android.util.Log.i("CenteredMotionDiag", diagnostic)
-        assertStationaryFade(diagnostic) { AnimationUtils.loadAnimation(context, exit) }
+    private fun assertWindowFades(context: Context, animation: Int) {
+        for ((attribute, duration, entering) in listOf(
+            Triple(android.R.attr.windowEnterAnimation, 220L, true),
+            Triple(android.R.attr.windowExitAnimation, 150L, false),
+        )) {
+            val values = context.obtainStyledAttributes(animation, intArrayOf(attribute))
+            val resource = try { values.getResourceId(0, 0) } finally { values.recycle() }
+            assertTrue("Dialog style supplies an animation", resource != 0)
+            val diagnostic = "style=${context.resources.getResourceName(animation)} resource=${context.resources.getResourceName(resource)}"
+            android.util.Log.i("CenteredMotionDiag", diagnostic)
+            assertStationaryFade(diagnostic, entering, expectedDuration = duration) {
+                AnimationUtils.loadAnimation(context, resource)
+            }
+        }
     }
 
     fun testFadeVerifierAcceptsIdentityTranslateAndScale() {
@@ -136,7 +147,7 @@ class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
             } })
         for ((index, create) in invalid.withIndex()) {
             var rejected = false
-            try { assertStationaryFade("negative-$index", create) }
+            try { assertStationaryFade("negative-$index", create = create) }
             catch (_: junit.framework.AssertionFailedError) { rejected = true }
             assertTrue("Non-fade must be rejected: $index", rejected)
         }
@@ -151,7 +162,7 @@ class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
                 val expected = themedAnimation(context)
                 assertTrue("Theme supplies a platform dialog animation", expected != 0)
                 assertEquals(expected, window.attributes.windowAnimations)
-                assertExitIsAlphaFade(context, expected)
+                assertWindowFades(context, expected)
             } else {
                 assertEquals(0, window.attributes.windowAnimations)
             }
@@ -202,6 +213,16 @@ class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
         closeAndAssertDisposed("usage-close")
     }
 
+    fun testCollaborationSheetCanUseCenterFadeAndDisposeOnDismiss() {
+        show { dismiss ->
+            ConversationAgentSheet(dismiss, bottomSheetMotion = false) {
+                TextButton(onClick = dismiss, modifier = Modifier.testTag("collaboration-close")) { Text("完成") }
+            }
+        }
+        assertWindowAnimation("collaboration-close")
+        closeAndAssertDisposed("collaboration-close")
+    }
+
     fun testBottomPreviewAndChoiceKeepPlatformAnimationDisabled() {
         show { dismiss ->
             PreviewDialog(dismiss, bottomSheet = true) {
@@ -226,7 +247,7 @@ class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
             val expected = themedAnimation(context)
             assertTrue(expected != 0)
             assertEquals(expected, window.attributes.windowAnimations)
-            assertExitIsAlphaFade(context, expected)
+            assertWindowFades(context, expected)
         }
         assertEquals(0, fixture.opens.get())
     }

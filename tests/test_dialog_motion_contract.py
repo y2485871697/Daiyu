@@ -24,8 +24,39 @@ class DialogMotionContractTest(unittest.TestCase):
         self.assertEqual(styles["Theme.Daiyu.Dialog"].attrib["parent"], "android:style/ThemeOverlay.Material.Dialog.Alert")
         self.assertEqual(styles["Animation.Daiyu.CenterDialog"].get("parent"), "android:style/Animation.Dialog")
         self.assertEqual(items("Animation.Daiyu.CenterDialog"), {
-            "android:windowEnterAnimation": "@android:anim/fade_in",
-            "android:windowExitAnimation": "@android:anim/fade_out"})
+            "android:windowEnterAnimation": "@anim/daiyu_center_dialog_enter",
+            "android:windowExitAnimation": "@anim/daiyu_center_dialog_exit"})
+
+    def test_center_fades_match_material_dialog_timing_without_translation_or_scale(self):
+        android = "{http://schemas.android.com/apk/res/android}"
+        for direction, start, end, duration, points in [
+            ("enter", 0.0, 1.0, 220, (0.2, 0.0, 0.0, 1.0)),
+            ("exit", 1.0, 0.0, 150, (0.3, 0.0, 1.0, 1.0)),
+        ]:
+            with self.subTest(direction=direction):
+                name = "daiyu_center_dialog_" + direction
+                animation = ET.parse(ROOT / "app/src/main/res/anim" / (name + ".xml")).getroot()
+                self.assertEqual(animation.tag, "alpha")
+                self.assertEqual(list(animation), [])
+                self.assertEqual(float(animation.get(android + "fromAlpha")), start)
+                self.assertEqual(float(animation.get(android + "toAlpha")), end)
+                self.assertEqual(int(animation.get(android + "duration")), duration)
+                self.assertEqual(int(animation.get(android + "startOffset", "0")), 0)
+                self.assertEqual(int(animation.get(android + "repeatCount", "0")), 0)
+                self.assertEqual(animation.get(android + "interpolator"), "@interpolator/" + name)
+                interpolator = ET.parse(ROOT / "app/src/main/res/interpolator" / (name + ".xml")).getroot()
+                self.assertEqual(interpolator.tag, "pathInterpolator")
+                self.assertEqual(tuple(float(interpolator.get(android + key)) for key in
+                    ("controlX1", "controlY1", "controlX2", "controlY2")), points)
+
+    def test_requested_collaboration_panel_uses_fade_without_changing_other_sheets(self):
+        panel = self.text("ui/components/ConversationCollaborationDialog.kt")
+        self.assertIn("ConversationAgentSheet(onDismiss, bottomSheetMotion = false,", panel)
+        style = self.text("ui/components/subagent/ConversationAgentStyle.kt")
+        self.assertIn("bottomSheetMotion: Boolean = true", style)
+        self.assertIn("PreviewDialog(onDismiss, bottomSheet = bottomSheetMotion)", style)
+        self.assertIn("modifier.align(Alignment.BottomCenter)", style)
+        self.assertIn(".padding(10.dp)", style)
 
     def test_dialog_primitives_cannot_bypass_motion_adapters(self):
         allowed = {"ui/components/DialogMotion.kt", "ui/components/PreviewDialog.kt"}
@@ -133,11 +164,17 @@ class DialogMotionContractTest(unittest.TestCase):
                          "assertEquals(1, disposals)", "window.attributes.windowAnimations",
                          "android.R.attr.windowAnimationStyle", "assertFalse(dialog.isShowing)",
                          "android.R.attr.dialogTheme", "ContextThemeWrapper(activity, theme)",
-                         "android.R.attr.windowExitAnimation", "AnimationUtils.loadAnimation(context, exit)",
+                         "android.R.attr.windowExitAnimation", "AnimationUtils.loadAnimation(context, resource)",
                          "loaded.getTransformation(", "transformation.matrix.getValues(matrix)",
-                         '"Centered exit must have identity matrix: $sample"',
+                         '"Centered fade must have identity matrix: $sample"',
                          "identity[index], matrix[index], .0001f", "for (step in 0..64)",
-                         "1f, transformation.alpha, .0001f", "0f, transformation.alpha, .0001f",
+                         "if (entering) 0f else 1f, transformation.alpha, .0001f",
+                         "if (entering) 1f else 0f, transformation.alpha, .0001f",
+                         "Triple(android.R.attr.windowEnterAnimation, 220L, true)",
+                         "Triple(android.R.attr.windowExitAnimation, 150L, false)",
+                         "expectedDuration = duration", "0L, animation.startOffset",
+                         'assertStationaryFade("negative-$index", create = create)',
+                         "ConversationAgentSheet(dismiss, bottomSheetMotion = false)",
                          "testFadeVerifierAcceptsIdentityTranslateAndScale", "testFadeVerifierRejectsRealMotionAndWrongAlphaEndpoints",
                          "assertOneShot(prototype, diagnostic)", "0, animation.repeatCount",
                          "animation.animations.forEach { assertOneShot(it, diagnostic) }", "repeatMode = Animation.REVERSE"]:

@@ -34,6 +34,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
@@ -68,6 +70,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     balanceState: app.daiyu.android.balance.BalanceState? = null,
     backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null,
     attachmentContent: @Composable () -> Unit = {}) {
+    app.daiyu.android.ui.components.DismissImeOnStop()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
     val chrome = chatChromeColors().copy(accent = conversationColors().accent)
@@ -152,7 +156,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     BasicTextField(
                         value = renderedValue,
                         onValueChange = { value ->
-                            if (mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
+                            // Losing focus at ON_STOP can collapse selection; keep the saved draft intact.
+                            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+                                mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
                                 val bodyChanged = value.text != references.text
                                 val next = references.edit(value.text)
                                 fun rawOffset(offset: Int) = if (bodyChanged) offset.coerceIn(0, value.text.length) else references.toSource(offset)

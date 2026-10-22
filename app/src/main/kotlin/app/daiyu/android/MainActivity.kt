@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -1404,6 +1405,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        enableEdgeToEdge()
         voiceEntryMode = when (voiceEntryPreferences.getString("mode", null)) {
             ChatMenuAction.VOICE_CHAT.name -> ChatMenuAction.VOICE_CHAT
             else -> ChatMenuAction.VOICE_INPUT

@@ -9,16 +9,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -56,13 +51,22 @@ internal fun ChatConversationLayers(
     composer: @Composable (LayerBackdrop?) -> Unit,
 ) {
     val backdrop = rememberTopBarBackdrop()
-    var heightPx by remember { mutableIntStateOf(0) }
-    val bottomInset = with(LocalDensity.current) { heightPx.toDp() }
-    Box(modifier.fillMaxSize()) {
-        Box(Modifier.matchParentSize().captureForTopBar(backdrop)
-            .background(MiuixTheme.colorScheme.background)) { messages(bottomInset) }
-        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { heightPx = it.height }) {
-            composer(backdrop)
+    val background = MiuixTheme.colorScheme.background
+    SubcomposeLayout(modifier.fillMaxSize()) { constraints ->
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val editor = subcompose("composer") {
+            Box(Modifier.fillMaxWidth()) { composer(backdrop) }
+        }.single().measure(constraints.copy(minWidth = width, minHeight = 0))
+        val bottomInset = editor.height.toDp()
+        val content = subcompose("messages") {
+            Box(Modifier.fillMaxSize().captureForTopBar(backdrop).background(background)) {
+                messages(bottomInset)
+            }
+        }.single().measure(Constraints.fixed(width, height))
+        layout(width, height) {
+            content.placeRelative(0, 0)
+            editor.placeRelative(0, height - editor.height)
         }
     }
 }

@@ -1,18 +1,24 @@
 package app.daiyu.android
 
+import android.os.Looper
+import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.data.repository.RecordedUsageProjection
 import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.ModelEvent
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.chat.conversation.ChatUsageDialog
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class ChatUsageDialogTest : WiredActivityTestCase() {
     private fun recordUsage(input: Long, output: Long): ConversationId {
@@ -27,22 +33,135 @@ class ChatUsageDialogTest : WiredActivityTestCase() {
         return conversation.id
     }
 
-    private fun show(id: ConversationId?, mode: AppearanceThemeMode) {
+    private fun mount(
+        id: ConversationId?,
+        mode: AppearanceThemeMode = AppearanceThemeMode.LIGHT,
+        readUsage: ((ConversationId) -> RecordedUsageProjection)? = null,
+        onDismiss: () -> Unit = {},
+    ) {
+        val visit = Any()
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(themeMode = mode), applyInterfaceScale = false) {
-                var open by remember(id, mode) { mutableStateOf(true) }
-                if (open) ChatUsageDialog(fixture.controller, id) { open = false }
+                key(visit) {
+                    var open by remember { mutableStateOf(true) }
+                    val dismiss = { open = false; onDismiss() }
+                    if (open) {
+                        if (readUsage == null) ChatUsageDialog(fixture.controller, id, onDismiss = dismiss)
+                        else ChatUsageDialog(fixture.controller, id, readUsage = readUsage, onDismiss = dismiss)
+                    }
+                }
             }
         } }
+    }
+
+    private fun assertNoIntermediateDialog() {
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
+        ui.onNodeWithTag("preview-dialog-viewport").assertDoesNotExist()
+        ui.onNodeWithTag("chat-usage-dialog").assertDoesNotExist()
+        ui.onNodeWithTag("chat-usage-empty").assertDoesNotExist()
+        ui.onNodeWithText("正在读取已记录用量…").assertDoesNotExist()
+        ui.onNodeWithText("用量读取失败").assertDoesNotExist()
+    }
+
+    private fun show(id: ConversationId?, mode: AppearanceThemeMode) {
+        mount(id, mode)
         awaitUniqueTag("chat-usage-dialog")
         node("chat-usage-dialog").assertIsDisplayed()
-        ui.waitUntil(5_000) {
-            ui.mainClock.advanceTimeByFrame()
-            ui.onAllNodesWithText("正在读取已记录用量…").fetchSemanticsNodes().isEmpty()
-        }
+        ui.onNodeWithText("正在读取已记录用量…").assertDoesNotExist()
         for (label in listOf("刷新", "关闭", "统计对象", "统计对象：全部会话", "统计对象：本会话", "详细用量")) {
             ui.onNodeWithText(label).assertDoesNotExist()
         }
+    }
+
+    fun testPendingReadDoesNotMountDialogUntilRealUsageIsReady() {
+        val id = recordUsage(17, 23)
+        val before = fixture.database.exportBackup()
+        val opens = fixture.opens.get()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val calls = AtomicInteger()
+        try {
+            mount(id, readUsage = { owner ->
+                check(Looper.myLooper() != Looper.getMainLooper())
+                assertEquals(id, owner)
+                calls.incrementAndGet()
+                entered.countDown()
+                check(release.await(10, TimeUnit.SECONDS))
+                RecordedUsageProjection(fixture.controller.recordedRequestUsage(owner))
+            })
+            awaitControl("usage reader entered") { entered.count == 0L }
+            assertNoIntermediateDialog()
+            assertEquals(1, calls.get())
+            release.countDown()
+            awaitUniqueTag("chat-usage-dialog")
+            ui.onNodeWithText("17").assertIsDisplayed()
+            ui.onNodeWithText("累计用量").assertIsDisplayed()
+            ui.onNodeWithText("暂无用量").assertDoesNotExist()
+            assertEquals(1, calls.get())
+        } finally { release.countDown() }
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(opens, fixture.opens.get())
+    }
+
+    fun testBackDuringReadRevokesVisitAndLateSuccessOrFailureCannotReplaceNewDialog() {
+        val first = recordUsage(17, 23)
+        val second = recordUsage(61, 79)
+        val before = fixture.database.exportBackup()
+        val opens = fixture.opens.get()
+        for (fail in listOf(false, true)) {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val finished = CountDownLatch(1)
+            val dismissed = AtomicInteger()
+            try {
+                mount(first, readUsage = { owner ->
+                    check(Looper.myLooper() != Looper.getMainLooper())
+                    entered.countDown()
+                    try {
+                        check(release.await(10, TimeUnit.SECONDS))
+                        if (fail) error("held usage read failure")
+                        RecordedUsageProjection(fixture.controller.recordedRequestUsage(owner))
+                    } finally { finished.countDown() }
+                }, onDismiss = { dismissed.incrementAndGet() })
+                awaitControl("held usage reader entered") { entered.count == 0L }
+                assertNoIntermediateDialog()
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                awaitControl("pending usage dismissed") { dismissed.get() == 1 }
+                assertNoIntermediateDialog()
+                show(second, AppearanceThemeMode.LIGHT)
+                ui.onNodeWithText("61").assertIsDisplayed()
+                release.countDown()
+                assertTrue(finished.await(5, TimeUnit.SECONDS))
+                repeat(2) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                node("chat-usage-dialog").assertIsDisplayed()
+                ui.onNodeWithText("61").assertIsDisplayed()
+                ui.onNodeWithText("17").assertDoesNotExist()
+                ui.onNodeWithText("用量读取失败").assertDoesNotExist()
+                assertEquals(1, dismissed.get())
+                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.onAllNodesWithTag("chat-usage-dialog").fetchSemanticsNodes().isEmpty()
+                }
+            } finally { release.countDown() }
+        }
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(opens, fixture.opens.get())
+    }
+
+    fun testFailedReadShowsRealErrorInsteadOfEmptyUsageOrLoadingPlaceholder() {
+        val id = fixture.database.create("default").id
+        val before = fixture.database.exportBackup()
+        val opens = fixture.opens.get()
+        mount(id, readUsage = { error("usage read failure") })
+        awaitUniqueTag("chat-usage-dialog")
+        ui.onNodeWithText("用量读取失败").assertIsDisplayed()
+        ui.onNodeWithText("正在读取已记录用量…").assertDoesNotExist()
+        ui.onNodeWithText("暂无用量").assertDoesNotExist()
+        ui.onNodeWithText("累计用量").assertDoesNotExist()
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(opens, fixture.opens.get())
     }
 
     fun testUsageIsConversationOnlyAndUnattachedOrEmptyChatNeverFallsBackToAll() {

@@ -72,5 +72,24 @@ class StreamingFollowContract(unittest.TestCase):
             self.assertIn(token, device)
 
 
+    def test_manual_clock_mutations_do_not_implicitly_advance_an_extra_frame(self):
+        device = DEVICE.read_text()
+        controlled = False
+        mutations = 0
+        for line in device.splitlines():
+            if "ui.mainClock.autoAdvance = false" in line:
+                controlled = True
+            elif "ui.mainClock.autoAdvance = true" in line:
+                controlled = False
+            if controlled:
+                self.assertNotIn("mainThread {", line)
+                if "ui.runOnUiThread {" in line:
+                    mutations += 1
+        self.assertEqual(6, mutations)
+        frame = device.split("private fun frame(): Float {", 1)[1].split("\n    }", 1)[0]
+        self.assertEqual(1, frame.count("advanceTimeByFrame()"))
+        self.assertIn("movement <= 14f * density", device)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,5 @@
 package app.daiyu.android.ui.screens.settings
 
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -15,8 +13,6 @@ import app.daiyu.android.balance.BalanceResult
 import app.daiyu.android.balance.BalanceState
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
-import app.daiyu.android.ui.haptics.miuix.TextButton
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
 
 internal typealias ProviderBalanceTester = (ModelSettingsDraftUi, () -> Boolean, (BalanceResult) -> Unit) -> Boolean
 
@@ -68,10 +64,9 @@ internal fun ProviderBalanceFields(draft: ModelSettingsDraftUi, enabled: Boolean
                     enabled = enabled, compact = true, tag = "provider-balance-result")
             }
             val valid = runCatching { requireNotNull(configuration).validateProviderBinding() }.isSuccess
-            TextButton(text = if (test.running) "正在测试余额查询" else "测试余额查询",
+            ProviderActionButton(text = if (test.running) "正在测试余额查询" else "测试余额查询",
                 enabled = enabled && testBalance != null && valid && !test.running, onClick = test.start,
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-                modifier = Modifier.testTag("provider-balance-test").padding(12.dp).fillMaxWidth().heightIn(min = 48.dp))
+                modifier = Modifier.testTag("provider-balance-test").padding(horizontal = 12.dp, vertical = 8.dp))
             test.status?.let { SettingsNote(it) }
         }
     }

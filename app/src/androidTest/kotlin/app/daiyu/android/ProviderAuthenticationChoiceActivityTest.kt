@@ -1,9 +1,66 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.screens.settings.ProviderDirectoryPage
 
 class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
+    fun testAddProviderRowsShareIconSlotsAndTextStartsAcrossThemesAndFontScales() {
+        val saved = fixture.controller.providers.snapshot()
+        for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
+            mainThread { activity.setContent {
+                val platform = LocalDensity.current
+                CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        key(dark, fontScale) {
+                            ProviderDirectoryPage(null, emptyMap(), "", {}, true, null, {}, {}, {}, {}, {})
+                        }
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            val tags = listOf("provider-add", "provider-add-anthropic", "provider-add-speech")
+            val titles = listOf("新增 OpenAI-compatible", "新增 Anthropic", "新增豆包语音")
+            val summaries = listOf("支持 ChatGPT、DeepSeek、Kimi、GLM、Qwen 等", "支持 Anthropic Claude 官方或兼容 API",
+                "仅用于朗读，填写语音控制台 API Key，不是方舟聊天 Key。")
+            var iconLeft: Float? = null
+            var iconWidth: Float? = null
+            var iconHeight: Float? = null
+            var textLeft: Float? = null
+            tags.forEachIndexed { index, tag ->
+                reveal(tag, "模型提供商")
+                val icon = ui.onNodeWithTag("$tag-icon", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val title = ui.onNodeWithText(titles[index], useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val summary = ui.onNodeWithText(summaries[index], useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                if (index == 0) {
+                    iconLeft = icon.left; iconWidth = icon.width; iconHeight = icon.height; textLeft = title.left
+                }
+                assertEquals("icon slot dark=$dark font=$fontScale", checkNotNull(iconLeft), icon.left, 1f)
+                assertEquals("icon width dark=$dark font=$fontScale", checkNotNull(iconWidth), icon.width, 1f)
+                assertEquals("icon height dark=$dark font=$fontScale", checkNotNull(iconHeight), icon.height, 1f)
+                assertEquals("title start dark=$dark font=$fontScale", checkNotNull(textLeft), title.left, 1f)
+                assertEquals(title.left, summary.left, 1f)
+                assertEquals(icon.width, icon.height, 1f)
+                val row = node(tag).fetchSemanticsNode().boundsInRoot
+                assertEquals(row.center.y, icon.center.y, 1f)
+            }
+            node("provider-add").assertHasClickAction()
+            node("provider-add-anthropic").assertHasClickAction()
+            node("provider-add-speech").assertHasNoClickAction()
+        }
+        assertEquals(saved, fixture.controller.providers.snapshot())
+        assertEquals(0, fixture.opens.get())
+    }
+
     private fun fillNew(name: String) {
         reveal("provider-name", "添加提供商").performTextReplacement(name)
         reveal("settings-field:Base URL", "添加提供商").performTextReplacement("https://fixture.invalid/v1")

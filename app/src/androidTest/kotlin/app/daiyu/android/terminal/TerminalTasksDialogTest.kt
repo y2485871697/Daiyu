@@ -21,7 +21,7 @@ class TerminalTasksDialogTest : WiredActivityTestCase() {
                 TerminalTasksDialog(busy, listOf(
                     TerminalTaskRow("long-command-".repeat(20), "后台任务", { reads++ }, { stops++ }),
                     TerminalTaskRow("历史任务", "只读记录 · 运行状态未知", { reads++ })
-                ), output = "", error = null, onRefresh = {}, onNext = null, onDismiss = {})
+                ), output = "", error = null, onDismiss = {})
             }
         } }
         val row = node("terminal-task-row:0").fetchSemanticsNode().boundsInRoot
@@ -33,9 +33,10 @@ class TerminalTasksDialogTest : WiredActivityTestCase() {
         node("terminal-task-stop:0").performClick()
         node("terminal-task-stop:1").assertDoesNotExist()
         ui.runOnIdle { assertEquals(1, reads); assertEquals(1, stops); busy = true }
-        node("terminal-task-read:0").assertIsNotEnabled()
+        node("terminal-task-read:0").assertIsEnabled()
         node("terminal-task-stop:0").assertIsNotEnabled()
-        node("terminal-tasks-refresh").assertIsNotEnabled()
+        node("terminal-tasks-refresh").assertDoesNotExist()
+        node("terminal-tasks-next").assertDoesNotExist()
         ui.runOnIdle { assertEquals(1, reads); assertEquals(1, stops) }
     }
 }

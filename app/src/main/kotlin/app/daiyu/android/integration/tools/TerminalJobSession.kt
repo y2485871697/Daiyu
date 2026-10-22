@@ -56,6 +56,7 @@ internal class TerminalJobPlan(
 internal interface TerminalJobTransport : AutoCloseable {
     fun execute(name: String, arguments: JSONObject): JSONObject
     fun inspect(id: String): JSONObject
+    fun inspectTail(id: String): JSONObject = inspect(id)
     fun stop(id: String): JSONObject
     fun awaitOrdinaryTermination(timeoutMillis: Long): Boolean
 }
@@ -179,6 +180,11 @@ internal class TerminalJobSession private constructor(
         return if (pair.first != null && pair.second != null) pair.first!!.inspect(pair.second!!)
         else JSONObject().put("ok", false).put("execution", "unknown").put("error", "terminal_job_not_dispatched_or_unconfirmed")
     }
+    fun logTailOnWorker(): JSONObject {
+        val pair = synchronized(lock) { backend to job }
+        return if (pair.first != null && pair.second != null) pair.first!!.inspectTail(pair.second!!)
+        else JSONObject().put("ok", false).put("execution", "unknown").put("error", "terminal_job_not_dispatched_or_unconfirmed")
+    }
     fun stopOnWorker(): JSONObject {
         val pair = synchronized(lock) { backend to job }
         return if (pair.first != null && pair.second != null) pair.first!!.stop(pair.second!!)
@@ -250,6 +256,11 @@ internal class TerminalJobSession private constructor(
                 object : TerminalJobTransport {
                     override fun execute(name: String, arguments: JSONObject) = registry.execute(name, arguments)
                     override fun inspect(id: String) = registry.inspectJob(id)
+                    override fun inspectTail(id: String): JSONObject {
+                        val head = registry.inspectJob(id, 0, 1)
+                        if (!head.optBoolean("ok")) return head
+                        return registry.inspectJob(id, (head.optLong("total_bytes") - 65536).coerceAtLeast(0), 65536)
+                    }
                     override fun stop(id: String) = registry.stopOwnedJob(id)
                     override fun close() = registry.close()
                     override fun awaitOrdinaryTermination(timeoutMillis: Long) = registry.awaitOrdinaryTermination(timeoutMillis)

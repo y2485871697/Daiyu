@@ -159,7 +159,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             listOf(executable,"-w","--")+b.shell
         } else b.shell
         val id=UUID.randomUUID().toString()
-        val job=Job(id,scope!!,conversationOwner!!,session,mode,b,File(directory,"$id.log"),File(directory,"$id.script"))
+        val job=Job(id,scope!!,conversationOwner!!,session,mode,command,b,File(directory,"$id.log"),File(directory,"$id.script"))
         try {
             synchronized(jobs) {
                 if(jobs.size>=MAX_GLOBAL_JOBS || jobs.values.count { it.log.parentFile.canonicalPath==directory.canonicalPath }>=MAX_JOBS || !storageAvailable()) return error("job_or_log_retention_limit")
@@ -403,7 +403,10 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         val value=identity(job.backend).put("scope",job.scope).put("owner",job.owner).put("session_id",job.session).put("mode",job.mode)
             .put("pid",handle?.pid ?: -1L).put("process_start",handle?.start).put("state",job.state).put("job_id",job.id)
             .put("execution",if(job.state in setOf("start_failed", "cancelled_before_dispatch")) "not_executed" else "unknown")
-        val bytes=value.toString().toByteArray(Charsets.UTF_8); check(bytes.size<=16384)
+        value.put("command", job.command.trim().take(2048))
+        var bytes=value.toString().toByteArray(Charsets.UTF_8)
+        if (bytes.size > 16384) { value.remove("command"); bytes=value.toString().toByteArray(Charsets.UTF_8) }
+        check(bytes.size<=16384)
         TerminalDurability.replace(file, bytes)
     }
     private fun identity(b:SelectedBackend)=JSONObject().put("ok",true).put("backend",b.name).put("uid",b.uid).put("root",b.root).put("working_directory",b.guestCwd ?: b.cwd.absolutePath)
@@ -430,7 +433,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             .put("parameters",JSONObject().put("type","object").put("properties",fields).put("required",JSONArray(required)).put("additionalProperties",false))
     }
     private data class OwnedProcess(val process: Process, val pid: Long, val start: String?)
-    private class Job(val id:String,val scope:String,val owner:String,val session:String,val mode:String,val backend:SelectedBackend,val log:File,val script:File) {
+    private class Job(val id:String,val scope:String,val owner:String,val session:String,val mode:String,val command:String,val backend:SelectedBackend,val log:File,val script:File) {
         @Volatile var cancelRequested=false
         @Volatile var handle:OwnedProcess?=null
         @Volatile var state="pending"

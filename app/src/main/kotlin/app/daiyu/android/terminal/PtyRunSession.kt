@@ -42,6 +42,9 @@ class PtyRunSession internal constructor(private val owner: PtyRunOwner, private
     fun read(caller: TaskAuthorization, offset: Int = 0, limit: Int = 16384): JSONObject =
         synchronized(lifecycle) { execute(caller) { session.read(offset, limit) } }
 
+    internal fun readAvailable(caller: TaskAuthorization): JSONObject =
+        synchronized(lifecycle) { execute(caller) { session.readAvailable() } }
+
     fun write(caller: TaskAuthorization, requestId: String, inputSequence: Long, bytes: ByteArray): JSONObject =
         execute(caller) { session.write(requestId, bytes, inputSequence) }
 

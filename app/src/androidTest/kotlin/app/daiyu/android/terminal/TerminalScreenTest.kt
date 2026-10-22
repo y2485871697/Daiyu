@@ -30,8 +30,17 @@ class TerminalScreenTest : WiredActivityTestCase() {
         activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val content: @androidx.compose.runtime.Composable () -> Unit = {
-                    TerminalScreenContent(state, onCreateSession = { created += it }, onSend = { sent += it },
-                        onClose = { closes++ }, onBack = {}, onOpenTasks = { tasks++ })
+                    var simple by remember { mutableStateOf(true) }
+                    var linux by remember { mutableStateOf(false) }
+                    val entry = if (state.ownsResources || state.terminationConfirmed) TerminalSessionEntry(
+                        "test-session", simple, null, "Android", state,
+                        blocks = if (state.output.isEmpty()) emptyList() else listOf(TerminalCommandBlock("test-block", "printf", "/workspace", state.output, false))) else null
+                    TerminalScreenContent(TerminalWorkspaceState(simple, linux, entry?.id, listOfNotNull(entry), state.linux),
+                        onCreateSession = { created += if (linux) state.linux.selected else null },
+                        onSend = { _, text -> sent += if (simple) text + "\n" else text },
+                        onSelectEnvironment = { linux = it }, onSelectSession = {}, onRestart = {},
+                        onClose = { closes++ }, onStop = {}, onResize = { _, _, _ -> },
+                        onSimple = { simple = it }, onBack = {}, onOpenEnvironment = {}, onOpenTasks = { tasks++ })
                 }
                 if (interceptInput) {
                     val interceptor = remember {
@@ -52,9 +61,9 @@ class TerminalScreenTest : WiredActivityTestCase() {
         node("terminal-input").assertIsDisplayed()
         node("terminal-send").assertIsNotEnabled()
         node("terminal-identity").assertDoesNotExist()
-        node("terminal-sessions").assertContentDescriptionEquals("新建会话")
+        node("terminal-sessions").assertContentDescriptionEquals("会话")
         node("terminal-tasks").assertContentDescriptionEquals("后台任务")
-        node("terminal-mode").assertContentDescriptionEquals("简洁模式")
+        node("terminal-mode").assertContentDescriptionEquals("控制台模式")
         val sessions = node("terminal-sessions").fetchSemanticsNode().boundsInRoot
         val jobs = node("terminal-tasks").fetchSemanticsNode().boundsInRoot
         val mode = node("terminal-mode").fetchSemanticsNode().boundsInRoot
@@ -80,18 +89,21 @@ class TerminalScreenTest : WiredActivityTestCase() {
     fun testActualOutputInputAndCloseStayWiredWithoutAutoReopen() {
         state = TerminalEnvironmentState(phase = "RUNNING", ownsResources = true, acceptsInput = true, output = "real-pty-output\n")
         show()
-        node("terminal-output").assertTextEquals("real-pty-output\n")
+        node("terminal-output").assertTextEquals("real-pty-output")
         node("terminal-input").performTextReplacement("printf user-input")
         node("terminal-send").performClick()
         node("terminal-sessions").performClick()
-        node("terminal-create-session").assertIsNotEnabled()
-        node("terminal-close").performClick()
+        node("terminal-create-session").assertIsEnabled()
+        node("terminal-close:test-session").performClick()
         ui.runOnIdle { assertEquals(listOf("printf user-input\n"), sent); assertEquals(1, closes); assertTrue(created.isEmpty()) }
         mainThread { state = state.copy(phase = "CLOSING", acceptsInput = false) }
         node("terminal-send").assertIsNotEnabled()
-        node("terminal-state").assertTextEquals("正在关闭终端…")
+        node("terminal-close:test-session").assertIsEnabled()
+        pressBackAndWait()
         mainThread { state = state.copy(phase = "UNKNOWN", ownsResources = false, terminationConfirmed = true) }
-        node("terminal-state").assertTextEquals("会话已结束")
+        node("terminal-sessions").performClick()
+        ui.onNodeWithText("已退出").assertIsDisplayed()
+        pressBackAndWait()
         ui.runOnIdle { assertTrue(created.isEmpty()) }
     }
     fun testModeMovesToolbarAndDoesNotChangeDraftOutputOrLifecycle() {
@@ -107,7 +119,7 @@ class TerminalScreenTest : WiredActivityTestCase() {
         node("terminal-shortcuts").assertIsDisplayed()
         val raw = node("terminal-output-region").fetchSemanticsNode().boundsInRoot
         assertTrue(node("terminal-toolbar").fetchSemanticsNode().boundsInRoot.bottom <= raw.top)
-        node("terminal-output").assertTextEquals("retained output")
+        node("terminal-grid-line:0").assertTextContains("retained output", substring = true)
         node("terminal-mode").performClick()
         node("terminal-input").assertTextEquals("draft not sent")
         node("terminal-output").assertTextEquals("retained output")
@@ -196,7 +208,8 @@ class TerminalScreenTest : WiredActivityTestCase() {
         assertTrue(scroll.fetchSemanticsNode().config[range].value() != before)
         val input = node("terminal-direct-input").fetchSemanticsNode().boundsInRoot
         val output = node("terminal-output-region").fetchSemanticsNode().boundsInRoot
-        assertTrue(input.top >= output.bottom)
+        assertTrue(input.left >= output.left && input.right <= output.right)
+        assertTrue(input.top >= output.top && input.bottom <= output.bottom)
         ui.runOnIdle { assertTrue(sent.isEmpty()); assertTrue(created.isEmpty()); assertEquals(0, closes) }
     }
     fun testTasksControlDoesNotSendACommandOrOpenAShell() {

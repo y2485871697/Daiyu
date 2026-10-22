@@ -40,7 +40,7 @@ internal class TerminalJobHistoryReader(
     }
 
     data class Record(val jobId: String, val owner: String, val scope: String,
-        val sessionId: String, val mode: String, val backend: String) {
+        val sessionId: String, val mode: String, val backend: String, val command: String? = null) {
         val state: String get() = "unknown_after_process_restart"
     }
     data class Scan(val records: List<Record>, val skipped: Int = 0, val error: String? = null)
@@ -204,7 +204,10 @@ internal class TerminalJobHistoryReader(
         val mode = field("mode").also { require(it in setOf("sync", "async", "daemon")) }
         val backend = field("backend").also { require(it.isNotBlank() && it.length <= 256 && it.none { c -> c.isISOControl() }) }
         // Never propagate persisted state, exit_code, PID or process_start as live evidence.
-        return Record(id, recordedOwner, scope, session, mode, backend)
+        val command = if (json.has("command")) field("command").also {
+            require(it.isNotBlank() && it.length <= 2048 && '\u0000' !in it)
+        } else null
+        return Record(id, recordedOwner, scope, session, mode, backend, command)
     }
     private fun requireOwner(owner: String) { require(owner.matches(Regex("[A-Za-z0-9_-]{1,128}"))) }
     private fun requireUuid(id: String) { require(UUID.fromString(id).toString() == id) }

@@ -1,261 +1,324 @@
 package app.daiyu.android.ui.screens.terminal
 
 import androidx.compose.foundation.background
-import app.daiyu.android.ui.haptics.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.input.key.*
-import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.daiyu.android.domain.tools.TaskAuthorization
-import app.daiyu.android.terminal.LinuxGenerationRef
-import app.daiyu.android.terminal.TerminalEnvironmentHost
-import app.daiyu.android.terminal.TerminalEnvironmentState
+import app.daiyu.android.terminal.*
 import app.daiyu.android.ui.components.*
+import app.daiyu.android.ui.haptics.clickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import app.daiyu.android.ui.icons.DaiyuIcons
-import app.daiyu.android.ui.screens.settings.SettingsNote
-import app.daiyu.android.ui.screens.settings.SettingsRow
 import top.yukonga.miuix.kmp.window.WindowDialog
 
-/** The application owns the host; observing or changing presentation never opens a shell. */
 @Composable
 fun TerminalScreen(
-    host: TerminalEnvironmentHost,
-    caller: TaskAuthorization,
-    onOpenAndroid: () -> Unit,
-    onOpenLinux: (LinuxGenerationRef) -> Unit,
+    workspace: TerminalSessionWorkspace,
+    onCreateSession: () -> Unit,
+    onSend: (String?, String) -> Unit,
     onBack: () -> Unit,
+    onOpenEnvironment: () -> Unit,
     isCurrent: () -> Boolean = { true },
     onOpenTasks: (() -> Unit)? = null,
 ) {
-    val state by host.state.collectAsStateWithLifecycle()
-    LaunchedEffect(host) { if (isCurrent()) host.refreshLinux() }
+    val state by workspace.state.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { if (isCurrent()) workspace.refresh() }
     TerminalScreenContent(state,
-        onCreateSession = { linux -> if (isCurrent()) {
-            if (linux == null) onOpenAndroid() else onOpenLinux(linux)
+        onCreateSession = { if (isCurrent()) onCreateSession() },
+        onSend = { id, text -> if (isCurrent()) onSend(id, text) },
+        onSelectEnvironment = { if (isCurrent()) {
+            workspace.selectEnvironment(it)
+            if (!workspace.state.value.simple && workspace.state.value.active == null) onCreateSession()
         } },
-        onSend = { if (isCurrent()) host.send(caller, it) },
-        onClose = { if (isCurrent()) host.requestClose(caller) },
+        onSelectSession = { if (isCurrent()) workspace.select(it) },
+        onRestart = { if (isCurrent()) workspace.restart(it) },
+        onClose = { if (isCurrent()) workspace.closeSession(it) },
+        onStop = { if (isCurrent()) workspace.stop(it) },
+        onResize = { id, rows, columns -> if (isCurrent()) workspace.resize(id, rows, columns) },
+        onSimple = { if (isCurrent()) {
+            workspace.setSimple(it)
+            if (!it && workspace.state.value.active == null) onCreateSession()
+        } },
         onBack = { if (isCurrent()) onBack() },
+        onOpenEnvironment = { if (isCurrent()) onOpenEnvironment() },
         onOpenTasks = onOpenTasks?.let { action -> { if (isCurrent()) action() } })
 }
 
 @Composable
 fun TerminalScreenContent(
-    state: TerminalEnvironmentState,
-    onCreateSession: (LinuxGenerationRef?) -> Unit,
-    onSend: (String) -> Unit,
-    onClose: () -> Unit,
+    state: TerminalWorkspaceState,
+    onCreateSession: () -> Unit,
+    onSend: (String?, String) -> Unit,
+    onSelectEnvironment: (Boolean) -> Unit,
+    onSelectSession: (String) -> Unit,
+    onRestart: (String) -> Unit,
+    onClose: (String) -> Unit,
+    onStop: (String) -> Unit,
+    onResize: (String, Int, Int) -> Unit,
+    onSimple: (Boolean) -> Unit,
     onBack: () -> Unit,
+    onOpenEnvironment: () -> Unit,
     onOpenTasks: (() -> Unit)? = null,
 ) {
     var input by remember { mutableStateOf("") }
-    var linux by remember { mutableStateOf(state.environment?.startsWith("Linux:") == true) }
     var sessions by remember { mutableStateOf(false) }
-    var details by remember { mutableStateOf(false) }
-    var simple by rememberSaveable { mutableStateOf(true) }
-    var control by remember { mutableStateOf(false) }
-    var directInput by remember { mutableStateOf(TextFieldValue("\u200b", TextRange(1))) }
-    val outputScroll = rememberScrollState()
-    val linuxLabel = state.linux.distribution?.replaceFirstChar { it.uppercase() } ?: "Linux"
-    val canCreate = state.canOpen && (!linux ||
-        (state.linux.selected != null && state.linux.state == "FILES_READY"))
-    LaunchedEffect(state.environment, state.ownsResources) {
-        if (state.ownsResources) linux = state.environment?.startsWith("Linux:") == true
-    }
-    LaunchedEffect(simple, state.acceptsInput) {
-        control = false
-        directInput = TextFieldValue("\u200b", TextRange(1))
-    }
-    var followingOutput by remember { mutableStateOf(true) }
-    LaunchedEffect(outputScroll) {
-        snapshotFlow { outputScroll.isScrollInProgress to (outputScroll.value >= outputScroll.maxValue - 24) }
-            .collect { (scrolling, bottom) -> if (scrolling) followingOutput = bottom }
-    }
-    LaunchedEffect(state.output) { if (followingOutput) outputScroll.scrollTo(outputScroll.maxValue) }
+    val current = state.active
+    val linuxLabel = state.linux.distribution?.replaceFirstChar { it.uppercase() }
+        ?: state.linux.choices.firstOrNull()?.label?.replaceFirstChar { it.uppercase() } ?: "Linux"
+    val showGuide = state.linuxSelected && state.linux.state != "FILES_READY" && current == null
+    val canCreate = (!state.simple || state.sessions.count { it.simple } < 6) &&
+        (!state.linuxSelected || state.linux.state == "FILES_READY")
+    val sendable = !showGuide && current?.restarting != true &&
+        (current == null || current.state.acceptsInput || current.state.canOpen)
     fun send() {
-        if (!state.acceptsInput || input.isBlank()) return
-        onSend(input + "\n")
+        if (!sendable || input.isBlank()) return
+        onSend(current?.id, input.trim())
         input = ""
     }
     val toolbar: @Composable () -> Unit = {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag("terminal-toolbar"), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("terminal-toolbar"), verticalAlignment = Alignment.CenterVertically) {
             listOf(false to "Android", true to linuxLabel).forEach { (target, label) ->
                 Text(label, Modifier.testTag(if (target) "terminal-env-linux" else "terminal-env-android")
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                        enabled = state.canOpen, onClick = { linux = target })
-                    .padding(horizontal = 10.dp, vertical = 12.dp),
-                    color = if (linux == target) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = { onSelectEnvironment(target) })
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    color = if (state.linuxSelected == target) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (state.linuxSelected == target) FontWeight.SemiBold else null,
                     style = MaterialTheme.typography.labelMedium)
             }
-            Spacer(Modifier.weight(1f))
-            PlainToolButton(DaiyuIcons.Add, "新建会话", "terminal-sessions") { sessions = true }
-            PlainToolButton(DaiyuIcons.Chart, "后台任务", "terminal-tasks", enabled = onOpenTasks != null) { onOpenTasks?.invoke() }
-            if (simple) PlainToolButton(DaiyuIcons.Terminal, "简洁模式", "terminal-mode",
-                modifier = Modifier.semantics { stateDescription = "简洁模式" }) { simple = false }
-            else Text("简洁模式", Modifier.testTag("terminal-mode").semantics { stateDescription = "交互模式" }
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) { simple = true }
-                .heightIn(min = 40.dp).wrapContentHeight().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp))
-                .padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium)
+            if (state.simple) Text(current?.cwd.orEmpty(), Modifier.weight(1f).padding(horizontal = 8.dp),
+                fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End)
+            else Spacer(Modifier.weight(1f))
+            TerminalToolButton(terminalLayers, "会话", "terminal-sessions") { sessions = true }
+            TerminalToolButton(terminalInsights, "后台任务", "terminal-tasks", enabled = onOpenTasks != null) { onOpenTasks?.invoke() }
+            if (state.simple) TerminalToolButton(DaiyuIcons.Terminal, "控制台模式", "terminal-mode") { onSimple(false) }
+            else TerminalAction("简洁模式", "terminal-mode", true) { onSimple(true) }
+            if (state.simple && current?.running == true)
+                TerminalAction("停止", "terminal-stop", true, destructive = true) { onStop(current.id) }
         }
     }
     WithoutPressRipple {
         MiuixScaffold(title = "终端", onBack = onBack, modifier = Modifier.testTag("terminal-screen")) { padding, _, side ->
             Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), start = side, end = side)
                 .navigationBarsPadding().imePadding().testTag("page:终端")) {
-                if (!simple) toolbar()
-                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp).testTag("terminal-output-region")) {
-                    if (state.output.isEmpty()) Text(
-                        "常驻 Shell 会话：命令之间保留工作目录与环境，切出页面不中断运行。",
-                        style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.align(Alignment.Center).testTag("terminal-empty"))
-                    else SelectionContainer(Modifier.fillMaxSize().verticalScroll(outputScroll).testTag("terminal-output-scroll")) {
-                        Text(state.output, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("terminal-output"))
+                if (!state.simple) toolbar()
+                Box(Modifier.weight(1f).fillMaxWidth().testTag("terminal-output-region")) {
+                    when {
+                        showGuide -> Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center) {
+                            Text("Linux 工具环境尚未安装", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                            TerminalAction("前往安装", "terminal-open-environment", true,
+                                modifier = Modifier.padding(top = 12.dp), onClick = onOpenEnvironment)
+                        }
+                        state.simple && current?.blocks.isNullOrEmpty() -> Text(
+                            state.error ?: "常驻 Shell 会话：命令之间保留工作目录与环境，切出页面不中断运行。",
+                            style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.Center).padding(32.dp).testTag("terminal-empty"))
+                        state.simple -> TerminalBlocks(checkNotNull(current).blocks, onReinput = { input = it })
+                        else -> TerminalConsole(current, onSend = { onSend(current?.id, it) },
+                            onResize = { rows, columns -> current?.let { onResize(it.id, rows, columns) } },
+                            onReconnect = { if (current == null) onCreateSession() else onRestart(current.id) },
+                            onOpenEnvironment = onOpenEnvironment)
                     }
                 }
-                val status = when {
-                    state.phase == "OPENING" -> "正在打开终端…"
-                    state.phase == "CLOSING" -> "正在关闭终端…"
-                    state.error != null -> "终端暂不可用，请查看终端详情。"
-                    state.ownsResources && !state.acceptsInput -> "正在等待终端响应，请勿重复启动。"
-                    state.terminationConfirmed -> "会话已结束"
-                    else -> null
-                }
-                status?.let { Text(it, Modifier.padding(horizontal = 16.dp).testTag("terminal-state"), style = MaterialTheme.typography.bodySmall) }
-                if (!simple) BasicTextField(value = directInput, onValueChange = { value ->
-                    if (state.acceptsInput) {
-                        directInput = value
-                        if (value.composition == null) {
-                            val text = value.text.replaceFirst("\u200b", "")
-                            if (text.isNotEmpty() || value.text.isEmpty()) {
-                                onSend(if (value.text.isEmpty()) "\u007f" else if (control) terminalControlText(text) else text)
-                                control = false
-                            }
-                            directInput = TextFieldValue("\u200b", TextRange(1))
-                        }
-                    }
-                }, enabled = state.acceptsInput, modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp).testTag("terminal-direct-input")
-                    .onPreviewKeyEvent { event ->
-                        val native = event.nativeKeyEvent
-                        val bytes = if (event.type != KeyEventType.KeyDown || !state.acceptsInput || directInput.composition != null) null
-                        else if ((event.isCtrlPressed || control) && native.keyCode in android.view.KeyEvent.KEYCODE_A..android.view.KeyEvent.KEYCODE_Z)
-                            (native.keyCode - android.view.KeyEvent.KEYCODE_A + 1).toChar().toString()
-                        else when (event.key) {
-                            Key.Enter, Key.NumPadEnter -> "\r"
-                            Key.Backspace -> "\u007f"
-                            Key.Escape -> "\u001b"
-                            Key.Tab -> "\t"
-                            Key.DirectionLeft -> "\u001b[D"
-                            Key.DirectionUp -> "\u001b[A"
-                            Key.DirectionDown -> "\u001b[B"
-                            Key.DirectionRight -> "\u001b[C"
-                            else -> null
-                        }
-                        if (bytes == null) false else { control = false; onSend(bytes); true }
-                    },
-                    textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
-                    decorationBox = { field -> Box {
-                        if (directInput.text == "\u200b") Text("直接输入", color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall)
-                        field()
-                    } })
-                if (simple) {
+                if (state.simple) {
                     toolbar()
-                    Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp).fillMaxWidth()
+                    if (!showGuide) Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp).fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(24.dp))
                         .padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         BasicTextField(value = input, onValueChange = { if (it.length <= 16000) input = it },
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(vertical = 14.dp).testTag("terminal-input"),
                             maxLines = 4, textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface, fontFamily = FontFamily.Monospace),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { send() }),
-                            decorationBox = { field -> Box { if (input.isEmpty()) Text("输入命令", color = MaterialTheme.colorScheme.onSurfaceVariant); field() } })
-                        PlainToolButton(DaiyuIcons.Send, "发送命令", "terminal-send", state.acceptsInput && input.isNotBlank()) { send() }
-                    }
-                } else Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).testTag("terminal-shortcuts"),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    val keys = listOf("Esc" to "\u001b", "Ctrl" to "", "Tab" to "\t", "←" to "\u001b[D", "↑" to "\u001b[A", "↓" to "\u001b[B", "→" to "\u001b[C")
-                    keys.forEach { (label, value) ->
-                        Text(label, Modifier.weight(1f).testTag("terminal-key:$label").semantics {
-                            if (label == "Ctrl") stateDescription = if (control) "已启用" else "未启用"
-                        }.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                            enabled = state.acceptsInput && directInput.composition == null, role = Role.Button) {
-                            if (label == "Ctrl") control = !control else { control = false; onSend(value) }
-                        }.background(if (label == "Ctrl" && control) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
-                            .heightIn(min = 40.dp).wrapContentHeight().padding(vertical = 8.dp),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (state.acceptsInput && directInput.composition == null) 1f else .4f))
+                            decorationBox = { field -> Box {
+                                if (input.isEmpty()) Text(if (current?.running == true) "向运行中的命令发送输入" else "输入命令",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                                field()
+                            } })
+                        PlainToolButton(DaiyuIcons.JumpUp, "发送", "terminal-send", sendable && input.isNotBlank()) { send() }
                     }
                 }
             }
         }
-        if (sessions) WindowDialog(show = true, title = "会话", onDismissRequest = { sessions = false }) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()).testTag("terminal-sessions-dialog")) {
-                if (state.ownsResources) {
-                    SettingsRow("当前会话 · ${if (linux) linuxLabel else "Android"}")
-                    SettingsRow("关闭当前会话", tag = "terminal-close", onClick = if (state.disposed) null else ({ sessions = false; onClose() }))
-                } else SettingsNote("暂无会话")
-                Text("新建会话", Modifier.fillMaxWidth().testTag("terminal-create-session")
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                        enabled = canCreate, role = Role.Button) {
-                        sessions = false; onCreateSession(if (linux) state.linux.selected else null)
-                    }.background(MaterialTheme.colorScheme.inverseSurface.copy(alpha = if (canCreate) 1f else .35f), RoundedCornerShape(18.dp))
-                    .heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 16.dp, vertical = 12.dp),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = MaterialTheme.colorScheme.inverseOnSurface,
-                    style = MaterialTheme.typography.labelLarge)
-                if (linux && state.linux.state != "FILES_READY") SettingsNote("使用 Linux 前，请到设置 → 工具 → Linux 环境安装。")
-                if (state.error != null || state.lastOperation != null || state.outputTruncated) {
-                    SettingsRow("终端详情", tag = "terminal-show-details", onClick = { sessions = false; details = true })
-                }
-            }
+        if (sessions) TerminalSessionsDialog(state.sessions.filter { it.simple == state.simple }, state.activeSessionId,
+            canCreate, onDismiss = { sessions = false }, onSelect = { onSelectSession(it); sessions = false },
+            onRestart = onRestart, onClose = onClose, onNew = { onCreateSession(); sessions = false })
+    }
+}
+
+@Composable
+private fun TerminalBlocks(blocks: List<TerminalCommandBlock>, onReinput: (String) -> Unit) {
+    val scroll = rememberLazyListState()
+    val atBottom by remember { derivedStateOf {
+        val info = scroll.layoutInfo
+        (info.visibleItemsInfo.lastOrNull()?.index ?: Int.MAX_VALUE) >= info.totalItemsCount - 1
+    } }
+    LaunchedEffect(blocks.size, blocks.lastOrNull()?.output?.length) { if (atBottom && blocks.isNotEmpty()) scroll.scrollToItem(blocks.lastIndex) }
+    LazyColumn(state = scroll, modifier = Modifier.fillMaxSize().testTag("terminal-output-scroll"),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+        items(blocks, key = { it.id }) { block -> TerminalBlock(block, onReinput) }
+    }
+}
+
+@Composable
+private fun TerminalBlock(block: TerminalCommandBlock, onReinput: (String) -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    val accent = MaterialTheme.colorScheme.primary
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).combinedClickable(interactionSource = remember { MutableInteractionSource() },
+        indication = null, onClick = {}, onLongClick = { menu = true }).padding(vertical = 6.dp)) {
+        if (block.exitCode?.let { it != 0 } == true) {
+            Box(Modifier.width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.error))
+            Spacer(Modifier.width(8.dp))
         }
-        if (details) WindowDialog(show = true, title = "终端详情", onDismissRequest = { details = false }) {
-            SelectionContainer(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                Text(buildString {
-                    appendLine("状态：${state.phase}")
-                    state.environment?.let { appendLine("环境：$it") }
-                    state.exitCode?.let { appendLine("退出码：$it") }
-                    state.exitSignal?.let { appendLine("退出信号：$it") }
-                    state.error?.let { appendLine(it) }
-                    state.linux.error?.let { appendLine(it) }
-                    state.lastOperation?.let { appendLine("输入结果：$it") }
-                    if (state.outputTruncated) appendLine("输出达到日志上限，后续内容已截断。")
-                }, Modifier.testTag("terminal-details"), style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.weight(1f)) {
+        Text(buildAnnotatedString {
+            if (block.cwd.isNotEmpty()) { withStyle(SpanStyle(color = dim)) { append(block.cwd) }; append("  ") }
+            withStyle(SpanStyle(color = accent)) { append("❯ ") }
+            append(block.command)
+        }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+        if (block.output.isNotEmpty()) Text(terminalStyledOutput(block.output),
+            Modifier.padding(top = 2.dp).testTag("terminal-output"), fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (block.running) Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            Text("运行中…", Modifier.padding(start = 6.dp), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (block.interrupted) Text("已停止", Modifier.padding(top = 2.dp), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (block.truncated) Text("输出过长，已截断", Modifier.padding(top = 2.dp), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        block.exitCode?.takeIf { it != 0 }?.let { Text("退出码 $it", Modifier.padding(top = 2.dp),
+            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+    if (menu) WindowDialog(show = true, title = "", onDismissRequest = { menu = false }) {
+        Column {
+            TerminalAction("复制命令", "terminal-copy-command", true, Modifier.fillMaxWidth()) {
+                clipboard.setText(AnnotatedString(block.command)); menu = false
             }
+            TerminalAction("复制输出", "terminal-copy-output", block.output.isNotEmpty(), Modifier.fillMaxWidth()) {
+                clipboard.setText(AnnotatedString(terminalPlainOutput(block.output))); menu = false
+            }
+            TerminalAction("重新填入", "terminal-reinput", true, Modifier.fillMaxWidth()) { onReinput(block.command); menu = false }
         }
     }
 }
 
-internal fun terminalControlText(text: String): String = text.map { char ->
-    when (val upper = char.uppercaseChar()) {
-        in '@'..'_' -> (upper.code - 64).toChar()
-        ' ' -> '\u0000'
-        '?' -> '\u007f'
-        else -> char
+@Composable
+private fun TerminalSessionsDialog(entries: List<TerminalSessionEntry>, active: String?, canCreate: Boolean,
+    onDismiss: () -> Unit, onSelect: (String) -> Unit, onRestart: (String) -> Unit, onClose: (String) -> Unit, onNew: () -> Unit) {
+    WindowDialog(show = true, title = "会话", onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().testTag("terminal-sessions-dialog")) {
+            if (entries.isEmpty()) Text("暂无会话", Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            else LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                items(entries, key = { it.id }) { entry ->
+                    Column(Modifier.fillMaxWidth().testTag("terminal-session:${entry.id}")
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                            role = Role.Button, onClick = { onSelect(entry.id) }).padding(vertical = 6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(entry.label, style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (entry.id == active) FontWeight.SemiBold else null,
+                                color = if (entry.id == active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                            if (entry.id == active) Text("当前", Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary)
+                        }
+                        if (entry.simple && entry.cwd.isNotEmpty()) Text(entry.cwd, fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(when { !entry.state.ownsResources -> "已退出"; entry.running -> "运行中"; else -> "空闲" },
+                                Modifier.weight(1f), color = if (entry.running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelSmall)
+                            TerminalAction("重启", "terminal-restart:${entry.id}", !entry.restarting) { onRestart(entry.id) }
+                            TerminalAction("关闭", "terminal-close:${entry.id}", true, destructive = true) { onClose(entry.id) }
+                        }
+                    }
+                }
+            }
+            TerminalAction("新建会话", "terminal-create-session", canCreate, Modifier.fillMaxWidth().padding(top = 4.dp), onClick = onNew)
+        }
     }
+}
+
+@Composable
+private fun TerminalToolButton(icon: ImageVector, label: String, tag: String,
+    enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.size(36.dp).testTag(tag).clickable(
+        interactionSource = remember { MutableInteractionSource() }, indication = null,
+        enabled = enabled, role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, label, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+            alpha = if (enabled) 1f else .3f))
+    }
+}
+
+@Composable
+internal fun TerminalAction(text: String, tag: String, enabled: Boolean, modifier: Modifier = Modifier,
+    destructive: Boolean = false, onClick: () -> Unit) {
+    Text(text, modifier.testTag(tag).heightIn(min = 28.dp).widthIn(min = 48.dp)
+        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+            enabled = enabled, role = Role.Button, onClick = onClick)
+        .wrapContentHeight().background(if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(18.dp))
+        .padding(horizontal = 12.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium,
+        color = (if (destructive) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.inverseOnSurface).copy(alpha = if (enabled) 1f else .4f),
+        textAlign = TextAlign.Center)
+}
+
+private val terminalLayers by lazy { ImageVector.Builder("TerminalSessions", 24.dp, 24.dp, 24f, 24f).apply {
+    path(fill = androidx.compose.ui.graphics.SolidColor(Color.Black)) {
+        moveTo(12f, 2f); lineTo(1f, 8f); lineTo(12f, 14f); lineTo(23f, 8f); close()
+        moveTo(3f, 11f); lineTo(12f, 16f); lineTo(21f, 11f); lineTo(23f, 12f); lineTo(12f, 18f); lineTo(1f, 12f); close()
+        moveTo(3f, 15f); lineTo(12f, 20f); lineTo(21f, 15f); lineTo(23f, 16f); lineTo(12f, 22f); lineTo(1f, 16f); close()
+    }
+}.build() }
+private val terminalInsights by lazy { ImageVector.Builder("TerminalTasks", 24.dp, 24.dp, 24f, 24f).apply {
+    path(stroke = androidx.compose.ui.graphics.SolidColor(Color.Black), strokeLineWidth = 1.8f,
+        strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round, strokeLineJoin = androidx.compose.ui.graphics.StrokeJoin.Round) {
+        moveTo(3f, 17f); lineTo(8f, 12f); lineTo(13f, 15f); lineTo(21f, 6f)
+        moveTo(18f, 6f); lineTo(21f, 6f); lineTo(21f, 9f)
+        moveTo(4f, 4f); lineTo(4f, 7f); moveTo(2.5f, 5.5f); lineTo(5.5f, 5.5f)
+    }
+}.build() }
+
+internal fun terminalControlText(text: String): String = text.map { char ->
+    when (val upper = char.uppercaseChar()) { in '@'..'_' -> (upper.code - 64).toChar(); ' ' -> '\u0000'; '?' -> '\u007f'; else -> char }
 }.joinToString("")

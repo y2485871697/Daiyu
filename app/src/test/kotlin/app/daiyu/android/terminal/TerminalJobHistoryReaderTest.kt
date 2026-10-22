@@ -72,6 +72,19 @@ class TerminalJobHistoryReaderTest {
         assertEquals(setOf("terminal-jobs"), files.list()!!.toSet())
     }
 
+    @Test fun commandPreviewIsOptionalDisplayDataAndNeverRestoresAuthority() = fixture { files, directory ->
+        val old = record(directory)
+        val withCommand = record(directory) { it.put("command", "printf saved-command") }
+        record(directory) { it.put("command", "x".repeat(2049)) }
+        val scan = reader(files).list(owner)
+        assertEquals(1, scan.skipped)
+        assertNull(scan.records.single { it.jobId == old }.command)
+        val preview = scan.records.single { it.jobId == withCommand }
+        assertEquals("printf saved-command", preview.command)
+        assertEquals("unknown_after_process_restart", preview.state)
+        assertEquals("unknown", reader(files).page(owner, preview).getString("execution"))
+    }
+
     @Test fun absentHistoryDoesNotCreateDirectoryAndOwnerOrFilenameMismatchIsIsolated() = fixture { files, directory ->
         assertTrue(reader(files).list(owner).records.isEmpty())
         assertFalse(directory.exists())

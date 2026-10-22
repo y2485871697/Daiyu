@@ -1,7 +1,6 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
-import androidx.compose.ui.semantics.SemanticsActions
 import app.daiyu.android.domain.Conversation
 import app.daiyu.android.terminal.TerminalJobHistoryReader
 import org.json.JSONObject
@@ -23,7 +22,7 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         File(directory, "$id.json").also { created.add(it) }.writeText(JSONObject()
             .put("job_id", id).put("owner", conversation.id.value).put("scope", "original-run")
             .put("session_id", UUID.randomUUID().toString()).put("backend", "android").put("mode", "async")
-            .put("state", "exited").put("exit_code", 0).toString())
+            .put("state", "exited").put("exit_code", 0).put("command", "printf saved-command").toString())
         File(directory, "$id.log").also { created.add(it) }.writeText(text)
         return conversation to id
     }
@@ -45,36 +44,31 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         try { super.tearDown() } finally { created.forEach { it.delete() } }
     }
 
-    fun testNoLiveStillShowsUnknownReadOnlyHistoryAndExplicitRefreshAndPagination() {
-        val (conversation, _) = seedHistory("H".repeat(16384) + "tail-only-second-page")
+    fun testNoLiveShowsUnknownHistoryAndReadsBoundedTailThroughLogButton() {
+        val (conversation, _) = seedHistory("HEAD-MUST-NOT-APPEAR" + "H".repeat(100_000) + "tail-last")
         assertTrue(fixture.controller.terminalJobRuns(conversation.id).isEmpty())
         open(conversation)
         node("terminal-tasks-dialog").assertExists()
         node("terminal-task-stop:0").assertDoesNotExist()
-        ui.onNodeWithText("只读记录 · 运行状态未知").assertExists()
-        node("terminal-task-read:0").assertIsEnabled()
-            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
-        awaitControl("first history page") {
+        ui.onNodeWithText("printf saved-command").assertExists()
+        ui.onNodeWithText("状态未知").assertExists()
+        node("terminal-task-read:0").assertIsEnabled().performClick()
+        awaitControl("bounded history tail") {
             val visit = checkNotNull(invoke("getTerminalJobsVisit"))
-            !(property(visit, "getBusy") as Boolean) && property(visit, "getHasMore") == true
+            !(property(visit, "getBusy") as Boolean) && property(visit, "getHistoryPage") != null
         }
-        node("terminal-task-output").assertTextContains("历史任务状态未知", substring = true)
+        node("terminal-task-output").assertTextContains("tail-last", substring = true)
         node("terminal-task-output").assertTextContains("H".repeat(32), substring = true)
-        node("terminal-tasks-dialog").scrollToDescendant(hasTestTag("terminal-tasks-next"))
-        node("terminal-tasks-next").performClick()
-        awaitControl("second history page") {
-            val visit = checkNotNull(invoke("getTerminalJobsVisit"))
-            !(property(visit, "getBusy") as Boolean) && property(visit, "getNextOffset") == 16405L
-        }
-        node("terminal-task-output").assertTextContains("tail-only-second-page", substring = true)
+        val text = node("terminal-task-output").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString("") { it.text }
+        assertEquals(65_536, text.length)
+        assertFalse(text.contains("HEAD-MUST-NOT-APPEAR"))
+        assertFalse(text.contains("历史任务状态未知"))
         node("terminal-tasks-next").assertDoesNotExist()
-        node("terminal-tasks-dialog").scrollToDescendant(hasTestTag("terminal-tasks-refresh"))
-        node("terminal-tasks-refresh").performClick()
-        awaitControl("explicit refresh") {
-            val visit = checkNotNull(invoke("getTerminalJobsVisit"))
-            !(property(visit, "getBusy") as Boolean) && property(visit, "getHistoryPage") == null
-        }
-        node("terminal-task-stop:0").assertDoesNotExist()
+        node("terminal-tasks-refresh").assertDoesNotExist()
+        node("terminal-task-read:0").performClick()
+        node("terminal-task-output").assertDoesNotExist()
+        node("terminal-task-read:0").performClick()
+        node("terminal-task-output").assertTextContains("tail-last", substring = true)
         assertEquals(0, fixture.opens.get())
     }
 
@@ -161,7 +155,6 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
             property(visit, "getBusy") == false && property(visit, "getHistoryPage") != null
         }
         node("terminal-task-output").assertTextContains("terminal page history", substring = true)
-        node("terminal-task-output").assertTextContains("历史任务状态未知", substring = true)
         awaitNodeWindowFocus(node("terminal-tasks-dialog"))
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         ui.waitForIdle()

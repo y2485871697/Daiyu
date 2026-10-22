@@ -15,13 +15,10 @@ internal fun terminalTaskOutput(raw: String): String {
     val status = when {
         value.opt("stopped") == false -> "任务尚未确认停止"
         value.opt("ok") == false && error == null -> "任务操作未完成，结果未确认"
-        value.opt("history_read_only") == true -> "历史任务状态未知"
-        value.optString("execution") == "unknown" -> "任务操作结果未确认"
         else -> null
     }
-    val output = stdout ?: decoded
-    if (output == null && error == null && status == "历史任务状态未知") return "暂无日志 · 历史任务状态未知"
+    val output = (stdout ?: decoded)?.let(::terminalPlainOutput)?.trimEnd()
     return listOfNotNull(output, error, status).distinct().joinToString("\n").ifBlank {
-        if (encoded != null) "任务日志解码失败" else "已收到任务回执，未返回日志"
+        if (encoded != null) "任务日志解码失败" else "暂无日志输出"
     }
 }

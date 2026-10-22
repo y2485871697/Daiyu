@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import app.daiyu.android.ui.components.bottomSheetContentInsets
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
 import androidx.compose.ui.platform.LocalDensity
@@ -90,7 +89,7 @@ internal fun AssistantPreviewDialog(
         val sheetHeight = minOf((maxHeight - 48.dp).coerceIn(300.dp, 520.dp), availableHeight)
         CompositionLocalProvider(LocalDensity provides density) {
             AssistantPreviewSheet(title, onDismiss, onBack, showCloseButton, footer,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(top = 10.dp)
+                modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
                     .fillMaxWidth().height(sheetHeight),
                 content = content)
         }
@@ -109,7 +108,7 @@ internal fun AssistantPreviewSheet(
 ) {
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
-    val shape = RoundedCornerShape(topStart = 25.dp * s, topEnd = 25.dp * s)
+    val shape = RoundedCornerShape(25.dp * s)
     Column(modifier.testTag("assistant-sheet").clip(shape).previewGlassBlur(shape = shape, radius = 28f * s, saturation = 1.3f)
         .drawWithCache {
             val length = size.width * .642788f + size.height * .766044f
@@ -119,7 +118,7 @@ internal fun AssistantPreviewSheet(
             onDrawBehind { drawRect(brush) }
         }.border(1.dp, colors.border, shape)
         .pointerInput(Unit) { detectTapGestures(onTap = {}) }
-        .bottomSheetContentInsets().padding(1.dp).padding(start = 15.dp * s, end = 15.dp * s, top = 10.dp * s, bottom = 16.dp * s)) {
+        .padding(1.dp).padding(start = 15.dp * s, end = 15.dp * s, top = 10.dp * s, bottom = 16.dp * s)) {
         Box(Modifier.align(Alignment.CenterHorizontally).width(29.dp * s).height(3.dp * s)
             .clip(CircleShape).background(colors.toolbar.copy(alpha = .24f)))
         Spacer(Modifier.height(17.dp * s))

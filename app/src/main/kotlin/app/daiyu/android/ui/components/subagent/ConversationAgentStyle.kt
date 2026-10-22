@@ -7,7 +7,6 @@ import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.haptics.toggleable
 import androidx.compose.ui.draw.alpha
-import app.daiyu.android.ui.components.bottomSheetContentInsets
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
@@ -53,20 +52,20 @@ internal data class ConversationAgentColors(val dark: Boolean) {
 }
 @Composable internal fun conversationAgentColors() = ConversationAgentColors(MaterialTheme.colorScheme.background.luminance() < .5f)
 
-/** Bottom-attached glass surface; only the top edge is rounded. */
+/** Floating glass sheet with rounded corners. */
 @Composable
 internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit) {
     val colors = conversationAgentColors()
-    val shape = RoundedCornerShape(topStart = radius.dp, topEnd = radius.dp)
+    val shape = RoundedCornerShape(radius.dp)
     PreviewDialog(onDismiss, bottomSheet = true) {
-        Column(modifier.align(Alignment.BottomCenter).heightIn(max = (maxHeight - 20.dp).coerceAtLeast(0.dp)).padding(top = 10.dp).fillMaxWidth().testTag("conversation-agent-sheet")
+        Column(modifier.align(Alignment.BottomCenter).heightIn(max = (maxHeight - 20.dp).coerceAtLeast(0.dp)).padding(10.dp).fillMaxWidth().testTag("conversation-agent-sheet")
             .shadow(18.dp, shape, ambientColor = Color(0x24352044), spotColor = Color(0x24352044))
             .clip(shape)
             .previewGlassBlur(shape)
             .pointerInput(Unit) { detectTapGestures(onTap = {}) }
             .background(Brush.linearGradient(colors.gradient))
-            .border(1.dp, colors.edge, shape).bottomSheetContentInsets()) {
+            .border(1.dp, colors.edge, shape)) {
             CompositionLocalProvider(LocalContentColor provides colors.text, content = { content() })
         }
     }

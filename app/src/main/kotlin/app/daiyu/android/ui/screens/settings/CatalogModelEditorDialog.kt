@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.model.catalog.CatalogModelEdit
 import app.daiyu.android.ui.components.MiuixDialogActions
-import app.daiyu.android.ui.components.bottomSheetContentInsets
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.WithoutPressRipple
 import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
@@ -42,11 +41,10 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
     MiuixTheme(colors = colors) {
         WithoutPressRipple {
             PreviewDialog(onDismiss = { if (enabled) onDismiss() }, bottomSheet = true) {
-                Column(Modifier.align(Alignment.BottomCenter).padding(top = 12.dp).widthIn(max = 560.dp).fillMaxWidth()
+                Column(Modifier.align(Alignment.BottomCenter).padding(12.dp).widthIn(max = 560.dp).fillMaxWidth()
                     .heightIn(max = (maxHeight - 24.dp).coerceAtLeast(0.dp))
                     .testTag("catalog-model-dialog")
-                    .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)).background(colors.surface)
-                    .bottomSheetContentInsets()
+                    .clip(RoundedCornerShape(32.dp)).background(colors.surface)
                     .padding(horizontal = 24.dp, vertical = 20.dp)) {
                     Text(if (isNew) "添加模型" else "编辑模型", fontSize = 18.sp, fontWeight = FontWeight.Medium,
                         modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))

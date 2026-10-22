@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
@@ -156,21 +154,21 @@ internal fun DaiyuChoiceSheet(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = onDismiss,
-                ).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                ).windowInsetsPadding(WindowInsets.safeDrawing)
                 .imePadding(),
         ) {
             Column(
                 modifier = Modifier.dialogEnterMotion().align(Alignment.BottomCenter).widthIn(max = 640.dp)
-                    .fillMaxWidth().padding(top = 12.dp).heightIn(max = 560.dp)
+                    .fillMaxWidth().padding(12.dp).heightIn(max = 560.dp)
                     .testTag("daiyu-choice-sheet")
-                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(colors.surfaceContainer)
+                    .clip(RoundedCornerShape(20.dp)).background(colors.surfaceContainer)
                     .semantics { paneTitle = title }
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         clickFeedback = false,
                         onClick = {},
-                    ).bottomSheetContentInsets().padding(16.dp),
+                    ).padding(16.dp),
             ) {
                 Text(title, style = MiuixTheme.textStyles.headline1, color = colors.onSurface,
                     modifier = Modifier.padding(bottom = 12.dp))

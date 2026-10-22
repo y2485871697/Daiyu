@@ -1,4 +1,4 @@
-"""Source wiring only. Geometry and IME behavior are covered by the deferred Android tests."""
+"""Source contracts only; floating geometry and IME tests await the approved Android batch."""
 from pathlib import Path
 import unittest
 
@@ -11,77 +11,67 @@ def source(path):
 
 
 class BottomSheetEdgeContractTest(unittest.TestCase):
-    def test_preview_sheet_mode_is_opt_in_and_keeps_ime(self):
+    SHELLS = {
+        "ui/screens/chat/conversation/ChatSelectionSheet.kt": (10, "RoundedCornerShape(25.dp)"),
+        "ui/components/subagent/ConversationAgentStyle.kt": (10, "RoundedCornerShape(radius.dp)"),
+        "ui/screens/assistants/AssistantPreviewComponents.kt": (10, "RoundedCornerShape(25.dp * s)"),
+        "ui/components/UsagePresentation.kt": (10, "RoundedCornerShape(if (compact) 16.dp else 25.dp)"),
+        "ui/screens/settings/CatalogModelEditorDialog.kt": (12, "RoundedCornerShape(32.dp)"),
+        "ui/components/DaiyuDialogs.kt": (12, "RoundedCornerShape(20.dp)"),
+    }
+
+    def test_preview_uses_external_safe_area_and_keeps_ime_and_bottom_motion(self):
         text = source("ui/components/PreviewDialog.kt")
         self.assertIn("bottomSheet: Boolean = false", text)
-        self.assertIn("if (bottomSheet) WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)", text)
-        self.assertIn("else WindowInsets.safeDrawing", text)
-        self.assertIn(".windowInsetsPadding(drawingInsets).imePadding()", text)
+        self.assertIn(".windowInsetsPadding(WindowInsets.safeDrawing).imePadding()", text)
         self.assertIn("decorFitsSystemWindows = false", text)
         self.assertIn("val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier", text)
+        self.assertNotIn("WindowInsetsSides", text)
+        self.assertNotIn("bottomSheetContentInsets", text)
 
-    def test_content_insets_use_consumable_bottom_safe_drawing_only(self):
-        text = source("ui/components/PreviewDialog.kt")
-        self.assertIn("internal fun Modifier.bottomSheetContentInsets(): Modifier =", text)
-        self.assertIn("windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))", text)
-        self.assertNotIn("getBottom(", text)
-
-    def test_all_six_bottom_shells_move_safe_area_inside_the_painted_surface(self):
-        for path, background in [
-            ("ui/screens/chat/conversation/ChatSelectionSheet.kt", ".background(Brush.linearGradient(colors.sheet))"),
-            ("ui/components/subagent/ConversationAgentStyle.kt", ".background(Brush.linearGradient(colors.gradient))"),
-            ("ui/screens/assistants/AssistantPreviewComponents.kt", ".border(1.dp, colors.border, shape)"),
-            ("ui/screens/settings/CatalogModelEditorDialog.kt", ".background(colors.surface)"),
-            ("ui/components/UsagePresentation.kt", ".border(1.dp, colors.edge, shape)"),
-            ("ui/components/DaiyuDialogs.kt", ".background(colors.surfaceContainer)"),
-        ]:
+    def test_six_shells_restore_original_outer_margins_and_all_four_corners(self):
+        for path, (margin, shape) in self.SHELLS.items():
             with self.subTest(path=path):
                 text = source(path)
-                start = text.index(background)
-                self.assertIn(".bottomSheetContentInsets()", text[start:])
+                shell = text.split("internal fun DaiyuChoiceSheet(", 1)[1] if path.endswith("DaiyuDialogs.kt") else text
+                self.assertIn(f".padding({margin}.dp)", shell)
+                self.assertLess(shell.index(f".padding({margin}.dp)"), shell.index(".clip("))
+                self.assertIn(shape, shell)
+                self.assertNotIn("bottomSheetContentInsets", shell)
+                self.assertNotIn("RoundedCornerShape(topStart =", shell)
                 if not path.endswith(("UsagePresentation.kt", "DaiyuDialogs.kt")):
-                    self.assertIn("bottomSheet = true", text)
+                    self.assertIn("bottomSheet = true", shell)
 
-    def test_attachment_and_thinking_surface_edges_have_no_external_bottom_or_side_margin(self):
-        for path in ["ui/screens/chat/conversation/ChatSelectionSheet.kt", "ui/components/subagent/ConversationAgentStyle.kt"]:
-            text = source(path)
-            with self.subTest(path=path):
-                self.assertIn(".padding(top = 10.dp)", text)
-                self.assertNotIn(".padding(10.dp)", text)
-                self.assertIn("RoundedCornerShape(topStart =", text)
-                self.assertIn("topEnd =", text)
-
-    def test_compact_usage_keeps_center_alignment_and_original_insets(self):
+    def test_compact_usage_keeps_center_alignment_width_and_padding(self):
         text = source("ui/components/UsagePresentation.kt")
         self.assertIn("PreviewDialog(onDismiss, bottomSheet = !compact)", text)
         self.assertIn("if (compact) Alignment.Center else Alignment.BottomCenter", text)
-        self.assertIn("if (compact) Modifier.padding(10.dp) else Modifier.padding(top = 10.dp)", text)
-        self.assertIn("if (compact) Modifier else Modifier.bottomSheetContentInsets()", text)
-        self.assertIn("if (compact) RoundedCornerShape(16.dp)", text)
+        self.assertIn(".padding(10.dp)", text)
+        self.assertIn("RoundedCornerShape(if (compact) 16.dp else 25.dp)", text)
         self.assertIn("max = if (compact) cardWidth else 550.dp", text)
 
-    def test_non_preview_choice_has_edge_to_edge_window_and_top_only_outer_insets(self):
+    def test_non_preview_choice_has_external_safe_area_and_original_motion(self):
         text = source("ui/components/DaiyuDialogs.kt").split("internal fun DaiyuChoiceSheet(", 1)[1]
         self.assertIn("decorFitsSystemWindows = false", text)
-        self.assertIn("WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)", text)
+        self.assertIn(".windowInsetsPadding(WindowInsets.safeDrawing)", text)
         self.assertIn(".imePadding()", text)
-        self.assertNotIn(".navigationBarsPadding()", text)
-        self.assertIn(".padding(top = 12.dp)", text)
-        self.assertNotIn(".padding(12.dp)", text)
+        self.assertIn(".fillMaxWidth().padding(12.dp).heightIn(max = 560.dp)", text)
         self.assertIn("animateContent = false", text)
         self.assertIn("widthIn(max = 640.dp)", text)
 
-    def test_custom_editor_and_assistant_keep_height_caps_but_remove_bottom_rounding(self):
+    def test_height_caps_and_content_padding_are_preserved(self):
         assistant = source("ui/screens/assistants/AssistantPreviewComponents.kt")
-        self.assertIn("RoundedCornerShape(topStart = 25.dp * s, topEnd = 25.dp * s)", assistant)
-        self.assertIn(".padding(top = 10.dp)", assistant)
         self.assertIn(".height(sheetHeight)", assistant)
+        self.assertIn("start = 15.dp * s, end = 15.dp * s, top = 10.dp * s, bottom = 16.dp * s", assistant)
         editor = source("ui/screens/settings/CatalogModelEditorDialog.kt")
-        self.assertIn("RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)", editor)
-        self.assertIn(".padding(top = 12.dp).widthIn(max = 560.dp)", editor)
+        self.assertIn(".padding(12.dp).widthIn(max = 560.dp)", editor)
+        self.assertIn(".padding(horizontal = 24.dp, vertical = 20.dp)", editor)
         self.assertIn("MiuixDialogActions", editor)
+        selection = source("ui/screens/chat/conversation/ChatSelectionSheet.kt")
+        self.assertIn("start = 15.dp, end = 15.dp, top = 11.dp, bottom = 15.dp", selection)
+        self.assertIn("maxHeight - if (height == null) 70.dp else 88.dp", selection)
 
-    def test_centered_dialogs_and_material_sheet_do_not_opt_into_preview_sheet_mode(self):
+    def test_centered_and_material_sheets_remain_separate(self):
         for path in ["ui/components/subagent/ConversationAgentChoice.kt", "ui/screens/chat/conversation/ToolOutputDialog.kt"]:
             with self.subTest(path=path):
                 self.assertNotIn("bottomSheet =", source(path))
@@ -94,7 +84,7 @@ class BottomSheetEdgeContractTest(unittest.TestCase):
         self.assertIn("surface.positionOnScreen - surface.positionInRoot", text)
         self.assertIn("ViewCompat.getRootWindowInsets(view)", text)
         self.assertIn("val keyboardTop = checkNotNull(originalWindowBottom) - imeBottom", text)
-        self.assertIn("windowBottom = keyboardTop", text)
+        self.assertIn("safeBottom = checkNotNull(originalWindowBottom) - maxOf(imeBottom, systemBottom)", text)
         self.assertIn("awaitNodeWindowFocus(node(surfaceTag))", text)
         self.assertIn("if (!ime) {", text)
         self.assertIn("dismissIme(root)", text)
@@ -108,13 +98,17 @@ class BottomSheetEdgeContractTest(unittest.TestCase):
         self.assertIn('"choice-sheet-cancel"', text)
         self.assertIn("val open = mutableStateOf(true)", text)
         self.assertNotIn("remember { mutableStateOf(true) }", text)
-        self.assertIn("windowBottom, surfaceBottom, 2f", text)
+        self.assertIn("safeBottom - margin, surfaceBottom, 2f", text)
+        self.assertIn("assertHorizontalInsets(surfaceTag, surface, viewport, insets)", text)
+        self.assertIn("safeLeft + gap, surfaceLeft, 2f", text)
+        self.assertIn("safeRight - gap, surfaceRight, 2f", text)
         self.assertIn("override fun doFrame(frameTimeNanos: Long)", text)
         self.assertIn("currentFrameNanos = frameTimeNanos", text)
         self.assertIn("frame != Long.MIN_VALUE && frame != lastRestoredFrame", text)
         self.assertIn("choreographer.removeFrameCallback(frameCallback)", text)
         self.assertNotIn("getInstance().frameTimeNanos", text)
-        self.assertIn("<= safeBottom + 2f", text)
+        self.assertIn("controlBottom <= surfaceBottom + 2f", text)
+        self.assertIn("originalBottom - safeInset - bottomMargin", text)
         for tag in ["chat-selection-sheet", "conversation-agent-sheet", "assistant-sheet", "usage-glass-dialog", "daiyu-choice-sheet", "catalog-model-dialog"]:
             self.assertIn('"' + tag + '"', text)
 

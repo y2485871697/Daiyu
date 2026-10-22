@@ -1903,7 +1903,7 @@ class MainActivity : ComponentActivity() {
                         assistants = projectedAssistants, selectedAssistantId = activeAssistant,
                         onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
                         onSearchChange = { paneState = paneState.copy(searchQuery = it) },
-                        onConversationSelected = { id -> guard { openRetainedConversation(id) } },
+                        onConversationSelected = { id -> guard { select(retainedConversation(id)) } },
                         onConversationRename = { item -> editRetainedConversation(item, false) },
                         onConversationDelete = { item -> confirmDelete(item.id) },
                         onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },

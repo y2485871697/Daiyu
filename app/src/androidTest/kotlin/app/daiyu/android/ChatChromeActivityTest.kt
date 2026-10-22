@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
@@ -53,7 +54,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
     )
 
     private fun show(composer: ComposerUi, actions: ChatScreenActions = ChatScreenActions(),
-        fontScale: Float = 1f, interfaceScale: Float = 1f, dark: Boolean = false, balance: BalanceState? = null) {
+        fontScale: Float = 1f, interfaceScale: Float = 1f, dark: Boolean = false, balance: BalanceState? = null,
+        opaqueBackground: Boolean = false) {
         layoutScenario = "dark=$dark scale=$interfaceScale font=$fontScale enabled=${composer.enabled} fraction=${composer.contextFraction}"
         mainThread {
             activity.setContent {
@@ -64,7 +66,9 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                         val colors = chatActionColors()
                         val disabledColor = MiuixTheme.colorScheme.disabledOnSurface
                         SideEffect { actionColors = colors; disabledContextColor = disabledColor }
-                        ChatMenuLayer(Modifier.fillMaxSize()) {
+                        ChatMenuLayer(Modifier.fillMaxSize().then(
+                            if (opaqueBackground) Modifier.background(MiuixTheme.colorScheme.background) else Modifier,
+                        )) {
                             Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
                                 ChatTopBar("测试会话", actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
                                 ChatComposer(composer, actions, balanceState = balance)
@@ -451,23 +455,25 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
 
     fun testMoreButtonHasNoPressedOrExpandedBackgroundInEitherTheme() {
         for (dark in listOf(false, true)) {
-            show(composer(), dark = dark)
+            show(composer(), dark = dark, opaqueBackground = true)
             val more = button("更多")
+            dismissIme()
+            awaitImeFrame(more, visible = false)
             val idle = captureScreenNode(more).toPixelMap()
             more.performTouchInput { down(center) }
             val pressed = try { captureScreenNode(more).toPixelMap() }
                 finally { more.performTouchInput { up() } }
             more.assertIsSelected()
             val expanded = captureScreenNode(more).toPixelMap()
-            for (image in listOf(pressed, expanded)) {
+            for ((state, image) in listOf("pressed" to pressed, "expanded" to expanded)) {
                 for ((fx, fy) in listOf(.2f to .2f, .8f to .2f, .2f to .8f, .8f to .8f)) {
                     val x = (idle.width * fx).toInt().coerceAtMost(idle.width - 1)
                     val y = (idle.height * fy).toInt().coerceAtMost(idle.height - 1)
                     val expected = idle[x, y]
                     val actual = image[x, y]
-                    assertEquals("More background red, dark=$dark", expected.red, actual.red, .01f)
-                    assertEquals("More background green, dark=$dark", expected.green, actual.green, .01f)
-                    assertEquals("More background blue, dark=$dark", expected.blue, actual.blue, .01f)
+                    assertEquals("More background red, dark=$dark state=$state", expected.red, actual.red, .01f)
+                    assertEquals("More background green, dark=$dark state=$state", expected.green, actual.green, .01f)
+                    assertEquals("More background blue, dark=$dark state=$state", expected.blue, actual.blue, .01f)
                 }
             }
             touch(node("chat-menu:NEW_CHAT"))

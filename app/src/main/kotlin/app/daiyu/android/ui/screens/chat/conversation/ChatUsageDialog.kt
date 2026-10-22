@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import app.daiyu.android.ui.app.ConversationTokenUsageContent
 import app.daiyu.android.ui.components.UsageGlassDialog
 import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.layout.appWindowSize
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
@@ -34,15 +36,28 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** This surface only reads its conversation. An unattached chat never queries global usage. */
 @Composable
-internal fun ChatUsageDialog(controller: ChatController, conversationId: ConversationId?, onDismiss: () -> Unit) {
+internal fun ChatUsageDialog(
+    controller: ChatController,
+    conversationId: ConversationId?,
+    readUsage: (ConversationId) -> RecordedUsageProjection = { owner ->
+        RecordedUsageProjection(controller.recordedRequestUsage(owner))
+    },
+    onDismiss: () -> Unit,
+) {
     var projection by remember(controller, conversationId) { mutableStateOf<RecordedUsageProjection?>(null) }
     var loading by remember(controller, conversationId) { mutableStateOf(conversationId != null) }
     LaunchedEffect(controller, conversationId) {
         val owner = conversationId ?: return@LaunchedEffect
-        projection = withContext(Dispatchers.IO) { runCatching {
-            RecordedUsageProjection(controller.recordedRequestUsage(owner))
-        }.getOrNull() }
+        projection = withContext(Dispatchers.IO) {
+            try { readUsage(owner) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        }
         loading = false
+    }
+    if (loading) {
+        BackHandler(onBack = onDismiss)
+        return
     }
     val colors = usagePalette()
     UsageGlassDialog(title = "Token 用量", onDismiss = onDismiss, compact = true, adaptiveWidth = true) {
@@ -51,7 +66,6 @@ internal fun ChatUsageDialog(controller: ChatController, conversationId: Convers
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val usage = projection
             when {
-                loading -> Text("正在读取已记录用量…", fontSize = 10.sp, color = colors.muted)
                 conversationId == null || usage?.combined?.requestSnapshotCount == 0L -> {
                     Box(Modifier.fillMaxWidth().heightIn(min = 100.dp).testTag("chat-usage-empty"),
                         contentAlignment = Alignment.Center) {

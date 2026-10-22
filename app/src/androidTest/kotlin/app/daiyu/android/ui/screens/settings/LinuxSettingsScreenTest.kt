@@ -4,6 +4,7 @@ import androidx.activity.compose.setContent
 import app.daiyu.android.runningmode.*
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.terminal.*
@@ -65,17 +66,20 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         show()
         val reads = loads.get()
         node("linux-distribution-choice").performClick()
-        ui.onNodeWithText("软件兼容性更好的 glibc 环境").performClick()
+        node("linux-choice:linux-distribution-choice:1").performClick()
         node("linux-tab:files").performClick().assertIsSelected()
         node("linux-files:workspace").assertIsSelected()
-        revealLinux("workspace-private-import").assertHasClickAction()
+        node("workspace-private-import").assertHasClickAction().assertHeightIsAtLeast(48.dp)
+        node("workspace-private-refresh").assertHasClickAction()
+        ui.onNodeWithText("私有工作区").assertDoesNotExist()
+        ui.onNodeWithText("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。").assertDoesNotExist()
         revealLinux("linux-files:rootfs").performClick().assertIsSelected()
         ui.onNodeWithText("当前环境暂无可浏览的 Rootfs").assertExists()
         node("workspace-private-import").assertDoesNotExist()
         revealLinux("linux-files:shared").performClick().assertIsSelected()
         revealLinux("workspace-pick-directory").assertHasClickAction()
         revealLinux("workspace-pick-file").assertHasClickAction()
-        ui.onNodeWithText("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。").assertExists()
+        ui.onNodeWithText("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。").assertDoesNotExist()
         node("linux-tab:basic").performClick().assertIsSelected()
         node("linux-distribution-choice").assertTextContains("Debian")
         assertFalse(checkNotNull(owner).state.value.revoked)
@@ -88,9 +92,9 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         show(onOpenTerminal = { terminalNavigations.incrementAndGet() })
         val oldTerminal = checkNotNull(node("linux-open-terminal").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         node("linux-distribution-choice").performClick()
-        val oldDebian = checkNotNull(ui.onNodeWithText("软件兼容性更好的 glibc 环境")
+        val oldDebian = checkNotNull(node("linux-choice:linux-distribution-choice:1")
             .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        ui.onNodeWithText("轻量的 musl 环境").performClick()
+        node("linux-choice:linux-distribution-choice:0").performClick()
         node("linux-tab:files").performClick()
         mainThread { oldDebian(); oldTerminal() }
         assertEquals(0, terminalNavigations.get())
@@ -127,6 +131,30 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
             root.deleteRecursively()
         }
     }
+    fun testRetainedFileToolbarCallbacksExpireAfterSourceSwitchAndDoNotOpenPickers() {
+        show()
+        node("linux-tab:files").performClick()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("workspace-private-import").fetchSemanticsNodes()
+                .singleOrNull()?.config?.contains(SemanticsActions.OnClick) == true &&
+                ui.onAllNodesWithTag("workspace-private-import").fetchSemanticsNodes()
+                    .none { it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled) }
+        }
+        val oldImport = checkNotNull(node("workspace-private-import").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val oldRefresh = checkNotNull(node("workspace-private-refresh").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        revealLinux("linux-files:rootfs").performClick()
+        ui.onNodeWithText("Rootfs 仅供只读浏览，不跟随符号链接，不导入或删除环境文件。").assertDoesNotExist()
+        mainThread { oldImport(); oldRefresh() }
+        ui.onNodeWithText("当前环境暂无可浏览的 Rootfs").assertIsDisplayed()
+        node("workspace-private-import").assertDoesNotExist()
+        revealLinux("linux-files:workspace").performClick()
+        mainThread { oldImport(); oldRefresh() }
+        node("workspace-private-import").assertIsDisplayed()
+        node("linux-tab:files").assertIsDisplayed()
+        assertFalse(checkNotNull(owner).state.value.revoked)
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
     private fun setRunningMode(mode: RunningMode) {
         mainThread { assertTrue(modes.save(mode)) }
     }
@@ -134,11 +162,11 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
     fun testDistributionAndModePopupsOnlyChangeTheInstallChoice() {
         show()
         node("linux-distribution-choice").performClick()
-        ui.onNodeWithText("软件兼容性更好的 glibc 环境").performClick()
+        node("linux-choice:linux-distribution-choice:1").performClick()
         node("linux-distribution-choice").assertTextContains("Debian")
         setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").performClick()
-        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").performClick()
+        node("linux-choice:linux-execution-choice:1").performClick()
         revealLinux("linux-execution-choice").assertTextContains("Root 模式 · chroot")
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
@@ -148,17 +176,17 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         for (mode in listOf(RunningMode.NORMAL, RunningMode.SHIZUKU)) {
             setRunningMode(mode)
             revealLinux("linux-execution-choice").performClick()
-            ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
-            ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
+            node("linux-choice:linux-execution-choice:1").assertDoesNotExist()
+            node("linux-choice:linux-execution-choice:0").performClick()
         }
         setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").performClick()
-        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertExists()
-        val oldChroot = checkNotNull(ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境")
+        node("linux-choice:linux-execution-choice:1").assertExists()
+        val oldChroot = checkNotNull(node("linux-choice:linux-execution-choice:1")
             .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         setRunningMode(RunningMode.NORMAL)
-        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
-        ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
+        node("linux-choice:linux-execution-choice:1").assertDoesNotExist()
+        node("linux-choice:linux-execution-choice:0").performClick()
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
         mainThread { oldChroot() }
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
@@ -174,16 +202,16 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         show()
         setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").performClick()
-        val oldChroot = checkNotNull(ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境")
+        val oldChroot = checkNotNull(node("linux-choice:linux-execution-choice:1")
             .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         setRunningMode(RunningMode.SHIZUKU)
-        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
-        ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").assertIsDisplayed()
+        node("linux-choice:linux-execution-choice:1").assertDoesNotExist()
+        node("linux-choice:linux-execution-choice:0").assertIsDisplayed()
         mainThread { oldChroot() }
         setRunningMode(RunningMode.ROOT)
-        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertIsDisplayed()
+        node("linux-choice:linux-execution-choice:1").assertIsDisplayed()
         mainThread { oldChroot() }
-        ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
+        node("linux-choice:linux-execution-choice:0").performClick()
         revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
         assertFalse(checkNotNull(owner).state.value.revoked)
         assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())

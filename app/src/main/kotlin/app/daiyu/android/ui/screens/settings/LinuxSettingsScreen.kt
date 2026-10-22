@@ -123,7 +123,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
             if (tab == LinuxSettingsTab.FILES) {
                 WorkspaceSettingsScreen(onBack = leave, pageTitle = "Linux 工具环境", integratedLinux = true,
                     rootfs = rootfs, onOpenTerminal = onOpenTerminal)
-            } else SettingsScaffoldPage("Linux 工具环境", leave, actions = {
+            } else SettingsScaffoldPage("Linux 工具环境", leave, compactTitle = true, actions = {
                 if (onOpenTerminal != null) {
                     val openTerminal: () -> Unit = { if (basicCurrent()) onOpenTerminal() }
                     val semanticOpenTerminal = hapticClick(true, openTerminal)
@@ -184,13 +184,13 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                     SettingsSectionTitle("环境配置")
                     SettingsCard {
                         LinuxChoiceRow("Linux 发行版", distributionName(distribution), "linux-distribution-choice", choiceEnabled,
-                            choices = listOf("Alpine" to "轻量的 musl 环境", "Debian" to "软件兼容性更好的 glibc 环境"),
+                            choices = listOf("Alpine", "Debian"),
                             selectedIndex = if (distribution.equals("debian", true)) 1 else 0,
                             popupScope = choiceScope, ownerCurrent = ::choiceCurrent,
                             onSelect = { choose(if (it == 0) "alpine" else "debian", mode) })
                         LinuxChoiceRow("运行方式", modeName(mode), "linux-execution-choice", choiceEnabled,
-                            choices = listOf("普通模式 · PRoot" to "无需 Root，使用独立的私有 Linux 环境") +
-                                if (rootMode) listOf("Root 模式 · chroot" to "使用 Root 与独立挂载空间，保留已有环境") else emptyList(),
+                            choices = listOf("普通模式 · PRoot") +
+                                if (rootMode) listOf("Root 模式 · chroot") else emptyList(),
                             selectedIndex = if (mode == LinuxExecutionMode.CHROOT) 1 else 0,
                             popupScope = choiceScope, ownerCurrent = ::choiceCurrent,
                             onSelect = { choose(distribution, if (it == 0) LinuxExecutionMode.PROOT else LinuxExecutionMode.CHROOT) })
@@ -251,7 +251,7 @@ private fun modeName(mode: LinuxExecutionMode) = if (mode == LinuxExecutionMode.
 
 @Composable
 private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: Boolean,
-    choices: List<Pair<String, String>>, selectedIndex: Int, popupScope: Any, ownerCurrent: () -> Boolean, onSelect: (Int) -> Unit) {
+    choices: List<String>, selectedIndex: Int, popupScope: Any, ownerCurrent: () -> Boolean, onSelect: (Int) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val currentChoices = rememberUpdatedState(choices)
     val colors = MiuixTheme.colorScheme
@@ -277,13 +277,11 @@ private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: B
                             }
                             val semanticSelectChoice = hapticClick(enabled, selectChoice)
                             DropdownMenuItem(text = {
-                                Column(Modifier.widthIn(max = 232.dp).padding(vertical = 8.dp)) {
-                                    Text(choice.first, style = MiuixTheme.textStyles.body1)
-                                    Text(choice.second, style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary)
-                                }
+                                Text(choice, modifier = Modifier.widthIn(max = 232.dp).padding(vertical = 8.dp),
+                                    style = MiuixTheme.textStyles.body1)
                             }, trailingIcon = { if (index == selectedIndex) DaiyuIcon(DaiyuIcons.Check, "已选择", Modifier.size(22.dp)) },
                                 enabled = enabled,
-                                modifier = Modifier.semantics { onClick { semanticSelectChoice(); true } },
+                                modifier = Modifier.testTag("linux-choice:$tag:$index").semantics { onClick { semanticSelectChoice(); true } },
                                 onClick = selectChoice)
                         }
                     }

@@ -44,6 +44,7 @@ fun MiuixScaffoldPage(
     editorScrollIsolation: EditorScrollIsolation? = null,
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     containerColor: Color = MiuixTheme.colorScheme.surface,
+    compactTitle: Boolean = false,
     content: LazyListScope.() -> Unit,
 ) {
     val pageScrollConnection = remember(scrollBehavior, editorScrollIsolation) {
@@ -63,6 +64,7 @@ fun MiuixScaffoldPage(
             TopBarBackdrop(backdrop, containerColor) {
                 AdaptiveTopAppBar(
                     title = title,
+                    compactTitle = compactTitle,
                     modifier = topBarModifier.testTag("page-topbar:$title"),
                     color = topBarColor,
                     navigationIcon = { MiuixBackButton(onClick = onBack) },

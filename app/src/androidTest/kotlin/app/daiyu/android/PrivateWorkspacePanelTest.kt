@@ -32,7 +32,7 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
                 val panel = rememberPrivateWorkspacePanel(access, gate, compact = compact)
-                MiuixScaffoldPage("私有文件测试", onBack = { gate.set(false) }) { item { panel() } }
+                MiuixScaffoldPage("私有文件测试", onBack = { gate.set(false) }, actions = { panel.actions() }) { item { panel() } }
             } } }
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-private-entry:sub").fetchSemanticsNodes().size == 1 }
             reveal("workspace-private-entry:sub", "私有文件测试").performClick()

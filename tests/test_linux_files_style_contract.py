@@ -4,6 +4,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/settings'
+COMPONENTS = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/components'
 
 
 def read(name):
@@ -11,7 +12,7 @@ def read(name):
 
 
 class LinuxFilesStyleContract(unittest.TestCase):
-    def test_bottom_navigation_is_flat_and_keeps_accessible_haptic_tabs(self):
+    def test_bottom_navigation_limits_selection_to_icon_background(self):
         nav = read('LinuxSettingsNavigation.kt').split('internal fun LinuxFileLocationTabs')[0]
         self.assertIn('import app.daiyu.android.ui.haptics.selectable', nav)
         self.assertIn('selectableGroup()', nav)
@@ -19,14 +20,16 @@ class LinuxFilesStyleContract(unittest.TestCase):
         self.assertIn('linux-tab:${tab.name.lowercase()}', nav)
         self.assertIn('linux-tab-indicator:${tab.name.lowercase()}', nav)
         self.assertIn('fontSize = 13.sp', nav)
-        self.assertIn('size = 22.dp', nav)
-        self.assertIn('heightIn(min = 64.dp)', nav)
+        self.assertIn('size = 24.dp', nav)
+        self.assertIn('size(width = 64.dp, height = 32.dp)', nav)
+        self.assertIn('heightIn(min = 72.dp)', nav)
         self.assertIn('horizontalCutoutPadding()', nav)
-        self.assertNotIn('colors.surface', nav)
-        self.assertNotIn('alpha = .12f', nav)
-        self.assertNotIn('RoundedCornerShape(18.dp)', nav)
+        column, icon = nav.split('Box(Modifier.size(width = 64.dp', 1)
+        self.assertNotIn('background(colors.primary', column)
+        self.assertIn('background(colors.primary.copy(alpha = .12f))', icon)
+        self.assertNotIn('height = 3.dp', nav)
 
-    def test_navigation_inset_is_owned_once_by_parent_not_each_tab_or_list(self):
+    def test_navigation_inset_and_callback_owners_stay_with_parent(self):
         page = read('LinuxSettingsScreen.kt')
         nav = read('LinuxSettingsNavigation.kt')
         self.assertEqual(page.count('.navigationBarsPadding()'), 1)
@@ -35,80 +38,105 @@ class LinuxFilesStyleContract(unittest.TestCase):
         self.assertIn('tabScope === renderedTabScope && tab != it', page)
         self.assertIn('tabScope = Any(); confirmInstall = false; confirmUse = false; confirmPending = false; tab = it', page)
 
-    def test_file_source_tabs_are_lightweight_and_allow_large_text_to_wrap(self):
+    def test_file_source_segmented_control_preserves_disabled_and_tab_semantics(self):
         nav = read('LinuxSettingsNavigation.kt').split('internal fun LinuxFileLocationTabs', 1)[1].split('internal fun linuxBrowsableRootfs')[0]
-        self.assertIn('enabled = enabled', nav)
-        self.assertIn('role = Role.Tab', nav)
-        self.assertIn('fontSize = 14.sp', nav)
-        self.assertIn('maxLines = 2, textAlign = TextAlign.Center', nav)
-        self.assertIn('linux-files-indicator:${location.name.lowercase()}', nav)
-        self.assertNotIn('background(colors.surface)', nav)
-        self.assertNotIn('RoundedCornerShape(16.dp)', nav)
+        for token in ['BorderStroke(1.dp', 'RoundedCornerShape(28.dp)', 'enabled = enabled',
+                      'role = Role.Tab', 'maxLines = 2, textAlign = TextAlign.Center',
+                      'DaiyuIcons.Check', 'linux-files-indicator:${location.name.lowercase()}']:
+            self.assertIn(token, nav)
+        self.assertNotIn('height = 3.dp', nav)
 
-    def test_private_import_toolbar_is_not_an_empty_full_width_card(self):
+    def test_topbar_uses_existing_real_actions_not_a_callback_registration_side_channel(self):
         panel = read('PrivateWorkspacePanel.kt')
-        toolbar = panel.split('return { Column {', 1)[1].split('        notice?.let', 1)[0]
-        compact = toolbar.split('        } else {', 1)[0]
-        self.assertIn('LinuxFilePanelHeader("私有工作区")', compact)
-        self.assertIn('LinuxFileAction("导入文件", "workspace-private-import"', compact)
-        self.assertIn('enabled = controlsEnabled && listing != null', compact)
-        self.assertIn('workspace-private-refresh', compact)
-        self.assertNotIn('SettingsCard', compact)
-        self.assertIn('if (compact) entryContent() else SettingsCard { entryContent() }', panel)
-        self.assertIn('if (compact) SettingsCard { directoryContent() } else directoryContent()', panel)
+        actions = panel.split('return LinuxFilePanel(actions = {', 1)[1].split('}, content = {', 1)[0]
+        self.assertIn('onClick = importFile', actions)
+        self.assertIn('enabled = controlsEnabled && listing != null', actions)
+        self.assertIn('workspace-private-refresh', actions)
+        self.assertIn('DaiyuIcons.Import, "导入文件"', actions)
+        self.assertNotIn('SettingsCard', actions)
+        self.assertNotIn('SettingsNote', actions)
+        parent = read('WorkspaceSettingsScreen.kt')
+        toolbar = parent.split('SettingsScaffoldPage(', 1)[1].split('    }) {', 1)[0]
+        for token in ['compactTitle = integratedLinux', 'privatePanel?.actions?.invoke()',
+                      'rootfsPanel?.actions?.invoke()', 'workspace-refresh', 'linux-open-terminal']:
+            self.assertIn(token, toolbar)
+        self.assertLess(toolbar.index('privatePanel?.actions'), toolbar.index('linux-open-terminal'))
+        self.assertNotIn('LinuxFilePanelHeader', parent)
 
-    def test_shared_and_rootfs_use_the_same_header_and_empty_state_without_writes(self):
+    def test_file_cards_and_path_are_separate_from_toolbar_and_each_other(self):
+        panel = read('PrivateWorkspacePanel.kt')
+        self.assertIn('if (compact) LinuxFileEntryCard { entryContent() } else SettingsCard { entryContent() }', panel)
+        self.assertNotIn('SettingsCard { directoryContent() }', panel)
         rootfs = read('LinuxRootfsPanel.kt')
-        shared = read('WorkspaceSettingsScreen.kt')
-        self.assertIn('LinuxFilePanelHeader("Rootfs")', rootfs)
-        self.assertIn('LinuxFileDirectoryHeader(shown.directory.relative)', rootfs)
-        self.assertIn('LinuxFileEmptyState("当前环境暂无可浏览的 Rootfs")', rootfs)
-        self.assertIn('LinuxFileEmptyState("此目录为空")', rootfs)
+        self.assertIn('LinuxFileEntryCard {', rootfs)
+        self.assertIn('summary = entry.relative', rootfs)
         self.assertIn('PrivateWorkspacePaths.existingRoot(context.filesDir, root)', rootfs)
-        self.assertIn('entry.symbolicLink -> "符号链接 · 不跟随"', rootfs)
         self.assertNotIn('importFile(', rootfs)
         self.assertNotIn('.delete(', rootfs)
-        self.assertIn('LinuxFilePanelHeader("共享文件夹")', shared)
-        self.assertIn('LinuxFileEmptyState("还没有共享目录或文件")', shared)
-        self.assertIn('fileScope === renderedScope', shared)
-        self.assertIn('epoch.get() != pickerCallbackEpoch', shared)
+        components = read('LinuxFileComponents.kt')
+        self.assertIn('parentTag: String, onParent: (() -> Unit)?', components)
+        self.assertIn('enabled = onParent != null', components)
+        self.assertIn('RoundedCornerShape(16.dp)', components)
 
-    def test_existing_descriptions_and_empty_messages_are_preserved_verbatim(self):
+    def test_integrated_pages_have_no_static_descriptions_or_duplicate_panel_titles(self):
+        components = read('LinuxFileComponents.kt')
+        for name in ['LinuxFileDescription', 'LinuxFilePanelHeader', 'LinuxFileAction']:
+            self.assertNotIn(name, components)
+        private = read('PrivateWorkspacePanel.kt')
+        standalone = private.split('if (!compact) {', 1)[1].split('        notice?.let', 1)[0]
+        description = '应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。'
+        self.assertIn(description, standalone)
+        self.assertEqual(private.count(description), 1)
+        shared = read('WorkspaceSettingsScreen.kt')
+        self.assertIn('if (!integratedLinux) SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")', shared)
+        self.assertIn('summary = if (integratedLinux) null else', shared)
+        rootfs = read('LinuxRootfsPanel.kt')
+        self.assertNotIn('Rootfs 仅供只读浏览', rootfs)
+        self.assertNotIn('LinuxFilePanelHeader', rootfs)
+        basic = read('LinuxSettingsScreen.kt')
+        self.assertIn('choices = listOf("Alpine", "Debian")', basic)
+        self.assertIn('choices: List<String>', basic)
+        self.assertNotIn('choice.second', basic)
+        for text in ['轻量的 musl 环境', '软件兼容性更好的 glibc 环境',
+                     '无需 Root，使用独立的私有 Linux 环境', '使用 Root 与独立挂载空间，保留已有环境']:
+            self.assertNotIn(text, basic)
+
+    def test_empty_errors_confirmations_and_access_fences_remain(self):
         for name, texts in {
-            'PrivateWorkspacePanel.kt': [
-                '应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。',
-                '此私有目录为空', '仅显示前 100 项，请缩小目录范围',
-                '操作未确认完成，请重新进入目录检查；不会自动重试'],
-            'LinuxRootfsPanel.kt': [
-                'Rootfs 仅供只读浏览，不跟随符号链接，不导入或删除环境文件。',
-                'Rootfs 未读取，请刷新或检查环境状态', '此目录为空'],
-            'WorkspaceSettingsScreen.kt': [
-                '选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。',
-                '还没有共享目录或文件', '撤销后，本应用将无法再读取该目录或文件。不会删除原文件。'],
+            'PrivateWorkspacePanel.kt': ['此私有目录为空', '仅显示前 100 项，请缩小目录范围',
+                '操作未确认完成，请重新进入目录检查；不会自动重试', '无法撤销；不会删除原导入来源。',
+                'current() && !busy && !sharedBusy() && pending == null && request == null && directory != null',
+                'lifecycle.withResumed', 'permitted(at)'],
+            'LinuxRootfsPanel.kt': ['Rootfs 未读取，请刷新或检查环境状态', '此目录为空',
+                '当前环境暂无可浏览的 Rootfs', '!visit.get() || token.get()'],
+            'WorkspaceSettingsScreen.kt': ['还没有共享目录或文件',
+                '撤销后，本应用将无法再读取该目录或文件。不会删除原文件。',
+                'fileScope === renderedScope', 'epoch.get() != pickerCallbackEpoch'],
         }.items():
             for text in texts:
                 with self.subTest(name=name, text=text):
                     self.assertIn(text, read(name))
 
-    def test_controls_and_empty_state_use_local_readable_sizes_not_a_global_scale(self):
-        components = read('LinuxFileComponents.kt')
-        for token in ['fontSize = 16.sp', 'fontSize = 14.sp', 'fontSize = 13.sp',
-                      'heightIn(min = 48.dp)', 'heightIn(min = 176.dp)', 'role = Role.Button']:
-            self.assertIn(token, components)
-        self.assertNotIn('LocalDensity', components)
-        self.assertNotIn('interfaceScale', components)
-        self.assertNotIn('ButtonDefaults', components)
+    def test_compact_topbar_is_opt_in_and_does_not_change_other_pages(self):
+        adaptive = (COMPONENTS / 'AdaptiveTopAppBar.kt').read_text()
+        scaffold = (COMPONENTS / 'MiuixScaffoldPage.kt').read_text()
+        for source in [adaptive, scaffold, read('SettingsScaffold.kt')]:
+            self.assertIn('compactTitle: Boolean = false', source)
+        self.assertIn('if (compactTitle || rememberIsWideScreen())', adaptive)
+        self.assertIn('compactTitle = compactTitle', scaffold)
+        self.assertIn('compactTitle = compactTitle', read('SettingsScaffold.kt'))
+        self.assertIn('leave, compactTitle = true, actions', read('LinuxSettingsScreen.kt'))
 
     def test_compact_and_standalone_file_action_regressions_share_original_guards(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/PrivateWorkspacePanelTest.kt').read_text()
         for token in ['compact = false', 'compact = true',
                       'rememberPrivateWorkspacePanel(access, gate, compact = compact)',
-                      'workspace-private-actions:sub/keep.txt', 'performTouchInput { longClick() }',
-                      'assertEquals("keep", File(sub, "keep.txt").readText())',
-                      'assertTrue(sub.isDirectory)', 'realPauseResume(activity, atPause = { retained() })']:
+                      'actions = { panel.actions() }', 'workspace-private-actions:sub/keep.txt',
+                      'performTouchInput { longClick() }', 'assertTrue(sub.isDirectory)',
+                      'realPauseResume(activity, atPause = { retained() })']:
             self.assertIn(token, test)
 
-    def test_device_test_source_covers_selection_disabled_and_large_font_both_themes(self):
+    def test_device_test_source_keeps_selection_disabled_and_large_font_both_themes(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/LinuxSettingsNavigationTest.kt').read_text()
         for token in ['testBottomNavigationHasTwoTabTargetsAndOneStableSelectionIndicator',
                       'testFileLocationTabsPreserveSelectionAndDisabledState',

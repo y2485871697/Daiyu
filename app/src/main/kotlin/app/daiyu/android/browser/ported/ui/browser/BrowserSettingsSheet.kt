@@ -3,6 +3,9 @@
 // Local/private integration; see app/src/main/assets/licenses/openminis/NOTICE.md.
 package app.daiyu.android.browser.ported.ui.browser
 
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.components.materialImeCursorColor
+
 import androidx.compose.ui.res.stringResource
 import android.webkit.CookieManager
 import android.webkit.WebStorage
@@ -200,10 +203,12 @@ internal fun BrowserSettingsSheet(
                         customUA = it.take(4096).filter { ch -> ch.code >= 32 && ch.code != 127 }
                     },
                     label = { Text(stringResource(R.string.om_browser_settings_custom_ua_label)) },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.managedInput().fillMaxWidth().padding(top = 8.dp),
                     singleLine = false,
                     textStyle = MaterialTheme.typography.bodySmall,
-                )
+
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
                 MinisTextButton(onClick = {
                     tabPool.setUserAgentFromUI(UserAgentProfile.CUSTOM, customUA)
                 }) {
@@ -305,9 +310,11 @@ internal fun BrowserSettingsSheet(
                     // field sits near the bottom of the sheet — without
                     // scroll-into-view it sits behind the soft keyboard
                     // every time the user taps it.
-                    modifier = Modifier.weight(1f).bringIntoViewOnFocus(),
+                    modifier = Modifier.managedInput().weight(1f).bringIntoViewOnFocus(),
                     textStyle = MaterialTheme.typography.bodyMedium,
-                )
+
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
                 Spacer(Modifier.size(8.dp))
                 MinisTextButton(
                     onClick = {
@@ -346,9 +353,11 @@ internal fun BrowserSettingsSheet(
                     onValueChange = { cookieFilterText = it },
                     label = { Text(stringResource(R.string.om_browser_settings_filter_by_domain)) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    modifier = Modifier.managedInput().fillMaxWidth().padding(bottom = 8.dp),
                     textStyle = MaterialTheme.typography.bodySmall,
-                )
+
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             }
 
             if (domains.isEmpty()) {
@@ -554,9 +563,11 @@ private fun ViewportSection(
                 // [T-android-browser-settings-keyboard-overlap] focus →
                 // scroll-into-view so the soft keyboard doesn't cover
                 // the Custom viewport editor.
-                modifier = Modifier.width(110.dp).bringIntoViewOnFocus(),
+                modifier = Modifier.managedInput().width(110.dp).bringIntoViewOnFocus(),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
             )
             Spacer(Modifier.size(8.dp))
             Text("×", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -568,9 +579,11 @@ private fun ViewportSection(
                 singleLine = true,
                 // [T-android-browser-settings-keyboard-overlap] focus →
                 // scroll-into-view; mirrors the Width field.
-                modifier = Modifier.width(110.dp).bringIntoViewOnFocus(),
+                modifier = Modifier.managedInput().width(110.dp).bringIntoViewOnFocus(),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
             )
             Spacer(Modifier.size(8.dp))
             MinisTextButton(onClick = onApply) { Text(stringResource(R.string.om_browser_settings_apply)) }

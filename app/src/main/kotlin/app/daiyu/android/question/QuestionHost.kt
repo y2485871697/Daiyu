@@ -1,5 +1,7 @@
 package app.daiyu.android.question
 
+import app.daiyu.android.ui.components.manageInput
+
 import app.daiyu.android.ui.haptics.setHapticNegativeButton
 import app.daiyu.android.ui.haptics.setHapticPositiveButton
 import app.daiyu.android.ui.haptics.setHapticClickListener
@@ -104,6 +106,8 @@ class QuestionHost(private val registry: QuestionRegistry) {
             .setView(ScrollView(activity).apply { addView(content) })
             .setHapticPositiveButton("提交答案", null).setHapticNegativeButton("稍后回答", null).create()
         window.setOnShowListener {
+            other?.manageInput(window.window)
+            note?.manageInput(window.window)
             window.getButton(AlertDialog.BUTTON_POSITIVE).setHapticClickListener {
                 val checked = group.checkedRadioButtonId
                 val noteText = note?.text?.toString()?.takeIf { it.isNotEmpty() }

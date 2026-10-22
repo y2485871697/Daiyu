@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.components.materialImeCursorColor
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -154,12 +157,18 @@ import kotlinx.coroutines.withContext
         onDismissRequest = { editing = false; bearer = "" }) {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(label, { label = it }, label = { Text("名称") },
-                enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("mcp-server-label"))
+                enabled = !busy, modifier = Modifier.managedInput().fillMaxWidth().testTag("mcp-server-label"),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             OutlinedTextField(endpoint, { endpoint = it }, label = { Text("HTTPS MCP 地址") },
-                enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("mcp-server-endpoint"))
+                enabled = !busy, modifier = Modifier.managedInput().fillMaxWidth().testTag("mcp-server-endpoint"),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             OutlinedTextField(bearer, { bearer = it }, label = { Text(if (selected == null) "Bearer 令牌（可选）" else "Bearer 令牌（留空保留）") },
                 visualTransformation = PasswordVisualTransformation(), enabled = !busy,
-                modifier = Modifier.fillMaxWidth().testTag("mcp-server-bearer"))
+                modifier = Modifier.managedInput().fillMaxWidth().testTag("mcp-server-bearer"),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             app.daiyu.android.ui.haptics.miuix.TextButton(text = "保存", onClick = { save(false) },
                 enabled = !busy && snapshot != null, modifier = Modifier.testTag("mcp-settings-save"))
             app.daiyu.android.ui.haptics.miuix.TextButton(text = "取消", onClick = { editing = false; bearer = "" })

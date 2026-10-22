@@ -3,6 +3,9 @@
 // Local/private integration; see app/src/main/assets/licenses/openminis/NOTICE.md.
 package app.daiyu.android.browser.ported.ui.browser
 
+import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
+
 import app.daiyu.android.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedVisibility
@@ -260,7 +263,7 @@ internal fun BrowserSheet(
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurface,
                             ),
-                            cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
+                            cursorBrush = imeCursorBrush(accent),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                             keyboardActions = KeyboardActions(onGo = {
                                 val trimmed = urlInput.trim()
@@ -272,7 +275,7 @@ internal fun BrowserSheet(
                                 keyboardController?.hide()
                                 focusManager.clearFocus()
                             }),
-                            modifier = Modifier.fillMaxWidth().testTag("browser-visual-address"),
+                            modifier = Modifier.managedInput().fillMaxWidth().testTag("browser-visual-address"),
                         )
                         if (urlInput.isEmpty()) {
                             Text(

@@ -1,5 +1,8 @@
 package app.daiyu.android.ui
 
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.components.materialImeCursorColor
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -63,11 +66,19 @@ internal fun ShizukuApprovalHost(
         if (enabled) {
             Text("普通发送及图片发送不会获得此授权。须先在 Shizuku 设置页明确授权系统访问；此处不会自动请求权限或执行探测命令。")
             OutlinedTextField(uid, { uid = it }, label = { Text("精确 UID：0 或 2000（必选，无默认值）") },
-                enabled = preview == null, singleLine = true)
+                enabled = preview == null, singleLine = true,
+                modifier = Modifier.managedInput(),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             OutlinedTextField(command, { command = it }, label = { Text("本次精确 shell 命令") },
-                enabled = preview == null, modifier = Modifier.fillMaxWidth())
+                enabled = preview == null, modifier = Modifier.managedInput().fillMaxWidth(),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             OutlinedTextField(timeout, { timeout = it }, label = { Text("超时毫秒（1–120000）") },
-                enabled = preview == null, singleLine = true)
+                enabled = preview == null, singleLine = true,
+                modifier = Modifier.managedInput(),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             Button(enabled = preview == null && text.isNotBlank(), onClick = {
                 val prepared = controller.prepareShizukuSend(conversation, text, command, uid, timeout)
                 if (prepared != null) ownedPreparation.value = prepared

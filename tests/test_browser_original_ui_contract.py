@@ -41,11 +41,30 @@ def approved_original_ui_source(path, source):
                           'SimpleDateFormat("HH:mm", Locale.getDefault())')
 
 
+def approved_input_behavior_source(source):
+    """Match code only: strings and comments must remain part of the frozen UI contract."""
+    protected = []
+    def stash(match):
+        protected.append(match.group())
+        return f'__INPUT_LITERAL_{len(protected) - 1}__'
+    literal = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+    source = literal.sub(stash, source)
+    source = re.sub(r'(?m)^import app\.daiyu\.android\.ui\.components\.(?:managedInput|imeCursorBrush|materialImeCursorColor)\n', '', source)
+    source = source.replace('.managedInput()', '')
+    source = source.replace('imeCursorBrush(accent)', 'androidx.compose.ui.graphics.SolidColor(accent)')
+    colors = ('colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors('
+              'cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), '
+              'errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),')
+    source = source.replace(colors, '')
+    return re.sub(r'__INPUT_LITERAL_(\d+)__', lambda m: protected[int(m.group(1))], source)
+
+
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
 def tokens(source):
+    source = approved_input_behavior_source(source)
     source = source.replace('BrowserUiPool', 'BrowserTabPool')
     source = re.sub(r'(?m)^(?:package|import) [^\n]*\n', '', source)
     return [m.group() for m in TOKEN.finditer(source) if m.lastgroup != 'comment']
@@ -166,6 +185,7 @@ def visual_binding_contract(source, name):
 
 
 def imports_contract(source):
+    source = approved_input_behavior_source(source)
     imports = set(re.findall(r'(?m)^import (.*)$', source))
     normalized = set()
     for name in imports:
@@ -220,6 +240,31 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
             self.assertNotEqual(render_contract(normalized),
                                 render_contract(approved_original_ui_source(HISTORY_PATH, changed)))
         self.assertEqual(source, approved_original_ui_source('ui/browser/BrowserSettingsSheet.kt', source))
+
+    def test_input_policy_keeps_visible_cursor_and_layout_frozen(self):
+        for path in ('ui/browser/BrowserHistorySheet.kt', 'ui/browser/BrowserSettingsSheet.kt', 'ui/browser/BrowserSheet.kt'):
+            source = (PORT / path).read_text()
+            contract = body_contract if self.baseline['files'][path]['mode'] == 'body' else render_contract
+            expected = contract(source)
+            self.assertIn('.managedInput()', source)
+            if path.endswith('BrowserSheet.kt'):
+                changed = source.replace('imeCursorBrush(accent)', 'imeCursorBrush(Color.Red)')
+                self.assertNotEqual(expected, contract(changed))
+            else:
+                changed = source.replace('materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary)',
+                                         'materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)')
+                self.assertNotEqual(expected, contract(changed))
+                changed = source.replace('errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)',
+                                         'errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary)')
+                self.assertNotEqual(expected, contract(changed))
+            self.assertNotEqual(expected, contract(source.replace('.managedInput()', '.padding(1.dp).managedInput()', 1)))
+            self.assertNotEqual(expected, contract(source.replace('.managedInput()', '.managedInput(Color.Red)', 1)))
+
+    def test_input_normalization_never_erases_literal_copy(self):
+        for literal in ('.managedInput()', 'imeCursorBrush(accent)', 'colors = cursorColor'):
+            original = 'Text("original")'
+            changed = 'Text("original' + literal + '")'
+            self.assertNotEqual(render_contract(original), render_contract(changed))
 
     def test_original_visual_bindings_and_preset_lists(self):
         self.assertEqual(set(VISUAL_BINDINGS), set(self.baseline['visual_bindings']))

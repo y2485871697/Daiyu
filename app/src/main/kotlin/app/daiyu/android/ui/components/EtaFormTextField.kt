@@ -56,7 +56,7 @@ internal fun EtaFormTextField(
                 maxLines = if (singleLine) 1 else maxLines,
                 visualTransformation = visualTransformation,
                 keyboardOptions = keyboardOptions,
-                modifier = modifier.fillMaxWidth().heightIn(min = 48.dp)
+                modifier = modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp)
                     .semantics { contentDescription = hint },
                 shape = RoundedCornerShape(EtaInputCornerRadius),
                 textStyle = MiuixTheme.textStyles.body1,
@@ -68,7 +68,8 @@ internal fun EtaFormTextField(
                     focusedTextColor = colors.onSurface,
                     unfocusedTextColor = colors.onSurface,
                     disabledTextColor = colors.onSurface.copy(alpha = 0.38f),
-                    cursorColor = colors.primary,
+                    cursorColor = materialImeCursorColor(colors.primary),
+                    errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error),
                     focusedBorderColor = colors.primary.copy(alpha = 0.65f),
                     unfocusedBorderColor = colors.outline.copy(alpha = 0.30f),
                     disabledBorderColor = colors.outline.copy(alpha = 0.15f),

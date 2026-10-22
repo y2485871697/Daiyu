@@ -1,5 +1,7 @@
 package app.daiyu.android.pet
 
+import app.daiyu.android.ui.components.manageInput
+
 import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.content.Context
 import android.graphics.Canvas
@@ -180,9 +182,10 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
     private val work = Switch(context).apply { text = "真实任务完工反应" }
     private val global = Switch(context).apply { text = "全局悬浮（需要系统授权）" }
     private val audio = Switch(context).apply { text = "独立桌宠语音（需注入服务）" }
-    private val assistant = EditText(context).apply { hint = "独立桌宠assistant ID（不继承主Agent）"; isSingleLine = true }
-    private val provider = EditText(context).apply { hint = "独立provider ID"; isSingleLine = true }
-    private val model = EditText(context).apply { hint = "独立model ID"; isSingleLine = true }
+    private val assistant = EditText(context).apply { manageInput(); hint = "独立桌宠assistant ID（不继承主Agent）"; isSingleLine = true }
+    private val provider = EditText(context).apply { manageInput(); hint = "独立provider ID"; isSingleLine = true }
+    private var lastModel: PetModelSelection? = null
+    private val model = EditText(context).apply { manageInput(); hint = "独立model ID"; isSingleLine = true }
     private val scale = SeekBar(context).apply { max = 26 }
     private val memories = TextView(context)
     private val usage = TextView(context)
@@ -268,9 +271,15 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
         val s = snapshot.state
         enabled.isChecked = s.settings.enabled; work.isChecked = s.settings.workReactions
         global.isChecked = s.settings.globalVisible; audio.isChecked = s.settings.audioEnabled
-        if (!assistant.hasFocus()) assistant.setText(s.settings.model.assistantId)
-        if (!provider.hasFocus()) provider.setText(s.settings.model.providerId)
-        if (!model.hasFocus()) model.setText(s.settings.model.modelId)
+        fun sync(field: EditText, previous: String?, next: String) {
+            if (previous == null || field.text.toString() == previous) {
+                if (field.text.toString() != next) field.setText(next)
+            }
+        }
+        sync(assistant, lastModel?.assistantId, s.settings.model.assistantId)
+        sync(provider, lastModel?.providerId, s.settings.model.providerId)
+        sync(model, lastModel?.modelId, s.settings.model.modelId)
+        lastModel = s.settings.model
         scale.progress = ((s.settings.scale - .5f) / .05f).roundToInt()
         status.text = snapshot.error ?: "粮食 ${s.satiety}/$PET_MAX_SATIETY (${petSatietyPercent(s.satiety)}%) · ${petSatietyBand(s.satiety)}${if (s.thinking) " · 思考中" else ""}"
         foods.forEach { it.isEnabled = s.settings.enabled && !s.thinking && !snapshot.closed }

@@ -1,5 +1,8 @@
 package app.daiyu.android.ui
 
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.components.materialImeCursorColor
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -68,14 +71,18 @@ internal fun BrowserApprovalHost(
             Text("保存 FULL 只设置能力上限，不是本次批准。普通发送、模型文本和 ask_user 回复都不会授权。")
             Text("当前上限：${settings.access.name}；history／cookie 继续拒绝。fetch 仅在本页列出完整精确参数并明确批准后获准；主运行批准不覆盖 child，child 须另行独立批准。")
             OutlinedTextField(value = readActions, onValueChange = { readActions = it },
-                enabled = preparation == null, modifier = Modifier.fillMaxWidth(),
+                enabled = preparation == null, modifier = Modifier.managedInput().fillMaxWidth(),
                 label = { Text("明确选择读取动作（英文逗号分隔，无默认选择）") },
-                supportingText = { Text("例如 list_tabs。空 session 不会自动创建标签或导航。new_tab / close_tab 也是写操作。") })
+                supportingText = { Text("例如 list_tabs。空 session 不会自动创建标签或导航。new_tab / close_tab 也是写操作。") },
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
             writes.forEachIndexed { index, raw ->
                 OutlinedTextField(value = raw, onValueChange = { value ->
                     writes = writes.toMutableList().also { it[index] = value }
-                }, enabled = preparation == null, modifier = Modifier.fillMaxWidth(),
-                    label = { Text("写操作 ${index + 1}：完整参数 JSON 对象") })
+                }, enabled = preparation == null, modifier = Modifier.managedInput().fillMaxWidth(),
+                    label = { Text("写操作 ${index + 1}：完整参数 JSON 对象") },
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            )
                 TextButton(enabled = preparation == null, onClick = {
                     writes = writes.filterIndexed { position, _ -> position != index }
                 }) { Text("移除此写操作") }

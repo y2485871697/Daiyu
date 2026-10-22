@@ -591,14 +591,14 @@ private fun PaneSearchRow(
                 value = query,
                 onValueChange = onSearchChange,
                 enabled = searchFocusEnabled && searchActive,
-                modifier = Modifier
+                modifier = Modifier.managedInput()
                     .fillMaxWidth()
                     .testTag("drawer-search-input")
                     .focusRequester(searchFocusRequester)
                     .focusProperties { canFocus = searchFocusEnabled && searchActive },
                 singleLine = true,
                 textStyle = textStyle,
-                cursorBrush = SolidColor(conversationPanePreviewPalette().accent),
+                cursorBrush = imeCursorBrush(conversationPanePreviewPalette().accent),
             )
         }
     }

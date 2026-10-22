@@ -1,5 +1,7 @@
 package app.daiyu.android.question
 
+import app.daiyu.android.ui.components.manageInput
+
 import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.content.Context
 import android.os.Handler
@@ -141,10 +143,10 @@ class QuestionCardView(context: Context) : LinearLayout(context) {
         for (index in 0 until options.childCount) options.getChildAt(index).setHapticClickListener {}
         addView(options)
         val other = if (otherId != -1) EditText(context).apply {
-            hint = "其他答案"; filters = arrayOf(InputFilter.LengthFilter(4000)); visibility = GONE; addView(this)
+            manageInput(); hint = "其他答案"; filters = arrayOf(InputFilter.LengthFilter(4000)); visibility = GONE; addView(this)
         } else null
         val note = if (value.question.allowNote) EditText(context).apply {
-            hint = "补充说明（可选）"; filters = arrayOf(InputFilter.LengthFilter(4000)); addView(this)
+            manageInput(); hint = "补充说明（可选）"; filters = arrayOf(InputFilter.LengthFilter(4000)); addView(this)
         } else null
         if (draft != null) {
             other?.setText(draft.other); note?.setText(draft.note)

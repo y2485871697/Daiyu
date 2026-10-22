@@ -65,8 +65,6 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
         PetSettingsPage.FEED -> "投喂"
         PetSettingsPage.MEMORY -> "记忆与用量"
     }, onBack = back, modifier = modifier.testTag("pet-settings-view")) {
-        snapshot.pet.error?.let { item("pet-error") { SettingsNote(it, error = true) } }
-        model.problem?.let { item("pet-model-problem") { SettingsNote(it, error = true) } }
         when (page) {
             PetSettingsPage.HOME -> item("pet-controls") {
                 SettingsCard(Modifier.padding(top = 12.dp)) {

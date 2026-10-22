@@ -105,7 +105,6 @@ class PetController(
                 poseTimer = scheduler.after(1_500) { synchronized(this) {
                     if (allowed() && generation == ticket) save(state.copy(mood = PetMood.IDLE))
                 } }
-                error = "已投喂；未配置独立桌宠assistant/model，未请求反应"
             } catch (_: Exception) { error = "已投喂；桌宠动作定时服务不可用" }
             publish()
             return PetCommandResult.Applied

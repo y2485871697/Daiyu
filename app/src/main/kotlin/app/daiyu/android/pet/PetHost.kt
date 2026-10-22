@@ -33,6 +33,8 @@ class PetHost internal constructor(
 
     private val app = context.applicationContext
     private val ui = Handler(Looper.getMainLooper())
+    private val runtimeErrors = PetErrorLog()
+    private val overlayErrors = PetErrorLog()
     internal val resources = WhaleMaidResources(app)
     internal val controller = PetController(AndroidPetStore(app), model, AndroidPetScheduler(),
         PetClock { System.currentTimeMillis() }, voice)
@@ -57,6 +59,7 @@ class PetHost internal constructor(
         windowPort = windowPort, canDrawOverlays = canDrawOverlays) { state, error ->
         val changed = overlayState != state || overlayError != error
         overlayState = state; overlayError = error
+        overlayErrors.update(error.takeIf { state == PetOverlayState.ERROR })
         if (changed) {
             // Layout/WM failures may arrive outside a controller update. Publish fallback promptly.
             updateInAppVisibility(controller.snapshot())
@@ -80,7 +83,10 @@ class PetHost internal constructor(
         watchingPermission = runCatching {
             appOps.startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, app.packageName, permissionListener); true
         }.getOrDefault(false)
-        observation = controller.observe { ui.post { if (!closed) sync() } }
+        observation = controller.observe { snapshot ->
+            runtimeErrors.update(snapshot.error)
+            ui.post { if (!closed) sync() }
+        }
     }
     /** Mount a transparent, touch-through in-app layer above the content. Global mode still uses WM.
      * ON_STOP hides in-app art; global art stays until disabled/revoked/ON_DESTROY/close.
@@ -187,6 +193,7 @@ class PetHost internal constructor(
             watchingPermission = false
             observation.cancel(); ui.removeCallbacksAndMessages(null)
             overlay.close(); controller.close()
+            runtimeErrors.update(controller.snapshot().error)
             runCatching { (model as? AutoCloseable)?.close() }
             runCatching { (voice as? AutoCloseable)?.close() }
             mount?.let { container?.removeView(it) }; mount = null; container = null

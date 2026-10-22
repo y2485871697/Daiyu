@@ -9,6 +9,7 @@ import app.daiyu.android.assistants.AssistantProfile
 import app.daiyu.android.domain.pet.PetCommandResult
 import app.daiyu.android.domain.pet.PetModelSelection
 import app.daiyu.android.pet.PetApplicationHost
+import app.daiyu.android.pet.logPetError
 import app.daiyu.android.storage.IndependentModelSettings
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import kotlinx.coroutines.CancellationException
@@ -45,7 +46,10 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
     LaunchedEffect(store, slot) {
         try { record = withContext(Dispatchers.IO) { store.record(slot) } }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { problem = "配置读取失败，请重新进入。" }
+        catch (_: Exception) {
+            if (slot == IndependentModelSettings.Slot.PET) logPetError("说话模型配置读取失败")
+            problem = "配置读取失败，请重新进入。"
+        }
         finally { busy = false }
     }
     fun applyPetModel(selection: PetModelSelection) {
@@ -82,7 +86,10 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
                     selectedKey = choice.key
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { refreshAfterFailure(); problem = "模型配置更新未完成，请重新选择。" }
+            catch (_: Exception) {
+                if (slot == IndependentModelSettings.Slot.PET) logPetError("说话模型配置更新失败")
+                refreshAfterFailure(); problem = "模型配置更新未完成，请重新选择。"
+            }
             finally { busy = false; saving = false }
         }
     }
@@ -98,7 +105,10 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
                     problem = null
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { refreshAfterFailure(); problem = "停用未确认，请重试。" }
+            catch (_: Exception) {
+                if (slot == IndependentModelSettings.Slot.PET) logPetError("说话模型停用失败")
+                refreshAfterFailure(); problem = "停用未确认，请重试。"
+            }
             finally { busy = false; saving = false }
         }
     }
@@ -114,7 +124,8 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
                 if (assistants.isEmpty()) problem = "请先创建助手。" else pendingAssistant = choice
             } else select(choice, assistant)
         }
-    }, onDismiss = { picker = false })
+    }, onDismiss = { picker = false }, showStatusMessages = slot != IndependentModelSettings.Slot.PET,
+        onLoadFailure = { if (slot == IndependentModelSettings.Slot.PET) logPetError("说话模型列表读取失败") })
     pendingAssistant?.let { choice ->
         DaiyuChoiceSheet("选择助手", assistants.map { it.name }, onSelect = { index ->
             select(choice, assistants[index].id)
@@ -130,7 +141,8 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
     IndependentModelSelection(store, slot, assistants, pets, source) { controls ->
         val title = if (slot == IndependentModelSettings.Slot.PET) "说话模型" else "辅助视觉模型"
         SettingsScaffoldPage(title, onBack, modifier = modifier.testTag("independent-model-${slot.key}")) {
-            controls.problem?.let { item("independent-model-status") { SettingsNote(it, error = true) } }
+            if (slot != IndependentModelSettings.Slot.PET)
+                controls.problem?.let { item("independent-model-status") { SettingsNote(it, error = true) } }
             item("independent-model-selection") {
                 SettingsCard(Modifier.padding(top = 12.dp)) {
                     SettingsSwitchRow("使用自定义模型", controls.enabled, !controls.busy || controls.saving,

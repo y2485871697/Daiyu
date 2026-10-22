@@ -6,6 +6,9 @@ import android.test.InstrumentationTestCase
 import app.daiyu.android.delegation.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.delegation.ChildTaskStatus
+import app.daiyu.android.model.catalog.CatalogCommitResult
+import app.daiyu.android.model.catalog.CatalogModelParameters
+import app.daiyu.android.model.catalog.SavedCatalogModel
 import app.daiyu.android.storage.*
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -36,9 +39,9 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
             settings.save(ModelSettings("https://example.invalid", "parent-api", "synthetic-key", false))
             val catalog = settings.modelCatalogSnapshot()
             check(settings.modelCatalog.compareAndAppend(catalog.providerIdentity, catalog.revision,
-                listOf(app.daiyu.android.model.catalog.SavedCatalogModel(child.modelId, child.displayName,
-                    app.daiyu.android.model.catalog.CatalogModelParameters(localIdentity = child.id)))) { false }
-                == app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED)
+                listOf(SavedCatalogModel(child.modelId, child.displayName,
+                    CatalogModelParameters(localIdentity = child.id)))) { false }
+                == CatalogCommitResult.COMMITTED)
             val factory: (ModelSettings) -> ModelPort = { config ->
                 object : ModelPort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")

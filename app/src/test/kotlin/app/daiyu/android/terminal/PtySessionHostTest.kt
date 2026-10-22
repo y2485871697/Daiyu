@@ -28,7 +28,10 @@ class PtySessionHostTest : TestCase() {
         }
         fun await(condition: () -> Boolean) {
             val end = System.nanoTime() + 2_000_000_000L
-            while (!condition() && System.nanoTime() < end) Thread.sleep(5)
+            while (System.nanoTime() < end) {
+                if (condition()) return
+                Thread.sleep(5)
+            }
             assertTrue(condition())
         }
         try {

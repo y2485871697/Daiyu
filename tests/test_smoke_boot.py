@@ -76,7 +76,7 @@ class SourceTests(unittest.TestCase):
         job = int(re.search(r'^    timeout-minutes: (\d+)', workflow, re.M).group(1)) * 60
         # 600s emulator boot + all one-shot stages; loops include kill grace.
         maximum = 600 + sum(seconds + 5 for _, seconds in stages)
-        maximum += 60 * (4 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1)
+        maximum += 60 * (3 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1)
         # EXIT diagnostics, two extra display-function calls, and final UI sleep.
         maximum += 190 + 80 + 1
         self.assertGreater(step, maximum)
@@ -356,12 +356,23 @@ class ProcessTests(unittest.TestCase):
         ET.SubElement(ui, 'node', {'package': package, 'class': 'android.widget.TextView', 'text': '代鱼'})
         (self.root / 'smoke/rebooted').unlink(missing_ok=True)
         (self.root / 'smoke/boot-id-polls').unlink(missing_ok=True)
+        (self.root / 'smoke/fixture-ime-selected').unlink(missing_ok=True)
+        (self.root / 'smoke/ime-enabled-corrupted').unlink(missing_ok=True)
         fake_ui = self.root / 'fake-ui.xml'
         fake_ui.write_text('<broken' if case == 'malformed-ui' else
                            '代鱼 · 聊天 发送' if case == 'old-title-only' else
                            ET.tostring(ui, encoding='unicode'), encoding='utf-8')
         self.executable('adb', r'''#!/bin/sh
 printf '%s\n' "$*" >> smoke/adb-calls.txt
+fake_boot_id() {
+  if [ -f smoke/rebooted ] && [ "$CASE" != reboot-unchanged ]; then
+   polls=0; [ ! -f smoke/boot-id-polls ] || polls=$(cat smoke/boot-id-polls)
+   polls=$((polls + 1)); printf '%s' "$polls" > smoke/boot-id-polls
+   if [ "$CASE" = reboot-delayed ] && [ "$polls" -le 20 ]; then
+    printf '11111111-1111-1111-1111-111111111111\n'
+   else printf '22222222-2222-2222-2222-222222222222\n'; fi
+  else printf '11111111-1111-1111-1111-111111111111\n'; fi
+}
 case "$*" in
  'shell wm size 320x640') [ "$CASE" != display-fail ] || exit 7; printf '320x640' > smoke/display-size-state ;;
  'shell wm density 160') printf '160' > smoke/display-density-state ;;
@@ -374,20 +385,31 @@ case "$*" in
   printf 'Physical density: 160\nOverride density: %s\n' "$density" ;;
  'shell getprop ro.build.version.sdk') printf '%s\n' "$API" ;;
  'shell getprop sys.boot_completed') printf '1\n' ;;
- 'shell cat /proc/sys/kernel/random/boot_id')
-  if [ -f smoke/rebooted ] && [ "$CASE" != reboot-unchanged ]; then
-   polls=0; [ ! -f smoke/boot-id-polls ] || polls=$(cat smoke/boot-id-polls)
-   polls=$((polls + 1)); printf '%s' "$polls" > smoke/boot-id-polls
-   if [ "$CASE" = reboot-delayed ] && [ "$polls" -le 20 ]; then
-    printf '11111111-1111-1111-1111-111111111111\n'
-   else printf '22222222-2222-2222-2222-222222222222\n'; fi
-  else printf '11111111-1111-1111-1111-111111111111\n'; fi ;;
+ 'shell cat /proc/sys/kernel/random/boot_id') fake_boot_id ;;
  'shell settings get secure default_input_method')
   if [ -f smoke/rebooted ] && [ "$CASE" = reboot-ime-changed ]; then printf 'other/.Ime\n'
+  elif [ -f smoke/fixture-ime-selected ]; then
+   if [ "$CASE" = fixture-wrong-default ]; then printf 'other/.Ime\n'
+   else printf 'jp.co.omronsoft.openwnn/.OpenWnnJAJP\n'; fi
   else printf 'original/.Ime\n'; fi ;;
+ 'shell settings get secure enabled_input_methods')
+  if [ -f smoke/ime-enabled-corrupted ]; then printf 'jp.co.omronsoft.openwnn/.OpenWnnJAJP\n'; exit 0; fi
+  printf 'original/.Ime'
+  if [ -f smoke/fixture-ime-selected ] && [ "$CASE" != fixture-enable-missing ]; then
+   printf ':jp.co.omronsoft.openwnn/.OpenWnnJAJP'
+  fi
+  printf '\n' ;;
+ 'shell pm path jp.co.omronsoft.openwnn')
+  [ "$CASE" != fixture-package-missing ] || exit 7
+  printf 'package:/system/app/OpenWnn/OpenWnn.apk\n' ;;
+ 'shell ime enable jp.co.omronsoft.openwnn/.OpenWnnJAJP')
+  [ "$CASE" != fixture-enable-fail ] || exit 7 ;;
+ 'shell ime set jp.co.omronsoft.openwnn/.OpenWnnJAJP')
+  [ "$CASE" != fixture-set-fail ] || exit 7
+  touch smoke/fixture-ime-selected ;;
  'reboot') [ "$CASE" != reboot-fail ] || exit 7; touch smoke/rebooted ;;
 
- *pidof*) printf '123\n456\n' ;;
+ *pidof*) fake_boot_id; printf '123\n456\n' ;;
  'shell pm path android') printf 'package:/system/framework/framework-res.apk\n' ;;
  'shell getprop debug.hwui.renderer') printf '\n' ;;
  'shell dumpsys webviewupdate')
@@ -441,6 +463,7 @@ case "$*" in
   [ "$CASE" != after-terminal ] || printf 'INSTRUMENTATION_STATUS_CODE: 0\n'
   case "$CASE" in instrument-timeout) exit 124 ;; instrument-fail) exit 9 ;; esac
   [ "$CASE" != display-leak ] || printf '1216x2432' > smoke/display-size-state
+  [ "$CASE" != fixture-enabled-leak ] || touch smoke/ime-enabled-corrupted
   : > smoke/fake-app-running ;;
  'shell am start '*)
   printf '%s\n' "$@" > smoke/launch-args.txt
@@ -561,6 +584,45 @@ exit 0
         calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
         self.assertEqual(calls.count('reboot'), 1)
         self.assertLess(calls.index('reboot'), calls.index('install delivery/app.apk'))
+
+    def test_api26_selects_one_preinstalled_real_ime_before_tests_without_disabling_original(self):
+        for api in (26, 37):
+            with self.subTest(api=api):
+                result = self.smoke(api=api)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+                switch = 'shell ime set jp.co.omronsoft.openwnn/.OpenWnnJAJP'
+                self.assertEqual(calls.count(switch), int(api == 26))
+                self.assertFalse(any('ime disable' in call for call in calls))
+                if api == 26:
+                    self.assertLess(calls.index('reboot'), calls.index(switch))
+                    self.assertLess(calls.index(switch), calls.index('install delivery/app.apk'))
+                    self.assertEqual((self.root / 'smoke/ime-default-restored.txt').read_text(), 'original/.Ime\n')
+                    self.assertEqual((self.root / 'smoke/ime-fixture-selected.txt').read_text(),
+                                     'jp.co.omronsoft.openwnn/.OpenWnnJAJP\n')
+
+    def test_api26_rejects_enabled_ime_leak_even_when_default_fixture_is_unchanged(self):
+        result = self.smoke(case='fixture-enabled-leak')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.root / 'smoke/ime-fixture-selected.txt').read_bytes(),
+                         (self.root / 'smoke/ime-fixture-after.txt').read_bytes())
+        self.assertNotEqual((self.root / 'smoke/ime-enabled-selected.txt').read_bytes(),
+                            (self.root / 'smoke/ime-enabled-after.txt').read_bytes())
+        calls = (self.root / 'smoke/adb-calls.txt').read_text()
+        self.assertIn('shell am instrument ', calls)
+        self.assertNotIn('shell am start ', calls)
+        self.assertEqual(calls.count('shell ime set '), 1)
+
+    def test_invalid_explicit_ime_fixture_fails_before_installation_without_fallback(self):
+        for case in ('fixture-package-missing', 'fixture-enable-fail', 'fixture-set-fail',
+                     'fixture-wrong-default', 'fixture-enable-missing'):
+            with self.subTest(case=case):
+                result = self.smoke(case=case)
+                self.assertNotEqual(result.returncode, 0)
+                calls = (self.root / 'smoke/adb-calls.txt').read_text()
+                self.assertNotIn('install delivery/app.apk', calls)
+                self.assertNotIn('ime disable', calls)
+                self.assertLessEqual(calls.count('shell ime set '), 1)
 
     def test_api26_reboot_failure_identity_ime_and_new_crashes_fail_closed(self):
         for case in ('reboot-fail', 'reboot-unchanged', 'reboot-ime-changed', 'reboot-crash'):

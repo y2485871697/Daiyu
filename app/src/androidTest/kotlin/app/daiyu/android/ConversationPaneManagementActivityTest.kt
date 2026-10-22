@@ -51,7 +51,15 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         setDraft("甲编辑后的草稿")
         setSelection(1, 3)
         val before = fixture.database.exportBackup()
+        val previousEditor = retainedControls(activity)
+        mainThread {
+            assertEquals(1, MainActivity::class.java.getDeclaredField("selectionStart").apply { isAccessible = true }.getInt(activity)); assertEquals(3, MainActivity::class.java.getDeclaredField("selectionEnd").apply { isAccessible = true }.getInt(activity))
+        }
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        mainThread {
+            previousEditor.onSelectionChange(0, 0)
+            assertEquals(1, MainActivity::class.java.getDeclaredField("selectionStart").apply { isAccessible = true }.getInt(activity)); assertEquals(3, MainActivity::class.java.getDeclaredField("selectionEnd").apply { isAccessible = true }.getInt(activity))
+        }
         awaitUniqueTag("drawer-conversation:${second.id.value}")
         node("drawer-search").performClick()
         node("drawer-search-input").performTextReplacement("保留侧栏")

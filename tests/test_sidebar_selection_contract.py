@@ -82,6 +82,23 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('editorGeneration() > generation', test)
         self.assertIn('paneState().searchResults().map { it.id }.toSet() == expectedResults', test)
 
+    def test_recreation_collapse_diagnostic_does_not_change_selection_acceptance(self):
+        host = (SRC / 'MainActivity.kt').read_text()
+        diagnostic = host.split('if (BuildConfig.DEBUG && selectionStart != selectionEnd && start == end)', 1)[1].split('selectionStart = start; selectionEnd = end', 1)[0]
+        self.assertIn('Throwable("selection-collapse-origin")', diagnostic)
+        self.assertIn('windowFocused=', diagnostic)
+        self.assertNotIn('return', diagnostic)
+        self.assertNotIn('draft', diagnostic)
+
+    def test_subagent_reopened_name_field_exists_before_window_focus(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/SubAgentSettingsButtonTest.kt').read_text()
+        body = test.split('fun testAddGroupButtonStillOpensFormAndSavesOnlyOnConfirmation()', 1)[1]
+        for opening in body.split('addGroupButton().performClick()')[1:]:
+            self.assertLess(opening.index('fetchSemanticsNodes().size == 1'), opening.index('awaitNodeWindowFocus(name)'))
+            self.assertIn('ui.waitUntil(5_000)', opening)
+        self.assertIn('assertEquals(listOf("新子代理组"), repository.presets().map { it.name })', body)
+        self.assertIn('assertEquals(0, fixture.opens.get())', body)
+
     def test_slot_restore_isolates_toolbar_without_changing_semantics_default(self):
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ActivityTest.kt').read_text()

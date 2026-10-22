@@ -2276,6 +2276,13 @@ class MainActivity : ComponentActivity() {
                 chatState.composer.enabled && !imageHost.sending && (selectionStart != start || selectionEnd != end)) {
                 offlineHost.invalidate()
                 if (dictationDraft != null) { dictationHost.invalidate(); invalidateConfiguredVoice() }
+                if (BuildConfig.DEBUG && selectionStart != selectionEnd && start == end) {
+                    android.util.Log.d("DaiyuSelection", "collapse host=${System.identityHashCode(this)} " +
+                        "editor=$editorGeneration lifecycle=${lifecycle.currentState} " +
+                        "windowFocused=${window.decorView.hasWindowFocus()} " +
+                        "old=($selectionStart,$selectionEnd) next=($start,$end)",
+                        Throwable("selection-collapse-origin"))
+                }
                 selectionStart = start; selectionEnd = end
                 chatState = chatState.copy(composer = chatState.composer.copy(
                     selectionStart = start, selectionEnd = end))

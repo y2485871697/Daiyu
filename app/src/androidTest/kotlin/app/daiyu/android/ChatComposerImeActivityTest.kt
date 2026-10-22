@@ -77,7 +77,11 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         val before = settledFrame(visible = false, before = emptyWindow)
         val database = fixture.database.exportBackup()
         repeat(2) {
-            node("chat-draft").performClick()
+            // Native IME frames do not advance the injected pointer clock past double-tap time.
+            node("chat-draft").performTouchInput {
+                advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+                click()
+            }
             node("chat-draft").assertIsFocused()
             assertRealApi26ImeBinding()
             val shown = settledFrame(visible = true, before = before)

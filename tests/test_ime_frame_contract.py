@@ -42,6 +42,11 @@ class ImeFrameContractTest(unittest.TestCase):
         self.assertIn('before.composerBottom, restored.composerBottom, 2f', text)
         self.assertIn('assertEquals(database, fixture.database.exportBackup())', text)
         self.assertNotIn('showSoftInput(', text)
+        pointer = text.split('repeat(2)', 1)[1].split('assertRealApi26ImeBinding()', 1)[0]
+        self.assertIn('performTouchInput {', pointer)
+        self.assertLess(pointer.index('advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)'),
+                        pointer.index('click()'))
+        self.assertNotIn('Thread.sleep', pointer)
 
     def test_voice_completes_show_hide_before_navigation_back(self):
         text = (TEST / 'VoiceSettingsStructureActivityTest.kt').read_text()

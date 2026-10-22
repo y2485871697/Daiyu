@@ -248,6 +248,74 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
         ui.waitForIdle()
     }
+    /** Observe completed traversals, not Compose virtual time or transient IME visibility. */
+    protected fun <T : Any> awaitStableWindowFrame(view: android.view.View, sample: () -> T?): T {
+        val accepted = java.util.concurrent.atomic.AtomicReference<T?>()
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        var recent: T? = null
+        var previous: T? = null
+        var stableFrames = 0
+        var lastFrame = Long.MIN_VALUE
+        var frameNanos = Long.MIN_VALUE
+        var active = true
+        var observer: android.view.ViewTreeObserver? = null
+        var choreographer: android.view.Choreographer? = null
+        val frameCallback = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                if (!active) return
+                frameNanos = frameTimeNanos
+                view.postInvalidateOnAnimation()
+                checkNotNull(choreographer).postFrameCallback(this)
+            }
+        }
+        val listener = android.view.ViewTreeObserver.OnPreDrawListener {
+            if (active && frameNanos != Long.MIN_VALUE && frameNanos != lastFrame) {
+                lastFrame = frameNanos
+                try {
+                    val next = if (view.isAttachedToWindow && view.hasWindowFocus() && !view.isLayoutRequested) sample() else null
+                    recent = next
+                    stableFrames = if (next != null && next == previous) stableFrames + 1 else if (next != null) 1 else 0
+                    previous = next
+                    if (stableFrames >= 2) accepted.compareAndSet(null, next)
+                } catch (caught: Throwable) { failure.set(caught) }
+            }
+            true
+        }
+        try {
+            instrumentation.runOnMainSync {
+                observer = view.viewTreeObserver
+                choreographer = android.view.Choreographer.getInstance()
+                checkNotNull(observer).addOnPreDrawListener(listener)
+                checkNotNull(choreographer).postFrameCallback(frameCallback)
+            }
+            try {
+                ui.waitUntil(5_000) { failure.get()?.let { throw it }; accepted.get() != null }
+            } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+                throw AssertionError("Window did not settle in two native frames: last=$recent frames=$stableFrames", timeout)
+            }
+            return checkNotNull(accepted.get())
+        } finally {
+            instrumentation.runOnMainSync {
+                active = false
+                choreographer?.removeFrameCallback(frameCallback)
+                val registered = observer
+                if (registered?.isAlive == true) registered.removeOnPreDrawListener(listener)
+                else view.viewTreeObserver.removeOnPreDrawListener(listener)
+            }
+        }
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    protected fun awaitImeFrame(target: SemanticsNodeInteraction, visible: Boolean) {
+        val view = (target.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+        awaitStableWindowFrame(view) {
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+            val bottom = insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom
+            if (insets != null && insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == visible &&
+                bottom != null && (if (visible) bottom > 0 else bottom == 0)) bottom else null
+        }
+    }
+
     protected fun reveal(tag: String, page: String = "模型设置", lazyKey: Any? = null): SemanticsNodeInteraction {
         dismissIme()
         val title = if (page == "模型设置" && ui.onAllNodesWithTag("page:主模型服务商").fetchSemanticsNodes().isNotEmpty())
@@ -584,8 +652,8 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun setDraft(text: String) { node("chat-draft").performTextReplacement(text) }
     protected fun assertDraft(text: String) { node("chat-draft").assertEditableText(text) }
-    protected fun setSelection(start: Int, end: Int) {
-        node("chat-draft").performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(start, end, false)) }
+    protected fun setSelection(start: Int, end: Int, relativeToOriginalText: Boolean = false) {
+        node("chat-draft").performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(start, end, relativeToOriginalText)) }
         ui.waitForIdle()
         assertSelection(start, end)
     }

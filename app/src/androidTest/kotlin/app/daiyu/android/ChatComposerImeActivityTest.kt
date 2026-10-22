@@ -72,7 +72,11 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         dismissIme()
         val emptyWindow = settledFrame(visible = false)
         setDraft("键盘位置回归草稿")
-        // Finish the show initiated by text replacement before requesting the baseline hide.
+        // Text replacement can keep focus without showing a previously hidden IME.
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
         awaitImeFrame(node("chat-draft"), visible = true)
         dismissIme()
         val before = settledFrame(visible = false, before = emptyWindow)

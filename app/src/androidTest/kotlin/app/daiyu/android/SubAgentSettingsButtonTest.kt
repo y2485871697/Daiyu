@@ -119,6 +119,9 @@ class SubAgentSettingsButtonTest : WiredActivityTestCase() {
         ui.onNodeWithText("取消").performClick()
         name.assertDoesNotExist()
         assertTrue(repository.presets().isEmpty())
+        awaitNodeWindowFocus(addGroupButton())
+        dismissIme()
+        awaitImeFrame(addGroupButton(), visible = false)
 
         addGroupButton().performClick()
         ui.waitUntil(5_000) {

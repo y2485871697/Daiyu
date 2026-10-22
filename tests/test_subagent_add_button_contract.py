@@ -47,5 +47,17 @@ class SubAgentAddButtonContractTest(unittest.TestCase):
             self.assertIn(fragment, test)
 
 
+    def test_reopen_waits_for_the_underlying_window_and_hidden_native_ime(self):
+        test = ANDROID.read_text()
+        reopen = test.split('ui.onNodeWithText("取消").performClick()', 1)[1].split('name.performTextReplacement("新子代理组")', 1)[0]
+        self.assertLess(reopen.index('name.assertDoesNotExist()'), reopen.index('awaitNodeWindowFocus(addGroupButton())'))
+        self.assertLess(reopen.index('awaitNodeWindowFocus(addGroupButton())'), reopen.index('dismissIme()'))
+        self.assertLess(reopen.index('dismissIme()'), reopen.index('awaitImeFrame(addGroupButton(), visible = false)'))
+        self.assertLess(reopen.index('awaitImeFrame(addGroupButton(), visible = false)'), reopen.index('addGroupButton().performClick()'))
+        self.assertLess(reopen.index('addGroupButton().performClick()'), reopen.index('fetchSemanticsNodes().size == 1'))
+        self.assertIn('ui.waitUntil(5_000)', reopen)
+        self.assertNotIn('Thread.sleep', reopen)
+
+
 if __name__ == '__main__':
     unittest.main()

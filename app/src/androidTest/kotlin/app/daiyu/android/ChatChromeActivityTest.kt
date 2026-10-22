@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -346,6 +347,28 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         assertTrue(layout("100% " + "上下文使用情况".repeat(20)).isLineEllipsized(0))
         assertTrue(node("chat-model").fetchSemanticsNode().boundsInRoot.width > 0f)
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testEmptySendKeepsItsCircularBackgroundWithoutBecomingClickable() {
+        for (dark in listOf(false, true)) for (canSend in listOf(false, true)) {
+            val sent = mutableListOf<String>()
+            val draft = if (canSend) "消息" else ""
+            show(composer().copy(text = draft, phase = ComposerPhase.IDLE),
+                actions = ChatScreenActions(onSend = { sent.add(it) }), dark = dark, opaqueBackground = true)
+            awaitVisualIdle()
+            val send = node("chat-send")
+            if (canSend) send.assertIsEnabled() else send.assertIsNotEnabled()
+            val pixels = send.captureToImage().toPixelMap()
+            val behind = pixels[0, pixels.height / 2]
+            val fill = requireNotNull(actionColors).sendContainer
+                .copy(alpha = if (canSend || !dark) 1f else .4f).compositeOver(behind)
+            val actual = pixels[pixels.width / 2, pixels.height / 5]
+            assertEquals("send red dark=$dark enabled=$canSend", fill.red, actual.red, .015f)
+            assertEquals("send green dark=$dark enabled=$canSend", fill.green, actual.green, .015f)
+            assertEquals("send blue dark=$dark enabled=$canSend", fill.blue, actual.blue, .015f)
+            touch(send)
+            ui.runOnIdle { assertEquals(if (canSend) listOf(draft) else emptyList<String>(), sent) }
+        }
     }
 
     fun testComposerVisibleControlsStayBalancedWithAvatarAcrossActionStates() {

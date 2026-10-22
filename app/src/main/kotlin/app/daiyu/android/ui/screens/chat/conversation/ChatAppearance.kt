@@ -19,7 +19,7 @@ internal fun chatActionColors(): ChatActionColors {
     val dark = colors.background.luminance() < .3f
     val buttons = assistantPreviewPalette()
     return ChatActionColors(
-        sendContainer = if (dark) buttons.primary else buttons.soft,
+        sendContainer = if (dark) buttons.primary else Color(0xFFE8E7EE),
         sendContent = if (dark) buttons.onPrimary else buttons.accent,
         appendContainer = buttons.primary,
         appendContent = buttons.onPrimary,

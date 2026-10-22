@@ -21,7 +21,7 @@ class PageBackGestureContractTest(unittest.TestCase):
     def test_root_registration_precedes_page_content_and_native_prompts_stay_outside(self):
         start = self.main.index('app.daiyu.android.ui.navigation.PageBackGestureHost(')
         handler = self.main.index('BackHandler(enabled = retainedPage != "chat")', start)
-        route = self.main.index('\n                when (retainedPage) {', handler)
+        route = self.main.index('\n                when (if (retainedPage == \"assistant-edit\") assistantEditReturnPage else retainedPage) {', handler)
         prompts = self.main.index('\n                TerminalTasksSurface()', route)
         self.assertLess(start, handler)
         self.assertLess(handler, route)

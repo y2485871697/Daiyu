@@ -7,6 +7,9 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +63,7 @@ fun AssistantEditScreen(
     assets: AssistantAssets,
     installedSkills: List<AssistantSkill> = emptyList(),
     onSaved: (String) -> Unit = {},
+    onOutsideDismiss: () -> Unit = onBack,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -138,6 +142,7 @@ fun AssistantEditScreen(
     BackHandler(onBack = close)
     AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_editor_title), onDismiss = close, onBack = close,
         showCloseButton = false,
+        onOutsideDismiss = { session.close(); onOutsideDismiss() },
         footer = {
             AssistantPreviewButton(stringResource(R.string.action_cancel), close, Modifier.weight(1f).testTag("assistant-edit-cancel"))
             AssistantPreviewButton(stringResource(R.string.assistant_save_changes), ::save,
@@ -147,18 +152,23 @@ fun AssistantEditScreen(
         Column(Modifier.fillMaxWidth().weight(1f).testTag("assistant-editor")
             .editorPageGestures(scrollIsolation)
             .verticalScroll(rememberScrollState()).padding(horizontal = 2.dp * s, vertical = 1.dp * s)) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp * s)
+                .testTag("assistant-edit-avatar").clip(RoundedCornerShape(16.dp * s)).background(colors.soft)
+                .clickable(enabled = !saving, interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                    if (session.isActive && pickerOwner == null) {
+                        pickerOwner = session
+                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                }.padding(14.dp * s), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp * s)) {
+                AssistantAvatar(bitmap = avatarBitmap, size = 64.dp * s, modifier = Modifier.testTag("assistant-avatar-image"))
+                Text(name.ifBlank { stringResource(R.string.assistant_editor_name) }, color = colors.text,
+                    fontSize = (18f * s).sp, lineHeight = (26f * s).sp, fontWeight = FontWeight(550),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).testTag("assistant-avatar-name"))
+            }
             AssistantPreviewField(name, { if (session.isActive && !saving) name = it },
                 stringResource(R.string.assistant_editor_name), enabled = !saving,
-                fieldModifier = Modifier.testTag("assistant-edit-name"), labelAction = {
-                    AssistantAvatar(bitmap = avatarBitmap, size = 16.dp * s,
-                        modifier = Modifier.testTag("assistant-edit-avatar").clickable(enabled = !saving,
-                            interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                            if (session.isActive && pickerOwner == null) {
-                                pickerOwner = session
-                                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            }
-                        })
-                })
+                fieldModifier = Modifier.testTag("assistant-edit-name"))
             AssistantPreviewField(description, { if (session.isActive && !saving) description = it },
                 stringResource(R.string.assistant_description), enabled = !saving,
                 placeholder = stringResource(R.string.assistant_description_placeholder),

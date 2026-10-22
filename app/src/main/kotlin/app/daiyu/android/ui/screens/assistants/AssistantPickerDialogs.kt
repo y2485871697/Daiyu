@@ -70,6 +70,7 @@ fun AssistantPickerDialog(
     onDelete: (String) -> Unit,
     assets: AssistantAssets,
     editing: Boolean = false,
+    onOutsideDismiss: () -> Unit = onDismiss,
 ) {
     var searchFocused by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -78,7 +79,7 @@ fun AssistantPickerDialog(
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     LaunchedEffect(show) {
-        if (!show) { searchQuery = ""; actionProfileId = null; deleteProfile = null }
+        if (!show) { searchFocused = false; searchQuery = ""; actionProfileId = null; deleteProfile = null }
     }
     if (!show || editing) return
     val filtered = remember(assistants, searchQuery) {
@@ -90,6 +91,7 @@ fun AssistantPickerDialog(
     AssistantPreviewDialog(show = actionProfile == null && deleteProfile == null,
         title = stringResource(R.string.assistant_picker_title), onDismiss = onDismiss,
         showCloseButton = false,
+        onOutsideDismiss = onOutsideDismiss,
         footer = {
             // Creation remains a visual placeholder until its editor flow is connected.
             AssistantPreviewButton(stringResource(R.string.assistant_new), {},
@@ -143,11 +145,12 @@ fun AssistantPickerDialog(
         AssistantActionsDialog(profile, assets = assets, canDelete = assistants.size > 1,
             onCopy = { actionProfileId = null; onCopy(profile.id) },
             onEdit = { onEdit(profile.id) },
-            onDelete = { actionProfileId = null; deleteProfile = profile }, onDismiss = { actionProfileId = null })
+            onDelete = { actionProfileId = null; deleteProfile = profile }, onDismiss = { actionProfileId = null },
+            onOutsideDismiss = onOutsideDismiss)
     }
     deleteProfile?.let { profile ->
         AssistantDeleteDialog(profile, assets = assets, canDelete = assistants.size > 1, onDismiss = { deleteProfile = null },
-            onConfirm = { deleteProfile = null; onDelete(profile.id) })
+            onConfirm = { deleteProfile = null; onDelete(profile.id) }, onOutsideDismiss = onOutsideDismiss)
     }
 }
 
@@ -164,6 +167,7 @@ fun AssistantPickerDialog(
     useGlobalSelection: Boolean = true,
     canMutate: () -> Boolean = { true },
     editing: Boolean = false,
+    onOutsideDismiss: () -> Unit = onDismiss,
 ) {
     val profiles by store.assistants.collectAsState()
     val active by store.selectedId.collectAsState()
@@ -189,7 +193,7 @@ fun AssistantPickerDialog(
             store.delete(id)
             assets.deleteMemory(id)
             assets.deleteAvatar(avatar)
-        } }, assets = assets, editing = editing)
+        } }, assets = assets, editing = editing, onOutsideDismiss = onOutsideDismiss)
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -231,9 +235,11 @@ internal fun AssistantProfileCard(
 
 @Composable
 internal fun AssistantActionsDialog(profile: AssistantProfile, assets: AssistantAssets, canDelete: Boolean, onCopy: () -> Unit,
-    onEdit: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    onEdit: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit,
+    onOutsideDismiss: () -> Unit = onDismiss) {
     AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_actions_title), onDismiss = onDismiss, onBack = onDismiss,
         showCloseButton = false,
+        onOutsideDismiss = onOutsideDismiss,
         footer = { AssistantPreviewButton(stringResource(R.string.assistant_back_to_list), onDismiss, Modifier.weight(1f)) }) {
         AssistantDialogIdentity(profile, assets)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -248,10 +254,11 @@ internal fun AssistantActionsDialog(profile: AssistantProfile, assets: Assistant
 }
 
 @Composable
-internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantAssets, canDelete: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantAssets, canDelete: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit,
+    onOutsideDismiss: () -> Unit = onDismiss) {
     val s = assistantPreviewScale()
     AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_delete_title),
-        onDismiss = onDismiss, onBack = onDismiss, footer = {
+        onDismiss = onDismiss, onBack = onDismiss, onOutsideDismiss = onOutsideDismiss, footer = {
             AssistantPreviewButton(stringResource(R.string.action_cancel), onDismiss, Modifier.weight(1f))
             AssistantPreviewButton(stringResource(R.string.action_delete), onConfirm, Modifier.weight(1f), danger = true, enabled = canDelete)
         }) {

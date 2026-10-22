@@ -96,9 +96,9 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
     private fun text(id: Int) = instrumentation.targetContext.getString(id)
     private fun tagged(tag: String) = ui.onNodeWithTag(tag, useUnmergedTree = true)
     private fun dp(px: Float) = px / density.get().density
-    private fun assertType(text: String, size: TextUnit, lineHeight: TextUnit) {
+    private fun assertType(text: String, size: TextUnit, lineHeight: TextUnit, tag: String? = null) {
         val results = mutableListOf<TextLayoutResult>()
-        ui.onNodeWithText(text, useUnmergedTree = true)
+        (if (tag == null) ui.onNodeWithText(text, useUnmergedTree = true) else tagged(tag))
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
         val input = results.single().layoutInput
         assertEquals(size, input.style.fontSize)
@@ -119,7 +119,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             tagged("assistant-edit-name").scrollToVisible()
             assertType(text(R.string.assistant_editor_title), 18.sp, 26.sp)
             assertType(text(R.string.assistant_editor_name), 13.sp, 20.sp)
-            assertType("Visual editor", 14.sp, 21.sp)
+            assertType("Visual editor", 14.sp, 21.sp, "assistant-edit-name")
             tagged("assistant-edit-description").assert(SemanticsMatcher.keyIsDefined(SemanticsActions.SetText))
             tagged("assistant-edit-avatar").assertHasClickAction()
             tagged("assistant-edit-save").assertIsNotEnabled()
@@ -332,6 +332,22 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                 assertEquals(background.blue, pixel.blue, .01f)
             }
         }
+    }
+
+    fun testAvatarCardIsAboveNameAndTracksNameDraft() {
+        show()
+        val card = tagged("assistant-edit-avatar").scrollToVisible().assertHasClickAction()
+        val image = tagged("assistant-avatar-image").fetchSemanticsNode().boundsInRoot
+        val name = tagged("assistant-edit-name").fetchSemanticsNode().boundsInRoot
+        val cardBounds = card.fetchSemanticsNode().boundsInRoot
+        assertTrue("Avatar card must be above the name input", cardBounds.bottom <= name.top)
+        assertEquals(64f, dp(image.width), .6f)
+        assertEquals(64f, dp(image.height), .6f)
+        tagged("assistant-avatar-name").assertTextEquals("Visual editor")
+        setField("assistant-edit-name", "Avatar preview draft")
+        tagged("assistant-avatar-name").assertTextEquals("Avatar preview draft")
+        assertEquals("Visual editor", store.assistants.value.single().name)
+        assertEquals(0, writes.get())
     }
 
     fun testCancelDiscardsUnsavedFields() {

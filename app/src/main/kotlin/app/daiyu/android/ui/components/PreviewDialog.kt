@@ -16,7 +16,8 @@ import androidx.compose.ui.window.DialogWindowProvider
 /** Shared window coordinates for preview overlays; design insets are applied by each surface. */
 @Composable
 internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scrimBlurRadius: Float = 0f,
-    bottomSheet: Boolean = false, content: @Composable BoxWithConstraintsScope.() -> Unit) {
+    bottomSheet: Boolean = false, onOutsideDismiss: () -> Unit = onDismiss,
+    content: @Composable BoxWithConstraintsScope.() -> Unit) {
     val colors = usagePalette()
     val density = LocalDensity.current
     Dialog(onDismissRequest = onDismiss,
@@ -27,10 +28,10 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
             if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()
         }
         Box(Modifier.fillMaxSize().testTag("preview-dialog-viewport")) {
-            Box(Modifier.matchParentSize()
+            Box(Modifier.matchParentSize().testTag("preview-dialog-scrim")
                 .then(if (scrimBlurRadius > 0f) Modifier.previewGlassBlur(androidx.compose.ui.graphics.RectangleShape, radius = scrimBlurRadius, saturation = 1f) else Modifier)
                 .dialogDimBackground(scrimColor ?: Color(if (colors.dark) 0x55000000 else 0x2620172d), animate = bottomSheet)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onOutsideDismiss))
             CompositionLocalProvider(LocalDensity provides density) {
                 val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier
                 BoxWithConstraints(motion.fillMaxSize()

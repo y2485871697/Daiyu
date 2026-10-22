@@ -38,7 +38,7 @@ JAVA_SECOND_SOURCE = (
 class SourceTests(unittest.TestCase):
     def test_native_framebuffer_does_not_change_default_test_canvas(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
-        hook = workflow.split('          pre-emulator-launch-script: |', 1)[1].split('          disable-animations:', 1)[0]
+        hook = (ROOT / 'scripts/prepare_smoke_emulator.sh').read_text()
         self.assertIn('"hw.lcd.width":"1216"', hook)
         self.assertIn('"hw.lcd.height":"2432"', hook)
         self.assertIn('"hw.lcd.density":"160"', hook)
@@ -117,42 +117,81 @@ class SourceTests(unittest.TestCase):
                 self.assertEqual(item['target'], 'google_apis' if item['api'] == '26' else 'google_apis_ps16k')
         self.assertIn("emulator-build: ${{ matrix.api == '26' && '13610412' || '' }}", smoke)
         self.assertIn("-gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} ", smoke)
-        self.assertIn("grep -Fx 'Pkg.Revision=35.6.11'", smoke)
-        self.assertIn("grep -Fx 'Pkg.BuildId=13610412'", smoke)
-        self.assertIn('"hw.lcd.density":"160"', smoke)
+        self.assertIn("grep -Fx 'Pkg.Revision=35.6.11'", (ROOT / 'scripts/prepare_smoke_emulator.sh').read_text())
+        self.assertIn("grep -Fx 'Pkg.BuildId=13610412'", (ROOT / 'scripts/prepare_smoke_emulator.sh').read_text())
+        self.assertIn('"hw.lcd.density":"160"', (ROOT / 'scripts/prepare_smoke_emulator.sh').read_text())
         self.assertEqual({(item['api'], item['shard']) for item in matrices[-1]},
                          {(api, shard) for api in ('26', '37.2') for shard in range(4)})
 
-    def test_prelaunch_pin_checks_actual_metadata_and_version_command(self):
+    def test_prelaunch_hook_is_atomic_and_gates_smoke_after_action_catches_failure(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
-        hook = workflow.split('          pre-emulator-launch-script: |', 1)[1].split('          disable-animations:', 1)[0]
-        commands = [line.strip() for line in hook.splitlines() if line.strip()][:3]
+        self.assertIn('pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"', workflow)
+        self.assertIn('sudo apt-get install --no-install-recommends -y libpulse0', workflow)
+        self.assertLess(workflow.index('          rm -f smoke/prelaunch-ready.txt'),
+                        workflow.index('      - name: 安装并检查启动'))
+        self.assertLess(workflow.index('sudo apt-get install --no-install-recommends -y libpulse0'),
+                        workflow.index('      - name: 安装并检查启动'))
+        wrapper = re.search(r"          script: (bash -c '.*')", workflow).group(1)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / 'smoke').mkdir()
+            (root / 'scripts').mkdir()
+            (root / 'scripts/smoke_boot.sh').write_text('#!/bin/sh\ntouch invoked\nexit 7\n')
+            for ready, expected in ((False, 1), (True, 7)):
+                with self.subTest(ready=ready):
+                    if ready:
+                        (root / 'smoke/prelaunch-ready.txt').write_text('26\n')
+                    result = subprocess.run(['sh', '-c', wrapper], cwd=root, capture_output=True)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    self.assertEqual((root / 'invoked').exists(), ready)
+                    self.assertEqual((root / 'smoke/exit-code.txt').read_text().strip(), str(expected))
+
+    def test_prelaunch_pin_checks_actual_metadata_and_version_command(self):
+        script = ROOT / 'scripts/prepare_smoke_emulator.sh'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'scripts').mkdir()
+            (root / 'scripts/install_bounded_adb.sh').write_text(
+                '#!/bin/sh\ntouch installer-invoked\nexit "${INSTALL_EXIT:-0}"\n')
             emulator = root / 'emulator'
             emulator.mkdir()
             binary = emulator / 'emulator'
-            for api, revision, build, exit_code, expected in (
-                    ('26', '35.6.11', '13610412', 0, True),
-                    ('26', '37.2.12', '16428233', 0, False),
-                    ('26', '35.6.11', 'other', 0, False),
-                    ('26', '35.6.11', '13610412', 7, False),
-                    ('37.2', '37.2.12', '16428233', 0, True)):
-                with self.subTest(api=api, revision=revision, build=build, exit_code=exit_code):
+            avd = root / 'avd'
+            (avd / 'test.avd').mkdir(parents=True)
+            for api, revision, build, exit_code, install_exit, target, expected in (
+                    ('26', '35.6.11', '13610412', 0, 0, '26', True),
+                    ('26', '37.2.12', '16428233', 0, 0, '26', False),
+                    ('26', '35.6.11', 'other', 0, 0, '26', False),
+                    ('26', '35.6.11', '13610412', 127, 0, '26', False),
+                    ('26', '35.6.11', '13610412', 0, 7, '26', False),
+                    ('26', '35.6.11', '13610412', 0, 0, '37.2', False),
+                    ('37.2', '37.2.12', '16428233', 0, 0, '37.2', True)):
+                with self.subTest(api=api, revision=revision, build=build, exit_code=exit_code,
+                                  install_exit=install_exit, target=target):
+                    shutil.rmtree(root / 'smoke', ignore_errors=True)
+                    (root / 'smoke').mkdir()
+                    # A stale success receipt must not survive any failed preparation.
+                    (root / 'smoke/prelaunch-ready.txt').write_text('stale\n')
+                    (root / 'installer-invoked').unlink(missing_ok=True)
                     binary.write_text('#!/bin/sh\necho emulator-version\nexit ' + str(exit_code) + '\n')
                     binary.chmod(0o755)
                     (emulator / 'source.properties').write_text(
                         f'Pkg.Revision={revision}\nPkg.BuildId={build}\n')
-                    results = []
-                    for command in commands:
-                        result = subprocess.run(['sh', '-c', command.replace('${{ matrix.api }}', api)],
-                                                cwd=root, env=dict(os.environ, ANDROID_HOME=temporary),
-                                                capture_output=True)
-                        results.append(result.returncode)
-                        if result.returncode:
-                            break
-                    self.assertEqual(all(code == 0 for code in results), expected)
+                    (avd / 'test.ini').write_text(f'target=android-{target}\n')
+                    (avd / 'test.avd/config.ini').write_text('hw.lcd.width=320\nhw.lcd.height=640\n')
+                    result = subprocess.run(['sh', '-c', f'bash "{script.as_posix()}" "{api}"'], cwd=root,
+                                            env=dict(os.environ, ANDROID_HOME=temporary,
+                                                     ANDROID_AVD_HOME=str(avd), INSTALL_EXIT=str(install_exit)),
+                                            capture_output=True)
+                    self.assertEqual(result.returncode == 0, expected, result.stderr)
+                    self.assertEqual((root / 'smoke/prelaunch-ready.txt').exists(), expected)
+                    if expected:
+                        self.assertEqual((root / 'smoke/prelaunch-ready.txt').read_text(), api + '\n')
+                        self.assertIn('hw.lcd.width=1216\n', (root / 'smoke/avd-config.ini').read_text())
+                    if exit_code:
+                        self.assertFalse((root / 'installer-invoked').exists())
+                        self.assertFalse((root / 'smoke/emulator-package.txt').exists())
+                        self.assertNotIn('hw.lcd.width=1216', (avd / 'test.avd/config.ini').read_text())
 
     def test_identity_and_unchanged_application(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123')
@@ -237,11 +276,17 @@ class ProcessTests(unittest.TestCase):
                 calls = (self.root / 'smoke/adb-calls.txt').read_text()
                 self.assertLess(calls.index('shell wm size 320x640'), calls.index('shell am instrument'))
                 self.assertIn('Override size: 320x640', (self.root / 'smoke/display-size-after.txt').read_text())
-        for case in ('display-fail', 'wrong-native-display', 'wrong-density', 'display-leak'):
+        for case in ('display-fail', 'wrong-native-display', 'missing-display-override', 'wrong-density', 'display-leak'):
             with self.subTest(case=case):
                 result = self.smoke(case=case)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn('shell am start', (self.root / 'smoke/adb-calls.txt').read_text())
+                calls = (self.root / 'smoke/adb-calls.txt').read_text()
+                self.assertNotIn('shell am start', calls)
+                if case != 'display-leak':
+                    self.assertNotIn('install -r', calls)
+                    self.assertNotIn('shell am instrument', calls)
+                else:
+                    self.assertIn('shell am instrument', calls)
 
     def test_wrapper_timeout_and_stdout(self):
         wrapper = self.bin / 'adb'
@@ -318,6 +363,7 @@ case "$*" in
  'shell wm density 160') printf '160' > smoke/display-density-state ;;
  'shell wm size')
   physical=1216x2432; [ "$CASE" != wrong-native-display ] || physical=320x640
+  [ "$CASE" != missing-display-override ] || { printf 'Physical size: 320x640\n'; exit 0; }
   printf 'Physical size: %s\nOverride size: %s\n' "$physical" "$(cat smoke/display-size-state)" ;;
  'shell wm density')
   density=$(cat smoke/display-density-state); [ "$CASE" != wrong-density ] || density=320

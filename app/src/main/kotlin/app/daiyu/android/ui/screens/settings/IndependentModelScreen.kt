@@ -24,6 +24,7 @@ internal data class IndependentModelControls(
     val problem: String?,
     val onEnabledChange: (Boolean) -> Unit,
     val onChoose: () -> Unit,
+    val saving: Boolean = false,
 )
 
 /** One selection owner shared by the standalone visual page and the pet's original five rows. */
@@ -35,6 +36,7 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
     val feature = "independent-${slot.key}"
     var record by remember(store, slot) { mutableStateOf<IndependentModelSettings.Record?>(null) }
     var busy by remember(store, slot) { mutableStateOf(true) }
+    var saving by remember(store, slot) { mutableStateOf(false) }
     var problem by remember(store, slot) { mutableStateOf<String?>(null) }
     var label by remember(store, slot) { mutableStateOf(source.label(feature)) }
     var selectedKey by remember(store, slot) { mutableStateOf(source.key(feature)) }
@@ -61,6 +63,7 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
         picker = false
         pendingAssistant = null
         busy = true
+        saving = true
         problem = null
         val images = if (choice.key == selectedKey) record?.imageInput else null
         scope.launch {
@@ -80,12 +83,13 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { refreshAfterFailure(); problem = "模型配置更新未完成，请重新选择。" }
-            finally { busy = false }
+            finally { busy = false; saving = false }
         }
     }
     fun disable() {
         if (busy) return
         busy = true
+        saving = true
         scope.launch {
             try {
                 withContext(NonCancellable) {
@@ -95,12 +99,12 @@ internal fun IndependentModelSelection(store: IndependentModelSettings, slot: In
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { refreshAfterFailure(); problem = "停用未确认，请重试。" }
-            finally { busy = false }
+            finally { busy = false; saving = false }
         }
     }
     content(IndependentModelControls(record?.enabled == true, busy, label, problem,
         onEnabledChange = { if (!busy) { if (it) picker = true else disable() } },
-        onChoose = { if (!busy) picker = true }))
+        onChoose = { if (!busy) picker = true }, saving = saving))
     val title = if (slot == IndependentModelSettings.Slot.PET) "说话模型" else "辅助视觉模型"
     if (picker) SettingsModelPicker(title, source, selectedKey, onSelect = { choice ->
         if (!busy) {
@@ -129,8 +133,8 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
             controls.problem?.let { item("independent-model-status") { SettingsNote(it, error = true) } }
             item("independent-model-selection") {
                 SettingsCard(Modifier.padding(top = 12.dp)) {
-                    SettingsSwitchRow("使用自定义模型", controls.enabled, !controls.busy,
-                        tag = "independent-model-enabled", onCheckedChange = controls.onEnabledChange)
+                    SettingsSwitchRow("使用自定义模型", controls.enabled, !controls.busy || controls.saving,
+                        busy = controls.saving, tag = "independent-model-enabled", onCheckedChange = controls.onEnabledChange)
                     SettingsRow("选择模型", summary = controls.label ?: "选择模型", tag = "independent-model-configure",
                         onClick = if (controls.busy) null else controls.onChoose)
                 }

@@ -69,13 +69,14 @@ internal fun CompressionSettingsForm(
     modelLabel: String? = null,
     hasSummarySelection: Boolean = false,
     onChooseModel: () -> Unit = {},
+    saving: Boolean = false,
 ) {
     SettingsScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
         notice?.let { item("compression-notice") { SettingsNote(it, error = error) } }
         item("compression-automatic") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("自动压缩上下文", draft.automatic, enabled,
-                    tag = "settings-switch:自动压缩", summary = "实测达到窗口 80% 时压缩，保留约 16% 最近上下文。") {
+                    busy = saving, tag = "settings-switch:自动压缩", summary = "实测达到窗口 80% 时压缩，保留约 16% 最近上下文。") {
                     onSave(draft.copy(automatic = it))
                 }
             }
@@ -83,7 +84,7 @@ internal fun CompressionSettingsForm(
         item("compression-protocol") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 // Endpoint preference is not wired yet; never reuse the provider/model selection action.
-                ProviderChoiceRow("请求接口", "Chat Completions API", "compression-protocol", enabled,
+                ProviderChoiceRow("请求接口", "Chat Completions API", "compression-protocol", enabled && !saving,
                     listOf("Chat Completions API", "Responses API"),
                     listOf("compression-endpoint:chat-completions", "compression-endpoint:responses"),
                     selectedIndex = -1, onSelect = {})
@@ -93,11 +94,11 @@ internal fun CompressionSettingsForm(
         item("compression-profile") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("自定义压缩模型", draft.configureSummary, enabled,
-                    tag = "settings-switch:使用独立摘要配置", summary = "关闭时沿用对话模型。") {
+                    busy = saving, tag = "settings-switch:使用独立摘要配置", summary = "关闭时沿用对话模型。") {
                     if (it && !hasSummarySelection) onChooseModel() else onSave(draft.copy(configureSummary = it))
                 }
                 SettingsRow("压缩模型", summary = modelLabel ?: "选择模型", tag = "compression-summary-config",
-                    onClick = if (enabled) onChooseModel else null)
+                    onClick = if (enabled && !saving) onChooseModel else null)
             }
         }
     }

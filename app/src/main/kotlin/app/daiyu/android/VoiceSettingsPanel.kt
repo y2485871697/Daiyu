@@ -241,7 +241,7 @@ internal fun VoiceSettingsPanel(
                 } else when (section) {
                     "RECOGNITION" -> {
                         item { SettingsCard {
-                            SettingsSwitchRow("启用语音输入", inputEnabled, enabled = !busy, tag = "voice-input-enable",
+                            SettingsSwitchRow("启用语音输入", inputEnabled, busy = busy, tag = "voice-input-enable",
                                 summary = "点击聊天输入框的语音按钮，把说话变成文字。") { switchFeature("input", it) { inputEnabled = it } }
                             SettingsRow("离线语音", tag = "voice-offline-settings", onClick = if (busy) null else ({
                                 if (current() && !busy && stopAudio()) { invalidatePicker(); onOpenOfflineSpeech() }
@@ -256,8 +256,8 @@ internal fun VoiceSettingsPanel(
                     }
                     "READ_ALOUD", "CONVERSATION" -> {
                         if (section == "CONVERSATION") item { SettingsCard {
-                            SettingsSwitchRow("启用语音会话", conversationEnabled, enabled = !busy) { switchFeature("conversation", it) { conversationEnabled = it } }
-                            SettingsSwitchRow("云端识别", draft.dictation == "DOUBAO", enabled = !busy) {
+                            SettingsSwitchRow("启用语音会话", conversationEnabled, busy = busy) { switchFeature("conversation", it) { conversationEnabled = it } }
+                            SettingsSwitchRow("云端识别", draft.dictation == "DOUBAO", busy = busy) {
                                 if (current() && stopAudio()) {
                                     if (it) changeDraft(draft.copy(dictation = "DOUBAO")) else save(recognitionConfiguration().copy(dictation = "SYSTEM"))
                                 }
@@ -270,7 +270,7 @@ internal fun VoiceSettingsPanel(
                         } }
                         if (section == "CONVERSATION" && draft.dictation != "DOUBAO") item { OfflineSpeechPackCard(context, ::current) }
                         item { SettingsCard {
-                            SettingsSwitchRow("云端语音", cloud, enabled = !busy, tag = "voice-cloud-enable", summary = "关闭时使用系统语音。") { enabled ->
+                            SettingsSwitchRow("云端语音", cloud, busy = busy, tag = "voice-cloud-enable", summary = "关闭时使用系统语音。") { enabled ->
                                 if (current() && !busy && stopAudio()) {
                                     cloud = enabled
                                     if (!enabled) { preferences.rememberCloud(profile, draft); save(draft.copy(engine = "SYSTEM", voice = "")) }
@@ -293,7 +293,7 @@ internal fun VoiceSettingsPanel(
                             onInitialize = if (saved == null && !cloud && draft.engine == "SYSTEM") ({ save(draft) }) else null) }
                     }
                     "REALTIME" -> item { SettingsCard {
-                        SettingsSwitchRow("启用实时通话", realtimeEnabled, enabled = !busy) { switchFeature("realtime", it) { realtimeEnabled = it } }
+                        SettingsSwitchRow("启用实时通话", realtimeEnabled, busy = busy) { switchFeature("realtime", it) { realtimeEnabled = it } }
                         SettingsRow("服务商", summary = if (draft.duplexKey.isBlank()) "连接豆包账户" else "豆包语音", onClick = if (busy) null else ({ dialog = "DUPLEX_KEY" }))
                         SettingsRow("音色", summary = draft.duplexVoice, onClick = if (busy) null else ({ dialog = "DUPLEX_VOICE" }))
                         SettingsNote("可选择默认音色或输入已有音色 ID。")

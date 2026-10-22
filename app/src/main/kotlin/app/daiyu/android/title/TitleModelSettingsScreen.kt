@@ -15,6 +15,7 @@ internal fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurr
     var draft by remember(owner) { mutableStateOf(emptyDraft()) }
     var settings by remember(owner) { mutableStateOf(TitleModelSettings()) }
     var busy by remember(owner) { mutableStateOf(true) }
+    var saving by remember(owner) { mutableStateOf(false) }
     var notice by remember(owner) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     var picker by remember(owner) { mutableStateOf(false) }
@@ -23,6 +24,7 @@ internal fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurr
     fun consume(result: TitleModelSettingsEditor.Result, saved: Boolean) {
         if (!ownerCurrent() || !owner.isCurrent(result)) return
         busy = false
+        saving = false
         if (result.failed) notice = "本地配置读取/保存未确认；未发送请求，不自动重试"
         else if (!result.revoked) {
             result.settings?.let { settings = it }
@@ -32,6 +34,7 @@ internal fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurr
     fun enqueue(work: TitleModelSettingsEditor.Work?, saved: Boolean) {
         if (work == null) return
         busy = true
+        saving = saved
         scope.launch {
             val result = withContext(Dispatchers.IO) { work.runWorker() }
             consume(result, saved)
@@ -47,7 +50,7 @@ internal fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurr
     TitleModelSettingsPanel(settings, draft, { if (ownerCurrent() && !busy) draft = it },
         onSave = { if (ownerCurrent()) enqueue(owner.prepareSave(it), true) },
         onDisable = { if (ownerCurrent()) enqueue(owner.prepareDisable(), true) },
-        busy = busy, notice = notice, onBack = { if (ownerCurrent()) onBack() },
+        busy = busy, saving = saving, notice = notice, onBack = { if (ownerCurrent()) onBack() },
         modelLabel = modelLabel, onChooseModel = { if (ownerCurrent() && !busy) picker = true })
     if (picker) SettingsModelPicker("标题模型", source, selectedKey,
         onSelect = { choice ->

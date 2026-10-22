@@ -38,14 +38,15 @@ fun TitleModelSettingsPanel(
     onBack: () -> Unit = {},
     modelLabel: String? = null,
     onChooseModel: () -> Unit = {},
+    saving: Boolean = false,
 ) {
     SettingsScaffoldPage(title = "标题模型", onBack = onBack, modifier = modifier) {
         item("title-model-intro") { SettingsNote("为新会话自动生成简短标题。") }
         notice?.let { item("title-model-status") { SettingsNote(it) } }
         item("title-model-summary") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
-                SettingsSwitchRow("使用自定义模型", settings.enabled, !busy,
-                    tag = "title-model-enabled") { requested -> if (requested) onChooseModel() else onDisable() }
+                SettingsSwitchRow("使用自定义模型", settings.enabled, !busy || saving,
+                    busy = busy && saving, tag = "title-model-enabled") { requested -> if (requested) onChooseModel() else onDisable() }
                 SettingsRow("选择模型", summary = modelLabel ?: "选择模型", tag = "title-model-configure",
                     onClick = if (busy) null else onChooseModel)
             }

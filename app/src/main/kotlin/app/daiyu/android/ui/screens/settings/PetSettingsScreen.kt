@@ -91,8 +91,8 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                             if (!host.snapshot().canDrawOverlays) showPermission = true
                         }
                     }
-                    SettingsSwitchRow("指定说话模型", model.enabled, enabled && !model.busy,
-                        tag = "pet-custom-model", onCheckedChange = model.onEnabledChange)
+                    SettingsSwitchRow("指定说话模型", model.enabled, enabled && (!model.busy || model.saving),
+                        busy = model.saving, tag = "pet-custom-model", onCheckedChange = model.onEnabledChange)
                     SettingsRow("说话模型", summary = model.label ?: "选择模型",
                         tag = "pet-model-configure", onClick = if (enabled && !model.busy) model.onChoose else null)
                 }

@@ -79,7 +79,7 @@ class MarkdownProjectionTest {
     }
 
     @Test fun emptyMixedBodyDoesNotInvokeParser() = runBlocking {
-        val result = projectMarkdown(emptyList()) { error("no text") }
+        val result = projectMarkdown(emptyList(), parser = { error("no text") })
         assertTrue(result.blocks.isEmpty())
     }
 }

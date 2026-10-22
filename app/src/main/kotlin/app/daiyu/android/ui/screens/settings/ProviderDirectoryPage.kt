@@ -50,14 +50,14 @@ internal fun ProviderDirectoryPage(
             SettingsCard {
                 SettingsRow("新增 OpenAI-compatible", summary = "支持 ChatGPT、DeepSeek、Kimi、GLM、Qwen 等",
                     tag = "provider-add", leading = { DaiyuIcon(DaiyuIcons.Model, null, Modifier.testTag("provider-add-icon")) },
-                    onClick = if (enabled) onAddOpenAi else null)
+                    showChevron = true, onClick = if (enabled) onAddOpenAi else null)
                 SettingsRow("新增 Anthropic", summary = "支持 Anthropic Claude 官方或兼容 API",
                     tag = "provider-add-anthropic", leading = {
                         Box(Modifier.size(24.dp).testTag("provider-add-anthropic-icon"), contentAlignment = Alignment.Center) {
                             Text("AI")
                         }
                     },
-                    onClick = if (enabled) onAddAnthropic else null)
+                    showChevron = true, onClick = if (enabled) onAddAnthropic else null)
                 SettingsRow("新增豆包语音", summary = "仅用于朗读，填写语音控制台 API Key，不是方舟聊天 Key。",
                     tag = "provider-add-speech", leading = { DaiyuIcon(DaiyuIcons.Voice, null, Modifier.testTag("provider-add-speech-icon")) },
                     trailing = { DaiyuIcon(DaiyuIcons.ChevronRight, null) })
@@ -91,7 +91,7 @@ internal fun ProviderAuthenticationPage(enabled: Boolean, notice: String?, onBac
             SettingsCard {
                 SettingsRow("API Key", summary = "OpenAI 官方接口或兼容的第三方站点",
                     tag = "provider-auth-api-key", leading = { DaiyuIcon(DaiyuIcons.Key, null) },
-                    onClick = if (enabled) onApiKey else null)
+                    showChevron = true, onClick = if (enabled) onApiKey else null)
                 SettingsRow("OAuth", summary = "使用 OpenAI Codex 登录", tag = "provider-auth-oauth",
                     leading = { DaiyuIcon(DaiyuIcons.Model, null) },
                     trailing = { DaiyuIcon(DaiyuIcons.ChevronRight, null) })

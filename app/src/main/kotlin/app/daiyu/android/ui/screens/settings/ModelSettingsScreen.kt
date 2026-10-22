@@ -293,7 +293,7 @@ internal fun ResponsesPathRow(title: String, path: String, enabled: Boolean, onS
     var choosing by remember { mutableStateOf(false) }
     val options = listOf("/v1/responses", "/responses")
     SettingsRow(title, summary = path.ifBlank { options.first() },
-        tag = "responses-path-select:$title", onClick = if (enabled) ({ choosing = true }) else null)
+        tag = "responses-path-select:$title", showChevron = true, onClick = if (enabled) ({ choosing = true }) else null)
     if (choosing) DaiyuChoiceSheet(title = title, options = options,
         onSelect = { index -> if (enabled) onSelect(options[index]); choosing = false },
         onDismiss = { choosing = false })

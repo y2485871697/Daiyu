@@ -2,6 +2,13 @@ package app.daiyu.android
 
 import android.view.ViewGroup
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import app.daiyu.android.browser.ported.ui.browser.BrowserSheet
+import app.daiyu.android.browser.session.BrowserOwner
+import app.daiyu.android.browser.session.BrowserOwnerKind
+import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.browser.openminis.BrowserVisibleAction
 import app.daiyu.android.browser.openminis.BrowserVisibleConfiguration
 import app.daiyu.android.browser.openminis.BrowserVisibleDownload
@@ -74,6 +81,70 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
         ui.onNodeWithTag("browser-visual-stop-owner").assertDoesNotExist()
         ui.onNodeWithText(activity.getString(R.string.om_browser_settings_done)).performClick()
         node("browser-visual-page").assertExists()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testBusyTabKeepsItsTitleAndCloseSlotGeometryWithoutCloseAuthority() {
+        for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
+            val lease = BrowserTabLease(BrowserOwner("geometry", BrowserOwnerKind.MAIN), 0, 1L, 1L)
+            var busy = false
+            var closes = 0
+            val visit = object : BrowserVisualVisit {
+                override val conversationId = null
+                override val memory = BrowserUiMemory("tab-slot-geometry")
+                override val taskOwned = true
+                override fun snapshot() = ControllerBrowserVisual.State(live = true, lease = lease,
+                    takenOver = !busy, waiting = busy, tabs = listOf(lease))
+                override fun takeover(lease: BrowserTabLease) = Unit
+                override fun mount(parent: ViewGroup) = Unit
+                override fun unmount(parent: ViewGroup) = Unit
+                override fun navigate(url: String) = Unit
+                override fun newTab() = Unit
+                override fun selectTab(lease: BrowserTabLease) = Unit
+                override fun closeTab() { closes++ }
+                override fun control(action: BrowserVisibleAction) = Unit
+                override fun configure(configuration: BrowserVisibleConfiguration) = Unit
+                override fun downloads(listener: BrowserVisibleDownload?) = Unit
+                override fun restore() = Unit
+                override fun stop() = Unit
+                override fun close() = Unit
+            }
+            lateinit var pool: BrowserUiPool
+            mainThread {
+                pool = BrowserUiPool(activity.applicationContext, visit)
+                activity.setContent {
+                    val density = LocalDensity.current
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                        AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK
+                            else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                            BrowserSheet(pool, {})
+                        }
+                    }
+                }
+            }
+            val chip = ui.onNode(hasText("Tab 0") and hasClickAction())
+            val title = ui.onNodeWithText("Tab 0", useUnmergedTree = true)
+            val chipBounds = chip.fetchSemanticsNode().boundsInRoot
+            val titleBounds = title.fetchSemanticsNode().boundsInRoot
+            val close = ui.onNodeWithContentDescription(activity.getString(R.string.om_browser_close_tab))
+            close.assertExists()
+            mainThread { busy = true; pool.refresh() }
+            close.assertDoesNotExist()
+            assertEquals(chipBounds, chip.fetchSemanticsNode().boundsInRoot)
+            assertEquals(titleBounds, title.fetchSemanticsNode().boundsInRoot)
+            chip.performTouchInput { click() }
+            mainThread { pool.closeTabFromUI(lease.tabId) }
+            assertEquals(0, closes)
+            mainThread { busy = false; pool.refresh() }
+            assertEquals(chipBounds, chip.fetchSemanticsNode().boundsInRoot)
+            assertEquals(titleBounds, title.fetchSemanticsNode().boundsInRoot)
+            close.performClick()
+            ui.waitForIdle()
+            assertEquals(1, closes)
+            mainThread { busy = true; pool.refresh() }
+            close.assertDoesNotExist()
+            assertEquals(chipBounds, chip.fetchSemanticsNode().boundsInRoot)
+        }
         assertEquals(0, fixture.opens.get())
     }
 

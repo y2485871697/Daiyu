@@ -33,7 +33,18 @@ TOKEN = re.compile(r'(?P<comment>//[^\n]*|/\*[\s\S]*?\*/)|(?P<string>"""[\s\S]*?
 HISTORY_PATH = 'ui/browser/BrowserHistorySheet.kt'
 
 
+TAB_CHIP_STABLE_CLOSE = '        Spacer(Modifier.width(4.dp))\n        Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {\n            if (showClose) {\n                IconButton(\n                    onClick = onClose,\n                    modifier = Modifier.size(16.dp),\n                ) {\n                    Icon(\n                        Icons.Default.Close,\n                        contentDescription = stringResource(R.string.om_browser_close_tab),\n                        modifier = Modifier.size(10.dp),\n                        tint = MaterialTheme.colorScheme.onSurfaceVariant,\n                    )\n                }\n            }\n        }'
+TAB_CHIP_ORIGINAL_CLOSE = '        if (showClose) {\n            Spacer(Modifier.width(4.dp))\n            IconButton(\n                onClick = onClose,\n                modifier = Modifier.size(16.dp),\n            ) {\n                Icon(\n                    Icons.Default.Close,\n                    contentDescription = stringResource(R.string.om_browser_close_tab),\n                    modifier = Modifier.size(10.dp),\n                    tint = MaterialTheme.colorScheme.onSurfaceVariant,\n                )\n            }\n        }'
+TAB_CHIP_STABLE_PADDING = '.padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp)'
+TAB_CHIP_ORIGINAL_PADDING = '.padding(start = 10.dp, end = if (showClose) 6.dp else 10.dp, top = 5.dp, bottom = 5.dp)'
+
+
 def approved_original_ui_source(path, source):
+    if path == 'ui/browser/BrowserSheet.kt':
+        prefix, marker, chip = source.partition('private fun TabChip(')
+        chip = chip.replace(TAB_CHIP_STABLE_CLOSE, TAB_CHIP_ORIGINAL_CLOSE, 1)
+        chip = chip.replace(TAB_CHIP_STABLE_PADDING, TAB_CHIP_ORIGINAL_PADDING, 1)
+        return prefix + marker + chip
     if path != HISTORY_PATH:
         return source
     source = source.replace('import androidx.compose.ui.platform.LocalLocale', 'import java.util.Locale')
@@ -239,6 +250,25 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
             changed = source.replace(old, new)
             self.assertNotEqual(render_contract(normalized),
                                 render_contract(approved_original_ui_source(HISTORY_PATH, changed)))
+        self.assertEqual(source, approved_original_ui_source('ui/browser/BrowserSettingsSheet.kt', source))
+
+    def test_busy_tab_reserves_only_the_original_close_slot(self):
+        path = 'ui/browser/BrowserSheet.kt'
+        source = (PORT / path).read_text()
+        chip = source.split('private fun TabChip(', 1)[1].split('private fun ToolbarIcon(', 1)[0]
+        self.assertIn(TAB_CHIP_STABLE_CLOSE, chip)
+        self.assertIn(TAB_CHIP_STABLE_PADDING, chip)
+        self.assertNotIn(TAB_CHIP_ORIGINAL_PADDING, chip)
+        self.assertIn('showClose = !isAgentBusy', source)
+        normalized = approved_original_ui_source(path, source)
+        self.assertEqual(self.baseline['files'][path]['contract_sha256'], digest(render_contract(normalized)))
+        for old, new in [('Box(Modifier.size(16.dp)', 'Box(Modifier.size(17.dp)'),
+                         ('Spacer(Modifier.width(4.dp))', 'Spacer(Modifier.width(5.dp))'),
+                         ('end = 6.dp, top = 5.dp', 'end = 7.dp, top = 5.dp'),
+                         ('if (showClose) {', 'if (true) {')]:
+            changed = source.replace(old, new)
+            self.assertNotEqual(render_contract(normalized),
+                                render_contract(approved_original_ui_source(path, changed)))
         self.assertEqual(source, approved_original_ui_source('ui/browser/BrowserSettingsSheet.kt', source))
 
     def test_input_policy_keeps_visible_cursor_and_layout_frozen(self):

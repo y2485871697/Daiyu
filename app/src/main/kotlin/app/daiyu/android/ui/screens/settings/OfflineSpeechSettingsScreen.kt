@@ -34,7 +34,7 @@ internal fun OfflineSpeechPackCard(context: Context, ownerCurrent: () -> Boolean
                 pack.error -> "下载未完成或校验失败，点击重试。"
                 pack.downloading -> "${(pack.downloadedBytes * 100 / SpeechModelManifest.totalBytes).coerceIn(0, 100)}%"
                 else -> "中英双语 · 约 ${SpeechModelManifest.totalBytes / 1_000_000} MB · 下载后离线使用"
-            }, onClick = if (pack.checking || pack.ready) null else ({
+            }, showChevron = !pack.ready, onClick = if (pack.checking || pack.ready) null else ({
                 if (canAct()) { if (pack.downloading) OfflineSpeechPack.cancelDownload() else confirm = true }
             }))
         if (pack.downloading) androidx.compose.material3.LinearProgressIndicator(

@@ -98,7 +98,7 @@ internal fun CompressionSettingsForm(
                     if (it && !hasSummarySelection) onChooseModel() else onSave(draft.copy(configureSummary = it))
                 }
                 SettingsRow("压缩模型", summary = modelLabel ?: "选择模型", tag = "compression-summary-config",
-                    onClick = if (enabled && !saving) onChooseModel else null)
+                    showChevron = true, onClick = if (enabled && !saving) onChooseModel else null)
             }
         }
     }

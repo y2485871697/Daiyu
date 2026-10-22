@@ -92,7 +92,7 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                     SettingsSwitchRow("指定说话模型", model.enabled, enabled && (!model.busy || model.saving),
                         busy = model.saving, tag = "pet-custom-model", onCheckedChange = model.onEnabledChange)
                     SettingsRow("说话模型", summary = model.label ?: "选择模型",
-                        tag = "pet-model-configure", onClick = if (enabled && !model.busy) model.onChoose else null)
+                        tag = "pet-model-configure", showChevron = true, onClick = if (enabled && !model.busy) model.onChoose else null)
                 }
             }
             PetSettingsPage.MORE -> item("pet-more") {
@@ -104,7 +104,7 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                     SettingsRow("投喂", summary = "粮食 ${state.satiety}", onClick = { page = PetSettingsPage.FEED })
                     SettingsRow("记忆与用量", onClick = { page = PetSettingsPage.MEMORY })
                     SettingsRow("系统悬浮窗权限", onClick = onOpenOverlayPermission)
-                    SettingsRow("刷新权限状态", onClick = if (enabled) ({ host.refreshOverlayPermission() }) else null)
+                    SettingsRow("刷新权限状态", showChevron = true, onClick = if (enabled) ({ host.refreshOverlayPermission() }) else null)
                 }
             }
             PetSettingsPage.SCALE -> item("pet-scale") {
@@ -112,7 +112,7 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                     SettingsRow("当前大小", summary = "${(settings.scale * 100).roundToInt()}%")
                     Slider(value = settings.scale, onValueChange = { host.controller.setScale(it) }, enabled = enabled,
                         valueRange = .5f..1.8f, steps = 25, modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsRow("恢复默认大小", onClick = if (enabled) ({ host.controller.setScale(1f) }) else null)
+                    SettingsRow("恢复默认大小", showChevron = true, onClick = if (enabled) ({ host.controller.setScale(1f) }) else null)
                 }
             }
             PetSettingsPage.FEED -> item("pet-foods") {
@@ -121,14 +121,14 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                         val bitmap = remember(host, food) { host.resources.food(food.resourceKey)?.asImageBitmap() }
                         SettingsRow(food.displayName, summary = "粮食 +${food.satiety}",
                             leading = { if (bitmap != null) Image(bitmap, null, Modifier.size(40.dp)) },
-                            onClick = if (enabled && settings.enabled && !state.thinking) ({ host.feed(food) }) else null)
+                            showChevron = true, onClick = if (enabled && settings.enabled && !state.thinking) ({ host.feed(food) }) else null)
                     }
                 }
             }
             PetSettingsPage.MEMORY -> {
                 item("pet-memory-summary") {
                     SettingsCard {
-                        SettingsRow("清空记忆", summary = "同时取消当前反应", onClick = if (enabled) ({ host.controller.clearMemories() }) else null)
+                        SettingsRow("清空记忆", summary = "同时取消当前反应", showChevron = true, onClick = if (enabled) ({ host.controller.clearMemories() }) else null)
                         if (state.memories.isEmpty()) SettingsNote("暂无记忆")
                         else state.memories.forEach { SettingsNote(it.speech) }
                     }

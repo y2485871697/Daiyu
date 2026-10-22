@@ -172,7 +172,7 @@ import kotlinx.coroutines.withContext
                 SettingsSectionTitle("服务器设置")
                 SettingsCard {
                     SettingsRow("连接设置", summary = selected.endpoint,
-                        onClick = if (busy) null else ({ edit(selected) }), tag = "mcp-settings-edit")
+                        showChevron = true, onClick = if (busy) null else ({ edit(selected) }), tag = "mcp-settings-edit")
                 }
             }
             item(key = "tools-heading") { SettingsSectionTitle("工具（${selected.catalog.size}）") }
@@ -186,7 +186,7 @@ import kotlinx.coroutines.withContext
                 SettingsSectionTitle("服务器管理")
                 SettingsCard {
                     SettingsRow("删除服务器", tag = "mcp-settings-delete",
-                        onClick = if (busy) null else ({ deleting = true }))
+                        showChevron = true, onClick = if (busy) null else ({ deleting = true }))
                 }
             }
         }

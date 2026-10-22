@@ -198,7 +198,7 @@ internal fun <T> LocalCatalogModelsScreen(
             if (managementEndpoint != null) ProviderModelManagementCard(managementEndpoint, fetchingModels, onFetchModels, add)
             else if (actions.add != null) SettingsCard {
                 SettingsRow("添加自定义模型", summary = "手动填写展示名称与 Model ID", tag = "local-model-add",
-                    leading = { DaiyuIcon(DaiyuIcons.Add, null) }, onClick = add)
+                    leading = { DaiyuIcon(DaiyuIcons.Add, null) }, showChevron = true, onClick = add)
             }
             SettingsSearch(query, { query = it }, "搜索模型", "local-model-search")
             notice?.let { SettingsNote(it) }

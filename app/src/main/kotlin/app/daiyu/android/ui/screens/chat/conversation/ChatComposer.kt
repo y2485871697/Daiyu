@@ -3,6 +3,9 @@ package app.daiyu.android.ui.screens.chat.conversation
 import app.daiyu.android.ui.icons.ChatContextMark
 import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import app.daiyu.android.ui.components.AssistantDisplay
@@ -48,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.draw.clip
@@ -64,11 +68,13 @@ import app.daiyu.android.ui.icons.daiyuIconColor
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier, assistant: AssistantDisplay? = null,
     balanceState: app.daiyu.android.balance.BalanceState? = null,
     backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null,
+    onInputFocusChanged: (Boolean) -> Unit = {},
+    isInputDismissInProgress: () -> Boolean = { false },
     attachmentContent: @Composable () -> Unit = {}) {
     app.daiyu.android.ui.components.DismissImeOnStop()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -156,8 +162,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     BasicTextField(
                         value = renderedValue,
                         onValueChange = { value ->
-                            // Losing focus at ON_STOP can collapse selection; keep the saved draft intact.
-                            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+                            // Explicit dismissal and ON_STOP must not write back a collapsed selection.
+                            if ((!isInputDismissInProgress() || value.text != references.text) &&
+                                lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
                                 mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
                                 val bodyChanged = value.text != references.text
                                 val next = references.edit(value.text)
@@ -179,10 +186,10 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }
                         },
                         enabled = state.enabled,
-                        modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
+                        modifier = Modifier.testTag("chat-draft").onFocusChanged { onInputFocusChanged(it.isFocused) }.fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
                             .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
                         maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 16.sp, lineHeight = 24.sp),
-                        cursorBrush = SolidColor(chrome.accent),
+                        cursorBrush = SolidColor(if (WindowInsets.isImeVisible) chrome.accent else Color.Unspecified),
                         decorationBox = { inner ->
                             Box {
                                 if (references.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,

@@ -14,6 +14,15 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import app.daiyu.android.ui.components.chatInputDismissTapModifier
+import app.daiyu.android.ui.components.hideChatInputIme
 import androidx.compose.ui.Modifier
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -63,30 +72,47 @@ internal fun DaiyuChatScreen(
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     composerAttachments: @Composable () -> Unit = {},
 ) {
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val view = LocalView.current
+    var draftFocused by remember { mutableStateOf(false) }
+    var inputDismissInProgress by remember { mutableStateOf(false) }
+    val dismissInputOnTap = chatInputDismissTapModifier {
+        if (draftFocused) {
+            inputDismissInProgress = true
+            try {
+                hideChatInputIme(focus, keyboard, view)
+            } finally {
+                inputDismissInProgress = false
+            }
+        }
+    }
     ChatMenuLayer(modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
             .statusBarsPadding().navigationBarsPadding(),
     ) {
-        ChatTopBar(state.title, actions, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
+        ChatTopBar(state.title, actions, modifier = dismissInputOnTap, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,
             interactiveModeChangeEnabled = state.interactiveModeChangeEnabled,
             automaticCompression = state.automaticCompression, automaticCompressionPending = state.automaticCompressionPending)
         state.statusText?.let { status ->
             // Operational errors/recovery/preparation are not money and never enter the amount slot.
             top.yukonga.miuix.kmp.basic.Text(status,
-                modifier = Modifier.testTag("chat-status").fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                modifier = dismissInputOnTap.testTag("chat-status").fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                     .semantics { liveRegion = LiveRegionMode.Polite },
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1)
         }
         ChatConversationLayers(Modifier.weight(1f).imePadding(), messages = { bottomInset ->
             androidx.compose.runtime.key(state.conversationKey) {
-                ChatMessageList(state.turns, actions, Modifier.fillMaxSize(),
+                ChatMessageList(state.turns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset)
             }
         }, composer = { backdrop ->
-            ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop, attachmentContent = composerAttachments)
+            ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,
+                onInputFocusChanged = { draftFocused = it }, isInputDismissInProgress = { inputDismissInProgress },
+                attachmentContent = composerAttachments)
         })
     }
 }

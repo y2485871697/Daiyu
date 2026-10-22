@@ -157,8 +157,9 @@ class ReleasePackageTests(unittest.TestCase):
     def test_focused_window_requires_exact_activity_ownership_and_cross_checks_available_tokens(self):
         harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
         focus = harness.split('protected fun focusedWindowRoot()', 1)[1].split('protected fun dismissIme(', 1)[0]
-        for fragment in ('candidate.windowLayoutParams.orNull() ?: return false',
+        for fragment in ('decor.layoutParams as? android.view.WindowManager.LayoutParams',
                          'windowContext === host || decor === hostDecor',
+                         'windowContext !is android.app.Activity &&',
                          'windowContext = windowContext.baseContext',
                          'activityToken != null && params.token == activityToken',
                          'hostDecor.windowToken != null && decor.applicationWindowToken == hostDecor.windowToken',
@@ -166,6 +167,13 @@ class ReleasePackageTests(unittest.TestCase):
                          'decor.isAttachedToWindow && decor.hasWindowFocus()'):
             self.assertIn(fragment, focus)
         self.assertNotIn('candidate.decorView.applicationWindowToken == host.window.decorView.applicationWindowToken', focus)
+        self.assertIn('WindowInspectorCompat.getGlobalWindowViews()', focus)
+        self.assertIn('instrumentation.runOnMainSync', focus)
+        self.assertIn('uptimeMillis() + 5_000', focus)
+        self.assertIn('currentHost === host && !host.isFinishing && !host.isDestroyed', focus)
+        for blocking in ('Espresso.', '.inRoot(', 'mainThread {', 'awaitVisualIdle()', 'waitForIdle'):
+            self.assertNotIn(blocking, focus)
+
         lifecycle = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ActivityLifecycleTest.kt').read_text()
         entry = lifecycle.split('fun testFocusedRootBelongsToHostWhenImportDialogOwnsFocus()', 1)[1].split('    private fun ', 1)[0]
         self.assertEqual(entry.strip(), '{\n        verifyFocusedImportDialogHost()\n    }')

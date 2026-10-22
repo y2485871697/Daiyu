@@ -5,6 +5,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 exec 3>&2
 # The pre-launch wrapper bounds action probes; smoke stages set their own budgets.
 export ADB_COMMAND_TIMEOUT=5460
+export SMOKE_SCRIPT_DIR="$SCRIPT_DIR"
 adb_stage() {
   local phase=$1 limit=$2 code=0
   shift 2
@@ -16,7 +17,7 @@ adb_stage() {
 APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
 test -n "$APK"
 mkdir -p smoke
-rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt
+rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json
 rm -rf smoke/settings-ui
 # Explicitly name every source test class: legacy default discovery scans all dependency DEX.
 target_spec=$(python3 - <<'PYCOUNT'
@@ -60,15 +61,25 @@ if requested is not None and not requested <= classes.keys():
     raise ValueError("Unknown instrumentation test class")
 shards = int(os.environ.get("SMOKE_SHARD_COUNT", "1"))
 shard = int(os.environ.get("SMOKE_SHARD_INDEX", "0"))
-if mode == "candidate" and (shards != 1 or shard != 0):
-    raise ValueError("Candidate mode requires exactly one shard per API")
+if mode == "candidate" and shards not in (1, 4):
+    raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
 if not 1 <= shards <= 16 or not 0 <= shard < shards or len(classes) < shards:
     raise ValueError("Invalid instrumentation shard")
-# Balance by discovered method count, preserving each complete class.
-groups = [{} for _ in range(shards)]
-for name, count in sorted(classes.items(), key=lambda item: (-item[1], item[0])):
-    target = min(range(shards), key=lambda index: (sum(groups[index].values()), index))
-    groups[target][name] = count
+# Use one shared plan for both APIs, so allocation and completeness stay identical.
+import sys
+sys.path.insert(0, str(Path(os.environ["SMOKE_SCRIPT_DIR"]) / "acceptance"))
+from shard_plan import allocate
+if requested is None:
+    groups, plan = allocate(classes, shards)
+else:
+    # Balance what will actually execute; retain the rest of discovery for audit.
+    groups, plan = allocate({name: classes[name] for name in sorted(requested)}, shards)
+    remainder, _ = allocate({name: count for name, count in classes.items() if name not in requested}, shards)
+    for group, unselected in zip(groups, remainder):
+        group.update(unselected)
+plan["allocation_scope"] = "targeted" if requested is not None else "full"
+plan["allocated_classes"] = sorted(requested if requested is not None else classes)
+Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n")
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,

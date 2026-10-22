@@ -170,58 +170,46 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
 
     protected fun focusedWindowRoot(): android.view.View {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
         val host = checkNotNull(currentHost)
         val deadline = android.os.SystemClock.uptimeMillis() + 5_000
-        var lastNoRoot: androidx.test.espresso.NoMatchingRootException? = null
+        var hostState = ""
         while (true) {
-            mainThread { check(!host.isFinishing && !host.isDestroyed) }
             var root: android.view.View? = null
-            try {
-                androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.isRoot())
-                    .inRoot(object : org.hamcrest.TypeSafeMatcher<androidx.test.espresso.Root>() {
-                        override fun describeTo(description: org.hamcrest.Description) {
-                            description.appendText("attached window with current focus")
-                        }
-                        override fun matchesSafely(candidate: androidx.test.espresso.Root): Boolean {
-                            val decor = candidate.decorView
-                            val hostDecor = host.window.decorView
-                            val activityToken = host.window.attributes.token
-                            val params = candidate.windowLayoutParams.orNull() ?: return false
+            var failure: Throwable? = null
+            // Do not enter Espresso's independent root-readiness/idle timeout inside this deadline.
+            instrumentation.runOnMainSync {
+                try {
+                    check(currentHost === host && !host.isFinishing && !host.isDestroyed)
+                    val hostDecor = host.window.decorView
+                    val activityToken = host.window.attributes.token
+                    root = androidx.test.platform.view.inspector.WindowInspectorCompat.getGlobalWindowViews()
+                        .lastOrNull { decor ->
+                            val params = decor.layoutParams as? android.view.WindowManager.LayoutParams
+                                ?: return@lastOrNull false
                             var windowContext = decor.context
                             while (windowContext is android.content.ContextWrapper && windowContext !is android.app.Activity) {
                                 windowContext = windowContext.baseContext
                             }
                             // Compose application Dialogs may have an independent layout token on API 26.
                             val owned = windowContext === host || decor === hostDecor ||
-                                (activityToken != null && params.token == activityToken) ||
-                                (hostDecor.windowToken != null && decor.applicationWindowToken == hostDecor.windowToken)
-                            return owned && params.type in android.view.WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW..
+                                (windowContext !is android.app.Activity &&
+                                    ((activityToken != null && params.token == activityToken) ||
+                                        (hostDecor.windowToken != null && decor.applicationWindowToken == hostDecor.windowToken)))
+                            owned && params.type in android.view.WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW..
                                 android.view.WindowManager.LayoutParams.LAST_SUB_WINDOW &&
                                 decor.isAttachedToWindow && decor.hasWindowFocus()
                         }
-                    })
-                    .perform(object : androidx.test.espresso.ViewAction {
-                        override fun getConstraints(): org.hamcrest.Matcher<android.view.View> =
-                            androidx.test.espresso.matcher.ViewMatchers.isRoot()
-                        override fun getDescription() = "capture focused window root"
-                        override fun perform(controller: androidx.test.espresso.UiController, view: android.view.View) {
-                            if (view.isAttachedToWindow && view.hasWindowFocus()) root = view
-                        }
-                    })
-            } catch (failure: androidx.test.espresso.NoMatchingRootException) {
-                lastNoRoot = failure
+                    hostState = "host=${System.identityHashCode(host)} task=${host.taskId} " +
+                        "attached=${hostDecor.isAttachedToWindow} focused=${hostDecor.hasWindowFocus()} " +
+                        "token=${hostDecor.windowToken}"
+                } catch (caught: Throwable) { failure = caught }
+            }
+            failure?.let { throw it }
+            if (android.os.SystemClock.uptimeMillis() >= deadline) {
+                throw AssertionError("No attached focused test-process window within focus wait: $hostState")
             }
             root?.let { return it }
-            if (android.os.SystemClock.uptimeMillis() >= deadline) {
-                var hostState = ""
-                mainThread {
-                    val decor = host.window.decorView
-                    hostState = "host=${System.identityHashCode(host)} task=${host.taskId} " +
-                        "attached=${decor.isAttachedToWindow} focused=${decor.hasWindowFocus()} " +
-                        "token=${decor.windowToken}"
-                }
-                throw AssertionError("No attached focused test-process window within focus wait: $hostState", lastNoRoot)
-            }
             android.os.SystemClock.sleep(20)
         }
     }
@@ -240,15 +228,21 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                     .hideSoftInputFromWindow(checkNotNull(focus.windowToken), 0)
             }
         }
-        instrumentation.runOnMainSync { requestHide() }
+        var failure: Throwable? = null
+        instrumentation.runOnMainSync { try { requestHide() } catch (caught: Throwable) { failure = caught } }
+        failure?.let { throw it }
         ui.waitUntil(5_000) {
             var hidden = false
+            failure = null
             instrumentation.runOnMainSync {
-                val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
-                hidden = root.isAttachedToWindow && insets != null &&
-                    !insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())
-                if (!hidden) requestHide()
+                try {
+                    val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
+                    hidden = root.isAttachedToWindow && insets != null &&
+                        !insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())
+                    if (!hidden) requestHide()
+                } catch (caught: Throwable) { failure = caught }
             }
+            failure?.let { throw it }
             hidden
         }
         ui.waitForIdle()

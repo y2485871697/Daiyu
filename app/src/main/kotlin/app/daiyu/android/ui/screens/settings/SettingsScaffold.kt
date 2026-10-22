@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import app.daiyu.android.ui.components.MiuixScaffold
 import app.daiyu.android.ui.components.MiuixScaffoldPage
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -33,11 +34,12 @@ internal fun SettingsScaffoldPage(
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
+    scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     content: LazyListScope.() -> Unit,
 ) {
     CompositionLocalProvider(LocalSettingsPageStyle provides true) {
         MiuixScaffoldPage(title = title, onBack = onBack, modifier = modifier, actions = actions, listState = listState,
-            containerColor = settingsPageBackground(),
+            containerColor = settingsPageBackground(), scrollBehavior = scrollBehavior,
             listModifier = Modifier.background(settingsPageBackground()), content = content)
     }
 }

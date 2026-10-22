@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.haptics.miuix.TextButton
@@ -61,6 +63,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     testBalance: ProviderBalanceTester? = null,
     onDelete: (() -> Unit)? = null,
     pageUi: ProviderPageUiState? = null,
+    modelScrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -102,13 +105,13 @@ internal fun <T> ProviderCatalogSettingsScreen(
     var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
     if (managingLocal && localModelActions != null) {
         LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false },
-            listState = modelListState, queryState = modelQuery)
+            listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior)
         return
     }
     if (twoTabs && modelTab && localModelActions != null) {
         key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled && !state.saving,
             onBack = onBack, pageTitle = pageTitle, managementEndpoint = draft.endpoint,
-            listState = modelListState, queryState = modelQuery,
+            listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior,
             fetchingModels = state.loading, onFetchModels = if (enabled && !state.loading && !state.saving) ({ fetch(draft) }) else null, headerContent = {
                 tabs()
                 item {

@@ -52,11 +52,31 @@ def verify(env, record, source_run, jobs, changed):
 
 
 def candidate_workflow_inputs(workflow):
-    # Only the reviewed API26 image and candidate-source wiring may differ.
+    # Only the reviewed API26 image, candidate-source wiring and 1-to-4 shard migration may differ.
     prefix, smoke = workflow.split('  smoke:\n', 1)
     prefix = prefix.replace('options: [debug, release, candidate]', 'options: [debug, release]')
     smoke = smoke.replace('"api":"26","target":"default"', '"api":"26","target":"google_apis"')
     smoke = smoke.replace("(inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate'))", "inputs.mode == 'candidate'")
+    # Match the complete legacy expressions; arbitrary matrix/env edits stay rejected.
+    def matrix(api, shards):
+        return json.dumps([dict(api=api, target='google_apis' if api == '26' else 'google_apis_ps16k',
+                                ram=4096 if api == '26' else 6144, shard=i) for i in shards],
+                          separators=(',', ':'))
+    one26, one37 = matrix('26', [0]), matrix('37.2', [0])
+    four26, four37 = matrix('26', range(4)), matrix('37.2', range(4))
+    both_one = one26[:-1] + ',' + one37[1:]
+    both_four = four26[:-1] + ',' + four37[1:]
+    legacy = (f"inputs.mode == 'candidate' && inputs.smoke_api == '26' && '{one26}' || "
+              f"inputs.mode == 'candidate' && inputs.smoke_api == '37.2' && '{one37}' || "
+              f"inputs.mode == 'candidate' && '{both_one}' || "
+              f"inputs.mode == 'smoke' && inputs.smoke_api == '26' && '{four26}' || "
+              f"inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '{four37}' || '{both_four}'")
+    parallel = (f"(inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '26' && '{four26}' || "
+                f"(inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '37.2' && '{four37}' || '{both_four}'")
+    smoke = smoke.replace('include: ${{ fromJSON(' + legacy + ') }}',
+                          'include: ${{ fromJSON(' + parallel + ') }}')
+    smoke = smoke.replace("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'candidate' && 1 || 4 }}",
+                          "SMOKE_SHARD_COUNT: '4'")
     return prefix + '  smoke:\n' + smoke
 
 

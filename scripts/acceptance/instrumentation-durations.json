@@ -1,0 +1,2032 @@
+{
+  "schema_version": 1,
+  "description": "Complete successful classes only; slower observed API wins. Source edits/count changes fall back to method estimates. Never acceptance evidence.",
+  "sources": [
+    {
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5",
+      "artifact_directory": "0",
+      "logcat_sha256": "8d846986bdd8bf64ce96e5d3467f5ccbfb425d47e5a8ef4fc24baa25c60cf5fe",
+      "inventory_sha256": "a4f21c3af29d319e6dbb7155756ddbe3e223722a8c23ef1c3e4af5270554f689"
+    },
+    {
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5",
+      "artifact_directory": "1",
+      "logcat_sha256": "7a80ea319b26ff5b9a055af6c34bd7a593bf3a5c95caed05c40052541908c6e0",
+      "inventory_sha256": "b36cdfc7267705003c12875781410f4fcc1bda2047cdfb12884dc466a4175491"
+    },
+    {
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5",
+      "artifact_directory": "2",
+      "logcat_sha256": "da5527f6c9059f07453d8c8629a203907307f733682a21fa553837bb173d1f0e",
+      "inventory_sha256": "02649822fa6fda605e40b1f0878f931ebd4d215d8a7fd1cb20a81515bfff3dec"
+    },
+    {
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5",
+      "artifact_directory": "3",
+      "logcat_sha256": "b4ede80e26dc72daed37560aea5e1934e9d00e1504c666a011a556564fc6663b",
+      "inventory_sha256": "7c6f7a7d092843723be51cbf87d682c1c3f1301ad247ae2b8c583d04c417b069"
+    },
+    {
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510",
+      "artifact_directory": "api26",
+      "logcat_sha256": "79da14d33dd3b45660dc613f74c02bf4331a74d480f011ce18c1744adc761150",
+      "inventory_sha256": "6ca6f2b43b945a28dd3c54c8b8adefe377c03db70f2630709f6b7df67bc8fb40"
+    },
+    {
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510",
+      "artifact_directory": "api37.2",
+      "logcat_sha256": "1c3780d5fb9012241a33e24fabb339bb3fc7c59a26ff110579c54838be845d16",
+      "inventory_sha256": "6ca6f2b43b945a28dd3c54c8b8adefe377c03db70f2630709f6b7df67bc8fb40"
+    }
+  ],
+  "classes": {
+    "app.daiyu.android.BalanceProductionActivityTest": {
+      "tests": 4,
+      "milliseconds": 89075,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/BalanceProductionActivityTest.kt",
+      "source_sha256": "eb745e7181133ab7c29de0df07edb33af0c384c6cee6323c9160e3257b1a774d",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ChatChromeActivityTest": {
+      "tests": 14,
+      "milliseconds": 184962,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ChatChromeActivityTest.kt",
+      "source_sha256": "c2698053e2fa5c2dbcf118c9a6c128a75bfa3ae1e92e20d8987b345994b5d74a",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ChatMenuEntryActivityTest": {
+      "tests": 14,
+      "milliseconds": 187744,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ChatMenuEntryActivityTest.kt",
+      "source_sha256": "3e2b68f639dee9439435671c709b490aed9e486b38cb29aca552118b9c412f1e",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ChatMenuPlacementActivityTest": {
+      "tests": 1,
+      "milliseconds": 13845,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ChatMenuPlacementActivityTest.kt",
+      "source_sha256": "ba6f97ad3a57c2fa0135eae39ca58603750587ebd116607ca4e0ff1108874cae",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ControllerImageSendingTest": {
+      "tests": 16,
+      "milliseconds": 6849,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ControllerImageSendingTest.kt",
+      "source_sha256": "e95561621ae81473d2f3340000efa09fc4fc5eccce0a8190cc0735cb8a56723d",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ImageChatHostActivityTest": {
+      "tests": 12,
+      "milliseconds": 244446,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ImageChatHostActivityTest.kt",
+      "source_sha256": "4b0fdddc5a38261363f7eb32bbf4e97a152722bd413b8009c07a1d0127f5d6f5",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.LocalCatalogModelsActivityTest": {
+      "tests": 5,
+      "milliseconds": 97172,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/LocalCatalogModelsActivityTest.kt",
+      "source_sha256": "2fdfa576dd22a32eda92405b698118becaaba5a8d3d8de54fba26e027414a515",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.OtherPagePositionActivityTest": {
+      "tests": 2,
+      "milliseconds": 39214,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/OtherPagePositionActivityTest.kt",
+      "source_sha256": "290abfe18f009ce7e72a67f3109a425d0fbbf2d4db7b8edb4dcfdd677e051394",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ProviderAuthenticationChoiceActivityTest": {
+      "tests": 5,
+      "milliseconds": 85306,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ProviderAuthenticationChoiceActivityTest.kt",
+      "source_sha256": "6a7ac68d3937372a0ed006acece05577a23f101a2b03b7bc0016ca9604cd6b81",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ProviderBalanceFrontendTest": {
+      "tests": 5,
+      "milliseconds": 78139,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ProviderBalanceFrontendTest.kt",
+      "source_sha256": "9de5d0c407abd5b7aa97ebbbdc7e13a85eacc5857080e038576a9f7e2e9b84d8",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ProviderSettingsLayoutActivityTest": {
+      "tests": 7,
+      "milliseconds": 108030,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ProviderSettingsLayoutActivityTest.kt",
+      "source_sha256": "c94d8ecaca281ec8950addfd0383c53d5bd4f849ea803c13fcddc1c209af2032",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.SearchHistoryDialogTest": {
+      "tests": 4,
+      "milliseconds": 69892,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SearchHistoryDialogTest.kt",
+      "source_sha256": "c211207b80506007c72c2e4140a3e9e0a31dc69ec72280bc73c5fe7d6f9f79ee",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.SearchHostActivityTest": {
+      "tests": 12,
+      "milliseconds": 197704,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SearchHostActivityTest.kt",
+      "source_sha256": "f5749f0fe2959f0ccb9c9d8f47a9a26047f56c870f75fafefa50d4261ba6af3e",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.SessionGatewayMainSettingsTest": {
+      "tests": 7,
+      "milliseconds": 112945,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SessionGatewayMainSettingsTest.kt",
+      "source_sha256": "3d9ace82a422d49d0922c232a9f1b0b43eb44dbb786c3df9757157cfbe4206c8",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.SessionGatewaySettingsScreenTest": {
+      "tests": 2,
+      "milliseconds": 29874,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SessionGatewaySettingsScreenTest.kt",
+      "source_sha256": "f17e80f1d3e0cdac33cadcc986353b549ed74bbc08d6c10aa7cfbf30e6d19e66",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.SettingsButtonSemanticsActivityTest": {
+      "tests": 3,
+      "milliseconds": 47833,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SettingsButtonSemanticsActivityTest.kt",
+      "source_sha256": "1578a9fd51faed52da35763cdffb26e35601b421351828224898b48cd29ab1c7",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.SettingsReleaseActivityTest": {
+      "tests": 5,
+      "milliseconds": 75399,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SettingsReleaseActivityTest.kt",
+      "source_sha256": "87ead5e07a0f0707af83254e624fa6f7bad82e09b8e9797de280424c55309d55",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.SettingsSubpageStyleActivityTest": {
+      "tests": 3,
+      "milliseconds": 41670,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SettingsSubpageStyleActivityTest.kt",
+      "source_sha256": "d8c85f3eb8cd969df61fa6736562926ee7466b756273a301e3cb5954d6d29e94",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.SkillInstallScreenTest": {
+      "tests": 29,
+      "milliseconds": 377542,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SkillInstallScreenTest.kt",
+      "source_sha256": "180fcf9ad6cdea0ab85705252987dd3d5da1814d35fb68427332105f9488110c",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.SqlNullHistoryReceiptTest": {
+      "tests": 1,
+      "milliseconds": 184,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SqlNullHistoryReceiptTest.kt",
+      "source_sha256": "04c80e4d0b4e45f8a116324b4d8f5b47656e4b823b9b2de13789ef2bc11f9fb4",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.SubAgentCatalogActivityTest": {
+      "tests": 3,
+      "milliseconds": 44799,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SubAgentCatalogActivityTest.kt",
+      "source_sha256": "1f6ba2c8d59a31dd63b9c941bc624bc6aea7d3da74dff3f84b4b9192ca85f524",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.SubAgentDialogAffordanceTest": {
+      "tests": 2,
+      "milliseconds": 28179,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SubAgentDialogAffordanceTest.kt",
+      "source_sha256": "808b686ea7d64e826e383cd417f1e470a382fbe5415edf039fada53219d79c03",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.SubAgentPresetActionsSheetTest": {
+      "tests": 6,
+      "milliseconds": 77803,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SubAgentPresetActionsSheetTest.kt",
+      "source_sha256": "02b38b4c9f18649ca30bf5745941917f0c66b6e11082cb65730c6ef5e6a6ebe1",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.SystemAccessSettingsActivityTest": {
+      "tests": 4,
+      "milliseconds": 58920,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/SystemAccessSettingsActivityTest.kt",
+      "source_sha256": "c1978c8b103d0544e1c499eef663a0aef2fdaef9102005c4dbcfdff494175617",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.TaskSurfaceSettingsActivityTest": {
+      "tests": 1,
+      "milliseconds": 14715,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/TaskSurfaceSettingsActivityTest.kt",
+      "source_sha256": "0587fd9a2ce07cc4bb0edc19d4b669bb0e7a71d187dc6df27cf7ac33dfbacc0a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.TerminalChatActivityTest": {
+      "tests": 3,
+      "milliseconds": 42168,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/TerminalChatActivityTest.kt",
+      "source_sha256": "cd52af8f98dcaf63a228f66489dcd9c5879086230b59c2e69cc0170c1c4cdac5",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.TextSendActivityTest": {
+      "tests": 9,
+      "milliseconds": 150526,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/TextSendActivityTest.kt",
+      "source_sha256": "6376247f8a5fa24aa644de3a6e589ed4bf3511a9763aab6a107f710356570a63",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.TextSendTicketTest": {
+      "tests": 2,
+      "milliseconds": 636,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/TextSendTicketTest.kt",
+      "source_sha256": "ee6c72bf03629f9e6a9dead4bb69dad7d19902efb651f0de8667efdc223f537a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.TitleModelSettingsActivityTest": {
+      "tests": 2,
+      "milliseconds": 27447,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/TitleModelSettingsActivityTest.kt",
+      "source_sha256": "a49256c3dc6337068381ba0c1e6fcd84eb89f4b99ab5f834efc17565d36fa44c",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.UsageCompactPresentationTest": {
+      "tests": 4,
+      "milliseconds": 50735,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/UsageCompactPresentationTest.kt",
+      "source_sha256": "b66dad79941be996fbe8802c8f8e9ed725ad4550da350df037072d53f792162a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.VideoChatHostAndroidTest": {
+      "tests": 5,
+      "milliseconds": 1831,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/VideoChatHostAndroidTest.kt",
+      "source_sha256": "a0b143d13fd5543d651f296744aebaed4f4a696c59b23206c2c4ddfa8d7790e8",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.VirtualDisplayApprovalScreenTest": {
+      "tests": 7,
+      "milliseconds": 95188,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/VirtualDisplayApprovalScreenTest.kt",
+      "source_sha256": "42557827f8451b50d36a3fc7d4b02add5796dfc6180996ce068ec5e8ae1cb1a6",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.VirtualDisplayMainActivityTest": {
+      "tests": 6,
+      "milliseconds": 78408,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/VirtualDisplayMainActivityTest.kt",
+      "source_sha256": "aaa2379b4fd937d63c8f6b95bb547da59ed05fda7e394c4b7c08a3c442b8c1f4",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.VoiceProductionHostDeviceTest": {
+      "tests": 6,
+      "milliseconds": 993,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/VoiceProductionHostDeviceTest.kt",
+      "source_sha256": "65a7e87aaaa046d1a783444f5c69a69139093cee9aca9ae2f4cc47f9db79c072",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.VoiceSettingsStructureActivityTest": {
+      "tests": 3,
+      "milliseconds": 44514,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/VoiceSettingsStructureActivityTest.kt",
+      "source_sha256": "b78598ddaed015e7608987301350cdb16a28785aa7f1c58eb5aa16460711fa51",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.WorkspaceSettingsActivityTest": {
+      "tests": 10,
+      "milliseconds": 144279,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/WorkspaceSettingsActivityTest.kt",
+      "source_sha256": "2be013c34f024e98bb50fc8e4aa7df46bc7c687b1f3a8061e8747571e38c216d",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.appearance.IconAppearanceScreenTest": {
+      "tests": 6,
+      "milliseconds": 63449,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/appearance/IconAppearanceScreenTest.kt",
+      "source_sha256": "1709742a7b52d2cf414a12a9a47354422dae4b633cfb50e042fabb201d4d4e0f",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.appearance.Task17IconAppearanceTest": {
+      "tests": 6,
+      "milliseconds": 1081,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/appearance/Task17IconAppearanceTest.kt",
+      "source_sha256": "fea2fb7a1ab9375da3326b31cadb63b2c45177ec4247bfa074d71fb9d08b2461",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.assistants.AssistantProfileCasDatabaseTest": {
+      "tests": 2,
+      "milliseconds": 425,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/assistants/AssistantProfileCasDatabaseTest.kt",
+      "source_sha256": "752ca7d588590641c39a029451afb2bcb8f4642a5ac1a37d11aba592636ca086",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.ExtendedNeutralBackupTest": {
+      "tests": 11,
+      "milliseconds": 3903,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/ExtendedNeutralBackupTest.kt",
+      "source_sha256": "38162dd2e2f6ebc8fa61be02368492bb1c36316e55c273b995622a80233435c5",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.MessageImageBackupAssetsTest": {
+      "tests": 7,
+      "milliseconds": 1603,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/MessageImageBackupAssetsTest.kt",
+      "source_sha256": "60d4ca849f97e612a54527d72ff326bceddeffc4b2131f07bbb2ec21d15a3589",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.NeutralBackupServiceTest": {
+      "tests": 22,
+      "milliseconds": 7483,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/NeutralBackupServiceTest.kt",
+      "source_sha256": "9143c7e0f7709e6a574a8abf5cf8685f549e53d8f2410bc50c58a4bc65d04e89",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.NeutralImageBackupTest": {
+      "tests": 8,
+      "milliseconds": 2031,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/NeutralImageBackupTest.kt",
+      "source_sha256": "034f4a3d8c2b13d3a65bec8d5c03012bfafce1fd44b261206b033eb7ca3776d7",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.NeutralVideoBackupTest": {
+      "tests": 5,
+      "milliseconds": 1285,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/NeutralVideoBackupTest.kt",
+      "source_sha256": "e582dc07e944f8296e3ccdb0cb69194f05d40f916ed5fcb11be6b2daf6c6be8f",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.SegmentedBackupRoundTripTest": {
+      "tests": 4,
+      "milliseconds": 1550,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/SegmentedBackupRoundTripTest.kt",
+      "source_sha256": "015cb6446ea3ccba578a57436b3f1874e8cd47e86281573304886697e541efa7",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.StaticGenerationLeafDeviceTest": {
+      "tests": 5,
+      "milliseconds": 1230,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/StaticGenerationLeafDeviceTest.kt",
+      "source_sha256": "ae20562f46a745704862cba93e425f91ae631400f82a08ea1ff0054a92ba6501",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.TypedUsageBackupTest": {
+      "tests": 13,
+      "milliseconds": 10827,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/TypedUsageBackupTest.kt",
+      "source_sha256": "af0779bfc7b8205861e64859698bc191ca00e42a03bb290c7d8ec7cddf64b8c3",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.backup.VideoBackupDatabaseIntegrationTest": {
+      "tests": 15,
+      "milliseconds": 6150,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/backup/VideoBackupDatabaseIntegrationTest.kt",
+      "source_sha256": "f779df8d957b81b05340b2708c2faa11e0d6c16f86f0ec38eddcad06e087a4fd",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.balance.EncryptedBalancePersistenceTest": {
+      "tests": 4,
+      "milliseconds": 131,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/balance/EncryptedBalancePersistenceTest.kt",
+      "source_sha256": "b315afb8def3aca5452bf54cd9fa745c4d9ff7cb3dc3ede72f47ad1b6b003638",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.browser.BrowserApprovalHostTest": {
+      "tests": 4,
+      "milliseconds": 47792,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/browser/BrowserApprovalHostTest.kt",
+      "source_sha256": "faf4a5cdf9b5cb74cee847608f0f5cbe4d366a6aedc26242c1f4514830502fa8",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.browser.BrowserDownloadLedgerAndroidTest": {
+      "tests": 2,
+      "milliseconds": 549,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/browser/BrowserDownloadLedgerAndroidTest.kt",
+      "source_sha256": "c665ac83512d2e40b77b54f05a64f991fb3eb3fc0b3f4d9cbeba170c7a2eac9a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.browser.BrowserProductionCompositionTest": {
+      "tests": 8,
+      "milliseconds": 5091,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/browser/BrowserProductionCompositionTest.kt",
+      "source_sha256": "e02921fcc52436c82800e52432e1bee798fdc3e4fb0aa10724ccd36447e0c1cc",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.browser.BrowserSettingsScreenTest": {
+      "tests": 5,
+      "milliseconds": 65408,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/browser/BrowserSettingsScreenTest.kt",
+      "source_sha256": "0cac95aee02abb4b8425735513b6842ce3841701152f8ff6029815f5fa8be6d9",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.browser.CatalogBrowserBindingAndroidTest": {
+      "tests": 4,
+      "milliseconds": 1398,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/browser/CatalogBrowserBindingAndroidTest.kt",
+      "source_sha256": "b03f52fa4f0d25f4c32e62eac73e7bc99545754bc88cc168635249ae50c7eb4d",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.CompressionSettingsStoreTest": {
+      "tests": 5,
+      "milliseconds": 809,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/CompressionSettingsStoreTest.kt",
+      "source_sha256": "3202b8de1d3965ffd622cfeb9375dc53f62bae4fcdfc6e663b1684791ef9df4b",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ContextHistoryServiceTest": {
+      "tests": 5,
+      "milliseconds": 1127,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ContextHistoryServiceTest.kt",
+      "source_sha256": "d1fd2f7c6e8f9e76977029005b9c1036369100ea350f1243c2fad65fee970ef7",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ContextManagementWorkerTest": {
+      "tests": 14,
+      "milliseconds": 5206,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ContextManagementWorkerTest.kt",
+      "source_sha256": "8a5739dbb707a3e27e02d27eb2a40d341feb573515f75deaa8f88ce153ba745f",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ContextPreparationCoordinatorTest": {
+      "tests": 14,
+      "milliseconds": 4474,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ContextPreparationCoordinatorTest.kt",
+      "source_sha256": "36933164869e84148f67b5153a85ed9cfb7947548c9e7e10ff964022fc4a8361",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ContextRegistryScopeTest": {
+      "tests": 10,
+      "milliseconds": 3065,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ContextRegistryScopeTest.kt",
+      "source_sha256": "eb199c226bb22413ac9ec3f8535609c4c5df45437814a00a770be544ee21c920",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ContextServiceConsistencyTest": {
+      "tests": 5,
+      "milliseconds": 993,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ContextServiceConsistencyTest.kt",
+      "source_sha256": "0a9329b9ab060988680c3a31bc172430892946aab609418f4b573490d2df2b48",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ContextServiceTest": {
+      "tests": 19,
+      "milliseconds": 5838,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ContextServiceTest.kt",
+      "source_sha256": "2c87d083541879a27ed9147aa7e552ccd40d482f3522619d8a29ddf76a1318ea",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ContextVideoBoundaryTest": {
+      "tests": 9,
+      "milliseconds": 2524,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ContextVideoBoundaryTest.kt",
+      "source_sha256": "ae99d269bea331fc59b14cc3353bbe9336b1d956f3ede56040b0b7e3c428e41f",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ManualSummaryProductionDatabaseTest": {
+      "tests": 11,
+      "milliseconds": 3423,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ManualSummaryProductionDatabaseTest.kt",
+      "source_sha256": "d8ab7a28a42a2f22a0a09e74f2936191ae472948f292a832142bc7e56c36fc91",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ModelContextSummarizerTest": {
+      "tests": 6,
+      "milliseconds": 1446,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ModelContextSummarizerTest.kt",
+      "source_sha256": "fcac9176de31c7537dcd17c400d3164f44b174227989468025cff569345f0d98",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ProductionCompressionSettingsTest": {
+      "tests": 7,
+      "milliseconds": 1216,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ProductionCompressionSettingsTest.kt",
+      "source_sha256": "a0f700b7bd8aff377e21966353e3d07fea3cf67f087889e1e9997e39c0a5fb76",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.ProductionContextPreparationTest": {
+      "tests": 5,
+      "milliseconds": 1221,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/ProductionContextPreparationTest.kt",
+      "source_sha256": "8eecde50829957930ef17b0265eb9c67fc75b075ff079c97a44f3678a9198d4f",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.RecordedUsageConsumptionDatabaseTest": {
+      "tests": 3,
+      "milliseconds": 805,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/RecordedUsageConsumptionDatabaseTest.kt",
+      "source_sha256": "5118d4f53bdef5f6df6311362bcf9d5a3b1ed878a0b9c5fd1201c455cdbdac5b",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.RuntimePreparationSchemaTest": {
+      "tests": 1,
+      "milliseconds": 240,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/RuntimePreparationSchemaTest.kt",
+      "source_sha256": "bd2717ac4e1bf1b9286c7fa39204896bff453c7d6356722f134253eda6d06504",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.SummaryProfilePreparationTest": {
+      "tests": 2,
+      "milliseconds": 484,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/SummaryProfilePreparationTest.kt",
+      "source_sha256": "621367321db8006dd3b925a5a1562800e234e29a32ab7bb338f81a1629c7d7e0",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.SummaryProfileStoreTest": {
+      "tests": 13,
+      "milliseconds": 2557,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/SummaryProfileStoreTest.kt",
+      "source_sha256": "bf9160353adb3496e66735ef54234bb4a7e32fd363584bbaf1672853093fb63c",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.SummaryRuntimeProductionDatabaseTest": {
+      "tests": 5,
+      "milliseconds": 1704,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/SummaryRuntimeProductionDatabaseTest.kt",
+      "source_sha256": "bd06469d65e80843e786a1a569de12cecebdcb1ef75cfcf88c523518bc4d30ad",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.context.TokenTailCompressionTest": {
+      "tests": 5,
+      "milliseconds": 1011,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/context/TokenTailCompressionTest.kt",
+      "source_sha256": "6789bf7b48a0135cf1d7f58a740c1929e550dbb50517946841693bc9620e2699",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.gui.GuiCaptureDisposalProductionTest": {
+      "tests": 1,
+      "milliseconds": 158,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/gui/GuiCaptureDisposalProductionTest.kt",
+      "source_sha256": "fd521770250732c354d7ccafd76e240f0a1bcce70448914ef58eaa78f9b04658",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.gui.GuiCatalogProductionTest": {
+      "tests": 8,
+      "milliseconds": 1444,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/gui/GuiCatalogProductionTest.kt",
+      "source_sha256": "47c1210d87abda2b6f7c1e2192e3f7c35ebaa376406df06ce862b349b3f47e65",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.haptics.ControllerHapticsStopTest": {
+      "tests": 3,
+      "milliseconds": 1708,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/haptics/ControllerHapticsStopTest.kt",
+      "source_sha256": "3d85c127f159b5f02dbf3ba56f09863293dd192e9ef1bdce26d101234994b032",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.haptics.HapticSettingsStoreTest": {
+      "tests": 3,
+      "milliseconds": 585,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/haptics/HapticSettingsStoreTest.kt",
+      "source_sha256": "934ad17ec9366f736c83699b1596b567c1205a852e581de891717b1fbd1563dd",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.haptics.HapticsActivityHostTest": {
+      "tests": 6,
+      "milliseconds": 1267,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/haptics/HapticsActivityHostTest.kt",
+      "source_sha256": "47b9e4e731287f9c3f5a92b58b2f610628b9122a6745d6b680141d6a451c35b6",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.haptics.HapticsHostBindingTest": {
+      "tests": 3,
+      "milliseconds": 515,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/haptics/HapticsHostBindingTest.kt",
+      "source_sha256": "7382d0c3a1c2753cccc148ae0fc11b3ca2125474cb96dcecbc73ccd7b0510b8a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.haptics.HapticsRuntimeTest": {
+      "tests": 10,
+      "milliseconds": 1973,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/haptics/HapticsRuntimeTest.kt",
+      "source_sha256": "ec3b33e0bbdd8e6cc01c7bb9018c8c294a29b6a31cb862fdf4dbe9353d2beb5f",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.haptics.TouchHapticsTest": {
+      "tests": 6,
+      "milliseconds": 743,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/haptics/TouchHapticsTest.kt",
+      "source_sha256": "0a3ce056c40af80eb4c1a636c138973f430d06d112680434a585640479897a36",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.integration.tools.AndroidToolIntegrationTest": {
+      "tests": 6,
+      "milliseconds": 1206,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/integration/tools/AndroidToolIntegrationTest.kt",
+      "source_sha256": "abda6f8516eebb534f7f9418218f9776cbb6c7d2730b26acc118fe5d5c808d90",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.integration.tools.RunGenerationToolsDeviceTest": {
+      "tests": 6,
+      "milliseconds": 1367,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/integration/tools/RunGenerationToolsDeviceTest.kt",
+      "source_sha256": "a6c1df8632237ce6d5b8ef742013dd93513d59da2e86b9139de569e11b27dc46",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.media.AndroidImageAttachmentsTest": {
+      "tests": 8,
+      "milliseconds": 1980,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/media/AndroidImageAttachmentsTest.kt",
+      "source_sha256": "0de624c2f135962ba33d92d345b0cf5710a280cfd91b87cd73908808abcf7f2a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.media.BrowserScreenshotStoreTest": {
+      "tests": 8,
+      "milliseconds": 64,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/media/BrowserScreenshotStoreTest.kt",
+      "source_sha256": "ebb3b73e1220da76528b207c592ab7a90292db1da5f4f8fe2498c0ad76ff6fe4",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.media.MessageGenerationAssetsDeviceTest": {
+      "tests": 3,
+      "milliseconds": 18,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/media/MessageGenerationAssetsDeviceTest.kt",
+      "source_sha256": "67993e1b35aa6d3b6cd2782f7b137709027e24093d52ebb20bbbd715ecf04481",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.media.video.AndroidVideoAttachmentsTest": {
+      "tests": 3,
+      "milliseconds": 12,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/media/video/AndroidVideoAttachmentsTest.kt",
+      "source_sha256": "299427b72c0fcbedc04710087ca0b08bfce296ae0198c9e20ac33a52f4aff069",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.GptServiceTierTest": {
+      "tests": 7,
+      "milliseconds": 1667,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/GptServiceTierTest.kt",
+      "source_sha256": "7c4d53a27640d4235ecc59d95ebc99311a616e12f175b4094394b3b55da78f74",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.ModelFactoryTest": {
+      "tests": 5,
+      "milliseconds": 907,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/ModelFactoryTest.kt",
+      "source_sha256": "ebfb70c8691703382c629e6c80687da3cdf23235d4eb1cfe9e7dd1bd871dcafe",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.NativeCompletionSettingsTest": {
+      "tests": 5,
+      "milliseconds": 1255,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/NativeCompletionSettingsTest.kt",
+      "source_sha256": "7e8044de8e1e90cc63019973d543e4a9feefd85af5d093c4cd54067d1fcbf6ea",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.NativeCompletionTest": {
+      "tests": 17,
+      "milliseconds": 3557,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/NativeCompletionTest.kt",
+      "source_sha256": "4a77a5e63378986fd1276629b96c15446f4b5c448b69530e986068e2ed11bb22",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.ProviderHeadersStoreTest": {
+      "tests": 5,
+      "milliseconds": 1299,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/ProviderHeadersStoreTest.kt",
+      "source_sha256": "97c901a7488d7bdd319646f24ebed587eefb76458f7e61b5973e02b2a73276c9",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.ProviderRequestOptionsStoreTest": {
+      "tests": 6,
+      "milliseconds": 1657,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/ProviderRequestOptionsStoreTest.kt",
+      "source_sha256": "00b26bdec1ce31a4848877a2705e8fb7f0b6e59d5b2e19903070fdd5d3dc8337",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.ProviderSnapshotTest": {
+      "tests": 3,
+      "milliseconds": 569,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/ProviderSnapshotTest.kt",
+      "source_sha256": "ec18a06205801057c62058aa933e823ec84b8ae49a7f22273b13cfefb12597d4",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.RequestBodyFieldsAndroidTest": {
+      "tests": 1,
+      "milliseconds": 199,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/RequestBodyFieldsAndroidTest.kt",
+      "source_sha256": "1a80218ca6beee62190cf885d2d74158bfd11c69b74be9272c60d7a930545157",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.RequestBodyMergeTest": {
+      "tests": 11,
+      "milliseconds": 1803,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/RequestBodyMergeTest.kt",
+      "source_sha256": "b9b26271a593b970120b4c52e82ae4b2f17aa55efeb00c00e2b3646ccc1f35cb",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.generation.GenerationSettingsStoreDeviceTest": {
+      "tests": 2,
+      "milliseconds": 433,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/generation/GenerationSettingsStoreDeviceTest.kt",
+      "source_sha256": "e6c87cbb6ae6a5f8d635a0c5f0d877075e9149f18f0639484bd4db7e2d45a8dd",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.usage.AttributedUsageDatabaseTest": {
+      "tests": 10,
+      "milliseconds": 2099,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/usage/AttributedUsageDatabaseTest.kt",
+      "source_sha256": "d1ffae59ddf97aa21d0448389851157e22e33bfe05b95150f7df2d471cac7310",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.usage.ControllerUsageAttributionTest": {
+      "tests": 2,
+      "milliseconds": 708,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/usage/ControllerUsageAttributionTest.kt",
+      "source_sha256": "9d17a814362e3ebd4720c00824a7f1583c55d55eaf42af1ebdcf34d7b09e67ab",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.model.usage.P21RequestCoverageDatabaseTest": {
+      "tests": 7,
+      "milliseconds": 1545,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/model/usage/P21RequestCoverageDatabaseTest.kt",
+      "source_sha256": "3dccb6e7cfa7d2ba2555151a9feb5222f5296366bbb316d789afc14484da817e",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.pet.AndroidPetStoreCapacityTest": {
+      "tests": 3,
+      "milliseconds": 1804,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/pet/AndroidPetStoreCapacityTest.kt",
+      "source_sha256": "c342c9ee1b84a2ae4908d4bcc4f31865940f1f3ecf417c160d90d48589778175",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.pet.AndroidPetStoreTest": {
+      "tests": 3,
+      "milliseconds": 771,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/pet/AndroidPetStoreTest.kt",
+      "source_sha256": "2c0f2083bf443a8446e12edc6a1eff6839cc98d15b347f45898923af90334c42",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.pet.PetApplicationHostTest": {
+      "tests": 8,
+      "milliseconds": 1831,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/pet/PetApplicationHostTest.kt",
+      "source_sha256": "6037201d49b12f0dc8108b980a27d995900797037736cda0a5153c1b3000d2f4",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.pet.PetCupboardDialogTest": {
+      "tests": 4,
+      "milliseconds": 61384,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/pet/PetCupboardDialogTest.kt",
+      "source_sha256": "c31e6f3c424fdd944b033ed2e3298ec7862621fa5c6125e7673329c7c24e2318",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.pet.PetHostCloseTest": {
+      "tests": 2,
+      "milliseconds": 528,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/pet/PetHostCloseTest.kt",
+      "source_sha256": "709d646e1b2531971082122b115186ae7aa43b20ea75a80f8696cf245bceaaf6",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.pet.PetHostTest": {
+      "tests": 2,
+      "milliseconds": 440,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/pet/PetHostTest.kt",
+      "source_sha256": "1492afada178496eac5c42e19282270475fcf64a730a44484005a3d32411cc51",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.pet.PetOverlayHostTest": {
+      "tests": 8,
+      "milliseconds": 1372,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/pet/PetOverlayHostTest.kt",
+      "source_sha256": "0925962edb815e155cd38b5ba70fecc88dbc38e3f067a5287c6f48ea2f90e885",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.platform.CrossAppNotificationsTest": {
+      "tests": 8,
+      "milliseconds": 3802,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/platform/CrossAppNotificationsTest.kt",
+      "source_sha256": "5e7a4921146545f070ce1b32bda9eefd04a010c1ad13b539ef5df0df0da2cb38",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.platform.DeviceQueryBoundsTest": {
+      "tests": 2,
+      "milliseconds": 398,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/platform/DeviceQueryBoundsTest.kt",
+      "source_sha256": "3d56e7240e3bc73bb75dc2d2ba22907872ae26b598729cf64faff7bfd8ba9a47",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.platform.PlatformPermissionBoundaryTest": {
+      "tests": 6,
+      "milliseconds": 977,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/platform/PlatformPermissionBoundaryTest.kt",
+      "source_sha256": "d467879e163e101b5c3752c40d446918ab54e3523f6e6e9dfa0115eff6c87e53",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.question.QuestionCardBindingTest": {
+      "tests": 8,
+      "milliseconds": 1294,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/question/QuestionCardBindingTest.kt",
+      "source_sha256": "e73208c0ed15cd02c75ade8e83d474fba2ec5a427e3240236b54c82227bc4ecf",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.question.QuestionCardRetainedTest": {
+      "tests": 5,
+      "milliseconds": 1620,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/question/QuestionCardRetainedTest.kt",
+      "source_sha256": "82b2ef63a700b23ba52baac9fad0a4a006289ed2ca8f5e7c1bcaa609737609e2",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.question.QuestionCardViewTest": {
+      "tests": 11,
+      "milliseconds": 3124,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/question/QuestionCardViewTest.kt",
+      "source_sha256": "a23e79691c20530072fafb00ae9e2e4925ab3b34d9cd848024e543b9d6d52f81",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.question.QuestionRunSessionTest": {
+      "tests": 16,
+      "milliseconds": 3888,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/question/QuestionRunSessionTest.kt",
+      "source_sha256": "40d3dc2dbc1246089a0d0b4f58f53701b147b3cbf618c312e959d771ed3c9b70",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.question.QuestionTest": {
+      "tests": 10,
+      "milliseconds": 7125,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/question/QuestionTest.kt",
+      "source_sha256": "d3f2f2285b4f3b8a53a657530e38b35928c87bc25ff8b488aefcf5bd0ecf7acc",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.shizuku.ShizukuApprovalScreenTest": {
+      "tests": 4,
+      "milliseconds": 51534,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/shizuku/ShizukuApprovalScreenTest.kt",
+      "source_sha256": "53d4eb7293ea9a91a43899afec97b616e2a98d84ca14c9581990d3cb7bcff21d",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.shizuku.ShizukuBackendContractTest": {
+      "tests": 13,
+      "milliseconds": 2381,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/shizuku/ShizukuBackendContractTest.kt",
+      "source_sha256": "2b19088d06459a1325234d1484629ea63612c48c1db0e6d05ee016cd910a54f5",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.BuiltinSkillManagementTest": {
+      "tests": 5,
+      "milliseconds": 975,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/BuiltinSkillManagementTest.kt",
+      "source_sha256": "ddaf2b825431b9a1458ed943f37f4289f12005e6bf158e7cef0de064108578ea",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.GitHubSkillsTest": {
+      "tests": 13,
+      "milliseconds": 3256,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/GitHubSkillsTest.kt",
+      "source_sha256": "6fb3cba9c1fefb1bbf7b24993500dcf461375d50c065440c3bc6efb2fa71a6d9",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.LocalSkillZipArchiveTest": {
+      "tests": 5,
+      "milliseconds": 1388,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/LocalSkillZipArchiveTest.kt",
+      "source_sha256": "93ef44f0617cbe43d906d68d5f9c8169e471a57ecd9dcc94344112435b346ac3",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.SkillCompatibilityIntegrationTest": {
+      "tests": 4,
+      "milliseconds": 1051,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/SkillCompatibilityIntegrationTest.kt",
+      "source_sha256": "0f134750f50518072faa0316dde4995fd4388ce9dfc0d69a44e96b89351810ab",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.SkillInstallManagementTest": {
+      "tests": 15,
+      "milliseconds": 2786,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/SkillInstallManagementTest.kt",
+      "source_sha256": "f4dd7dffca2121a5191f93c040d08c825c07e6d3f10b9465875f6689733ac036",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.SkillManagementTest": {
+      "tests": 18,
+      "milliseconds": 3286,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/SkillManagementTest.kt",
+      "source_sha256": "b8659495687a60492de14eb34b1ca6595c2ae7c1af30204e27ad616b68861e17",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.SkillRegistrySnapshotTest": {
+      "tests": 7,
+      "milliseconds": 1901,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/SkillRegistrySnapshotTest.kt",
+      "source_sha256": "35ac3e0420947d22d9cb3a8a211eaf57f0a7dad444ac9086817f7116e769baff",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.SkillRunSelectionTest": {
+      "tests": 9,
+      "milliseconds": 2478,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/SkillRunSelectionTest.kt",
+      "source_sha256": "bb7a3ef1b679f6ff18faaefce02359b393214d22b4444c6608f662325fe3d628",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.SkillRunSessionTest": {
+      "tests": 14,
+      "milliseconds": 3001,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/SkillRunSessionTest.kt",
+      "source_sha256": "07b4b996e921c1eb6ca0843f94fa9aaeb1323cb573522590e74b95e83f8907d2",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.SkillStoreTest": {
+      "tests": 20,
+      "milliseconds": 4020,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/SkillStoreTest.kt",
+      "source_sha256": "2aa3ba40efd7efb23d444c39701d21b4545146a88a5c3a7c2e4a2a8ce4b211e8",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.skills.SkillToolRegistryValidationTest": {
+      "tests": 9,
+      "milliseconds": 2395,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/skills/SkillToolRegistryValidationTest.kt",
+      "source_sha256": "d3999e1b69b0c4de4c34d9e8992bb363062f336763ca722208dcd15379b9d20e",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.AssistantReplyIdentityDatabaseTest": {
+      "tests": 3,
+      "milliseconds": 622,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/AssistantReplyIdentityDatabaseTest.kt",
+      "source_sha256": "fcac7db92df6b29196eefd8b57d8f4a7f63aec142775caa6dafa06af107e3987",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.ChildCommandSchemaMigrationTest": {
+      "tests": 4,
+      "milliseconds": 790,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/ChildCommandSchemaMigrationTest.kt",
+      "source_sha256": "6f65c2fddce62a019aa2babecaa01b7da0394e4bbb28732702d5a7e1c53fd9e0",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.ConversationCompletionMarkersTest": {
+      "tests": 5,
+      "milliseconds": 281,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/ConversationCompletionMarkersTest.kt",
+      "source_sha256": "a54efb68f417a726b2d5467cd8822170b9348e3070f762ab0bd9555493911fb6",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.ConversationHistoryDatabaseTest": {
+      "tests": 5,
+      "milliseconds": 1177,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/ConversationHistoryDatabaseTest.kt",
+      "source_sha256": "015a30d23f691272917b653d34d8c1dd68022a0a0296be7b4e0bdc183f2c5583",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.ConversationSchema4Test": {
+      "tests": 4,
+      "milliseconds": 985,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/ConversationSchema4Test.kt",
+      "source_sha256": "5d2e9ce368bafa66aefb7e079caacb577af60aa701b7d03385c23869bafbdbba",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.ConversationSendReceiptTest": {
+      "tests": 18,
+      "milliseconds": 3790,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/ConversationSendReceiptTest.kt",
+      "source_sha256": "8ffca404b65fb16f5fd1c22b5244307cfc6784a3deff6e1ce700d6b326711f2a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.GenerationSchemaMigrationTest": {
+      "tests": 11,
+      "milliseconds": 5640,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/GenerationSchemaMigrationTest.kt",
+      "source_sha256": "611b9514cf8b6e514d985ab1522d04bb0384ee8f4571457491a6963bda7d14fb",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.MessageImageDatabaseTest": {
+      "tests": 5,
+      "milliseconds": 242,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/MessageImageDatabaseTest.kt",
+      "source_sha256": "39ed10cd16335333c89b50d54507e4085aa2c8b73a25142d53807590c608b2dd",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.MessageTimeDatabaseTest": {
+      "tests": 7,
+      "milliseconds": 1613,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/MessageTimeDatabaseTest.kt",
+      "source_sha256": "1bbb0dabf68a01ee4f2824ae3873a5de959c0f626c53bea8c3d26b1bc70ff861",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.MessageVideoDatabaseTest": {
+      "tests": 10,
+      "milliseconds": 3279,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/MessageVideoDatabaseTest.kt",
+      "source_sha256": "a9d61a19a3f0cc3fa071f971d0ac0bc89c510853c6cc720b830046d1a5b7ef32",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.MessageVideoInputCodecAndroidTest": {
+      "tests": 3,
+      "milliseconds": 604,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/MessageVideoInputCodecAndroidTest.kt",
+      "source_sha256": "507dc2c18d1da8d6920c11b7a7a60148799c8a8bb437f7f023c3d54f8475e4db",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.ModelSettingsCatalogBindingTest": {
+      "tests": 22,
+      "milliseconds": 4550,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/ModelSettingsCatalogBindingTest.kt",
+      "source_sha256": "c6cac13fcc84b2f22576a81779c745eb874aac00a56654ae4ff24bb6899c222a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.ModelSettingsRestoreTest": {
+      "tests": 23,
+      "milliseconds": 4792,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/ModelSettingsRestoreTest.kt",
+      "source_sha256": "9e406ce006926b6c41519532dd8546e53b509b5aa8d1db9111c4bdd167644fe6",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.P21IntegrityDatabaseTest": {
+      "tests": 5,
+      "milliseconds": 1411,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/P21IntegrityDatabaseTest.kt",
+      "source_sha256": "233c659777b65314a1d2e9034164b3095c0b1e1d901fb09bdbc7ecc10316d353",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.RecordedUsageReaderDatabaseTest": {
+      "tests": 7,
+      "milliseconds": 2774,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/RecordedUsageReaderDatabaseTest.kt",
+      "source_sha256": "5ab1d59a68a919618d4cba96380f3e064d29b3689ddbc58b060069bf3a2552df",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.SQLiteChildTaskStoreTest": {
+      "tests": 14,
+      "milliseconds": 3933,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/SQLiteChildTaskStoreTest.kt",
+      "source_sha256": "1923ebe1d7f49915d20080b0761efd1dd5a19ae33348f10f8294aa9c229f9a40",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.SQLiteGenerationAttemptStoreTest": {
+      "tests": 9,
+      "milliseconds": 3145,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/SQLiteGenerationAttemptStoreTest.kt",
+      "source_sha256": "26bcd4c25fc4a4c8d798e709ef550e0e231125ec0cebec2cdd7c7bac72bfe1eb",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.SQLiteGenerationOutputStoreTest": {
+      "tests": 21,
+      "milliseconds": 4493,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/SQLiteGenerationOutputStoreTest.kt",
+      "source_sha256": "b4e3dc607d5498bedbd88c47f6fa403534739ef3edf984e6a3d2cf3bcd1a51eb",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.SQLiteRuntimeStoreDatabaseTest": {
+      "tests": 13,
+      "milliseconds": 7422,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/SQLiteRuntimeStoreDatabaseTest.kt",
+      "source_sha256": "fbdf6fe8ba26e148d19458718a4c5b1ec7b8191b7430e83a3e7c8b98846c5d48",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.storage.SQLiteSupplementAdmissionDatabaseTest": {
+      "tests": 7,
+      "milliseconds": 1350,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/storage/SQLiteSupplementAdmissionDatabaseTest.kt",
+      "source_sha256": "401546493791d5300b90ec1f1ebc2f7b0bf409d8da952d444bf6ed7e9c3c8745",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.terminal.AndroidPtyHostTest": {
+      "tests": 6,
+      "milliseconds": 1455,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/terminal/AndroidPtyHostTest.kt",
+      "source_sha256": "b8b6a5c39550920becd28a64651f86cd3eb3ea10e079a74b3b7bf1403b66bd34",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.terminal.LinuxChrootProductionDeviceTest": {
+      "tests": 1,
+      "milliseconds": 189,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/terminal/LinuxChrootProductionDeviceTest.kt",
+      "source_sha256": "75674d3eeacf6be01c09a472591d90027115d15d397d306e059a7ee8de52f06c",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.terminal.TerminalEnvironmentHostDeviceTest": {
+      "tests": 2,
+      "milliseconds": 1009,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalEnvironmentHostDeviceTest.kt",
+      "source_sha256": "a0762125885880598e571cff48e719439deae2300c575580d530f0f4e62f555e",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.terminal.TerminalJobHistoryReaderDeviceTest": {
+      "tests": 8,
+      "milliseconds": 1674,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalJobHistoryReaderDeviceTest.kt",
+      "source_sha256": "3492ea4400c66ea262b9edffaf38699483fa042af1705065aa754a043f68ffee",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.terminal.TerminalPathsTest": {
+      "tests": 18,
+      "milliseconds": 4573,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalPathsTest.kt",
+      "source_sha256": "dc9c1ef5ea652464b35f86c31a50f467146b9549c7e70de3f57a4fd7136c9884",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.terminal.TerminalRegistryTest": {
+      "tests": 22,
+      "milliseconds": 5961,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalRegistryTest.kt",
+      "source_sha256": "c1a8daa02aae63fe3d49e315fd44f9aba5165b7fa64c0c0af7711270dc452ba7",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.terminal.TerminalScreenTest": {
+      "tests": 7,
+      "milliseconds": 87490,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalScreenTest.kt",
+      "source_sha256": "bac573acbed0a5d990344e0917b06715727140c98530f70d9c8682a63f6a035b",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.terminal.TerminalTasksDialogTest": {
+      "tests": 1,
+      "milliseconds": 12831,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalTasksDialogTest.kt",
+      "source_sha256": "6c1844c00101ea009d124f469446ce87fc25ed53cc08c49e66fe513e2fa3fd66",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.title.SqliteTitleCommitAdapterTest": {
+      "tests": 8,
+      "milliseconds": 1455,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/title/SqliteTitleCommitAdapterTest.kt",
+      "source_sha256": "405f4f68942ac39c536c5f378e8be306de5ff8925b1e1507aaf7bc222d83cb2b",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.title.TitleModelCoordinatorTest": {
+      "tests": 13,
+      "milliseconds": 2669,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/title/TitleModelCoordinatorTest.kt",
+      "source_sha256": "090c30f017f4681d5496cbe45d8f1949eb194fbbedba0ada114e409689c5fc56",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.title.TitleModelFactoryTest": {
+      "tests": 2,
+      "milliseconds": 495,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/title/TitleModelFactoryTest.kt",
+      "source_sha256": "62121637101e11a3d6bd113f2c0e42b017c2b9ae146cf07f3e5674602e9ced8a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.title.TitleModelSettingsEditorTest": {
+      "tests": 3,
+      "milliseconds": 583,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/title/TitleModelSettingsEditorTest.kt",
+      "source_sha256": "c611318544471c6ef368b99f88fb67ab7d8444b1128de80f15543603e2f5a801",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.title.TitleModelSettingsStoreTest": {
+      "tests": 7,
+      "milliseconds": 1369,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/title/TitleModelSettingsStoreTest.kt",
+      "source_sha256": "e6ad0071f16b422baefe1c127234d63472b2c117ab5499b6f94f891e1b27f93d",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.title.TitleProductionDatabaseTest": {
+      "tests": 5,
+      "milliseconds": 984,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/title/TitleProductionDatabaseTest.kt",
+      "source_sha256": "26f682e863b56a39523ebcb47cdc96aaff13c757e8ca49435f0c0425d2c59095",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.MessageImageRenderingTest": {
+      "tests": 4,
+      "milliseconds": 49819,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/MessageImageRenderingTest.kt",
+      "source_sha256": "52a0e19f8bc238cfa4ad0246568c69151990e1bb8e98a2d049718527fda628d6",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.ShizukuApprovalHostTest": {
+      "tests": 3,
+      "milliseconds": 37410,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/ShizukuApprovalHostTest.kt",
+      "source_sha256": "9983c5447d1f5e0d6992e73667141c0855eaa1a6ca1f1acbdc4725ca5ca7b4e5",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.TerminalApprovalHostTest": {
+      "tests": 4,
+      "milliseconds": 57391,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/TerminalApprovalHostTest.kt",
+      "source_sha256": "cf4f2b50642f8122c96632237c6028784b02d7ce93e7580ec7e032e40e6b5767",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.ToolScreenshotReceiptTest": {
+      "tests": 2,
+      "milliseconds": 596,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/ToolScreenshotReceiptTest.kt",
+      "source_sha256": "f807e2a7fe5a7e0368fb920862dbb691b7e600461ae034308549be84e7c13a89",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.icons.ModelBrandIconTest": {
+      "tests": 3,
+      "milliseconds": 38533,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/icons/ModelBrandIconTest.kt",
+      "source_sha256": "9a73c86ea840d38c2ab63bea76a52cbf11aa6d1c3f2408aabbc3bfbd33237b3b",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.attachments.ImageAttachmentsUiTest": {
+      "tests": 8,
+      "milliseconds": 101983,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/attachments/ImageAttachmentsUiTest.kt",
+      "source_sha256": "71e42b2fa5e53d515b7b32bc89fee209552b8da197b66e0539dfd06f2fc146ca",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.attachments.VideoAttachmentsUiTest": {
+      "tests": 17,
+      "milliseconds": 205806,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/attachments/VideoAttachmentsUiTest.kt",
+      "source_sha256": "97d1fa334e10613381dd66161b60763badbfb3f87be52cb923df9a4418867468",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest": {
+      "tests": 8,
+      "milliseconds": 101275,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageListMeasurePhaseTest.kt",
+      "source_sha256": "31da5da0f14be79f6e7953375bd1832bff74ee0727bbe0c11f4a283f4b5302d3",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest": {
+      "tests": 4,
+      "milliseconds": 54153,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageSpacingTest.kt",
+      "source_sha256": "41a50bbf9a32515a8c85bcbe01081b70d3f366004c4e832fddae0bcf322d924c",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.ChatModelPickerLayoutTest": {
+      "tests": 7,
+      "milliseconds": 93977,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatModelPickerLayoutTest.kt",
+      "source_sha256": "3348c3a4a3b4990d1666f0573ca38c029934d613794e2f800ddcac41e3077471",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.ChatTypographyTest": {
+      "tests": 1,
+      "milliseconds": 33605,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatTypographyTest.kt",
+      "source_sha256": "e70108a9846cfda81e89224908452a080b04518c3e2b6e143879c69d1b655637",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest": {
+      "tests": 15,
+      "milliseconds": 186568,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageMarkdownTest.kt",
+      "source_sha256": "df74d633a7a53db813f62109f25e65fd44ba8c4d3dd1b649d2a01c55fb2b19af",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningCardTest": {
+      "tests": 2,
+      "milliseconds": 24951,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReportedReasoningCardTest.kt",
+      "source_sha256": "3921f7dfe2bd35289521d3ea35641b198652650e28a9a65f3b43e3337147ad5b",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.SubAgentStatusDialogTest": {
+      "tests": 2,
+      "milliseconds": 26201,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/SubAgentStatusDialogTest.kt",
+      "source_sha256": "4f569e6d5e52d8b1e77cad1992951328b7bdae703f5e7c08cd9263a59ab6a532",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.ToolCardReadabilityTest": {
+      "tests": 3,
+      "milliseconds": 66948,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt",
+      "source_sha256": "a35b8fd2ebef3e291adcbf5c1bf8283e497536871ab02eb1e79176cee6652fc3",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest": {
+      "tests": 13,
+      "milliseconds": 172603,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolOperationCardTest.kt",
+      "source_sha256": "01e88ff6ecc950e3fcac1db6bcb6bebfdbefc1e37c8350af75596b0a4139681a",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.settings.CatalogModelEditorLayoutTest": {
+      "tests": 3,
+      "milliseconds": 49166,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/CatalogModelEditorLayoutTest.kt",
+      "source_sha256": "2ee3e91bf6cd0646c8916452ab435c7db5f4603f98cef809afbd711e57d1feaf",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.settings.CompressionSettingsFormTest": {
+      "tests": 5,
+      "milliseconds": 64326,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/CompressionSettingsFormTest.kt",
+      "source_sha256": "6ff839b90fb3a569e8e32fc262c641e038a75104de39b13c362aa35f0bf5ae21",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.settings.LinuxSettingsScreenTest": {
+      "tests": 7,
+      "milliseconds": 92433,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/LinuxSettingsScreenTest.kt",
+      "source_sha256": "2016f4036fe6ddebe89c2cf0541c1605cff49115a66cd6d6525ce6bf6b41e78b",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ui.screens.settings.PermissionCheckScreenTest": {
+      "tests": 2,
+      "milliseconds": 48777,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/PermissionCheckScreenTest.kt",
+      "source_sha256": "996de840aedfb35111162bd964e067ad8d43ce1d3c3ddd4cc8563886cc135585",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.settings.ProviderCatalogSettingsScreenTest": {
+      "tests": 5,
+      "milliseconds": 69023,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/ProviderCatalogSettingsScreenTest.kt",
+      "source_sha256": "adc7e5ff352a441cbed8a14b1b9b4ab2f5800f1acf36e3f8c1f83141a041c02e",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.settings.ProviderInlineEditorsTest": {
+      "tests": 2,
+      "milliseconds": 29813,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/ProviderInlineEditorsTest.kt",
+      "source_sha256": "63031b44aa1ba63b5d156c16e0fa311e2d777da2eb8a4d479db86a18d48d92b5",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.settings.ProviderInlineFieldsLayoutTest": {
+      "tests": 6,
+      "milliseconds": 80950,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/ProviderInlineFieldsLayoutTest.kt",
+      "source_sha256": "7e0d4fcfc6bbe4e4d7956256b319bda75dc76fd532d291d3c814aaf9a67a1812",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.ui.screens.settings.ProviderModelSelectionDialogTest": {
+      "tests": 6,
+      "milliseconds": 79858,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/ProviderModelSelectionDialogTest.kt",
+      "source_sha256": "7132c6224837f30d2bbdb5acaa704ac1c993b0e8c0adb1f42fee9973238ee6d1",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ui.screens.settings.ProviderSettingsThemeTest": {
+      "tests": 1,
+      "milliseconds": 11980,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/ProviderSettingsThemeTest.kt",
+      "source_sha256": "dcc5b0a8d4d96fab33a1515e8d2e158394def9a5118bee6b7fb7139e0dc2084c",
+      "run_id": 39717208828,
+      "attempt": 1,
+      "api": "26",
+      "build_sha": "5d7a60e443c596eeef0e03828f38bc2e23400510"
+    },
+    "app.daiyu.android.ui.screens.settings.RunningModeSettingsScreenTest": {
+      "tests": 2,
+      "milliseconds": 26057,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/RunningModeSettingsScreenTest.kt",
+      "source_sha256": "428f294ee2b59714028b31c231266376864686fb5d62d87e82d9dfa4d92edffc",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.vd.OwnerUninitializedShutdownLauncherTest": {
+      "tests": 1,
+      "milliseconds": 200,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/vd/OwnerUninitializedShutdownLauncherTest.kt",
+      "source_sha256": "fbd21d0e9d7486ac2563d14ee670a943b59e033ef152b20c8283165f75519bc6",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.vd.R08RealTaskDeliveryBackendTest": {
+      "tests": 1,
+      "milliseconds": 185,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/vd/R08RealTaskDeliveryBackendTest.kt",
+      "source_sha256": "3dfb57fa977a0e7fd29695ce8c4d8d5ab5f0f0dae7aded67e85d78b992b02cef",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.vd.VirtualDisplayAnchorManifestTest": {
+      "tests": 1,
+      "milliseconds": 240,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/vd/VirtualDisplayAnchorManifestTest.kt",
+      "source_sha256": "e7fc9bed8236fbaad98c9702e1cb294391be587ddf24c796039a67331fa24c52",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.vd.runtime.OwnerAnchorIdentityTest": {
+      "tests": 1,
+      "milliseconds": 162,
+      "source_path": "app/src/androidTest/java/app/daiyu/android/vd/runtime/OwnerAnchorIdentityTest.java",
+      "source_sha256": "8f1a000fc9b5cdffa74e35b6059ac9eff8f9baa4d46f5749018c384f2ac44221",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.vd.runtime.OwnerUninitializedShutdownSocketTest": {
+      "tests": 7,
+      "milliseconds": 1746,
+      "source_path": "app/src/androidTest/java/app/daiyu/android/vd/runtime/OwnerUninitializedShutdownSocketTest.java",
+      "source_sha256": "2fcf76520a42af4e26111383c16b6357330d2f2f268255925c37154b56babad6",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.voice.AndroidDictationSafetyTest": {
+      "tests": 9,
+      "milliseconds": 1904,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/voice/AndroidDictationSafetyTest.kt",
+      "source_sha256": "d24dd224b6e0da906b870826af6dbfb02c51ae2a098594db2aa26f2469d8e7e5",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.voice.DraftDictationSessionTest": {
+      "tests": 4,
+      "milliseconds": 882,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/voice/DraftDictationSessionTest.kt",
+      "source_sha256": "d69ffc7f33ce3373cd0eb3a46592b56b9da2fd43b26f05333c6dad430394262d",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.voice.ProductionSpeechReleaseSafetyTest": {
+      "tests": 1,
+      "milliseconds": 222,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/voice/ProductionSpeechReleaseSafetyTest.kt",
+      "source_sha256": "a7e5a42c80ecb72648bebb894ca7364b58f6aa6fac4d20b54df72a9d7c0fc308",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.workspace.PrivateWorkspaceFilesTest": {
+      "tests": 15,
+      "milliseconds": 2726,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/workspace/PrivateWorkspaceFilesTest.kt",
+      "source_sha256": "bc32b603ae996ecbe004c6086678112077ba74b73063838ce1228d7346c04c1e",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    },
+    "app.daiyu.android.workspace.WorkspaceFilesAccessTest": {
+      "tests": 8,
+      "milliseconds": 1665,
+      "source_path": "app/src/androidTest/kotlin/app/daiyu/android/workspace/WorkspaceFilesAccessTest.kt",
+      "source_sha256": "256392f55cc2a397c36fe4b236e68d5135594333a8e6bd21de7d8103678d2d88",
+      "run_id": 39669754489,
+      "attempt": 1,
+      "api": "37.2",
+      "build_sha": "3a8c64e549200036bebe62ec6954c09bd279c0d5"
+    }
+  }
+}

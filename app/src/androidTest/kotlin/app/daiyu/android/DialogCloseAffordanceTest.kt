@@ -55,6 +55,8 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
             ui.onNodeWithText(text).assertDoesNotExist()
         }
         awaitNodeWindowFocus(node("chat-model-picker"))
+        dismissIme()
+        awaitNodeWindowFocus(node("chat-model-picker"))
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()

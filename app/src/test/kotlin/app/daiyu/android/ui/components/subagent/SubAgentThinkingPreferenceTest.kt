@@ -15,7 +15,7 @@ class SubAgentThinkingPreferenceTest {
             ReasoningEffort.MEDIUM, ReasoningEffort.HIGH, ReasoningEffort.XHIGH, ReasoningEffort.MAX)
         for (effort in listOf(null, ReasoningEffort.OFF, ReasoningEffort.HIGH, ReasoningEffort.DEFAULT)) {
             val draft = profile.copy(reasoning = effort)
-            val projected = subAgentThinkingPreference(draft, config, chatStyle = true)
+            val projected = subAgentThinkingPreference(draft, config)
             assertEquals(choices, projected.options)
             assertEquals(effort ?: ReasoningEffort.DEFAULT, projected.effort)
             assertEquals(effort, draft.reasoning)
@@ -24,16 +24,20 @@ class SubAgentThinkingPreferenceTest {
         assertTrue(model.reasoningEfforts.isEmpty())
     }
 
-    @Test fun settingsAndMediaKeepTheirExistingExplicitCapabilityMapping() {
-        val settings = subAgentThinkingPreference(profile.copy(reasoning = ReasoningEffort.HIGH), config, chatStyle = false)
-        assertTrue(settings.options.isEmpty())
-        assertEquals(ReasoningEffort.OFF, settings.effort)
+    @Test fun explicitTextCapabilitiesDoNotRemoveRequestedPreferences() {
+        val explicit = config.copy(reasoningCapabilities = SubAgentReasoningCapabilities(emptyList(), canDisable = true))
+        val settings = subAgentThinkingPreference(profile.copy(reasoning = ReasoningEffort.HIGH), explicit)
+        assertEquals(7, settings.options.size)
+        assertEquals(ReasoningEffort.HIGH, settings.effort)
+    }
+
+    @Test fun mediaKeepsItsExistingExplicitCapabilityMapping() {
         val mediaProfile = profile.copy(role = "image_generation", reasoning = ReasoningEffort.HIGH)
         val mediaConfig = config.copy(mediaReasoningSupported = true,
             mediaReasoningEfforts = listOf(ReasoningEffort.LOW, ReasoningEffort.HIGH))
-        val media = subAgentThinkingPreference(mediaProfile, mediaConfig, chatStyle = true)
+        val media = subAgentThinkingPreference(mediaProfile, mediaConfig)
         assertEquals(listOf(ReasoningEffort.LOW, ReasoningEffort.HIGH), media.options)
         assertEquals(ReasoningEffort.HIGH, media.effort)
-        assertTrue(subAgentThinkingPreference(mediaProfile, config, chatStyle = true).options.isEmpty())
+        assertTrue(subAgentThinkingPreference(mediaProfile, config).options.isEmpty())
     }
 }

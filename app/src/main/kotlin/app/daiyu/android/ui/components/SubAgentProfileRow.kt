@@ -50,7 +50,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
     }
     val media = if (profile.isMedia && config != null) MediaReasoningSettings.resolve(config, profile.role) else null
     val canThink = config != null && (!profile.isMedia || media?.status == MediaReasoningSettings.Status.SUPPORTED)
-    val thinking = config?.let { subAgentThinkingPreference(profile, it, LocalConversationAgentStyle.current) }
+    val thinking = config?.let { subAgentThinkingPreference(profile, it) }
     val effective = thinking?.effort
     val efforts = thinking?.options.orEmpty()
     val thinkingLabel = when {

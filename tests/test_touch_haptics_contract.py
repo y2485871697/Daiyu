@@ -109,8 +109,10 @@ class TouchHapticsContractTest(unittest.TestCase):
             self.assertIn("val feedbackView = LocalView.current", text, file)
         self.assertIn("TouchHaptics.action(view) { preview(index); commit(index) }", (SRC / "ui/components/subagent/ConversationThinkingPicker.kt").read_text())
         text = (SRC / "ui/components/subagent/ThinkingEffortPicker.kt").read_text()
-        self.assertIn("if (next != latestEffort) TouchHaptics.action(view)", text)
-        self.assertIn("hapticEffect = SliderDefaults.SliderHapticEffect.None", text)
+        self.assertIn("CompositionLocalProvider(LocalConversationAgentStyle provides !mainChat)", text)
+        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description)", text)
+        self.assertNotIn("WindowDialog", text)
+        self.assertNotIn("SliderDefaults", text)
 
     def test_programmatic_native_check_restore_has_no_haptic_observer(self):
         for file, group in (("question/QuestionHost.kt", "group"), ("question/QuestionCardView.kt", "options")):

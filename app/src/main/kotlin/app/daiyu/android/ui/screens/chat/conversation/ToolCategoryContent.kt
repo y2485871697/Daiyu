@@ -159,8 +159,11 @@ private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.End), color = colors.muted)
         } else SelectionContainer {
-            Text(document.text, (if (code) surface.padding(horizontal = 9.dp, vertical = 8.dp)
-                else surface.padding(vertical = 2.dp)).testTag("tool-document:${document.title}"), style = style, color = colors.text)
+            if (code) Box(surface.testTag("tool-document-frame:${document.title}")) {
+                Text(document.text, Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp)
+                    .testTag("tool-document:${document.title}"), style = style, color = colors.text)
+            } else Text(document.text, surface.padding(vertical = 2.dp)
+                .testTag("tool-document:${document.title}"), style = style, color = colors.text)
         }
     }
     if (opened) ToolOutputDialog(document, onDismiss = { opened = false })

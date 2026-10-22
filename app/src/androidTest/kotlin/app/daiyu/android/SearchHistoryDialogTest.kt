@@ -170,8 +170,14 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
             val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
             val before = node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
             val top = node(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top
-            realPauseResume(activity, atPause = { oldClick(); oldMore() })
+            realPauseResume(activity, atPause = {
+                oldClick(); oldMore()
+                assertNull(opened)
+                assertEquals(3, reads.get())
+            })
+            ui.mainClock.advanceTimeBy(200)
             assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertEquals(4, reads.get())
             node(tag).assertDoesNotExist()
             release.countDown()
             awaitUniqueTag("search:retry")

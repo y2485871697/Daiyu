@@ -149,7 +149,7 @@ internal fun ChatModelPicker(
                                             modifier = Modifier.testTag("chat-model-count:${provider.id}"))
                                         provider.balance?.let { balance ->
                                             ProviderBalanceIndicator(state = balance,
-                                                modifier = Modifier.testTag("chat-model-provider-balance:${provider.id}").widthIn(max = 96.dp),
+                                                modifier = Modifier.testTag("chat-model-provider-balance:${provider.id}"),
                                                 textStyle = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
                                         }
                                     }

@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +39,7 @@ import java.util.concurrent.atomic.AtomicLong
 internal enum class WorkspaceSettingsSection { ALL, FILES, SHARED }
 
 private class WorkspaceRevoke(val uri: Uri)
+private data class WorkspaceDirectoryPosition(val tree: Uri, val index: Int, val offset: Int)
 
 @Composable
 internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier,
@@ -66,7 +68,8 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     var shownTree by remember { mutableStateOf<Uri?>(null) }
     var lastTree by remember { mutableStateOf<Uri?>(null) }
     var restoringDirectory by remember { mutableStateOf(false) }
-    val listState = rememberLazyListState()
+    var listState by remember { mutableStateOf(LazyListState()) }
+    var retainedPosition by remember(access) { mutableStateOf<WorkspaceDirectoryPosition?>(null) }
     val loadingListState = rememberLazyListState()
     var pendingTree by remember { mutableStateOf<Boolean?>(null) }
     var request by remember { mutableStateOf<AtomicBoolean?>(null) }
@@ -76,15 +79,21 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     fun invalidateRead() { request?.set(true); request = null; listing = null; shownTree = null; restoringDirectory = false }
     fun browse(uri: Uri, restoring: Boolean = false) {
         if (!current() || !restoring && !sharingCurrent() || busy || privateOccupied || !loaded || uri !in grants) return
+        if (!restoring) retainedPosition = null
         invalidateRead(); notice = null; restoringDirectory = restoring
         val token = AtomicBoolean(false); request = token
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) { access.files(uri) { !visit.get() || token.get() } }
-                if (current() && request === token && !token.get()) { listing = result; shownTree = uri; lastTree = uri }
+                if (current() && request === token && !token.get()) {
+                    retainedPosition?.takeIf { restoring && it.tree == uri }?.let {
+                        listState = LazyListState(it.index, it.offset)
+                    }
+                    listing = result; shownTree = uri; lastTree = uri; retainedPosition = null
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
-                if (current() && request === token && !token.get()) { lastTree = null; notice = "目录未读取，请刷新或重新选择" }
+                if (current() && request === token && !token.get()) { lastTree = null; retainedPosition = null; notice = "目录未读取，请刷新或重新选择" }
             }
             finally { if (request === token) { request = null; restoringDirectory = false } }
         }
@@ -100,16 +109,24 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                 if (current() && request === token && !token.get()) {
                     grants = values; loaded = true; request = null
                     val tree = lastTree
-                    if (tree != null && tree in values) browse(tree, restoring = true) else lastTree = null
+                    if (tree != null && tree in values) browse(tree, restoring = true)
+                    else { lastTree = null; retainedPosition = null }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { if (current() && request === token && !token.get()) { grants = emptyList(); lastTree = null; loaded = true; request = null; notice = "共享目录暂时不可用，请刷新或重新选择" } }
+            catch (_: Exception) { if (current() && request === token && !token.get()) { grants = emptyList(); lastTree = null; retainedPosition = null; loaded = true; request = null; notice = "共享目录暂时不可用，请刷新或重新选择" } }
         }
     }
     DisposableEffect(access, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) refresh()
-            if (event == Lifecycle.Event.ON_PAUSE) { callbackEpoch = epoch.incrementAndGet(); invalidateRead(); revoking = null; grants = emptyList(); loaded = false }
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                val tree = shownTree
+                if (loaded && !restoringDirectory && tree != null && listing != null) {
+                    retainedPosition = WorkspaceDirectoryPosition(tree,
+                        listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+                }
+                callbackEpoch = epoch.incrementAndGet(); invalidateRead(); revoking = null; grants = emptyList(); loaded = false
+            }
         }
         lifecycle.addObserver(observer)
         onDispose { visit.set(false); invalidateRead(); lifecycle.removeObserver(observer) }
@@ -120,7 +137,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         pendingTree = null
         if (visit.get() && tree != null && result.resultCode == Activity.RESULT_OK && result.data != null) {
             val data = result.data!!
-            busy = true; invalidateRead()
+            busy = true; retainedPosition = null; invalidateRead()
             val admittedEpoch = epoch.get()
             scope.launch {
                 try {
@@ -145,7 +162,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     val pickerCallbackEpoch = callbackEpoch
     fun pick(tree: Boolean) {
         if (!sharingCurrent() || epoch.get() != pickerCallbackEpoch || busy || privateOccupied || pendingTree != null) return
-        pendingTree = tree; revoking = null; invalidateRead()
+        pendingTree = tree; revoking = null; retainedPosition = null; invalidateRead()
         try { picker.launch(PlatformSettingsAccess.pickerIntent(tree)) }
         catch (_: Exception) { pendingTree = null; notice = "未能打开系统文件选择器" }
     }
@@ -164,7 +181,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         title = "撤销共享授权", confirmText = "撤销", destructive = true, message = "撤销后，本应用将无法再读取该目录或文件。不会删除原文件。",
         onDismiss = { if (revoking === revoke) revoking = null }, onConfirm = {
             if (sharingCurrent() && !busy && !privateOccupied && loaded && revoke.uri in grants && revoking === revoke) {
-                revoking = null; busy = true; invalidateRead()
+                revoking = null; busy = true; retainedPosition = null; invalidateRead()
                 val admittedEpoch = epoch.get()
                 scope.launch {
                     try {
@@ -197,7 +214,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         if (integratedLinux) item(key = "linux-file-locations") {
             LinuxFileLocationTabs(location, !busy && !privateOccupied && pendingTree == null) {
                 if (current() && fileScope === renderedScope && !busy && !privateOccupied && pendingTree == null && location != it) {
-                    invalidateRead(); lastTree = null; revoking = null; notice = null; fileScope = Any(); location = it
+                    invalidateRead(); lastTree = null; retainedPosition = null; revoking = null; notice = null; fileScope = Any(); location = it
                     if (it == LinuxFileLocation.SHARED && !loaded) refresh(clearNotice = false)
                 }
             }

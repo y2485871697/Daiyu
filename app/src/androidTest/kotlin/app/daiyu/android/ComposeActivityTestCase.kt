@@ -591,7 +591,8 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun assertSelection(start: Int, end: Int) {
         val range = node("chat-draft").fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange]
-        assertEquals(start, range.start); assertEquals(end, range.end)
+        assertEquals("selection expected=($start,$end) actual=(${range.start},${range.end})", start, range.start)
+        assertEquals("selection expected=($start,$end) actual=(${range.start},${range.end})", end, range.end)
     }
     // Retain host capabilities or app-owned semantics, not ClickableNode wrappers.
     // Capture before navigation; never refetch a replacement callback after a visit changes.
@@ -849,8 +850,10 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.waitForIdle()
     }
 
-    protected fun recreateActivity(activity: MainActivity, afterDestroyed: () -> Unit = {}): MainActivity {
+    protected fun recreateActivity(activity: MainActivity, afterImeHidden: () -> Unit = {},
+        afterDestroyed: () -> Unit = {}): MainActivity {
         dismissIme()
+        afterImeHidden()
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {
             mainThread { androidx.core.app.ActivityCompat.recreate(activity) }

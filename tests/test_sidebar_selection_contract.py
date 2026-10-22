@@ -50,12 +50,27 @@ class SidebarSelectionContractTest(unittest.TestCase):
                          'fixture.controller.preferences.getString("selected", null)',
                          'node("drawer-search-input").assertEditableText("保留侧栏")',
                          'assertEquals(before, fixture.database.exportBackup())',
-                         'KeyEvent.KEYCODE_BACK', 'ui.onRoot().performTouchInput',
+                         'KeyEvent.KEYCODE_BACK', 'drawerRoot.performTouchInput',
+                         'isRoot() and hasAnyDescendant(hasTestTag("conversation-drawer"))',
+                         'awaitNodeWindowFocus(drawer)',
                          'assertEquals(false, hostValue("getSidebarVisible"))',
                          'assertDraft("乙草稿")', 'assertSelection(1, 3)',
                          'node("chat-draft").assertIsNotEnabled()',
                          'testManageSelectsInPlacePreservesOwnerDraftAndReopensWithoutLosingSelection',
                          'assertEquals(0, fixture.opens.get())']:
+            self.assertIn(fragment, test)
+
+
+    def test_recreation_diagnostic_preserves_both_selection_endpoints_and_hide_boundary(self):
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ActivityTest.kt').read_text()
+        helper = fixture.split('protected fun recreateActivity(', 1)[1].split('protected fun finishExistingMainActivities', 1)[0]
+        self.assertLess(helper.index('dismissIme()'), helper.index('afterImeHidden()'))
+        self.assertLess(helper.index('afterImeHidden()'), helper.index('ActivityCompat.recreate(activity)'))
+        self.assertIn('selection expected=($start,$end) actual=(${range.start},${range.end})', fixture)
+        for fragment in ['selectionCheckpoint("before-hide")', 'selectionCheckpoint("after-hide-before-recreate")',
+                         'selectionCheckpoint("replacement-focused")', 'after-destroy retained=',
+                         'assertDraft(" B新稿\\n "); assertSelection(1, 2)']:
             self.assertIn(fragment, test)
 
 

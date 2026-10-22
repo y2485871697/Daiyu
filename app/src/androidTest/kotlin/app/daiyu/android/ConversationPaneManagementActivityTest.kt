@@ -84,10 +84,13 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         node("drawer-search-input").assertEditableText("保留侧栏")
         node("drawer-conversation:${second.id.value}").performClick()
         assertSelectedWithSidebarOpen(second, "乙草稿")
-        val root = ui.onRoot().fetchSemanticsNode().boundsInRoot
-        val pane = node("conversation-drawer").fetchSemanticsNode().boundsInRoot
+        val drawer = node("conversation-drawer")
+        awaitNodeWindowFocus(drawer)
+        val drawerRoot = ui.onNode(isRoot() and hasAnyDescendant(hasTestTag("conversation-drawer")), useUnmergedTree = true)
+        val root = drawerRoot.fetchSemanticsNode().boundsInRoot
+        val pane = drawer.fetchSemanticsNode().boundsInRoot
         assertTrue("Scrim is exposed to the right of the pane", root.right > pane.right)
-        ui.onRoot().performTouchInput {
+        drawerRoot.performTouchInput {
             click(Offset((pane.right + root.right) / 2f - root.left, root.center.y - root.top))
         }
         ui.waitForIdle()

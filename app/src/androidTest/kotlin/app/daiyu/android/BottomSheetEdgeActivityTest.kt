@@ -184,6 +184,15 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         val restoredFrames = java.util.concurrent.atomic.AtomicInteger()
         val observer = view.viewTreeObserver
         var lastRestoredFrame = Long.MIN_VALUE
+        var currentFrameNanos = Long.MIN_VALUE
+        lateinit var choreographer: android.view.Choreographer
+        val frameCallback = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                currentFrameNanos = frameTimeNanos
+                view.postInvalidateOnAnimation()
+                choreographer.postFrameCallback(this)
+            }
+        }
         val listener = android.view.ViewTreeObserver.OnPreDrawListener {
             val insets = ViewCompat.getRootWindowInsets(view)
             val location = IntArray(2)
@@ -194,23 +203,30 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                 insets.getInsets(WindowInsetsCompat.Type.ime()).bottom == 0 &&
                 kotlin.math.abs(location[1] + view.rootView.height - originalBottom) <= 2f &&
                 kotlin.math.abs(bottom - originalBottom) <= 2f
-            val frame = android.view.Choreographer.getInstance().frameTimeNanos
+            val frame = currentFrameNanos
             if (!restored) {
                 restoredFrames.set(0)
                 lastRestoredFrame = Long.MIN_VALUE
-            } else if (frame != lastRestoredFrame) {
+            } else if (frame != Long.MIN_VALUE && frame != lastRestoredFrame) {
                 restoredFrames.incrementAndGet()
                 lastRestoredFrame = frame
             }
             if (restoredFrames.get() < 2) view.postInvalidateOnAnimation()
             true
         }
-        instrumentation.runOnMainSync { observer.addOnPreDrawListener(listener) }
+        instrumentation.runOnMainSync {
+            choreographer = android.view.Choreographer.getInstance()
+            observer.addOnPreDrawListener(listener)
+            choreographer.postFrameCallback(frameCallback)
+        }
         try {
             dismissIme()
             ui.waitUntil(5_000) { restoredFrames.get() >= 2 }
         } finally {
-            instrumentation.runOnMainSync { if (observer.isAlive) observer.removeOnPreDrawListener(listener) }
+            instrumentation.runOnMainSync {
+                choreographer.removeFrameCallback(frameCallback)
+                if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+            }
         }
         assertAttached("catalog-model-dialog", "dialog-confirm")
         close("catalog-model-dialog")

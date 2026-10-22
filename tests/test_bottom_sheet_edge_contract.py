@@ -103,6 +103,11 @@ class BottomSheetEdgeContractTest(unittest.TestCase):
         self.assertIn("val open = mutableStateOf(true)", text)
         self.assertNotIn("remember { mutableStateOf(true) }", text)
         self.assertIn("windowBottom, surfaceBottom, 2f", text)
+        self.assertIn("override fun doFrame(frameTimeNanos: Long)", text)
+        self.assertIn("currentFrameNanos = frameTimeNanos", text)
+        self.assertIn("frame != Long.MIN_VALUE && frame != lastRestoredFrame", text)
+        self.assertIn("choreographer.removeFrameCallback(frameCallback)", text)
+        self.assertNotIn("getInstance().frameTimeNanos", text)
         self.assertIn("<= safeBottom + 2f", text)
         for tag in ["chat-selection-sheet", "conversation-agent-sheet", "assistant-sheet", "usage-glass-dialog", "daiyu-choice-sheet", "catalog-model-dialog"]:
             self.assertIn('"' + tag + '"', text)

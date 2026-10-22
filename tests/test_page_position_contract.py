@@ -65,22 +65,30 @@ class PagePositionContract(unittest.TestCase):
         self.assertIn('now.generation == generation', dialog)
         self.assertIn('LaunchedEffect(request, query, resumed, renderedVisit)', dialog)
 
-    def test_history_search_restores_fresh_pages_before_exposing_retained_position(self):
+    def test_history_search_preserves_only_a_read_only_render_frame_while_restoring_fresh_pages(self):
         dialog = source('ui/app/SearchHistoryDialog.kt')
         self.assertIn('state = if (useResultsPosition) listState else loadingListState', dialog)
         self.assertIn('snapshot.results.size < renderRestoreCount && snapshot.nextCursor != null', dialog)
-        self.assertIn('val snapshot = requests.state.collectAsState().value', dialog)
-        self.assertIn('val renderResumed = resumed', dialog)
-        self.assertIn('val renderRestoring = restoring', dialog)
-        self.assertIn('val renderRestoreCount = restoreCount', dialog)
-        self.assertIn('renderResumed && !renderRestoring && phase == SearchPhase.Results', dialog)
-        restore = dialog.split('LaunchedEffect(request, renderResumed', 1)[1].split('fun cancelSearch()', 1)[0]
-        self.assertIn('snapshot.generation == requests.state.value.generation', restore)
-        self.assertNotIn('val now = requests.state.value', restore)
-        self.assertIn('requests.loadMore()', dialog)
-        self.assertIn('renderRestoring && snapshot.appendPhase == SearchAppendPhase.ReadError', dialog)
-        self.assertIn('renderRestoring && snapshot.appendPhase == SearchAppendPhase.Cancelled', dialog)
-        self.assertIn('restoreCount = maxOf(restoreCount, requests.state.value.results.size)', dialog)
+        self.assertIn('val renderFrame = retainedFrame ?: freshFrame', dialog)
+        self.assertIn('val useResultsPosition = renderFrame != null', dialog)
+        self.assertIn('itemsIndexed(renderFrame.rows,', dialog)
+        self.assertIn('when (renderFrame.appendPhase)', dialog)
+        self.assertIn('if (renderFrame.hasMore)', dialog)
+        self.assertIn('!authoritativeTerminal && (!renderResumed || renderRestoring)', dialog)
+        self.assertIn('Box(Modifier.matchParentSize())', dialog)
+        frame = dialog.split('private data class DisplayedHistoryResults(', 1)[1].split('\n)', 1)[0]
+        for forbidden in ('Cursor', 'generation', 'reader', 'permit', 'onClick'):
+            self.assertNotIn(forbidden, frame)
+        self.assertIn('restoreCount = maxOf(restoreCount, lastDisplayed?.rows?.size ?: 0)', dialog)
+        self.assertIn('DisposableEffect(requests, lifecycle, request)', dialog)
+        self.assertIn('remember(request) { mutableStateOf<DisplayedHistoryResults?>(null) }', dialog)
+        self.assertIn('.then(if (!renderReadOnly) Modifier', dialog)
+        self.assertIn('!renderReadOnly && !restoring && available()', dialog)
+        self.assertIn('restoring == renderRestoring && now.generation == snapshot.generation', dialog)
+        self.assertIn('if (authoritativeTerminal) lastDisplayed = null', dialog)
+        self.assertIn('snapshot.phase == SearchPhase.Results && snapshot.appendPhase == SearchAppendPhase.Idle', dialog)
+        self.assertIn('snapshot.generation == requests.state.value.generation', dialog)
+        self.assertIn('if (next.trim() != request.query)', dialog)
 
 
 if __name__ == '__main__':

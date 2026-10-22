@@ -148,7 +148,7 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
                     SettingsSwitchRow("使用自定义模型", controls.enabled, !controls.busy || controls.saving,
                         busy = controls.saving, tag = "independent-model-enabled", onCheckedChange = controls.onEnabledChange)
                     SettingsRow("选择模型", summary = controls.label ?: "选择模型", tag = "independent-model-configure",
-                        onClick = if (controls.busy) null else controls.onChoose)
+                        showChevron = true, onClick = if (controls.busy) null else controls.onChoose)
                 }
             }
         }

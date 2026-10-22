@@ -48,7 +48,7 @@ fun TitleModelSettingsPanel(
                 SettingsSwitchRow("使用自定义模型", settings.enabled, !busy || saving,
                     busy = busy && saving, tag = "title-model-enabled") { requested -> if (requested) onChooseModel() else onDisable() }
                 SettingsRow("选择模型", summary = modelLabel ?: "选择模型", tag = "title-model-configure",
-                    onClick = if (busy) null else onChooseModel)
+                    showChevron = true, onClick = if (busy) null else onChooseModel)
             }
         }
     }

@@ -223,7 +223,7 @@ internal fun VoiceSettingsPanel(
         SettingsScaffoldPage("声音复刻账户", ::leaveChild) {
             item { VoiceSettingsCard {
                 SettingsTextField("声音复刻 API Key", accountKeyDraft, { accountKeyDraft = it }, password = true)
-                SettingsRow("保存账户", onClick = if (busy || accountKeyDraft.isBlank()) null else ({
+                SettingsRow("保存账户", showChevron = true, onClick = if (busy || accountKeyDraft.isBlank()) null else ({
                     if (current() && stopAudio()) {
                         val value = VoiceConfiguration(engine = "DOUBAO", provider = "personal-doubao",
                             endpoint = "https://openspeech.bytedance.com", key = accountKeyDraft.trim(),
@@ -299,7 +299,7 @@ internal fun VoiceSettingsPanel(
                             SettingsNote("识别音频会发送到豆包；与朗读、实时对话分别配置。")
                             SettingsTextField("ASR API Key", draft.asrKey, { if (!busy) changeDraft(draft.copy(asrKey = it)) }, password = true, enabled = !busy)
                             SettingsRow(if (asrAdvanced) "收起高级设置" else "高级：更换识别服务",
-                                onClick = if (busy) null else ({ asrAdvanced = !asrAdvanced }))
+                                showChevron = true, onClick = if (busy) null else ({ asrAdvanced = !asrAdvanced }))
                             if (asrAdvanced) {
                                 SettingsNote("仅在控制台开通了不同服务时更改。")
                                 DoubaoAsrProtocol.resources.forEachIndexed { index, resource ->
@@ -312,7 +312,7 @@ internal fun VoiceSettingsPanel(
                                     }
                                 }
                             }
-                            SettingsRow("保存连接设置", tag = "voice-save", onClick = if (busy || draft.asrKey.isBlank()) null else ({
+                            SettingsRow("保存连接设置", tag = "voice-save", showChevron = true, onClick = if (busy || draft.asrKey.isBlank()) null else ({
                                 if (current()) save(recognitionConfiguration().copy(asrKey = draft.asrKey.trim()))
                             }))
                             SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
@@ -321,10 +321,10 @@ internal fun VoiceSettingsPanel(
                 } else if (child == "MIMO") {
                     item { VoiceSettingsCard {
                         SettingsRow("MiMo 提供商", summary = mimoConnection()?.let { modelSource.providerName(it.provider) } ?: "请选择提供商",
-                            onClick = if (busy) null else ({ dialog = "MIMO_MODEL" }))
+                            showChevron = true, onClick = if (busy) null else ({ dialog = "MIMO_MODEL" }))
                         SettingsTextField("声音名称", sampleName, { if (!busy) { sampleName = it.take(80); selectedSample = null } }, enabled = !busy)
                         SettingsRow(if (selectedSample == null) "选择 MP3 / WAV 录音" else "录音已选择 · 重新选择",
-                            tag = "voice-sample-import", onClick = if (busy || pickerPending) null else ({
+                            tag = "voice-sample-import", showChevron = true, onClick = if (busy || pickerPending) null else ({
                                 val selected = mimoConnection()
                                 if (current() && sampleName.isNotBlank() && selected != null && picker.begin(selected, sampleName)) {
                                     pickerPending = true
@@ -332,7 +332,7 @@ internal fun VoiceSettingsPanel(
                                     catch (_: Exception) { picker.deliver(null); pickerPending = picker.pending; resultRevision++; notice = "未能打开录音选择器" }
                                 } else notice = "请先选择 MiMo 提供商。"
                             }))
-                        SettingsRow("保存参考声音", tag = "voice-sample-save", onClick = if (busy || selectedSample == null) null else ({
+                        SettingsRow("保存参考声音", tag = "voice-sample-save", showChevron = true, onClick = if (busy || selectedSample == null) null else ({
                             val selection = selectedSample
                             if (current() && selection != null && selection.configuration == mimoConnection()) {
                                 busy = true
@@ -357,10 +357,10 @@ internal fun VoiceSettingsPanel(
                             VoiceSettingsPreview(runtime, profile, !busy && preview != null && sampleText.isNotBlank(),
                                 ::current, installPreviewRevoke, sampleText, configuration = preview?.configuration,
                                 personalPreview = preview, embedded = true)
-                            SettingsRow("用于朗读", onClick = if (busy || mimoConnection()?.referenceOwner() != voice.providerId) null else ({
+                            SettingsRow("用于朗读", showChevron = true, onClick = if (busy || mimoConnection()?.referenceOwner() != voice.providerId) null else ({
                                 mimoConnection()?.let { save(it.copy(voice = voice.id, model = app.daiyu.android.voice.personal.MimoPersonalVoices.MODEL), speechOnly = true) }
                             }))
-                            SettingsRow("删除", onClick = if (busy) null else ({ removing = voice.id }))
+                            SettingsRow("删除", showChevron = true, onClick = if (busy) null else ({ removing = voice.id }))
                         }
                     }
                 } else when (section) {
@@ -368,14 +368,14 @@ internal fun VoiceSettingsPanel(
                         item { VoiceSettingsCard {
                             SettingsSwitchRow("启用语音转文字", inputEnabled, busy = busy, tag = "voice-input-enable",
                                 summary = "点击聊天输入框的语音按钮，把说话变成文字。") { switchFeature("input", it) { inputEnabled = it } }
-                            SettingsRow("离线语音", tag = "voice-offline-settings", onClick = if (busy) null else ({
+                            SettingsRow("离线语音", tag = "voice-offline-settings", showChevron = true, onClick = if (busy) null else ({
                                 if (current() && !busy && stopAudio()) { invalidatePicker(); child = "OFFLINE" }
                             }))
                         } }
                         item { OfflineSpeechPackCard(context, ::current) }
                         item { VoiceSettingsCard { SettingsRow("识别方式", tag = "voice-recognition-method",
                             summary = if (saved?.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
-                            onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "ASR" } })) } }
+                            showChevron = true, onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "ASR" } })) } }
                         if (pack.ready && draft.dictation != "DOUBAO") item { VoiceSettingsCard { SettingsSwitchRow("离线听写", pack.enabled,
                             tag = "offline-speech-enable") { if (current()) OfflineSpeechPack.setEnabled(context, it) } } }
                     }
@@ -391,7 +391,7 @@ internal fun VoiceSettingsPanel(
                             }
                             if (draft.dictation == "DOUBAO") {
                                 SettingsTextField("ASR API Key", draft.asrKey, { if (!busy) { changeDraft(draft.copy(asrKey = it)); conversationAsrDirty = true } }, password = true, enabled = !busy)
-                                SettingsRow("识别服务", summary = draft.asrResource.ifBlank { "请选择" }, onClick = if (busy) null else ({ dialog = "ASR_RESOURCE" }))
+                                SettingsRow("识别服务", summary = draft.asrResource.ifBlank { "请选择" }, showChevron = true, onClick = if (busy) null else ({ dialog = "ASR_RESOURCE" }))
                             }
                         } }
                         if (section == "CONVERSATION" && draft.dictation != "DOUBAO") item { OfflineSpeechPackCard(context, ::current) }
@@ -417,10 +417,10 @@ internal fun VoiceSettingsPanel(
                         } }
                         if (cloud) item { VoiceSettingsCard {
                             SettingsRow("朗读模型", summary = draft.model.takeIf { it.isNotBlank() }?.let { draft.modelLabel.ifBlank { "${modelSource.providerName(draft.provider).orEmpty()} · $it" } } ?: "选择朗读模型",
-                                tag = "voice-model-open", onClick = if (busy) null else ({ dialog = "MODEL" }))
+                                tag = "voice-model-open", showChevron = true, onClick = if (busy) null else ({ dialog = "MODEL" }))
                             val catalog = SpeechEngine.entries.firstOrNull { it.name == draft.engine }?.let { SpeechVoices.catalog(it, draft.model) }.orEmpty()
                             SettingsRow("音色", summary = catalog.firstOrNull { it.id == draft.voice }?.name ?: draft.voice.ifBlank { "选择音色" },
-                                tag = "voice-voice-open", onClick = if (busy || draft.model.isBlank() || (catalog.isEmpty() && draft.engine != "FISH")) null
+                                tag = "voice-voice-open", showChevron = true, onClick = if (busy || draft.model.isBlank() || (catalog.isEmpty() && draft.engine != "FISH")) null
                                     else ({ dialog = if (draft.engine == "FISH") "VOICE_MANUAL" else "VOICE" }))
                         } }
                         item { VoiceSettingsPreview(runtime, profile,
@@ -431,13 +431,13 @@ internal fun VoiceSettingsPanel(
                     "REALTIME" -> item { VoiceSettingsCard {
                         SettingsSwitchRow("启用豆包实时通话", realtimeEnabled, busy = busy) { switchFeature("realtime", it) { realtimeEnabled = it } }
                         SettingsRow("提供商", summary = modelSource.providerName(draft.duplexProvider) ?: "选择豆包语音提供商",
-                            onClick = if (busy) null else ({ dialog = "DUPLEX_PROVIDER" }))
+                            showChevron = true, onClick = if (busy) null else ({ dialog = "DUPLEX_PROVIDER" }))
                         SettingsRow("选择音色", summary = realtimeCatalog.firstOrNull { it.id == draft.duplexVoice }?.name
                             ?: accountVoices.firstOrNull { it.id == draft.duplexVoice }?.name ?: "选择音色",
-                            onClick = if (busy) null else ({ dialog = "DUPLEX_VOICE" }))
+                            showChevron = true, onClick = if (busy) null else ({ dialog = "DUPLEX_VOICE" }))
                         SettingsRow(if (realtimeRefreshing) "正在刷新…" else "刷新音色", summary = when (realtimeCatalogStatus) {
                             1 -> "音色列表已更新"; 2 -> "更新失败，保留当前目录"; else -> "使用内置音色列表"
-                        }, onClick = if (realtimeRefreshing || busy) null else ({
+                        }, showChevron = true, onClick = if (realtimeRefreshing || busy) null else ({
                             if (current()) {
                                 realtimeRefreshing = true
                                 scope.launch {
@@ -453,7 +453,7 @@ internal fun VoiceSettingsPanel(
                         SettingsTextField("角色说明", draft.instructions, { if (!busy) { changeDraft(draft.copy(instructions = it)); realtimeDirty = true } }, multiline = true, enabled = !busy)
                     } }
                     "PERSONAL" -> item { VoiceSettingsCard {
-                        SettingsRow("豆包语音", tag = "voice-account-open", onClick = if (busy) null else ({
+                        SettingsRow("豆包语音", tag = "voice-account-open", showChevron = true, onClick = if (busy) null else ({
                             if (current() && stopAudio()) {
                                 invalidatePicker()
                                 val selected = personalAccounts["DOUBAO"]
@@ -461,7 +461,7 @@ internal fun VoiceSettingsPanel(
                                 else child = "DOUBAO_ACCOUNT"
                             }
                         }))
-                        SettingsRow("MiMo 语音", tag = "voice-mimo-open", onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "MIMO"; notice = "" } }))
+                        SettingsRow("MiMo 语音", tag = "voice-mimo-open", showChevron = true, onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "MIMO"; notice = "" } }))
                     } }
                 }
                 if (notice.isNotBlank()) item { SettingsNote(notice, error = notice.startsWith("未")) }

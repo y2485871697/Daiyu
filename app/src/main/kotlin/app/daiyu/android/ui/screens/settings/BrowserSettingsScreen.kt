@@ -83,7 +83,7 @@ internal fun BrowserSettingsScreen(
                         }) else null,
                         trailing = { RadioButton(selected = selected == access, onClick = null, enabled = !busy) })
                 }
-                SettingsRow(title = "保存并回读", tag = "browser-save", onClick = if (!busy) ({
+                SettingsRow(title = "保存并回读", tag = "browser-save", showChevron = true, onClick = if (!busy) ({
                     if (page.active && pageSaveOwner.isActive && currentOwner()) {
                         val requested = BrowserSettings(selected)
                         busy = true

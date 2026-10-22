@@ -176,10 +176,10 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                     message?.let { SettingsNote(it, error = true) }
                     if (state.error) SettingsNote("环境设置未完成，请重试。", error = true)
                     state.pendingRemoval?.let { pending ->
-                        SettingsCard { SettingsRow("重试移除环境授权", onClick = if (pageEnabled) ({ if (basicCurrent()) page.remove(pending); Unit }) else null) }
+                        SettingsCard { SettingsRow("重试移除环境授权", showChevron = true, onClick = if (pageEnabled) ({ if (basicCurrent()) page.remove(pending); Unit }) else null) }
                     }
                     state.pendingApproval?.takeIf { it.installation.executionMode != LinuxExecutionMode.CHROOT || rootMode }?.let {
-                        SettingsCard { SettingsRow("完成环境设置", onClick = if (pageEnabled) ({ if (basicCurrent()) confirmPending = true }) else null) }
+                        SettingsCard { SettingsRow("完成环境设置", showChevron = true, onClick = if (pageEnabled) ({ if (basicCurrent()) confirmPending = true }) else null) }
                     }
                 }
                 item("linux-configuration") {

@@ -91,7 +91,7 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
                 state.phase == SpeechPhase.ERROR || state.phase == SpeechPhase.UNAVAILABLE -> "试听失败，请检查语音配置。"
                 preparing || state.phase == SpeechPhase.INITIALIZING || state.phase == SpeechPhase.QUEUED -> "正在准备…"
                 else -> null
-            }, onClick = if (!enabled && !active) null else ({
+            }, showChevron = true, onClick = if (!enabled && !active) null else ({
                 if (active) stop()
                 else if (current() && onInitialize != null) initialize = true
                 else if (current() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {

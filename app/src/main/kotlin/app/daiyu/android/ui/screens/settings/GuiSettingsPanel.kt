@@ -91,16 +91,16 @@ internal fun GuiSettingsPanel(
                     SettingsRow(title = "当前会话 ${session.identity.sessionId} / 任务 ${session.identity.runId}",
                         summary = "授权本身不落盘；UI 树/明确截图会作为本次工具结果提供给模型，并可能进入任务记录。页面失主、任务结束、服务断开即撤销授权。最多 128 节点、16 层、16 KiB 文本，密码节点文本隐藏。", tag = "gui-run")
                     SettingsRow(title = "允许本次 Agent 读取一次 UI 树（不含截图）", tag = "gui-grant-observe",
-                        onClick = if (!frozen) ({ if (active()) notice = describe(session.approveReadsFromUser(GuiReadApproval(1, 0))) }) else null)
+                        showChevron = true, onClick = if (!frozen) ({ if (active()) notice = describe(session.approveReadsFromUser(GuiReadApproval(1, 0))) }) else null)
                     SettingsRow(title = "允许一次 UI 树与一次明确请求的截图", summary = "仅有此选择仍不会截图；工具必须单独请求。截图可能含敏感信息，将作为本次工具结果提供给模型并可能留在任务记录；不绕过系统安全窗口。",
-                        tag = "gui-grant-screenshot", onClick = if (!frozen) ({ if (active()) notice = describe(session.approveReadsFromUser(GuiReadApproval(1, 1))) }) else null)
+                        tag = "gui-grant-screenshot", showChevron = true, onClick = if (!frozen) ({ if (active()) notice = describe(session.approveReadsFromUser(GuiReadApproval(1, 1))) }) else null)
                     SettingsRow(title = "精确操作必须在外部目标上通过静态浮层确认",
                         summary = "本设置页不再读取预览后切页授权。父任务先保留准备资源，再打开服务托管的非抢焦浮层；选择真实目标、展示完整输入后才获取最终观察。启用服务不是写授权。",
                         tag = "gui-exact-boundary")
                     pendingAction?.let { proposal ->
                         SettingsRow(title = "为提议动作打开外部确认浮层",
                             summary = "${proposal.operation} · 完整输入=${proposal.text ?: "无"}。提议中的旧 observation/node 不会沿用，需在真实外部应用重新选择并确认。",
-                            tag = "gui-confirm-action", onClick = if (!frozen) ({ if (active()) {
+                            tag = "gui-confirm-action", showChevron = true, onClick = if (!frozen) ({ if (active()) {
                                 val result = session.prepareExactActionFromUser(proposal.operation, proposal.text,
                                     ownerCurrent = { currentOwner() }, onConfirmed = onExactConfirmed)
                                 if (result is GuiResult.Value) {
@@ -112,7 +112,7 @@ internal fun GuiSettingsPanel(
                             } }) else null)
                     }
                     SettingsRow(title = "冻结以上授权并交给本次任务", summary = "不会扩大到其他动作或新观察。动作需同一 observation_id 与原调度器精确 WRITE 授权；过期不自动重试。",
-                        tag = "gui-freeze", onClick = if (!frozen) ({ if (active()) {
+                        tag = "gui-freeze", showChevron = true, onClick = if (!frozen) ({ if (active()) {
                             val writes = session.freezeAuthorizationFromUser()
                             frozen = true
                             page.transferred = try { onConfirmed(session, writes) } catch (_: Exception) { false }

@@ -51,26 +51,27 @@ internal fun SearchNotice(text: String, tag: String = "search:notice") {
 }
 
 @Composable
-internal fun SearchLoading(onCancel: () -> Unit) {
+internal fun SearchLoading(enabled: Boolean = true, onCancel: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) {
-        CircularProgressIndicator(Modifier.size(24.dp).testTag("search:loading"))
+        CircularProgressIndicator(Modifier.size(24.dp).then(if (enabled) Modifier.testTag("search:loading") else Modifier))
         Text(
             text = stringResource(R.string.search_loading),
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
             style = MiuixTheme.textStyles.body2,
         )
-        TextButton(text = stringResource(R.string.search_cancel), onClick = onCancel)
+        TextButton(text = stringResource(R.string.search_cancel), enabled = enabled, onClick = onCancel)
     }
 }
 
 @Composable
-internal fun SearchReadError(onRetry: () -> Unit) {
-    Column(Modifier.fillMaxWidth().testTag("search:error")) {
+internal fun SearchReadError(enabled: Boolean = true, onRetry: () -> Unit) {
+    Column(Modifier.fillMaxWidth().then(if (enabled) Modifier.testTag("search:error") else Modifier)) {
         SearchNotice(stringResource(R.string.search_read_error))
         TextButton(
             text = stringResource(R.string.search_retry),
+            enabled = enabled,
             onClick = onRetry,
-            modifier = Modifier.padding(horizontal = 24.dp).testTag("search:retry"),
+            modifier = Modifier.padding(horizontal = 24.dp).then(if (enabled) Modifier.testTag("search:retry") else Modifier),
         )
     }
 }

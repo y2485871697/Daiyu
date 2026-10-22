@@ -66,7 +66,7 @@ internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boole
         onDispose { previous?.revoke() }
     }
     SettingsRow("自定义请求体", tag = "model-body-fields", summary = "逐字段编辑",
-        onClick = if (enabled) ({
+        showChevron = true, onClick = if (enabled) ({
             close()
             owner = RequestBodyFieldEditorOwner(draft)
         }) else null)

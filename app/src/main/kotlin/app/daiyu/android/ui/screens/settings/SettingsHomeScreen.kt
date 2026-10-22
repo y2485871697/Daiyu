@@ -110,7 +110,7 @@ private fun SettingsHomeCard(id: String, content: @Composable ColumnScope.() -> 
 private fun SettingsHomeRow(entry: SettingsEntry, diagnostics: SettingsDiagnosticsUi,
     release: SettingsReleaseUi, onClick: () -> Unit) {
     if (entry.id == "updates") {
-        SettingsRow(entry.title, onClick = if (release.checking) null else onClick,
+        SettingsRow(entry.title, showChevron = true, onClick = if (release.checking) null else onClick,
             summary = if (release.checking) "正在检查更新…" else "当前版本：${BuildConfig.VERSION_NAME}",
             leading = { SettingsIcon(entry.icon) })
         return

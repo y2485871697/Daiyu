@@ -29,7 +29,9 @@ import app.daiyu.android.ui.components.subagent.*
 internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAgentProvider>, enabled: Boolean = true,
     settings: Boolean = false, draftAllowed: Boolean = enabled, draftRetry: (() -> Unit)? = null) {
     val editor = LocalConversationSubAgentEditor.current
-    val usable = enabled && editor?.enabled == true
+    val modelRefreshing = editor?.modelRefreshing?.collectAsState()?.value ?: false
+    val presentationProviders = editor?.modelDisplayProviders?.collectAsState()?.value ?: providers
+    val usable = enabled && editor?.enabled == true && !modelRefreshing
     val currentUsable by rememberUpdatedState(usable)
     var modelPicker by remember(editor, profile.id) { mutableStateOf(false) }
     var thinkingPicker by remember(editor, profile.id) { mutableStateOf(false) }
@@ -41,14 +43,14 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
         if (!usable) { modelPicker = false; thinkingPicker = false; rolePicker = false; tierPicker = false; resolutionPicker = false }
     }
     LaunchedEffect(profile.role) { rolePicker = false; tierPicker = false; thinkingPicker = false; modelPicker = false; resolutionPicker = false }
-    val config = remember(profile.providerId, profile.modelId, profile.role, providers) {
-        val provider = providers.firstOrNull { it.id == profile.providerId && it.isEnabled }
+    val config = remember(profile.providerId, profile.modelId, profile.role, presentationProviders) {
+        val provider = presentationProviders.firstOrNull { it.id == profile.providerId && it.isEnabled }
         val model = provider?.models?.firstOrNull { it.id == profile.modelId && it.isEnabled }
         if (provider == null || model == null || model.supportsSpeechSynthesis ||
             !profile.acceptsModel(model.supportsImageGeneration, model.supportsVideoGeneration)) null
         else runCatching { buildSubAgentModelConfig(provider, model) }.getOrNull()
     }
-    val speedProvider = providers.singleOrNull { it.id == profile.providerId && it.isEnabled }
+    val speedProvider = presentationProviders.singleOrNull { it.id == profile.providerId && it.isEnabled }
     val speedModel = speedProvider?.models?.singleOrNull { it.id == profile.modelId && it.isEnabled }
     val showGptSpeed = supportsGptSpeedBinding(speedProvider, speedModel)
     val media = if (profile.isMedia && config != null) MediaReasoningSettings.resolve(config, profile.role) else null
@@ -70,7 +72,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                 Icons.Rounded.ViewInAr, "${profile.name}模型", enabled = usable, badge = config?.providerName,
                 onClick = { if (currentUsable) { modelPicker = true } },
                 onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } },
-                trailing = { SubAgentGptSpeedButton(profile, providers, usable) })
+                trailing = { SubAgentGptSpeedButton(profile, presentationProviders, usable) })
             Box(Modifier.fillMaxWidth()) {
                 SubAgentSettingRow("职责", profile.roleLabel, Icons.Rounded.Assignment,
                     "选择${profile.name}职责", enabled = usable, dropdown = true,
@@ -142,7 +144,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                     }
                     if (showGptSpeed) {
                         HorizontalDivider(Modifier.testTag("subagent-gpt-divider-${profile.id}"), color = colors.line)
-                        SubAgentGptSpeedButton(profile, providers, usable, Modifier.padding(top = 8.dp))
+                        SubAgentGptSpeedButton(profile, presentationProviders, usable, Modifier.padding(top = 8.dp))
                     }
                 }
             }
@@ -161,7 +163,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                     if (config != null) Text(config.providerName + " · 思考 $thinkingLabel", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                SubAgentGptSpeedButton(profile, providers, usable)
+                SubAgentGptSpeedButton(profile, presentationProviders, usable)
                 IconButton(modifier = Modifier.size(48.dp), enabled = usable, onClick = {
                     if (currentUsable && editor != null) SubAgentProfileDraftSession.open(editor, profile)?.let { profileDraft = it }
                 }) { Icon(Icons.Rounded.MoreVert, "配置${profile.name}", Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface) }

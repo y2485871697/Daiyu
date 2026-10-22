@@ -227,7 +227,7 @@ internal fun VoiceAccountPanel(
                         TextButton("更多", enabled = !busy, onClick = { if (current()) voiceMenu = voice })
                     })
                     if (voice.tts && !voice.accepted) SettingsRow("确认音色，允许正式合成", summary = "可能产生音色费用",
-                        onClick = if (!enabled) null else ({ ask("我有权使用此声音，并同意正式合成可能产生音色费用") {
+                        showChevron = true, onClick = if (!enabled) null else ({ ask("我有权使用此声音，并同意正式合成可能产生音色费用") {
                             withContext(Dispatchers.IO) { resources.voices.accept(voice) }
                         } }))
                 }
@@ -236,7 +236,7 @@ internal fun VoiceAccountPanel(
         if (page == "ACCOUNT") item {
             VoiceSettingsCard {
                 SettingsTextField("声音复刻 API Key", accountKey, { if (!busy) { accountKey = it; confirmation = null } }, password = true, enabled = !busy)
-                SettingsRow("保存账户", onClick = if (busy || accountKey.isBlank() || onAccountKeyChange == null) null else ({
+                SettingsRow("保存账户", showChevron = true, onClick = if (busy || accountKey.isBlank() || onAccountKeyChange == null) null else ({
                     val key = accountKey
                     execute { onAccountKeyChange?.invoke(key) }
                 }))
@@ -249,25 +249,25 @@ internal fun VoiceAccountPanel(
             VoiceSettingsCard {
                 AccountField("AK", ak, busy, true) { ak = it; sk = ""; projects = emptyList(); confirmation = null }
                 AccountField("SK", sk, busy, true) { sk = it; projects = emptyList(); confirmation = null }
-                SettingsRow("当前项目", summary = project, onClick = if (busy || projects.isEmpty()) null else ({ projectPicker = true }))
-                SettingsRow(if (projects.isEmpty()) "获取项目列表" else "刷新项目列表", onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
+                SettingsRow("当前项目", summary = project, showChevron = true, onClick = if (busy || projects.isEmpty()) null else ({ projectPicker = true }))
+                SettingsRow(if (projects.isEmpty()) "获取项目列表" else "刷新项目列表", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
                     val a = ak; val s = sk
                     ask("向火山 IAM 发送 AK 签名请求，仅查询项目，不发送语音 Key") { projects = resources.projects.list(a, s); projectPicker = projects.isNotEmpty(); notice = if (projects.isEmpty()) "没有可选项目，可手动填写项目名称。" else "请选择与语音 API Key 相同的项目。" }
                 }))
-                SettingsRow("手动填写项目（备用）", onClick = if (busy) null else ({ projectManual = !projectManual }))
+                SettingsRow("手动填写项目（备用）", showChevron = true, onClick = if (busy) null else ({ projectManual = !projectManual }))
                 if (projectManual) AccountField("项目名称", project, busy) { project = it; confirmation = null }
-                SettingsRow("读取我的名额", onClick = if (!enabled || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
+                SettingsRow("读取我的名额", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
                     val a = ak; val s = sk; val p = project
                     ask("查询项目 $p 的槽位；已制作槽位将用当前语音 Key 校验，不制作、不合成") {
                         val count = resources.voices.importPurchased(speech!!, a, s, p)
                         notice = if (count == 0) "本项目未找到名额；请核对项目与语音 API Key。" else "已同步 $count 个名额；未使用的名额在制作声音时选择。"
                     }
                 }))
-                SettingsRow("保存账户信息", onClick = if (account == null || busy || !current() || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
+                SettingsRow("保存账户信息", showChevron = true, onClick = if (account == null || busy || !current() || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
                     val a = ak; val s = sk; val p = project
                     execute { withContext(Dispatchers.IO) { resources.preferences.save(account!!.fingerprint, a, s, p) }; notice = "账户信息已加密保存在本机" }
                 }))
-                SettingsRow("清除已记住的信息", onClick = if (account == null || busy || !current()) null else ({
+                SettingsRow("清除已记住的信息", showChevron = true, onClick = if (account == null || busy || !current()) null else ({
                     ask("清除本机保存的 AK / SK 与项目，不改动云端账户") {
                         withContext(Dispatchers.IO) { resources.preferences.clear(account!!.fingerprint) }
                         ak = ""; sk = ""; project = "default"; projects = emptyList(); notice = "已清除本机账户信息"
@@ -296,14 +296,14 @@ internal fun VoiceAccountPanel(
                         if (current()) { if (page == "CREATE") { slotId = voice.id; postpaid = false } else existingId = voice.id; confirmation = null }
                     }
                 }
-                SettingsRow("查找我的音色名额", onClick = if (!enabled) null else ({ navigate("SYNC") }))
-                SettingsRow("备用方式：从控制台复制 ID", onClick = if (busy) null else ({ manualId = !manualId }))
+                SettingsRow("查找我的音色名额", showChevron = true, onClick = if (!enabled) null else ({ navigate("SYNC") }))
+                SettingsRow("备用方式：从控制台复制 ID", showChevron = true, onClick = if (busy) null else ({ manualId = !manualId }))
                 if (manualId) {
                     if (page == "CREATE") AccountField("名额 ID", slotId, busy) { slotId = it; confirmation = null }
                     else AccountField("已有音色 ID", existingId, busy) { existingId = it; confirmation = null }
                 }
-                if (page == "CREATE") SettingsRow("下一步：选择录音", onClick = if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null else ({ step = 1; agreed = false }))
-                else SettingsRow("导入声音", onClick = if (!enabled || !existingId.matches(Regex("(?:S_|etaClone)[A-Za-z0-9_-]+"))) null else ({
+                if (page == "CREATE") SettingsRow("下一步：选择录音", showChevron = true, onClick = if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null else ({ step = 1; agreed = false }))
+                else SettingsRow("导入声音", showChevron = true, onClick = if (!enabled || !existingId.matches(Regex("(?:S_|etaClone)[A-Za-z0-9_-]+"))) null else ({
                     val id = existingId; val n = name
                     ask("用当前语音账户查询已有音色 $id；不上传、不制作") { resources.voices.importExisting(speech!!, id, n); page = "LIST"; notice = "声音已导入；没有重新制作。" }
                 }))
@@ -316,14 +316,14 @@ internal fun VoiceAccountPanel(
             SettingsSectionTitle("2. 选择录音")
             VoiceSettingsCard {
                 SettingsRow(if (sampleUri == null) "选择录音" else "重新选择录音", tag = "voice-training-sample",
-                    summary = if (sampleUri == null) "选择文件不会上传" else "录音已选择", onClick = if (!enabled || pickerPending) null else ({
+                    summary = if (sampleUri == null) "选择文件不会上传" else "录音已选择", showChevron = true, onClick = if (!enabled || pickerPending) null else ({
                         if (samplePicker.begin(frozenConfiguration.revision)) {
                             pickerPending = true
                             try { picker.launch("audio/*") }
                             catch (_: Exception) { samplePicker.deliver(null); pickerPending = samplePicker.pending; pickerResult++; notice = "未能打开录音选择器" }
                         }
                     }))
-                SettingsRow("下一步：确认制作", onClick = if (!enabled || sampleUri == null) null else ({ step = 2; agreed = false }))
+                SettingsRow("下一步：确认制作", showChevron = true, onClick = if (!enabled || sampleUri == null) null else ({ step = 2; agreed = false }))
             }
             SettingsNote("支持 WAV / MP3 / OGG / M4A / AAC，最大 10 MiB。请选择清晰的单人录音，并确认你拥有此声音及录音的使用权。")
         }
@@ -333,7 +333,7 @@ internal fun VoiceAccountPanel(
                 SettingsRow("名称", summary = name)
                 SettingsRow(if (postpaid) "新建后付费音色" else "已有名额", summary = if (postpaid) null else slotId)
                 SettingsSwitchRow("我有权使用此录音并同意本次上传制作", agreed, enabled = enabled) { agreed = it }
-                SettingsRow("确认上传并制作", tag = "voice-training-submit", onClick = if (!enabled || !agreed || sampleUri == null) null else ({
+                SettingsRow("确认上传并制作", tag = "voice-training-submit", showChevron = true, onClick = if (!enabled || !agreed || sampleUri == null) null else ({
                     val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else slotId
                     ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。结果未知时只查询原音色，不重复提交。") {
                         val sample = PersonalVoices.readSample(context, uri)

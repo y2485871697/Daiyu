@@ -101,6 +101,7 @@ internal fun SettingsRow(
     trailing: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
     tag: String = "settings-row:$title",
+    showChevron: Boolean = onClick != null,
 ) {
     val feedbackView = LocalView.current
     Row(
@@ -124,7 +125,7 @@ internal fun SettingsRow(
         if (trailing != null) {
             Spacer(Modifier.width(8.dp))
             Row(Modifier.widthIn(max = 112.dp), verticalAlignment = Alignment.CenterVertically) { trailing() }
-        } else if (onClick != null) {
+        } else if (showChevron) {
             DaiyuIcon(DaiyuIcons.ChevronRight, contentDescription = null,
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
         }

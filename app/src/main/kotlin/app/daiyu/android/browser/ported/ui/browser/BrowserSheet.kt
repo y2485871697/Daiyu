@@ -498,7 +498,7 @@ private fun TabChip(
             .background(bg, CircleShape)
             .border(1.dp, borderColor, CircleShape)
             .clickable(onClick = onClick)
-            .padding(start = 10.dp, end = if (showClose) 6.dp else 10.dp, top = 5.dp, bottom = 5.dp),
+            .padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -509,18 +509,20 @@ private fun TabChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (showClose) {
-            Spacer(Modifier.width(4.dp))
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier.size(16.dp),
-            ) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = stringResource(R.string.om_browser_close_tab),
-                    modifier = Modifier.size(10.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Spacer(Modifier.width(4.dp))
+        Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+            if (showClose) {
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.size(16.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = stringResource(R.string.om_browser_close_tab),
+                        modifier = Modifier.size(10.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

@@ -175,6 +175,17 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                 val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
                 val before = node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
                 val top = node(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top
+                val dialogBounds = node("search-history-dialog").fetchSemanticsNode().boundsInRoot
+                val listBounds = node("search-history-results").fetchSemanticsNode().boundsInRoot
+                fun assertRetainedGeometry() {
+                    node(tag).assertIsDisplayed().assertHasNoClickAction()
+                    assertEquals(dialogBounds, node("search-history-dialog").fetchSemanticsNode().boundsInRoot)
+                    assertEquals(listBounds, node("search-history-results").fetchSemanticsNode().boundsInRoot)
+                    assertEquals(top, node(tag).fetchSemanticsNode().boundsInRoot.top, 2f)
+                    assertEquals(before, node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .001f)
+                    mainThread { oldClick(); oldMore() }
+                    assertNull(opened)
+                }
                 realPauseResume(activity, atPause = {
                     oldClick(); oldMore()
                     assertNull(opened)
@@ -183,17 +194,20 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeBy(200)
                 assertTrue(entered.await(5, TimeUnit.SECONDS))
                 assertEquals(4, reads.get())
-                node(tag).assertDoesNotExist()
+                assertRetainedGeometry()
                 release.countDown()
                 awaitUniqueTag("search:retry")
-                node(tag).assertDoesNotExist()
+                assertRetainedGeometry()
                 node("search:retry").performClick()
                 if (blockLastPage) {
                     ui.waitUntil(5_000) { lastPageEntered.count == 0L }
-                    node(tag).assertDoesNotExist()
+                    assertRetainedGeometry()
                     releaseLastPage.countDown()
                 }
-                ui.waitUntil(5_000) { ui.onAllNodesWithTag(tag).fetchSemanticsNodes().size == 1 && node(tag).isDisplayed() }
+                ui.waitUntil(5_000) {
+                    ui.onAllNodes(hasTestTag(tag) and hasClickAction()).fetchSemanticsNodes().size == 1
+                }
+                node(tag).assertIsDisplayed().assertHasClickAction()
                 node("search:query").assertEditableText("历史")
                 assertEquals(before, node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .001f)
                 assertEquals(top, node(tag).fetchSemanticsNode().boundsInRoot.top, 2f)
@@ -204,6 +218,99 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                 assertEquals(0, fixture.opens.get())
             } finally { release.countDown(); releaseLastPage.countDown() }
         }
+    }
+
+
+    fun testSmallResultKeepsGeometryDuringResumeAndRealQueryChangeDropsIt() {
+        val reads = AtomicInteger()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        try {
+            show(fontScale = .9f, reader = { request, _, signal ->
+                if (reads.incrementAndGet() == 2) { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
+                signal.throwIfCanceled()
+                MessageSearchPage(listOf(hit.copy(snippet = request.query)))
+            })
+            node("search:query").performTextReplacement("原查询")
+            dismissIme()
+            awaitUniqueTag(tag)
+            val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            val dialog = node("search-history-dialog").fetchSemanticsNode().boundsInRoot
+            val list = node("search-history-results").fetchSemanticsNode().boundsInRoot
+            realPauseResume(activity)
+            ui.mainClock.advanceTimeBy(200)
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            node(tag).assertIsDisplayed().assertHasNoClickAction()
+            assertEquals(dialog, node("search-history-dialog").fetchSemanticsNode().boundsInRoot)
+            assertEquals(list, node("search-history-results").fetchSemanticsNode().boundsInRoot)
+            mainThread { oldClick() }
+            assertNull(opened)
+            node("search:query").performTextReplacement("新查询")
+            awaitUniqueTag(tag)
+            node(tag).assertTextEquals("助手 · 新查询")
+            release.countDown()
+            ui.waitForIdle()
+            node(tag).assertTextEquals("助手 · 新查询")
+        } finally { release.countDown() }
+    }
+
+    fun testResumeAcceptsAuthoritativeEmptyOrReadErrorInsteadOfRetainingOldHits() {
+        for (fail in listOf(false, true)) {
+            val reads = AtomicInteger()
+            show(reader = { _, _, _ ->
+                if (reads.incrementAndGet() == 1) MessageSearchPage(listOf(hit))
+                else if (fail) error("synthetic fresh read failure") else MessageSearchPage(emptyList())
+            })
+            node("search:query").performTextReplacement("查询")
+            dismissIme()
+            awaitUniqueTag(tag)
+            realPauseResume(activity)
+            ui.mainClock.advanceTimeBy(200)
+            awaitUniqueTag(if (fail) "search:error" else "search:empty")
+            node(tag).assertDoesNotExist()
+            assertEquals(2, reads.get())
+            assertNull(opened)
+        }
+    }
+
+    fun testResumePreservesContinuationGeometryAndRepausingDoesNotLoseTheTarget() {
+        val reads = AtomicInteger()
+        val firstEntered = CountDownLatch(1); val secondEntered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        try {
+            show(reader = { request, _, signal ->
+                when (reads.incrementAndGet()) {
+                    2 -> { firstEntered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
+                    3 -> { secondEntered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
+                }
+                signal.throwIfCanceled()
+                MessageSearchPage((0 until 20).map { hit.copy(messageId = "footer-$it") },
+                    MessageSearchCursor(request.query, "current",
+                        listOf(SearchConversationRevision("current", "当前会话", "fixture")), 0, 20))
+            })
+            node("search:query").performTextReplacement("查询")
+            dismissIme()
+            awaitUniqueTag("search:message:current:footer-0:1")
+            node("search-history-results").scrollToDescendant(hasTestTag("search:more"))
+            val oldMore = checkNotNull(node("search:more").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            val bounds = node("search:more").fetchSemanticsNode().boundsInRoot
+            val scroll = node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+            realPauseResume(activity)
+            ui.mainClock.advanceTimeBy(200)
+            assertTrue(firstEntered.await(5, TimeUnit.SECONDS))
+            node("search:more").assertIsNotEnabled()
+            assertEquals(bounds, node("search:more").fetchSemanticsNode().boundsInRoot)
+            realPauseResume(activity)
+            ui.mainClock.advanceTimeBy(200)
+            assertTrue(secondEntered.await(5, TimeUnit.SECONDS))
+            node("search:more").assertIsNotEnabled()
+            assertEquals(bounds, node("search:more").fetchSemanticsNode().boundsInRoot)
+            mainThread { oldMore() }
+            assertEquals(3, reads.get())
+            release.countDown()
+            ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("search:more") and isEnabled()).fetchSemanticsNodes().size == 1 }
+            assertEquals(scroll, node("search-history-results").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), .001f)
+            assertEquals(3, reads.get())
+        } finally { release.countDown() }
     }
 
 }

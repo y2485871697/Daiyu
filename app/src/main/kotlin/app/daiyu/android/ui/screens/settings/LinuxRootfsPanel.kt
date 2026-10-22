@@ -2,6 +2,12 @@ package app.daiyu.android.ui.screens.settings
 
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.haptics.miuix.IconButton
+import app.daiyu.android.ui.icons.DaiyuIcon
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -56,26 +62,33 @@ internal fun rememberLinuxRootfsPanel(root: File?): @Composable () -> Unit {
     LaunchedEffect(root) { load(null) }
     BackHandler(enabled = listing?.directory?.relative?.isNotEmpty() == true) { load(parent = true) }
     return { Column {
-        SettingsNote("Rootfs 仅供只读浏览，不跟随符号链接，不导入或删除环境文件。")
-        if (root == null) SettingsNote("当前环境暂无可浏览的 Rootfs")
+        LinuxFilePanelHeader("Rootfs") {
+            if (root != null) IconButton(onClick = { load() }, enabled = request == null,
+                modifier = Modifier.size(48.dp).testTag("linux-rootfs-refresh")) {
+                DaiyuIcon(DaiyuIcons.Refresh, "刷新", size = 21.dp)
+            }
+        }
+        LinuxFileDescription("Rootfs 仅供只读浏览，不跟随符号链接，不导入或删除环境文件。")
+        if (root == null) SettingsCard { LinuxFileEmptyState("当前环境暂无可浏览的 Rootfs") }
         else {
-            SettingsCard { SettingsRow("刷新", tag = "linux-rootfs-refresh", onClick = { load() }) }
             notice?.let { SettingsNote(it) }
             if (request != null) SettingsNote("正在读取 Rootfs")
             listing?.let { shown ->
-                SettingsSectionTitle(shown.directory.relative.ifEmpty { "/" })
-                if (shown.directory.relative.isNotEmpty()) SettingsCard {
-                    SettingsRow("上级目录", tag = "linux-rootfs-parent", onClick = { load(parent = true) })
-                }
-                if (shown.entries.isEmpty()) SettingsNote("此目录为空")
-                if (shown.truncated) SettingsNote("仅显示前 100 项，请缩小目录范围")
-                shown.entries.forEach { entry ->
-                    SettingsCard { SettingsRow(entry.name, summary = when {
-                        entry.symbolicLink -> "符号链接 · 不跟随"
-                        entry.directory -> "目录"
-                        else -> android.text.format.Formatter.formatShortFileSize(context, entry.size)
-                    }, leading = { SettingsIcon(if (entry.directory) DaiyuIcons.Folder else DaiyuIcons.File) },
-                        tag = "linux-rootfs-entry:${entry.relative}", onClick = if (entry.directory) ({ load(entry) }) else null) }
+                SettingsCard {
+                    LinuxFileDirectoryHeader(shown.directory.relative)
+                    if (shown.directory.relative.isNotEmpty()) {
+                        SettingsRow("上级目录", tag = "linux-rootfs-parent", onClick = { load(parent = true) })
+                    }
+                    if (shown.entries.isEmpty()) LinuxFileEmptyState("此目录为空")
+                    if (shown.truncated) SettingsNote("仅显示前 100 项，请缩小目录范围")
+                    shown.entries.forEach { entry ->
+                        SettingsRow(entry.name, summary = when {
+                            entry.symbolicLink -> "符号链接 · 不跟随"
+                            entry.directory -> "目录"
+                            else -> android.text.format.Formatter.formatShortFileSize(context, entry.size)
+                        }, leading = { SettingsIcon(if (entry.directory) DaiyuIcons.Folder else DaiyuIcons.File) },
+                            tag = "linux-rootfs-entry:${entry.relative}", onClick = if (entry.directory) ({ load(entry) }) else null)
+                    }
                 }
             }
         }

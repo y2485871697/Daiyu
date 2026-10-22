@@ -117,7 +117,8 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     }
 
     val rootfs = linuxBrowsableRootfs(state, distribution, mode, terminal?.linux?.selected)
-    Column(modifier.fillMaxSize().background(settingsPageBackground()).testTag("linux-settings-view")) {
+    Column(modifier.fillMaxSize().background(settingsPageBackground())
+        .navigationBarsPadding().testTag("linux-settings-view")) {
         Box(Modifier.weight(1f)) {
             if (tab == LinuxSettingsTab.FILES) {
                 WorkspaceSettingsScreen(onBack = leave, pageTitle = "Linux 工具环境", integratedLinux = true,

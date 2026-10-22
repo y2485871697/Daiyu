@@ -162,16 +162,21 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
         }
     }
     return { Column {
-        SettingsSectionTitle("私有工作区")
-        SettingsNote("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。")
-        SettingsCard {
-            if (compact) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                app.daiyu.android.ui.haptics.miuix.TextButton("导入文件", onClick = importFile,
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("workspace-private-import"))
-                IconButton(onClick = { load() }, modifier = Modifier.size(48.dp).testTag("workspace-private-refresh")) {
+        if (compact) {
+            val controlsEnabled = current() && !busy && !sharedBusy() && pending == null && request == null
+            LinuxFilePanelHeader("私有工作区") {
+                LinuxFileAction("导入文件", "workspace-private-import",
+                    enabled = controlsEnabled && listing != null, onClick = importFile)
+                IconButton(onClick = { load() }, enabled = controlsEnabled,
+                    modifier = Modifier.size(48.dp).testTag("workspace-private-refresh")) {
                     DaiyuIcon(DaiyuIcons.Refresh, "刷新", size = 21.dp)
                 }
-            } else SettingsRow("导入文件", tag = "workspace-private-import", onClick = importFile)
+            }
+            LinuxFileDescription("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。")
+        } else {
+            SettingsSectionTitle("私有工作区")
+            SettingsNote("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。")
+            SettingsCard { SettingsRow("导入文件", tag = "workspace-private-import", onClick = importFile) }
         }
         notice?.let { SettingsNote(it) }
         if (busy || request != null) SettingsNote("正在处理私有文件")
@@ -179,34 +184,42 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
             SettingsRow("重试读取目录", onClick = { load(null) }, tag = "workspace-private-retry")
         }
         listing?.let { shown ->
-            SettingsSectionTitle(shown.directory.relative.ifEmpty { "/" })
-            if (shown.directory.relative.isNotEmpty()) SettingsCard {
-                SettingsRow("上级目录", onClick = { load(parent = true) }, tag = "workspace-private-parent")
-            }
-            if (shown.entries.isEmpty()) SettingsNote("此私有目录为空")
-            if (shown.truncated) SettingsNote("仅显示前 100 项，请缩小目录范围")
-            shown.entries.forEach { entry ->
-                SettingsCard {
-                    SettingsRow(entry.name, summary = if (entry.directory) "目录" else Formatter.formatShortFileSize(context, entry.size),
-                        leading = { SettingsIcon(if (entry.directory) DaiyuIcons.Folder else DaiyuIcons.File) },
-                        trailing = if (compact) ({
-                            IconButton(onClick = {
-                                if (current() && !busy && !sharedBusy() && pending == null && request == null)
-                                    actions = WorkspaceDelete(entry, epoch.get())
-                            }, modifier = Modifier.size(48.dp).testTag("workspace-private-actions:${entry.relative}")) {
-                                DaiyuIcon(DaiyuIcons.More, "文件操作", size = 20.dp)
-                            }
-                        }) else null,
-                        modifier = Modifier.combinedClickable(
-                            enabled = current() && !busy && !sharedBusy() && pending == null && request == null,
-                            onClick = { if (entry.directory) load(entry) },
-                            onLongClickLabel = "文件操作", onLongClick = {
-                                if (current() && !busy && !sharedBusy() && pending == null && request == null) {
-                                    actions = WorkspaceDelete(entry, epoch.get())
+            val directoryContent: @Composable () -> Unit = {
+                if (compact) LinuxFileDirectoryHeader(shown.directory.relative)
+                else SettingsSectionTitle(shown.directory.relative.ifEmpty { "/" })
+                if (shown.directory.relative.isNotEmpty()) {
+                    if (compact) SettingsRow("上级目录", onClick = { load(parent = true) }, tag = "workspace-private-parent")
+                    else SettingsCard { SettingsRow("上级目录", onClick = { load(parent = true) }, tag = "workspace-private-parent") }
+                }
+                if (shown.entries.isEmpty()) {
+                    if (compact) LinuxFileEmptyState("此私有目录为空") else SettingsNote("此私有目录为空")
+                }
+                if (shown.truncated) SettingsNote("仅显示前 100 项，请缩小目录范围")
+                shown.entries.forEach { entry ->
+                    val entryContent: @Composable () -> Unit = {
+                        SettingsRow(entry.name, summary = if (entry.directory) "目录" else Formatter.formatShortFileSize(context, entry.size),
+                            leading = { SettingsIcon(if (entry.directory) DaiyuIcons.Folder else DaiyuIcons.File) },
+                            trailing = if (compact) ({
+                                IconButton(onClick = {
+                                    if (current() && !busy && !sharedBusy() && pending == null && request == null)
+                                        actions = WorkspaceDelete(entry, epoch.get())
+                                }, modifier = Modifier.size(48.dp).testTag("workspace-private-actions:${entry.relative}")) {
+                                    DaiyuIcon(DaiyuIcons.More, "文件操作", size = 20.dp)
                                 }
-                            }), tag = "workspace-private-entry:${entry.relative}")
+                            }) else null,
+                            modifier = Modifier.combinedClickable(
+                                enabled = current() && !busy && !sharedBusy() && pending == null && request == null,
+                                onClick = { if (entry.directory) load(entry) },
+                                onLongClickLabel = "文件操作", onLongClick = {
+                                    if (current() && !busy && !sharedBusy() && pending == null && request == null) {
+                                        actions = WorkspaceDelete(entry, epoch.get())
+                                    }
+                                }), tag = "workspace-private-entry:${entry.relative}")
+                    }
+                    if (compact) entryContent() else SettingsCard { entryContent() }
                 }
             }
+            if (compact) SettingsCard { directoryContent() } else directoryContent()
         }
     }
     }

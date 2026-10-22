@@ -223,16 +223,34 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         if (rootfsPanel != null) item(key = "linux-rootfs") { rootfsPanel() }
         if (showShared) {
         item(key = "sharing") {
-            SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
-            SettingsCard {
-                SettingsRow("共享目录", onClick = { pick(true) }, tag = "workspace-pick-directory")
-                SettingsRow("共享文件", onClick = { pick(false) }, tag = "workspace-pick-file")
-                SettingsRow("刷新", onClick = { if (sharingCurrent()) refresh() }, tag = "workspace-refresh")
+            if (integratedLinux) {
+                LinuxFilePanelHeader("共享文件夹") {
+                    app.daiyu.android.ui.haptics.miuix.IconButton(onClick = { if (sharingCurrent()) refresh() },
+                        enabled = loaded && !busy && !privateOccupied && pendingTree == null && request == null,
+                        modifier = Modifier.size(48.dp).testTag("workspace-refresh")) {
+                        app.daiyu.android.ui.icons.DaiyuIcon(app.daiyu.android.ui.icons.DaiyuIcons.Refresh, "刷新", size = 21.dp)
+                    }
+                }
+                LinuxFileDescription("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
+                SettingsCard {
+                    SettingsRow("共享目录", onClick = { pick(true) }, tag = "workspace-pick-directory")
+                    SettingsRow("共享文件", onClick = { pick(false) }, tag = "workspace-pick-file")
+                }
+            } else {
+                SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
+                SettingsCard {
+                    SettingsRow("共享目录", onClick = { pick(true) }, tag = "workspace-pick-directory")
+                    SettingsRow("共享文件", onClick = { pick(false) }, tag = "workspace-pick-file")
+                    SettingsRow("刷新", onClick = { if (sharingCurrent()) refresh() }, tag = "workspace-refresh")
+                }
             }
             notice?.let { SettingsNote(it) }
             if (busy || !loaded) SettingsNote("正在读取共享状态")
             else if (request != null) SettingsNote("正在读取目录")
-            else if (grants.isEmpty()) SettingsNote("还没有共享目录或文件")
+            else if (grants.isEmpty()) {
+                if (integratedLinux) SettingsCard { LinuxFileEmptyState("还没有共享目录或文件") }
+                else SettingsNote("还没有共享目录或文件")
+            }
         }
         grants.forEachIndexed { index, uri ->
             item(key = "grant:$uri") {

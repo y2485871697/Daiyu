@@ -34,6 +34,10 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         var mounts = 0
         var detaches = 0
         var failDetach = false
+        var failConfiguration = false
+        val controls = mutableListOf<app.daiyu.android.browser.openminis.BrowserVisibleAction>()
+        val configurations = mutableListOf<app.daiyu.android.browser.openminis.BrowserVisibleConfiguration>()
+        val downloadListeners = mutableListOf<app.daiyu.android.browser.openminis.BrowserVisibleDownload?>()
         var onCreate: () -> Unit = {}
         var onBeforeRelease: () -> Unit = {}
         var paused = false
@@ -83,10 +87,42 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
                         detaches++
                         check(!failDetach) { "detach uncertain" }
                         parent.removeView(child)
-                    })
+                    }, controlOriginal = { controls.add(it) }, configureOriginal = {
+                        configurations.add(it)
+                        check(!failConfiguration) { "configuration uncertain" }
+                    }, downloadOriginal = { downloadListeners.add(it) })
             })
         init { if (initialTab) check(session.execute(mapOf("action" to "new_tab")) is BrowserOutcome.Confirmed) }
         override fun close() { controller.revoke(); binding.close() }
+    }
+
+    fun testVisibleCommandsForwardExactValuesAndConfigurationFailureIsNotReplayed() = main {
+        val f = Fixture()
+        try {
+            f.paused = true
+            val visit = requireNotNull(f.controller.openVisit())
+            visit.takeover(requireNotNull(f.session.currentTab))
+            assertTrue(visit.snapshot().takenOver)
+            val parent = android.widget.FrameLayout(instrumentation.targetContext)
+            visit.mount(parent)
+            val config = app.daiyu.android.browser.openminis.BrowserVisibleConfiguration(
+                com.openminis.app.browser.UserAgentProfile.DESKTOP_CHROME, null, 800, 600)
+            val listener = app.daiyu.android.browser.openminis.BrowserVisibleDownload { _, _, _, _ -> }
+            visit.control(app.daiyu.android.browser.openminis.BrowserVisibleAction.BACK)
+            visit.configure(config)
+            visit.downloads(listener)
+            assertEquals(listOf(app.daiyu.android.browser.openminis.BrowserVisibleAction.BACK), f.controls)
+            assertEquals(listOf(config), f.configurations)
+            assertSame(listener, f.downloadListeners.last())
+            f.failConfiguration = true
+            visit.configure(config.copy(width = 900))
+            assertTrue(visit.snapshot().unknown)
+            val count = f.configurations.size
+            visit.configure(config)
+            visit.restore()
+            assertEquals(count, f.configurations.size)
+            assertEquals(0, f.resumes)
+        } finally { f.close() }
     }
 
     fun testNewTabWaitsForPauseAndRetainsOriginalSessionAndAllocation() = main {

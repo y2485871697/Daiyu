@@ -9,6 +9,7 @@ import com.openminis.app.browser.ScrollDirection
 
 /** Translation to the fixed manager, not to its global tab pool. No authority arguments. */
 internal object OpenMinisCommandMapper {
+    val hostActions = setOf("set_user_agent", "set_viewport", "reload", "go_back", "go_forward")
     private val fields = mapOf(
         "navigate" to setOf("url", "timeout_ms"),
         "get_text" to setOf("selector", "offset", "max_chars"),
@@ -107,9 +108,7 @@ internal object OpenMinisCommandMapper {
      */
     fun preflight(command: BrowserCommand) {
         if (command.action in setOf("fetch", "get_cookies", "set_cookies")) return
-        // The fixed manager reloads after a UA change without a correlated navigation token.
-        require(command.action != "set_user_agent") { "BROWSER_OPENMINIS_USER_AGENT_UNSUPPORTED" }
-        map(command)
+        if (command.action in hostActions) validate(command) else map(command)
     }
 
     fun map(command: BrowserCommand): BrowserActionInput {
@@ -182,7 +181,7 @@ internal object OpenMinisCommandMapper {
     /** Command-aware publication seam. A failure MUST throw, never return a Confirmed-shaped value. */
     fun result(command: BrowserCommand, answer: BrowserActionResult): BrowserExecutionResult {
         validate(command)
-        if (command.action !in setOf("set_viewport", "reload", "go_back", "go_forward")) map(command)
+        if (command.action !in hostActions) map(command)
         return BrowserOutput.convert(command, answer)
     }
 }

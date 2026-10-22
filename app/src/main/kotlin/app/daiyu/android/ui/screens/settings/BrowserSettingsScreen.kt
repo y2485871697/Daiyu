@@ -110,16 +110,16 @@ internal fun BrowserSettingsScreen(
                 SettingsRow(title = "已回读上限", summary = saved?.let(::accessLabel) ?: "未确认",
                     tag = "browser-saved")
             }
-            SettingsNote("此页只保存偏好，不访问网站、不创建标签、不执行工具。更改偏好不扩大已经冻结的运行授权；是否提供工具还需宿主接入与逐次确认。")
+            SettingsNote("此页只保存偏好，不访问网站、不创建标签、不执行工具。更改偏好不扩大已经冻结的运行授权；实际工具仍按本次任务授权与能力上限执行。")
         }
         item(key = "browser_limits") {
             SettingsSectionTitle("真实限制")
             SettingsCard {
                 SettingsRow("WRITE 必须逐项确认", summary = "精确动作、参数、显式 tab_id、会话/运行/助手绑定；FULL 不是任意操作许可。")
-                SettingsRow("标签上限", summary = "现有底层每个 owner 最多 3 个标签（0–2）；本准备接口仅面向主浏览器，不承诺子浏览器可用或无限标签。")
-                SettingsRow("历史记录：DENY", summary = "本功能不授予全局历史写入同意。")
+                SettingsRow("标签上限", summary = "每个 owner 最多 3 个标签（0–2）；任务标签与人工浏览器分别管理，网站登录状态可能共享。")
+                SettingsRow("任务历史记录：DENY", summary = "Agent 任务不写全局历史；人工浏览页面的历史可在浏览器面板查看和清除。")
                 SettingsRow("Cookie 名称：默认全部拒绝", summary = "不开放读取或修改 Cookie；WebView 的网站账号与 Cookie 并非按 owner 隔离。")
-                SettingsRow("文件与下载", summary = "本阶段不开放 fetch、offload 或共享路径；不自动映射下载文件。")
+                SettingsRow("文件与下载", summary = "任务下载仍需独立授权；浏览器面板的人工下载可查看进度、取消和打开文件，不自动映射共享路径。")
                 SettingsRow("失败与接管", summary = "未知执行结果不得自动重试；仍受实际后端支持、权限、标签所有权、接管和生命周期约束。")
             }
         }

@@ -781,15 +781,16 @@ class MainActivity : ComponentActivity() {
             putExtra(Intent.EXTRA_TITLE, request.suggestedName)
         }, request::result)
     }
-    private var browserVisualVisit by mutableStateOf<ControllerBrowserVisual.Visit?>(null)
+    private var browserVisualVisit by mutableStateOf<BrowserVisualVisit?>(null)
+    private val humanBrowsers = mutableMapOf<ConversationId?, LocalBrowserVisual>()
     private fun closeBrowserVisualVisit() {
         val original = browserVisualVisit
         browserVisualVisit = null
         original?.close()
     }
-    private fun browserVisualPageCurrent(original: ControllerBrowserVisual.Visit): Boolean =
+    private fun browserVisualPageCurrent(original: BrowserVisualVisit): Boolean =
         activityUsable() && voiceForeground && generationResumed() && retainedPage == "browser" &&
-            !sidebarVisible && browserVisualVisit === original && selected?.id == original.owner.conversationId
+            !sidebarVisible && browserVisualVisit === original && selected?.id == original.conversationId
 
     private fun openBrowserVisualPage(expectedOwner: WorkStepOwnerUi? = null) {
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
@@ -799,7 +800,16 @@ class MainActivity : ComponentActivity() {
         val original = selected?.id?.let { controller.openBrowserVisual(it, expectedOwner) }
         if (expectedOwner != null && original == null) return
         retainedPage = "browser"
-        browserVisualVisit = original
+        browserVisualVisit = original ?: humanBrowsers.getOrPut(selected?.id) {
+            LocalBrowserVisual(applicationContext, selected?.id)
+        }.let { human ->
+            if (human.needsReplacement) {
+                human.close()
+                LocalBrowserVisual(applicationContext, selected?.id).also {
+                    humanBrowsers[selected?.id] = it
+                }.openVisit()
+            } else human.openVisit()
+        }
     }
 
     private var retainedPageState by mutableStateOf("chat")
@@ -4515,6 +4525,7 @@ class MainActivity : ComponentActivity() {
 
         revokeChildAuthorization()
         closeBrowserVisualVisit()
+        if (retainedPage == "browser") retainedPage = "chat"
         chatReferencePick?.let { request ->
             val preserve = request.live && request.firstPickerHop && !request.returned &&
                 chatReferenceAvailable() && chatReferenceMatches(request)
@@ -4610,6 +4621,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        humanBrowsers.values.forEach { it.close() }
+        humanBrowsers.clear()
         cancelGenerationMedia()
         revokeBackupExportPage()
         revokeChildAuthorization()

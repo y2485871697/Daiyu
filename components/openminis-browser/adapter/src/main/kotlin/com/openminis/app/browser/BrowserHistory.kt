@@ -41,6 +41,13 @@ class BrowserHistoryStore internal constructor(
     queueCapacity: Int = QUEUE_CAPACITY,
 ) : AutoCloseable {
     companion object {
+        private val suppressRecording = ThreadLocal<Boolean>()
+        fun withoutRecording(action: () -> Unit) {
+            val previous = suppressRecording.get()
+            suppressRecording.set(true)
+            try { action() } finally { if (previous == null) suppressRecording.remove() else suppressRecording.set(previous) }
+        }
+
         private const val MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L
         private const val MAX_ENTRIES = 256
         private const val QUEUE_CAPACITY = 64
@@ -144,6 +151,7 @@ class BrowserHistoryStore internal constructor(
     }
 
     fun record(url: String, title: String) {
+        if (suppressRecording.get() == true) return
         if (url.isEmpty()) return
         require(url.length <= MAX_URL && title.length <= MAX_TITLE) { "History entry too large" }
         synchronized(lock) {

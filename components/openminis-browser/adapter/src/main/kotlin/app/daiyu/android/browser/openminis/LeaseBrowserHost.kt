@@ -28,6 +28,7 @@ internal interface BlankBrowserResource {
     /** Runs after allocation has an owner, so partial initialization remains destroyable. */
     fun initialize() {}
     suspend fun execute(input: BrowserActionInput): BrowserActionResult
+    suspend fun executeCommand(command: BrowserCommand): BrowserActionResult = execute(OpenMinisCommandMapper.map(command))
     /** UI only. Update callback/history lease, without replacing the page or manager. */
     fun rebind(lease: BrowserTabLease) {}
     fun beforeReleaseTakeover() {}
@@ -155,7 +156,7 @@ internal class LeaseBrowserHost(
     override fun execute(command: BrowserCommand, lease: BrowserTabLease): CompletableFuture<BrowserExecutionResult> {
         check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
         // Pure support validation must precede slot mutation and UI enqueue.
-        val input = OpenMinisCommandMapper.map(command)
+        OpenMinisCommandMapper.preflight(command)
         // Called UNDER the registry's admission lock: state + enqueue ONLY. Never launch here.
         val pending = CompletableFuture<BrowserExecutionResult>()
         val slot = synchronized(lock) {
@@ -168,7 +169,7 @@ internal class LeaseBrowserHost(
             value
         }
         try {
-            ui.post { start(slot, command, input, pending) }
+            ui.post { start(slot, command, pending) }
         } catch (failure: Exception) {
             // No WebView work even on rejection. Retire via another bounded enqueue;
             // if the dispatcher is permanently dead, disposal cannot be guaranteed.
@@ -180,7 +181,7 @@ internal class LeaseBrowserHost(
         return pending
     }
 
-    private fun start(slot: Slot, command: BrowserCommand, input: BrowserActionInput,
+    private fun start(slot: Slot, command: BrowserCommand,
                       pending: CompletableFuture<BrowserExecutionResult>) {
         // Never read the mutable execution lease from a late continuation.
         val (lease, operation) = synchronized(lock) { slot.lease to slot.operation }
@@ -199,7 +200,7 @@ internal class LeaseBrowserHost(
                 synchronized(lock) { slot.activeExecutions++ }
                 scope.launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
-                        val answer = withTimeout(timeout) { resource.execute(input) }
+                        val answer = withTimeout(timeout) { resource.executeCommand(command) }
                         val result = OpenMinisCommandMapper.result(command, answer)
                         sessions.publish(lease) {
                             checkLive(slot)

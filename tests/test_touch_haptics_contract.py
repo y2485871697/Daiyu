@@ -94,7 +94,7 @@ class TouchHapticsContractTest(unittest.TestCase):
     def test_empty_consumers_do_not_vibrate(self):
         cases = {
             "ui/components/DaiyuDialogs.kt": "clickFeedback = false,\n                        onClick = {}",
-            "ui/screens/browser/BrowserVisualScreen.kt": "clickFeedback = false, onClick = {}",
+            "browser/ported/ui/browser/BrowserSheet.kt": "clickFeedback = false, onClick = {}",
             "ui/screens/chat/conversation/ChatMessageList.kt": "clickFeedback = false, onClick = {}, onLongClick",
         }
         for file, fragment in cases.items():

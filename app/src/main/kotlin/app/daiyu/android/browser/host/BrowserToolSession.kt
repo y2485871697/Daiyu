@@ -94,6 +94,15 @@ class BrowserToolSession(
             .map { it.lease }.sortedBy { it.tabId }
     }
 
+    /** User-selected existing tab; no tool execution or generation change. */
+    fun selectVisibleTab(lease: BrowserTabLease) = synchronized(lock) {
+        checkOpen()
+        val slot = slots[lease.tabId] ?: error("BROWSER_TAB_MISSING")
+        check(slot.lease == lease && slot.phase == Phase.READY) { "BROWSER_STALE_TAB" }
+        sessions.assertCurrent(lease)
+        current = slot
+    }
+
     /** Trusted host only: resolve the exact token to its original allocation. */
     fun <T> withTakenOverTab(
         token: BrowserToolTakeoverToken,

@@ -262,8 +262,15 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 assertGraphic(label, iconDp)
                 val avatar = ui.onNodeWithTag("chat-assistant-avatar", useUnmergedTree = true)
                     .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-                assertEquals(18f, avatar.width / density, .75f)
-                assertEquals(18f, avatar.height / density, .75f)
+                assertEquals(24f, avatar.width / density, .75f)
+                assertEquals(24f, avatar.height / density, .75f)
+                val assistantSlot = node("chat-assistant").assertIsDisplayed()
+                    .assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp)
+                    .fetchSemanticsNode().boundsInRoot
+                assertEquals(assistantSlot.center.x, avatar.center.x, 1f)
+                assertEquals(assistantSlot.center.y, avatar.center.y, 1f)
+                assertEquals(4f, (avatar.left - assistantSlot.left) / density, .75f)
+                assertEquals(4f, (avatar.top - assistantSlot.top) / density, .75f)
                 val colors = requireNotNull(actionColors)
                 val expected = if (label == "追加消息") colors.appendContainer else colors.sendContainer
                 val tag = if (label == "发送" || label == "追加消息") "chat-send" else "chat-control"

@@ -193,7 +193,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
                                 contentAlignment = Alignment.Center) {
-                                AssistantAvatar(assistant, 18.dp, Modifier.testTag("chat-assistant-avatar"))
+                                AssistantAvatar(assistant, 24.dp, Modifier.testTag("chat-assistant-avatar"))
                             }
                         }
                         key(state.controlOwnerKey) {

@@ -2,7 +2,6 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -81,8 +80,7 @@ internal fun MessageActionBar(
             }
         }
         if (timestamp.isNotBlank()) {
-            if (!endAligned) Spacer(Modifier.weight(1f))
-            MessageTimestamp(timestamp)
+            MessageTimestamp(timestamp, modifier = if (endAligned) Modifier else Modifier.weight(1f))
         }
     }
 }

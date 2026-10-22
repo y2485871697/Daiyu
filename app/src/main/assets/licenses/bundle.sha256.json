@@ -74,8 +74,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/openminis/NOTICE.md",
-      "bytes": 2832,
-      "sha256": "4ea44877ed56c962838cd7e0af0e2f42bc3a61ff63e5f533afd853b5a0a54e53"
+      "bytes": 3070,
+      "sha256": "f0d23426ace79c9ffc0c48e7fc9cbd8178cc4706589ad8650af624df6833023a"
     },
     {
       "path": "app/src/main/assets/licenses/proot-5.1.107.92.txt",

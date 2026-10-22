@@ -8,6 +8,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
+import app.daiyu.android.ui.haptics.hapticClick
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -165,12 +168,20 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
     return LinuxFilePanel(actions = {
         if (compact) {
             val controlsEnabled = current() && !busy && !sharedBusy() && pending == null && request == null
-            IconButton(onClick = importFile, enabled = controlsEnabled && listing != null,
-                modifier = Modifier.size(48.dp).testTag("workspace-private-import")) {
+            val importEnabled = controlsEnabled && listing != null
+            val refreshFiles: () -> Unit = { load() }
+            val semanticImport = hapticClick(importEnabled, importFile)
+            val semanticRefresh = hapticClick(controlsEnabled, refreshFiles)
+            IconButton(onClick = importFile, enabled = importEnabled,
+                modifier = Modifier.size(48.dp).testTag("workspace-private-import").semantics {
+                    onClick { semanticImport(); true }
+                }) {
                 DaiyuIcon(DaiyuIcons.Import, "导入文件", size = 22.dp)
             }
-            IconButton(onClick = { load() }, enabled = controlsEnabled,
-                modifier = Modifier.size(48.dp).testTag("workspace-private-refresh")) {
+            IconButton(onClick = refreshFiles, enabled = controlsEnabled,
+                modifier = Modifier.size(48.dp).testTag("workspace-private-refresh").semantics {
+                    onClick { semanticRefresh(); true }
+                }) {
                 DaiyuIcon(DaiyuIcons.Refresh, "刷新", size = 22.dp)
             }
         }

@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import kotlin.math.abs
@@ -163,9 +164,13 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         awaitHostWindowFocus(original)
         assertFalse(original.isDestroyed)
         assertEquals(task, original.taskId)
+        ui.waitUntil(5_000) {
+            ui.onNodeWithTag("chat-draft").fetchSemanticsNode().config[SemanticsProperties.Focused] == false
+        }
         node("chat-draft").assertIsNotFocused()
         // No dismissIme here: a return-triggered keyboard would be a product failure.
         val returned = settledFrame(visible = false, before = before)
+        node("chat-draft").assertIsNotFocused()
         assertEquals(before.headerBottom, returned.headerBottom, 2f)
         assertDraft(draft)
         assertSelection(1, 4)
@@ -189,11 +194,11 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
     }
 
     fun testReturningFromHomeDoesNotReopenVisibleKeyboardOrLoseSelection() {
-        keyboardBackgroundRoundTrip(hideBeforeLeaving = false)
+        repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = false) }
     }
 
     fun testReturningFromHomeDoesNotReopenHiddenFocusedKeyboard() {
-        keyboardBackgroundRoundTrip(hideBeforeLeaving = true)
+        repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = true) }
     }
 
     fun testPauseWithoutStopDoesNotClearDraftFocusOrSelection() {

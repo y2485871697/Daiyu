@@ -61,17 +61,54 @@ internal suspend fun showChatInputIme(
 
 /** Returning to the app must not restore an old editing session's keyboard. */
 @Composable
-internal fun DismissImeOnStop() {
+internal fun DismissImeOnStop(onDismiss: (() -> Unit) -> Unit = { it() }) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
+    val dismiss by rememberUpdatedState(onDismiss)
     DisposableEffect(lifecycle, focus, keyboard, view) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) hideChatInputIme(focus, keyboard, view)
+        var pendingStopDismiss = false
+        var restoreDismiss: Runnable? = null
+        var disposed = false
+        fun hide() = dismiss { hideChatInputIme(focus, keyboard, view) }
+        fun scheduleRestoreDismiss() {
+            if (!pendingStopDismiss || restoreDismiss != null ||
+                !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || !view.hasWindowFocus()) return
+            val work = Runnable {
+                restoreDismiss = null
+                if (!disposed && pendingStopDismiss &&
+                    lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && view.hasWindowFocus()) {
+                    pendingStopDismiss = false
+                    hide()
+                }
+            }
+            restoreDismiss = work
+            view.postOnAnimation(work)
         }
+        val windowFocus = android.view.ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            if (focused) scheduleRestoreDismiss()
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    pendingStopDismiss = true
+                    restoreDismiss?.let(view::removeCallbacks)
+                    restoreDismiss = null
+                    hide()
+                }
+                Lifecycle.Event.ON_RESUME -> scheduleRestoreDismiss()
+                else -> Unit
+            }
+        }
+        view.viewTreeObserver.addOnWindowFocusChangeListener(windowFocus)
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose {
+            disposed = true
+            restoreDismiss?.let(view::removeCallbacks)
+            lifecycle.removeObserver(observer)
+            view.viewTreeObserver.removeOnWindowFocusChangeListener(windowFocus)
+        }
     }
 }
 

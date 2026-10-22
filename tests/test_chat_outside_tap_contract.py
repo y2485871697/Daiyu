@@ -57,7 +57,7 @@ class ChatOutsideTapContractTest(unittest.TestCase):
         self.assertIn('.onFocusChanged { onInputFocusChanged(it.isFocused) }', text)
         self.assertIn('lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)', text)
         self.assertIn('isInputDismissInProgress: () -> Boolean = { false }', text)
-        self.assertIn('if ((!isInputDismissInProgress() || value.text != references.text) &&', text)
+        self.assertIn('if ((!lifecycleDismissInProgress && !isInputDismissInProgress() || value.text != references.text) &&', text)
         self.assertIn('editingValue = TextFieldValue(projected.text, selection, composition)', text)
         self.assertNotIn('if (value.selection.collapsed)', text)
 

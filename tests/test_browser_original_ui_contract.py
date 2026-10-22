@@ -30,6 +30,17 @@ VISUAL_BINDINGS = {
 TOKEN = re.compile(r'(?P<comment>//[^\n]*|/\*[\s\S]*?\*/)|(?P<string>"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')|[A-Za-z_]\w*|[^\s]')
 
 
+HISTORY_PATH = 'ui/browser/BrowserHistorySheet.kt'
+
+
+def approved_original_ui_source(path, source):
+    if path != HISTORY_PATH:
+        return source
+    source = source.replace('import androidx.compose.ui.platform.LocalLocale', 'import java.util.Locale')
+    return source.replace('SimpleDateFormat("HH:mm", LocalLocale.current.platformLocale)',
+                          'SimpleDateFormat("HH:mm", Locale.getDefault())')
+
+
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -191,10 +202,24 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
     def test_original_rendered_copy_controls_and_layout_arguments(self):
         for path, expected in self.baseline['files'].items():
             with self.subTest(path=path):
-                source = (PORT / path).read_text()
+                source = approved_original_ui_source(path, (PORT / path).read_text())
                 contract = body_contract if expected['mode'] == 'body' else render_contract
                 self.assertEqual(expected['contract_sha256'], digest(contract(source)), 'original UI contract changed: ' + path)
                 self.assertEqual(expected['imports_sha256'], digest(imports_contract(source)), 'non-approved UI import: ' + path)
+
+    def test_history_locale_uses_only_the_approved_observable_adaptation(self):
+        source = (PORT / HISTORY_PATH).read_text()
+        self.assertEqual(1, source.count('import androidx.compose.ui.platform.LocalLocale'))
+        self.assertEqual(1, source.count('SimpleDateFormat("HH:mm", LocalLocale.current.platformLocale)'))
+        self.assertNotIn('Locale.getDefault()', source)
+        normalized = approved_original_ui_source(HISTORY_PATH, source)
+        self.assertEqual(self.baseline['files'][HISTORY_PATH]['contract_sha256'], digest(render_contract(normalized)))
+        for old, new in [('"HH:mm"', '"hh:mm"'), ('"HH:mm"', '"HH:mm:ss"'),
+                         ('Date(entry.timestamp)', 'Date(0)'), ('fontSize = 11.sp', 'fontSize = 12.sp')]:
+            changed = source.replace(old, new)
+            self.assertNotEqual(render_contract(normalized),
+                                render_contract(approved_original_ui_source(HISTORY_PATH, changed)))
+        self.assertEqual(source, approved_original_ui_source('ui/browser/BrowserSettingsSheet.kt', source))
 
     def test_original_visual_bindings_and_preset_lists(self):
         self.assertEqual(set(VISUAL_BINDINGS), set(self.baseline['visual_bindings']))

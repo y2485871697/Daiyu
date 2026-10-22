@@ -36,7 +36,7 @@ class SubAgentAddButtonContractTest(unittest.TestCase):
     def test_regression_covers_real_screen_pixels_states_and_save_cancel(self):
         test = ANDROID.read_text()
         for fragment in ['SubAgentSettingsScreen(', 'listOf(false, true)', 'listOf(1f, .8f)',
-                         'captureScreenNode(button).toPixelMap()', 'primaryContainer',
+                         'button.captureToImage().toPixelMap()', 'primaryContainer',
                          '168f * density', '48f * density', 'assertFloatingContainer(addGroupButton())',
                          'assertFloatingContainer(detail)', 'repository.addPreset("按钮样式")',
                          'assertTrue(repository.presets().isEmpty())',

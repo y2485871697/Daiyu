@@ -26,8 +26,12 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
     private fun workspaceControl(tag: String): SemanticsNodeInteraction {
         ui.waitUntil(5_000) {
             try {
-                node("page:工作区").scrollToDescendant(hasTestTag(tag))
-                node(tag).assertIsDisplayed()
+                try {
+                    node(tag).assertIsDisplayed()
+                } catch (_: AssertionError) {
+                    node("page:工作区").scrollToDescendant(hasTestTag(tag))
+                    node(tag).assertIsDisplayed()
+                }
                 true
             } catch (_: AssertionError) { false }
         }

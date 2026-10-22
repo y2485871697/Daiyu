@@ -61,7 +61,8 @@ class MessageActionBarLayoutTest : WiredActivityTestCase() {
             ui.onNodeWithText(timestamp).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             assertEquals(11.sp, layouts.single().layoutInput.style.fontSize)
             assertEquals(1, layouts.single().lineCount)
-            assertFalse(layouts.single().hasVisualOverflow)
+            assertFalse("timestamp layout=${layouts.single().size}, overflowWidth=${layouts.single().didOverflowWidth}, " +
+                "overflowHeight=${layouts.single().didOverflowHeight}, bar=$bar, time=$time", layouts.single().hasVisualOverflow)
         }
         assertEquals(0, fixture.opens.get())
     }

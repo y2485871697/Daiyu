@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Intent
 import androidx.activity.compose.setContent
 import app.daiyu.android.runningmode.*
 import androidx.compose.ui.test.*
@@ -69,8 +72,14 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         node("linux-choice:linux-distribution-choice:1").performClick()
         node("linux-tab:files").performClick().assertIsSelected()
         node("linux-files:workspace").assertIsSelected()
-        node("workspace-private-import").assertHasClickAction().assertHeightIsAtLeast(48.dp)
-        node("workspace-private-refresh").assertHasClickAction()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("workspace-private-import").fetchSemanticsNodes().singleOrNull()?.let {
+                it.config.contains(SemanticsActions.OnClick) &&
+                    !it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+            } == true
+        }
+        node("workspace-private-import").assertHasClickAction().assertIsEnabled().assertHeightIsAtLeast(48.dp)
+        node("workspace-private-refresh").assertHasClickAction().assertIsEnabled()
         ui.onNodeWithText("私有工作区").assertDoesNotExist()
         ui.onNodeWithText("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。").assertDoesNotExist()
         revealLinux("linux-files:rootfs").performClick().assertIsSelected()
@@ -132,27 +141,48 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         }
     }
     fun testRetainedFileToolbarCallbacksExpireAfterSourceSwitchAndDoNotOpenPickers() {
-        show()
-        node("linux-tab:files").performClick()
-        ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("workspace-private-import").fetchSemanticsNodes()
-                .singleOrNull()?.config?.contains(SemanticsActions.OnClick) == true &&
-                ui.onAllNodesWithTag("workspace-private-import").fetchSemanticsNodes()
-                    .none { it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled) }
+        val pickerLaunches = AtomicInteger()
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action != Intent.ACTION_OPEN_DOCUMENT && intent.action != Intent.ACTION_CREATE_DOCUMENT) return null
+                pickerLaunches.incrementAndGet()
+                return Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+            }
         }
-        val oldImport = checkNotNull(node("workspace-private-import").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        val oldRefresh = checkNotNull(node("workspace-private-refresh").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        revealLinux("linux-files:rootfs").performClick()
-        ui.onNodeWithText("Rootfs 仅供只读浏览，不跟随符号链接，不导入或删除环境文件。").assertDoesNotExist()
-        mainThread { oldImport(); oldRefresh() }
-        ui.onNodeWithText("当前环境暂无可浏览的 Rootfs").assertIsDisplayed()
-        node("workspace-private-import").assertDoesNotExist()
-        revealLinux("linux-files:workspace").performClick()
-        mainThread { oldImport(); oldRefresh() }
-        node("workspace-private-import").assertIsDisplayed()
-        node("linux-tab:files").assertIsDisplayed()
-        assertFalse(checkNotNull(owner).state.value.revoked)
-        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+        instrumentation.addMonitor(monitor)
+        try {
+            show()
+            node("linux-tab:files").performClick()
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag("workspace-private-import").fetchSemanticsNodes().singleOrNull()?.let {
+                    it.config.contains(SemanticsActions.OnClick) &&
+                        !it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+                } == true
+            }
+            val oldImport = checkNotNull(node("workspace-private-import").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            val oldRefresh = checkNotNull(node("workspace-private-refresh").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            revealLinux("linux-files:rootfs").performClick()
+            ui.onNodeWithText("Rootfs 仅供只读浏览，不跟随符号链接，不导入或删除环境文件。").assertDoesNotExist()
+            mainThread { oldImport(); oldRefresh() }
+            assertEquals(0, pickerLaunches.get())
+            ui.onNodeWithText("当前环境暂无可浏览的 Rootfs").assertIsDisplayed()
+            node("workspace-private-import").assertDoesNotExist()
+            revealLinux("linux-files:workspace").performClick()
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag("workspace-private-import").fetchSemanticsNodes().singleOrNull()?.let {
+                    !it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+                } == true
+            }
+            mainThread { oldImport(); oldRefresh() }
+            assertEquals(0, pickerLaunches.get())
+            node("workspace-private-import").assertIsEnabled().performClick()
+            ui.waitUntil(5_000) { pickerLaunches.get() == 1 }
+            node("linux-tab:files").assertIsDisplayed()
+            assertFalse(checkNotNull(owner).state.value.revoked)
+            assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
     }
 
     private fun setRunningMode(mode: RunningMode) {

@@ -148,15 +148,16 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 val size = geometry.layoutInfo.coordinates.size
                 assertEquals("$title frame must not be vertically clipped", size.height.toFloat(), geometry.boundsInRoot.height, 1f)
                 assertEquals("$title frame must not be horizontally clipped", size.width.toFloat(), geometry.boundsInRoot.width, 1f)
-                val pixels = captureScreenNode(frame).toPixelMap()
+                val pixels = frame.captureToImage().toPixelMap()
                 val sampleY = (4f * layoutsByTitle.getValue(title).layoutInput.density.density).roundToInt()
                 assertTrue("sample must stay between the border and text padding", sampleY in 1 until pixels.height)
                 val actual = pixels[pixels.width / 2, sampleY]
                 val expected = Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
-                assertEquals(expected.red, actual.red, .025f)
-                assertEquals("dark=$dark title=$title sampleY=$sampleY frame=${pixels.width}x${pixels.height}",
-                    expected.green, actual.green, .025f)
-                assertEquals(expected.blue, actual.blue, .025f)
+                val sample = "dark=$dark title=$title sampleY=$sampleY frame=${pixels.width}x${pixels.height} " +
+                    "actual=$actual expected=$expected bounds=${geometry.boundsInRoot}"
+                assertEquals(sample, expected.red, actual.red, .025f)
+                assertEquals(sample, expected.green, actual.green, .025f)
+                assertEquals(sample, expected.blue, actual.blue, .025f)
             }
             ui.onNodeWithTag("tool-output-hint:标准输出").assertDoesNotExist()
             ui.onNodeWithTag("tool-document:标准输出", useUnmergedTree = true).assertTextEquals("hello")

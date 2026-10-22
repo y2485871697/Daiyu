@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,7 +47,6 @@ import androidx.compose.ui.unit.sp
 import com.openminis.app.browser.BrowserHistoryStore
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 import app.daiyu.android.browser.ported.ui.components.MinisTextButton
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -188,7 +188,7 @@ fun BrowserHistorySheet(
                                     )
                                 }
                                 Text(
-                                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(entry.timestamp)),
+                                    SimpleDateFormat("HH:mm", LocalLocale.current.platformLocale).format(Date(entry.timestamp)),
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 )

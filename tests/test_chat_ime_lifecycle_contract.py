@@ -38,15 +38,28 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, layers)
 
     def test_stop_cleanup_is_chat_scoped_and_does_not_restore_focus(self):
-        helper = self.read(MAIN / 'ui/components/ChatInputIme.kt').split('internal fun DismissImeOnStop()', 1)[1]
-        self.assertIn('event == Lifecycle.Event.ON_STOP', helper)
+        helper = self.read(MAIN / 'ui/components/ChatInputIme.kt').split('internal fun DismissImeOnStop(', 1)[1]
+        self.assertIn('var pendingStopDismiss = false', helper)
+        stop = helper.split('Lifecycle.Event.ON_STOP -> {', 1)[1].split('Lifecycle.Event.ON_RESUME', 1)[0]
+        self.assertIn('pendingStopDismiss = true', stop)
+        self.assertIn('hide()', stop)
+        self.assertIn('if (!pendingStopDismiss || restoreDismiss != null ||', helper)
+        self.assertIn('Lifecycle.State.RESUMED', helper)
+        self.assertIn('view.hasWindowFocus()', helper)
+        self.assertLess(helper.index('pendingStopDismiss = false\n                    hide()'),
+                        helper.index('view.postOnAnimation(work)'))
         self.assertIn('hideChatInputIme(focus, keyboard, view)', helper)
         self.assertIn('lifecycle.addObserver(observer)', helper)
-        self.assertIn('onDispose { lifecycle.removeObserver(observer) }', helper)
-        for forbidden in ('ON_PAUSE', 'ON_RESUME', 'requestFocus(', '.show()'):
+        self.assertIn('lifecycle.removeObserver(observer)', helper)
+        self.assertIn('restoreDismiss?.let(view::removeCallbacks)', helper)
+        self.assertIn('removeOnWindowFocusChangeListener(windowFocus)', helper)
+        for forbidden in ('ON_PAUSE', 'requestFocus(', '.show()'):
             self.assertNotIn(forbidden, helper)
-        self.assertIn('DismissImeOnStop()', self.read(CHAT / 'ChatComposer.kt'))
-        self.assertNotIn('DismissImeOnStop()', self.read(MAIN / 'MainActivity.kt'))
+        composer = self.read(CHAT / 'ChatComposer.kt')
+        self.assertIn('DismissImeOnStop { dismiss ->', composer)
+        self.assertIn('try { dismiss() } finally { lifecycleDismissInProgress = false }', composer)
+        self.assertIn('!lifecycleDismissInProgress && !isInputDismissInProgress()', composer)
+        self.assertNotIn('DismissImeOnStop(', self.read(MAIN / 'MainActivity.kt'))
 
     def test_stopped_editor_preserves_local_value_and_host_selection(self):
         composer = self.read(CHAT / 'ChatComposer.kt')
@@ -80,8 +93,8 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
                          'assertEquals(database, fixture.database.exportBackup())'):
             self.assertIn(expected, before_reopen)
         self.assertIn('settledFrame(visible = true, before = returned)', returned)
-        self.assertIn('keyboardBackgroundRoundTrip(hideBeforeLeaving = false)', android)
-        self.assertIn('keyboardBackgroundRoundTrip(hideBeforeLeaving = true)', android)
+        self.assertIn('repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = false) }', android)
+        self.assertIn('repeat(2) { keyboardBackgroundRoundTrip(hideBeforeLeaving = true) }', android)
         self.assertIn('realPauseResume(activity)', android)
         measure = self.read(ANDROID / 'ui/screens/chat/conversation/ChatComposerMeasurePhaseTest.kt')
         self.assertIn('actual > 0', measure)

@@ -164,7 +164,7 @@ internal fun PageBackGestureHost(
                 }
             } else Modifier,
         )) {
-            Box(Modifier.fillMaxSize().testTag("page-back-surface").graphicsLayer {
+            Box(Modifier.fillMaxSize().graphicsLayer {
                 translationX = state.direction * size.width * progress * if (state.predictive) 0.12f else 1f
                 val scale = if (state.predictive) 1f - 0.06f * progress else 1f
                 scaleX = scale
@@ -172,7 +172,7 @@ internal fun PageBackGestureHost(
                 shape = RoundedCornerShape(20.dp)
                 clip = state.predictive && progress > 0f
                 shadowElevation = 8.dp.toPx() * progress
-            }.background(background)) { content() }
+            }.testTag("page-back-surface").background(background)) { content() }
         }
     }
 }

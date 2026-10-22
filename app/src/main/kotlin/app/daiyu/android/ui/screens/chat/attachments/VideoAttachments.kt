@@ -74,7 +74,8 @@ internal typealias VideoDraftHandoff = (VideoDraftRequest, VideoDraftText, (Vide
  * Controlled P18 composer adjunct. Pass the ONE long-lived parent-owned VideoChatHost; never create
  * a host/journal writer in composition. Mount only for the active chat route (not merely hidden).
  * [viewLifecycleOwner] must be the route view lifecycle (Activity in a Compose-only route, Fragment
- * viewLifecycleOwner in a Fragment). This component is its host's sole lifecycle binding.
+ * viewLifecycleOwner in a Fragment). Unless [manageLifecycle] is false, this component owns the
+ * lifecycle binding. A parent-managed binding must live outside keyed composer subcompositions.
  *
  * [enabled] is the parent's media-route gate (e.g. no image draft); [parentBusy] gates actions without
  * touching normal text/image send routes. No network, DB, URI persistence, or editor clearing occurs.
@@ -90,16 +91,19 @@ internal fun VideoAttachments(
     parentBusy: Boolean = false,
     viewLifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current,
     compact: Boolean = false,
+    manageLifecycle: Boolean = true,
     pickRequest: Any? = null,
     onControls: (VideoComposerControls?) -> Unit = {},
 ) {
     val registry = checkNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
     val picker = remember(host, registry, conversation, viewLifecycleOwner) { VideoPickerBinding(host, registry) }
-    DisposableEffect(host, picker, conversation, viewLifecycleOwner) {
-        host.enter(conversation)
-        val binding = host.bindLifecycle(viewLifecycleOwner)
+    DisposableEffect(host, picker, conversation, viewLifecycleOwner, manageLifecycle) {
+        val binding = if (manageLifecycle) {
+            host.enter(conversation)
+            host.bindLifecycle(viewLifecycleOwner)
+        } else null
         onDispose {
-            binding.close() // Route departure fences callbacks before unregistering the picker.
+            binding?.close()
             picker.close()
         }
     }

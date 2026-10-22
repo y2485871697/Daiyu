@@ -576,7 +576,7 @@ class MainActivity : ComponentActivity() {
                     text.revision, text.text, true), settle)
             }, enabled = videoComposerAvailable(),
             parentBusy = videoSending || controller.active != null || !controller.ready || controller.dataBusy,
-            compact = true, pickRequest = pick, onControls = { controls ->
+            compact = true, manageLifecycle = false, pickRequest = pick, onControls = { controls ->
                 videoComposerControls = controls
                 if (controls != null && pick != null && videoPickEntry === pick) {
                     videoPickEntry = null
@@ -1477,6 +1477,12 @@ class MainActivity : ComponentActivity() {
                 }
                 LaunchedEffect(sidebarVisible, retainedPage) {
                     if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
+                }
+                if (retainedPage == "chat" && !sidebarVisible) {
+                    DisposableEffect(videoHost, editorGeneration) {
+                        val binding = videoHost.bindLifecycle(this@MainActivity)
+                        onDispose { binding.close() }
+                    }
                 }
                 app.daiyu.android.ui.navigation.PageBackGestureHost(
                     routeKey = retainedPage,

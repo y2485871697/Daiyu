@@ -9,7 +9,7 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class MessageTimestampStyleContractTest(unittest.TestCase):
     def test_action_bar_reuses_retained_eleven_sp_timestamp(self):
         actions = (CHAT / 'MessageActionBar.kt').read_text(encoding='utf-8')
-        self.assertIn('MessageTimestamp(timestamp)', actions)
+        self.assertIn('MessageTimestamp(timestamp, modifier = if (endAligned) Modifier else Modifier.weight(1f))', actions)
         self.assertNotIn('fontSize = 8.sp', actions)
         style = (CHAT / 'MessageTimestamp.kt').read_text(encoding='utf-8')
         self.assertIn('fontSize = 11.sp', style)
@@ -19,8 +19,8 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
 
     def test_only_assistant_receives_elastic_space_before_timestamp(self):
         actions = (CHAT / 'MessageActionBar.kt').read_text(encoding='utf-8')
-        self.assertIn('if (!endAligned) Spacer(Modifier.weight(1f))', actions)
-        self.assertLess(actions.index('if (!endAligned) Spacer'), actions.index('MessageTimestamp(timestamp)'))
+        self.assertIn('modifier = if (endAligned) Modifier else Modifier.weight(1f)', actions)
+        self.assertNotIn('Spacer(Modifier.weight(1f))', actions)
         self.assertIn('if (timestamp.isNotBlank())', actions)
         self.assertIn('if (endAligned) Alignment.End else Alignment.Start', actions)
 

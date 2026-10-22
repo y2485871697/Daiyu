@@ -76,7 +76,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     onInputFocusChanged: (Boolean) -> Unit = {},
     isInputDismissInProgress: () -> Boolean = { false },
     attachmentContent: @Composable () -> Unit = {}) {
-    app.daiyu.android.ui.components.DismissImeOnStop()
+    var lifecycleDismissInProgress by remember { mutableStateOf(false) }
+    app.daiyu.android.ui.components.DismissImeOnStop { dismiss ->
+        lifecycleDismissInProgress = true
+        try { dismiss() } finally { lifecycleDismissInProgress = false }
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
@@ -163,7 +167,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         value = renderedValue,
                         onValueChange = { value ->
                             // Explicit dismissal and ON_STOP must not write back a collapsed selection.
-                            if ((!isInputDismissInProgress() || value.text != references.text) &&
+                            if ((!lifecycleDismissInProgress && !isInputDismissInProgress() || value.text != references.text) &&
                                 lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
                                 mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
                                 val bodyChanged = value.text != references.text

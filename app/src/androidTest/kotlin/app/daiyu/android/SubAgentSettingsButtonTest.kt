@@ -70,7 +70,7 @@ class SubAgentSettingsButtonTest : WiredActivityTestCase() {
         assertTrue("Button retains minimum width", bounds.width >= 168f * density - 1f)
         assertTrue("Button retains minimum touch height", bounds.height >= 48f * density - 1f)
         assertEquals("Button stays centered", host.center.x, bounds.center.x, 1.5f)
-        val pixels = captureScreenNode(button).toPixelMap()
+        val pixels = button.captureToImage().toPixelMap()
         // The capsule's left-center is background, outside the text and rounded edge.
         val actual = pixels[(12f * density).toInt(), pixels.height / 2]
         assertEquals("Filled container red", expectedContainer.red, actual.red, .01f)

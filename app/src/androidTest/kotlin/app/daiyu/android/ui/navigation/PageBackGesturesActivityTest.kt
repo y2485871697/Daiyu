@@ -119,7 +119,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         progress(BackEventCompat.EDGE_LEFT)
         val moving = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
         if (Build.VERSION.SDK_INT >= 34) {
-            assertTrue(moving.width < initial.width)
+            assertTrue("predictive initial=$initial moving=$moving", moving.width < initial.width)
             assertTrue(moving.center.x > initial.center.x)
         } else {
             assertTrue(abs(moving.width - initial.width) <= 1f)

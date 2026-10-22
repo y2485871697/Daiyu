@@ -70,7 +70,11 @@ class LinuxFilesStyleContract(unittest.TestCase):
         panel = read('PrivateWorkspacePanel.kt')
         actions = panel.split('return LinuxFilePanel(actions = {', 1)[1].split('}, content = {', 1)[0]
         self.assertIn('onClick = importFile', actions)
-        self.assertIn('enabled = controlsEnabled && listing != null', actions)
+        self.assertIn('val importEnabled = controlsEnabled && listing != null', actions)
+        self.assertIn('onClick = importFile, enabled = importEnabled', actions)
+        self.assertIn('val semanticImport = hapticClick(importEnabled, importFile)', actions)
+        self.assertIn('onClick { semanticImport(); true }', actions)
+        self.assertIn('onClick { semanticRefresh(); true }', actions)
         self.assertIn('workspace-private-refresh', actions)
         self.assertIn('DaiyuIcons.Import, "导入文件"', actions)
         self.assertNotIn('SettingsCard', actions)

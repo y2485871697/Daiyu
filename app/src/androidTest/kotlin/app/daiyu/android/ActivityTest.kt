@@ -71,6 +71,43 @@ class ActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testVideoLifecycleBindingStaysWithRouteAcrossEditorAndActivityReplacement() {
+        val host = fixture.controller.videoHost
+        val first = fixture.database.create("default")
+        val second = fixture.database.create("default")
+        for (conversation in listOf(first, second, first, first)) {
+            mainThread { activity.select(conversation) }
+            awaitControl("video route visible after selection") {
+                host.state.visible && host.state.conversation == conversation.id.value
+            }
+            mainThread {
+                assertTrue("single binding guard remains active", runCatching { host.bindLifecycle(activity) }.isFailure)
+            }
+            node("chat-draft").assertIsDisplayed()
+            val controls = MainActivity::class.java.getDeclaredField("videoComposerControls").apply { isAccessible = true }
+            awaitControl("current composer controls survive subcomposition replacement") { controls.get(activity) != null }
+        }
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        mainThread { assertFalse(host.state.visible) }
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        awaitControl("video route restored after sidebar") { host.state.visible }
+        openSettings()
+        mainThread { assertFalse(host.state.visible) }
+        backToChat(activity)
+        awaitControl("video route restored after settings") { host.state.visible }
+        val previous = activity
+        activity = recreateActivity(activity)
+        assertNotSame(previous, activity)
+        awaitControl("replacement owns retained video route") {
+            host.state.visible && host.state.conversation == first.id.value
+        }
+        mainThread {
+            assertSame(host, fixture.controller.videoHost)
+            assertTrue("replacement still has exactly one binding", runCatching { host.bindLifecycle(activity) }.isFailure)
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testCredentialFailureCanBeReenteredFromSettings() {
         val config = fixture.settings.load()
         fixture.application.getSharedPreferences("model-settings", 0).edit().remove("iv").commit()

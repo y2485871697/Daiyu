@@ -12,6 +12,7 @@ class PtySessionHostTest : TestCase() {
     private fun assertQueuedInputFence(releaseOnInterrupt: Boolean) {
         val root = Files.createTempDirectory("daiyu-pty-fence").toFile()
         val entered = java.util.concurrent.CountDownLatch(1)
+        val writerCancelled = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)
         val eof = java.util.concurrent.CountDownLatch(1)
         val written = java.io.ByteArrayOutputStream()
@@ -29,7 +30,10 @@ class PtySessionHostTest : TestCase() {
                 override fun write(value: Int) {
                     entered.countDown()
                     while (true) {
-                        try { release.await(); break } catch (_: InterruptedException) { if(releaseOnInterrupt) { release.countDown(); break } }
+                        try { release.await(); break } catch (_: InterruptedException) {
+                            writerCancelled.countDown()
+                            if (releaseOnInterrupt) { release.countDown(); break }
+                        }
                     }
                     synchronized(written) { written.write(value) }
                 }
@@ -50,9 +54,12 @@ class PtySessionHostTest : TestCase() {
         Thread.sleep(300) // Keep B's own deadline separate from A's deliberate timeout.
         val b = Thread { second.set(session.write("second", "BBB".toByteArray(), 2)) }.apply { start() }
         try {
+            assertTrue(writerCancelled.await(4, java.util.concurrent.TimeUnit.SECONDS))
+            // Release at the cancellation fence, before A's journal commit consumes B's deadline.
+            release.countDown()
             a.join(4000); assertFalse(a.isAlive)
             assertEquals("unknown", first.get().getString("execution"))
-            release.countDown(); b.join(2000); assertFalse(b.isAlive)
+            b.join(2000); assertFalse(b.isAlive)
             assertEquals("not_executed", second.get().getString("execution"))
             assertEquals("pty_session_unavailable", second.get().getString("error"))
             val bytes = synchronized(written) { written.toByteArray() }

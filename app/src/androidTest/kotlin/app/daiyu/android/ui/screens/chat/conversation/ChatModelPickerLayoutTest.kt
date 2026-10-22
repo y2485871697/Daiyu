@@ -3,6 +3,8 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.SideEffect
@@ -87,6 +89,44 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
             assertEquals("b" to "same", selected.last())
             node("chat-model-provider:b").performClick()
             node("chat-model-option:b:same").assertDoesNotExist()
+        }
+    }
+
+    fun testSelectedModelBackgroundMatchesLightReferenceAndKeepsDarkPalette() {
+        for (dark in listOf(false, true)) {
+            val updates = mutableStateOf(state)
+            show(updates = updates, dark = dark)
+            val expected = Color(if (dark) 0xFF28262F else 0xFFEFEDFB)
+            fun background(tag: String): Color {
+                val pixels = captureScreenNode(node(tag)).toPixelMap()
+                // Sample above the 12dp content padding, away from glyphs, icons and rounded edges.
+                return pixels[pixels.width / 2, (4f * contentDensity).toInt()]
+            }
+            fun assertBackground(tag: String) {
+                val actual = background(tag)
+                assertEquals("$tag red (dark=$dark)", expected.red, actual.red, .006f)
+                assertEquals("$tag green (dark=$dark)", expected.green, actual.green, .006f)
+                assertEquals("$tag blue (dark=$dark)", expected.blue, actual.blue, .006f)
+            }
+            fun assertNoHighlight(tag: String) {
+                val actual = background(tag)
+                assertTrue("$tag must not keep the selected background (dark=$dark)",
+                    kotlin.math.abs(actual.red - expected.red) + kotlin.math.abs(actual.green - expected.green) +
+                        kotlin.math.abs(actual.blue - expected.blue) > .03f)
+            }
+            node("chat-model-option:same").assertIsSelected()
+            node("chat-model-option:next").assertIsNotSelected()
+            assertBackground("chat-model-option:same")
+            assertNoHighlight("chat-model-option:next")
+            val callbacksBefore = selected.size
+            node("chat-model-option:next").performClick()
+            assertEquals(callbacksBefore + 1, selected.size)
+            assertEquals("a" to "next", selected.last())
+            mainThread { updates.value = state.copy(current = "next") }
+            node("chat-model-option:same").assertIsNotSelected()
+            node("chat-model-option:next").assertIsSelected()
+            assertBackground("chat-model-option:next")
+            assertNoHighlight("chat-model-option:same")
         }
     }
 

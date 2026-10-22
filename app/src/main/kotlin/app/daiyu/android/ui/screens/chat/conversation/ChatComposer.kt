@@ -234,7 +234,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }, Modifier.size(32.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = (if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
-                                    .copy(alpha = if (primaryEnabled) 1f else .4f),
+                                    .copy(alpha = if (primaryEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
                                 enabled = primaryEnabled, containerSize = 28.dp,
                                 tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 14.dp else 16.dp,

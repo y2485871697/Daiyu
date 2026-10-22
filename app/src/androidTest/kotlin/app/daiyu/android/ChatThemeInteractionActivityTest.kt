@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
@@ -99,7 +100,7 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
                     val colors = chatActionColors()
                     val buttons = app.daiyu.android.ui.screens.assistants.assistantPreviewPalette()
                     SideEffect {
-                        assertEquals(if (mode == AppearanceThemeMode.DARK) buttons.primary else buttons.soft, colors.sendContainer)
+                        assertEquals(if (mode == AppearanceThemeMode.DARK) buttons.primary else Color(0xFFE8E7EE), colors.sendContainer)
                         assertEquals(if (mode == AppearanceThemeMode.DARK) buttons.onPrimary else buttons.accent, colors.sendContent)
                         assertEquals(buttons.primary, colors.appendContainer)
                         assertEquals(buttons.onPrimary, colors.appendContent)

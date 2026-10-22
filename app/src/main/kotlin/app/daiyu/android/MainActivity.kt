@@ -5361,12 +5361,13 @@ class MainActivity : ComponentActivity() {
         val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
-            turns = if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
+            turns = ChatTurnMapper.withStreamingOwner(if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey
             }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
             }, toolReceipt = app.daiyu.android.ui.RetainedToolOutcomes.projectionReader(controller.database, shown.map { it.second }, controller::runState, controller::runStopping)),
+                controlOwner?.takeIf { state?.phase == ExecutionPhase.STREAMING }),
             statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,

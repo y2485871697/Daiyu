@@ -41,7 +41,7 @@ internal fun MessageContent(
     markdown: Boolean,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
-    textBody: @Composable (String, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text, modifier, markdown) },
+    textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         var imageNumber = 0
@@ -50,7 +50,7 @@ internal fun MessageContent(
             key(itemKey) {
                 when (block) {
                     is MessageContentUi.Text -> {
-                        if (block.text.isNotBlank()) textBody(block.text, Modifier.testTag("message-content-text:$index"))
+                        if (block.text.isNotBlank()) textBody(block, Modifier.testTag("message-content-text:$index"))
                     }
                     is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                     is MessageContentUi.Tool -> {

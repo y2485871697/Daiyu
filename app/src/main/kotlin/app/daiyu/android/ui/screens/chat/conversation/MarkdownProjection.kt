@@ -22,20 +22,25 @@ internal fun markdownBodySnapshot(
 ): MarkdownBodySnapshot? = if (blocks != null) MarkdownBodySnapshot(text, blocks)
     else previous?.takeIf { text.startsWith(it.text) }
 
+internal val defaultMarkdownParser: (String) -> List<MarkdownBlock> = MarkdownParser::parse
+
 // One running CPU parse; cancelled snapshots do not accumulate runnable parse work.
 private val markdownDispatcher = Dispatchers.Default.limitedParallelism(1)
 
 internal suspend fun projectMarkdown(
     sources: List<String>,
-    parser: (String) -> List<MarkdownBlock> = MarkdownParser::parse,
+    parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser,
     cache: MarkdownProjectionCache = markdownProjectionCache,
 ): MarkdownProjection {
     currentCoroutineContext().ensureActive()
     cache.get(sources, parser)?.let { return it }
     val projection = withContext(markdownDispatcher) {
+        val context = currentCoroutineContext()
         val blocks = sources.distinct().associateWith { source ->
             currentCoroutineContext().ensureActive()
-            parser(source)
+            cache.getBlocks(source, parser) ?: if (parser === defaultMarkdownParser) {
+                MarkdownParser.parse(source) { context.ensureActive() }
+            } else parser(source)
         }
         MarkdownProjection(sources.toList(), blocks, parser)
     }

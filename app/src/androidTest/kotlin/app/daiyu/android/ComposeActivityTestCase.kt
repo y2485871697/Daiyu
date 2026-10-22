@@ -166,6 +166,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 host.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
         }
         check(currentHost === host)
+        awaitVisualIdle()
         focusedWindowRoot()
     }
 

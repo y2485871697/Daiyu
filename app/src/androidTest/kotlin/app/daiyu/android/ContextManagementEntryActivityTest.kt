@@ -175,6 +175,8 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             }
             focused
         }
+        dismissIme(pickerView)
+        awaitNodeWindowFocus(node("settings-model-picker"))
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         awaitUniqueTag("context-management")
         node("compression-dialog-api:${protocol.wireName}").assertIsSelected()

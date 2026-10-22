@@ -17,7 +17,7 @@ adb_stage() {
 APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
 test -n "$APK"
 mkdir -p smoke
-rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json
+rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/hwui-before.txt smoke/hwui-renderer.txt
 rm -rf smoke/settings-ui
 # Explicitly name every source test class: legacy default discovery scans all dependency DEX.
 target_spec=$(python3 - <<'PYCOUNT'
@@ -120,6 +120,16 @@ collect_diagnostics() {
 trap collect_diagnostics EXIT
 adb_stage device 60 wait-for-device
 api=$(adb_stage api 15 shell getprop ro.build.version.sdk | tr -d '\r')
+# Android O's legacy OpenGL renderer aborts in the preinstalled launcher.
+# Restart existing renderer processes after choosing the supported Skia GL pipeline.
+if test "$api" = 26; then
+  adb_stage hwui-log-before 20 logcat -d -b all > smoke/hwui-before.txt
+  adb_stage hwui-root 15 root
+  adb_stage hwui-device 30 wait-for-device
+  adb_stage hwui-configure 20 shell 'setprop debug.hwui.renderer skiagl && stop && setprop sys.boot_completed 0 && start'
+  adb_stage hwui-state 15 shell getprop debug.hwui.renderer | tr -d '\r' > smoke/hwui-renderer.txt
+  grep -Fx skiagl smoke/hwui-renderer.txt
+fi
 # Current gfxstream images crash in gesture-bar region sampling before app install.
 if test "$api" -ge 36; then
   adb_stage navigation 15 shell cmd overlay enable com.android.internal.systemui.navbar.threebutton
@@ -145,6 +155,23 @@ for attempt in $(seq 1 60); do
   sleep 2
 done
 test "$stable" -ge 15
+adb_stage webview-state 15 shell dumpsys webviewupdate | tr -d '\r' > smoke/webview.txt
+provider=$(python3 - <<'PYWEBVIEW'
+from pathlib import Path
+import re
+state = Path("smoke/webview.txt").read_text()
+current = re.findall(r"^\s*Current WebView package \(name, version\): \(([\w.]+), [^)]+\)\s*$", state, re.M)
+assert len(current) == 1, "WebView has no unique current provider"
+for field, value in (("Any WebView package installed", "true"), ("WebView package dirty", "false")):
+    assert re.findall(r"^\s*" + field + r": (\w+)\s*$", state, re.M) == [value], field
+started = re.findall(r"^\s*Number of relros started: (\d+)\s*$", state, re.M)
+finished = re.findall(r"^\s*Number of relros finished: (\d+)\s*$", state, re.M)
+assert len(started) == len(finished) == 1 and started == finished, "WebView relro not ready"
+print(current[0])
+PYWEBVIEW
+)
+adb_stage webview-package 15 shell pm path "$provider" > smoke/webview-package.txt
+grep -q '^package:' smoke/webview-package.txt
 # Large native framebuffer permits the phone-density fixture; all other tests keep the original canvas.
 verify_display_baseline() {
   local phase=$1

@@ -319,8 +319,11 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
             mainThread { assertNotNull(listing()); deliver(oldCode) }
             assertEquals(1, documents.opens.get())
             assertTrue(controller.dataBusy)
+            assertNull(notice.get())
             release.countDown()
-            ui.waitUntil(10_000) { !controller.dataBusy }
+            ui.waitUntil(10_000) {
+                !controller.dataBusy && notice.get()?.startsWith("浏览器原件保存失败") == true
+            }
             assertTrue(notice.get()?.startsWith("浏览器原件保存失败") == true)
             assertEquals(0L, documents.file(destination).length())
             assertEquals(1, documents.opens.get())

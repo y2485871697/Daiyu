@@ -108,13 +108,13 @@ class SourceTests(unittest.TestCase):
         self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
                          {(api, index) for api in ('26', '37.2') for index in range(4)})
 
-    def test_api26_uses_aosp_without_changing_gpu_or_formal_matrix(self):
+    def test_api26_has_google_webview_without_changing_gpu_or_formal_matrix(self):
         smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
         matrices = [json.loads(value) for value in re.findall(r"'(\[[^']*\])'", smoke)]
         self.assertEqual(len(matrices), 3)
         for matrix in matrices:
             for item in matrix:
-                self.assertEqual(item['target'], 'default' if item['api'] == '26' else 'google_apis_ps16k')
+                self.assertEqual(item['target'], 'google_apis' if item['api'] == '26' else 'google_apis_ps16k')
         self.assertIn('-gpu swiftshader ', smoke)
         self.assertIn('"hw.lcd.density":"160"', smoke)
         self.assertEqual({(item['api'], item['shard']) for item in matrices[-1]},
@@ -292,6 +292,19 @@ case "$*" in
  'shell getprop sys.boot_completed') printf '1\n' ;;
  *pidof*) printf '123\n456\n' ;;
  'shell pm path android') printf 'package:/system/framework/framework-res.apk\n' ;;
+ 'shell getprop debug.hwui.renderer') printf 'skiagl\n' ;;
+ 'shell setprop debug.hwui.renderer '*) [ "$CASE" != hwui-fail ] || exit 9 ;;
+ 'shell dumpsys webviewupdate')
+  [ "$CASE" != webview-command-fail ] || exit 8
+  [ "$CASE" != webview-garbage ] || { printf 'not a service dump\n'; exit 0; }
+  if [ "$CASE" = webview-null ]; then printf 'Current WebView package is null\n'
+  else printf 'Current WebView package (name, version): (com.android.chrome, 61.0)\n'; fi
+  dirty=false; [ "$CASE" != webview-dirty ] || dirty=true
+  finished=2; [ "$CASE" != webview-relro ] || finished=1
+  printf 'Any WebView package installed: true\nWebView package dirty: %s\nNumber of relros started: 2\nNumber of relros finished: %s\n' "$dirty" "$finished" ;;
+ 'shell pm path com.android.chrome')
+  [ "$CASE" = webview-no-path ] || printf 'package:/system/app/Chrome/Chrome.apk\n' ;;
+
  'shell cat /proc/meminfo') printf 'MemTotal: 5000000 kB\n' ;;
  'install '*) printf 'Success\n'; [ "$CASE" != install-fail ] || exit 7 ;;
  'shell am instrument '*)
@@ -399,6 +412,32 @@ exit 0
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[3:8], ['-w', '-r', '-e', 'class', 'app.daiyu.android.FirstTest'])
         self.assertEqual(args[8], 'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner')
+
+    def test_webview_and_api26_renderer_ready_before_install(self):
+        for api in (26, 37):
+            result = self.smoke(api=api)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+            probe = calls.index('shell dumpsys webviewupdate')
+            install = next(i for i, value in enumerate(calls) if value.startswith('install '))
+            self.assertLess(probe, install)
+            self.assertIn('shell pm path com.android.chrome', calls)
+            self.assertEqual('root' in calls, api == 26)
+            if api == 26:
+                configure = next(i for i, value in enumerate(calls) if value.startswith('shell setprop debug.hwui.renderer'))
+                self.assertLess(configure, probe)
+                self.assertEqual((self.root / 'smoke/hwui-renderer.txt').read_text(), 'skiagl\n')
+
+    def test_unready_webview_or_renderer_cannot_start_tests(self):
+        for case in ('webview-command-fail', 'webview-garbage', 'webview-null',
+                     'webview-dirty', 'webview-relro', 'webview-no-path', 'hwui-fail'):
+            with self.subTest(case=case):
+                result = self.smoke(case=case)
+                self.assertNotEqual(result.returncode, 0)
+                calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+                self.assertFalse(any(value.startswith('install ') for value in calls))
+                self.assertFalse(any('am instrument' in value for value in calls))
+                self.assertTrue((self.root / 'smoke/logcat-exit.txt').exists())
 
     def test_launch_isolated_from_instrumentation_on_both_apis(self):
         for api in (26, 37):

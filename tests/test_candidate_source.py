@@ -241,7 +241,7 @@ class CandidateSourceTests(unittest.TestCase):
                     self.assertEqual({(item['api'], item['shard']) for item in matrix},
                                      {(a, shard) for a in apis for shard in shards}, (mode, variant, api))
                     for item in matrix:
-                        self.assertEqual(item['target'], 'default' if item['api'] == '26' else 'google_apis_ps16k')
+                        self.assertEqual(item['target'], 'google_apis' if item['api'] == '26' else 'google_apis_ps16k')
                         self.assertEqual(item['ram'], 4096 if item['api'] == '26' else 6144)
 
     def test_workflow_wires_candidate_download_and_four_shards_without_rebuild(self):

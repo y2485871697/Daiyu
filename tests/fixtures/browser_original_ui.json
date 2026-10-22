@@ -1,0 +1,102 @@
+{
+  "repository": "y2485871697/Eta",
+  "revision": "3196270e361c82cc1f399218d914ec49de0d83cc",
+  "files": {
+    "ui/browser/BrowserDownloadsSheet.kt": {
+      "mode": "render",
+      "original_sha256": "6f038f1bc7803bceede3bd9d8edea48ab6cb171ee245bc995bdbe73044ed9059",
+      "contract_sha256": "f2b84a0667f9da3291a6cc748b47439910860090d339485c96558437deda3cb3",
+      "imports_sha256": "0a975c5473c784e6da0ece986980f7dcacff839ce0f9b952f8ddf2870ffb1868"
+    },
+    "ui/browser/BrowserHistorySheet.kt": {
+      "mode": "render",
+      "original_sha256": "70a883a30b71d34f7685e145cf76abfcda82cd01f7fe269b70cbd819447ed6b7",
+      "contract_sha256": "4405239cd3a1b691c484ebfe6511b8e841c5e453e793331799e12a36201543f8",
+      "imports_sha256": "a8247ae4f573adda47803beb63a16f80d897ab41a0a63ea3152c9b8c60e0a29a"
+    },
+    "ui/browser/BrowserSettingsSheet.kt": {
+      "mode": "render",
+      "original_sha256": "0d2516ced2c871adf05b29483efeabbb71bca2bd67a2465e7492ab45f4b7913b",
+      "contract_sha256": "59ca1912e3f050c37f94208e8fcba295c0948b6dd2cbfe6fdea49761b1495506",
+      "imports_sha256": "694b0e08f4510b40b01ef26e831b91714507a71a3951286d6077bdf1d49d0cbe"
+    },
+    "ui/browser/BrowserSheet.kt": {
+      "mode": "render",
+      "original_sha256": "59638a05054a8ad83709fc62a49a372cbe661e1a2e6cee8d84d821166c734e00",
+      "contract_sha256": "8b724590863ba86590c7aaeef6e0f59259cd68347775001b4a10223a9e6cb63a",
+      "imports_sha256": "c6d26411fa1ecb9cfae93c9b5e4d7218d20ca099e323f6f798632492e2a81d04"
+    },
+    "ui/chat/StandardChatSheet.kt": {
+      "mode": "body",
+      "original_sha256": "c02433f2c4e28664583a3c9263739f1f4e6fa9aa17dcd04364139c90b41fbe8a",
+      "contract_sha256": "88d17b815ef0992c7c3f518e27d9fc6d33420081d36c7db06facc2d2441df091",
+      "imports_sha256": "cc1ab484c4e2dd1d76cb8b90b1ecf9fa063b0b0a67134faf4d1e963250d34a0e"
+    },
+    "ui/components/MinisButton.kt": {
+      "mode": "body",
+      "original_sha256": "d9cb7d1b9a81e58c46b0b8727b4e5f6b3ab7641b21b596dbad3f6b3123b3ae4b",
+      "contract_sha256": "cf581db3e092f7b53e2e4688ca45af00b04db45b22fde188f6b90b161e31207b",
+      "imports_sha256": "e6345a9c0ea81c3f80ff0964a1f1c8a0831293387fa8cf60382a6a145c7ffbba"
+    },
+    "ui/theme/ChatColors.kt": {
+      "mode": "body",
+      "original_sha256": "8ccfb05fb86feb3afcf71069e96d6003fd1aa23a33e038b347ced116f0f9271d",
+      "contract_sha256": "9e7e7bd67c0704e9b74ae106db013eb7e38ee2427276ecba9747d78683211260",
+      "imports_sha256": "600f220c99babbddbee437c666e0526f9803528cb5cc4b4126eeb6fa2ffe6aa4"
+    },
+    "ui/theme/Theme.kt": {
+      "mode": "body",
+      "original_sha256": "089b99c76ee05ae1f186392c5e939fb2c10838cab61f9357dbd79fba13efb7d1",
+      "contract_sha256": "bb8b4ba14dc718c87d0711f8b6b1e015c0ca6279447aaa2fb17693f9b4784cc4",
+      "imports_sha256": "3a12b2ff8c203e46b06f3cecc81862f5da59adefb93e16e67880debcb1046d7d"
+    },
+    "ui/util/BringIntoViewOnFocus.kt": {
+      "mode": "body",
+      "original_sha256": "e90c69b29b5f792b139e365980c849bc68004031a51565dfa09825db54a8b540",
+      "contract_sha256": "bdaeb6c33c77df24ca8a88f750367a2193fe8daebda140ae56923752ed99d696",
+      "imports_sha256": "7c8b2fa8d3ee17f3318a39bfd85d0e6e7dbbc9e6ad2be0e00a6e89b087bf6df0"
+    }
+  },
+  "settings_helpers": {
+    "displayUA": "6761c30edcc3ee8e835afb9a0f35e4f0ca103f7cf682ed918dfe9e21714d12e9",
+    "uaMismatchWarning": "77abb7b5430f6c1a8e708ce5d594ac51853efb4dae120a7ad6735016f74d1aa4"
+  },
+  "resources": {
+    "values": "22e1752d40a66126a2a9b487230710907869ecc794de51565bc4bec8ba817fe3",
+    "values-b+zh+Hans": "faa3cecae8f47c391b9127c5e6f196fbf677113f2f657cc80c34dcc8b70392a9",
+    "values-b+zh+Hant": "d7b001efbb24e7f7b6b4b5f098ac9d76447e82495846c355fd8d831322050e08"
+  },
+  "visual_bindings": {
+    "ui/browser/BrowserSheet.kt": {
+      "accent": "89513c4b1d5a8c5bb80f91c29c27de4040a61beda1bfe9470204e9b78a391794",
+      "secondaryBg": "b33177dce5dffc53c224f2285184659c32838ae3499c001ee627e2b143e42682",
+      "tertiaryBg": "905c8d1a314742fae16c6ae96f03c53e99b1513dd994991769ee5b9fdec3155f",
+      "title": "1d463099118faad3ab14b5f2bae485e846fcb24087355888d89ec2d45fc65626",
+      "domain": "2afb809988cd53fa682dae326498fea2f792f7f28ef54244e31b4b254a8ca6da",
+      "displayTitle": "435076de2ac1f70d47253b3fdc825dc858ae9721c70412bb92f75b15b31e216c",
+      "bg": "9ad2553aaa28c447a0e9ee6524d8d333e5c76d676aae36ff4c77465707486af5",
+      "borderColor": "27a423333c7eb38532a35ec1a8e14b905bcf82b7ddb8485f696de92658173c52",
+      "textColor": "5f3e2e83ef50adfa4b411b8fdc2b47227c45922dd7df8142324ccafa51d193ab",
+      "angle": "95e2b86b9a4bc740836b3896a36b9086e004e608a0de09f21c706ccdbb6704e9",
+      "breathingAlpha": "3e39789ff73313ce6965add252da407a48c9002d63e23fc56896dd297dbcc0a6"
+    },
+    "ui/browser/BrowserSettingsSheet.kt": {
+      "notSetPlaceholder": "740267780af09e85fac169ec56c85cdb0573d5e9dcd99499cfbb22a3e3e29762",
+      "label": "1b9847cff9e550c1f73196fb0de88344b5487a6c71c14faf7a73cad3083c64fc",
+      "uaSubtitle": "4a7543cb06561adb09f86c1c260b1bf13eb82008556024ab73f85c430b55c703",
+      "viewportPresets": "d0e8f6dddd3edaeb771bad63757681c22832e43541ed634728fa4f8c1f4f098f",
+      "active": "f9aa3b185f5ff819ea746b2d84f720f894b297964a12861db5809213b7685c91",
+      "bg": "1cd55b4cc9fdf4c080eecde22eb7f3b3abe2e43bacef6434a6fd4345dd5c0584",
+      "fg": "b4c9a8e92bd476d33df28e22b7eda46935356288bf5edcb12494c93b077af4f4",
+      "warning": "2085ff5d35f3e094b7e000c7762ff65602d582e90fddd02eeee088f3e716367e"
+    },
+    "ui/browser/BrowserDownloadsSheet.kt": {
+      "(icon, tint)": "9cf2e56ca7b1ccbdad770763f3c74a06508c722845efb115af9b1a4016df6be3",
+      "doneText": "88c561b25edf89c1ddde9cae32948577c7bd38e6a89b585d734c296a40ac0164",
+      "totalText": "ea0927b8a87956915900420e31727b34ce348a79418b706ffa4dee3e345e17fc",
+      "pct": "147d6f00ac335c06d431cf4ebe63fb8b7e5246a66c9c09b57ad2009ca3eaacd8",
+      "statusText": "8952dea8b5692ca5035f50f07f9cc31ff2c2763c62718c91c2554a94179050ef"
+    }
+  },
+  "navigation_helper_sha256": "fbd6fa2cac5770ca26228d14d322c068fff96e5ef49a073b9788187100046049"
+}

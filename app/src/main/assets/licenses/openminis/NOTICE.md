@@ -14,3 +14,5 @@
 ## 浏览器 UI 迁入补充
 
 本批将旧 Eta 固定修订 `3196270e361c82cc1f399218d914ec49de0d83cc` 中的 OpenMinis 衍生浏览器 UI 迁入 `browser/ported/`：BrowserSheet、BrowserSettingsSheet、BrowserHistorySheet、BrowserDownloadsSheet、StandardChatSheet、Theme、ChatColors、MinisButton 与 BringIntoViewOnFocus。保留 GPL-3.0-only 文件头及原布局/文案，调整包名、资源命名空间、统一触感与弹窗动效适配；移除旧全局池依赖，改接当前任务 lease 或人工会话，新增 UA/viewport/下载/历史控制及安全生命周期。三语言 `openminis_browser.xml` 对应迁入页面引用。该补充不改原 20 文件快照摘要，也不把本地衍生 UI 误标为未修改上游文件。
+
+本次原样纠偏移除迁移时自加的任务说明、任务按钮与主面板诊断区。`browser/ui/BrowserUiPool.kt` 的裸主机识别取自上述 Eta 修订的 `agent/browser/BrowserNavigation.kt::looksLikeUrl`；下载打开恢复原版应用选择器、扩展名 MIME 与只记日志的失败处理，文件仍由 Android DownloadManager 的 content URI 分享，不搬入旧私有缓存或新增存储权限。固定原始 UI 与三语言资源摘要见 `tests/fixtures/browser_original_ui.json`。

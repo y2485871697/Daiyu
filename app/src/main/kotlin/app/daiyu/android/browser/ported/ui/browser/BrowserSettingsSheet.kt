@@ -51,7 +51,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -151,13 +150,6 @@ internal fun BrowserSettingsSheet(
 
             Spacer(Modifier.height(16.dp))
 
-            if (tabPool.taskOwned) {
-                MinisTextButton(onClick = { tabPool.restore(); onDismiss() }, modifier = Modifier.testTag("browser-visual-restore")) { Text("归还浏览器并继续任务") }
-                MinisTextButton(onClick = { tabPool.stopTask(); onDismiss() }, modifier = Modifier.testTag("browser-visual-stop-owner")) { Text("停止任务") }
-                Text("查看网页会暂停当前任务；关闭面板不会自动继续。", style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(16.dp))
-            }
-
             // ── User Agent ──
             Text(
                 stringResource(R.string.om_browser_settings_user_agent),
@@ -212,7 +204,7 @@ internal fun BrowserSettingsSheet(
                     singleLine = false,
                     textStyle = MaterialTheme.typography.bodySmall,
                 )
-                MinisTextButton(enabled = customUA.isNotBlank(), onClick = {
+                MinisTextButton(onClick = {
                     tabPool.setUserAgentFromUI(UserAgentProfile.CUSTOM, customUA)
                 }) {
                     Text(stringResource(R.string.om_browser_settings_apply))

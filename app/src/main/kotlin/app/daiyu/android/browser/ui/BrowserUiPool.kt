@@ -30,11 +30,21 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
         fun normalize(input: String): String {
             val value = input.trim()
             require(value.isNotEmpty() && value.length <= 4096 && value.none { it.code < 32 || it.code == 127 })
-            if ("://" in value) return value
-            val host = value.substringBefore('/').substringBefore('?').substringBefore('#')
-            return if (!value.any(Char::isWhitespace) && ('.' in host || host.startsWith("localhost"))) "https://$value"
-                else "https://www.bing.com/search?q=" + URLEncoder.encode(value, "UTF-8")
+            if (value.startsWith("about:") || "://" in value) return value
+            if (looksLikeUrl(value)) return "https://$value"
+            return "https://www.bing.com/search?q=" + URLEncoder.encode(value, "UTF-8")
         }
+        private fun looksLikeUrl(value: String): Boolean {
+            if (value.isEmpty() || value.any { it.isWhitespace() }) return false
+            val host = value.substringBefore('/').substringBefore('?').substringBefore('#')
+            if (host.equals("localhost", ignoreCase = true) || host.startsWith("localhost:")) return true
+            if (IPV4.matches(host) || IPV4_PORT.matches(host)) return true
+            if (host.startsWith(".") || host.endsWith(".")) return false
+            val labels = host.split('.')
+            return labels.size >= 2 && labels.all { it.isNotEmpty() }
+        }
+        private val IPV4 = Regex("""^\d{1,3}(\.\d{1,3}){3}$""")
+        private val IPV4_PORT = Regex("""^\d{1,3}(\.\d{1,3}){3}:\d{1,5}$""")
     }
     private val prefs = context.getSharedPreferences("browser_prefs", Context.MODE_PRIVATE)
     private val models = mutableMapOf<Int, Tab>()
@@ -47,7 +57,6 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
     val customViewportWidth = MutableStateFlow(prefs.getInt("browser_custom_viewport_width", 0))
     val customViewportHeight = MutableStateFlow(prefs.getInt("browser_custom_viewport_height", 0))
     private var customUserAgent = prefs.getString("custom_user_agent", null)
-    val taskOwned get() = visit?.taskOwned == true
     private var deferredNavigation: String? = null
     private val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
     enum class DownloadState { DOWNLOADING, COMPLETED, FAILED }
@@ -145,8 +154,6 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
     val idleTimeoutMinutes get() = prefs.getInt(PREF_IDLE_TIMEOUT_MINUTES, DEFAULT_IDLE_TIMEOUT_MINUTES).coerceIn(1, 240)
     fun setIdleTimeoutMinutes(minutes: Int) { prefs.edit().putInt(PREF_IDLE_TIMEOUT_MINUTES, minutes.coerceIn(1, 240)).apply() }
     fun takeControl() = ensureTabForUI()
-    fun restore() { visit?.restore(); refresh() }
-    fun stopTask() { visit?.stop(); refresh() }
     private fun download(url: String, userAgent: String, disposition: String?, mime: String?) {
         if (!OpenMinisNavigationPolicy.permits(url)) return
         val filename = URLUtil.guessFileName(url, disposition, mime).replace('/', '_').replace('\\', '_')
@@ -211,10 +218,15 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
     }; saveDownloads() }
     fun clearFinishedDownloads() { downloads.value = downloads.value.filter { it.state == DownloadState.DOWNLOADING }; saveDownloads() }
     fun openDownload(entry: DownloadEntry) {
-        val uri = downloadManager.getUriForDownloadedFile(entry.id) ?: return
-        val mime = downloadManager.getMimeTypeForDownloadedFile(entry.id) ?: "*/*"
-        try { context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        catch (_: android.content.ActivityNotFoundException) { notice.value = "没有可打开此文件的应用" }
+        try {
+            val uri = downloadManager.getUriForDownloadedFile(entry.id) ?: return
+            val extension = entry.filename.substringAfterLast('.', "").lowercase()
+            val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
+            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(Intent.createChooser(intent, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+            android.util.Log.w("BrowserDownloads", "open failed")
+        }
     }
 }

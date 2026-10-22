@@ -379,11 +379,6 @@ internal fun BrowserSheet(
                 }
             }
 
-            val browserNotice by tabPool.notice.collectAsState()
-            if (browserNotice.contains("未确认") || browserNotice.contains("不能") || browserNotice.contains("失败")) {
-                Text(browserNotice, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 12.dp))
-            }
             // ── Bottom Toolbar ──
             HorizontalDivider()
             Row(
@@ -440,7 +435,7 @@ internal fun BrowserSheet(
                     ToolbarIcon(
                         icon = Icons.Default.Refresh,
                         contentDesc = stringResource(R.string.om_browser_reload),
-                        enabled = selectedTab != null && currentURL.isNotEmpty() && !isAgentBusy,
+                        enabled = !isAgentBusy,
                         tint = accent,
                         onClick = { selectedTab?.manager?.reload() },
                     )

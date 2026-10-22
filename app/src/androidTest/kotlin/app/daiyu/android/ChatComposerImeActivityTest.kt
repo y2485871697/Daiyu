@@ -304,6 +304,8 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
             click()
         }
         awaitImeFrame(node("chat-draft"), visible = true)
+        // Move the range before collapsing: tapping beyond a short draft may already select its end.
+        setSelection(0, draft.length, relativeToOriginalText = true)
         setSelection(draft.length, draft.length, relativeToOriginalText = true)
         assertHostSelection(draft.length, draft.length)
         val visible = draftPixels()

@@ -148,7 +148,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 val size = geometry.layoutInfo.coordinates.size
                 assertEquals("$title frame must not be vertically clipped", size.height.toFloat(), geometry.boundsInRoot.height, 1f)
                 assertEquals("$title frame must not be horizontally clipped", size.width.toFloat(), geometry.boundsInRoot.width, 1f)
-                val pixels = frame.captureToImage().toPixelMap()
+                val pixels = captureScreenNode(frame).toPixelMap()
                 val sampleY = (4f * layoutsByTitle.getValue(title).layoutInput.density.density).roundToInt()
                 assertTrue("sample must stay between the border and text padding", sampleY in 1 until pixels.height)
                 val actual = pixels[pixels.width / 2, sampleY]

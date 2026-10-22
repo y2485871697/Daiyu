@@ -242,13 +242,16 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(9f, (surface.left - host.left) / density, .5f)
             assertEquals(16f, (host.bottom - surface.bottom) / density, .75f)
             assertEquals(144f, surface.height / density, 1.5f)
-            assertEquals(contextHeightPx(layout("37% 上下文")), context.height, 0f)
-            assertEquals(14f, (context.top - surface.top) / density, .75f)
-            assertEquals(14f, (surface.right - context.right) / density, .75f)
-            assertEquals(13f, (divider.left - surface.left) / density, .75f)
             val contextText = layout("37% 上下文")
             val actualDensity = contextText.layoutInput.density.density
             val contextHeight = contextHeightPx(contextText).toInt()
+            assertEquals(contextHeight.toFloat(), context.height, 0f)
+            val modelHeight = (26f * actualDensity).roundToInt()
+            val expectedTopPx = (12f * actualDensity).roundToInt() +
+                ((maxOf(modelHeight, contextHeight) - contextHeight) / 2f).roundToInt()
+            assertEquals(expectedTopPx.toFloat(), context.top - surface.top, 0f)
+            assertEquals(14f, (surface.right - context.right) / density, .75f)
+            assertEquals(13f, (divider.left - surface.left) / density, .75f)
             val expectedGap = contextBottomGapPx(actualDensity, contextHeight)
             assertEquals("Context gap density=$actualDensity height=$contextHeight expected=$expectedGap",
                 expectedGap, divider.top - context.bottom, 0f)

@@ -44,6 +44,7 @@ class SubAgentResumeGeometryActivityTest : WiredActivityTestCase() {
         withContext(Dispatchers.Main) { source.refreshAll { loaded } }
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun show(dark: Boolean = false, scale: Float = 1f) {
         preferencesName?.let { instrumentation.targetContext.deleteSharedPreferences(it) }
         val name = "subagent-resume-${UUID.randomUUID()}"
@@ -67,10 +68,22 @@ class SubAgentResumeGeometryActivityTest : WiredActivityTestCase() {
             }
         }
         awaitUniqueTag("conversation-agent-sheet")
-        awaitNodeWindowFocus(node("conversation-agent-sheet"))
+        val sheet = node("conversation-agent-sheet")
+        awaitNodeWindowFocus(sheet)
+        val view = (sheet.fetchSemanticsNode().root as ViewRootForTest).view
+        dismissIme(view.rootView)
+        awaitImeFrame(sheet, visible = false)
         ui.mainClock.advanceTimeBy(1_000)
         awaitVisualIdle()
         mainThread { session.name = "Unsaved worker"; session.editParallel("7") }
+        val surface = sheet.fetchSemanticsNode()
+        awaitStableWindowFrame(view) {
+            val insets = ViewCompat.getRootWindowInsets(view)
+            if (insets == null || insets.isVisible(WindowInsetsCompat.Type.ime()) ||
+                insets.getInsets(WindowInsetsCompat.Type.ime()).bottom != 0) null
+            else view.rootView.height to Rect(surface.positionInRoot,
+                Size(surface.size.width.toFloat(), surface.size.height.toFloat()))
+        }
     }
 
     private fun geometry(): Rect {

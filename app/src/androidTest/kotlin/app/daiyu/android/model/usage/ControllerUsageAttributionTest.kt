@@ -21,14 +21,19 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
         val alias = "app.daiyu.android.test.usage.$id"
         val settings = ModelSettingsStore(app, alias)
         val childOpened = AtomicInteger(); val parentOpened = AtomicInteger()
-        val child = SubAgentModel("child-record", "child-api")
-        val provider = SubAgentProvider("explicit-provider", "Fixture", listOf(child))
+        val child = SubAgentModel(UUID.randomUUID().toString(), "child-api")
+        val provider = SubAgentProvider("primary", "Fixture", listOf(child))
         val profile = SubAgentProfile("review", "Reviewer", "review", providerId = provider.id, modelId = child.id)
         val preferences = ConversationSubAgentPreferences(app.getSharedPreferences("subagent_configuration", 0))
         val controller: ChatController
         lateinit var conversation: Conversation
         init {
             settings.save(ModelSettings("https://example.invalid", "parent-api", "synthetic-key", false))
+            val catalog = settings.modelCatalogSnapshot()
+            check(settings.modelCatalog.compareAndAppend(catalog.providerIdentity, catalog.revision,
+                listOf(app.daiyu.android.model.catalog.SavedCatalogModel(child.modelId, child.displayName,
+                    app.daiyu.android.model.catalog.CatalogModelParameters(localIdentity = child.id)))) { false }
+                == app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED)
             controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0), { config ->
                 object : ModelPort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
@@ -83,9 +88,6 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
     override fun tearDown() { try { fixtures.forEach { it.close() } } finally { super.tearDown() } }
 
     private fun send(f: Fixture) {
-        controlMain {
-            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-        }
         assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
         awaitControl("child and parent complete") { f.controller.active == null }
     }

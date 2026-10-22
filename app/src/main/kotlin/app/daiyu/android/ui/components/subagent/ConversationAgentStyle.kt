@@ -10,7 +10,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
-import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -44,6 +43,7 @@ internal data class ConversationAgentColors(val dark: Boolean) {
     val accent = Color(if (dark) 0xffc6b7d5 else 0xff756980)
     val strong = Color(if (dark) 0xffb4a3f7 else 0xff7663bd)
     val line = Color(if (dark) 0x28c3b0d9 else 0x2681738e)
+    val field = Color(if (dark) 0x06ffffff else 0x60ffffff)
     val soft = Color(if (dark) 0x14c0acd7 else 0x1281738e)
     val taskLine = Color(if (dark) 0xff2b283a else 0xffece7f5)
     val taskMuted = Color(if (dark) 0xff7a7786 else 0xffa19aa9)
@@ -81,28 +81,30 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
 @Composable internal fun ConversationAgentSwitch(checked: Boolean, enabled: Boolean, onCheckedChange: ((Boolean) -> Unit)? = null) {
     val colors = conversationAgentColors()
     val shape = RoundedCornerShape(20.dp)
-    Box(Modifier.size(36.dp, 22.dp).alpha(if (enabled) 1f else .4f).clip(shape)
-        .background(if (checked) Color(0xff82728f) else Color(0x28b4aabb))
-        .border(1.dp, if (checked) Color(0xff82728f) else colors.line, shape)
-        .then(if (onCheckedChange != null) Modifier.toggleable(value = checked, enabled = enabled, role = Role.Switch,
-            interactionSource = remember { MutableInteractionSource() }, indication = null, onValueChange = onCheckedChange) else Modifier),
-        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart) {
-        Box(Modifier.padding(horizontal = 2.dp).size(16.dp).background(if (checked) Color.White else Color(0xffa69baa), CircleShape))
+    Box(Modifier.size(48.dp).then(if (onCheckedChange != null) Modifier.toggleable(value = checked,
+        enabled = enabled, role = Role.Switch, interactionSource = remember { MutableInteractionSource() },
+        indication = null, onValueChange = onCheckedChange) else Modifier), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp, 22.dp).alpha(if (enabled) 1f else .4f).clip(shape)
+            .background(if (checked) Color(0xff82728f) else Color(0x28b4aabb))
+            .border(1.dp, if (checked) Color(0xff82728f) else colors.line, shape),
+            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart) {
+            Box(Modifier.padding(horizontal = 2.dp).size(16.dp).background(if (checked) Color.White else Color(0xffa69baa), CircleShape))
+        }
     }
 }
 
 @Composable internal fun ConversationAgentButton(text: String, enabled: Boolean = true, primary: Boolean = false,
-    modifier: Modifier = Modifier, primaryColor: Color = assistantPreviewPalette().primary,
-    onPrimaryColor: Color = assistantPreviewPalette().onPrimary, onClick: () -> Unit) {
+    modifier: Modifier = Modifier, primaryColor: Color = conversationAgentColors().accent,
+    onPrimaryColor: Color = if (conversationAgentColors().dark) Color(0xff211735) else Color.White, onClick: () -> Unit) {
     val colors = conversationAgentColors()
-    Box(modifier.defaultMinSize(minHeight = 44.dp).alpha(if (enabled) 1f else .4f)
+    Box(modifier.defaultMinSize(minHeight = 48.dp).alpha(if (enabled) 1f else .4f)
         .squircleSurface(color = if (primary) primaryColor else colors.soft,
             cornerRadius = ButtonDefaults.CornerRadius)
         .squircleBorder(width = 1.dp, color = if (primary) primaryColor else colors.line,
             cornerRadius = ButtonDefaults.CornerRadius)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = if (primary) onPrimaryColor else colors.accent)
+        Text(text, fontSize = 14.sp, lineHeight = 20.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = if (primary) onPrimaryColor else colors.accent)
     }
 }
 

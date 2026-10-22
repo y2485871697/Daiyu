@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
@@ -25,7 +26,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
     val maximumHeight = (appWindowSize().height - 32.dp).coerceAtLeast(0.dp)
     ConversationAgentTypography {
         ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight)) {
-            Column(Modifier.fillMaxWidth().padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
+            Column(Modifier.fillMaxWidth().testTag("subagent-config-window").padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
                 ConversationAgentHandle()
                 Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp, lineHeight = 26.sp), modifier = Modifier.weight(1f))
@@ -43,7 +44,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
         Text(label, fontSize = 13.sp, lineHeight = 20.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
         BasicTextField(value, onValueChange, enabled = enabled, singleLine = true, keyboardOptions = keyboardOptions,
             textStyle = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = colors.text),
-            modifier = Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Color(if (colors.dark) 0x06ffffff else 0x60ffffff), RoundedCornerShape(10.dp))
-                .border(1.dp, colors.line, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).background(colors.field, RoundedCornerShape(10.dp))
+                .border(1.dp, colors.line, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 12.dp))
     }
 }

@@ -44,13 +44,18 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         val childOpens = AtomicInteger()
         val childHistories = java.util.Collections.synchronizedList(mutableListOf<List<Message>>())
         val parentOpens = AtomicInteger()
-        val child = SubAgentModel("child-record", "child-api")
-        val provider = SubAgentProvider("explicit-provider", "Fixture", listOf(child))
+        val child = SubAgentModel(UUID.randomUUID().toString(), "child-api")
+        val provider = SubAgentProvider("primary", "Fixture", listOf(child))
         val profile = SubAgentProfile("review", "Reviewer", "review", providerId = provider.id, modelId = child.id)
         val controller: ChatController
         lateinit var conversation: Conversation
         init {
             settings.save(ModelSettings("https://example.invalid", "parent-api", "synthetic-key", false))
+            val catalog = settings.modelCatalogSnapshot()
+            check(settings.modelCatalog.compareAndAppend(catalog.providerIdentity, catalog.revision,
+                listOf(app.daiyu.android.model.catalog.SavedCatalogModel(child.modelId, child.displayName,
+                    app.daiyu.android.model.catalog.CatalogModelParameters(localIdentity = child.id)))) { false }
+                == app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED)
             controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0), { config ->
                 object : ModelPort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
@@ -129,7 +134,6 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
     private fun fresh(submit: Boolean = true, holdParent: Boolean = false, holdChildCleanup: Boolean = false): Fixture =
         Fixture(instrumentation.targetContext, submit, holdParent, holdChildCleanup).also {
             fixtures.add(it); awaitChange(it, "recovery") { it.controller.ready }; it.prepare()
-            main { assertTrue(it.controller.bindChildSavedModel(it.conversation.id, it.profile.id, it.child.modelId, it.provider)) }
         }
     private fun send(f: Fixture) = assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
     private fun retained(f: Fixture): Int = synchronized(f.controller) {
@@ -410,12 +414,13 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         f.controller.stop()
     }
 
-    fun testRevokingSavedModelRetainsStoppedChildrenUntilExit() {
+    fun testStoppingSavedModelTaskRetainsChildrenUntilExit() {
         val f = fresh()
         send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
         awaitChange(f, "parent complete before revoke") { f.controller.active == null }
         assertParentCompleted(f)
-        main { f.controller.revokeChildSavedModel(f.conversation.id, f.profile.id) }
+        val record = f.controller.childTasks(f.conversation.id).single()
+        main { assertEquals(ChildTaskStop.REQUESTED, f.controller.stopChildTask(record)) }
         assertTrue(f.childCancelled.await(5, TimeUnit.SECONDS)); assertChildStillBlocked(f)
         assertEquals(1, retained(f)); assertTrue(f.controller.hasLiveChildTasks())
         releaseChild(f)

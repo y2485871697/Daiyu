@@ -512,7 +512,6 @@ class ChatController internal constructor(private val application:Application,
     private fun invalidateVideoConfiguration() {
         invalidateVideo()
         revokeImageProvider()
-        childBindings.clear()
         videoConfigurationEpoch.incrementAndGet()
     }
     private var videoReaders = 0
@@ -1386,7 +1385,7 @@ class ChatController internal constructor(private val application:Application,
     private val childPreferences by lazy { ConversationSubAgentPreferences(application.getSharedPreferences("subagent_configuration", 0)) }
     private fun conversationExists(id: ConversationId): Boolean = database.readableDatabase.rawQuery(
         "SELECT 1 FROM conversations WHERE id=?", arrayOf(id.value)).use { it.moveToFirst() }
-    private val childBindings = SavedSubAgentRuntimeBindings(settings::load) {
+    private val childBindings = SavedSubAgentRuntimeBindings {
         val config=it.asModelSettings()
         messageImages.wrap(model(config), ProviderSnapshot.capture(config))
     }
@@ -1401,6 +1400,23 @@ class ChatController internal constructor(private val application:Application,
                 record.settings.applyTo(store.load(), record.id).also { it.validate() }
             }
         }
+    }
+    private fun freezeSavedChildModels(key: SubAgentConfigKey.Conversation,
+        runModel: (ProviderSnapshot) -> ModelPort): FrozenSubAgentModels {
+        val ownerState = childPreferences.ownerState(key)
+        val config = childPreferences.snapshot(key)
+        val registryRevision = providers.snapshot().revision
+        val catalogRevisions = config.profiles.filter { it.enabled }.map { it.providerId }.distinct().associateWith { slot ->
+            providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it } }
+        }
+        val bindingsCurrent = {
+            conversationExists(ConversationId(key.value)) && childPreferences.ownerState(key) == ownerState &&
+                childPreferences.snapshot(key) == config && providers.snapshot().revision == registryRevision &&
+                catalogRevisions.all { (slot, revision) ->
+                    providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it == revision } }
+                }
+        }
+        return childBindings.freeze(key, config, savedSubAgentProviders(), ::readSavedChildProviderModel, bindingsCurrent, runModel)
     }
     internal fun savedSubAgentProviders(): List<SubAgentProvider> {
         check(Looper.myLooper() != Looper.getMainLooper())
@@ -1418,47 +1434,6 @@ class ChatController internal constructor(private val application:Application,
         }
         check(providers.snapshot().revision == state.revision)
         return projected
-    }
-    internal fun bindChildSavedModelAsync(conversationId: ConversationId, expectedProfile: SubAgentProfile,
-        expectedApiModel: String, provider: SubAgentProvider, owner: ModelSettingsSaveOwner, completed: (Boolean) -> Unit,
-    ) {
-        check(Looper.myLooper() == Looper.getMainLooper())
-        dataTask(failureNotice = "子模型授权未保存；请重新核对选择", completed = completed, work = {
-            owner.commit {
-                require(conversationExists(conversationId))
-                val key = SubAgentConfigKey.Conversation(conversationId.value)
-                val config = childPreferences.snapshot(key)
-                require(config.enabled)
-                val current = checkNotNull(config.profiles.singleOrNull { it.id == expectedProfile.id })
-                require(current == expectedProfile)
-                childBindings.authorizeSavedModel(key, current, expectedApiModel, provider, ::readSavedChildProviderModel)
-            }
-            "子模型已授权；绑定原会话、提供商和本地模型"
-        })
-    }
-    @Synchronized internal fun bindChildSavedModel(conversationId: ConversationId, profileId: String,
-        expectedApiModel: String, provider: SubAgentProvider): Boolean {
-        childBindings.revoke(SubAgentConfigKey.Conversation(conversationId.value), profileId)
-        if (!idleAvailable()) return false
-        return try {
-            require(conversationExists(conversationId)) { "Conversation no longer exists" }
-            val owner = SubAgentConfigKey.Conversation(conversationId.value)
-            val config = childPreferences.snapshot(owner)
-            require(config.enabled)
-            val profile = requireNotNull(config.profiles.singleOrNull { it.id == profileId })
-            childBindings.authorizePrimaryModel(owner, profile, expectedApiModel, provider)
-            problem = null; notifyChanged(); true
-        } catch (_: Exception) { problem = "子模型绑定失败；未发起请求，请核对明确选择及已保存配置"; notifyChanged(); false }
-    }
-    internal fun revokeChildSavedModel(conversationId: ConversationId, profileId: String) {
-        val targets=synchronized(this) {
-            childBindings.revoke(SubAgentConfigKey.Conversation(conversationId.value), profileId)
-            backgroundRuns.values.flatMap { tasks -> tasks.snapshots().filter {
-                it.record.owner.conversationId == conversationId.value && it.record.profileId == profileId && !it.settled
-            }.map { tasks to it.record.owner } }
-        }
-        // A provider's cancel implementation must never run with the Controller monitor held.
-        targets.forEach { (tasks, owner) -> tasks.stop(owner) }
     }
     @Synchronized internal fun hasLiveChildTasks(conversationId:ConversationId?=null):Boolean =
         backgroundRuns.values.any { tasks -> tasks.snapshots().any {
@@ -1542,12 +1517,13 @@ class ChatController internal constructor(private val application:Application,
                 val assistantContext = AssistantRunContext.capture(assistantStore, assistantId, assistantAssets)
                 replyIdentity = AssistantReplyIdentity.capture(assistantContext, assistantAssets)
                 check(assistantStore.read(assistantId) == profile) { "assistant_profile_changed" }
-                childBindings.freeze(key, childPreferences.snapshot(key)) { provider ->
+                freezeSavedChildModels(key) { provider ->
                     val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversation))
                         ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                     messageImages.wrap(delegate, provider)
                 }
             } catch (_: Exception) { return ChildTaskCommandReceipt.Rejected("child_model_binding_unavailable") }
+            if (!runCatching { models.isCurrent() }.getOrDefault(false)) return ChildTaskCommandReceipt.Rejected("child_model_configuration_changed")
             if (command.profileId !in models) return ChildTaskCommandReceipt.Rejected("invalid_child_profile")
             if (preparationCancelled(token)) return ChildTaskCommandReceipt.Rejected("cancelled_before_admission")
             val run = RunId(UUID.randomUUID().toString())
@@ -3084,16 +3060,17 @@ class ChatController internal constructor(private val application:Application,
         val replyIdentity = try { AssistantReplyIdentity.capture(assistantContext, assistantAssets) } catch (_: Exception) {
             problem="助手头像读取失败；草稿保留，未发起请求";notifyChanged();return null
         }
-        val childModels:Map<String,ChildModelDefinition> = if(!withChildren) emptyMap() else try {
+        val childPreparation = if (!withChildren) null else try {
             val key=SubAgentConfigKey.Conversation(checkNotNull(conversation).id.value)
-            childBindings.freeze(key,childPreferences.snapshot(key)) { provider ->
+            freezeSavedChildModels(key) { provider ->
                 val delegate=sessionModel?.invoke(provider,assistantContext,SessionGatewayContext(checkNotNull(conversation).id))
                     ?: assistantModel?.invoke(provider,assistantContext) ?: model(provider.asModelSettings())
                 messageImages.wrap(delegate,provider)
             }
         } catch (_:Exception) {
-            problem="子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
+            problem="子模型配置不可用、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
         }
+        val childModels: Map<String, ChildModelDefinition> = childPreparation ?: emptyMap()
         val interactiveSnapshot = interactiveMode.snapshot()
         val frozenProvider = try { freezePreparationProvider(token) } catch (_: CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
@@ -3467,6 +3444,10 @@ class ChatController internal constructor(private val application:Application,
             problem="运行准备失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
         }
         val (owned, tools) = prepared
+        if (childPreparation != null && !runCatching { childPreparation.isCurrent() }.getOrDefault(false)) {
+            auxiliaryPort?.close(); closeUnacceptedTools(tools)
+            problem="子代理配置或提供商已变化；草稿保留，请重新发送";notifyChanged();return null
+        }
         if (!runCatching { providers.isCurrentActive(frozenProvider) }.getOrDefault(false)) {
             auxiliaryPort?.close(); closeUnacceptedTools(tools)
             problem="提供商选择或配置已变化；草稿保留，请重新发送";notifyChanged();return null
@@ -4510,7 +4491,7 @@ class ChatController internal constructor(private val application:Application,
                 closed=true;ready=false;dataOperation=null;dataStatus=null;dataBusy=false;active=null
                 preparation?.revoked=true
                 imageProvider=null; imageProviderConfiguration=null
-                configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear();childBindings.clear()
+                configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear()
             }
             resources?.also {fenceRun(it)}.also {runRevocationListeners.clear()}
         }

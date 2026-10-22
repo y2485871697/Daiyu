@@ -830,7 +830,6 @@ class MainActivity : ComponentActivity() {
                 if (value == "chat") refreshConfirmedModelLabel()
             }
             if (value != "browser") closeBrowserVisualVisit()
-            if (value != "chat") revokeChildAuthorization()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
             if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
@@ -903,7 +902,7 @@ class MainActivity : ComponentActivity() {
     private var interactiveModeObservation: AutoCloseable? = null
     @Volatile private var selected: Conversation? = null
         set(value) {
-            if (field?.id != value?.id) { closeBrowserVisualVisit(); revokeChildAuthorization() }
+            if (field?.id != value?.id) { closeBrowserVisualVisit() }
             if (field?.id != value?.id && revokeContextManagementEntry()) editorGeneration++
             if (field?.id != value?.id) { revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit() }
             field = value
@@ -953,7 +952,7 @@ class MainActivity : ComponentActivity() {
     }
     @Volatile private var editorGeneration = 0L
         set(value) {
-            if (field != value) { closeBrowserVisualVisit(); revokeChildAuthorization() }
+            if (field != value) { closeBrowserVisualVisit() }
             if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
@@ -1373,12 +1372,6 @@ class MainActivity : ComponentActivity() {
         assistantEditReturnToSidebar = false
     }
     private var assistantAvatarRevision by mutableStateOf(0L)
-    private var childModelSaveOwner: ModelSettingsSaveOwner? = null
-    private var childAuthorizationEpoch = 0L
-    private fun revokeChildAuthorization() {
-        childAuthorizationEpoch++
-        childModelSaveOwner?.revoke(); childModelSaveOwner = null
-    }
     private var collaborationOwner by mutableStateOf<String?>(null)
     private var collaborationVisible by mutableStateOf(false)
     private var childStatusVisit by mutableStateOf<Pair<Any, String?>?>(null)
@@ -2117,26 +2110,10 @@ class MainActivity : ComponentActivity() {
                     } else LaunchedEffect(visit) { if (childStatusVisit === visit) childStatusVisit = null }
                 }
                 val owner = collaborationOwner
-                val authorizationEpoch = childAuthorizationEpoch
-                val authorizationGeneration = editorGeneration
                 ConversationCollaborationDialog(show = collaborationVisible, conversationId = owner,
-                    onDismiss = { revokeChildAuthorization(); collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
+                    onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
                     ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
-                    repositoryFactory = { subAgentRepository }, modelSource = subAgentModelSource,
-                    onAuthorizeSavedModel = { profile, provider, chosen ->
-                        if (activityUsable() && voiceForeground && collaborationVisible && retainedPage == "chat" &&
-                            selected?.id?.value == owner && owner != null && editorGeneration == authorizationGeneration &&
-                            childAuthorizationEpoch == authorizationEpoch) {
-                            childModelSaveOwner?.revoke()
-                            val saveOwner = ModelSettingsSaveOwner(); childModelSaveOwner = saveOwner
-                            guard {
-                                controller.bindChildSavedModelAsync(ConversationId(owner), profile, chosen.modelId, provider, saveOwner) { success ->
-                                    if (childModelSaveOwner === saveOwner && activityUsable() && childAuthorizationEpoch == authorizationEpoch)
-                                        toast(if (success) "子模型已授权" else "授权未保存，请重新核对")
-                                }
-                            }
-                        }
-                    })
+                    repositoryFactory = { subAgentRepository }, modelSource = subAgentModelSource)
                 // Saved independently for the standalone composer or this conversation.
                 // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
@@ -4566,7 +4543,6 @@ class MainActivity : ComponentActivity() {
             retainedPage == "chat" && !sidebarVisible && selected?.id?.value == mediaPicker.binding.conversationId
         mediaPicker?.pickerHopPending = false
 
-        revokeChildAuthorization()
         closeBrowserVisualVisit()
         if (retainedPage == "browser") retainedPage = "chat"
         chatReferencePick?.let { request ->
@@ -4668,7 +4644,6 @@ class MainActivity : ComponentActivity() {
         humanBrowsers.clear()
         cancelGenerationMedia()
         revokeBackupExportPage()
-        revokeChildAuthorization()
         closeBrowserVisualVisit()
         revokeChatReferencePick(); chatReferencePick = null
         modelSaveOwner?.revoke(); modelSaveOwner = null

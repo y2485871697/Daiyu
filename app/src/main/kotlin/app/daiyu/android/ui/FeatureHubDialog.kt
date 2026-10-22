@@ -4,7 +4,7 @@ import app.daiyu.android.ui.haptics.setHapticNeutralButton
 import app.daiyu.android.ui.haptics.setHapticNegativeButton
 import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.app.Activity
-import app.daiyu.android.ui.components.startDaiyuEnterMotion
+import app.daiyu.android.ui.components.prepareDaiyuCenterMotion
 import android.app.AlertDialog
 import android.os.Looper
 import android.view.KeyEvent
@@ -99,9 +99,8 @@ internal class FeatureHubDialog(
             } else false
         }
         window = dialog
-        dialog.window?.setWindowAnimations(0)
+        dialog.prepareDaiyuCenterMotion()
         dialog.show()
-        dialog.startDaiyuEnterMotion()
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setHapticClickListener {
             if (window === dialog && dialog.isShowing && !activity.isFinishing && !activity.isDestroyed) render(null)
         }

@@ -160,6 +160,31 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
     }
 
+    protected fun restoreOriginalHost(host: MainActivity) {
+        check(!host.isDestroyed && !host.isFinishing)
+        val component = android.content.ComponentName(instrumentation.targetContext, MainActivity::class.java)
+            .flattenToShortString()
+        val descriptor = java.util.concurrent.atomic.AtomicReference<android.os.ParcelFileDescriptor?>()
+        val reader = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val outputTask = reader.submit<String> {
+            val pipe = instrumentation.uiAutomation.executeShellCommand("am start -n $component -f 0x30020000")
+            descriptor.set(pipe)
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(pipe).use { stream ->
+                check(!Thread.currentThread().isInterrupted)
+                stream.bufferedReader().use { it.readText() }
+            }
+        }
+        val output = try {
+            outputTask.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        } finally {
+            outputTask.cancel(true)
+            descriptor.get()?.close()
+            reader.shutdownNow()
+        }
+        assertTrue("HOME return launch failed: $output", output.contains("Starting:") &&
+            !output.contains("Error:") && !output.contains("Exception"))
+    }
+
     protected fun awaitHostWindowFocus(host: MainActivity) {
         awaitControl("host resumed before focused-window check") {
             !host.isDestroyed && !host.isFinishing &&
@@ -255,6 +280,8 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         var recent: T? = null
         var previous: T? = null
         var stableFrames = 0
+        var observedFrames = 0
+        var lastWindowState = ""
         var lastFrame = Long.MIN_VALUE
         var frameNanos = Long.MIN_VALUE
         var active = true
@@ -272,6 +299,12 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             if (active && frameNanos != Long.MIN_VALUE && frameNanos != lastFrame) {
                 lastFrame = frameNanos
                 try {
+                    observedFrames++
+                    val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+                    lastWindowState = "attached=${view.isAttachedToWindow} focused=${view.hasWindowFocus()} " +
+                        "layoutRequested=${view.isLayoutRequested} token=${view.windowToken} " +
+                        "imeVisible=${insets?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())} " +
+                        "imeBottom=${insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom}"
                     val next = if (view.isAttachedToWindow && view.hasWindowFocus() && !view.isLayoutRequested) sample() else null
                     recent = next
                     stableFrames = if (next != null && next == previous) stableFrames + 1 else if (next != null) 1 else 0
@@ -291,7 +324,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             try {
                 ui.waitUntil(5_000) { failure.get()?.let { throw it }; accepted.get() != null }
             } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
-                throw AssertionError("Window did not settle in two native frames: last=$recent frames=$stableFrames", timeout)
+                throw AssertionError("Window did not settle in two native frames: last=$recent frames=$stableFrames observedFrames=$observedFrames $lastWindowState", timeout)
             }
             return checkNotNull(accepted.get())
         } finally {
@@ -628,7 +661,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.onNodeWithContentDescription("语音输入").assertIsEnabled().performTouchInput { longClick() }
         node("chat-menu:VOICE_CHAT").assertIsEnabled().performClick()
         node("voice-universal-control").assertDoesNotExist()
-        ui.onNodeWithContentDescription("语音输入").assertIsEnabled().performClick()
+        node("chat-menu:VOICE_CHAT").assertIsSelected()
+        androidx.test.espresso.Espresso.pressBack()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("chat-menu:VOICE_CHAT").fetchSemanticsNodes().isEmpty()
+        }
+        ui.onNodeWithContentDescription("语音输入").assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitUniqueTag("voice-universal-control")
     }
     protected fun menu(label: String) {

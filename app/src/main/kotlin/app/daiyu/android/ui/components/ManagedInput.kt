@@ -148,21 +148,36 @@ internal fun EditText.manageInput(window: Window? = null) {
 }
 
 private fun bindInput(entry: InputEntry, explicitWindow: Window? = null): () -> Unit {
+    val view = entry.view
     var host: InputWindow? = null
-    fun attach() {
-        if (host != null) return
-        val window = explicitWindow ?: entry.view.inputWindow() ?: return
+    var disposed = false
+    fun tryAttach(): Boolean {
+        if (disposed || !view.isAttachedToWindow) return false
+        if (host != null) return true
+        val window = explicitWindow ?: view.inputWindow() ?: return false
         host = InputWindows.acquire(window, entry)
+        return true
+    }
+    // Child attachment can precede DecorView's token; retry only after this traversal.
+    val retryAttach = Runnable { tryAttach() }
+    fun attach() {
+        view.removeCallbacks(retryAttach)
+        if (!disposed && view.isAttachedToWindow && !tryAttach()) view.post(retryAttach)
+    }
+    fun detach() {
+        view.removeCallbacks(retryAttach)
+        host?.remove(entry); host = null
     }
     val listener = object : View.OnAttachStateChangeListener {
         override fun onViewAttachedToWindow(v: View) { attach() }
-        override fun onViewDetachedFromWindow(v: View) { host?.remove(entry); host = null }
+        override fun onViewDetachedFromWindow(v: View) { detach() }
     }
-    entry.view.addOnAttachStateChangeListener(listener)
-    if (entry.view.isAttachedToWindow) attach()
+    view.addOnAttachStateChangeListener(listener)
+    if (view.isAttachedToWindow) attach()
     return {
-        entry.view.removeOnAttachStateChangeListener(listener)
-        host?.remove(entry); host = null
+        disposed = true
+        view.removeOnAttachStateChangeListener(listener)
+        detach()
     }
 }
 

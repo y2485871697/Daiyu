@@ -196,7 +196,25 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             confirm.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             val cancelBounds = cancel.fetchSemanticsNode().boundsInRoot
             val confirmBounds = confirm.fetchSemanticsNode().boundsInRoot
-            val actionsBefore = node("subagent-config-actions").fetchSemanticsNode().boundsInRoot
+            val actions = node("subagent-config-actions")
+            awaitNodeWindowFocus(actions)
+            val view = (actions.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+            data class WindowFrame(val width: Int, val height: Int, val visible: android.graphics.Rect,
+                val imeVisible: Boolean, val imeBottom: Int)
+            fun windowFrame() = awaitStableWindowFrame(view) {
+                val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+                if (insets == null) null else {
+                    val visibleFrame = android.graphics.Rect()
+                    view.getWindowVisibleDisplayFrame(visibleFrame)
+                    WindowFrame(view.rootView.width, view.rootView.height, visibleFrame,
+                        insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()),
+                        insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom)
+                }
+            }
+            dismissIme(view.rootView)
+            awaitImeFrame(actions, visible = false)
+            val windowBefore = windowFrame()
+            val actionsBefore = actions.fetchSemanticsNode().boundsInRoot
             assertEquals(cancelBounds.height, confirmBounds.height, 1f)
             assertEquals(cancelBounds.top, confirmBounds.top, 1f)
             val speed = ui.onNodeWithContentDescription("草稿GPT速度")
@@ -207,8 +225,11 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
                 assertEquals(data.profile, data.repository.snapshot(data.editor.owner).profiles.single())
             }
             ui.onNodeWithText("并行上限（0 为不限）").scrollToVisible().assertIsDisplayed()
-            val after = node("subagent-config-actions").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-            assertEquals(actionsBefore.top, after.top, 1f)
+            val windowAfter = windowFrame()
+            val after = actions.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val geometry = "dark=$dark fontScale=$fontScale window=$windowBefore->$windowAfter actions=$actionsBefore->$after"
+            assertEquals("Pure scrolling must keep window and IME unchanged: $geometry", windowBefore, windowAfter)
+            assertEquals(geometry, actionsBefore.top, after.top, 1f)
             ui.onNodeWithContentDescription("草稿任务分工").scrollToVisible().assertHeightIsAtLeast(48.dp)
             cancel.assertIsDisplayed().performClick()
             ui.runOnIdle { assertFalse(visible) }

@@ -94,6 +94,7 @@ internal fun VideoAttachments(
     manageLifecycle: Boolean = true,
     pickRequest: Any? = null,
     onControls: (VideoComposerControls?) -> Unit = {},
+    onControlsDisposed: ((VideoComposerControls) -> Unit)? = null,
 ) {
     val registry = checkNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
     val picker = remember(host, registry, conversation, viewLifecycleOwner) { VideoPickerBinding(host, registry) }
@@ -111,7 +112,7 @@ internal fun VideoAttachments(
     // Never display previous route's items before the lifecycle effect has entered the new slot.
     if (state.conversation != conversation) return
     key(host, state.owner, state.visit) {
-        VideoAttachmentsContent(host, state, text, onHandoff, picker, modifier, enabled && !parentBusy, compact, pickRequest, onControls)
+        VideoAttachmentsContent(host, state, text, onHandoff, picker, modifier, enabled && !parentBusy, compact, pickRequest, onControls, onControlsDisposed)
     }
 }
 
@@ -136,21 +137,28 @@ private fun VideoAttachmentsContent(
     compact: Boolean,
     pickRequest: Any?,
     onControls: (VideoComposerControls?) -> Unit,
+    onControlsDisposed: ((VideoComposerControls) -> Unit)?,
 ) {
     var confirmation by remember { mutableStateOf<VideoConfirmation?>(null) }
     var cover by remember { mutableStateOf<VideoChatHost.Item.Ready?>(null) }
     val canEdit = enabled && state.visible && !state.fenced && !state.storageFailed && !state.recovering
     val controls by rememberUpdatedState(onControls)
+    val releaseControls by rememberUpdatedState(onControlsDisposed)
     val canSelect = canEdit && !picker.selecting && state.remaining > 0 && state.items.none { it is VideoChatHost.Item.Importing }
     val canSubmit = enabled && state.canSubmit && !picker.selecting
     DisposableEffect(host, picker, state, text, enabled, picker.selecting, pickRequest) {
         var live = true
-        controls(VideoComposerControls(canSubmit,
+        val published = VideoComposerControls(canSubmit,
             picker.selecting || state.fenced || state.storageFailed || state.recovering ||
                 state.items.isNotEmpty() && !canSubmit,
             select = { if (live && canSelect && sameVideoVisit(state, host.state)) picker.launch(state) },
-            send = { if (live && canSubmit && sameVideoVisit(state, host.state)) confirmation = VideoConfirmation(state, text) }))
-        onDispose { live = false; controls(null) }
+            send = { if (live && canSubmit && sameVideoVisit(state, host.state)) confirmation = VideoConfirmation(state, text) })
+        controls(published)
+        onDispose {
+            live = false
+            val release = releaseControls
+            if (release != null) release(published) else controls(null)
+        }
     }
     val colors = MiuixTheme.colorScheme
     val hasStatus = picker.selecting || picker.notice != null || state.storageFailed || state.fenced

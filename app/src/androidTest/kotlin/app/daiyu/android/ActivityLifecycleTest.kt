@@ -181,6 +181,37 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         assertEquals(0, modelCalls.get())
     }
 
+    fun testPetRuntimeFailureDoesNotAppearOnSettingsPage() {
+        start()
+        val singleton = application.pets
+        val original = singleton.host.snapshot().pet.state.settings
+        try {
+            mainThread {
+                val updated = singleton.updateSettings(original.copy(enabled = true,
+                    model = app.daiyu.android.domain.pet.PetModelSelection("missing-assistant", "missing-provider", "missing-model")))
+                assertTrue(updated is app.daiyu.android.domain.pet.PetCommandResult.Applied)
+                assertNull(singleton.host.snapshot().pet.error)
+                val fed = singleton.host.feed(app.daiyu.android.domain.pet.PetFood.BOWL)
+                assertFalse(fed is app.daiyu.android.domain.pet.PetCommandResult.Rejected)
+            }
+            awaitControl("pet model failure") { singleton.host.snapshot().pet.error != null }
+            val failed = singleton.host.snapshot().pet
+            val failure = checkNotNull(failed.error)
+            assertEquals("桌宠反应失败；未生成记忆/语音", failure)
+            assertEquals("missing-model", failed.state.usage.last().modelId)
+            assertEquals(app.daiyu.android.domain.pet.PetRequestStatus.FAILED, failed.state.usage.last().status)
+            openSettings()
+            reveal("settings-row:鲸鱼女仆", "设置").performClick()
+            awaitUniqueTag("pet-settings-view")
+            ui.onNodeWithText(failure).assertDoesNotExist()
+            listOf("pet-enabled", "pet-work-reactions", "pet-global-visible", "pet-custom-model", "pet-model-configure")
+                .forEach { node(it).assertIsDisplayed() }
+            assertEquals(0, modelCalls.get())
+        } finally {
+            mainThread { singleton.updateSettings(original) }
+        }
+    }
+
     fun testFailedSelectionPreferenceCommitKeepsInputAndDraftOwner() {
         val current = start(); val a = controller.database.create(); val b = controller.database.create()
         controller.database.draft(b.id, "B protected draft")

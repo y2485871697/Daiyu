@@ -42,7 +42,7 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
     ))
 
     private fun show(value: ChatModelPickerState = state, dark: Boolean = false, scale: Float = 1f, font: Float = 1f, width: Dp? = null,
-        updates: State<ChatModelPickerState>? = null) {
+        updates: State<ChatModelPickerState>? = null, showStatusMessages: Boolean = true) {
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
@@ -54,7 +54,8 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
                             SideEffect { contentDensity = actualDensity }
                             ChatModelPicker(updates?.value ?: value, { selected += "a" to it }, {},
                                 onSelectOtherProvider = { provider, model -> selected += provider to model },
-                                modifier = if (width == null) Modifier else Modifier.widthIn(max = width))
+                                modifier = if (width == null) Modifier else Modifier.widthIn(max = width),
+                                showStatusMessages = showStatusMessages)
                         }
                     }
                 }
@@ -72,6 +73,32 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
         node("chat-model-list").performScrollToKey(key)
         awaitVisualIdle()
         return node(tag).assertIsDisplayed()
+    }
+
+    fun testPetStatusSuppressionKeepsLoadingAndFailureSelectionDisabled() {
+        val failure = "模型列表读取失败，请重新打开。"
+        val variants = listOf(state.copy(loading = true), state.copy(enabled = false, message = failure),
+            state.copy(enabled = false))
+        for (value in variants) {
+            show(value, showStatusMessages = false)
+            listOf("正在读取模型目录…", failure, "当前任务结束后可切换模型").forEach {
+                ui.onNodeWithText(it).assertDoesNotExist()
+            }
+            node("chat-model-option:same").assertIsNotEnabled()
+        }
+        show(showStatusMessages = false)
+        node("chat-model-option:next").assertIsEnabled().performClick()
+        assertEquals("a" to "next", selected.last())
+    }
+
+    fun testOtherPickerEntrancesStillShowStatusByDefault() {
+        show(state.copy(loading = true))
+        ui.onNodeWithText("正在读取模型目录…").assertIsDisplayed()
+        show(state.copy(enabled = false))
+        ui.onNodeWithText("当前任务结束后可切换模型").assertIsDisplayed()
+        val failure = "模型列表读取失败，请重新打开。"
+        show(state.copy(enabled = false, message = failure))
+        ui.onNodeWithText(failure).assertIsDisplayed()
     }
 
     fun testHtmlStructureAndAccordionAcrossThemesAndScales() {

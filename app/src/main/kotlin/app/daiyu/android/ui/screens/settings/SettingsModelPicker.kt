@@ -17,13 +17,14 @@ internal val SettingsModelProtocols = setOf(ProviderProtocol.RESPONSES, Provider
 @Composable
 internal fun SettingsModelPicker(title: String, source: SettingsModelSource, selectedKey: String?,
     onSelect: (SettingsModelChoice) -> Unit, onDismiss: () -> Unit,
-    protocols: Set<ProviderProtocol> = SettingsModelProtocols) {
+    protocols: Set<ProviderProtocol> = SettingsModelProtocols,
+    showStatusMessages: Boolean = true, onLoadFailure: () -> Unit = {}) {
     var choices by remember(source, protocols) { mutableStateOf<List<SettingsModelChoice>?>(null) }
     var failed by remember(source, protocols) { mutableStateOf(false) }
     LaunchedEffect(source, protocols) {
         try { choices = withContext(Dispatchers.IO) { source.choices(protocols) } }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { failed = true }
+        catch (_: Exception) { failed = true; onLoadFailure() }
     }
     val loading = choices == null && !failed
     val displayed = if (failed) emptyList() else choices.orEmpty()
@@ -54,5 +55,5 @@ internal fun SettingsModelPicker(title: String, source: SettingsModelSource, sel
     }
     ChatModelPicker(state, { select(providerId, it) }, onDismiss,
         onSelectOtherProvider = { slot, id -> select(slot, id) }, title = title,
-        modifier = Modifier.testTag("settings-model-picker"))
+        modifier = Modifier.testTag("settings-model-picker"), showStatusMessages = showStatusMessages)
 }

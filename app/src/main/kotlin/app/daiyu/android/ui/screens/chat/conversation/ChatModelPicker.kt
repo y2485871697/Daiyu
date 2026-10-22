@@ -69,6 +69,7 @@ internal fun ChatModelPicker(
     onSelectOtherProvider: (String, String) -> Unit = { _, _ -> },
     title: String = "选择模型",
     modifier: Modifier = Modifier,
+    showStatusMessages: Boolean = true,
 ) {
     var query by remember { mutableStateOf("") }
     var searchFocused by remember { mutableStateOf(false) }
@@ -122,7 +123,7 @@ internal fun ChatModelPicker(
                     },
                 )
                 Spacer(Modifier.height(16.dp))
-                if (status != null) Text(status, color = colors.muted, fontSize = 13.sp, lineHeight = 20.sp,
+                if (showStatusMessages && status != null) Text(status, color = colors.muted, fontSize = 13.sp, lineHeight = 20.sp,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
                 LazyColumn(Modifier.testTag("chat-model-list").fillMaxWidth().weight(1f).padding(end = 2.dp),
                     state = listState) {

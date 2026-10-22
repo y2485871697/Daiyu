@@ -9,7 +9,9 @@ class PetControllerTest {
     private class Scheduler : PetScheduler {
         data class Entry(val delay: Long, val task: () -> Unit, var cancelled: Boolean = false)
         val entries = mutableListOf<Entry>()
+        var fail = false
         override fun after(delayMillis: Long, task: () -> Unit): PetCancel {
+            if (fail) error("scheduler unavailable")
             val row = Entry(delayMillis, task); entries.add(row); return PetCancel { row.cancelled = true }
         }
         fun fire(delay: Long, evenCancelled: Boolean = false) {
@@ -155,11 +157,27 @@ class PetControllerTest {
     }
     @Test fun unconfiguredFeedIsRealGameActionButNotModelCompletion() {
         val f = Fixture(InMemoryPetStore(PetState(settings = PetSettings(enabled = true))))
-        f.c.feed(PetFood.POT)
+        val errors = mutableListOf<String?>()
+        val observation = f.c.observe { errors.add(it.error) }
+        assertTrue(f.c.feed(PetFood.POT) is PetCommandResult.Applied)
         val s = f.c.snapshot().state
         assertEquals(15_000, s.satiety); assertEquals(PetMood.EATING, s.mood)
         assertTrue(s.memories.isEmpty()); assertTrue(s.usage.isEmpty()); assertFalse(s.speechVisible)
+        assertNull(f.c.snapshot().error)
+        assertTrue(f.model.requests.isEmpty()); assertEquals(0, f.voice.spoken)
         f.scheduler.fire(1_500); assertEquals(PetMood.IDLE, f.c.snapshot().state.mood)
+        assertTrue(errors.all { it == null })
+        assertEquals(f.c.snapshot().state, f.store.load())
+        observation.cancel()
+    }
+    @Test fun unconfiguredFeedStillReportsActualTimerFailure() {
+        val f = Fixture(InMemoryPetStore(PetState(settings = PetSettings(enabled = true))))
+        f.scheduler.fail = true
+        assertTrue(f.c.feed(PetFood.POT) is PetCommandResult.Applied)
+        assertEquals(15_000, f.c.snapshot().state.satiety)
+        assertEquals("已投喂；桌宠动作定时服务不可用", f.c.snapshot().error)
+        assertTrue(f.model.requests.isEmpty()); assertTrue(f.c.snapshot().state.usage.isEmpty())
+        assertEquals(f.c.snapshot().state, f.store.load())
     }
     @Test fun failedStoreDoesNotConfirmFeedOrOverwriteFailedReadWithDefaults() {
         var saves = 0

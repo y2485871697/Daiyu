@@ -48,9 +48,8 @@ class ChatAttachmentSizingContract(unittest.TestCase):
 
     def test_shared_shell_preserves_glass_safe_area_and_wrap_content(self):
         for token in ["PreviewDialog(onDismiss, bottomSheet = true)",
-                      "RoundedCornerShape(topStart = 25.dp, topEnd = 25.dp)",
-                      ".padding(top = 10.dp)", ".previewGlassBlur(shape, 28f, 1.3f)",
-                      ".bottomSheetContentInsets()", "max = available", "fill = height != null"]:
+                      "RoundedCornerShape(25.dp)",
+                      ".padding(10.dp)", ".previewGlassBlur(shape, 28f, 1.3f)", "max = available", "fill = height != null"]:
             self.assertIn(token, self.shell)
         self.assertNotIn("fontScale", self.shell)
         self.assertNotIn("interfaceScale", self.shell)

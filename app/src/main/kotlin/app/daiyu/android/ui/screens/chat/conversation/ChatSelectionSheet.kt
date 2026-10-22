@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.daiyu.android.ui.components.bottomSheetContentInsets
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
@@ -46,14 +45,13 @@ internal fun ChatSelectionSheet(
     val colors = usagePalette()
     PreviewDialog(onDismiss, bottomSheet = true) {
         val available = (maxHeight - if (height == null) 70.dp else 88.dp).coerceAtLeast(0.dp)
-        val shape = RoundedCornerShape(topStart = 25.dp, topEnd = 25.dp)
-        Column(Modifier.align(Alignment.BottomCenter).padding(top = 10.dp).fillMaxWidth()
+        val shape = RoundedCornerShape(25.dp)
+        Column(Modifier.align(Alignment.BottomCenter).padding(10.dp).fillMaxWidth()
             .then(if (height == null) Modifier.heightIn(min = minOf(180.dp, available), max = available)
                 else Modifier.height(minOf(height, available)))
             .testTag("chat-selection-sheet").clip(shape).previewGlassBlur(shape, 28f, 1.3f)
             .background(Brush.linearGradient(colors.sheet)).border(1.dp, colors.edge, shape)
             .pointerInput(Unit) { detectTapGestures(onTap = {}) }
-            .bottomSheetContentInsets()
             .padding(start = 15.dp, end = 15.dp, top = 11.dp, bottom = 15.dp)) {
             Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
                 .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))

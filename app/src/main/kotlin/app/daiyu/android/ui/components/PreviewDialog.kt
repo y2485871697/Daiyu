@@ -32,17 +32,10 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
                 .dialogDimBackground(scrimColor ?: Color(if (colors.dark) 0x55000000 else 0x2620172d), animate = bottomSheet)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
             CompositionLocalProvider(LocalDensity provides density) {
-                val drawingInsets = if (bottomSheet) WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
-                    else WindowInsets.safeDrawing
                 val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier
                 BoxWithConstraints(motion.fillMaxSize()
-                    .windowInsetsPadding(drawingInsets).imePadding(), content = content)
+                    .windowInsetsPadding(WindowInsets.safeDrawing).imePadding(), content = content)
             }
         }
     }
 }
-
-/** Keep the sheet background at the window edge while controls avoid the system gesture area. */
-@Composable
-internal fun Modifier.bottomSheetContentInsets(): Modifier =
-    windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))

@@ -54,7 +54,33 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         androidx.compose.ui.geometry.Rect(node.positionInRoot,
             androidx.compose.ui.geometry.Size(node.size.width.toFloat(), node.size.height.toFloat()))
 
-    private fun assertAttached(surfaceTag: String, controlTag: String? = null, ime: Boolean = false,
+    private fun assertHorizontalInsets(surfaceTag: String,
+        surface: androidx.compose.ui.semantics.SemanticsNode,
+        viewport: androidx.compose.ui.semantics.SemanticsNode,
+        insets: WindowInsetsCompat) {
+        val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        val viewportBounds = rawBounds(viewport)
+        val safeLeft = viewportBounds.left + safe.left
+        val safeRight = viewportBounds.right - safe.right
+        val available = safeRight - safeLeft
+        val density = surface.layoutInfo.density
+        val margin = with(density) { (if (surfaceTag in listOf("daiyu-choice-sheet", "catalog-model-dialog")) 12.dp else 10.dp).toPx() }
+        val width = with(density) {
+            when (surfaceTag) {
+                "daiyu-choice-sheet" -> minOf(available, 640.dp.toPx()) - 2 * margin
+                "catalog-model-dialog" -> minOf(available - 2 * margin, 560.dp.toPx())
+                "usage-glass-dialog" -> minOf(available - 2 * margin, 550.dp.toPx())
+                else -> available - 2 * margin
+            }
+        }
+        val gap = (available - width) / 2
+        val surfaceLeft = rawBounds(surface).left
+        val surfaceRight = rawBounds(surface).right
+        assertEquals("Original left inset remains outside the surface", safeLeft + gap, surfaceLeft, 2f)
+        assertEquals("Original right inset remains outside the surface", safeRight - gap, surfaceRight, 2f)
+    }
+
+    private fun assertFloating(surfaceTag: String, controlTag: String? = null, ime: Boolean = false,
         originalWindowBottom: Float? = null) {
         awaitUniqueTag(surfaceTag)
         awaitNodeWindowFocus(node(surfaceTag))
@@ -71,14 +97,13 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         assertSame(surface.root, viewport.root)
         val control = controlTag?.let { node(it).assertIsDisplayed().fetchSemanticsNode() }
         var surfaceBottom = 0f
-        var windowBottom = 0f
         var safeBottom = 0f
         var controlBottom = 0f
+        val margin = with(surface.layoutInfo.density) { (if (surfaceTag in listOf("daiyu-choice-sheet", "catalog-model-dialog")) 12.dp else 10.dp).toPx() }
         instrumentation.runOnMainSync {
             val viewportBottom = viewport.boundsInRoot.bottom + viewport.positionOnScreen.y - viewport.positionInRoot.y
             val screenOffset = surface.positionOnScreen - surface.positionInRoot
             surfaceBottom = rawBounds(surface).bottom + screenOffset.y
-            windowBottom = viewportBottom
             safeBottom = viewportBottom
             if (control != null) {
                 assertSame(surface.root, control.root)
@@ -89,6 +114,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             decor.getLocationOnScreen(location)
             assertEquals("Viewport fills the dialog window", location[1] + decor.height.toFloat(), viewportBottom, 2f)
             val insets = checkNotNull(ViewCompat.getRootWindowInsets(view))
+            assertHorizontalInsets(surfaceTag, surface, viewport, insets)
             assertEquals(ime, insets.isVisible(WindowInsetsCompat.Type.ime()))
             if (ime) {
                 // ADJUST_NOTHING may retain the full frame. Subtract from the original
@@ -97,15 +123,15 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                 assertTrue("Visible IME has a positive bottom inset", imeBottom > 0)
                 val keyboardTop = checkNotNull(originalWindowBottom) - imeBottom
                 assertTrue("Viewport must reach the independent keyboard edge", viewportBottom >= keyboardTop - 2f)
-                windowBottom = keyboardTop
-                safeBottom = windowBottom
+                val systemBottom = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).bottom
+                safeBottom = checkNotNull(originalWindowBottom) - maxOf(imeBottom, systemBottom)
             } else {
                 safeBottom -= insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).bottom
             }
         }
-        assertEquals("The painted surface must meet the window/keyboard edge", windowBottom, surfaceBottom, 2f)
+        assertEquals("The painted surface keeps its original bottom margin", safeBottom - margin, surfaceBottom, 2f)
         if (control != null) {
-            assertTrue("Controls stay above the navigation gesture area", controlBottom <= safeBottom + 2f)
+            assertTrue("Controls stay within the floating surface", controlBottom <= surfaceBottom + 2f)
         }
     }
 
@@ -117,11 +143,11 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         assertEquals(1, dismissals)
     }
 
-    fun testAttachmentAndThinkingSheetsReachBottomInBothThemesAndScales() {
+    fun testAttachmentAndThinkingSheetsKeepFloatingInsetsInBothThemesAndScales() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             var action: ChatMenuAction? = null
             show(dark, scale) { dismiss -> ChatAttachmentSheet(dismiss) { action = it } }
-            assertAttached("chat-selection-sheet", "chat-attachment:ATTACH_FOLDER")
+            assertFloating("chat-selection-sheet", "chat-attachment:ATTACH_FOLDER")
             node("chat-attachment:ATTACH_IMAGE").performClick()
             assertEquals(ChatMenuAction.ATTACH_IMAGE, action)
             assertEquals(1, dismissals)
@@ -130,27 +156,27 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                 ConversationThinkingPicker(true, ReasoningEffort.MEDIUM,
                     listOf(ReasoningEffort.OFF, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH), dismiss, { changes++ }, null)
             }
-            assertAttached("conversation-agent-sheet", "thinking-depth-slider")
+            assertFloating("conversation-agent-sheet", "thinking-depth-slider")
             close("conversation-agent-sheet")
             assertEquals(0, changes)
         }
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testAssistantUsageChoiceAndModelEditorShareBottomAttachment() {
+    fun testAssistantUsageChoiceAndModelEditorShareFloatingInsets() {
         val assets = FileAssistantAssets(instrumentation.targetContext)
         show { dismiss -> AssistantPickerDialog(true, emptyList(), null, {}, {}, dismiss,
             onCopy = {}, onDelete = {}, assets = assets) }
-        assertAttached("assistant-sheet", "assistant-done")
+        assertFloating("assistant-sheet", "assistant-done")
         close("assistant-sheet")
         show { dismiss -> UsageGlassDialog("底部用量弹窗", dismiss) { Box(Modifier.height(60.dp)) } }
-        assertAttached("usage-glass-dialog")
+        assertFloating("usage-glass-dialog")
         close("usage-glass-dialog")
         show { dismiss -> DaiyuChoiceSheet("选择", listOf("一", "二"), {}, dismiss) }
-        assertAttached("daiyu-choice-sheet", "choice-sheet-cancel")
+        assertFloating("daiyu-choice-sheet", "choice-sheet-cancel")
         close("daiyu-choice-sheet")
         show { dismiss -> CatalogModelEditorDialog(CatalogModelEdit("model", "模型"), true, true, {}, dismiss) }
-        assertAttached("catalog-model-dialog", "dialog-confirm")
+        assertFloating("catalog-model-dialog", "dialog-confirm")
         close("catalog-model-dialog")
         assertEquals(0, fixture.opens.get())
     }
@@ -165,9 +191,9 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         close("usage-glass-dialog")
     }
 
-    fun testEditorSurfaceFollowsImeWithoutExtraBottomGapAndReturnsToWindowEdge() {
+    fun testEditorSurfaceKeepsBottomMarginAboveImeAndReturnsToSafeEdge() {
         show { dismiss -> CatalogModelEditorDialog(CatalogModelEdit("model", "模型"), true, true, {}, dismiss) }
-        assertAttached("catalog-model-dialog", "dialog-confirm")
+        assertFloating("catalog-model-dialog", "dialog-confirm")
         val sheet = node("catalog-model-dialog").fetchSemanticsNode()
         val view = (sheet.root as ViewRootForTest).view
         var originalBottom = 0f
@@ -188,7 +214,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             }
             visible
         }
-        assertAttached("catalog-model-dialog", "dialog-confirm", ime = true,
+        assertFloating("catalog-model-dialog", "dialog-confirm", ime = true,
             originalWindowBottom = originalBottom)
         val restoredFrames = java.util.concurrent.atomic.AtomicInteger()
         val observer = view.viewTreeObserver
@@ -207,11 +233,13 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             val location = IntArray(2)
             view.rootView.getLocationOnScreen(location)
             val bottom = rawBounds(sheet).bottom + sheet.positionOnScreen.y - sheet.positionInRoot.y
+            val safeInset = insets?.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())?.bottom ?: 0
+            val bottomMargin = with(sheet.layoutInfo.density) { 12.dp.toPx() }
             val restored = view.isAttachedToWindow && insets != null &&
                 !insets.isVisible(WindowInsetsCompat.Type.ime()) &&
                 insets.getInsets(WindowInsetsCompat.Type.ime()).bottom == 0 &&
                 kotlin.math.abs(location[1] + view.rootView.height - originalBottom) <= 2f &&
-                kotlin.math.abs(bottom - originalBottom) <= 2f
+                kotlin.math.abs(bottom - (originalBottom - safeInset - bottomMargin)) <= 2f
             val frame = currentFrameNanos
             if (!restored) {
                 restoredFrames.set(0)
@@ -237,7 +265,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                 if (observer.isAlive) observer.removeOnPreDrawListener(listener)
             }
         }
-        assertAttached("catalog-model-dialog", "dialog-confirm")
+        assertFloating("catalog-model-dialog", "dialog-confirm")
         close("catalog-model-dialog")
         assertEquals(0, fixture.opens.get())
     }

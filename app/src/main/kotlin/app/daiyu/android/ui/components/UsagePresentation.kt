@@ -55,14 +55,14 @@ internal fun UsageGlassDialog(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
-    val shape = if (compact) RoundedCornerShape(16.dp) else RoundedCornerShape(topStart = 25.dp, topEnd = 25.dp)
+    val shape = RoundedCornerShape(if (compact) 16.dp else 25.dp)
     PreviewDialog(onDismiss, bottomSheet = !compact) {
         val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
         val cardWidth = if (adaptiveWidth) 218.dp * fontScale else 218.dp
         val available = (maxHeight - 30.dp).coerceAtLeast(0.dp)
         Column(
             Modifier.align(if (compact) Alignment.Center else Alignment.BottomCenter)
-                .then(if (compact) Modifier.padding(10.dp) else Modifier.padding(top = 10.dp))
+                .padding(10.dp)
                 .widthIn(max = if (compact) cardWidth else 550.dp).fillMaxWidth()
                 .heightIn(max = minOf(if (compact) 620.dp else 550.dp, available))
                 .testTag("usage-glass-dialog").clip(shape)
@@ -70,7 +70,6 @@ internal fun UsageGlassDialog(
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }
                 .background(Brush.linearGradient(colors.sheet))
                 .border(1.dp, colors.edge, shape)
-                .then(if (compact) Modifier else Modifier.bottomSheetContentInsets())
                 .padding(horizontal = if (compact) 14.dp else 15.dp)
                 .padding(top = if (compact) 8.dp else 14.dp, bottom = if (compact) 10.dp else 15.dp),
         ) {

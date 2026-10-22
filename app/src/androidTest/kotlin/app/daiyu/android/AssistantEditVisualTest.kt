@@ -14,7 +14,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewSection
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.geometry.Offset
@@ -23,6 +25,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.assistants.*
@@ -30,8 +33,10 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.assistants.AssistantEditScreen
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewSwitch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.floor
+import kotlin.math.roundToInt
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -145,6 +150,96 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             tagged("assistant-edit-cancel").performClick()
             assertEquals(1, closed.get())
             assertEquals(0, writes.get())
+        }
+    }
+
+    private fun assertSwitchThumbGeometry(tag: String, checked: Boolean,
+        rtl: Boolean = false, verifyWhite: Boolean = true) {
+        val trackNode = tagged(tag)
+        val track = trackNode.fetchSemanticsNode().boundsInRoot
+        val thumb = ui.onNode(hasTestTag("assistant-preview-switch-thumb") and hasAnyAncestor(hasTestTag(tag)),
+            useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val px = density.get().density
+        assertEquals("track width", (36f * px).roundToInt().toFloat(), track.width, 1f)
+        assertEquals("track height", (22f * px).roundToInt().toFloat(), track.height, 1f)
+        assertEquals("thumb width", (16f * px).roundToInt().toFloat(), thumb.width, 1f)
+        assertEquals("thumb height", thumb.width, thumb.height, 0f)
+        val inset = (3f * px).roundToInt().toFloat()
+        val endGap = if (checked != rtl) track.right - thumb.right else thumb.left - track.left
+        assertEquals("logical end inset checked=$checked rtl=$rtl", inset, endGap, 1f)
+        assertEquals("thumb top inset", inset, thumb.top - track.top, 1f)
+        assertEquals("thumb bottom inset", inset, track.bottom - thumb.bottom, 1f)
+        assertEquals("thumb vertical center", track.center.y, thumb.center.y, 1f)
+        if (checked && verifyWhite) {
+            val image = captureScreenNode(trackNode).toPixelMap()
+            val center = image[(thumb.center.x - track.left).roundToInt(),
+                (thumb.center.y - track.top).roundToInt()]
+            assertEquals(1f, center.red, .04f)
+            assertEquals(1f, center.green, .04f)
+            assertEquals(1f, center.blue, .04f)
+        }
+    }
+
+    fun testSkillAndMemoryThumbsStayAtTheirTrackEndsWithoutSaving() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            show(scale, dark)
+            for (tag in listOf("assistant-skill-visual-skill", "assistant-memory-switch")) {
+                val toggle = tagged(tag).scrollToVisible()
+                awaitVisualIdle()
+                toggle.assertIsOff()
+                assertSwitchThumbGeometry(tag, checked = false)
+                toggle.performTouchInput { click(center) }
+                awaitVisualIdle()
+                toggle.assertIsOn()
+                assertSwitchThumbGeometry(tag, checked = true)
+                toggle.performTouchInput { click(center) }
+                awaitVisualIdle()
+                toggle.assertIsOff()
+                assertSwitchThumbGeometry(tag, checked = false)
+            }
+            tagged("assistant-edit-save").assertIsNotEnabled()
+            assertEquals(0, writes.get())
+            assertEquals(0, saved.get())
+        }
+    }
+
+    fun testThumbEndsFollowDensityScaleAndRtlWhileDisabledClicksStayBlocked() {
+        val cases = listOf(Triple(1f, 1f, LayoutDirection.Ltr), Triple(1.5f, .8f, LayoutDirection.Rtl),
+            Triple(2.75f, 1f, LayoutDirection.Ltr), Triple(3.5f, .8f, LayoutDirection.Rtl))
+        for ((platformDensity, scale, direction) in cases) for (enabled in listOf(false, true)) {
+            val checked = mutableStateOf(false)
+            val calls = AtomicInteger()
+            mainThread { activity.setContent {
+                CompositionLocalProvider(LocalDensity provides Density(platformDensity, .9f),
+                    LocalLayoutDirection provides direction) {
+                    AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                        themeMode = if (enabled) AppearanceThemeMode.LIGHT else AppearanceThemeMode.DARK),
+                        applyInterfaceScale = true) {
+                        density.set(LocalDensity.current)
+                        Box(Modifier.padding(24.dp)) {
+                            AssistantPreviewSwitch(checked.value, enabled, "启用", Modifier.testTag("geometry-switch")) {
+                                calls.incrementAndGet(); checked.value = it
+                            }
+                        }
+                    }
+                }
+            } }
+            for (on in listOf(false, true)) {
+                ui.runOnIdle { checked.value = on }
+                awaitVisualIdle()
+                val toggle = tagged("geometry-switch")
+                assertSwitchThumbGeometry("geometry-switch", on, direction == LayoutDirection.Rtl, verifyWhite = enabled)
+                if (enabled) toggle.assertIsEnabled() else toggle.assertIsNotEnabled()
+                val before = calls.get()
+                toggle.performTouchInput { click(center) }
+                awaitVisualIdle()
+                ui.runOnIdle {
+                    assertEquals(before + if (enabled) 1 else 0, calls.get())
+                    assertEquals(if (enabled) !on else on, checked.value)
+                }
+                assertSwitchThumbGeometry("geometry-switch", checked.value, direction == LayoutDirection.Rtl,
+                    verifyWhite = enabled)
+            }
         }
     }
 

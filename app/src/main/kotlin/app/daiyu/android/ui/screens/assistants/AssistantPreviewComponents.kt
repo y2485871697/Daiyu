@@ -248,9 +248,11 @@ internal fun AssistantPreviewSwitch(checked: Boolean, enabled: Boolean, label: S
             contentAlignment = Alignment.Center) {
             Box(Modifier.size(36.dp * s, 22.dp * s).clip(CircleShape)
                 .background(if (checked) (if (colors.dark) Color(0xFFB3A0C7) else Color(0xFFA18BB8)) else colors.soft)
-                .border(1.dp, if (checked) Color.Transparent else colors.line, CircleShape)) {
-                Box(Modifier.align(Alignment.CenterStart).offset(x = (if (checked) 14 else 3).dp * s)
-                    .size(16.dp * s).clip(CircleShape).background(if (checked) Color.White else colors.muted))
+                .border(1.dp, if (checked) Color.Transparent else colors.line, CircleShape)
+                .padding(horizontal = 3.dp * s)) {
+                Box(Modifier.align(if (checked) Alignment.CenterEnd else Alignment.CenterStart)
+                    .size(16.dp * s).testTag("assistant-preview-switch-thumb")
+                    .clip(CircleShape).background(if (checked) Color.White else colors.muted))
             }
         }
     }

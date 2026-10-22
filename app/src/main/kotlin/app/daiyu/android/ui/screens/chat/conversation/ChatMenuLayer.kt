@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
@@ -27,6 +28,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import app.daiyu.android.ui.components.LocalPopupMotion
+import app.daiyu.android.ui.components.PopupMotion
 import app.daiyu.android.ui.components.PopupExitRetentionMillis
 import app.daiyu.android.ui.components.rememberPopupMotion
 import app.daiyu.android.ui.components.etaMenuClipReveal
@@ -40,6 +42,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.dropShadow
@@ -120,16 +123,10 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
                                     val scale = 0.15f + 0.85f * motion.fraction.value
                                     scaleX = scale
                                     scaleY = scale
-                                    alpha = motion.alpha.value
                                     transformOrigin = TransformOrigin(1f, 0f)
                                 }
-                                .etaMenuClipReveal(
-                                    fractionProgress = { if (menu.expanded()) motion.fraction.value else 1f },
-                                    preferAbove = false, cornerRadius = 19.dp, squircleEnabled = false,
-                                    clipWhenFullyRevealed = false,
-                                )
                                 .then(if (menu.expanded()) Modifier.semantics { paneTitle = "会话菜单" }
-                                else Modifier.clearAndSetSemantics {})) {
+                                else Modifier.clearAndSetSemantics {}), motion = motion) {
                                 CompositionLocalProvider(LocalPopupMotion provides motion) { menu.content() }
                             }
                         },
@@ -212,9 +209,28 @@ internal fun ChatAnchoredMenu(
 }
 
 @Composable
-internal fun ChatGlassMenuSurface(backdrop: LayerBackdrop?, modifier: Modifier, content: @Composable () -> Unit) {
+internal fun ChatGlassMenuSurface(
+    backdrop: LayerBackdrop?,
+    modifier: Modifier,
+    motion: PopupMotion? = null,
+    content: @Composable () -> Unit,
+) {
     val dark = MiuixTheme.colorScheme.background.luminance() < .3f
     val shape = RoundedCornerShape(19.dp)
+    val revealFraction = if (motion?.visibleState?.targetState == false) 1f
+        else (motion?.fraction?.value ?: 1f).coerceIn(0f, 1f)
+    val opacity = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)
+    val radius = with(LocalDensity.current) { 19.dp.toPx() }
+    val shadowShape = remember(shape, revealFraction, radius) {
+        if (revealFraction == 1f) shape else GenericShape { size, _ ->
+            if (revealFraction > 0f) {
+                addRoundRect(RoundRect(Rect(0f, 0f, size.width, size.height * revealFraction),
+                    CornerRadius(radius)))
+            }
+        }
+    }
+    val broadShadow = if (dark) Color(0x55000000) else Color(0x164C3A6B)
+    val nearShadow = if (dark) Color(0x22000000) else Color(0x05342048)
     val blur = if (backdrop == null) Modifier else Modifier.textureBlur(
         backdrop = backdrop, shape = shape, blurRadius = 24f,
         colors = BlurColors(blendColors = emptyList(), saturation = 1.35f),
@@ -222,11 +238,18 @@ internal fun ChatGlassMenuSurface(backdrop: LayerBackdrop?, modifier: Modifier, 
     val shades = if (dark) listOf(Color(0xE62C2739), Color(0xDB1B1924))
         else listOf(Color(0xE6FFFFFF), Color(0xD4FAF7FF))
     Column(modifier.width(IntrinsicSize.Max)
-        .dropShadow(shape, Shadow(radius = if (dark) 35.dp else 34.dp,
+        // Keep the halo outside the body's alpha layer and reveal clip.
+        .dropShadow(shadowShape, Shadow(radius = if (dark) 35.dp else 34.dp,
             offset = DpOffset(0.dp, if (dark) 14.dp else 12.dp),
-            color = if (dark) Color(0x55000000) else Color(0x164C3A6B)))
-        .dropShadow(shape, Shadow(radius = 6.dp, offset = DpOffset(0.dp, 2.dp),
-            color = if (dark) Color(0x22000000) else Color(0x05342048)))
+            color = broadShadow.copy(alpha = broadShadow.alpha * opacity)))
+        .dropShadow(shadowShape, Shadow(radius = 6.dp, offset = DpOffset(0.dp, 2.dp),
+            color = nearShadow.copy(alpha = nearShadow.alpha * opacity)))
+        .graphicsLayer { alpha = opacity }
+        .etaMenuClipReveal(
+            fractionProgress = { revealFraction },
+            preferAbove = false, cornerRadius = 19.dp, squircleEnabled = false,
+            clipWhenFullyRevealed = false,
+        )
         .clip(shape).then(blur)
         .pointerInput(Unit) { detectTapGestures(onTap = {}) }
         .background(Brush.linearGradient(shades))

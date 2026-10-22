@@ -13,11 +13,16 @@ import kotlinx.coroutines.withContext
 internal class SavedCatalogSubAgentModelSource : SubAgentModelSource {
     private val state = MutableStateFlow<List<SubAgentProvider>>(emptyList())
     override val providers = state.asStateFlow()
+    private val displayed = MutableStateFlow<List<SubAgentProvider>>(emptyList())
+    override val displayProviders = displayed.asStateFlow()
+    private val refreshingState = MutableStateFlow(false)
+    override val refreshing = refreshingState.asStateFlow()
     private var generation = 0L
 
     /** Same UI lane as refresh; invalidates even a blocking read that has not returned yet. */
     fun clear() {
         generation++
+        refreshingState.value = true
         state.value = emptyList()
     }
 
@@ -27,7 +32,14 @@ internal class SavedCatalogSubAgentModelSource : SubAgentModelSource {
         val loaded = try { withContext(Dispatchers.IO) { read() } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { emptyList() }
-        if (request == generation) state.value = loaded
+        publish(request, loaded)
+    }
+
+    private fun publish(request: Long, loaded: List<SubAgentProvider>) {
+        if (request != generation) return
+        state.value = loaded
+        displayed.value = loaded
+        refreshingState.value = false
     }
 
     /** Called on the UI lane; blocking registry/credential work stays on IO. */
@@ -48,7 +60,7 @@ internal class SavedCatalogSubAgentModelSource : SubAgentModelSource {
             }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { emptyList() }
-        if (request == generation) state.value = loaded
+        publish(request, loaded)
     }
 }
 

@@ -52,7 +52,7 @@ internal class SubAgentProfileDraftSession private constructor(
         return editor.canEdit() && current.presetApplicationToken == expectedApplicationToken
     }
     fun canCommit(currentEditor: ConversationSubAgentEditor?, allowed: Boolean, ticket: Any = openToken): Boolean =
-        ticket === openToken && isCurrent(currentEditor, allowed) && editor.enabled
+        ticket === openToken && isCurrent(currentEditor, allowed) && editor.enabled && !editor.modelRefreshing.value
     fun edit(change: (SubAgentProfile) -> SubAgentProfile) {
         val old = draft; draft = change(old)
         if (old.providerId != draft.providerId || old.modelId != draft.modelId) { bindingChanged = true; resetParallel() }
@@ -63,13 +63,13 @@ internal class SubAgentProfileDraftSession private constructor(
         parallelValue = editor.rememberedParallelLimit(draft)?.toString().orEmpty()
     }
     fun bindParallel(config: SubAgentModelConfig?) {
-        val next = config?.takeIf { it.providerId.isNotBlank() && it.model.isNotBlank() }?.let { SubAgentParallelModel(it.providerId, it.model) }
+        val next = config?.takeIf { it.providerId.isNotBlank() && it.model.isNotBlank() }?.let { SubAgentParallelModel(it.providerId, it.model) } ?: return
         if (next != parallelModel) {
             parallelModel = next
             val originalBinding = expectedProfile != null && !bindingChanged && draft.providerId == expectedProfile.providerId && draft.modelId == expectedProfile.modelId
-            val restored = if (next != null && !originalBinding) editor.rememberedParallelLimit(draft) else null
+            val restored = if (!originalBinding) editor.rememberedParallelLimit(draft) else null
             parallelEdited = restored != null
-            parallelValue = if (next == null) "" else (restored ?: openedConfig.parallelLimit(next)).toString()
+            parallelValue = (restored ?: openedConfig.parallelLimit(next)).toString()
         }
     }
     fun editParallel(value: String) { parallelValue = value; parallelEdited = true }
@@ -96,7 +96,6 @@ internal fun resolveSubAgentProfileConfig(profile: SubAgentProfile, providers: L
     if (model.supportsSpeechSynthesis || !profile.acceptsModel(model.supportsImageGeneration, model.supportsVideoGeneration)) return null
     return runCatching { buildSubAgentModelConfig(provider, model) }.getOrNull()
 }
-private class SubAgentResolvedDraftBinding(val providerId: String, val modelId: String, val role: String, val config: SubAgentModelConfig?)
 private fun Modifier.profileDialogScrollableBody(): Modifier = layout { measurable, constraints ->
     val maximum = if (constraints.hasBoundedHeight) (constraints.maxHeight - 144.dp.roundToPx()).coerceAtLeast(1).coerceAtMost(520.dp.roundToPx()) else 520.dp.roundToPx()
     val placeable = measurable.measure(constraints.copy(minHeight = constraints.minHeight.coerceAtMost(maximum), maxHeight = maximum))
@@ -117,21 +116,20 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val draft = session.draft
-    val usable = session.canCommit(currentEditor, enabled) && !session.submitting
+    val presentationProviders = session.editor.modelDisplayProviders?.collectAsState()?.value ?: providers
+    val modelRefreshing by session.editor.modelRefreshing.collectAsState()
+    val usable = !modelRefreshing && session.canCommit(currentEditor, enabled) && !session.submitting
     var modelPicker by remember(session) { mutableStateOf(false) }
     var thinkingPicker by remember(session) { mutableStateOf(false) }
     var choices by remember(session) { mutableStateOf<String?>(null) }
-    val resolved by produceState<SubAgentResolvedDraftBinding?>(null, draft.providerId, draft.modelId, draft.role, providers) {
-        value = SubAgentResolvedDraftBinding(draft.providerId, draft.modelId, draft.role, resolveSubAgentProfileConfig(draft, providers))
+    val boundConfig = remember(draft.providerId, draft.modelId, draft.role, presentationProviders) {
+        resolveSubAgentProfileConfig(draft, presentationProviders)
     }
-    val boundConfig = resolved?.takeIf { it.providerId == draft.providerId && it.modelId == draft.modelId && it.role == draft.role }?.config
-    val resolutionPending = draft.providerId.isNotBlank() && draft.modelId.isNotBlank() &&
-        (resolved == null || resolved?.providerId != draft.providerId || resolved?.modelId != draft.modelId || resolved?.role != draft.role)
-    LaunchedEffect(session, draft.providerId, draft.modelId, draft.role, resolutionPending, boundConfig?.providerId, boundConfig?.model) {
-        if (!resolutionPending) session.bindParallel(boundConfig)
+    LaunchedEffect(session, draft.providerId, draft.modelId, draft.role, modelRefreshing, boundConfig?.providerId, boundConfig?.model) {
+        if (!modelRefreshing) session.bindParallel(boundConfig)
     }
     LaunchedEffect(usable) { if (!usable) { modelPicker = false; thinkingPicker = false; choices = null } }
-    val speedProvider = providers.singleOrNull { it.id == draft.providerId && it.isEnabled }
+    val speedProvider = presentationProviders.singleOrNull { it.id == draft.providerId && it.isEnabled }
     val speedModel = speedProvider?.models?.singleOrNull { it.id == draft.modelId && it.isEnabled }
     val canEditSpeed = boundConfig != null && supportsGptSpeedBinding(speedProvider, speedModel)
     val media = if (draft.isMedia && boundConfig != null) MediaReasoningSettings.resolve(boundConfig, draft.role) else null
@@ -146,7 +144,8 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
         else -> effective?.displayName ?: "未启用"
     }
     val verifiedGrok = boundConfig?.grokImage ?: false
-    val ready = usable && !resolutionPending && session.parallelBoundTo(boundConfig) && session.name.trim().isNotBlank() && session.parallelIsValid() && (session.expectedProfile != null || boundConfig != null)
+    val hasModelIdentity = draft.providerId.isNotBlank() || draft.modelId.isNotBlank()
+    val ready = usable && (!hasModelIdentity || boundConfig != null) && session.parallelBoundTo(boundConfig) && session.name.trim().isNotBlank() && session.parallelIsValid() && (session.expectedProfile != null || boundConfig != null)
     val interact: (() -> Unit) -> Unit = { action -> if (session.canCommit(latestEditor, latestEnabled) && !session.submitting) { action() } }
     val dismiss = { session.dismiss(); latestDismiss() }
     val userDismiss = { if (!session.submitting) dismiss() }

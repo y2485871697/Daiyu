@@ -55,7 +55,10 @@ internal class ControllerBrowserVisual(
         var attachment: CatalogBrowserBinding.VisibleAttachment? = null
         var closeStarted = false
     }
-    private class Pending(val visit: Visit, val lease: BrowserTabLease?, val create: Boolean = false) {
+    private class Pending(
+        val visit: Visit, val lease: BrowserTabLease?, val create: Boolean = false,
+        val expectedCurrent: BrowserTabLease? = lease,
+    ) {
         var admitted = false
     }
     private val uiMemory = app.daiyu.android.browser.ui.BrowserUiMemory("task:${owner.runId.value}")
@@ -96,10 +99,9 @@ internal class ControllerBrowserVisual(
     }
     private fun takeover(visit: Visit, lease: BrowserTabLease) {
         requireMain()
-        if (!current(visit) || unknown || token != null || pending.get() != null) return
+        if (!current(visit) || unknown || pending.get() != null || token?.lease == lease) return
         if (lease !in binding.session.visibleTabs) { notice = "原标签已变化；未接管。"; return }
-        if (binding.session.currentTab != lease) binding.session.selectVisibleTab(lease)
-        val request = Pending(visit, lease)
+        val request = Pending(visit, lease, expectedCurrent = binding.session.currentTab)
         pending.set(request)
         val accepted = try { originalPaused() || pauseOriginal() } catch (_: Exception) { false }
         if (!accepted) {
@@ -159,7 +161,7 @@ internal class ControllerBrowserVisual(
         if (!current(visit) || unknown) { pending.compareAndSet(request, null); return }
         if (request.admitted || !originalPaused()) return
         if (pending.get() !== request) return
-        if (binding.session.currentTab != request.lease) {
+        if (binding.session.currentTab != request.expectedCurrent) {
             pending.compareAndSet(request, null)
             notice = "暂停期间原标签已变化；未接管。请明确重新选择。"
             return
@@ -182,7 +184,20 @@ internal class ControllerBrowserVisual(
                 createTakenOverTab(visit)
                 return
             }
-            val acquired = binding.session.takeover(requireNotNull(request.lease))
+            val old = token
+            if (old != null) {
+                try {
+                    mounted.get()?.let(::detach)
+                    if (!current(visit) || unknown) return
+                    binding.session.releaseTakeover(old)
+                } catch (_: Exception) {
+                    markUnknown("标签切换未确认；未恢复自动化。")
+                    return
+                }
+                if (token === old) token = null
+                if (!current(visit) || unknown) return
+            }
+            val acquired = binding.session.takeover(requireNotNull(request.lease), selectOnSuccess = true)
             token = acquired
             if (acquired.cleanupFailure != null) markUnknown("接管失效处理 UNKNOWN；保留原资源，请停止原任务核实。")
             else notice = "已接管原标签。返回或后台只卸载页面，不自动恢复任务。"
@@ -238,19 +253,7 @@ internal class ControllerBrowserVisual(
         try { original.attachment?.navigate(url); notice = "已请求导航；不代表加载完成，未发送聊天消息。" }
         catch (_: Exception) { markUnknown("人工导航 UNKNOWN；不会重发或恢复自动化。") }
     }
-    private fun selectTab(visit: Visit, lease: BrowserTabLease) {
-        requireMain()
-        if (!current(visit) || unknown || pending.get() != null || lease !in binding.session.visibleTabs) return
-        if (token?.lease == lease) return
-        try {
-            mounted.get()?.let(::detach)
-            if (unknown) return
-            token?.let { binding.session.releaseTakeover(it); token = null }
-            val target = binding.session.visibleTabs.firstOrNull { it.tabId == lease.tabId && it.owner == lease.owner } ?: return
-            binding.session.selectVisibleTab(target)
-            takeover(visit, target)
-        } catch (_: Exception) { markUnknown("标签切换未确认；未恢复自动化。") }
-    }
+    private fun selectTab(visit: Visit, lease: BrowserTabLease) = takeover(visit, lease)
     private fun control(visit: Visit, action: app.daiyu.android.browser.openminis.BrowserVisibleAction) {
         requireMain()
         if (!current(visit) || unknown || pending.get() != null) return

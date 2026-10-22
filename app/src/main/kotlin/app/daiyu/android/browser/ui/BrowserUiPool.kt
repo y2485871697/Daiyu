@@ -91,7 +91,12 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
             val canGoBack = MutableStateFlow(false)
             val canGoForward = MutableStateFlow(false)
             fun loadURL(input: String) {
-                val url = normalize(input)
+                val url = try {
+                    normalize(input)
+                } catch (_: IllegalArgumentException) {
+                    notice.value = "此地址不能在网页中打开"
+                    return
+                }
                 if (!OpenMinisNavigationPolicy.permits(url)) { notice.value = "此地址不能在网页中打开"; return }
                 if (visit?.snapshot()?.mounted == true) visit.navigate(url) else deferredNavigation = url
                 refresh()

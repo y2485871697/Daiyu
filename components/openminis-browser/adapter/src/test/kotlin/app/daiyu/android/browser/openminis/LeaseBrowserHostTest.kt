@@ -73,10 +73,12 @@ class LeaseBrowserHostTest {
         val f = Fixture()
         val lease = f.create()
         val commands = listOf(
-            BrowserCommand("set_user_agent", lease.tabId, mapOf("user_agent" to "desktop_chrome")),
-            BrowserCommand("set_user_agent", lease.tabId, mapOf("user_agent" to "mobile_chrome")),
-            BrowserCommand("set_viewport", lease.tabId, mapOf("viewport_width" to 800, "viewport_height" to 600)),
-            BrowserCommand("reload", lease.tabId), BrowserCommand("go_back", lease.tabId), BrowserCommand("go_forward", lease.tabId),
+            BrowserCommand("set_user_agent", lease.tabId, mapOf("user_agent" to "forged")),
+            BrowserCommand("set_user_agent", lease.tabId, mapOf("user_agent" to "desktop_chrome", "owner" to "forged")),
+            BrowserCommand("set_viewport", lease.tabId, mapOf("viewport_width" to 800)),
+            BrowserCommand("set_viewport", lease.tabId, mapOf("reset" to true, "viewport_width" to 800, "viewport_height" to 600)),
+            BrowserCommand("reload", lease.tabId, mapOf("owner" to "forged")),
+            BrowserCommand("unknown_action", lease.tabId),
             BrowserCommand("navigate", lease.tabId, mapOf("url" to "https://example.invalid/", "timeout_ms" to 1000)),
         )
         try {

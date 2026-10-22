@@ -36,15 +36,45 @@ class OpenMinisCommandMapperTest {
         assertEquals("a", OpenMinisCommandMapper.map(command("find_elements", "selector" to "a")).selector)
     }
 
-    @Test fun tokenlessUaChangesAreRejectedByMapperAndResultConversion() {
+    @Test fun nativeHostCommandsBypassManagerMappingButStillValidateResults() {
+        fun reject(block: () -> Unit) {
+            try { block(); fail("must reject") }
+            catch (_: IllegalArgumentException) { }
+            catch (_: IllegalStateException) { }
+        }
         for (profile in listOf("desktop_chrome", "mobile_chrome")) {
             val command = command("set_user_agent", "user_agent" to profile)
+            OpenMinisCommandMapper.preflight(command)
             try { OpenMinisCommandMapper.map(command); fail("UA must not reach fixed manager") }
             catch (failure: IllegalStateException) { assertEquals("BROWSER_OPENMINIS_USER_AGENT_UNSUPPORTED", failure.message) }
-            try {
-                OpenMinisCommandMapper.result(command, com.openminis.app.browser.BrowserActionResult("Switched"))
-                fail("UA success must not be published")
-            } catch (failure: IllegalStateException) { assertEquals("BROWSER_OPENMINIS_USER_AGENT_UNSUPPORTED", failure.message) }
+            assertEquals("Switched", OpenMinisCommandMapper.result(command,
+                com.openminis.app.browser.BrowserActionResult("Switched")).text)
+            for (answer in listOf(
+                com.openminis.app.browser.BrowserActionResult.error("native failure"),
+                com.openminis.app.browser.BrowserActionResult("Error: native failure"),
+            )) {
+                try { OpenMinisCommandMapper.result(command, answer); fail("native failure must not publish") }
+                catch (failure: IllegalStateException) { assertEquals("BROWSER_OPENMINIS_ACTION_FAILED", failure.message) }
+            }
+        }
+        for (command in listOf(
+            command("set_viewport", "viewport_width" to 800, "viewport_height" to 600),
+            command("set_viewport", "reset" to true),
+        )) {
+            OpenMinisCommandMapper.preflight(command)
+            rejected(command)
+            assertEquals("Resized", OpenMinisCommandMapper.result(command,
+                com.openminis.app.browser.BrowserActionResult("Resized")).text)
+        }
+        for (command in listOf(
+            command("set_user_agent", "user_agent" to "forged"),
+            command("set_user_agent", "user_agent" to "desktop_chrome", "owner" to "forged"),
+            command("set_viewport", "viewport_width" to 800),
+            command("unknown_action"),
+        )) {
+            reject { OpenMinisCommandMapper.preflight(command) }
+            reject { OpenMinisCommandMapper.result(command,
+                com.openminis.app.browser.BrowserActionResult("forged success")) }
         }
     }
 

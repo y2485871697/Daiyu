@@ -34,7 +34,7 @@ internal fun markdownBlockLength(block: MarkdownBlock): Int = when (block) {
 }.coerceAtLeast(1)
 
 internal class MarkdownTextBoundaries(private val text: String) {
-    private val characters = BreakIterator.getCharacterInstance(Locale.ROOT).apply { setText(text) }
+    private val characters = BreakIterator.getCharacterInstance(Locale.ROOT).apply { setText(this@MarkdownTextBoundaries.text) }
 
     fun end(limit: Int): Int {
         if (limit >= text.length) return text.length

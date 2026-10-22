@@ -84,6 +84,7 @@ class MarkdownRevealTest {
             assertFalse(end in 1 until text.length && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate())
             assertFalse(end < text.length && text[end] == '\u0301')
         }
+        assertEquals(listOf(0, 1, 1, 3, 3, 5, 5, 7, 8), (0..text.length).map { boundaries.end(it) })
         assertEquals(text.length, boundaries.end(Int.MAX_VALUE))
     }
 

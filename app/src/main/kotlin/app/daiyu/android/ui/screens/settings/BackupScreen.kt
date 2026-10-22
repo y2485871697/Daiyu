@@ -1,6 +1,10 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import app.daiyu.android.ui.icons.DaiyuIcons
 
@@ -24,6 +28,7 @@ internal fun BackupScreen(
     engineeringUi: Boolean = false,
     onImport: () -> Unit = onImportComplete,
 ) {
+    var includeFullLinuxEnvironment by rememberSaveable { mutableStateOf(false) }
     SettingsScaffoldPage(title = "备份与导入", onBack = onBack, modifier = modifier) {
         item(key = "backup_intro") {
             SettingsNote("备份文件可能包含个人数据，请妥善保管。导入前请确认来源可信。")
@@ -33,9 +38,11 @@ internal fun BackupScreen(
         }
         item(key = "backup_actions") {
             SettingsCard {
-                SettingsRow("导出数据", summary = if (busy) "处理中，请稍候" else "保存当前数据备份", tag = "backup-export", onClick = if (busy) null else onExportComplete,
+                SettingsSwitchRow("包含完整 Linux 环境", checked = includeFullLinuxEnvironment, enabled = !busy,
+                    tag = "backup-include-full-linux") { includeFullLinuxEnvironment = it }
+                SettingsRow("导出数据", summary = if (busy) "处理中，请稍候" else "保存当前数据备份", tag = "backup-export", showChevron = true, onClick = if (busy) null else onExportComplete,
                     leading = { SettingsIcon(DaiyuIcons.Export) })
-                SettingsRow("导入数据", summary = if (busy) "处理中，请稍候" else "从备份文件恢复数据", tag = "backup-import", onClick = if (busy) null else onImport,
+                SettingsRow("导入数据", summary = if (busy) "处理中，请稍候" else "从备份文件恢复数据", tag = "backup-import", showChevron = true, onClick = if (busy) null else onImport,
                     leading = { SettingsIcon(DaiyuIcons.Import) })
             }
         }

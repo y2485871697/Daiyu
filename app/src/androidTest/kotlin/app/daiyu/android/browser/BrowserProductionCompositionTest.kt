@@ -33,7 +33,8 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
     }
 
     private fun host(access: BrowserAccess = BrowserAccess.FULL,
-                     kind: BrowserOwnerKind = BrowserOwnerKind.MAIN): AndroidBrowserRunHost {
+                     kind: BrowserOwnerKind = BrowserOwnerKind.MAIN,
+                     mainFrameRequests: java.util.concurrent.atomic.AtomicInteger? = null): AndroidBrowserRunHost {
         val context = instrumentation.targetContext
         val root = Files.createTempDirectory(context.cacheDir.toPath(), "browser-composition-")
         roots.add(root)
@@ -48,7 +49,10 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
                 historyApproval = OpenMinisHistoryApproval { _, url, _ -> historyApprovals.add(url); true },
                 requestOverride = { request ->
                     check(request.url.host == "browser-fixture.invalid")
-                    WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream(html.toByteArray()))
+                    val marker = if (request.isForMainFrame) mainFrameRequests?.incrementAndGet() else null
+                    val response = if (marker == null) html else html.replace("<title>Browser fixture</title>",
+                        "<title>Browser fixture $marker</title>")
+                    WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream(response.toByteArray()))
                 },
             )
         }.also { hosts.add(it) }
@@ -133,7 +137,8 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
             val parent = android.widget.FrameLayout(instrumentation.targetContext)
             val attachment = host.webHost.attach(token, parent)
             val view = parent.getChildAt(0) as android.webkit.WebView
-            assertTrue(view.settings.userAgentString.contains("Windows NT"))
+            assertEquals(com.openminis.app.browser.UserAgentProfile.DESKTOP_CHROME.userAgentString,
+                view.settings.userAgentString)
             assertEquals(second, attachment.page().url)
             attachment.close()
             host.session.releaseTakeover(token)
@@ -307,6 +312,115 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
             attachment.close()
             assertNull(host.currentTab)
             assertEquals(0, parent.childCount)
+        }
+    }
+
+    fun testUnmountedHumanRestoredTabsSurviveSaveAndReopen() {
+        val context = instrumentation.targetContext
+        val conversation = app.daiyu.android.domain.ConversationId("human-restore-test-${UUID.randomUUID()}")
+        val prefs = context.getSharedPreferences("browser_prefs", android.content.Context.MODE_PRIVATE)
+        val key = "tabs:human:${conversation.value}"
+        val expected = listOf("https://browser-fixture.invalid/restored-one",
+            "https://browser-fixture.invalid/restored-two", "https://browser-fixture.invalid/restored-three")
+        fun persistedUrls(): List<String> {
+            val array = org.json.JSONArray(prefs.getString(key, "[]"))
+            return (0 until array.length()).map { array.getString(it) }
+        }
+        try {
+            main {
+                val array = org.json.JSONArray()
+                expected.forEach { array.put(it) }
+                assertTrue(prefs.edit().putString(key, array.toString()).commit())
+            }
+            repeat(2) {
+                val local = main { app.daiyu.android.LocalBrowserVisual(context, conversation) }
+                try {
+                    main {
+                        val visit = checkNotNull(local.openVisit())
+                        val state = visit.snapshot()
+                        assertFalse(state.unknown)
+                        assertEquals(3, state.tabs.size)
+                        assertFalse(state.mounted)
+                        visit.close()
+                        assertEquals(expected, persistedUrls())
+                    }
+                } finally { main { local.close() } }
+                main { assertEquals(expected, persistedUrls()) }
+            }
+        } finally { main { assertTrue(prefs.edit().remove(key).commit()) } }
+    }
+
+    fun testModelConfigurationInvalidatesVisibleConfigurationCache() {
+        fun assertViewport(view: android.webkit.WebView, width: Int, height: Int) {
+            val density = view.resources.displayMetrics.density
+            assertEquals((width * density).toInt().coerceAtLeast(1), view.width)
+            assertEquals((height * density).toInt().coerceAtLeast(1), view.height)
+        }
+        fun awaitLoaded(attachment: app.daiyu.android.browser.openminis.BrowserVisibleAttachment,
+                        view: android.webkit.WebView, requests: java.util.concurrent.atomic.AtomicInteger,
+                        before: Int, url: String) {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            fun loaded() = main {
+                !attachment.isLoading && requests.get() > before && view.progress == 100 &&
+                    view.title == "Browser fixture ${requests.get()}" && view.url == url
+            }
+            while (!loaded() && System.nanoTime() < deadline) Thread.sleep(10)
+            assertTrue("fresh intercepted response must finish, not just cancel loading", loaded())
+        }
+        for (action in listOf("set_user_agent", "set_viewport", "reset_viewport")) {
+            val requests = java.util.concurrent.atomic.AtomicInteger()
+            val host = host(mainFrameRequests = requests)
+            val url = "https://browser-fixture.invalid/config-cache-$action"
+            confirmed(host, "action" to "new_tab")
+            confirmed(host, "action" to "navigate", "url" to url)
+            val configuration = app.daiyu.android.browser.openminis.BrowserVisibleConfiguration(
+                profile = com.openminis.app.browser.UserAgentProfile.MOBILE_CHROME, width = 640, height = 480)
+            val parent = main { android.widget.FrameLayout(instrumentation.targetContext) }
+            val firstToken = main { host.session.takeover(requireNotNull(host.currentTab)) }
+            val first = main { host.webHost.attach(firstToken, parent) }
+            val originalView = main { parent.getChildAt(0) as android.webkit.WebView }
+            try {
+                val before = requests.get()
+                main { first.configure(configuration); assertViewport(originalView, 640, 480) }
+                awaitLoaded(first, originalView, requests, before, url)
+            } finally { main { first.close(); host.session.releaseTakeover(firstToken) } }
+            when (action) {
+                "set_user_agent" -> confirmed(host, "action" to action, "user_agent" to "desktop_chrome")
+                "set_viewport" -> confirmed(host, "action" to action, "viewport_width" to 800, "viewport_height" to 600)
+                "reset_viewport" -> confirmed(host, "action" to "set_viewport", "reset" to true)
+            }
+            main {
+                val modelViewport = when (action) {
+                    "set_user_agent" -> 640 to 480
+                    "set_viewport" -> 800 to 600
+                    else -> configuration.profile.viewportSize
+                }
+                assertViewport(originalView, modelViewport.first, modelViewport.second)
+            }
+            val secondToken = main { host.session.takeover(requireNotNull(host.currentTab)) }
+            val second = main { host.webHost.attach(secondToken, parent) }
+            var appliedRequests = 0
+            try {
+                val before = requests.get()
+                main {
+                    assertSame(originalView, parent.getChildAt(0))
+                    assertFalse(second.isLoading)
+                    second.configure(configuration)
+                    assertTrue("$action must invalidate visible configuration deduplication", second.isLoading)
+                    assertEquals(configuration.profile.userAgentString, originalView.settings.userAgentString)
+                    assertViewport(originalView, 640, 480)
+                }
+                awaitLoaded(second, originalView, requests, before, url)
+                appliedRequests = requests.get()
+                main {
+                    second.configure(configuration)
+                    assertFalse(second.isLoading)
+                    assertViewport(originalView, 640, 480)
+                    assertEquals(appliedRequests, requests.get())
+                }
+            } finally { main { second.close(); host.session.releaseTakeover(secondToken) } }
+            assertTrue(confirmed(host, "action" to "get_text", "selector" to "body").result.text.contains("0123456789"))
+            assertEquals(appliedRequests, requests.get())
         }
     }
 

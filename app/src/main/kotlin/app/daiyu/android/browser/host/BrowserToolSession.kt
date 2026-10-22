@@ -269,7 +269,7 @@ class BrowserToolSession(
     }
 
     /** Trusted host takeover. Token is returned even if an invalidation callback failed. */
-    fun takeover(lease: BrowserTabLease): BrowserToolTakeoverToken {
+    fun takeover(lease: BrowserTabLease, selectOnSuccess: Boolean = false): BrowserToolTakeoverToken {
         check(lifecycle.supportsTakeover) { "BROWSER_TAKEOVER_UNSUPPORTED" }
         val slot = synchronized(lock) { requireReady(lease).also { it.phase = Phase.TRANSITION } }
         try {
@@ -278,6 +278,7 @@ class BrowserToolSession(
                 if (!closed && slots[lease.tabId] === slot) {
                     slot.lease = token.lease
                     slot.phase = Phase.TAKEN_OVER
+                    if (selectOnSuccess) current = slot
                 }
             }
             return BrowserToolTakeoverToken(this, token)

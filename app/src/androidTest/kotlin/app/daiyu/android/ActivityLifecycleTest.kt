@@ -11,7 +11,19 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.test.mock.MockContentResolver
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
+import app.daiyu.android.domain.pet.PetCommandResult
+import app.daiyu.android.domain.pet.PetFood
+import app.daiyu.android.domain.pet.PetModelSelection
+import app.daiyu.android.domain.pet.PetRequestStatus
+import app.daiyu.android.pet.PetApplicationHost
+import app.daiyu.android.pet.PetModelResolver
+import app.daiyu.android.storage.IndependentModelSettings
+import app.daiyu.android.storage.ProviderRepository
+import app.daiyu.android.ui.screens.settings.PetSettingsScreen
+import app.daiyu.android.ui.screens.settings.SettingsModelSource
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.balance.*
 import app.daiyu.android.storage.ModelSettingsStore
@@ -182,33 +194,66 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
     }
 
     fun testPetRuntimeFailureDoesNotAppearOnSettingsPage() {
-        start()
-        val singleton = application.pets
-        val original = singleton.host.snapshot().pet.state.settings
+        val current = start()
+        val petDirectory = File(directory, "pet-runtime-failure").apply { check(mkdir()) }
+        val petContext = object : ContextWrapper(testContext(fixture, "pet-runtime-failure-")) {
+            override fun getApplicationContext(): Context = this
+            override fun getFilesDir(): File = petDirectory
+        }
+        var pets: PetApplicationHost? = null
         try {
             mainThread {
-                val updated = singleton.updateSettings(original.copy(enabled = true,
-                    model = app.daiyu.android.domain.pet.PetModelSelection("missing-assistant", "missing-provider", "missing-model")))
-                assertTrue(updated is app.daiyu.android.domain.pet.PetCommandResult.Applied)
-                assertNull(singleton.host.snapshot().pet.error)
-                val fed = singleton.host.feed(app.daiyu.android.domain.pet.PetFood.BOWL)
-                assertFalse(fed is app.daiyu.android.domain.pet.PetCommandResult.Rejected)
+                pets = PetApplicationHost(petContext, resolver = PetModelResolver { null }, onOpenSettings = {})
+                val isolated = checkNotNull(pets)
+                val original = isolated.host.snapshot().pet.state.settings
+                assertTrue(isolated.updateSettings(original.copy(enabled = true, globalVisible = false,
+                    model = PetModelSelection("missing-assistant", "missing-provider", "missing-model")))
+                    is PetCommandResult.Applied)
+                assertNull(isolated.host.snapshot().pet.error)
+                assertFalse(isolated.host.feed(PetFood.BOWL) is PetCommandResult.Rejected)
             }
-            awaitControl("pet model failure") { singleton.host.snapshot().pet.error != null }
-            val failed = singleton.host.snapshot().pet
+            val isolated = checkNotNull(pets)
+            awaitControl("pet model failure") { isolated.host.snapshot().pet.error != null }
+            val failed = isolated.host.snapshot().pet
             val failure = checkNotNull(failed.error)
             assertEquals("桌宠反应失败；未生成记忆/语音", failure)
             assertEquals("missing-model", failed.state.usage.last().modelId)
-            assertEquals(app.daiyu.android.domain.pet.PetRequestStatus.FAILED, failed.state.usage.last().status)
-            openSettings()
-            reveal("settings-row:鲸鱼女仆", "设置").performClick()
+            assertEquals(PetRequestStatus.FAILED, failed.state.usage.last().status)
+            mainThread {
+                val models = IndependentModelSettings(petContext)
+                val source = SettingsModelSource(petContext, ProviderRepository(petContext))
+                current.setContent {
+                    MiuixTheme {
+                        PetSettingsScreen(host = isolated.host, models = models, source = source,
+                            assistants = emptyList(), pets = isolated,
+                            onOverlayAllowedChange = isolated::setOverlayAllowed,
+                            onOpenOverlayPermission = { error("Unexpected overlay permission request") })
+                    }
+                }
+            }
             awaitUniqueTag("pet-settings-view")
+            node("pet-settings-view").assertIsDisplayed()
             ui.onNodeWithText(failure).assertDoesNotExist()
             listOf("pet-enabled", "pet-work-reactions", "pet-global-visible", "pet-custom-model", "pet-model-configure")
                 .forEach { node(it).assertIsDisplayed() }
+            val stillFailed = isolated.host.snapshot().pet
+            assertEquals(failure, stillFailed.error)
+            assertEquals("missing-model", stillFailed.state.usage.last().modelId)
+            assertEquals(PetRequestStatus.FAILED, stillFailed.state.usage.last().status)
             assertEquals(0, modelCalls.get())
         } finally {
-            mainThread { singleton.updateSettings(original) }
+            try { mainThread { current.setContent {} } }
+            finally {
+                try { mainThread { pets?.close() } }
+                finally {
+                    try {
+                        listOf("daiyu_pet_v1", "independent-model-bindings", "independent-pet-model",
+                            "independent-vision-model", "model-settings", "settings-model-selection").forEach { name ->
+                            check(petContext.getSharedPreferences(name, 0).edit().clear().commit())
+                        }
+                    } finally { petDirectory.deleteRecursively() }
+                }
+            }
         }
     }
 

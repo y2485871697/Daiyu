@@ -485,6 +485,9 @@ private class AndroidBlankResource(
                     com.openminis.app.browser.BrowserHistoryStore.getInstance(context).record(url, view.title.orEmpty())
             }
             navigation.leaveManual()
+            if (command.action == "set_user_agent" || command.action == "set_viewport") {
+                appliedVisibleConfiguration = null
+            }
             return BrowserActionResult(text = "${command.action} completed")
         } catch (failure: Exception) {
             navigation.retire()

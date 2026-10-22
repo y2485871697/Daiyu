@@ -40,6 +40,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         val downloadListeners = mutableListOf<app.daiyu.android.browser.openminis.BrowserVisibleDownload?>()
         var onCreate: () -> Unit = {}
         var onBeforeRelease: () -> Unit = {}
+        var pauseAccepted = true
         var paused = false
         var pauses = 0
         var resumes = 0
@@ -77,7 +78,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         }
         val owner = Message(identity.assistantMessageId, identity.conversationId, identity.runId,
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-        val controller = ControllerBrowserVisual(owner, binding, { live }, { pauses++; true },
+        val controller = ControllerBrowserVisual(owner, binding, { live }, { pauses++; pauseAccepted },
             { paused }, { resumes++; true }, { live = false; true }, attachVisible = { _, parent ->
                 mounts++
                 val child = android.view.View(parent.context)
@@ -94,6 +95,95 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
             })
         init { if (initialTab) check(session.execute(mapOf("action" to "new_tab")) is BrowserOutcome.Confirmed) }
         override fun close() { controller.revoke(); binding.close() }
+    }
+
+    fun testRejectedPauseNeverChangesCurrentForSelectOrTakeover() = main {
+        for (direct in listOf(false, true)) {
+            val f = Fixture()
+            try {
+                val target = requireNotNull(f.session.currentTab)
+                assertTrue(f.session.execute(mapOf("action" to "new_tab")) is BrowserOutcome.Confirmed)
+                val original = requireNotNull(f.session.currentTab)
+                val tabs = f.session.visibleTabs
+                f.pauseAccepted = false
+                val visit = requireNotNull(f.controller.openVisit())
+                if (direct) visit.takeover(target) else visit.selectTab(target)
+                val state = visit.snapshot()
+                assertEquals(1, f.pauses)
+                assertFalse(state.waiting)
+                assertFalse(state.takenOver)
+                assertFalse(state.unknown)
+                assertFalse(f.controller.automationHeld)
+                assertEquals(original, f.session.currentTab)
+                assertEquals(tabs, f.session.visibleTabs)
+                f.registry.assertCurrent(target)
+                f.registry.assertCurrent(original)
+                assertEquals(0, f.releaseChecks)
+                assertEquals(0, f.resumes)
+            } finally { f.close() }
+        }
+    }
+
+    fun testAcceptedPauseSelectsTargetOnlyAfterActualPausedBoundary() = main {
+        for (direct in listOf(false, true)) {
+            val f = Fixture()
+            try {
+                val target = requireNotNull(f.session.currentTab)
+                assertTrue(f.session.execute(mapOf("action" to "new_tab")) is BrowserOutcome.Confirmed)
+                val original = requireNotNull(f.session.currentTab)
+                val visit = requireNotNull(f.controller.openVisit())
+                if (direct) visit.takeover(target) else visit.selectTab(target)
+                repeat(3) {
+                    val waiting = visit.snapshot()
+                    assertTrue(waiting.waiting)
+                    assertFalse(waiting.takenOver)
+                    assertEquals(original, f.session.currentTab)
+                    f.registry.assertCurrent(target)
+                }
+                assertEquals(1, f.pauses)
+                assertTrue(f.session.execute(mapOf("action" to "get_text")) is BrowserOutcome.Confirmed)
+                assertEquals(original, f.session.currentTab)
+                assertEquals(1, f.calls)
+                f.paused = true
+                val acquired = visit.snapshot()
+                assertFalse(acquired.waiting)
+                assertTrue(acquired.takenOver)
+                assertFalse(acquired.unknown)
+                val held = requireNotNull(f.session.currentTab)
+                assertEquals(target.tabId, held.tabId)
+                assertEquals(target.owner, held.owner)
+                assertEquals(held, acquired.lease)
+                val blocked = f.session.execute(mapOf("action" to "get_text"))
+                assertTrue(blocked is BrowserOutcome.NotExecuted)
+                assertEquals("BROWSER_TAKEN_OVER", (blocked as BrowserOutcome.NotExecuted).code)
+                assertEquals(1, f.calls)
+                assertEquals(0, f.resumes)
+            } finally { f.close() }
+        }
+    }
+
+    fun testSwitchReleaseFailureNeverReplaysEvenForKnownTakeoverErrors() = main {
+        for (failure in listOf("BROWSER_STALE_TAB", "BROWSER_TAB_MISSING", "BROWSER_OPENMINIS_NATIVE_ACTIVE")) {
+            val f = Fixture()
+            try {
+                val target = requireNotNull(f.session.currentTab)
+                assertTrue(f.session.execute(mapOf("action" to "new_tab")) is BrowserOutcome.Confirmed)
+                f.paused = true
+                val visit = requireNotNull(f.controller.openVisit())
+                visit.takeover(requireNotNull(f.session.currentTab))
+                val held = f.session.currentTab
+                f.onBeforeRelease = { error(failure) }
+                visit.selectTab(target)
+                assertTrue(visit.snapshot().unknown)
+                assertEquals(1, f.releaseChecks)
+                repeat(3) { visit.selectTab(target); visit.takeover(target); visit.restore(); visit.snapshot() }
+                assertEquals(1, f.releaseChecks)
+                assertEquals(held, f.session.currentTab)
+                assertEquals(2, f.allocations)
+                assertEquals(0, f.calls)
+                assertEquals(0, f.resumes)
+            } finally { f.close() }
+        }
     }
 
     fun testVisibleCommandsForwardExactValuesAndConfigurationFailureIsNotReplayed() = main {

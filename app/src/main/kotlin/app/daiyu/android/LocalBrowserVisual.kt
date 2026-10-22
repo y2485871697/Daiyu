@@ -40,7 +40,7 @@ internal class LocalBrowserVisual(context: Context, private val conversation: Co
         if (unknown) return
         val urls = org.json.JSONArray()
         host.session.visibleTabs.forEach { lease ->
-            val url = uiMemory.pages[lease.tabId]?.url.orEmpty()
+            val url = restoreUrls[lease.tabId] ?: uiMemory.pages[lease.tabId]?.url.orEmpty()
             if (OpenMinisNavigationPolicy.permits(url)) urls.put(url)
         }
         prefs.edit().putString(stateKey, urls.toString()).apply()

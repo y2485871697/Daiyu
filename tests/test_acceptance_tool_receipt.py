@@ -73,6 +73,6 @@ class ToolReceiptTests(unittest.TestCase):
         self.assertIn("path: tool-evidence/", smoke)
         self.assertIn('code=$?; printf "%s\\n" "$code" > smoke/exit-code.txt; exit "$code"', smoke)
         self.assertNotIn("echo 0", smoke)
-        self.assertIn("script: bash -c 'set +e; bash scripts/smoke_boot.sh;", smoke)
+        self.assertIn("script: bash -c 'set +e; test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh;", smoke)
         self.assertIn("name: 上传启动证据\n        if: always()", smoke)
         self.assertNotIn("final_delivery.py", workflow)

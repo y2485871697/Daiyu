@@ -255,24 +255,35 @@ internal fun ModelSettingsScreen(
         }
         item(key = "model_save") {
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)
-            TextButton(
-                text = if (providerName != null) "保存配置" else "保存",
-                onClick = submit,
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-                enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid,
-                modifier = Modifier.testTag("model-save").semantics { this[RetainedModelSaveAction] = submit }.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().heightIn(min = 48.dp),
-            )
+            val saveModifier = Modifier.testTag("model-save")
+                .semantics { this[RetainedModelSaveAction] = submit }
+            if (providerName != null) {
+                ProviderActionButton(
+                    text = "保存配置",
+                    onClick = submit,
+                    enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid,
+                    modifier = saveModifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+            } else {
+                TextButton(
+                    text = "保存",
+                    onClick = submit,
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid,
+                    modifier = saveModifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                        .fillMaxWidth().heightIn(min = 48.dp),
+                )
+            }
         }
         if (onDelete != null) item(key = "provider_delete") {
-            TextButton(text = "删除提供商", enabled = enabled, onClick = {
+            ProviderActionButton(text = "删除提供商", enabled = enabled, onClick = {
                 if (latestEnabled && latestDraft === draft) {
                     connection.cancel(); balance.cancel(); onDelete()
                 }
             }, colors = ButtonDefaults.textButtonColorsPrimary(
                 color = MiuixTheme.colorScheme.surfaceVariant,
                 textColor = assistantPreviewPalette().danger),
-                modifier = Modifier.testTag("provider-delete").padding(horizontal = 20.dp, vertical = 8.dp)
-                    .fillMaxWidth().heightIn(min = 48.dp))
+                modifier = Modifier.testTag("provider-delete").padding(horizontal = 20.dp, vertical = 4.dp))
         }
     }
 }

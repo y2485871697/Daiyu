@@ -1,6 +1,28 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
+import app.daiyu.android.ui.screens.settings.ProviderActionButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
     fun testConnectionFieldsStayCompactAndSecretActionSharesTheFieldCenter() {
@@ -59,6 +81,66 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())
     }
+    fun testCompactProviderActionsKeepFortyDpFillAndFortyEightDpTouchTargets() {
+        for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
+            val clicks = IntArray(3)
+            val enabled = mutableStateOf(true)
+            var density = 1f
+            mainThread { activity.setContent {
+                val platform = LocalDensity.current
+                density = platform.density
+                CompositionLocalProvider(LocalDensity provides Density(density, fontScale)) {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        key(dark, fontScale) {
+                            Column(Modifier.width(250.dp).background(Color.Magenta)) {
+                                listOf("测试余额查询", "保存配置", "删除提供商").forEachIndexed { index, title ->
+                                    ProviderActionButton(title, { clicks[index]++ },
+                                        Modifier.testTag("compact-provider-action:$index"), enabled = enabled.value,
+                                        colors = if (index == 2) ButtonDefaults.textButtonColorsPrimary(
+                                            color = MiuixTheme.colorScheme.surfaceVariant,
+                                            textColor = assistantPreviewPalette().danger)
+                                        else ButtonDefaults.textButtonColorsPrimary())
+                                }
+                            }
+                        }
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            repeat(3) { index ->
+                val button = node("compact-provider-action:$index").assertIsEnabled()
+                    .assertHeightIsEqualTo(48.dp)
+                val pixels = button.captureToImage().toPixelMap()
+                val x = pixels.width / 8
+                val fill = pixels[x, pixels.height / 2]
+                fun sameColor(color: Color) = kotlin.math.abs(color.red - fill.red) < .02f &&
+                    kotlin.math.abs(color.green - fill.green) < .02f && kotlin.math.abs(color.blue - fill.blue) < .02f
+                val paintedRows = (0 until pixels.height).filter { sameColor(pixels[x, it]) }
+                assertEquals("compact fill dark=$dark font=$fontScale index=$index", 40f * density, paintedRows.size.toFloat(), 2f)
+                assertEquals("continuous fill", paintedRows.last() - paintedRows.first() + 1, paintedRows.size)
+                assertEquals("top touch margin", 4f * density, paintedRows.first().toFloat(), 2f)
+                assertEquals("bottom fill edge", 44f * density, (paintedRows.last() + 1).toFloat(), 2f)
+                val outside = pixels[pixels.width / 2, (2f * density).toInt()]
+                assertFalse("edge tap must be outside the fill", sameColor(outside))
+                assertEquals(1f, outside.red, .01f)
+                assertEquals(0f, outside.green, .01f)
+                assertEquals(1f, outside.blue, .01f)
+                button.performTouchInput { click(Offset(center.x, 2f * density)) }
+                assertEquals(1, clicks[index])
+            }
+            mainThread { enabled.value = false }
+            ui.waitForIdle()
+            repeat(3) { index ->
+                val button = node("compact-provider-action:$index").assertIsNotEnabled()
+                button.performTouchInput { click() }
+                button.performTouchInput { click(Offset(center.x, 2f * density)) }
+                assertEquals(1, clicks[index])
+            }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToChat() {
         openModels()
         reveal("provider-delete", lazyKey = "provider_delete").performClick()

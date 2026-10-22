@@ -3,10 +3,14 @@ package app.daiyu.android.ui.screens.settings
 import androidx.compose.foundation.ExperimentalFoundationApi
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.storage.ProviderRegistrySnapshot
@@ -45,13 +49,17 @@ internal fun ProviderDirectoryPage(
             SettingsSectionTitle("新增提供商")
             SettingsCard {
                 SettingsRow("新增 OpenAI-compatible", summary = "支持 ChatGPT、DeepSeek、Kimi、GLM、Qwen 等",
-                    tag = "provider-add", leading = { DaiyuIcon(DaiyuIcons.Model, null) },
+                    tag = "provider-add", leading = { DaiyuIcon(DaiyuIcons.Model, null, Modifier.testTag("provider-add-icon")) },
                     onClick = if (enabled) onAddOpenAi else null)
                 SettingsRow("新增 Anthropic", summary = "支持 Anthropic Claude 官方或兼容 API",
-                    tag = "provider-add-anthropic", leading = { Text("AI") },
+                    tag = "provider-add-anthropic", leading = {
+                        Box(Modifier.size(24.dp).testTag("provider-add-anthropic-icon"), contentAlignment = Alignment.Center) {
+                            Text("AI")
+                        }
+                    },
                     onClick = if (enabled) onAddAnthropic else null)
                 SettingsRow("新增豆包语音", summary = "仅用于朗读，填写语音控制台 API Key，不是方舟聊天 Key。",
-                    tag = "provider-add-speech", leading = { DaiyuIcon(DaiyuIcons.Voice, null) },
+                    tag = "provider-add-speech", leading = { DaiyuIcon(DaiyuIcons.Voice, null, Modifier.testTag("provider-add-speech-icon")) },
                     trailing = { DaiyuIcon(DaiyuIcons.ChevronRight, null) })
             }
         }

@@ -20,6 +20,10 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.daiyu.android.ui.haptics.miuix.TextButton
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.TextButtonColors
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -118,4 +122,25 @@ internal fun ProviderChoiceRow(title: String, value: String, tag: String, enable
             }
         }
     }
+}
+
+@Composable
+internal fun ProviderActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: TextButtonColors = ButtonDefaults.textButtonColorsPrimary(),
+) {
+    TextButton(
+        text = text,
+        onClick = onClick,
+        enabled = enabled,
+        colors = colors,
+        minHeight = 40.dp,
+        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        textStyle = MiuixTheme.textStyles.body1.copy(fontSize = 14.sp, lineHeight = 20.sp),
+        // Reserve 48dp for Compose's minimum touch target around the compact fill.
+        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 4.dp),
+    )
 }

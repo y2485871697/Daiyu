@@ -61,6 +61,27 @@ class SidebarSelectionContractTest(unittest.TestCase):
             self.assertIn(fragment, test)
 
 
+    def test_inactive_drawer_search_never_clears_another_editors_focus(self):
+        pane = (SRC / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
+        search = pane.split('private fun PaneSearchRow(', 1)[1].split('private fun PaneDrawerActions(', 1)[0]
+        self.assertNotIn('clearFocus(', search)
+        self.assertNotIn('LocalFocusManager', search)
+        self.assertIn('if (!searchFocusEnabled) {\n            searchActive = false', search)
+        self.assertIn('enabled = searchFocusEnabled && searchActive', search)
+        self.assertIn('canFocus = searchFocusEnabled && searchActive', search)
+        self.assertIn('if (shouldHide) hideChatInputIme(focusManager, keyboard, view)', pane)
+
+    def test_single_sidebar_back_waits_for_hidden_native_ime_at_dispatch_boundary(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneManagementActivityTest.kt').read_text()
+        body = test.split('fun testSelectingConversationKeepsSidebarAndSearchUntilExplicitBackOrScrimDismissal()', 1)[1].split('\n    fun ', 1)[0]
+        before, after = body.split('instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)')
+        self.assertLess(before.rindex('dismissIme()'), before.index('awaitImeFrame(node("drawer-search-input"), visible = false)'))
+        self.assertLess(before.index('awaitNodeWindowFocus(node("conversation-drawer"))'), before.rindex('dismissIme()'))
+        self.assertIn('awaitControl("explicit hardware Back dismisses sidebar")', after)
+        self.assertIn('.assertIsNotEnabled().assert(isFocused().not())', after)
+        self.assertIn('assertSelection(1, 3)', after)
+        self.assertNotIn('Thread.sleep', body)
+
     def test_recreation_diagnostic_preserves_both_selection_endpoints_and_hide_boundary(self):
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ActivityTest.kt').read_text()

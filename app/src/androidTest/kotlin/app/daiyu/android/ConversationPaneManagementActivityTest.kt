@@ -91,8 +91,13 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
             mainThread { assertEquals(expectedResults, paneState().searchResults().map { it.id }.toSet()) }
         }
         assertEquals(before, fixture.database.exportBackup())
+        awaitNodeWindowFocus(node("conversation-drawer"))
+        dismissIme()
+        awaitImeFrame(node("drawer-search-input"), visible = false)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        ui.waitForIdle()
+        awaitControl("explicit hardware Back dismisses sidebar") {
+            hostValue("getSidebarVisible") == false
+        }
         mainThread {
             assertEquals(false, hostValue("getSidebarVisible"))
             assertEquals(first.id, selectedConversation()?.id)
@@ -101,6 +106,8 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         assertDraft("甲编辑后的草稿")
         assertSelection(1, 3)
         node("chat-draft").assertIsEnabled()
+        ui.onNodeWithTag("drawer-search-input", useUnmergedTree = true)
+            .assertIsNotEnabled().assert(isFocused().not())
 
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         node("drawer-search-input").assertEditableText("保留侧栏")

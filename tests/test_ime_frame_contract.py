@@ -57,6 +57,19 @@ class ImeFrameContractTest(unittest.TestCase):
         self.assertIn('KeyEvent.KEYCODE_BACK', body)
         self.assertIn('val restored = settledFrame(visible = false, before = before)', body)
 
+    def test_composer_warmup_uses_a_real_click_after_semantic_replacement(self):
+        text = (TEST / 'ChatComposerImeActivityTest.kt').read_text()
+        setup = text.split('setDraft("键盘位置回归草稿")', 1)[1].split('repeat(2)', 1)[0]
+        click = setup.index('node("chat-draft").performTouchInput {')
+        advance = setup.index('advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)')
+        show = setup.index('awaitImeFrame(node("chat-draft"), visible = true)')
+        self.assertLess(click, advance)
+        self.assertLess(advance, setup.index('click()'))
+        self.assertLess(setup.index('click()'), show)
+        self.assertLess(show, setup.index('dismissIme()'))
+        self.assertNotIn('showSoftInput(', setup)
+        self.assertNotIn('Thread.sleep', setup)
+
     def test_more_background_uses_opaque_theme_and_hidden_ime_without_relaxed_colors(self):
         text = (TEST / 'ChatChromeActivityTest.kt').read_text()
         self.assertIn('opaqueBackground: Boolean = false', text)

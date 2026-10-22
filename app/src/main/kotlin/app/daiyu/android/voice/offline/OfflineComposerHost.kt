@@ -26,11 +26,12 @@ internal class OfflineComposerHost(
         current: (DictationDraftTarget) -> Boolean,
         currentText: () -> String,
         applyDraft: (DictationDraftTarget, String, Int) -> Unit,
+        inputEnabled: () -> Boolean = { OfflineSpeechPack.state.value.enabled },
     ) : this(
         factory = { owner, events -> OfflineSpeechSession(ActivityVoiceAudio.gate, owner,
-            { OfflineSpeechPack.state.value.enabled && OfflineSpeechPack.state.value.ready },
+            { inputEnabled() && OfflineSpeechPack.state.value.ready },
             AndroidOfflineSpeechDevice(context.applicationContext), events) },
-        enabled = { OfflineSpeechPack.state.value.enabled && OfflineSpeechPack.state.value.ready },
+        enabled = { inputEnabled() && OfflineSpeechPack.state.value.ready },
         permission = { context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED },
         requestPermission = requestPermission, current = current, currentText = currentText, applyDraft = applyDraft,
     )

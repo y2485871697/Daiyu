@@ -9,7 +9,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.components.MiuixDialogActions
 import app.daiyu.android.ui.screens.settings.*
-import app.daiyu.android.voice.providers.SpeechEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -29,71 +28,108 @@ internal fun VoiceChoiceDialog(title: String, options: List<Pair<String, String>
     }
 }
 
-/** Protocol and speech URL are explicit: the chat catalog does not declare TTS capabilities. */
 @Composable
 internal fun VoiceModelDialog(initial: VoiceConfiguration, source: SettingsModelSource,
     isCurrent: () -> Boolean, fixedEngine: String? = null, onSave: (VoiceConfiguration) -> Unit, onDismiss: () -> Unit) {
-    var value by remember { mutableStateOf(initial) }
-    var choosingModel by remember { mutableStateOf(false) }
-    var choosingEngine by remember { mutableStateOf(false) }
-    var manual by remember { mutableStateOf(false) }
+    var choices by remember { mutableStateOf<List<SettingsSpeechModelChoice>?>(null) }
+    var expanded by remember { mutableStateOf(initial.provider) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val current by rememberUpdatedState(isCurrent)
     val alive = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
     DisposableEffect(Unit) { onDispose { alive.set(false) } }
-    if (choosingModel) {
-        SettingsModelPicker("选择语音模型", source, null, onSelect = { choice ->
-            if (!loading && current()) {
-                loading = true
-                scope.launch {
-                    try {
-                        val next = withContext(Dispatchers.IO) { source.withModel(choice) { settings ->
-                            require(settings.customHeaders.isEmpty)
-                            value.copy(provider = choice.provider.slotId, endpoint = settings.endpoint,
-                                model = settings.model, key = settings.apiKey, voice = "")
-                        } }
-                        if (alive.get() && current()) { value = next; choosingModel = false; error = "" }
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { error = "模型连接不可读取，或含语音配置尚不支持的请求头。请重新选择。"; choosingModel = false }
-                    finally { loading = false }
-                }
-            }
-        }, onDismiss = { if (!loading) choosingModel = false })
-        return
+    LaunchedEffect(source, fixedEngine) {
+        try {
+            val values = withContext(Dispatchers.IO) { source.speechChoices().filter { choice ->
+                fixedEngine == null || app.daiyu.android.voice.providers.SpeechModelCapabilities
+                    .engine(choice.connection.endpoint, choice.model).name == fixedEngine
+            } }
+            choices = values
+            if (expanded.isBlank() && values.map { it.connection.provider.slotId }.distinct().size == 1) expanded = values.first().connection.provider.slotId
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { choices = emptyList(); error = "模型列表读取失败，请重新打开。" }
     }
-    if (choosingEngine) {
-        VoiceChoiceDialog("语音服务", SpeechEngine.entries.map { it.name to it.name }, value.engine,
-            onSelect = { value = value.copy(engine = it, voice = ""); choosingEngine = false },
-            onDismiss = { choosingEngine = false })
-        return
-    }
-    WindowDialog(show = true, title = "语音模型", onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 540.dp).verticalScroll(rememberScrollState())
+    WindowDialog(show = true, title = "朗读模型", onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
             .testTag("voice-model-dialog")) {
-            SettingsRow("模型", summary = value.model.ifBlank { "选择已配置的供应商模型" },
-                tag = "voice-catalog-open", onClick = { if (current()) choosingModel = true })
-            SettingsRow("语音服务", summary = value.engine.takeUnless { it == "SYSTEM" } ?: "请选择",
-                onClick = if (fixedEngine != null) null else ({ if (current()) choosingEngine = true }))
-            SettingsTextField("语音接口地址", value.endpoint, { value = value.copy(endpoint = it) },
-                hint = "确认所选语音服务使用的 HTTPS 地址")
-            SettingsTextField("音色 ID", value.voice, { value = value.copy(voice = it) })
-            SettingsNote("请选择语音服务，并确认接口地址与音色。")
-            SettingsRow("手动配置", onClick = { manual = !manual })
-            if (manual) {
-                SettingsTextField("账户标识", value.provider, { value = value.copy(provider = it) })
-                SettingsTextField("模型 ID", value.model, { value = value.copy(model = it, voice = "") })
-                SettingsTextField("API Key", value.key, { value = value.copy(key = it) }, password = true)
+            if (choices == null) SettingsNote("正在读取…")
+            else if (choices!!.isEmpty() && error.isBlank()) SettingsNote("暂无可选朗读模型，请先在供应商中添加语音模型。")
+            choices.orEmpty().groupBy { it.connection.provider.slotId }.forEach { (provider, models) ->
+                SettingsRow(models.first().connection.name, tag = "voice-catalog-open:$provider",
+                    onClick = { expanded = if (expanded == provider) "" else provider })
+                if (expanded == provider) models.forEach { choice ->
+                    val selected = initial.provider == provider && if (initial.modelIdentity.isBlank() || choice.identity.isBlank()) initial.model == choice.model
+                        else initial.modelIdentity == choice.identity
+                    SettingsRadioRow(choice.name, selected, enabled = !loading) {
+                        if (!loading && current()) {
+                            loading = true
+                            scope.launch {
+                                try {
+                                    val next = withContext(Dispatchers.IO) { source.withSpeechModel(choice) { settings ->
+                                        val engine = app.daiyu.android.voice.providers.SpeechModelCapabilities.engine(settings.endpoint, settings.model)
+                                        require(fixedEngine == null || engine.name == fixedEngine)
+                                        initial.copy(engine = engine.name, provider = choice.connection.provider.slotId,
+                                            endpoint = settings.endpoint, model = settings.model, key = settings.apiKey,
+                                            customHeaders = settings.customHeaders, voice = initial.voice.takeIf {
+                                                selected && initial.engine == engine.name && initial.endpoint == settings.endpoint &&
+                                                    initial.key == settings.apiKey && initial.customHeaders == settings.customHeaders
+                                            }.orEmpty(),
+                                            modelIdentity = choice.identity, modelLabel = "${choice.connection.name} · ${choice.name}")
+                                    } }
+                                    if (alive.get() && current()) onSave(next)
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { if (alive.get()) error = "模型连接已变化或不可读取，请重新选择。" }
+                                finally { loading = false }
+                            }
+                        }
+                    }
+                }
             }
             if (error.isNotBlank()) SettingsNote(error, error = true)
-            MiuixDialogActions("确定", onCancel = onDismiss, onConfirm = {
-                if (current()) {
-                    if (value.engine == "SYSTEM" || value.provider.isBlank() || value.model.isBlank() || value.key.isBlank())
-                        error = "请选择模型和语音服务。"
-                    else onSave(value)
+            TextButton("关闭", onClick = onDismiss)
+        }
+    }
+}
+
+@Composable
+internal fun VoiceProviderDialog(title: String, engine: String, source: SettingsModelSource,
+    selected: String, isCurrent: () -> Boolean, onSelect: (SettingsVoiceProviderChoice, app.daiyu.android.storage.ModelSettings) -> Unit,
+    onDismiss: () -> Unit) {
+    var choices by remember { mutableStateOf<List<SettingsVoiceProviderChoice>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val current by rememberUpdatedState(isCurrent)
+    val alive = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
+    DisposableEffect(Unit) { onDispose { alive.set(false) } }
+    LaunchedEffect(source, engine) {
+        try { choices = withContext(Dispatchers.IO) { source.voiceProviders(engine) } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { error = "提供商列表读取失败，请重新打开。"; choices = emptyList() }
+    }
+    WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
+            .testTag("voice-provider-dialog")) {
+            if (choices == null) SettingsNote("正在读取…")
+            else if (choices!!.isEmpty() && error.isBlank()) SettingsNote("请先在供应商中配置${if (engine == "MIMO") "MiMo" else "豆包语音"}账户。")
+            choices.orEmpty().forEach { choice ->
+                SettingsRadioRow(choice.name, choice.provider.slotId == selected, enabled = !loading) {
+                    if (current() && !loading) {
+                        loading = true
+                        scope.launch {
+                            try {
+                                val value = withContext(Dispatchers.IO) { source.withVoiceProvider(choice) { it } }
+                                if (alive.get() && current()) onSelect(choice, value)
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { if (alive.get()) error = "账户连接已变化或不可读取，请重新选择。" }
+                            finally { loading = false }
+                        }
+                    }
                 }
-            }, confirmEnabled = !loading, modifier = Modifier.testTag("voice-model-save"))
+            }
+            if (error.isNotBlank()) SettingsNote(error, error = true)
+            TextButton("关闭", onClick = onDismiss)
         }
     }
 }
@@ -113,18 +149,20 @@ internal fun VoiceTextDialog(title: String, initial: String, password: Boolean =
 @Composable
 internal fun VoiceToneDialog(title: String, initial: String, choices: List<Pair<String, String>>,
     onSelect: (String) -> Unit, onDismiss: () -> Unit) {
-    var custom by remember { mutableStateOf(false) }
-    var value by remember { mutableStateOf(initial) }
+    val catalog = choices.distinctBy { it.first }
+    fun group(id: String): String = when {
+        id.startsWith("mimo-local-") || id.startsWith("S_") || id.startsWith("etaClone") -> "个人声音"
+        "female" in id -> "女声"
+        "male" in id -> "男声"
+        else -> ""
+    }
     WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState())
             .testTag("voice-tone-dialog")) {
-            choices.distinctBy { it.first }.forEach { (id, label) ->
-                SettingsRadioRow(label, selected = id == initial) { onSelect(id) }
-            }
-            SettingsRow("输入音色 ID", onClick = { custom = !custom })
-            if (custom) {
-                SettingsTextField("音色 ID", value, { value = it })
-                TextButton("使用此音色", enabled = value.isNotBlank(), onClick = { onSelect(value) })
+            listOf("女声", "男声", "", "个人声音").forEach { section ->
+                val rows = catalog.filter { group(it.first) == section }
+                if (section.isNotEmpty() && rows.isNotEmpty()) SettingsSectionTitle(section)
+                rows.forEach { (id, label) -> SettingsRadioRow(label, selected = id == initial) { onSelect(id) } }
             }
             TextButton("关闭", onClick = onDismiss)
         }

@@ -132,17 +132,19 @@ class VoiceAccountPanelLeafTest {
         })
         // These blocks are what the panel's one-shot pending confirmation invokes, not render/select.
         assertTrue(requests.isEmpty())
+        val metadataVoice = voice().copy(accepted = false)
         repeat(2) {
-            guard.execute({ true }, { true }) { guard.preview.toggle(config, voice()) }
+            guard.execute({ true }, { true }) { guard.preview.toggle(config, metadataVoice) }
         }
         assertEquals(2, requests.size)
         assertNotSame(requests[0], requests[1])
         assertEquals(1, stops)
-        assertTrue(ACCOUNT_PREVIEW_CONFIRMATION.contains("在线新合成固定文本：你好，这是当前账户音色的试听。"))
-        assertTrue(ACCOUNT_PREVIEW_CONFIRMATION.contains("可能收费或消耗额度"))
-        assertTrue(ACCOUNT_PREVIEW_CONFIRMATION.contains("取消也未必免计费"))
-        assertTrue(ACCOUNT_PREVIEW_CONFIRMATION.contains("仅授权本次请求"))
-        assertFalse(ACCOUNT_PREVIEW_CONFIRMATION.contains("云端示范"))
-        assertFalse(ACCOUNT_PREVIEW_CONFIRMATION.contains("demo", ignoreCase = true))
+        requests.forEach {
+            assertTrue(it.demoOnly)
+            assertFalse(it.voice.accepted)
+            assertEquals(metadataVoice.id, it.voice.id)
+            assertEquals(metadataVoice.account, it.voice.account)
+            assertEquals(metadataVoice.demo, it.demoUrl)
+        }
     }
 }

@@ -64,7 +64,9 @@ internal class ActivityVoiceAccountPreviewHost(
         request.configuration.engine == SpeechEngine.DOUBAO &&
         !request.configuration.model.contains("seed-audio", ignoreCase = true) &&
         (request.voice.id.startsWith("S_") || request.voice.id.startsWith("etaClone")) &&
-        request.voice.availableFor(VoiceAccountIdentity.from(request.configuration).key) && admission(request)
+        (if (request.demoOnly) request.voice.account == VoiceAccountIdentity.from(request.configuration).fingerprint &&
+            request.voice.status in setOf(2, 4) && request.voice.models.any { it in setOf(4, 5) }
+         else request.voice.availableFor(VoiceAccountIdentity.from(request.configuration).key)) && admission(request)
 
     override fun play(request: AccountPreviewRequest, listener: VoiceAccountPreviewPort.Listener): VoiceAccountPreviewPort.Lease {
         // Rejection must not steal another owner's microphone or stop a valid current preview.
@@ -175,7 +177,7 @@ internal class ActivityVoiceAccountPreviewHost(
         const val PREVIEW_TEXT = "你好，这是当前账户音色的试听。"
         internal const val COMPLETION_TAIL_MS = 150L
 
-        /** No CDN read: one explicit, potentially billable existing synthesis request per click. */
+        /** Demo requests are bounded, credential-free GETs; synthesis keeps its separate explicit capability. */
         fun forContext(context: Context, scope: CoroutineScope, configuration: SpeechProviderConfig,
             admission: (AccountPreviewRequest) -> Boolean): ActivityVoiceAccountPreviewHost {
             val app = context.applicationContext
@@ -219,8 +221,9 @@ internal class AccountPreviewSpeechPlayer(
         val work = CoroutineScope(Dispatchers.IO).launch(start = CoroutineStart.LAZY) {
             var bytes: ByteArray? = null
             try {
-                bytes = SpeechSynthesisClient(OkHttpVoiceTransport(calls)).synthesize(
-                    request.configuration, text, request.voice.id, request.voice)
+                bytes = if (request.demoOnly) fetchVoiceResource(request.demoUrl, calls)
+                    else SpeechSynthesisClient(OkHttpVoiceTransport(calls)).synthesize(
+                        request.configuration, text, request.voice.id, request.voice)
                 ensureActive()
                 val audio = bytes
                 // Queued delivery captures bytes but cannot touch MediaPlayer after the main fence.

@@ -260,15 +260,14 @@ class MainActivity : ComponentActivity() {
             current = {
                 val frozen = universalFrozen
                 frozen != null && voiceRuntime.current(frozen) &&
-                    (!universalOffline || (app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.enabled &&
-                        app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready))
+                    (!universalOffline || app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready)
             },
             recognitionConfiguration = {
                 val cfg = checkNotNull(universalFrozen).configuration
                 when {
                     universalOffline -> UniversalRecognitionConfiguration.Offline
                     cfg.dictation == "DOUBAO" -> UniversalRecognitionConfiguration.Doubao(cfg.asrKey, cfg.asrResource)
-                    cfg.dictation == "SYSTEM" -> UniversalRecognitionConfiguration.System("zh-CN")
+                    cfg.dictation == "SYSTEM" -> UniversalRecognitionConfiguration.Offline
                     else -> error("universal_recognition_not_configured")
                 }
             },
@@ -501,6 +500,8 @@ class MainActivity : ComponentActivity() {
                     target.conversationId == selected?.id?.value &&
                     target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
             },
+            inputEnabled = { VoiceSettingsPreferences(applicationContext).enabled("input") &&
+                voiceRuntime.configuration.value?.dictation != "DOUBAO" },
             currentText = { ComposerReferences(draft).text },
             applyDraft = { _, text, cursor ->
                 val next = ComposerReferences(draft).edit(text)
@@ -1408,6 +1409,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         voiceEntryMode = when (voiceEntryPreferences.getString("mode", null)) {
             ChatMenuAction.VOICE_CHAT.name -> ChatMenuAction.VOICE_CHAT
+            ChatMenuAction.VOICE_DOUBAO.name -> ChatMenuAction.VOICE_DOUBAO
             else -> ChatMenuAction.VOICE_INPUT
         }
         refreshAutomaticCompression()
@@ -1717,13 +1719,7 @@ class MainActivity : ComponentActivity() {
                         },
                         isCurrent = { activityUsable() && voiceForeground && retainedPage == "voice-settings" },
                         invalidate = { invalidateConfiguredVoice(); speechHost.stop(speechHost.owner); dictationHost.invalidate() },
-                        onBack = { if (activityUsable()) retainedPage = "settings" },
-                        onOpenOfflineSpeech = {
-                            if (activityUsable() && voiceForeground && retainedPage == "voice-settings") {
-                                offlineSpeechReturnPage = "voice-settings"
-                                retainedPage = "offline-speech"
-                            }
-                        })
+                        onBack = { if (activityUsable()) retainedPage = "settings" })
                     "session-gateway" -> {
                         val owner = gatewayOwner
                         val value = gatewayDraft
@@ -1963,6 +1959,12 @@ class MainActivity : ComponentActivity() {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
                                         automaticCompression = automaticCompression, automaticCompressionPending = automaticCompressionPending,
                                         composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
+                                            voiceModes = buildSet {
+                                                val voiceSettings = VoiceSettingsPreferences(applicationContext)
+                                                if (voiceSettings.enabled("input")) add(ChatMenuAction.VOICE_INPUT)
+                                                if (voiceSettings.enabled("conversation")) add(ChatMenuAction.VOICE_CHAT)
+                                                if (voiceSettings.enabled("realtime")) add(ChatMenuAction.VOICE_DOUBAO)
+                                            },
                                             videoSendAvailable = videoComposerControls?.canSubmit == true,
                                             videoSendBlocked = videoComposerControls?.blocked == true ||
                                                 videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true)), chatActions(), modifier = Modifier.weight(1f), turnExtras = { turn ->
@@ -2230,12 +2232,14 @@ class MainActivity : ComponentActivity() {
                 draftRevision == renderedDraftRevision && voiceForeground &&
                 retainedPage == "chat" && !sidebarVisible &&
                 controller.ready && !controller.dataBusy && !imageHost.sending && !shizukuWritesBlocked) {
-                if (app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.enabled) startOfflineDictation()
-                else {
+                run {
                     val target = DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision)
                     val config = try { voiceRuntime.snapshot() } catch (_: Exception) { null }
                     when (config?.dictation) {
-                        "SYSTEM" -> { invalidateConfiguredVoice(); captureDictationDraft(target); dictationHost.start(target) }
+                        "SYSTEM" -> {
+                            if (app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready) startOfflineDictation()
+                            else { toast("请先下载语音包"); retainedPage = "voice-settings" }
+                        }
                         "DOUBAO" -> {
                             val ownedTarget = remoteVoice.dictationTarget?.takeIf(::voiceEditorCurrent) ?: target
                             revokeUniversalVoice(); invalidatePreparedSpeech(); dictationHost.invalidate(); offlineHost.invalidate()
@@ -2265,8 +2269,27 @@ class MainActivity : ComponentActivity() {
         onVisibleCompleted = completionReadAction(),
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onMore = { if (currentChat()) refreshAutomaticCompression() },
-        onVoice = { if (voiceEntryMode == ChatMenuAction.VOICE_INPUT) requestDictation()
-            else if (currentChat()) voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) },
+        onVoice = voice@{
+            val feature = when (voiceEntryMode) {
+                ChatMenuAction.VOICE_INPUT -> "input"
+                ChatMenuAction.VOICE_DOUBAO -> "realtime"
+                else -> "conversation"
+            }
+            if (!VoiceSettingsPreferences(applicationContext).enabled(feature)) return@voice
+            when (voiceEntryMode) {
+                ChatMenuAction.VOICE_INPUT -> requestDictation()
+                ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) {
+                    if (remoteVoice.duplexActive) remoteVoice.invalidate()
+                    else { stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
+                        speechHost.stop(speechHost.owner); remoteVoice.startDuplex {
+                            activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                                editorGeneration == renderedEditorGeneration && draftRevision == renderedDraftRevision
+                        }
+                    }
+                }
+                else -> if (currentChat()) voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+            }
+        },
         onRegenerate = messageCallbacks.onRegenerate, onSpeak = { id ->
             if (editorMatches() && controller.ready && !controller.dataBusy &&
                 speechHost.owner == renderedSpeechOwner && selected?.id?.value == renderedConversation) {
@@ -2360,11 +2383,13 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.CONTEXT_STATS -> if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id)
             ChatMenuAction.COMPRESS_CONTEXT -> openContextPage()
             ChatMenuAction.AUTO_COMPRESS -> if (currentChat()) toggleAutomaticCompression()
-            ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT -> if (currentChat()) {
+            ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO -> if (currentChat() &&
+                VoiceSettingsPreferences(applicationContext).enabled(when (action) {
+                    ChatMenuAction.VOICE_INPUT -> "input"; ChatMenuAction.VOICE_DOUBAO -> "realtime"; else -> "conversation"
+                })) {
                 if (voiceEntryPreferences.edit().putString("mode", action.name).commit()) voiceEntryMode = action
                 else toast("语音入口未保存；保持原选择")
             }
-            ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) toast("豆包实时通话尚未接入；可使用已配置的语音对话")
             ChatMenuAction.NEW_CHAT -> if (currentChat()) select(null)
             ChatMenuAction.RENAME -> selected?.let { conversation ->
                 editConversation(conversation.id.value, false)

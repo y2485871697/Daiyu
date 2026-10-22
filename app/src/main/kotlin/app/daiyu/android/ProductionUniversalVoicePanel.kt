@@ -27,7 +27,7 @@ internal fun ProductionUniversalVoicePanel(
     val profiles = remember(configuration?.revision) {
         configuration?.let { config -> listOf(
             VoiceControlProfile("${config.revision}:configured", 0, "会话独立配置：${config.dictation} 识别 + ${config.engine} 正文"),
-            VoiceControlProfile("${config.revision}:offline", 0, "本机离线识别 + 会话独立 ${config.engine} 正文（需已启用语音包）"),
+            VoiceControlProfile("${config.revision}:offline", 0, "本机离线识别 + 会话独立 ${config.engine} 正文（需已下载语音包）"),
         ) }.orEmpty()
     }
     var selected by remember(profiles) { mutableStateOf(profiles.firstOrNull()) }

@@ -61,14 +61,27 @@ class PersonalVoicePreviewTest {
         assertFalse(preview.state.value.active); assertNull(preview.state.value.error)
         assertEquals(1, entries[1].stopped)
     }
-    @Test fun unacceptedUnknownWrongAccountAndUnsafeUrlsNeverReachPort() {
+    @Test fun unknownWrongAccountAndUnsafeUrlsNeverReachPort() {
         val entries = mutableListOf<Entry>(); val preview = owner(entries)
-        listOf(voice().copy(accepted = false), voice().copy(uncertain = true), voice().copy(account = "wrong"),
+        listOf(voice().copy(uncertain = true), voice().copy(account = "wrong"),
             voice().copy(demo = "http://example.test/demo"), voice().copy(demo = "https://user:secret@example.test/demo")).forEach {
             assertThrows(IllegalArgumentException::class.java) { preview.toggle(config, it) }
         }
         assertTrue(entries.isEmpty())
     }
+    @Test fun demoCanBeHeardBeforeFormalAcceptanceWithoutChangingTheVoice() {
+        val entries = mutableListOf<Entry>(); val preview = owner(entries)
+        val pending = voice().copy(accepted = false)
+        preview.toggle(config, pending)
+        assertEquals(1, entries.size)
+        assertTrue(entries.single().request.demoOnly)
+        assertEquals(pending.demo, entries.single().request.demoUrl)
+        assertFalse(entries.single().request.voice.accepted)
+        assertFalse(pending.accepted)
+        preview.stop()
+        assertEquals(1, entries.single().stopped)
+    }
+
     @Test fun retainedDrainPolicyIsBoundedButActualDrainBelongsToParentPort() {
         assertEquals(826L, PersonalVoicePreview.drainDelayMs(3407, 2731))
         assertEquals(150L, PersonalVoicePreview.drainDelayMs(-1, -1))

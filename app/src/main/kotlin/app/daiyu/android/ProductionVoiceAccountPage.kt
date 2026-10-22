@@ -32,6 +32,7 @@ internal fun ProductionVoiceAccountPage(
     isCurrent: () -> Boolean,
     installPreviewRevoke: (() -> Unit) -> (() -> Unit),
     onBack: () -> Unit,
+    standalone: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -39,11 +40,12 @@ internal fun ProductionVoiceAccountPage(
     val latestCurrent by rememberUpdatedState(isCurrent)
     val active = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var notice by remember { mutableStateOf("") }
-    var previewConsent by remember { mutableStateOf(false) }
+    fun configurationCurrent() = if (standalone) runtime.accountCurrent(frozen) else runtime.current(frozen, profile)
     val preview = remember(frozen.revision, profile) {
         ActivityVoiceAccountPreviewHost.forContext(context, scope, frozen.speech()) { request ->
-            active.get() && runtime.current(frozen, profile) && runCatching {
-                val selected = resources.voices.selected(request.voice.id, request.configuration)
+            active.get() && configurationCurrent() && runCatching {
+                val selected = if (request.demoOnly) resources.voices.find(request.voice.id, request.configuration)?.providerVoice()
+                    else resources.voices.selected(request.voice.id, request.configuration)
                 accountPreviewVoiceMatches(selected, request.voice)
             }.getOrDefault(false)
         }
@@ -72,15 +74,10 @@ internal fun ProductionVoiceAccountPage(
         if (notice.isNotBlank()) SettingsNote(notice, error = true)
         VoiceAccountPanel(
             frozenConfiguration = frozen, resources = resources, previewPort = preview,
-            previewConsent = {
-                SettingsCard {
-                    SettingsRow("试听授权", summary = "每次试听会在线合成固定文字，可能消耗额度或费用。",
-                        tag = "voice-account-preview-consent", onClick = { previewConsent = true })
-                }
-            },
+            onPreviewRequest = { if (latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && configurationCurrent()) active.set(true) },
             onAccountKeyChange = { key ->
-                check(latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && runtime.current(frozen, profile))
-                runtime.save(frozen.copy(key = key), profile)
+                check(latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && configurationCurrent())
+                if (standalone) runtime.saveAccount(frozen.copy(key = key.trim(), voice = app.daiyu.android.voice.providers.DoubaoVoices.DEFAULT_ID)) else runtime.save(frozen.copy(key = key), profile)
                 if (latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) leave()
             },
             stopPreviewStrictly = {
@@ -90,9 +87,9 @@ internal fun ProductionVoiceAccountPage(
                     app.daiyu.android.voice.ActivityVoiceAudio.gate.releaseHealthy()
                 }
             },
-            isCurrent = { runtime.current(it, profile) && latestCurrent() },
+            isCurrent = { (if (standalone) runtime.accountCurrent(it) else runtime.current(it, profile)) && latestCurrent() },
             onSelect = { original, personal ->
-                if (latestCurrent() && runtime.current(original, profile)) {
+                if (latestCurrent() && (if (standalone) runtime.accountCurrent(original) else runtime.current(original, profile))) {
                     active.set(false)
                     try {
                         check(preview.stopPreviewStrictly()) { "account_preview_release_unconfirmed" }
@@ -100,7 +97,15 @@ internal fun ProductionVoiceAccountPage(
                         runtime.invalidateSpeech()
                         scope.launch {
                             try {
-                                runtime.save(original.copy(voice = personal.id, model = "seed-tts-2.0"), profile)
+                                val speech = original.copy(voice = personal.id, model = "seed-tts-2.0")
+                                val current = runtime.profileConfiguration(profile).value ?: VoiceConfiguration()
+                                check(configurationCurrent())
+                                val next = current.withSpeech(speech)
+                                runtime.save(next, profile)
+                                VoiceSettingsPreferences(context).apply {
+                                    rememberCloud(profile, next)
+                                    setCloudEnabled(profile, true)
+                                }
                                 onBack()
                             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                             catch (_: Exception) { notice = "音色未保存，请退出后重新打开；不会自动合成" }
@@ -111,11 +116,7 @@ internal fun ProductionVoiceAccountPage(
             onBack = { leave() },
         )
     }
-    if (previewConsent) DaiyuConfirmDialog("试听授权", ACCOUNT_PREVIEW_CONFIRMATION, "允许", false,
-        onConfirm = {
-            previewConsent = false
-            if (latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && runtime.current(frozen, profile)) active.set(true)
-        }, onDismiss = { previewConsent = false })
+
 }
 
 internal fun accountPreviewVoiceMatches(

@@ -240,11 +240,17 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         SpeechMorphButton(
                             generating = state.showGenerationLoading(),
                             listening = state.listening,
-                            enabled = state.enabled,
-                            onClick = actions.onVoice,
+                            enabled = state.enabled && state.voiceModes.isNotEmpty(),
+                            onClick = {
+                                if (state.voiceMode !in state.voiceModes && state.voiceModes.size != 1) voiceModes = true
+                                else {
+                                    if (state.voiceMode !in state.voiceModes) actions.onMenuAction(state.voiceModes.single())
+                                    actions.onVoice()
+                                }
+                            },
                             onLongClick = { actions.onVoiceLongPress(); voiceModes = true },
                         )
-                        ChatVoiceModeMenu(voiceModes, { voiceModes = false }, actions.onMenuAction, state.voiceMode)
+                        ChatVoiceModeMenu(voiceModes, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
                     }
                 }
         }

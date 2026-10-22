@@ -143,6 +143,7 @@ data class ComposerUi(
     val morphLoadingBeforeResponseOnly: Boolean = false,
     val editorGeneration: Long = 0,
     val voiceMode: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
+    val voiceModes: Set<ChatMenuAction> = setOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO),
 )
 
 internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {

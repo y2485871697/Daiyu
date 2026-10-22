@@ -298,6 +298,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (runtime is AtomicRuntimeStore) runtime.commitCheckpoint(next) else runtime.save(next)
                 revision = next.revision
             } catch (failure: Exception) { throw PersistenceException(failure) }
+            if (next.phase == ExecutionPhase.PAUSED) {
+                try { publish(next.message) } catch (_: Exception) { /* Observers cannot undo a committed boundary. */ }
+            }
         }
         suspend fun awaitBarrier(offer: BarrierOffer): ExecutionReceipt {
             val runtime = checkNotNull(options.runtimeStore as? AtomicRuntimeStore) {

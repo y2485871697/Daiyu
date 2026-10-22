@@ -13,6 +13,12 @@ class RunControlActivityTest : WiredActivityTestCase() {
         assertDraft("")
         return checkNotNull(fixture.controller.active)
     }
+    private fun awaitAppendEnabled() {
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasTestTag("chat-send") and hasContentDescription("追加消息") and isEnabled())
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+    }
     fun testShortClickPausesRecreationRetainsDraftAndContinueCompletesSameOwner() {
         val first = fixture.session("cancelled"); val second = fixture.session("answer")
         val owner = send(); assertTrue(first.entered.await(5, TimeUnit.SECONDS))
@@ -21,11 +27,13 @@ class RunControlActivityTest : WiredActivityTestCase() {
         ui.waitForIdle(); assertDraft("unsent draft")
         assertEquals(RunStatus.RUNNING, fixture.controller.active!!.status)
         node("chat-control").assertDoesNotExist()
+        awaitAppendEnabled()
         node("chat-send").assertIsEnabled().assertContentDescriptionEquals("追加消息")
         assertEquals(1, fixture.opens.get())
         activity = recreateActivity(activity)
         assertDraft("unsent draft")
         node("chat-control").assertDoesNotExist()
+        awaitAppendEnabled()
         node("chat-send").assertIsEnabled().assertContentDescriptionEquals("追加消息")
         assertEquals(owner.id, fixture.controller.active!!.id); assertEquals(1, fixture.opens.get())
         setDraft("")

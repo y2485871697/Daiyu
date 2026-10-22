@@ -59,16 +59,25 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         ui.mainClock.advanceTimeBy(1_000)
         awaitVisualIdle()
         val surface = node(surfaceTag).assertIsDisplayed().fetchSemanticsNode()
-        val screenOffset = surface.positionOnScreen - surface.positionInRoot
-        val surfaceBottom = rawBounds(surface).bottom + screenOffset.y
         val view = (surface.root as ViewRootForTest).view
         val viewportTag = if (surfaceTag == "daiyu-choice-sheet") "choice-sheet-viewport" else "preview-dialog-viewport"
         val viewport = node(viewportTag).fetchSemanticsNode()
         assertSame(surface.root, viewport.root)
-        val viewportBottom = viewport.boundsInRoot.bottom + viewport.positionOnScreen.y - viewport.positionInRoot.y
-        var windowBottom = viewportBottom
-        var safeBottom = viewportBottom
-        mainThread {
+        val control = controlTag?.let { node(it).assertIsDisplayed().fetchSemanticsNode() }
+        var surfaceBottom = 0f
+        var windowBottom = 0f
+        var safeBottom = 0f
+        var controlBottom = 0f
+        instrumentation.runOnMainSync {
+            val viewportBottom = viewport.boundsInRoot.bottom + viewport.positionOnScreen.y - viewport.positionInRoot.y
+            val screenOffset = surface.positionOnScreen - surface.positionInRoot
+            surfaceBottom = rawBounds(surface).bottom + screenOffset.y
+            windowBottom = viewportBottom
+            safeBottom = viewportBottom
+            if (control != null) {
+                assertSame(surface.root, control.root)
+                controlBottom = rawBounds(control).bottom + control.positionOnScreen.y - control.positionInRoot.y
+            }
             val decor = view.rootView
             val location = IntArray(2)
             decor.getLocationOnScreen(location)
@@ -87,11 +96,8 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             }
         }
         assertEquals("The painted surface must meet the window/keyboard edge", windowBottom, surfaceBottom, 2f)
-        if (controlTag != null) {
-            val control = node(controlTag).assertIsDisplayed().fetchSemanticsNode()
-            assertSame(surface.root, control.root)
-            val controlOffset = control.positionOnScreen - control.positionInRoot
-            assertTrue("Controls stay above the navigation gesture area", rawBounds(control).bottom + controlOffset.y <= safeBottom + 2f)
+        if (control != null) {
+            assertTrue("Controls stay above the navigation gesture area", controlBottom <= safeBottom + 2f)
         }
     }
 
@@ -154,8 +160,15 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
     fun testEditorSurfaceFollowsImeWithoutExtraBottomGapAndReturnsToWindowEdge() {
         show { dismiss -> CatalogModelEditorDialog(CatalogModelEdit("model", "模型"), true, true, {}, dismiss) }
         assertAttached("catalog-model-dialog", "dialog-confirm")
+        val sheet = node("catalog-model-dialog").fetchSemanticsNode()
+        val view = (sheet.root as ViewRootForTest).view
+        var originalBottom = 0f
+        instrumentation.runOnMainSync {
+            val location = IntArray(2)
+            view.rootView.getLocationOnScreen(location)
+            originalBottom = location[1] + view.rootView.height.toFloat()
+        }
         node("settings-field:展示名称").performClick()
-        val view = (node("catalog-model-dialog").fetchSemanticsNode().root as ViewRootForTest).view
         mainThread {
             val focus = checkNotNull(view.rootView.findFocus())
             activity.getSystemService(InputMethodManager::class.java).showSoftInput(focus, InputMethodManager.SHOW_IMPLICIT)
@@ -168,11 +181,36 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             visible
         }
         assertAttached("catalog-model-dialog", "dialog-confirm", ime = true)
-        dismissIme()
-        ui.waitUntil(5_000) {
-            var visible = true
-            instrumentation.runOnMainSync { visible = ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true }
-            !visible
+        val restoredFrames = java.util.concurrent.atomic.AtomicInteger()
+        val observer = view.viewTreeObserver
+        var lastRestoredFrame = Long.MIN_VALUE
+        val listener = android.view.ViewTreeObserver.OnPreDrawListener {
+            val insets = ViewCompat.getRootWindowInsets(view)
+            val location = IntArray(2)
+            view.rootView.getLocationOnScreen(location)
+            val bottom = rawBounds(sheet).bottom + sheet.positionOnScreen.y - sheet.positionInRoot.y
+            val restored = view.isAttachedToWindow && insets != null &&
+                !insets.isVisible(WindowInsetsCompat.Type.ime()) &&
+                insets.getInsets(WindowInsetsCompat.Type.ime()).bottom == 0 &&
+                kotlin.math.abs(location[1] + view.rootView.height - originalBottom) <= 2f &&
+                kotlin.math.abs(bottom - originalBottom) <= 2f
+            val frame = android.view.Choreographer.getInstance().frameTimeNanos
+            if (!restored) {
+                restoredFrames.set(0)
+                lastRestoredFrame = Long.MIN_VALUE
+            } else if (frame != lastRestoredFrame) {
+                restoredFrames.incrementAndGet()
+                lastRestoredFrame = frame
+            }
+            if (restoredFrames.get() < 2) view.postInvalidateOnAnimation()
+            true
+        }
+        instrumentation.runOnMainSync { observer.addOnPreDrawListener(listener) }
+        try {
+            dismissIme()
+            ui.waitUntil(5_000) { restoredFrames.get() >= 2 }
+        } finally {
+            instrumentation.runOnMainSync { if (observer.isAlive) observer.removeOnPreDrawListener(listener) }
         }
         assertAttached("catalog-model-dialog", "dialog-confirm")
         close("catalog-model-dialog")

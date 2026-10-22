@@ -69,6 +69,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
     val chrome = chatChromeColors().copy(accent = conversationColors().accent)
+    val contextColor = if (state.enabled) chatChromeColors().accent else colors.disabledOnSurface
     val dark = colors.background.luminance() < .3f
     val dividerColor = if (dark) Color(0xFFC8B5EB).copy(alpha = .12f) else Color(0xFF9280B5).copy(alpha = .14f)
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
@@ -112,17 +113,19 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
             ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
-            Row(Modifier.widthIn(max = 144.dp).heightIn(min = 26.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
+            Row(Modifier.widthIn(max = 120.dp).heightIn(min = 24.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
                 .border(1.dp, chrome.line, RoundedCornerShape(12.dp))
-                .padding(1.dp).padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                .padding(1.dp).padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
-                ChatContextMark(fraction, if (state.enabled) chrome.accent else colors.disabledOnSurface,
-                    Modifier.size(18.dp))
+                ChatContextMark(fraction, contextColor, Modifier.size(18.dp).testTag("chat-context-icon"))
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
-                    modifier = Modifier,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp), color = chrome.accent,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    modifier = Modifier.weight(1f, fill = false).testTag("chat-context-label"),
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 14.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false),
+                        lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)),
+                    color = contextColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)

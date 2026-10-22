@@ -75,6 +75,7 @@ internal fun ChatModelPicker(
     var expanded by remember(state.providerId) { mutableStateOf<String?>(state.providerId) }
     var searchCollapsed by remember(query) { mutableStateOf(emptySet<String>()) }
     val colors = usagePalette()
+    val selectedBackground = if (colors.dark) colors.bubble else Color(0xFFEFEDFB)
     val search = query.trim()
     val listState = rememberLazyListState()
     LaunchedEffect(search) { listState.scrollToItem(0) }
@@ -165,7 +166,7 @@ internal fun ChatModelPicker(
                                 .modelGroupSurface(top = false, bottom = index == provider.models.lastIndex, surface = surface, line = colors.line)
                                 .padding(start = 4.dp, end = 4.dp, bottom = if (index == provider.models.lastIndex) 4.dp else 2.dp)) {
                                 Row(Modifier.testTag(tag).fillMaxWidth().alpha(if (canSelect) 1f else .45f)
-                                    .clip(RoundedCornerShape(12.dp)).background(if (selected) colors.bubble else Color.Transparent)
+                                    .clip(RoundedCornerShape(12.dp)).background(if (selected) selectedBackground else Color.Transparent)
                                     .selectable(selected = selected, enabled = canSelect, role = Role.RadioButton,
                                         interactionSource = remember { MutableInteractionSource() }, indication = null,
                                         onClick = {

@@ -41,6 +41,14 @@ class ModelPickerBalanceContract(unittest.TestCase):
         for forbidden in ('money.currency', 'statusText', 'clickable(', 'onClick'):
             self.assertNotIn(forbidden, indicator)
 
+    def test_animated_amount_wraps_short_text_without_changing_ellipsis_budget(self):
+        animation = source('balance/ui/ProviderBalanceAnimation.kt')
+        amount = animation.split('Text(text = displayText,', 1)[1].split('val current = burst', 1)[0]
+        self.assertIn('Modifier.width(IntrinsicSize.Max).graphicsLayer', amount)
+        self.assertIn('maxLines = 1, overflow = TextOverflow.Ellipsis', amount)
+        self.assertNotIn('widthIn(min', amount)
+        self.assertNotIn('padding', amount)
+
     def test_selector_preserves_collaboration_accent_and_selected_row(self):
         picker = source('ui/screens/chat/conversation/ChatModelPicker.kt')
         self.assertIn('val colors = usagePalette()', picker)

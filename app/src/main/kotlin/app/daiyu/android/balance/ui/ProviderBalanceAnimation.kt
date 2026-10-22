@@ -11,6 +11,8 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -180,7 +182,7 @@ internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: Strin
                 tint = amountColor)
             Text(text = displayText, style = textStyle, color = amountColor,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.graphicsLayer {
+                modifier = Modifier.width(IntrinsicSize.Max).graphicsLayer {
                     val shift = amountShift.value
                     translationY = shift * 4.dp.toPx()
                     alpha = 1f - 0.5f * shift

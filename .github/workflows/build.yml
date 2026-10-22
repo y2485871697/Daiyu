@@ -488,7 +488,7 @@ jobs:
     needs: [build, release, candidate]
     if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || (inputs.mode == 'release' && needs.release.result == 'success') || (inputs.mode == 'candidate' && needs.candidate.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
-    timeout-minutes: 170
+    timeout-minutes: 185
     strategy:
       fail-fast: false
       matrix:
@@ -567,7 +567,7 @@ jobs:
       - name: 预启动 ADB
         run: adb start-server
       - name: 安装并检查启动
-        timeout-minutes: 160
+        timeout-minutes: 175
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
@@ -581,7 +581,7 @@ jobs:
           ram-size: ${{ matrix.ram }}M
           cores: 4
           emulator-build: ${{ matrix.api == '26' && '13610412' || '' }}
-          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel
+          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel ${{ matrix.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}
           emulator-boot-timeout: 180
           pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
           disable-animations: true

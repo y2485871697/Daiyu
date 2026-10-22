@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -16,13 +17,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.icons.DaiyuIcons
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TooltipBox
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Compact chat actions; side effects remain delegated to the host. */
 @Composable
@@ -82,8 +80,9 @@ internal fun MessageActionBar(
                 Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = colors.muted)
             }
         }
-        if (timestamp.isNotBlank()) Text(timestamp,
-            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 12.sp),
-            color = colors.muted, maxLines = 1)
+        if (timestamp.isNotBlank()) {
+            if (!endAligned) Spacer(Modifier.weight(1f))
+            MessageTimestamp(timestamp)
+        }
     }
 }

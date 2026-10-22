@@ -9,7 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
@@ -1471,6 +1471,13 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(sidebarVisible, retainedPage) {
                     if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
                 }
+                app.daiyu.android.ui.navigation.PageBackGestureHost(
+                    routeKey = retainedPage,
+                    canNavigateBack = retainedPage != "chat",
+                    swipeDismissEnabled = appearance.swipeDismissEnabled,
+                    predictiveBackEnabled = appearance.predictiveBackEnabled,
+                    dispatchBack = { onBackPressedDispatcher.onBackPressed() },
+                ) {
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
                         "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
@@ -2009,6 +2016,7 @@ class MainActivity : ComponentActivity() {
                             ownerCurrent = { original != null && browserVisualPageCurrent(original) },
                             onBack = { if (activityUsable() && retainedPage == "browser") returnToChat() })
                     }
+                }
                 }
                 TerminalTasksSurface()
                 PromptSurface()

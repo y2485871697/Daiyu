@@ -48,7 +48,7 @@ import kotlinx.coroutines.withContext
             else -> { owner.revoke(); onBack() }
         }
     }
-    androidx.activity.compose.BackHandler { back() }
+    app.daiyu.android.ui.navigation.PageBackHandler { back() }
     fun save(remove: Boolean) {
         val before = snapshot ?: return
         if (busy || !current()) return

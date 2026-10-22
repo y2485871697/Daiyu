@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -142,7 +143,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                 Text(step.name, Modifier.weight(1f), color = colors.text,
                     style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(stateLabel, Modifier.widthIn(max = 88.dp), color = tint,
+                Text(stateLabel, Modifier.widthIn(max = 88.dp).width(IntrinsicSize.Max), color = tint,
                     style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp))
                 Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
                     if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(16.dp), tint = colors.muted)

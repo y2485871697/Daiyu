@@ -53,11 +53,19 @@ class PagePositionContract(unittest.TestCase):
 
     def test_history_search_restores_fresh_pages_before_exposing_retained_position(self):
         dialog = source('ui/app/SearchHistoryDialog.kt')
-        self.assertIn('state = if (!resumed || restoring || phase != SearchPhase.Results) loadingListState else listState', dialog)
-        self.assertIn('now.results.size < restoreCount && now.nextCursor != null', dialog)
+        self.assertIn('state = if (useResultsPosition) listState else loadingListState', dialog)
+        self.assertIn('snapshot.results.size < renderRestoreCount && snapshot.nextCursor != null', dialog)
+        self.assertIn('val snapshot = requests.state.collectAsState().value', dialog)
+        self.assertIn('val renderResumed = resumed', dialog)
+        self.assertIn('val renderRestoring = restoring', dialog)
+        self.assertIn('val renderRestoreCount = restoreCount', dialog)
+        self.assertIn('renderResumed && !renderRestoring && phase == SearchPhase.Results', dialog)
+        restore = dialog.split('LaunchedEffect(request, renderResumed', 1)[1].split('fun cancelSearch()', 1)[0]
+        self.assertIn('snapshot.generation == requests.state.value.generation', restore)
+        self.assertNotIn('val now = requests.state.value', restore)
         self.assertIn('requests.loadMore()', dialog)
-        self.assertIn('restoring && snapshot.appendPhase == SearchAppendPhase.ReadError', dialog)
-        self.assertIn('restoring && snapshot.appendPhase == SearchAppendPhase.Cancelled', dialog)
+        self.assertIn('renderRestoring && snapshot.appendPhase == SearchAppendPhase.ReadError', dialog)
+        self.assertIn('renderRestoring && snapshot.appendPhase == SearchAppendPhase.Cancelled', dialog)
         self.assertIn('restoreCount = maxOf(restoreCount, requests.state.value.results.size)', dialog)
 
 

@@ -245,7 +245,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             } } }
             workspaceControl("workspace-revoke:0")
             workspaceClick("workspace-revoke:0"); node("dialog-confirm").performClick(); awaitVisualIdle()
-            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            ui.waitUntil(5_000) { entered.count == 0L }
             realPauseResume(activity, atPause = { reads.clear() })
             release.countDown()
             ui.waitUntil(5_000) { ui.onAllNodesWithText("还没有共享目录或文件").fetchSemanticsNodes().size == 1 }

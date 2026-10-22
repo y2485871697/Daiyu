@@ -1374,6 +1374,15 @@ class MainActivity : ComponentActivity() {
         if (assistantEditReturnToSidebar) openSidebar()
         assistantEditReturnToSidebar = false
     }
+    private fun dismissAssistantFlow() {
+        assistantEditingId = null
+        assistantPicker = false
+        assistantSelectionOwner = null
+        assistantEditReturnPage = "chat"
+        assistantEditReturnToSidebar = false
+        dismissSidebar()
+        returnToChat()
+    }
     private var assistantAvatarRevision by mutableStateOf(0L)
     private var collaborationOwner by mutableStateOf<String?>(null)
     private var collaborationVisible by mutableStateOf(false)
@@ -1508,7 +1517,7 @@ class MainActivity : ComponentActivity() {
                         else -> returnToChat()
                     }
                 }
-                when (retainedPage) {
+                when (if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage) {
                     "balance-settings" -> {
                         val runtime = balanceRuntime
                         if (runtime != null) app.daiyu.android.balance.ui.BalanceSettingsScreen(
@@ -1893,24 +1902,6 @@ class MainActivity : ComponentActivity() {
                     "subagents" -> SubAgentSettingsScreen(onBack = { if (activityUsable() && retainedPage == "subagents") retainedPage = "settings" },
                         repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents",
                         modelSource = subAgentModelSource)
-                    "assistant-edit" -> assistantEditingId?.let { id ->
-                        var skills by remember(id) { mutableStateOf(emptyList<AssistantSkill>()) }
-                        LaunchedEffect(id) {
-                            skills = withContext(Dispatchers.IO) {
-                                try { controller.skillManagement().snapshot().entries.map { entry ->
-                                    AssistantSkill(entry.id, entry.skill.name, entry.skill.description)
-                                } } catch (_: Exception) { emptyList() }
-                            }
-                        }
-                        AssistantEditScreen(assistantId = id, onBack = { closeAssistantEditor() },
-                            store = assistantStore, assets = assistantAssets, installedSkills = skills,
-                            onSaved = { savedId ->
-                                if (activityUsable()) {
-                                    assistantAvatarRevision++
-                                    if (retainedPage == "assistant-edit" && assistantEditingId == savedId) refresh()
-                                }
-                            })
-                    }
                     else -> ConversationSidePaneScaffold(
                         state = paneState, visible = sidebarVisible, backHandlerEnabled = true,
                         assistants = projectedAssistants, selectedAssistantId = activeAssistant,
@@ -1993,6 +1984,27 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                }
+                if (retainedPage == "assistant-edit") assistantEditingId?.let { id ->
+                    var skills by remember(id) { mutableStateOf(emptyList<AssistantSkill>()) }
+                    LaunchedEffect(id) {
+                        skills = withContext(Dispatchers.IO) {
+                            try { controller.skillManagement().snapshot().entries.map { entry ->
+                                AssistantSkill(entry.id, entry.skill.name, entry.skill.description)
+                            } } catch (_: Exception) { emptyList() }
+                        }
+                    }
+                    AssistantEditScreen(assistantId = id, onBack = { closeAssistantEditor() },
+                        store = assistantStore, assets = assistantAssets, installedSkills = skills,
+                        onOutsideDismiss = {
+                            if (retainedPage == "assistant-edit" && assistantEditingId == id) dismissAssistantFlow()
+                        },
+                        onSaved = { savedId ->
+                            if (activityUsable()) {
+                                assistantAvatarRevision++
+                                if (retainedPage == "assistant-edit" && assistantEditingId == savedId) refresh()
+                            }
+                        })
                 }
                 if (retainedPage == "history-search") searchPage?.let { page ->
                     key(page) {
@@ -2098,7 +2110,11 @@ class MainActivity : ComponentActivity() {
                             assistantEditReturnToSidebar = false
                             assistantEditingId = id; retainedPage = "assistant-edit"
                         } },
-                        onDismiss = { if(assistantSelectionOwner===owner) assistantPicker = false })
+                        onDismiss = { if(assistantSelectionOwner===owner) {
+                            assistantPicker = false
+                            assistantSelectionOwner = null
+                        } },
+                        onOutsideDismiss = { if(assistantSelectionOwner===owner) dismissAssistantFlow() })
                 } }
                 usageVisit?.let { visit ->
                     if (retainedPage == "chat" && !sidebarVisible && selected?.id == visit.conversation) {

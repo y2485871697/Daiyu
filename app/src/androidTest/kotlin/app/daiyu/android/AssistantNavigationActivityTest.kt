@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import android.view.KeyEvent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -17,6 +18,16 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
             node("chat-assistant").performClick()
             awaitUniqueTag("assistant-list")
         }
+    }
+
+    private fun dismissOutside() {
+        val scrim = node("preview-dialog-scrim")
+        val bounds = scrim.fetchSemanticsNode().boundsInRoot
+        val sheet = node("assistant-sheet").fetchSemanticsNode().boundsInRoot
+        val gap = sheet.top - bounds.top
+        assertTrue("Assistant sheet must leave an outside hit region", gap > 24f)
+        scrim.performTouchInput { click(Offset(center.x, gap / 2f)) }
+        awaitUniqueTag("chat-draft")
     }
 
     private fun actions(id: String) {
@@ -104,4 +115,49 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
         node("page:设置").assertExists()
         assertEquals(0, fixture.opens.get())
     }
+    fun testOutsideDismissAtEveryAssistantLevelReturnsToChatAndReopensList() {
+        val store = fixture.controller.assistantStore
+        val profile = store.assistants.value.first()
+        val before = fixture.database.exportBackup()
+        val selected = store.selectedId.value
+        for (fromSettings in listOf(false, true)) for (level in 0..2) {
+            openPicker(fromSettings)
+            ui.onNodeWithTag("assistant-action-edit").assertDoesNotExist()
+            ui.onNodeWithTag("assistant-editor").assertDoesNotExist()
+            if (level >= 1) actions(profile.id)
+            if (level == 2) {
+                edit()
+                node("assistant-edit-name").scrollToVisible()
+                    .performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString("Unsaved outside name")) }
+                dismissIme()
+            }
+            dismissOutside()
+            node("chat-assistant").assertIsDisplayed()
+            ui.onNodeWithTag("assistant-sheet").assertDoesNotExist()
+            ui.onNodeWithTag("page:设置").assertDoesNotExist()
+            openPicker(fromSettings = false)
+            ui.onNodeWithTag("assistant-action-edit").assertDoesNotExist()
+            ui.onNodeWithTag("assistant-editor").assertDoesNotExist()
+            ui.onNodeWithText("Unsaved outside name").assertDoesNotExist()
+            node("assistant-done").performClick()
+            assertEquals(profile, store.read(profile.id))
+        }
+        assertEquals(selected, store.selectedId.value)
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testEditorKeepsOriginalPageComposed() {
+        val profile = fixture.controller.assistantStore.assistants.value.first()
+        for (fromSettings in listOf(false, true)) {
+            openPicker(fromSettings)
+            val tag = if (fromSettings) "page:设置" else "chat-draft"
+            val original = node(tag).fetchSemanticsNode().id
+            actions(profile.id)
+            edit()
+            assertEquals(original, node(tag).fetchSemanticsNode().id)
+            dismissOutside()
+        }
+    }
+
 }

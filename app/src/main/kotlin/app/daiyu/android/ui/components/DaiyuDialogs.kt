@@ -148,6 +148,7 @@ internal fun DaiyuChoiceSheet(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
         animateContent = false,
+        bottomSheet = true,
     ) {
         Box(
             Modifier.fillMaxSize().testTag("choice-sheet-viewport").dialogDimBackground(Color.Black.copy(alpha = 0.32f))

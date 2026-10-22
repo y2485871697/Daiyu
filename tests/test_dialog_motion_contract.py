@@ -36,22 +36,30 @@ class DialogMotionContractTest(unittest.TestCase):
         self.assertIn("tween(300, easing = DecelerateEasing(1.5f))", motion)
         preview = self.text("ui/components/PreviewDialog.kt")
         self.assertIn(".dialogDimBackground(", preview)
-        self.assertIn("BoxWithConstraints(Modifier.dialogEnterMotion()", preview)
-        self.assertIn("setWindowAnimations(0)", preview)
+        self.assertIn("val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier", preview)
+        self.assertIn("if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()", preview)
         choices = self.text("ui/components/DaiyuDialogs.kt")
         self.assertIn("animateContent = false", choices)
         self.assertIn("Modifier.dialogEnterMotion().align(Alignment.BottomCenter)", choices)
 
-    def test_all_native_dialogs_use_the_same_spring_solver(self):
+    def test_native_centered_dialogs_restore_platform_motion_before_show(self):
         native = self.text("ui/components/NativeDialogMotion.kt")
-        self.assertIn("TargetBasedAnimation(dialogEnterSpec(largeScreen)", native)
-        self.assertIn("animator.cancel()", native)
-        self.assertIn("override fun onAnimationEnd", native)
-        self.assertIn("window?.setDimAmount(targetDim * dim)", native)
-        self.assertIn("window?.setDimAmount(targetDim * value)", self.text("ui/components/DialogMotion.kt"))
+        self.assertIn("window?.usePlatformDialogFade()", native)
+        self.assertIn("android.R.attr.windowAnimationStyle", native)
+        self.assertIn("finally { attributes.recycle() }", native)
+        self.assertIn("setWindowAnimations(animation)", native)
+        self.assertNotIn("android.R.style.Animation_Dialog", native)
+        self.assertNotIn("ValueAnimator", native)
+        self.assertNotIn("translationY", native)
         for file in ["ui/GenerationMediaDialog.kt", "ui/FeatureHubDialog.kt", "question/QuestionHost.kt"]:
             with self.subTest(file=file):
-                self.assertIn("startDaiyuEnterMotion()", self.text(file))
+                text = self.text(file)
+                self.assertIn("prepareDaiyuCenterMotion()", text)
+                self.assertNotIn("startDaiyuEnterMotion()", text)
+                self.assertNotIn("setWindowAnimations(0)", text)
+        for file, receiver in [("ui/FeatureHubDialog.kt", "dialog"), ("question/QuestionHost.kt", "window")]:
+            text = self.text(file)
+            self.assertLess(text.index(receiver + ".prepareDaiyuCenterMotion()"), text.index(receiver + ".show()"))
         sheet = self.text("ui/components/SubAgentPresetActionsSheet.kt")
         self.assertIn("ModalBottomSheet(", sheet)
         self.assertIn("SheetState(", sheet)
@@ -64,6 +72,52 @@ class DialogMotionContractTest(unittest.TestCase):
         self.assertNotIn("AssistantSheetMotion", sheet)
         self.assertNotIn("MotionScheme", self.text("ui/components/DialogMotion.kt"))
         self.assertNotIn(".motionScheme", self.text("ui/components/DialogMotion.kt"))
+
+    def test_centered_wrappers_restore_platform_fade_without_delaying_dismissal(self):
+        motion = self.text("ui/components/DialogMotion.kt")
+        self.assertIn("internal fun PlatformDialogFade()", motion)
+        self.assertIn("window?.usePlatformDialogFade()", motion)
+        dialog = motion.split("internal fun DaiyuDialog(", 1)[1].split("internal fun DaiyuAlertDialog(", 1)[0]
+        self.assertIn("bottomSheet: Boolean = false", dialog)
+        self.assertIn("if (bottomSheet) DisablePlatformDialogAnimation() else PlatformDialogFade()", dialog)
+        self.assertIn("if (bottomSheet && animateContent) Modifier.dialogEnterMotion() else Modifier", dialog)
+        self.assertIn("onDismissRequest = onDismissRequest", dialog)
+        alert = motion.split("internal fun DaiyuAlertDialog(", 1)[1]
+        self.assertIn("confirmButton = { PlatformDialogFade(); confirmButton() }", alert)
+        self.assertIn("modifier = modifier", alert)
+        self.assertNotIn("dialogEnterMotion()", alert)
+        self.assertNotIn("delay(", motion)
+
+    def test_preview_center_uses_one_window_fade_and_bottoms_keep_their_motion(self):
+        preview = self.text("ui/components/PreviewDialog.kt")
+        self.assertIn("if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()", preview)
+        self.assertIn("animate = bottomSheet", preview)
+        self.assertIn("val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier", preview)
+        self.assertIn("BoxWithConstraints(motion.fillMaxSize()", preview)
+        motion = self.text("ui/components/DialogMotion.kt")
+        self.assertIn("if (!animate) return drawWithContent", motion)
+        self.assertIn("drawRect(color)", motion)
+        choice = self.text("ui/components/DaiyuDialogs.kt").split("internal fun DaiyuChoiceSheet(", 1)[1]
+        self.assertIn("bottomSheet = true", choice)
+        browser = self.text("ui/screens/browser/BrowserVisualScreen.kt")
+        self.assertIn("decorFitsSystemWindows = false), bottomSheet = true)", browser)
+
+    def test_android_regression_covers_center_bottom_and_immediate_owner_disposal(self):
+        test = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/CenteredDialogMotionActivityTest.kt").read_text()
+        for fragment in ["DaiyuDialog(dismiss)", "DaiyuAlertDialog(dismiss", "PreviewDialog(dismiss)",
+                         "compact = true", "bottomSheet = true", "DaiyuChoiceSheet(",
+                         "dialog.prepareDaiyuCenterMotion()", "assertEquals(1, dismissals)",
+                         "assertEquals(1, disposals)", "window.attributes.windowAnimations",
+                         "android.R.attr.windowAnimationStyle", "assertFalse(dialog.isShowing)",
+                         "android.R.attr.dialogTheme", "ContextThemeWrapper(activity, theme)",
+                         "android.R.attr.windowExitAnimation", "context.resources.getXml(exit)",
+                         "XmlPullParser.START_TAG", "android.R.attr.fromAlpha", "android.R.attr.toAlpha",
+                         'parser.name == "translate"', 'parser.name == "scale"',
+                         "assertEquals(1f, alpha.getFloat(0, Float.NaN), 0.0001f)",
+                         "assertEquals(0f, alpha.getFloat(1, Float.NaN), 0.0001f)", "parser.close()"]:
+            self.assertIn(fragment, test)
+        self.assertIn('assertWindowAnimation("bottom-preview", platformFade = false)', test)
+        self.assertIn('assertWindowAnimation("daiyu-choice-sheet", platformFade = false)', test)
 
     def test_production_glass_menu_uses_original_popup_motion_and_exit_retention(self):
         motion = self.text("ui/components/PopupMotion.kt")

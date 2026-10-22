@@ -60,7 +60,7 @@ internal fun BrowserVisualScreen(
     DisposableEffect(visit) { onDispose { visit?.close() } }
     WithoutPressRipple {
         Dialog(onDismissRequest = onBack, properties = DialogProperties(usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false)) {
+            decorFitsSystemWindows = false), bottomSheet = true) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f))
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onBack)) {
                 Column(modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.9f)

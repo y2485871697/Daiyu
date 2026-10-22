@@ -22,16 +22,20 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { window?.setDimAmount(0f); window?.setWindowAnimations(0) }
+        SideEffect {
+            window?.setDimAmount(0f)
+            if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()
+        }
         Box(Modifier.fillMaxSize().testTag("preview-dialog-viewport")) {
             Box(Modifier.matchParentSize()
                 .then(if (scrimBlurRadius > 0f) Modifier.previewGlassBlur(androidx.compose.ui.graphics.RectangleShape, radius = scrimBlurRadius, saturation = 1f) else Modifier)
-                .dialogDimBackground(scrimColor ?: Color(if (colors.dark) 0x55000000 else 0x2620172d))
+                .dialogDimBackground(scrimColor ?: Color(if (colors.dark) 0x55000000 else 0x2620172d), animate = bottomSheet)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
             CompositionLocalProvider(LocalDensity provides density) {
                 val drawingInsets = if (bottomSheet) WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
                     else WindowInsets.safeDrawing
-                BoxWithConstraints(Modifier.dialogEnterMotion().fillMaxSize()
+                val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier
+                BoxWithConstraints(motion.fillMaxSize()
                     .windowInsetsPadding(drawingInsets).imePadding(), content = content)
             }
         }

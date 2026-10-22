@@ -1,7 +1,7 @@
 package app.daiyu.android.ui
 
 import app.daiyu.android.ui.haptics.setHapticClickListener
-import app.daiyu.android.ui.components.startDaiyuEnterMotion
+import app.daiyu.android.ui.components.prepareDaiyuCenterMotion
 import android.app.Dialog
 import android.content.Context
 import android.graphics.Bitmap
@@ -17,8 +17,7 @@ import app.daiyu.android.GenerationMediaOriginal
 /** Owns only a verified original descriptor, never a provider URL or a mutable private path. */
 internal object GenerationMediaDialog {
     fun image(context: Context, bitmap: Bitmap, closed: () -> Unit): Dialog = Dialog(context).apply {
-        window?.setWindowAnimations(0)
-        setOnShowListener { startDaiyuEnterMotion() }
+        prepareDaiyuCenterMotion()
         setTitle("图片")
         val image = ImageView(context).apply { setImageBitmap(bitmap); adjustViewBounds = true }
         setContentView(image)
@@ -29,8 +28,7 @@ internal object GenerationMediaDialog {
         gate: app.daiyu.android.voice.AudioOwnerGate, owner: app.daiyu.android.voice.VoiceOwner,
         closed: () -> Unit): Dialog {
         val dialog = Dialog(context).apply {
-            window?.setWindowAnimations(0)
-            setOnShowListener { startDaiyuEnterMotion() }
+            prepareDaiyuCenterMotion()
         }
         val player = MediaPlayer()
         val layout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }

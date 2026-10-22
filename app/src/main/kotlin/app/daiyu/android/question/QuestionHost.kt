@@ -4,7 +4,7 @@ import app.daiyu.android.ui.haptics.setHapticNegativeButton
 import app.daiyu.android.ui.haptics.setHapticPositiveButton
 import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.app.Activity
-import app.daiyu.android.ui.components.startDaiyuEnterMotion
+import app.daiyu.android.ui.components.prepareDaiyuCenterMotion
 import android.app.AlertDialog
 import android.os.Handler
 import android.os.Looper
@@ -104,7 +104,6 @@ class QuestionHost(private val registry: QuestionRegistry) {
             .setView(ScrollView(activity).apply { addView(content) })
             .setHapticPositiveButton("提交答案", null).setHapticNegativeButton("稍后回答", null).create()
         window.setOnShowListener {
-            window.startDaiyuEnterMotion()
             window.getButton(AlertDialog.BUTTON_POSITIVE).setHapticClickListener {
                 val checked = group.checkedRadioButtonId
                 val noteText = note?.text?.toString()?.takeIf { it.isNotEmpty() }
@@ -143,7 +142,7 @@ class QuestionHost(private val registry: QuestionRegistry) {
         }
         window.setOnDismissListener { if (dialog === window) dialog = null }
         dialog = window
-        window.window?.setWindowAnimations(0)
+        window.prepareDaiyuCenterMotion()
         window.show()
     }
 

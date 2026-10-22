@@ -18,7 +18,7 @@ class BottomSheetEdgeContractTest(unittest.TestCase):
         self.assertIn("else WindowInsets.safeDrawing", text)
         self.assertIn(".windowInsetsPadding(drawingInsets).imePadding()", text)
         self.assertIn("decorFitsSystemWindows = false", text)
-        self.assertIn("BoxWithConstraints(Modifier.dialogEnterMotion()", text)
+        self.assertIn("val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier", text)
 
     def test_content_insets_use_consumable_bottom_safe_drawing_only(self):
         text = source("ui/components/PreviewDialog.kt")

@@ -59,13 +59,23 @@ internal fun Modifier.dialogEnterMotion(): Modifier {
 }
 
 @Composable
-internal fun Modifier.dialogDimBackground(color: Color): Modifier {
+internal fun Modifier.dialogDimBackground(color: Color, animate: Boolean = true): Modifier {
+    if (!animate) return drawWithContent {
+        drawRect(color)
+        drawContent()
+    }
     val progress = remember { Animatable(0f) }
     LaunchedEffect(Unit) { progress.animateTo(1f, tween(300, easing = DecelerateEasing(1.5f))) }
     return drawWithContent {
         drawRect(color.copy(alpha = color.alpha * progress.value))
         drawContent()
     }
+}
+
+@Composable
+internal fun PlatformDialogFade() {
+    val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+    SideEffect { window?.usePlatformDialogFade() }
 }
 
 @Composable
@@ -89,11 +99,12 @@ internal fun DaiyuDialog(
     onDismissRequest: () -> Unit,
     properties: DialogProperties = DialogProperties(),
     animateContent: Boolean = true,
+    bottomSheet: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     ComposeDialog(onDismissRequest = onDismissRequest, properties = properties) {
-        DisablePlatformDialogAnimation()
-        Box(if (animateContent) Modifier.dialogEnterMotion() else Modifier) { content() }
+        if (bottomSheet) DisablePlatformDialogAnimation() else PlatformDialogFade()
+        Box(if (bottomSheet && animateContent) Modifier.dialogEnterMotion() else Modifier) { content() }
     }
 }
 
@@ -116,8 +127,8 @@ internal fun DaiyuAlertDialog(
 ) {
     MaterialAlertDialog(
         onDismissRequest = onDismissRequest,
-        confirmButton = { DisablePlatformDialogAnimation(); confirmButton() },
-        modifier = Modifier.dialogEnterMotion().then(modifier),
+        confirmButton = { PlatformDialogFade(); confirmButton() },
+        modifier = modifier,
         dismissButton = dismissButton, icon = icon, title = title, text = text,
         shape = shape, containerColor = containerColor, iconContentColor = iconContentColor,
         titleContentColor = titleContentColor, textContentColor = textContentColor,

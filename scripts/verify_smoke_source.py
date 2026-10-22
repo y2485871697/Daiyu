@@ -129,8 +129,9 @@ def main():
         if (source_artifact['workflow_run']['id'] != int(run_id)
                 or source_artifact['workflow_run']['head_sha'] != env['SOURCE_SHA']):
             raise ValueError('候选源工件归属不符')
-        request = urllib.request.Request(source_artifact['archive_download_url'], headers={
-            'Authorization': f"Bearer {env['GH_TOKEN']}", 'Accept': 'application/vnd.github+json'})
+        request = urllib.request.Request(source_artifact['archive_download_url'],
+                                         headers={'Accept': 'application/vnd.github+json'})
+        request.add_unredirected_header('Authorization', f"Bearer {env['GH_TOKEN']}")
         with urllib.request.urlopen(request, timeout=90) as response:
             archive = response.read(512 * 1024 * 1024 + 1)
         if len(archive) > 512 * 1024 * 1024:

@@ -136,6 +136,8 @@ class CandidateSourceTests(unittest.TestCase):
         responses = [self.run, dict(jobs=self.jobs), metadata]
         def open_url(request, timeout):
             if request.full_url.endswith('/zip'):
+                self.assertNotIn('Authorization', request.headers)
+                self.assertIn('Authorization', request.unredirected_hdrs)
                 return io.BytesIO(archive if archive_override is None else archive_override)
             return io.BytesIO(json.dumps(responses.pop(0)).encode())
         previous = os.getcwd()
@@ -153,6 +155,16 @@ class CandidateSourceTests(unittest.TestCase):
             if sys.exc_info()[0] is not None:
                 self.assertFalse((parent / 'smoke/source.json').exists())
             os.chdir(previous)
+
+    def test_authorization_only_reaches_initial_api_not_redirect_storage(self):
+        request = source.urllib.request.Request('https://api.github.com/repos/owner/repo/actions/artifacts/456/zip',
+                                               headers={'Accept': 'application/vnd.github+json'})
+        request.add_unredirected_header('Authorization', 'Bearer fixture-not-a-secret')
+        redirected = source.urllib.request.HTTPRedirectHandler().redirect_request(
+            request, None, 302, 'Found', {}, 'https://results-receiver.actions.githubusercontent.com/fixture')
+        self.assertTrue(request.has_header('Authorization'))
+        self.assertFalse(redirected.has_header('Authorization'))
+        self.assertEqual(redirected.get_header('Accept'), 'application/vnd.github+json')
 
     def test_main_preserves_build_and_check_identity_and_raw_artifact_digest(self):
         receipt = self.main_fixture()

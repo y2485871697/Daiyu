@@ -64,6 +64,25 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
     private lateinit var original: ChatController
     private lateinit var activity: MainActivity
     private var recreationMonitor: Instrumentation.ActivityMonitor? = null
+    private val activityToken = UUID.randomUUID().toString()
+    private val fixtureActivities = java.util.concurrent.CopyOnWriteArrayList<MainActivity>()
+    private var cleanupRequested = false
+    private var activityCallbacksRegistered = false
+    private var cleanupCompleted = false
+    private val activityCallbacks = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityCreated(created: Activity, state: android.os.Bundle?) {
+            if (created is MainActivity && created.intent.getStringExtra("browser-save-fixture-owner") == activityToken) {
+                fixtureActivities.addIfAbsent(created)
+                if (cleanupRequested) created.finish()
+            }
+        }
+        override fun onActivityStarted(activity: Activity) = Unit
+        override fun onActivityResumed(activity: Activity) = Unit
+        override fun onActivityPaused(activity: Activity) = Unit
+        override fun onActivityStopped(activity: Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, state: android.os.Bundle) = Unit
+        override fun onActivityDestroyed(activity: Activity) = Unit
+    }
     private lateinit var root: File
     private lateinit var documents: Documents
     private lateinit var conversation: Conversation
@@ -110,8 +129,15 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         reference = controller.completedBrowserDownloads(conversation.id).single()
         sessions.close(owner) // A normally completed run need not retain live browser authority.
         application = instrumentation.targetContext.applicationContext as ChatApplication
-        mainThread { controller.observe(observeNotice); original = application.controller; application.controller = controller }
+        mainThread {
+            controller.observe(observeNotice)
+            original = application.controller
+            application.controller = controller
+            application.registerActivityLifecycleCallbacks(activityCallbacks)
+            activityCallbacksRegistered = true
+        }
         activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, MainActivity::class.java)
+            .putExtra("browser-save-fixture-owner", activityToken)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         instrumentation.waitForIdleSync()
         ui.waitUntil(10_000) {
@@ -132,39 +158,61 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
     }
 
     private fun cleanupFixture() {
+        if (cleanupCompleted) return
         var failure: Throwable? = null
         fun step(action: () -> Unit) {
             try { action() } catch (error: Throwable) {
                 if (failure == null) failure = error else if (failure !== error) failure?.addSuppressed(error)
             }
         }
-        if (::documents.isInitialized) documents.releaseOpen?.countDown()
-        takeRecreatedActivity()
-        var destroyed = !::activity.isInitialized
-        step {
-            if (::activity.isInitialized) {
-                mainThread { activity.finish() }
-                awaitControl("browser-save Activity destroyed") { activity.isDestroyed }
+        var destroyed = false
+        var drained = !::controller.isInitialized
+        try {
+            step { if (::documents.isInitialized) documents.releaseOpen?.countDown() }
+            step {
+                mainThread {
+                    cleanupRequested = true
+                    if (::activity.isInitialized) fixtureActivities.addIfAbsent(activity)
+                    fixtureActivities.forEach { if (!it.isDestroyed) it.finish() }
+                }
+                awaitControl("browser-save Activity destroyed") { fixtureActivities.all { it.isDestroyed } }
                 destroyed = true
             }
-        }
-        if (!destroyed) throw checkNotNull(failure)
-        step { if (::controller.isInitialized) ui.waitUntil(10_000) { !controller.dataBusy } }
-        step { if (::original.isInitialized) mainThread { application.controller = original } }
-        var drained = !::controller.isInitialized
-        step { if (::controller.isInitialized) { controller.close(); drained = true } }
-        if (destroyed && drained) {
-            step { if (::fixture.isInitialized) fixture.deleteDatabase("conversations.db") }
-            step { if (::root.isInitialized) root.deleteRecursively() }
+            step { if (::controller.isInitialized) ui.waitUntil(10_000) { !controller.dataBusy } }
+            step { if (::original.isInitialized) mainThread { application.controller = original } }
+            if (destroyed) {
+                step { if (::controller.isInitialized) { controller.close(); drained = true } }
+            }
+            if (destroyed && drained) {
+                step { if (::fixture.isInitialized) fixture.deleteDatabase("conversations.db") }
+                step { if (::root.isInitialized) check(!root.exists() || root.deleteRecursively()) }
+            }
+        } finally {
+            step { clearRecreationMonitor() }
+            step {
+                if (activityCallbacksRegistered) instrumentation.runOnMainSync {
+                    application.unregisterActivityLifecycleCallbacks(activityCallbacks)
+                    activityCallbacksRegistered = false
+                }
+            }
         }
         failure?.let { throw it }
+        cleanupCompleted = true
     }
 
-    private fun takeRecreatedActivity() {
+    private fun clearRecreationMonitor(monitor: Instrumentation.ActivityMonitor? = recreationMonitor) {
+        if (monitor == null) return
+        try { instrumentation.removeMonitor(monitor) }
+        finally { if (recreationMonitor === monitor) recreationMonitor = null }
+    }
+
+    private fun takeRecreatedActivity(beforeAdopt: () -> Unit = {}) {
         val monitor = recreationMonitor ?: return
-        activity = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
-        instrumentation.removeMonitor(monitor)
-        recreationMonitor = null
+        try {
+            val replacement = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
+            beforeAdopt()
+            activity = replacement
+        } finally { clearRecreationMonitor(monitor) }
     }
 
     private fun openListing() {
@@ -456,17 +504,35 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
             return code
         } finally { instrumentation.removeMonitor(monitor) }
     }
-    private fun recreateMain() {
+    private fun recreateMain(beforeAdopt: () -> Unit = {}) {
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {
             recreationMonitor = monitor
             mainThread { activity.recreate() }
-            takeRecreatedActivity()
+            takeRecreatedActivity(beforeAdopt)
             instrumentation.waitForIdleSync()
             ui.waitUntil(10_000) { field("selectionReady") == true }
         } finally {
-            if (recreationMonitor !== monitor) instrumentation.removeMonitor(monitor)
+            clearRecreationMonitor(monitor)
         }
+    }
+
+    fun testCleanupOwnsReplacementWhenRecreationHandoffThrows() {
+        val old = activity
+        val injected = IllegalStateException("fixture recreation handoff fault")
+        val failure = runCatching { recreateMain { throw injected } }.exceptionOrNull()
+        assertSame(injected, failure)
+        assertSame(old, activity)
+        assertNull(recreationMonitor)
+        val owned = fixtureActivities.toList()
+        assertTrue("real replacement must be tracked before handoff", owned.any { it !== old })
+        cleanupFixture()
+        assertTrue("all fixture Activities destroyed", owned.all { it.isDestroyed })
+        instrumentation.runOnMainSync { assertSame(original, application.controller) }
+        assertFalse(activityCallbacksRegistered)
+        assertFalse(root.exists())
+        cleanupFixture()
+        assertEquals(0, modelCalls.get())
     }
 
     fun testObsoleteStaticSaveVisitCannotBorrowReopenedListing() {
@@ -563,7 +629,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
             instrumentation.waitForIdleSync()
             ui.waitUntil(10_000) { field("selectionReady") == true }
         } finally {
-            if (recreationMonitor !== monitor) instrumentation.removeMonitor(monitor)
+            clearRecreationMonitor(monitor)
         }
         assertNull(field("pendingStaticOriginal")); assertNull(field("staticGenerationVisit")); assertNull(pendingCode())
         mainThread { deliver(old) }

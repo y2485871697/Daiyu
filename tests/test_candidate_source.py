@@ -72,7 +72,7 @@ class CandidateSourceTests(unittest.TestCase):
 
     def test_workflow_only_permits_reviewed_infrastructure_diff(self):
         for old, new in [(':app:assembleRelease', ':app:assembleDebug'),
-                         ('-gpu swiftshader', '-gpu host'),
+                         ("-gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }}", '-gpu host'),
                          ('"hw.lcd.density":"160"', '"hw.lcd.density":"525"'),
                          ('timeout-minutes: 160', 'timeout-minutes: 170'),
                          ('"ram":4096', '"ram":8192'),

@@ -108,17 +108,51 @@ class SourceTests(unittest.TestCase):
         self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
                          {(api, index) for api in ('26', '37.2') for index in range(4)})
 
-    def test_api26_has_google_webview_without_changing_gpu_or_formal_matrix(self):
+    def test_api26_has_pinned_emulator_without_changing_image_or_formal_matrix(self):
         smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
         matrices = [json.loads(value) for value in re.findall(r"'(\[[^']*\])'", smoke)]
         self.assertEqual(len(matrices), 3)
         for matrix in matrices:
             for item in matrix:
                 self.assertEqual(item['target'], 'google_apis' if item['api'] == '26' else 'google_apis_ps16k')
-        self.assertIn('-gpu swiftshader ', smoke)
+        self.assertIn("emulator-build: ${{ matrix.api == '26' && '13610412' || '' }}", smoke)
+        self.assertIn("-gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} ", smoke)
+        self.assertIn("grep -Fx 'Pkg.Revision=35.6.11'", smoke)
+        self.assertIn("grep -Fx 'Pkg.BuildId=13610412'", smoke)
         self.assertIn('"hw.lcd.density":"160"', smoke)
         self.assertEqual({(item['api'], item['shard']) for item in matrices[-1]},
                          {(api, shard) for api in ('26', '37.2') for shard in range(4)})
+
+    def test_prelaunch_pin_checks_actual_metadata_and_version_command(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        hook = workflow.split('          pre-emulator-launch-script: |', 1)[1].split('          disable-animations:', 1)[0]
+        commands = [line.strip() for line in hook.splitlines() if line.strip()][:3]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'smoke').mkdir()
+            emulator = root / 'emulator'
+            emulator.mkdir()
+            binary = emulator / 'emulator'
+            for api, revision, build, exit_code, expected in (
+                    ('26', '35.6.11', '13610412', 0, True),
+                    ('26', '37.2.12', '16428233', 0, False),
+                    ('26', '35.6.11', 'other', 0, False),
+                    ('26', '35.6.11', '13610412', 7, False),
+                    ('37.2', '37.2.12', '16428233', 0, True)):
+                with self.subTest(api=api, revision=revision, build=build, exit_code=exit_code):
+                    binary.write_text('#!/bin/sh\necho emulator-version\nexit ' + str(exit_code) + '\n')
+                    binary.chmod(0o755)
+                    (emulator / 'source.properties').write_text(
+                        f'Pkg.Revision={revision}\nPkg.BuildId={build}\n')
+                    results = []
+                    for command in commands:
+                        result = subprocess.run(['sh', '-c', command.replace('${{ matrix.api }}', api)],
+                                                cwd=root, env=dict(os.environ, ANDROID_HOME=temporary),
+                                                capture_output=True)
+                        results.append(result.returncode)
+                        if result.returncode:
+                            break
+                    self.assertEqual(all(code == 0 for code in results), expected)
 
     def test_identity_and_unchanged_application(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123')
@@ -292,8 +326,7 @@ case "$*" in
  'shell getprop sys.boot_completed') printf '1\n' ;;
  *pidof*) printf '123\n456\n' ;;
  'shell pm path android') printf 'package:/system/framework/framework-res.apk\n' ;;
- 'shell getprop debug.hwui.renderer') printf 'skiagl\n' ;;
- 'shell setprop debug.hwui.renderer '*) [ "$CASE" != hwui-fail ] || exit 9 ;;
+ 'shell getprop debug.hwui.renderer') printf '\n' ;;
  'shell dumpsys webviewupdate')
   [ "$CASE" != webview-command-fail ] || exit 8
   [ "$CASE" != webview-garbage ] || { printf 'not a service dump\n'; exit 0; }
@@ -361,7 +394,15 @@ case "$*" in
   else printf 'package:app.daiyu.android\n'; fi ;;
  'shell uiautomator dump '*) [ "$CASE" != dump-fail ] || exit 8 ;;
  'pull '*) [ "$CASE" != pull-fail ] || exit 8; cat "$FAKE_UI" > "$3" ;;
- 'logcat '*) [ "$CASE" != crash ] || printf 'FATAL EXCEPTION\n' ;;
+ 'logcat '*)
+  case "$CASE" in
+   pre-crash) printf 'FATAL EXCEPTION\n' ;;
+   pre-native-crash) printf 'Fatal signal 6 (SIGABRT)\n' ;;
+   late-pre-native-crash) grep -q 'shell pm path android' smoke/adb-calls.txt && printf 'Fatal signal 6 (SIGABRT)\n'; true ;;
+   pre-gl-crash) printf 'GL errors! frameworks/base/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp:110\n' ;;
+   crash) [ ! -f smoke/launch-args.txt ] || printf 'FATAL EXCEPTION\n' ;;
+   native-crash) [ ! -f smoke/launch-args.txt ] || printf 'Fatal signal 6 (SIGABRT)\n' ;;
+  esac ;;
  'exec-out '*)
   if [ "$CASE" = png ]; then printf bad; else printf '\211PNG\r\n\032\n'; fi ;;
  'emu screenrecord screenshot '*) printf '\211PNG\r\n\032\n' > "$4/Screenshot_fake.png" ;;
@@ -413,7 +454,7 @@ exit 0
         self.assertEqual(args[3:8], ['-w', '-r', '-e', 'class', 'app.daiyu.android.FirstTest'])
         self.assertEqual(args[8], 'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner')
 
-    def test_webview_and_api26_renderer_ready_before_install(self):
+    def test_webview_ready_and_renderer_observed_without_framework_restart(self):
         for api in (26, 37):
             result = self.smoke(api=api)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
@@ -422,15 +463,25 @@ exit 0
             install = next(i for i, value in enumerate(calls) if value.startswith('install '))
             self.assertLess(probe, install)
             self.assertIn('shell pm path com.android.chrome', calls)
-            self.assertEqual('root' in calls, api == 26)
-            if api == 26:
-                configure = next(i for i, value in enumerate(calls) if value.startswith('shell setprop debug.hwui.renderer'))
-                self.assertLess(configure, probe)
-                self.assertEqual((self.root / 'smoke/hwui-renderer.txt').read_text(), 'skiagl\n')
+            self.assertNotIn('root', calls)
+            self.assertFalse(any('setprop debug.hwui.renderer' in value or 'stop &&' in value for value in calls))
+            self.assertLess(calls.index('shell getprop debug.hwui.renderer'), probe)
+            self.assertEqual((self.root / 'smoke/hwui-renderer.txt').read_text(), '\n')
 
-    def test_unready_webview_or_renderer_cannot_start_tests(self):
+    def test_startup_java_and_native_crashes_cannot_start_tests(self):
+        for case in ('pre-crash', 'pre-native-crash', 'pre-gl-crash', 'late-pre-native-crash'):
+            with self.subTest(case=case):
+                result = self.smoke(case=case)
+                self.assertNotEqual(result.returncode, 0)
+                calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+                self.assertFalse(any(value.startswith('install ') for value in calls))
+                self.assertFalse(any('am instrument' in value for value in calls))
+                self.assertTrue((self.root / 'smoke/logcat-before.txt').read_text())
+                self.assertFalse(any('logcat -c' in value for value in calls))
+
+    def test_unready_webview_cannot_start_tests(self):
         for case in ('webview-command-fail', 'webview-garbage', 'webview-null',
-                     'webview-dirty', 'webview-relro', 'webview-no-path', 'hwui-fail'):
+                     'webview-dirty', 'webview-relro', 'webview-no-path'):
             with self.subTest(case=case):
                 result = self.smoke(case=case)
                 self.assertNotEqual(result.returncode, 0)
@@ -852,7 +903,7 @@ exit 0
                 self.assertFalse((self.root / 'smoke/boot.xml').exists())
 
     def test_business_gates_remain(self):
-        for case in ['count', 'failure', 'old-package', 'crash', 'png', 'foreign-ui',
+        for case in ['count', 'failure', 'old-package', 'crash', 'native-crash', 'png', 'foreign-ui',
                      'missing-send', 'missing-editor', 'malformed-ui', 'old-title-only']:
             result = self.smoke(case=case)
             with self.subTest(case=case):

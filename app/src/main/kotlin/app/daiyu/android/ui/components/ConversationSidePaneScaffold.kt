@@ -540,14 +540,12 @@ private fun PaneSearchRow(
         ),
     )
     val searchFocusRequester = remember { FocusRequester() }
-    val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
     var searchActive by remember { mutableStateOf(false) }
     LaunchedEffect(searchFocusEnabled) {
         if (!searchFocusEnabled) {
             searchActive = false
-            focusManager.clearFocus(force = true)
         }
     }
     LaunchedEffect(searchActive, searchFocusEnabled) {

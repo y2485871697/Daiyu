@@ -25,6 +25,7 @@ internal fun CompressionSettingsScreen(
     var draft by remember(editor) { mutableStateOf(CompressionSettingsDraftUi(binding)) }
     var retainedSummaryBinding by remember(editor) { mutableStateOf<SummaryModelBinding?>(null) }
     var busy by remember(editor) { mutableStateOf(true) }
+    var saving by remember(editor) { mutableStateOf(false) }
     var notice by remember(editor) { mutableStateOf<String?>(null) }
     var error by remember(editor) { mutableStateOf(false) }
     var choosingModel by remember(editor) { mutableStateOf(false) }
@@ -33,8 +34,9 @@ internal fun CompressionSettingsScreen(
     val page = remember(editor) { CompressionPage() }
     val currentOwner by rememberUpdatedState(ownerCurrent)
 
-    fun submit(work: CompressionSettingsEditor.Work) {
+    fun submit(work: CompressionSettingsEditor.Work, save: Boolean) {
         busy = true
+        saving = save
         try {
             worker.execute {
                 val result = runCatching { work.runWorker() }
@@ -70,10 +72,12 @@ internal fun CompressionSettingsScreen(
                             CompressionSettingsEditor.Outcome.Revoked -> return@onSuccess
                         }
                         busy = false
+                        saving = false
                     }.onFailure {
                         error = true
                         notice = "设置操作未确认，请核对后重新操作。"
                         busy = false
+                        saving = false
                     }
                 }
             }
@@ -81,6 +85,7 @@ internal fun CompressionSettingsScreen(
             editor.revoke()
             page.active = false
             busy = false
+            saving = false
             error = true
             notice = "设置页面已结束，请重新进入。"
         }
@@ -94,7 +99,7 @@ internal fun CompressionSettingsScreen(
             worker.shutdown()
         }
     }
-    LaunchedEffect(editor) { editor.prepareLoad()?.let(::submit) }
+    LaunchedEffect(editor) { editor.prepareLoad()?.let { submit(it, save = false) } }
     val leave: () -> Unit = {
         editor.revoke()
         page.active = false
@@ -107,12 +112,13 @@ internal fun CompressionSettingsScreen(
             if (page.active && currentOwner() && !busy) {
                 val request = runCatching { CompressionSettingsEditor.SaveRequest(
                     requested.compression()) }
-                request.onSuccess { editor.prepareSave(it)?.let(::submit) }.onFailure {
+                request.onSuccess { editor.prepareSave(it)?.let { work -> submit(work, save = true) } }.onFailure {
                     error = true
                     notice = "设置保存失败，请重新操作。"
                 }
             }
-        }, onBack = leave, enabled = !busy, notice = notice, error = error, modifier = modifier,
+        }, onBack = leave, enabled = !busy || saving, saving = busy && saving,
+        notice = notice, error = error, modifier = modifier,
         modelLabel = modelLabel, hasSummarySelection = retainedSummaryBinding != null, onChooseModel = {
             if (!busy && page.active && currentOwner()) choosingModel = true
         })
@@ -129,7 +135,7 @@ internal fun CompressionSettingsScreen(
                 editor.prepareSelection(settings) {
                     source.withModel(choice) { /* Validate the explicitly selected provider on the admitted worker. */ }
                     source.remember("compression", choice)
-                }?.let(::submit)
+                }?.let { submit(it, save = true) }
             }
         }, onDismiss = { choosingModel = false })
 }

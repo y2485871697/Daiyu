@@ -156,12 +156,10 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
             assertTrue("HOME must stop the original Activity", stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
         } finally {
             instrumentation.runOnMainSync { original.lifecycle.removeObserver(observer) }
-            instrumentation.targetContext.startActivity(
-                android.content.Intent(instrumentation.targetContext, MainActivity::class.java).addFlags(
-                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            restoreOriginalHost(original)
         }
         awaitHostWindowFocus(original)
+        assertSame("HOME must retain the original host", original, activity)
         assertFalse(original.isDestroyed)
         assertEquals(task, original.taskId)
         ui.waitUntil(5_000) {

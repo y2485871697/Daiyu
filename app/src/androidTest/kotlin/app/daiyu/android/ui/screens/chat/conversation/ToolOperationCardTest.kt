@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
@@ -125,7 +126,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                     applyInterfaceScale = false) {
-                    Column(Modifier.background(backdrop).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.background(backdrop).systemBarsPadding().verticalScroll(rememberScrollState())) {
                         ToolCategoryContent("terminal", ToolCategoryDetails.project("terminal",
                             """{"command":"printf hello"}""", """{"stdout":"hello","exit_code":0}"""))
                     }

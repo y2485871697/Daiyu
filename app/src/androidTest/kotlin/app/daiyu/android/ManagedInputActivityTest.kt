@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.unit.dp
@@ -26,10 +27,13 @@ import app.daiyu.android.ui.components.*
 import app.daiyu.android.ui.screens.settings.SettingsTextField
 
 class ManagedInputActivityTest : WiredActivityTestCase() {
+    private var fieldToolbar: androidx.compose.ui.platform.TextToolbar? = null
     private fun showFields(dialog: Boolean = false) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    val toolbar = androidx.compose.ui.platform.LocalTextToolbar.current
+                    androidx.compose.runtime.SideEffect { fieldToolbar = toolbar }
                     val fields: @androidx.compose.runtime.Composable () -> Unit = {
                         var first by remember { mutableStateOf(" 保留草稿😀 ") }
                         var second by remember { mutableStateOf("第二个输入框") }
@@ -56,9 +60,19 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun screenBounds(tag: String): androidx.compose.ui.geometry.Rect {
-        awaitNodeWindowFocus(node(tag))
-        val target = node(tag).fetchSemanticsNode()
-        return ui.runOnIdle { target.boundsInRoot.translate(target.positionOnScreen - target.positionInRoot) }
+        val interaction = node(tag)
+        awaitNodeWindowFocus(interaction)
+        val target = interaction.fetchSemanticsNode()
+        val view = (target.root as androidx.compose.ui.platform.ViewRootForTest).view
+        val token = view.windowToken
+        return awaitStableWindowFrame(view) {
+            if (view.windowToken != token || !target.layoutInfo.isPlaced ||
+                !target.layoutInfo.coordinates.isAttached) null else {
+                val bounds = target.boundsInRoot.translate(target.positionOnScreen - target.positionInRoot)
+                bounds.takeIf { it.width > 0f && it.height > 0f &&
+                    listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() } }
+            }
+        }
     }
 
     private fun injectGesture(points: List<Pair<Long, androidx.compose.ui.geometry.Offset>>) {
@@ -103,8 +117,16 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         } + listOf(hold + 400L to end))
     }
 
+    private fun awaitFieldFocus(tag: String, focused: Boolean) {
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false)
+                .singleOrNull()?.config?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Focused) == focused
+        }
+    }
+
     private fun tapField(tag: String) {
         realTap(tag)
+        awaitFieldFocus(tag, true)
         node(tag).assertIsFocused()
         awaitImeFrame(node(tag), visible = true)
     }
@@ -117,6 +139,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             assertTrue(it(5, 1, true))
         }
         realTap("managed-outside")
+        awaitFieldFocus("managed-first", false)
         node("managed-first").assertIsNotFocused()
         awaitImeFrame(node("managed-first"), visible = false)
         node("managed-first").assertTextEquals(" 保留草稿😀 ")
@@ -129,6 +152,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         node("managed-first").assertIsNotFocused()
         node("managed-second").performTextInput("续写")
         realTap("managed-button")
+        awaitFieldFocus("managed-second", false)
         node("managed-second").assertIsNotFocused()
         awaitImeFrame(node("managed-second"), visible = false)
         ui.onNodeWithText("动作次数 1").assertExists()
@@ -154,12 +178,10 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
         } finally {
             instrumentation.runOnMainSync { original.lifecycle.removeObserver(observer) }
-            instrumentation.targetContext.startActivity(android.content.Intent(
-                instrumentation.targetContext, MainActivity::class.java).addFlags(
-                android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                    android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            restoreOriginalHost(original)
         }
         awaitHostWindowFocus(original)
+        awaitFieldFocus("managed-first", false)
         node("managed-first").assertIsNotFocused()
         awaitImeFrame(node("managed-first"), visible = false)
         node("managed-first").assertTextEquals(" 保留草稿😀 ")
@@ -198,8 +220,11 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                 assertTrue(hidden.contentEquals(pixels(tag)))
             }
             realTap("managed-outside")
+            awaitFieldFocus(tag, false)
             node(tag).assertIsNotFocused()
             val unfocused = pixels(tag)
+            ui.mainClock.advanceTimeByFrame()
+            assertTrue("Unfocused pixel baseline must be stable: field=$tag", unfocused.contentEquals(pixels(tag)))
             val firstDifference = hidden.indices.firstOrNull { it >= unfocused.size || hidden[it] != unfocused[it] }
             assertTrue("Hidden IME must not draw a steady caret either: field=$tag " +
                 "hidden=${hidden.size} unfocused=${unfocused.size} firstDifference=$firstDifference",
@@ -220,6 +245,14 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         val dragged = node("managed-first").fetchSemanticsNode().config[
             androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
         assertFalse("Real long-press drag retains a text selection", dragged.collapsed)
+        mainThread { checkNotNull(fieldToolbar).hide() }
+        ui.waitUntil(5_000) {
+            var hidden = false
+            instrumentation.runOnMainSync {
+                hidden = fieldToolbar?.status == androidx.compose.ui.platform.TextToolbarStatus.Hidden
+            }
+            hidden
+        }
         realLongPress("managed-outside")
         node("managed-first").assertIsFocused()
         realDrag("managed-outside")

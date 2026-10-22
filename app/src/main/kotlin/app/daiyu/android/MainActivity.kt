@@ -587,6 +587,8 @@ class MainActivity : ComponentActivity() {
                         pick.owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
                         pick.epoch == contextManagementEntryEpoch) controls.select()
                 }
+            }, onControlsDisposed = { disposed ->
+                if (videoComposerControls === disposed) videoComposerControls = null
             })
     }
     private fun handoffVideo(request: VideoDraftRequest, original: ControllerVideoEditor,
@@ -1493,7 +1495,7 @@ class MainActivity : ComponentActivity() {
                     if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
                 }
                 if (retainedPage == "chat" && !sidebarVisible) {
-                    DisposableEffect(videoHost, editorGeneration) {
+                    DisposableEffect(videoHost, this@MainActivity) {
                         val binding = videoHost.bindLifecycle(this@MainActivity)
                         onDispose { binding.close() }
                     }

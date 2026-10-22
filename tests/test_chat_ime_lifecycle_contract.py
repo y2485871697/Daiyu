@@ -84,7 +84,9 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         self.assertIn('GLOBAL_ACTION_HOME', home)
         self.assertIn('Lifecycle.Event.ON_STOP', home)
         self.assertIn('stopped.await(5,', home)
-        self.assertIn('FLAG_ACTIVITY_REORDER_TO_FRONT', home)
+        self.assertIn('restoreOriginalHost(original)', home)
+        driver = self.read(ANDROID / 'ComposeActivityTestCase.kt').split('protected fun restoreOriginalHost', 1)[1].split('protected fun awaitHostWindowFocus', 1)[0]
+        self.assertIn('am start -n $component -f 0x30020000', driver)
         self.assertNotIn('FLAG_ACTIVITY_CLEAR_TASK', home)
         returned = home.split('awaitHostWindowFocus(original)', 1)[1]
         before_reopen = returned.split('node("chat-draft").performTouchInput', 1)[0]

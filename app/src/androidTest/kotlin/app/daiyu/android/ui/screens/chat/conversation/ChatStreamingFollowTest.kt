@@ -59,7 +59,7 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
         try {
             val origin = tailTop()
             var previous = origin
-            mainThread { height += 78.dp }
+            ui.runOnUiThread { height += 78.dp }
             repeat(8) {
                 val current = frame()
                 val movement = previous - current
@@ -70,7 +70,7 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
             val firstMovement = origin - previous
             assertTrue("Must make progress without paying the whole new height at once", firstMovement > density && firstMovement < 77f * density)
             repeat(10) {
-                mainThread { height += 26.dp }
+                ui.runOnUiThread { height += 26.dp }
                 val current = frame()
                 val movement = previous - current
                 assertTrue("Moving target cannot reverse: $movement", movement >= -1f)
@@ -105,7 +105,7 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             val origin = tailTop()
-            mainThread { height += 300.dp }
+            ui.runOnUiThread { height += 300.dp }
             repeat(6) { frame() }
             val progress = origin - tailTop()
             val density = activity.resources.displayMetrics.density
@@ -113,7 +113,7 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
             ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
             ui.waitForIdle()
             val stopped = tailTop()
-            mainThread { height += 300.dp }
+            ui.runOnUiThread { height += 300.dp }
             repeat(12) {
                 assertEquals("Touch cancels momentum as well as later height updates", stopped, frame(), 1f)
             }
@@ -131,12 +131,12 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             val origin = tailTop()
-            mainThread { height += 300.dp }
+            ui.runOnUiThread { height += 300.dp }
             repeat(6) { frame() }
             val progress = origin - tailTop()
             val density = activity.resources.displayMetrics.density
             assertTrue("Fixture must interrupt an active, unfinished follow: $progress", progress > density && progress < 299f * density)
-            mainThread {
+            ui.runOnUiThread {
                 request = ChatScrollRequest(serial = 2, messageId = "u1", followBottom = false)
             }
         } finally {

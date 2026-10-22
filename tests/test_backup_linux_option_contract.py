@@ -39,8 +39,15 @@ class BackupLinuxOptionContractTest(unittest.TestCase):
 
     def test_busy_lock_and_existing_callbacks_are_unchanged(self):
         self.assertIn('enabled = !busy', self.row)
-        self.assertIn('tag = "backup-export", onClick = if (busy) null else onExportComplete', self.source)
-        self.assertIn('tag = "backup-import", onClick = if (busy) null else onImport', self.source)
+        export = self.source.split('SettingsRow("导出数据"', 1)[1].split('SettingsRow("导入数据"', 1)[0]
+        importing = self.source.split('SettingsRow("导入数据"', 1)[1]
+        self.assertIn('tag = "backup-export"', export)
+        self.assertIn('onClick = if (busy) null else onExportComplete', export)
+        self.assertIn('tag = "backup-import"', importing)
+        self.assertIn('onClick = if (busy) null else onImport', importing)
+        if 'showChevron =' in self.source:
+            components = SCREEN.with_name('SettingsUiComponents.kt').read_text()
+            self.assertIn('showChevron: Boolean', components)
         self.assertIn('onImport: () -> Unit = onImportComplete', self.source)
         self.assertNotIn('onExportComplete(', self.row)
         self.assertNotIn('onImport(', self.row)

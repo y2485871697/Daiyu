@@ -40,9 +40,9 @@ internal fun BackupScreen(
             SettingsCard {
                 SettingsSwitchRow("包含完整 Linux 环境", checked = includeFullLinuxEnvironment, enabled = !busy,
                     tag = "backup-include-full-linux") { includeFullLinuxEnvironment = it }
-                SettingsRow("导出数据", summary = if (busy) "处理中，请稍候" else "保存当前数据备份", tag = "backup-export", showChevron = true, onClick = if (busy) null else onExportComplete,
+                SettingsRow("导出数据", summary = if (busy) "处理中，请稍候" else "保存当前数据备份", tag = "backup-export", onClick = if (busy) null else onExportComplete,
                     leading = { SettingsIcon(DaiyuIcons.Export) })
-                SettingsRow("导入数据", summary = if (busy) "处理中，请稍候" else "从备份文件恢复数据", tag = "backup-import", showChevron = true, onClick = if (busy) null else onImport,
+                SettingsRow("导入数据", summary = if (busy) "处理中，请稍候" else "从备份文件恢复数据", tag = "backup-import", onClick = if (busy) null else onImport,
                     leading = { SettingsIcon(DaiyuIcons.Import) })
             }
         }

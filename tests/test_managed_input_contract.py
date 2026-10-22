@@ -102,7 +102,7 @@ class ManagedInputContractTest(unittest.TestCase):
         for token in ('exerciseFields(false)', 'exerciseFields(true)', 'tapField("managed-second")',
                       'assertEquals(5, selection.start)', 'assertEquals(1, selection.end)',
                       'GLOBAL_ACTION_HOME', 'awaitHostWindowFocus(original)',
-                      'awaitImeFrame(node("managed-first"), visible = false)', '动作次数 1',
+                      'awaitFieldIme("managed-first", visible = false)', '动作次数 1',
                       'realLongPress("managed-first")', 'realDrag("managed-first")', 'fixture.database.exportBackup()', 'fixture.opens.get()'):
             self.assertIn(token, text)
         self.assertNotIn('Thread.sleep', text)

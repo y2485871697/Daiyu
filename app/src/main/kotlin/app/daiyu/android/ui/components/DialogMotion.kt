@@ -16,6 +16,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -27,6 +30,8 @@ import androidx.compose.ui.window.Dialog as ComposeDialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import top.yukonga.miuix.kmp.anim.folmeSpring
+
+internal val DialogEnterSettled = SemanticsPropertyKey<Boolean>("DialogEnterSettled")
 
 // Same motion as Miuix 0.9.4-rc01 WindowDialog; callers retain their own layout.
 internal fun dialogEnterSpec(largeScreen: Boolean): FiniteAnimationSpec<Float> =
@@ -46,7 +51,9 @@ internal fun Modifier.dialogEnterMotion(): Modifier {
     val density = LocalDensity.current.density
     val largeScreen = size.width / density >= 840f && size.height / density >= 480f
     val progress = rememberDialogEnterProgress(largeScreen)
-    return graphicsLayer {
+    return semantics {
+        this[DialogEnterSettled] = progress.value == 1f && !progress.isRunning
+    }.graphicsLayer {
         val value = progress.value
         if (largeScreen) {
             scaleX = 0.8f + 0.2f * value

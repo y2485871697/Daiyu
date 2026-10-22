@@ -80,45 +80,55 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected fun captureScreenNode(target: SemanticsNodeInteraction): ImageBitmap {
         awaitVisualIdle()
         val node = target.assertIsDisplayed().fetchSemanticsNode()
-        val bounds = ui.runOnIdle { node.boundsInRoot.translate(node.positionOnScreen - node.positionInRoot) }
-        check(listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() } &&
-            bounds.width > 0f && bounds.height > 0f)
-        val left = floor(bounds.left.toDouble()).toInt()
-        val top = floor(bounds.top.toDouble()).toInt()
-        val right = ceil(bounds.right.toDouble()).toInt()
-        val bottom = ceil(bounds.bottom.toDouble()).toInt()
         val view = (node.root as androidx.compose.ui.platform.ViewRootForTest).view
+        awaitNodeWindowFocus(target)
+        val token = view.windowToken
         val drawingEnabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
         val frame = java.util.concurrent.CountDownLatch(1)
         var drawListener: android.view.ViewTreeObserver.OnDrawListener? = null
-        val screen = try {
+        var screen: Bitmap? = null
+        var cropped: Bitmap? = null
+        try {
             if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
             instrumentation.runOnMainSync {
                 if (android.os.Build.VERSION.SDK_INT >= 29 && view.isHardwareAccelerated) {
                     view.viewTreeObserver.registerFrameCommitCallback { frame.countDown() }
                 } else {
                     drawListener = object : android.view.ViewTreeObserver.OnDrawListener {
-                        override fun onDraw() {
-                            view.post { frame.countDown() }
-                        }
+                        override fun onDraw() { view.post { frame.countDown() } }
                     }
                     view.viewTreeObserver.addOnDrawListener(drawListener)
                 }
                 view.invalidate()
             }
             check(frame.await(2, java.util.concurrent.TimeUnit.SECONDS)) { "截图前未提交绘制帧" }
-            checkNotNull(instrumentation.uiAutomation.takeScreenshot()) { "截图未返回图像" }
+            fun sampleBounds() = node.boundsInRoot.translate(node.positionOnScreen - node.positionInRoot)
+            val bounds = awaitStableWindowFrame(view) {
+                if (view.windowToken != token || !node.layoutInfo.isPlaced ||
+                    !node.layoutInfo.coordinates.isAttached) null else sampleBounds().takeIf {
+                    it.width > 0f && it.height > 0f &&
+                        listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() }
+                }
+            }
+            val captured = checkNotNull(instrumentation.uiAutomation.takeScreenshot()) { "截图未返回图像" }
+            screen = captured
+            val after = ui.runOnIdle { sampleBounds() }
+            check(view.windowToken == token && bounds == after) {
+                "Screenshot geometry changed: before=$bounds after=$after screen=${captured.width}x${captured.height}"
+            }
+            val left = floor(bounds.left.toDouble()).toInt()
+            val top = floor(bounds.top.toDouble()).toInt()
+            val right = ceil(bounds.right.toDouble()).toInt()
+            val bottom = ceil(bounds.bottom.toDouble()).toInt()
+            check(left >= 0 && top >= 0 && right <= captured.width && bottom <= captured.height && right > left && bottom > top) {
+                "Node crop $bounds outside ${captured.width}x${captured.height}"
+            }
+            return Bitmap.createBitmap(captured, left, top, right - left, bottom - top).also { cropped = it }.asImageBitmap()
         } finally {
             instrumentation.runOnMainSync { drawListener?.let { view.viewTreeObserver.removeOnDrawListener(it) } }
             if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+            if (cropped !== screen) screen?.recycle()
         }
-        var cropped: Bitmap? = null
-        try {
-            check(left >= 0 && top >= 0 && right <= screen.width && bottom <= screen.height && right > left && bottom > top) {
-                "Node crop $bounds outside ${screen.width}x${screen.height}"
-            }
-            return Bitmap.createBitmap(screen, left, top, right - left, bottom - top).also { cropped = it }.asImageBitmap()
-        } finally { if (cropped !== screen) screen.recycle() }
     }
 
     protected fun node(tag: String): SemanticsNodeInteraction {
@@ -346,6 +356,40 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             val bottom = insets?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom
             if (insets != null && insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == visible &&
                 bottom != null && (if (visible) bottom > 0 else bottom == 0)) bottom else null
+        }
+    }
+
+    protected fun awaitDialogEnter(target: SemanticsNodeInteraction) {
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            val current = target.fetchSemanticsNode()
+            val signals = generateSequence(current) { it.parent }.mapNotNull {
+                it.config.getOrNull(app.daiyu.android.ui.components.DialogEnterSettled)
+            }.toList()
+            assertTrue("Dialog entry signal missing from target parent chain", signals.isNotEmpty())
+            signals.all { it }
+        }
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    protected fun awaitDialogImeFrame(target: SemanticsNodeInteraction, visible: Boolean) {
+        val view = (target.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+        val automation = instrumentation.uiAutomation
+        val oldFlags = automation.serviceInfo.flags
+        try {
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            awaitStableWindowFrame(view) {
+                val shown = automation.windows.any { window ->
+                    val bounds = android.graphics.Rect()
+                    window.getBoundsInScreen(bounds)
+                    window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD && !bounds.isEmpty
+                }
+                shown.takeIf { it == visible }
+            }
+        } finally {
+            automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
         }
     }
 

@@ -37,7 +37,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
             var iconHeight: Float? = null
             var textLeft: Float? = null
             tags.forEachIndexed { index, tag ->
-                reveal(tag, "模型提供商")
+                reveal(tag, "模型提供商").scrollToVisible()
                 val icon = ui.onNodeWithTag("$tag-icon", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                 val title = ui.onNodeWithText(titles[index], useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                 val summary = ui.onNodeWithText(summaries[index], useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -50,6 +50,9 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
                 assertEquals("title start dark=$dark font=$fontScale", checkNotNull(textLeft), title.left, 1f)
                 assertEquals(title.left, summary.left, 1f)
                 assertEquals(icon.width, icon.height, 1f)
+                val density = activity.resources.displayMetrics.density
+                assertEquals("24dp icon width", 24f * density, icon.width, 1f)
+                assertEquals("24dp icon height", 24f * density, icon.height, 1f)
                 val row = node(tag).fetchSemanticsNode().boundsInRoot
                 assertEquals(row.center.y, icon.center.y, 1f)
             }

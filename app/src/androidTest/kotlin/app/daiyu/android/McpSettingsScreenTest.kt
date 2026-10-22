@@ -174,7 +174,22 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
             assertFalse(owner.current())
             try { store.save(emptyList(), owner, beforeRevocation); fail("revoked settings page saved") } catch (_: IllegalStateException) { }
-            assertEquals(beforeRevocation, store.snapshot())
+            val afterRevocation = store.snapshot()
+            assertEquals(beforeRevocation.revision, afterRevocation.revision)
+            assertSame(beforeRevocation.stamp, afterRevocation.stamp)
+            assertEquals(beforeRevocation.servers.size, afterRevocation.servers.size)
+            beforeRevocation.servers.zip(afterRevocation.servers).forEach { (before, after) ->
+                assertTrue("server id changed", before.id == after.id)
+                assertTrue("server label changed", before.label == after.label)
+                assertTrue("server endpoint changed", before.endpoint == after.endpoint)
+                assertTrue("server bearer changed", before.bearer == after.bearer)
+                assertEquals(before.enabled, after.enabled)
+                assertTrue("allowed tools changed", before.allowedTools == after.allowedTools)
+                assertEquals(before.catalog.size, after.catalog.size)
+                assertTrue("catalog metadata changed", before.catalog.zip(after.catalog).all { (old, fresh) ->
+                    old.sameMetadata(fresh)
+                })
+            }
         } finally {
             mainThread { activity.setContent {} }
             root.deleteRecursively()

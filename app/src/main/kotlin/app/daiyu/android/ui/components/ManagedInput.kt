@@ -32,6 +32,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import kotlin.math.hypot
 
 /** Only suppress selection/composition changes caused synchronously by our own dismissal. */
@@ -74,7 +75,8 @@ private fun View.inputWindow(): Window? {
         if (ancestor is DialogWindowProvider) return ancestor.window
         ancestor = ancestor.parent
     }
-    return context.inputActivity()?.window?.takeIf { it.decorView.windowToken == windowToken }
+    val activity = (findViewTreeLifecycleOwner() as? Activity) ?: context.inputActivity()
+    return activity?.window?.takeIf { isAttachedToWindow && it.decorView.windowToken == windowToken }
 }
 
 private fun View.visibleInputBounds(): RectF? {
@@ -184,16 +186,19 @@ private fun bindInput(entry: InputEntry, explicitWindow: Window? = null): () -> 
 private object InputWindows {
     val windows = mutableMapOf<Window, InputWindow>()
     fun acquire(window: Window, entry: InputEntry): InputWindow {
-        val host = windows.getOrPut(window) { InputWindow(window) }
+        val host = windows.getOrPut(window) {
+            val lifecycle = entry.view.findViewTreeLifecycleOwner()?.lifecycle
+                ?: (window.context.inputActivity() as? LifecycleOwner)?.lifecycle
+            InputWindow(window, lifecycle)
+        }
         host.entries.add(entry)
         return host
     }
 }
 
-private class InputWindow(private val window: Window) {
+private class InputWindow(private val window: Window, private val lifecycle: Lifecycle?) {
     val entries = mutableSetOf<InputEntry>()
     private val original = window.callback
-    private val lifecycle = (window.context.inputActivity() as? LifecycleOwner)?.lifecycle
     private val observer = LifecycleEventObserver { _, event ->
         if (event == Lifecycle.Event.ON_STOP) entries.firstOrNull { it.focused() }?.let { dismiss(it) }
     }

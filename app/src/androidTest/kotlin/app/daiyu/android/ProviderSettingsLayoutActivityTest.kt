@@ -61,16 +61,19 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
     fun testProviderFooterKeepsSaveConfigurationAndAlignedDeleteButtons() {
         val before = fixture.controller.providers.snapshot()
         openModels()
-        reveal("provider-delete", lazyKey = "provider_delete").assertIsEnabled()
+        reveal("provider-delete", lazyKey = "provider_delete").scrollToVisible().assertIsEnabled()
         val save = node("model-save").assertIsDisplayed().assertTextContains("保存配置")
             .fetchSemanticsNode().boundsInRoot
         val delete = node("provider-delete").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val density = activity.resources.displayMetrics.density
         assertEquals(save.left, delete.left, 1f)
         assertEquals(save.right, delete.right, 1f)
-        assertTrue("save keeps a full-width touch target", save.width / density > 200f && save.height / density >= 48f)
-        assertTrue("delete keeps a full-width touch target", delete.width / density > 200f && delete.height / density >= 48f)
+        val saveTouch = node("model-save").fetchSemanticsNode().touchBoundsInRoot
+        val deleteTouch = node("provider-delete").fetchSemanticsNode().touchBoundsInRoot
+        assertTrue("save keeps a full-width touch target: $saveTouch", saveTouch.width / density > 200f && saveTouch.height / density >= 48f)
+        assertTrue("delete keeps a full-width touch target: $deleteTouch", deleteTouch.width / density > 200f && deleteTouch.height / density >= 48f)
         assertTrue("delete is below save", delete.top >= save.bottom)
+        assertTrue("touch targets do not overlap", deleteTouch.top >= saveTouch.bottom)
         node("provider-delete").performClick()
         awaitUniqueTag("dialog-confirm")
         awaitNodeWindowFocus(node("dialog-confirm"))
@@ -93,7 +96,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = false) {
                         key(dark, fontScale) {
-                            Column(Modifier.width(250.dp).background(Color.Magenta)) {
+                            Column(Modifier.width(250.dp).background(Color.Magenta).testTag("compact-provider-host")) {
                                 listOf("测试余额查询", "保存配置", "删除提供商").forEachIndexed { index, title ->
                                     ProviderActionButton(title, { clicks[index]++ },
                                         Modifier.testTag("compact-provider-action:$index"), enabled = enabled.value,
@@ -108,10 +111,20 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
+            val host = node("compact-provider-host")
+            val hostBounds = host.fetchSemanticsNode().boundsInRoot
             repeat(3) { index ->
                 val button = node("compact-provider-action:$index").assertIsEnabled()
-                    .assertHeightIsEqualTo(48.dp)
-                val pixels = button.captureToImage().toPixelMap()
+                    .assertHeightIsEqualTo(40.dp).assertTouchHeightIsEqualTo(48.dp)
+                val touch = button.fetchSemanticsNode().touchBoundsInRoot
+                val left = (touch.left - hostBounds.left).toInt()
+                val top = (touch.top - hostBounds.top).toInt()
+                val bitmap = host.captureToImage()
+                val image = bitmap.toPixelMap()
+                val width = touch.width.toInt()
+                val height = touch.height.toInt()
+                check(left >= 0 && top >= 0 && left + width <= image.width && top + height <= image.height)
+                val pixels = bitmap.toPixelMap(startX = left, startY = top, width = width, height = height)
                 val x = pixels.width / 8
                 val fill = pixels[x, pixels.height / 2]
                 fun sameColor(color: Color) = kotlin.math.abs(color.red - fill.red) < .02f &&
@@ -126,17 +139,27 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                 assertEquals(1f, outside.red, .01f)
                 assertEquals(0f, outside.green, .01f)
                 assertEquals(1f, outside.blue, .01f)
-                button.performTouchInput { click(Offset(center.x, 2f * density)) }
+                val fillBounds = button.fetchSemanticsNode().boundsInRoot
+                val topPoint = Offset(touch.center.x, touch.top + 2f * density)
+                val bottomPoint = Offset(touch.center.x, touch.bottom - 2f * density)
+                assertTrue("top edge is outside fill", topPoint.y < fillBounds.top)
+                assertTrue("bottom edge is outside fill", bottomPoint.y > fillBounds.bottom)
+                host.performTouchInput { click(topPoint - hostBounds.topLeft) }
                 assertEquals(1, clicks[index])
+                host.performTouchInput { click(bottomPoint - hostBounds.topLeft) }
+                assertEquals(2, clicks[index])
             }
             mainThread { enabled.value = false }
             ui.waitForIdle()
             repeat(3) { index ->
                 val button = node("compact-provider-action:$index").assertIsNotEnabled()
                 button.performTouchInput { click() }
-                button.performTouchInput { click(Offset(center.x, 2f * density)) }
-                assertEquals(1, clicks[index])
+                val touch = button.fetchSemanticsNode().touchBoundsInRoot
+                host.performTouchInput { click(Offset(touch.center.x, touch.top + 2f * density) - hostBounds.topLeft) }
+                host.performTouchInput { click(Offset(touch.center.x, touch.bottom - 2f * density) - hostBounds.topLeft) }
+                assertEquals(2, clicks[index])
             }
+            assertTrue("disabled edge touches must not invoke any action", clicks.all { it == 2 })
         }
         assertEquals(0, fixture.opens.get())
     }

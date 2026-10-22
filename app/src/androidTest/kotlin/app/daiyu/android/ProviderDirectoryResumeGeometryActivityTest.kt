@@ -160,9 +160,11 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
         val saved = fixture.settings.load()
         val slot = registry.providers.single().slotId
         val tags = listOf("provider-add", "provider-add-anthropic", "provider-add-speech", "provider-open-$slot")
+        dismissIme()
         show(false, .9f) { ProviderManagementRoute(fixture.controller, { true }, {}) }
         awaitUniqueTag("provider-add")
         ui.waitUntil(5_000) { row("provider-add").fetchSemanticsNode().config.contains(SemanticsActions.OnClick) }
+        awaitImeFrame(row("provider-add"), visible = false)
         val before = bounds(tags)
         val textBefore = textGeometry("provider-add", summary)
         val testRoot = row("provider-add").fetchSemanticsNode().root as ViewRootForTest
@@ -245,7 +247,7 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
             val recorded = synchronized(frames) { frames.toList() }
             assertTrue(recorded.map { it.windowHeight }.distinct().size == 1)
             recorded.forEach { frame ->
-                assertEquals(0, frame.imeBottom)
+                assertEquals("return frame=$frame", 0, frame.imeBottom)
                 assertBounds(before, frame.geometry)
                 assertRect("return-frame summary", textBefore.bounds, frame.summary)
             }

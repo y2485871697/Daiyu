@@ -2,6 +2,10 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -28,7 +32,9 @@ import app.daiyu.android.ui.screens.settings.SettingsTextField
 
 class ManagedInputActivityTest : WiredActivityTestCase() {
     private var fieldToolbar: androidx.compose.ui.platform.TextToolbar? = null
+    private var fieldsInDialog = false
     private fun showFields(dialog: Boolean = false) {
+        fieldsInDialog = dialog
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -38,11 +44,17 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                         var first by remember { mutableStateOf(" 保留草稿😀 ") }
                         var second by remember { mutableStateOf("第二个输入框") }
                         var clicks by remember { mutableStateOf(0) }
-                        Column(Modifier.fillMaxWidth().padding(24.dp)) {
+                        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)) {
                             SettingsTextField("第一项", first, { first = it }, tag = "managed-first")
                             OutlinedTextField(second, { second = it },
                                 modifier = Modifier.managedInput().testTag("managed-second"),
                                 colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                    unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                    focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                                    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
                                     cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                                     errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)))
                             androidx.compose.material3.Text("外部标题", Modifier.testTag("managed-outside"))
@@ -52,7 +64,9 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                             }
                         }
                     }
-                    if (dialog) DaiyuDialog(onDismissRequest = {}) { fields() } else fields()
+                    if (dialog) DaiyuDialog(onDismissRequest = {}) { fields() }
+                    else Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                        .systemBarsPadding().imePadding()) { fields() }
                 }
             }
         }
@@ -60,7 +74,8 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun screenBounds(tag: String): androidx.compose.ui.geometry.Rect {
-        val interaction = node(tag)
+        val interaction = node(tag).scrollToVisible()
+        awaitVisualIdle()
         awaitNodeWindowFocus(interaction)
         val target = interaction.fetchSemanticsNode()
         val view = (target.root as androidx.compose.ui.platform.ViewRootForTest).view
@@ -124,11 +139,16 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         }
     }
 
+    private fun awaitFieldIme(tag: String, visible: Boolean) {
+        if (fieldsInDialog) awaitDialogImeFrame(node(tag), visible)
+        else awaitImeFrame(node(tag), visible)
+    }
+
     private fun tapField(tag: String) {
         realTap(tag)
         awaitFieldFocus(tag, true)
         node(tag).assertIsFocused()
-        awaitImeFrame(node(tag), visible = true)
+        awaitFieldIme(tag, visible = true)
     }
 
     private fun exerciseFields(dialog: Boolean) {
@@ -141,7 +161,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         realTap("managed-outside")
         awaitFieldFocus("managed-first", false)
         node("managed-first").assertIsNotFocused()
-        awaitImeFrame(node("managed-first"), visible = false)
+        awaitFieldIme("managed-first", visible = false)
         node("managed-first").assertTextEquals(" 保留草稿😀 ")
         val selection = node("managed-first").fetchSemanticsNode().config[
             androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
@@ -154,7 +174,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         realTap("managed-button")
         awaitFieldFocus("managed-second", false)
         node("managed-second").assertIsNotFocused()
-        awaitImeFrame(node("managed-second"), visible = false)
+        awaitFieldIme("managed-second", visible = false)
         ui.onNodeWithText("动作次数 1").assertExists()
         assertEquals(database, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
@@ -183,7 +203,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         awaitHostWindowFocus(original)
         awaitFieldFocus("managed-first", false)
         node("managed-first").assertIsNotFocused()
-        awaitImeFrame(node("managed-first"), visible = false)
+        awaitFieldIme("managed-first", visible = false)
         node("managed-first").assertTextEquals(" 保留草稿😀 ")
         tapField("managed-first")
         assertEquals(0, fixture.opens.get())
@@ -211,7 +231,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             assertTrue("Visible IME must show the caret to this test", changed)
             // This test hides only IME, deliberately preserving input focus.
             dismissIme()
-            awaitImeFrame(node(tag), visible = false)
+            awaitFieldIme(tag, visible = false)
             node(tag).assertIsFocused()
             val hidden = pixels(tag)
             repeat(3) {
@@ -257,7 +277,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         node("managed-first").assertIsFocused()
         realDrag("managed-outside")
         node("managed-first").assertIsFocused()
-        awaitImeFrame(node("managed-first"), visible = true)
+        awaitFieldIme("managed-first", visible = true)
     }
 
     fun testNativeFieldsKeepDraftAndSelectionWhenOutsideTapClearsFocus() {

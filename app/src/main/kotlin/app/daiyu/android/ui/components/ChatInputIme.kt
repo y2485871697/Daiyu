@@ -2,6 +2,13 @@ package app.daiyu.android.ui.components
 
 import android.app.Activity
 import android.view.View
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -65,5 +72,35 @@ internal fun DismissImeOnStop() {
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
+    }
+}
+
+/** Observe a short tap without taking the child's click, drag or long-press gesture. */
+@Composable
+internal fun chatInputDismissTapModifier(onTap: () -> Unit): Modifier {
+    val currentTap by rememberUpdatedState(onTap)
+    return Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var tap = true
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id }
+                if (event.changes.size != 1 || change == null) tap = false
+                if (change != null) {
+                    if (change.position.x !in 0f..size.width.toFloat() ||
+                        change.position.y !in 0f..size.height.toFloat() ||
+                        (change.position - down.position).getDistance() > viewConfiguration.touchSlop ||
+                        change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) tap = false
+                    if (!change.pressed) {
+                        if (tap && change.previousPressed &&
+                            change.position.x in 0f..size.width.toFloat() &&
+                            change.position.y in 0f..size.height.toFloat()) currentTap()
+                        break
+                    }
+                }
+                if (event.changes.none { it.pressed }) break
+            }
+        }
     }
 }

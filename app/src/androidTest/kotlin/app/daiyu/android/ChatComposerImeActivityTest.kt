@@ -5,6 +5,8 @@ import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -209,6 +211,125 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         assertDraft(" 暂时遮盖的草稿 ")
         assertSelection(1, 4)
         assertHostSelection(1, 4)
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testOutsideBlankAndTitleTapsReleaseDraftAndImeWithoutChangingDraft() {
+        dismissIme()
+        val before = settledFrame(visible = false)
+        val draft = " 保留草稿😀\n不发送 "
+        setDraft(draft)
+        val database = fixture.database.exportBackup()
+        for (target in listOf("chat-messages", "chat-title")) {
+            node("chat-draft").performTouchInput {
+                advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+                click()
+            }
+            node("chat-draft").assertIsFocused()
+            awaitImeFrame(node("chat-draft"), visible = true)
+            setSelection(8, 2, relativeToOriginalText = true)
+            assertHostSelection(8, 2)
+            node(target).performTouchInput {
+                if (target == "chat-messages") click(androidx.compose.ui.geometry.Offset(8f, 8f)) else click()
+            }
+            // The product tap must hide IME; the test does not dismiss it here.
+            node("chat-draft").assertIsNotFocused()
+            val hidden = settledFrame(visible = false, before = before)
+            assertEquals(before.headerBottom, hidden.headerBottom, 2f)
+            assertSelection(8, 2)
+            assertHostSelection(8, 2)
+            assertDraft(draft)
+            assertEquals(database, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
+        }
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        node("chat-draft").assertIsFocused()
+        awaitImeFrame(node("chat-draft"), visible = true)
+        val selection = node("chat-draft").fetchSemanticsNode().config[
+            androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
+        node("chat-draft").performTextInput("续写")
+        assertDraft(draft.replaceRange(selection.min, selection.max, "续写"))
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDraftAndComposerBlankTapsKeepEditingButTopButtonStillWorks() {
+        dismissIme()
+        setDraft(" 点输入栏不收起键盘 ")
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        awaitImeFrame(node("chat-draft"), visible = true)
+        val database = fixture.database.exportBackup()
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        node("chat-draft").assertIsFocused()
+        awaitImeFrame(node("chat-draft"), visible = true)
+        node("chat-composer-divider").performTouchInput { click() }
+        node("chat-draft").assertIsFocused()
+        awaitImeFrame(node("chat-draft"), visible = true)
+        // A real outside button retains its ordinary action while releasing the editor.
+        ui.onNodeWithContentDescription("更多").performTouchInput { click() }
+        node("chat-draft").assertIsNotFocused()
+        awaitImeFrame(node("chat-draft"), visible = false)
+        node("chat-menu:NEW_CHAT").assertIsDisplayed()
+        assertDraft(" 点输入栏不收起键盘 ")
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testHiddenImeStopsCaretDrawingEvenWhenDraftRemainsFocused() {
+        fun draftPixels(): IntArray {
+            val image = captureScreenNode(node("chat-draft")).toPixelMap()
+            return IntArray(image.width * image.height) { index ->
+                image[index % image.width, index / image.width].toArgb()
+            }
+        }
+        dismissIme()
+        val draft = "收起键盘后不闪烁"
+        setDraft(draft)
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        awaitImeFrame(node("chat-draft"), visible = true)
+        setSelection(draft.length, draft.length, relativeToOriginalText = true)
+        assertHostSelection(draft.length, draft.length)
+        val visible = draftPixels()
+        var cursorChanged = false
+        repeat(3) {
+            ui.mainClock.advanceTimeBy(550)
+            if (!visible.contentEquals(draftPixels())) cursorChanged = true
+        }
+        assertTrue("Visible IME must expose cursor blinking to the screenshot test", cursorChanged)
+        val database = fixture.database.exportBackup()
+        dismissIme()
+        awaitImeFrame(node("chat-draft"), visible = false)
+        settledFrame(visible = false)
+        node("chat-draft").assertIsFocused()
+        assertSelection(draft.length, draft.length)
+        assertHostSelection(draft.length, draft.length)
+        val expected = draftPixels()
+        repeat(3) {
+            ui.mainClock.advanceTimeBy(550)
+            node("chat-draft").assertIsFocused()
+            awaitImeFrame(node("chat-draft"), visible = false)
+            val pixels = draftPixels()
+            assertTrue("Hidden IME must not leave a blinking caret, sample=$it", expected.contentEquals(pixels))
+        }
+        node("chat-title").performTouchInput { click() }
+        node("chat-draft").assertIsNotFocused()
+        val withoutFocus = draftPixels()
+        assertTrue("Hidden IME must draw no caret, including a steady caret", expected.contentEquals(withoutFocus))
+        assertSelection(draft.length, draft.length)
+        assertHostSelection(draft.length, draft.length)
+        assertDraft(draft)
         assertEquals(database, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }

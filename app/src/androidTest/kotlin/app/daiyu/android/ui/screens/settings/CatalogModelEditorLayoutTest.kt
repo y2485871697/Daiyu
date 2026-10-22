@@ -97,6 +97,9 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(dark, scale, fontScale = 1.3f)
             open()
+            awaitNodeWindowFocus(node("catalog-model-editor"))
+            dismissIme()
+            awaitVisualIdle()
             val footer = node("catalog-model-actions").fetchSemanticsNode().boundsInRoot
             val cancel = node("dialog-cancel").fetchSemanticsNode().boundsInRoot
             val save = node("dialog-confirm").fetchSemanticsNode().boundsInRoot

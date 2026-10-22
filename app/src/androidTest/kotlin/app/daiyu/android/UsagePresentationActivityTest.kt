@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.*
@@ -50,13 +51,16 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         onBack: () -> Unit = {},
         load: suspend () -> UsageStatsSnapshot,
     ) {
+        val contentKey = Any()
         mainThread { activity.setContent {
-            val platform = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
-                AgentAppTheme(AppearanceSettings(interfaceScale = scale,
-                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
-                    applyInterfaceScale = true) {
-                    UsageStatsScreen(onBack = onBack, load = load)
+            key(contentKey) {
+                val platform = LocalDensity.current
+                CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
+                    AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                        themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = true) {
+                        UsageStatsScreen(onBack = onBack, load = load)
+                    }
                 }
             }
         } }
@@ -112,11 +116,17 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         )
         listOf(false, true).forEach { dark -> listOf(1f, .8f).forEach { scale ->
             show(dark = dark, scale = scale) { stats }
+            awaitUniqueTag("usage-heatmap")
+            awaitVisualIdle()
             val page = node("usage-stats-screen").fetchSemanticsNode().boundsInRoot
             val root = ui.onRoot().fetchSemanticsNode().boundsInRoot
             assertTrue("Usage statistics must occupy the page, not a capped dialog", page.height >= root.height * .95f)
+            usagePage().scrollToDescendant(hasTestTag("usage-heatmap"))
             node("usage-heatmap").assertIsDisplayed()
             node(tab(R.string.stats_tab_overview)).assertIsSelected()
+            usagePage().scrollToDescendant(hasTestTag(tab(R.string.stats_tab_models)))
+            awaitVisualIdle()
+            node(tab(R.string.stats_tab_models)).assertIsDisplayed()
             val tabNode = node(tab(R.string.stats_tab_models)).fetchSemanticsNode()
             assertTrue(tabNode.boundsInRoot.height / tabNode.layoutInfo.density.density >= 43.5f)
             ui.onNodeWithText("关闭").assertDoesNotExist()

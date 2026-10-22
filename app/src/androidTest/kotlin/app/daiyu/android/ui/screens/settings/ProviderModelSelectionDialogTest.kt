@@ -93,7 +93,10 @@ class ProviderModelSelectionDialogTest : WiredActivityTestCase() {
 
     fun testNoMatchesKeepsCountAndDisablesOnlyVisibleBulkActions() {
         show()
-        node("provider-model-option:beta").performClick()
+        node("provider-model-list").performScrollToKey("beta")
+        awaitVisualIdle()
+        node("provider-model-option:beta").assertIsDisplayed().performClick().assertIsOn()
+        node("provider-model-count").assertTextEquals("1/3")
         node("provider-model-search").performTextReplacement("not present")
         node("provider-model-count").assertTextEquals("1/3")
         node("provider-model-empty").assertTextEquals("没有匹配的模型")

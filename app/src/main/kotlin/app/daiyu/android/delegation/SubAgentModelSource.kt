@@ -3,13 +3,18 @@ package app.daiyu.android.delegation
 import app.daiyu.android.model.GptSpeedMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /** Read-only UI snapshot. The caller projects its model registry; no credentials or old repository. */
 internal interface SubAgentModelSource {
     val providers: StateFlow<List<SubAgentProvider>>
+    /** Retained labels for presentation only; confirmation still resolves against providers. */
+    val displayProviders: StateFlow<List<SubAgentProvider>> get() = providers
+    val refreshing: StateFlow<Boolean> get() = NotRefreshing
     val models: List<SubAgentModel> get() = providers.value.flatMap { it.models }
 
     companion object {
+        private val NotRefreshing = MutableStateFlow(false).asStateFlow()
         val Empty: SubAgentModelSource = object : SubAgentModelSource {
             override val providers = MutableStateFlow<List<SubAgentProvider>>(emptyList())
         }

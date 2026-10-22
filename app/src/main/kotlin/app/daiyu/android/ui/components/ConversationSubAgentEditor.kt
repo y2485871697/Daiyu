@@ -24,7 +24,12 @@ internal class ConversationSubAgentEditor(
 ) {
     constructor(owner: SubAgentConfigKey, repository: ConversationSubAgentPreferences,
         modelSource: SubAgentModelSource, canEdit: () -> Boolean) :
-        this(owner, repository, { id -> modelSource.providers.value.singleOrNull { it.id == id } }, canEdit)
+        this(owner, repository, { id -> modelSource.providers.value.singleOrNull { it.id == id } }, canEdit) {
+        this.modelSource = modelSource
+    }
+    private var modelSource: SubAgentModelSource? = null
+    val modelRefreshing get() = modelSource?.refreshing ?: SubAgentModelSource.Empty.refreshing
+    val modelDisplayProviders get() = modelSource?.displayProviders
     private class LostOwner : RuntimeException()
     private var storedState: SubAgentEditorState by mutableStateOf(SubAgentEditorState.Loading)
     private var lifecycleFailure: (() -> String?)? = null
@@ -36,7 +41,8 @@ internal class ConversationSubAgentEditor(
     fun dispose() { disposed = true }
     fun scoped(applicationToken: String?, gate: () -> Boolean = { true }): ConversationSubAgentEditor {
         val root = this
-        return ConversationSubAgentEditor(owner, repository, providerLookup) { root.enabled && gate() && root.applicationMatches(applicationToken) }
+        return ConversationSubAgentEditor(owner, repository, providerLookup,
+            { root.enabled && gate() && root.applicationMatches(applicationToken) }).also { it.modelSource = modelSource }
     }
     private fun applicationMatches(token: String?): Boolean = try { repository.snapshot(owner).presetApplicationToken == token } catch (_: Exception) { false }
     fun applyPreset(id: String, canApply: () -> Boolean = { true }): ConversationSubAgentPreferences.WriteResult {

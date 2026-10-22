@@ -1,17 +1,34 @@
 package app.daiyu.android.ui.screens.settings
 
 import app.daiyu.android.ui.components.managedInput
-import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.imeCursorBrush
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.sp
+import app.daiyu.android.ui.components.subagent.ConversationAgentButton
+import app.daiyu.android.ui.components.subagent.conversationAgentColors
+import app.daiyu.android.ui.haptics.material.IconButton
+import app.daiyu.android.ui.icons.DaiyuIcon
+import app.daiyu.android.ui.icons.DaiyuIcons
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -102,24 +119,45 @@ import kotlinx.coroutines.withContext
         editing = true
     }
     SettingsScaffoldPage(title = selected?.label ?: "MCP 服务器", onBack = { back() },
-        modifier = Modifier.testTag("mcp-settings"), actions = {
-            app.daiyu.android.ui.haptics.miuix.TextButton(
-                text = if (selected == null) "添加服务器" else "刷新",
-                enabled = !busy && snapshot != null,
-                modifier = Modifier.testTag(if (selected == null) "mcp-settings-add" else "mcp-refresh:${selected.id}"),
-                onClick = {
-                    if (selected == null) edit(null)
-                    else snapshot?.let { refresh(it, selected) }
-                })
+        modifier = Modifier.testTag("mcp-settings").semantics { stateDescription = status }, actions = {
+            if (selected == null) {
+                IconButton(onClick = { edit(null) }, enabled = !busy && snapshot != null,
+                    modifier = Modifier.size(48.dp).testTag("mcp-settings-add")) {
+                    DaiyuIcon(DaiyuIcons.Add, contentDescription = "添加服务器",
+                        tint = MiuixTheme.colorScheme.onSurface, size = 24.dp)
+                }
+            } else {
+                app.daiyu.android.ui.haptics.miuix.TextButton(text = "刷新",
+                    enabled = !busy && snapshot != null,
+                    modifier = Modifier.testTag("mcp-refresh:${selected.id}"),
+                    onClick = { snapshot?.let { refresh(it, selected) } })
+            }
         }) {
-        item(key = "status") {
+        if (busy || status != "保存只配置服务器，不授予工具权限。") item(key = "status") {
             top.yukonga.miuix.kmp.basic.Text(status,
                 modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp).testTag("mcp-settings-status"),
-                style = top.yukonga.miuix.kmp.theme.MiuixTheme.textStyles.body2)
+                style = MiuixTheme.textStyles.body2)
         }
         if (selected == null) {
-            item(key = "servers-heading") { SettingsSectionTitle("已配置服务器（${snapshot?.servers?.size ?: 0}）") }
-            if (snapshot?.servers?.isEmpty() == true) item(key = "empty") { SettingsNote("尚未添加服务器") }
+            item(key = "servers-heading") {
+                top.yukonga.miuix.kmp.basic.Text("服务器 · ${snapshot?.servers?.size ?: 0}",
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).testTag("mcp-settings-count"),
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            }
+            if (snapshot?.servers?.isEmpty() == true) item(key = "empty") {
+                Column(Modifier.padding(horizontal = 12.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp)).background(conversationAgentColors().soft)
+                    .testTag("mcp-settings-empty").padding(horizontal = 20.dp, vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    top.yukonga.miuix.kmp.basic.Text("还没有 MCP 服务器", style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    top.yukonga.miuix.kmp.basic.Text("点击添加服务器", style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    ConversationAgentButton("添加服务器", enabled = !busy, modifier = Modifier.testTag("mcp-settings-empty-add")) { edit(null) }
+                }
+            }
             snapshot?.servers?.forEach { server ->
                 item(key = server.id) {
                     SettingsCard {
@@ -155,23 +193,25 @@ import kotlinx.coroutines.withContext
     }
     if (editing) WindowDialog(show = true, title = if (selected == null) "添加服务器" else "连接设置",
         onDismissRequest = { editing = false; bearer = "" }) {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(label, { label = it }, label = { Text("名称") },
-                enabled = !busy, modifier = Modifier.managedInput().fillMaxWidth().testTag("mcp-server-label"),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
-            OutlinedTextField(endpoint, { endpoint = it }, label = { Text("HTTPS MCP 地址") },
-                enabled = !busy, modifier = Modifier.managedInput().fillMaxWidth().testTag("mcp-server-endpoint"),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
-            OutlinedTextField(bearer, { bearer = it }, label = { Text(if (selected == null) "Bearer 令牌（可选）" else "Bearer 令牌（留空保留）") },
-                visualTransformation = PasswordVisualTransformation(), enabled = !busy,
-                modifier = Modifier.managedInput().fillMaxWidth().testTag("mcp-server-bearer"),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
-            app.daiyu.android.ui.haptics.miuix.TextButton(text = "保存", onClick = { save(false) },
-                enabled = !busy && snapshot != null, modifier = Modifier.testTag("mcp-settings-save"))
-            app.daiyu.android.ui.haptics.miuix.TextButton(text = "取消", onClick = { editing = false; bearer = "" })
+        val colors = conversationAgentColors()
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("mcp-settings-form"),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            McpConnectionField(label, { label = it }, "名称", enabled = !busy,
+                modifier = Modifier.managedInput().testTag("mcp-server-label"), cursorBrush = imeCursorBrush(colors.accent))
+            McpConnectionField(endpoint, { endpoint = it }, "服务器地址", enabled = !busy,
+                modifier = Modifier.managedInput().testTag("mcp-server-endpoint"), cursorBrush = imeCursorBrush(colors.accent))
+            McpConnectionField(bearer, { bearer = it }, if (selected == null) "Bearer Token（可选）" else "Bearer Token（留空保留）",
+                enabled = !busy, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.managedInput().testTag("mcp-server-bearer"), cursorBrush = imeCursorBrush(colors.accent))
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).testTag("mcp-settings-actions"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ConversationAgentButton("取消", modifier = Modifier.weight(1f).fillMaxHeight().testTag("mcp-settings-cancel")) {
+                    editing = false; bearer = ""
+                }
+                ConversationAgentButton(if (selected == null) "添加服务器" else "保存", primary = true,
+                    enabled = !busy && snapshot != null,
+                    modifier = Modifier.weight(1f).fillMaxHeight().testTag("mcp-settings-save")) { save(false) }
+            }
         }
     }
     if (deleting && selected != null) DaiyuConfirmDialog(title = "删除服务器", confirmText = "删除",
@@ -179,5 +219,23 @@ import kotlinx.coroutines.withContext
         onDismiss = { deleting = false }, onConfirm = {
             id = selected.id
             save(true)
+        })
+}
+
+@Composable
+private fun McpConnectionField(value: String, onValueChange: (String) -> Unit, hint: String,
+    enabled: Boolean, modifier: Modifier, cursorBrush: Brush,
+    visualTransformation: VisualTransformation = VisualTransformation.None) {
+    val colors = MiuixTheme.colorScheme
+    val style = MiuixTheme.textStyles.body1.copy(fontSize = 14.sp, lineHeight = 21.sp, color = colors.onSurface)
+    BasicTextField(value, onValueChange, enabled = enabled, singleLine = true,
+        visualTransformation = visualTransformation, textStyle = style, cursorBrush = cursorBrush,
+        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = hint }
+            .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh),
+        decorationBox = { editor ->
+            Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) Text(hint, style = style, color = colors.onSurfaceVariantSummary)
+                editor()
+            }
         })
 }

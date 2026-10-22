@@ -14,7 +14,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -142,28 +146,30 @@ internal fun DaiyuChoiceSheet(
     val colors = MiuixTheme.colorScheme
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
         animateContent = false,
     ) {
         Box(
-            Modifier.fillMaxSize().dialogDimBackground(Color.Black.copy(alpha = 0.32f))
+            Modifier.fillMaxSize().testTag("choice-sheet-viewport").dialogDimBackground(Color.Black.copy(alpha = 0.32f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = onDismiss,
-                ).imePadding().navigationBarsPadding(),
+                ).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .imePadding(),
         ) {
             Column(
                 modifier = Modifier.dialogEnterMotion().align(Alignment.BottomCenter).widthIn(max = 640.dp)
-                    .fillMaxWidth().padding(12.dp).heightIn(max = 560.dp)
-                    .clip(RoundedCornerShape(20.dp)).background(colors.surfaceContainer)
+                    .fillMaxWidth().padding(top = 12.dp).heightIn(max = 560.dp)
+                    .testTag("daiyu-choice-sheet")
+                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(colors.surfaceContainer)
                     .semantics { paneTitle = title }
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         clickFeedback = false,
                         onClick = {},
-                    ).padding(16.dp),
+                    ).bottomSheetContentInsets().padding(16.dp),
             ) {
                 Text(title, style = MiuixTheme.textStyles.headline1, color = colors.onSurface,
                     modifier = Modifier.padding(bottom = 12.dp))
@@ -182,7 +188,7 @@ internal fun DaiyuChoiceSheet(
                     }
                 }
                 TextButton(text = "取消", onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("choice-sheet-cancel"))
             }
         }
     }

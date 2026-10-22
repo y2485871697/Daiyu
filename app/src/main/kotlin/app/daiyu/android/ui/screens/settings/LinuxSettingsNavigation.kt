@@ -35,22 +35,23 @@ internal fun LinuxSettingsTabs(selected: LinuxSettingsTab, onSelect: (LinuxSetti
         Row(Modifier.widthIn(max = 480.dp).fillMaxWidth().selectableGroup()) {
             LinuxSettingsTab.entries.forEach { tab ->
                 val active = selected == tab
-                val tint = if (active) colors.onSurface else colors.onSurfaceVariantSummary
+                val tint = if (active) colors.onPrimary else colors.onPrimaryContainer
                 Column(Modifier.weight(1f).testTag("linux-tab:${tab.name.lowercase()}")
                     .selectable(active, role = Role.Tab, onClick = { onSelect(tab) })
                     .heightIn(min = 72.dp).padding(vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.size(width = 64.dp, height = 32.dp).clip(RoundedCornerShape(50))
-                        .then(if (active) Modifier.background(colors.primary.copy(alpha = .12f))
-                            .testTag("linux-tab-indicator:${tab.name.lowercase()}") else Modifier),
+                        .background(if (active) colors.primary else colors.primaryContainer)
+                        .then(if (active) Modifier.testTag("linux-tab-indicator:${tab.name.lowercase()}") else Modifier),
                         contentAlignment = Alignment.Center) {
                         DaiyuIcon(if (tab == LinuxSettingsTab.BASIC) DaiyuIcons.Settings else DaiyuIcons.File,
                             null, tint = tint, size = 24.dp)
                     }
                     Text(if (tab == LinuxSettingsTab.BASIC) "基本" else "文件",
                         style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 16.sp,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal), color = tint)
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal),
+                        color = if (active) colors.primary else colors.onPrimaryContainer)
                 }
             }
         }
@@ -62,28 +63,30 @@ internal fun LinuxFileLocationTabs(selected: LinuxFileLocation, enabled: Boolean
     val colors = MiuixTheme.colorScheme
     val shape = RoundedCornerShape(28.dp)
     Row(Modifier.padding(horizontal = 16.dp, vertical = 16.dp).fillMaxWidth().clip(shape)
-        .border(BorderStroke(1.dp, colors.onSurfaceVariantSummary.copy(alpha = .65f)), shape)
+        .border(BorderStroke(1.dp, colors.outline), shape)
         .height(IntrinsicSize.Min).selectableGroup().testTag("linux-file-location-tabs")) {
         LinuxFileLocation.entries.forEachIndexed { index, location ->
             if (index > 0) Box(Modifier.width(1.dp).fillMaxHeight()
-                .background(colors.onSurfaceVariantSummary.copy(alpha = .65f)))
+                .background(colors.outline))
             val active = selected == location
+            val tint = (if (active) colors.onPrimary else colors.onPrimaryContainer)
+                .copy(alpha = if (enabled) 1f else .45f)
             Row(Modifier.weight(1f).testTag("linux-files:${location.name.lowercase()}")
-                .background(if (active) colors.primary.copy(alpha = .12f) else androidx.compose.ui.graphics.Color.Transparent)
+                .background(if (active) colors.primary else colors.primaryContainer)
                 .selectable(active, enabled = enabled, role = Role.Tab, onClick = { onSelect(location) })
                 .heightIn(min = 48.dp).padding(horizontal = 6.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 if (active) {
                     DaiyuIcon(DaiyuIcons.Check, null,
                         modifier = Modifier.size(16.dp).testTag("linux-files-indicator:${location.name.lowercase()}"),
-                        tint = colors.onSurface.copy(alpha = if (enabled) 1f else .45f))
+                        tint = tint)
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(when (location) { LinuxFileLocation.WORKSPACE -> "工作区"; LinuxFileLocation.ROOTFS -> "Rootfs"; LinuxFileLocation.SHARED -> "共享文件夹" },
                     style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 20.sp,
                         fontWeight = if (active) FontWeight.Medium else FontWeight.Normal),
                     maxLines = 2, textAlign = TextAlign.Center,
-                    color = colors.onSurface.copy(alpha = if (enabled) 1f else .45f))
+                    color = tint)
             }
         }
     }

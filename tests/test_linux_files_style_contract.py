@@ -26,8 +26,28 @@ class LinuxFilesStyleContract(unittest.TestCase):
         self.assertIn('horizontalCutoutPadding()', nav)
         column, icon = nav.split('Box(Modifier.size(width = 64.dp', 1)
         self.assertNotIn('background(colors.primary', column)
-        self.assertIn('background(colors.primary.copy(alpha = .12f))', icon)
+        self.assertNotIn('.background(', column.split('Column(Modifier.weight(1f)', 1)[1])
+        self.assertIn('background(if (active) colors.primary else colors.primaryContainer)', icon)
         self.assertNotIn('height = 3.dp', nav)
+
+    def test_navigation_colors_use_theme_pairs_instead_of_sampled_reference_colors(self):
+        nav = read('LinuxSettingsNavigation.kt')
+        bottom, files = nav.split('internal fun LinuxFileLocationTabs', 1)
+        self.assertIn('val tint = if (active) colors.onPrimary else colors.onPrimaryContainer', bottom)
+        self.assertIn('color = if (active) colors.primary else colors.onPrimaryContainer', bottom)
+        self.assertIn('tint = tint', bottom)
+        for source in [bottom, files]:
+            self.assertIn('background(if (active) colors.primary else colors.primaryContainer)', source)
+            self.assertNotIn('primary.copy(alpha = .12f)', source)
+            self.assertNotIn('Color(0x', source)
+            self.assertNotIn('assistantPreviewPalette', source)
+            self.assertNotIn('conversationAgentColors', source)
+        self.assertIn('val tint = (if (active) colors.onPrimary else colors.onPrimaryContainer)', files)
+        self.assertIn('.copy(alpha = if (enabled) 1f else .45f)', files)
+        self.assertIn('tint = tint', files)
+        self.assertIn('color = tint', files)
+        self.assertIn('BorderStroke(1.dp, colors.outline)', files)
+        self.assertIn('.background(colors.outline)', files)
 
     def test_navigation_inset_and_callback_owners_stay_with_parent(self):
         page = read('LinuxSettingsScreen.kt')
@@ -141,7 +161,10 @@ class LinuxFilesStyleContract(unittest.TestCase):
         for token in ['testBottomNavigationHasTwoTabTargetsAndOneStableSelectionIndicator',
                       'testFileLocationTabsPreserveSelectionAndDisabledState',
                       'fontScale = 1.3f', 'width(320.dp)', 'for (dark in listOf(false, true))',
-                      'assertHeightIsAtLeast(48.dp)', 'Role.Tab', 'assertIsNotEnabled()']:
+                      'assertHeightIsAtLeast(48.dp)', 'Role.Tab', 'assertIsNotEnabled()',
+                      'testNavigationUsesThemeColorPairsBeforeAndAfterSelectionInBothThemes',
+                      'captureToImage().toPixelMap()', 'colors.primaryContainer', 'colors.onPrimaryContainer',
+                      'val showKey = Any()', 'var tab by remember(showKey)', 'var location by remember(showKey)']:
             self.assertIn(token, test)
 
 

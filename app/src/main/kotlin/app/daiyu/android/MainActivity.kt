@@ -869,7 +869,7 @@ class MainActivity : ComponentActivity() {
             }
             if (value != "backup") { if (prompt?.backup == true) prompt = null; backupImportPickerHopPending = false; backupImportVisit = null; pendingBackupImportResult = null; cancelRestorePreview() }
             if (value != "terminal") terminalPageOwner = null
-            if (value != "linux-settings") {
+            if (value != "linux-settings" && value != "chat-workspace") {
                 linuxSettingsVisit = null
                 linuxSettingsPageOwner?.close()
                 linuxSettingsPageOwner = null
@@ -1430,7 +1430,7 @@ class MainActivity : ComponentActivity() {
         if (state?.getBoolean("terminal-page", false) == true) {
             terminalPageOwner = Any()
             terminalReturnPage = state.getString("terminal-return-page")
-                ?.takeIf { it in setOf("settings", "chat", "linux-settings") } ?: "settings"
+                ?.takeIf { it in setOf("settings", "chat", "linux-settings", "chat-workspace") } ?: "settings"
             retainedPageState = "terminal"
         }
         hapticsHost = app.daiyu.android.haptics.HapticsActivityHost(
@@ -1632,23 +1632,25 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
-                    "linux-settings" -> {
+                    "linux-settings", "chat-workspace" -> {
+                        val route = retainedPage
                         val state by terminalProvider.state.collectAsStateWithLifecycle()
                         val ready = state as? app.daiyu.android.terminal.TerminalApplicationState.Ready
                         val page = linuxSettingsPageOwner
                         val visit = linuxSettingsVisit
-                        if (ready == null || page == null) TerminalLoadingPage(state, onBack = {
-                            if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsVisit === visit)
-                                retainedPage = "settings"
-                        }) else {
+                        val leave: () -> Unit = {
+                            if (activityUsable() && retainedPage == route && linuxSettingsVisit === visit && linuxSettingsPageOwner === page) {
+                                if (route == "chat-workspace") returnToChat() else retainedPage = "settings"
+                            }
+                        }
+                        if (ready == null || page == null) TerminalLoadingPage(state, onBack = leave,
+                            title = if (route == "chat-workspace") "工作区" else "Linux 工具环境")
+                        else key(page) {
                             LinuxSettingsScreen(ready.application.settings, page, host = ready.application.terminalOwner.host,
-                                onOpenTerminal = {
-                                    if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsPageOwner === page)
+                                filesOnly = route == "chat-workspace", onOpenTerminal = {
+                                    if (activityUsable() && retainedPage == route && linuxSettingsPageOwner === page)
                                         openTerminal()
-                                }, onBack = {
-                                if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsPageOwner === page)
-                                    retainedPage = "settings"
-                            })
+                                }, onBack = leave)
                         }
                     }
                     "generation-settings" -> generationSettingsVisit?.let { visit -> key(visit) {
@@ -1758,12 +1760,6 @@ class MainActivity : ComponentActivity() {
                                 if (platformPageCurrent(owner)) { platformSaf.revoke(uri); platformSettingsRevision++ }
                             })
                     } }
-                    "chat-workspace" -> app.daiyu.android.ui.screens.settings.WorkspaceSettingsScreen(
-                        onBack = {
-                            if (activityUsable() && retainedPage == "chat-workspace") returnToChat()
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                    )
                     "settings" -> settingsPageState.SaveableStateProvider("settings-home") {
                         Column(Modifier.fillMaxSize()) {
                         if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "保留会话网关",
@@ -2389,7 +2385,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.SETTINGS -> retainedPage = "settings"
             ChatMenuAction.OPEN_TERMINAL -> openTerminal()
             ChatMenuAction.OPEN_BROWSER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) openBrowserVisualPage()
-            ChatMenuAction.OPEN_WORKSPACE -> if (currentChat()) retainedPage = "chat-workspace"
+            ChatMenuAction.OPEN_WORKSPACE -> if (currentChat()) openLinuxSettings(filesOnly = true)
             ChatMenuAction.CONVERSATION_ID -> selected?.let {
                 (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("会话 ID", it.id.value))
             }
@@ -4756,8 +4752,9 @@ class MainActivity : ComponentActivity() {
     @Composable private fun TerminalLoadingPage(
         state: app.daiyu.android.terminal.TerminalApplicationState,
         onBack: () -> Unit,
+        title: String = "终端",
     ) {
-        app.daiyu.android.ui.components.MiuixScaffoldPage(title = "终端", onBack = onBack) {
+        app.daiyu.android.ui.components.MiuixScaffoldPage(title = title, onBack = onBack) {
             item {
                 app.daiyu.android.ui.screens.settings.SettingsNote(
                     if (state == app.daiyu.android.terminal.TerminalApplicationState.Unavailable)
@@ -4767,18 +4764,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private fun openLinuxSettings() {
+    private fun openLinuxSettings(filesOnly: Boolean = false) {
         requireActivityUsable()
+        val route = if (filesOnly) "chat-workspace" else "linux-settings"
         linuxSettingsPageOwner?.close()
         val visit = Any()
         linuxSettingsVisit = visit
         linuxSettingsPageOwner = null
-        retainedPage = "linux-settings"
+        retainedPage = route
         lifecycleScope.launch {
             val state = terminalProvider.state.first {
                 it != app.daiyu.android.terminal.TerminalApplicationState.Loading
             }
-            if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsVisit === visit &&
+            if (activityUsable() && retainedPage == route && linuxSettingsVisit === visit &&
                 state is app.daiyu.android.terminal.TerminalApplicationState.Ready) {
                 linuxSettingsPageOwner = state.application.settings.enterPage()
             }
@@ -4795,7 +4793,7 @@ class MainActivity : ComponentActivity() {
     private fun openTerminal() {
         requireActivityUsable()
         terminalReturnPage = when (retainedPage) {
-            "settings", "linux-settings" -> retainedPage
+            "settings", "linux-settings", "chat-workspace" -> retainedPage
             else -> "chat"
         }
         terminalPageOwner = Any()
@@ -4805,6 +4803,7 @@ class MainActivity : ComponentActivity() {
         when (terminalReturnPage) {
             "settings" -> retainedPage = "settings"
             "linux-settings" -> openLinuxSettings()
+            "chat-workspace" -> openLinuxSettings(filesOnly = true)
             else -> returnToChat()
         }
     }

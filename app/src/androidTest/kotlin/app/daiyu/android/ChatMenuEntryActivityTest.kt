@@ -240,9 +240,26 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         try {
             menu(ChatMenuAction.OPEN_WORKSPACE)
             awaitUniqueTag("page:工作区")
+            node("linux-files:workspace").assertIsSelected()
+            node("linux-files:rootfs").assertIsDisplayed()
+            node("linux-files:shared").assertIsDisplayed()
+            node("linux-bottom-navigation").assertDoesNotExist()
+            node("linux-tab:basic").assertDoesNotExist()
+            node("linux-tab:files").assertDoesNotExist()
+            ui.onNodeWithText("私有工作区").assertDoesNotExist()
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag("workspace-private-import").fetchSemanticsNodes().singleOrNull()?.let {
+                    it.config.contains(androidx.compose.ui.semantics.SemanticsActions.OnClick) &&
+                        !it.config.contains(SemanticsProperties.Disabled)
+                } == true
+            }
             node("workspace-private-import").assertIsDisplayed().assertIsEnabled()
             node("workspace-pick-file").assertDoesNotExist()
             node("workspace-pick-directory").assertDoesNotExist()
+            val application = ((instrumentation.targetContext.applicationContext as ChatApplication).terminalProvider.state.value
+                as app.daiyu.android.terminal.TerminalApplicationState.Ready).application
+            assertFalse(application.terminalOwner.host.state.value.ownsResources)
+            assertTrue(application.terminalSessions.state.value.sessions.isEmpty())
             assertEquals(0, launches.get())
             assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
             assertEquals(before, fixture.database.exportBackup())
@@ -257,6 +274,48 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
             backToChat(activity)
             assertEquals(0, launches.get())
         } finally { instrumentation.removeMonitor(monitor) }
+    }
+
+    fun testWorkspaceTerminalRoundTripAndRecreationReturnToFilesOnlyWithFreshOwner() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.load()
+        menu(ChatMenuAction.OPEN_WORKSPACE)
+        awaitUniqueTag("page:工作区")
+        lateinit var previousOwner: app.daiyu.android.terminal.LinuxSettingsPageOwner
+        mainThread {
+            previousOwner = invokeHost(activity, "getLinuxSettingsPageOwner") as app.daiyu.android.terminal.LinuxSettingsPageOwner
+        }
+        val terminalOwner = (instrumentation.targetContext.applicationContext as ChatApplication).terminalOwner
+        assertFalse(terminalOwner.host.state.value.ownsResources)
+        val application = ((instrumentation.targetContext.applicationContext as ChatApplication).terminalProvider.state.value
+            as app.daiyu.android.terminal.TerminalApplicationState.Ready).application
+        assertTrue(application.terminalSessions.state.value.sessions.isEmpty())
+        node("linux-open-terminal").assertIsDisplayed().performClick()
+        awaitUniqueTag("terminal-screen")
+        assertTrue(previousOwner.state.value.revoked)
+        assertFalse(terminalOwner.host.state.value.ownsResources)
+        activity = recreateActivity(activity)
+        awaitUniqueTag("terminal-screen")
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        awaitUniqueTag("page:工作区")
+        lateinit var currentOwner: app.daiyu.android.terminal.LinuxSettingsPageOwner
+        mainThread {
+            currentOwner = invokeHost(activity, "getLinuxSettingsPageOwner") as app.daiyu.android.terminal.LinuxSettingsPageOwner
+        }
+        assertNotSame(previousOwner, currentOwner)
+        assertFalse(currentOwner.state.value.revoked)
+        node("linux-files:workspace").assertIsSelected()
+        node("linux-bottom-navigation").assertDoesNotExist()
+        node("linux-tab:basic").assertDoesNotExist()
+        node("linux-tab:files").assertDoesNotExist()
+        assertFalse(terminalOwner.host.state.value.ownsResources)
+        backToChat(activity)
+        assertDraft("menu draft stays unsent")
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(settings, fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
     }
 
     fun testWorkspaceMenuRetainedCallbackCannotNavigateWhilePausedOnAnotherPageOrAfterEditorReplacement() {

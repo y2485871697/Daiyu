@@ -25,7 +25,10 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
     })
     private var owner: LinuxSettingsPageOwner? = null
     private val loads = AtomicInteger()
-    private fun show(entries: List<LinuxInstallation> = emptyList(), onOpenTerminal: (() -> Unit)? = null) {
+    private var pageTitle = "Linux 工具环境"
+    private fun show(entries: List<LinuxInstallation> = emptyList(), filesOnly: Boolean = false,
+        onOpenTerminal: (() -> Unit)? = null) {
+        pageTitle = if (filesOnly) "工作区" else "Linux 工具环境"
         val catalog = object : LinuxSettingsCatalogAccess {
             override fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval { writes.incrementAndGet(); error("no configuration writes") }
             override suspend fun load(): List<LinuxInstallation> { loads.incrementAndGet(); return entries }
@@ -42,13 +45,13 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    LinuxSettingsScreen(controller, page, onBack = {}, runningModeStore = modes, onOpenTerminal = onOpenTerminal)
+                    LinuxSettingsScreen(controller, page, onBack = {}, runningModeStore = modes, filesOnly = filesOnly, onOpenTerminal = onOpenTerminal)
                 }
             }
         }
     }
     private fun revealLinux(tag: String): SemanticsNodeInteraction {
-        node("page:Linux 工具环境").scrollToDescendant(hasTestTag(tag))
+        node("page:$pageTitle").scrollToDescendant(hasTestTag(tag))
         return node(tag)
     }
     fun testOriginalGroupsHaveNoTechnicalPreviewAndUnavailableToolsAreNotMarkedInstalled() {
@@ -96,6 +99,28 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
     }
+    fun testFilesOnlyOpensNewWorkspaceWithoutBottomNavigationOrBasicActions() {
+        show(filesOnly = true)
+        node("page:工作区").assertExists()
+        node("linux-files:workspace").assertIsSelected()
+        node("linux-bottom-navigation").assertDoesNotExist()
+        node("linux-tab:basic").assertDoesNotExist()
+        node("linux-tab:files").assertDoesNotExist()
+        node("linux-distribution-choice").assertDoesNotExist()
+        node("linux-execution-choice").assertDoesNotExist()
+        ui.onNodeWithText("私有工作区").assertDoesNotExist()
+        revealLinux("linux-files:rootfs").performClick().assertIsSelected()
+        ui.onNodeWithText("当前环境暂无可浏览的 Rootfs").assertExists()
+        revealLinux("linux-files:shared").performClick().assertIsSelected()
+        revealLinux("workspace-pick-directory").assertHasClickAction()
+        revealLinux("workspace-pick-file").assertHasClickAction()
+        revealLinux("linux-files:workspace").performClick().assertIsSelected()
+        node("workspace-private-import").assertExists()
+        node("linux-bottom-navigation").assertDoesNotExist()
+        assertFalse(checkNotNull(owner).state.value.revoked)
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
     fun testBasicActionsRetainedAcrossTabsCannotChangeSelectionOrOpenTerminal() {
         val terminalNavigations = AtomicInteger()
         show(onOpenTerminal = { terminalNavigations.incrementAndGet() })
@@ -117,12 +142,19 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
     }
     fun testApprovedRootfsListsRealDirectoriesReadOnlyAndReturnsToParent() {
+        assertApprovedRootfsReadOnly(filesOnly = false)
+    }
+    fun testFilesOnlyUsesApprovedRootfsReadOnlyWithoutBottomNavigation() {
+        assertApprovedRootfsReadOnly(filesOnly = true)
+    }
+    private fun assertApprovedRootfsReadOnly(filesOnly: Boolean) {
         val root = java.io.File(instrumentation.targetContext.filesDir.canonicalFile, "rootfs-layout-${java.util.UUID.randomUUID()}").apply { mkdir() }
         val child = java.io.File(root, "etc").apply { mkdir() }
         java.io.File(child, "config").writeText("keep")
         try {
-            show(listOf(LinuxInstallation("alpine", "fixture", "one", root)))
-            node("linux-tab:files").performClick()
+            show(listOf(LinuxInstallation("alpine", "fixture", "one", root)), filesOnly = filesOnly)
+            if (filesOnly) node("linux-bottom-navigation").assertDoesNotExist()
+            else node("linux-tab:files").performClick()
             revealLinux("linux-files:rootfs").performClick()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("linux-rootfs-entry:etc").fetchSemanticsNodes().size == 1 }
             revealLinux("linux-rootfs-entry:etc").performClick()

@@ -57,6 +57,11 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
     private fun assertAttached(surfaceTag: String, controlTag: String? = null, ime: Boolean = false,
         originalWindowBottom: Float? = null) {
         awaitUniqueTag(surfaceTag)
+        awaitNodeWindowFocus(node(surfaceTag))
+        if (!ime) {
+            val root = (node(surfaceTag).fetchSemanticsNode().root as ViewRootForTest).view.rootView
+            dismissIme(root)
+        }
         ui.mainClock.advanceTimeBy(1_000)
         awaitVisualIdle()
         val surface = node(surfaceTag).assertIsDisplayed().fetchSemanticsNode()

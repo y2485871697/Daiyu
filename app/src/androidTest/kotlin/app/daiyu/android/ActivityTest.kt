@@ -131,7 +131,22 @@ class ActivityTest : WiredActivityTestCase() {
         session.release.countDown(); awaitControl("A completed") { fixture.controller.active == null }
         ui.waitForIdle(); assertDraft(" B新稿\n "); assertSelection(1, 2)
         ui.onNodeWithText("A回复").assertDoesNotExist(); assertTrue(fixture.database.messages(b.id).isEmpty())
-        activity = recreateActivity(activity)
+        fun selectionCheckpoint(phase: String) {
+            val range = node("chat-draft").fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange]
+            mainThread {
+                fun endpoint(name: String) = MainActivity::class.java.getDeclaredField(name).apply { isAccessible = true }.getInt(activity)
+                android.util.Log.d("DaiyuSelection", "$phase ui=(${range.start},${range.end}) " +
+                    "host=(${endpoint("selectionStart")},${endpoint("selectionEnd")}) retained=${fixture.controller.selections[b.id]}")
+            }
+        }
+        selectionCheckpoint("before-hide")
+        activity = recreateActivity(activity, afterImeHidden = {
+            selectionCheckpoint("after-hide-before-recreate")
+            assertDraft(" B新稿\n "); assertSelection(1, 2)
+        }, afterDestroyed = {
+            mainThread { android.util.Log.d("DaiyuSelection", "after-destroy retained=${fixture.controller.selections[b.id]}") }
+        })
+        selectionCheckpoint("replacement-focused")
         assertDraft(" B新稿\n "); assertSelection(1, 2)
         mainThread { activity.select(a) }; assertDraft("A下一条"); ui.onNodeWithText("A回复").assertExists()
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; assertDraft(unattached); assertSelection(2, 4)

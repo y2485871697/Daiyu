@@ -17,7 +17,7 @@ adb_stage() {
 APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
 test -n "$APK"
 mkdir -p smoke
-rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/logcat-before.txt smoke/properties-before.txt smoke/hwui-renderer.txt smoke/logcat-first-boot.txt smoke/ime-default-restored.txt smoke/readiness.txt
+rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/logcat-before.txt smoke/properties-before.txt smoke/hwui-renderer.txt smoke/logcat-first-boot.txt smoke/ime-default-restored.txt smoke/readiness.txt smoke/ime-enabled-before.txt smoke/ime-enabled-selected.txt smoke/ime-enabled-after.txt smoke/ime-fixture-{path,enable,set,selected,package,after}.txt
 rm -rf smoke/settings-ui
 # Explicitly name every source test class: legacy default discovery scans all dependency DEX.
 target_spec=$(python3 - <<'PYCOUNT'
@@ -142,14 +142,14 @@ fi
 wait_for_framework_ready() {
   local stable=0 previous="" current current_boot_id boot_changed
   for attempt in $(seq 1 60); do
+    current=$(timeout --kill-after=5 5 adb shell 'cat /proc/sys/kernel/random/boot_id && pidof system_server && pidof surfaceflinger' 2>/dev/null | tr -d '\r') || current=""
+    current_boot_id=${current%%$'\n'*}
+    current=${current#*$'\n'}
     boot_changed=1
-    if test -n "${previous_boot_id:-}"; then
-      current_boot_id=$(timeout --kill-after=5 5 adb shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r') || current_boot_id=""
-      if ! [[ "$current_boot_id" =~ ^[0-9a-fA-F-]{36}$ ]] || test "$current_boot_id" = "$previous_boot_id"; then
-        boot_changed=0
-      fi
+    if ! [[ "$current_boot_id" =~ ^[0-9a-fA-F-]{36}$ ]] ||
+       { test -n "${previous_boot_id:-}" && test "$current_boot_id" = "$previous_boot_id"; }; then
+      boot_changed=0
     fi
-    current=$(timeout --kill-after=5 5 adb shell 'pidof system_server && pidof surfaceflinger' 2>/dev/null | tr -d '\r') || current=""
     if test "$boot_changed" = 1 && test -n "$current" && test "$current" = "$previous" &&
        test "$(timeout --kill-after=5 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 &&
        timeout --kill-after=5 5 adb shell pm path android > smoke/package-ready.txt 2>&1 &&
@@ -197,6 +197,33 @@ wait_for_framework_ready
 verify_display_baseline before
 adb_stage ime-restored 15 shell settings get secure default_input_method > smoke/ime-default-restored.txt
 cmp smoke/ime-default-before.txt smoke/ime-default-restored.txt
+# Keep the original image/default identity above; select one explicit real IME
+# fixture before tests, never as a retry after a keyboard or focus failure.
+if test "$api" = 26; then
+  fixture_ime=jp.co.omronsoft.openwnn/.OpenWnnJAJP
+  adb_stage ime-enabled-before 15 shell settings get secure enabled_input_methods > smoke/ime-enabled-before.txt
+  adb_stage ime-fixture-path 15 shell pm path jp.co.omronsoft.openwnn > smoke/ime-fixture-path.txt
+  grep -Fx 'package:/system/app/OpenWnn/OpenWnn.apk' smoke/ime-fixture-path.txt
+  adb_stage ime-fixture-enable 15 shell ime enable "$fixture_ime" > smoke/ime-fixture-enable.txt
+  adb_stage ime-fixture-set 15 shell ime set "$fixture_ime" > smoke/ime-fixture-set.txt
+  adb_stage ime-enabled-selected 15 shell settings get secure enabled_input_methods > smoke/ime-enabled-selected.txt
+  adb_stage ime-selected 15 shell settings get secure default_input_method > smoke/ime-fixture-selected.txt
+  test "$(tr -d '\r\n' < smoke/ime-fixture-selected.txt)" = "$fixture_ime"
+  python3 - <<'PYIME'
+from pathlib import Path
+
+def enabled(name):
+    return {entry for entry in Path("smoke/" + name).read_text().strip().split(":") if entry}
+
+before = enabled("ime-enabled-before.txt")
+after = enabled("ime-enabled-selected.txt")
+fixture = "jp.co.omronsoft.openwnn/.OpenWnnJAJP"
+assert before and before <= after, "Original enabled IMEs changed"
+assert {entry.split(";")[0] for entry in after} - {entry.split(";")[0] for entry in before} <= {fixture}, "Unexpected added IME"
+assert fixture in {entry.split(";")[0] for entry in after}, "Fixture IME not enabled"
+PYIME
+  adb_stage ime-fixture-package 15 shell dumpsys package jp.co.omronsoft.openwnn > smoke/ime-fixture-package.txt
+fi
 adb_stage webview-state 15 shell dumpsys webviewupdate | tr -d '\r' > smoke/webview.txt
 provider=$(python3 - <<'PYWEBVIEW'
 from pathlib import Path
@@ -242,6 +269,12 @@ path.write_text(json.dumps(selection, sort_keys=True) + "\n")
 PYSELECTION
 else
   printf '%s skip phase=instrumentation reason=filtered-empty-shard\n' "$(date -u +%FT%TZ)" | tee -a smoke/stages.txt >&3
+fi
+if test "$api" = 26; then
+  adb_stage ime-fixture-after 15 shell settings get secure default_input_method > smoke/ime-fixture-after.txt
+  cmp smoke/ime-fixture-selected.txt smoke/ime-fixture-after.txt
+  adb_stage ime-enabled-after 15 shell settings get secure enabled_input_methods > smoke/ime-enabled-after.txt
+  cmp smoke/ime-enabled-selected.txt smoke/ime-enabled-after.txt
 fi
 verify_display_baseline after
 adb_stage packages 20 shell pm list packages > smoke/packages.txt

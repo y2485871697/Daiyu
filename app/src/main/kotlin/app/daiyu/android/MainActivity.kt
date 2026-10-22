@@ -2272,7 +2272,8 @@ class MainActivity : ComponentActivity() {
             }
         },
         onSelectionChange = { start, end ->
-            if (editorMatches() && !imageHost.sending && (selectionStart != start || selectionEnd != end)) {
+            if (editorMatches() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                chatState.composer.enabled && !imageHost.sending && (selectionStart != start || selectionEnd != end)) {
                 offlineHost.invalidate()
                 if (dictationDraft != null) { dictationHost.invalidate(); invalidateConfiguredVoice() }
                 selectionStart = start; selectionEnd = end

@@ -106,6 +106,12 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 2 * (1f * density).roundToInt() + 2 * (2f * density).roundToInt()).toFloat()
     }
 
+    private fun contextBottomGapPx(density: Float, contextHeight: Int): Float {
+        val modelHeight = (26f * density).roundToInt()
+        val spare = maxOf(modelHeight, contextHeight) - contextHeight
+        return ((4f * density).roundToInt() + spare - (spare / 2f).roundToInt()).toFloat()
+    }
+
     fun testRunningComposerAt320DpKeepsActionsSeparateAndContextReadable() {
         val state = composer()
         show(state)
@@ -213,6 +219,11 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
     }
 
     fun testEnlargedComposerFitsControlsWithoutDoubleScalingText() {
+        for ((density, expected) in listOf(1f to 5f, .8f to 3f, 1.25f to 6f, 1.5f to 7f)) {
+            val context = maxOf((24f * density).roundToInt(), (18f * density).roundToInt() +
+                2 * density.roundToInt() + 2 * (2f * density).roundToInt())
+            assertEquals(expected, contextBottomGapPx(density, context), 0f)
+        }
         val state = composer().copy(text = "", modelLabel = "gpt-6.1-sol", phase = ComposerPhase.IDLE)
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(state, fontScale = .9f, interfaceScale = scale, dark = dark)
@@ -230,7 +241,14 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(13f, (context.top - surface.top) / density, .75f)
             assertEquals(14f, (surface.right - context.right) / density, .75f)
             assertEquals(13f, (divider.left - surface.left) / density, .75f)
-            assertEquals(5f, (divider.top - context.bottom) / density, .75f)
+            val contextText = layout("37% 上下文")
+            val actualDensity = contextText.layoutInput.density.density
+            val contextHeight = contextHeightPx(contextText).toInt()
+            val expectedGap = contextBottomGapPx(actualDensity, contextHeight)
+            assertEquals("Context gap density=$actualDensity height=$contextHeight expected=$expectedGap",
+                expectedGap, divider.top - context.bottom, 0f)
+            assertEquals((26f * actualDensity).roundToInt().toFloat(),
+                node("chat-model").fetchSemanticsNode().boundsInRoot.height, 0f)
             assertEquals(36f, bottom.height / density, .75f)
             assertEquals(12f, (surface.bottom - bottom.bottom) / density, .75f)
             assertEquals(32f, send.width / density, .75f)

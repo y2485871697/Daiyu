@@ -2,6 +2,7 @@
 from pathlib import Path
 import re
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "app/src/main/kotlin/app/daiyu/android"
@@ -10,6 +11,20 @@ SRC = ROOT / "app/src/main/kotlin/app/daiyu/android"
 class DialogMotionContractTest(unittest.TestCase):
     def text(self, relative):
         return (SRC / relative).read_text()
+
+    def test_centered_theme_selects_platform_alpha_only_resources_without_activity_motion(self):
+        root = ET.parse(ROOT / "app/src/main/res/values/styles.xml").getroot()
+        styles = {node.attrib["name"]: node for node in root.findall("style")}
+        def items(name):
+            return {node.attrib["name"]: node.text for node in styles[name].findall("item")}
+        self.assertEqual(items("Theme.Daiyu")["android:dialogTheme"], "@style/Theme.Daiyu.CenterDialog")
+        self.assertNotIn("android:windowAnimationStyle", items("Theme.Daiyu"))
+        for name in ("Theme.Daiyu.CenterDialog", "Theme.Daiyu.Dialog"):
+            self.assertEqual(items(name)["android:windowAnimationStyle"], "@style/Animation.Daiyu.CenterDialog")
+        self.assertEqual(styles["Theme.Daiyu.Dialog"].attrib["parent"], "android:style/ThemeOverlay.Material.Dialog.Alert")
+        self.assertEqual(items("Animation.Daiyu.CenterDialog"), {
+            "android:windowEnterAnimation": "@android:anim/fade_in",
+            "android:windowExitAnimation": "@android:anim/fade_out"})
 
     def test_dialog_primitives_cannot_bypass_motion_adapters(self):
         allowed = {"ui/components/DialogMotion.kt", "ui/components/PreviewDialog.kt"}

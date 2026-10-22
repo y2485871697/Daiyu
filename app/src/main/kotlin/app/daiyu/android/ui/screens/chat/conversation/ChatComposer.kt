@@ -75,6 +75,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val dark = colors.background.luminance() < .3f
     val dividerColor = if (dark) Color(0xFFC8B5EB).copy(alpha = .12f) else Color(0xFF9280B5).copy(alpha = .14f)
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
+    val currentEditorEnabled by rememberUpdatedState(state.enabled)
     val currentDraft by rememberUpdatedState(state.text)
     var composingSource by remember(state.editorGeneration) { mutableStateOf<Pair<String, TextRange>?>(null) }
     val references = remember(state.text, composingSource) {
@@ -151,7 +152,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     BasicTextField(
                         value = renderedValue,
                         onValueChange = { value ->
-                            if (mountedGeneration == currentEditorGeneration) {
+                            if (mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
                                 val bodyChanged = value.text != references.text
                                 val next = references.edit(value.text)
                                 fun rawOffset(offset: Int) = if (bodyChanged) offset.coerceIn(0, value.text.length) else references.toSource(offset)

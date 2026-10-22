@@ -54,7 +54,8 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         androidx.compose.ui.geometry.Rect(node.positionInRoot,
             androidx.compose.ui.geometry.Size(node.size.width.toFloat(), node.size.height.toFloat()))
 
-    private fun assertAttached(surfaceTag: String, controlTag: String? = null, ime: Boolean = false) {
+    private fun assertAttached(surfaceTag: String, controlTag: String? = null, ime: Boolean = false,
+        originalWindowBottom: Float? = null) {
         awaitUniqueTag(surfaceTag)
         ui.mainClock.advanceTimeBy(1_000)
         awaitVisualIdle()
@@ -85,11 +86,13 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             val insets = checkNotNull(ViewCompat.getRootWindowInsets(view))
             assertEquals(ime, insets.isVisible(WindowInsetsCompat.Type.ime()))
             if (ime) {
-                // The visible frame works for both resize and edge-to-edge dialogs: do not
-                // subtract the IME height a second time from an already resized viewport.
-                val visible = android.graphics.Rect()
-                view.getWindowVisibleDisplayFrame(visible)
-                windowBottom = minOf(viewportBottom, visible.bottom.toFloat())
+                // ADJUST_NOTHING may retain the full frame. Subtract from the original
+                // window, never from a viewport that may already have been resized.
+                val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+                assertTrue("Visible IME has a positive bottom inset", imeBottom > 0)
+                val keyboardTop = checkNotNull(originalWindowBottom) - imeBottom
+                assertTrue("Viewport must reach the independent keyboard edge", viewportBottom >= keyboardTop - 2f)
+                windowBottom = keyboardTop
                 safeBottom = windowBottom
             } else {
                 safeBottom -= insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).bottom
@@ -180,7 +183,8 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             }
             visible
         }
-        assertAttached("catalog-model-dialog", "dialog-confirm", ime = true)
+        assertAttached("catalog-model-dialog", "dialog-confirm", ime = true,
+            originalWindowBottom = originalBottom)
         val restoredFrames = java.util.concurrent.atomic.AtomicInteger()
         val observer = view.viewTreeObserver
         var lastRestoredFrame = Long.MIN_VALUE

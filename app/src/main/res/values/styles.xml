@@ -1,11 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Daiyu" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:dialogTheme">@style/Theme.Daiyu.CenterDialog</item>
         <item name="android:alertDialogTheme">@style/Theme.Daiyu.Dialog</item>
         <item name="android:colorControlHighlight">@android:color/transparent</item>
     </style>
+    <style name="Theme.Daiyu.CenterDialog" parent="android:style/Theme.Material.Light.Dialog">
+        <item name="android:windowAnimationStyle">@style/Animation.Daiyu.CenterDialog</item>
+    </style>
     <style name="Theme.Daiyu.Dialog" parent="android:style/ThemeOverlay.Material.Dialog.Alert">
         <item name="android:colorControlHighlight">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@style/Animation.Daiyu.CenterDialog</item>
+    </style>
+    <style name="Animation.Daiyu.CenterDialog" parent="android:style/Animation.Material.Dialog">
+        <item name="android:windowEnterAnimation">@android:anim/fade_in</item>
+        <item name="android:windowExitAnimation">@android:anim/fade_out</item>
     </style>
     <style name="Theme.Daiyu.Anchor" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:colorControlHighlight">@android:color/transparent</item>

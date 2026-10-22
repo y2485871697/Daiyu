@@ -84,8 +84,9 @@ class ActivityTest : WiredActivityTestCase() {
                 assertTrue("single binding guard remains active", runCatching { host.bindLifecycle(activity) }.isFailure)
             }
             node("chat-draft").assertIsDisplayed()
-            val controls = MainActivity::class.java.getDeclaredField("videoComposerControls").apply { isAccessible = true }
-            awaitControl("current composer controls survive subcomposition replacement") { controls.get(activity) != null }
+            awaitControl("current composer controls survive subcomposition replacement") {
+                invokeHost(activity, "getVideoComposerControls") != null
+            }
         }
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         mainThread { assertFalse(host.state.visible) }

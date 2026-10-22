@@ -1,6 +1,10 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -71,6 +75,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             }
             val event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(),
                 action, point.x, point.y, 0)
+            event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
             try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
         }
         ui.waitForIdle()
@@ -194,7 +199,11 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             }
             realTap("managed-outside")
             node(tag).assertIsNotFocused()
-            assertTrue("Hidden IME must not draw a steady caret either", hidden.contentEquals(pixels(tag)))
+            val unfocused = pixels(tag)
+            val firstDifference = hidden.indices.firstOrNull { it >= unfocused.size || hidden[it] != unfocused[it] }
+            assertTrue("Hidden IME must not draw a steady caret either: field=$tag " +
+                "hidden=${hidden.size} unfocused=${unfocused.size} firstDifference=$firstDifference",
+                hidden.contentEquals(unfocused))
         }
         assertEquals(0, fixture.opens.get())
     }
@@ -227,12 +236,18 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             second = android.widget.EditText(activity).apply { setText("另一项"); manageInput() }
             outside = android.widget.TextView(activity).apply { text = "原生外部标题"; setPadding(32, 32, 32, 32) }
             activity.setContent {
-                androidx.compose.ui.viewinterop.AndroidView(factory = {
-                    android.widget.LinearLayout(activity).apply {
-                        orientation = android.widget.LinearLayout.VERTICAL
-                        addView(first); addView(second); addView(outside)
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Box(Modifier.fillMaxSize()
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
+                        .systemBarsPadding()) {
+                        androidx.compose.ui.viewinterop.AndroidView(factory = {
+                            android.widget.LinearLayout(activity).apply {
+                                orientation = android.widget.LinearLayout.VERTICAL
+                                addView(first); addView(second); addView(outside)
+                            }
+                        })
                     }
-                })
+                }
             }
         }
         fun tap(view: android.view.View) {

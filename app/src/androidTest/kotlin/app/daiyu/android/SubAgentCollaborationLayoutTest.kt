@@ -33,6 +33,51 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         }
     }
 
+    private var displayRestore: String? = null
+    private var originalEffectiveSize: String? = null
+
+    private fun displaySize(command: String): String =
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
+            .bufferedReader().use { it.readText() }
+
+    private fun effectiveSize(sizes: String): String =
+        checkNotNull(Regex("(?:Override|Physical) size: (\\d+x\\d+)").findAll(sizes).lastOrNull()) { sizes }.groupValues[1]
+
+    override fun setUp() {
+        if (name == "testProfileFormKeepsEqualFooterAndScrollsAtPhysicalWidthAndLargeFont") {
+            val sizes = displaySize("wm size")
+            check(Regex("Physical size: \\d+x\\d+").containsMatchIn(sizes)) { sizes }
+            originalEffectiveSize = effectiveSize(sizes)
+            displayRestore = Regex("Override size: (\\d+x\\d+)").find(sizes)?.groupValues?.get(1) ?: "reset"
+            check(displaySize("wm size 1216x2432").isBlank())
+            val applied = displaySize("wm size")
+            check(effectiveSize(applied) == "1216x2432") { "Requested physical-width fixture; actual: $applied" }
+            instrumentation.waitForIdleSync()
+        }
+        super.setUp()
+        if (displayRestore != null) {
+            ui.waitUntil(5_000) {
+                var width = 0
+                instrumentation.runOnMainSync { width = activity.window.decorView.width }
+                width == 1216
+            }
+        }
+    }
+
+    override fun cleanupAfterLegacy() {
+        try { super.cleanupAfterLegacy() }
+        finally {
+            displayRestore?.let { original ->
+                check(displaySize("wm size $original").isBlank())
+                val restored = displaySize("wm size")
+                check(effectiveSize(restored) == originalEffectiveSize) { "Display restore failed: $restored" }
+                displayRestore = null
+                originalEffectiveSize = null
+                instrumentation.waitForIdleSync()
+            }
+        }
+    }
+
     private class ProfileFixture(val repository: ConversationSubAgentPreferences,
         val editor: ConversationSubAgentEditor, val provider: SubAgentProvider, val profile: SubAgentProfile)
 

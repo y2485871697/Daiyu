@@ -95,7 +95,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         menu(ChatMenuAction.OPEN_BROWSER)
         node("browser-visual-page").assertExists()
-        ui.onNodeWithTag("browser-visual-empty", useUnmergedTree = true).assertTextEquals("请在上方输入网址开始浏览")
+        ui.onNodeWithTag("browser-visual-empty", useUnmergedTree = true).assertIsDisplayed().assertTextEquals(activity.getString(R.string.om_browser_enter_url_hint))
         node("browser-visual-tabs").assertTextEquals("1/3")
         node("browser-visual-new-tab").assertIsEnabled()
         node("browser-visual-takeover").assertDoesNotExist()

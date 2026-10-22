@@ -8,7 +8,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*

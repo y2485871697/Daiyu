@@ -1,6 +1,6 @@
 package app.daiyu.android
 
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*

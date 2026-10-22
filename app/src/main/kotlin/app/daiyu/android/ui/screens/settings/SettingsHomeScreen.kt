@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column

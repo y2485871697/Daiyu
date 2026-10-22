@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*

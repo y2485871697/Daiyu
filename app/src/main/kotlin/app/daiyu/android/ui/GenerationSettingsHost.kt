@@ -1,6 +1,6 @@
 package app.daiyu.android.ui
 
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth

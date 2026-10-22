@@ -1,6 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import app.daiyu.android.ui.haptics.material.RadioButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect

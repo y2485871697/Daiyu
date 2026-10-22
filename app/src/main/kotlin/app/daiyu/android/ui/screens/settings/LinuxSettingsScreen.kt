@@ -1,6 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.background
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource

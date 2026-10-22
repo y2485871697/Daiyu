@@ -2,7 +2,7 @@ package app.daiyu.android
 
 import android.net.Uri
 import android.os.Looper
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.screens.settings.*

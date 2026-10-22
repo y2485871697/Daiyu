@@ -2,7 +2,7 @@ package app.daiyu.android
 
 import android.os.Handler
 import android.os.Looper
-import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import app.daiyu.android.ui.screens.settings.SettingsCard
 import app.daiyu.android.ui.screens.settings.SettingsRow
 import app.daiyu.android.ui.screens.settings.SettingsNote

@@ -50,7 +50,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
 
     def test_form_and_footer_use_available_space_not_fixed_footer_budget(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
-        self.assertIn('.weight(1f, fill = false).heightIn(max = 520.dp).verticalScroll', form)
+        self.assertIn('.weight(1f, fill = false).heightIn(max = 520.dp).testTag("subagent-config-body").verticalScroll', form)
         self.assertNotIn('profileDialogScrollableBody', form)
         self.assertIn('.height(IntrinsicSize.Min)', form)
         style = (UI / 'subagent/ConversationAgentStyle.kt').read_text()
@@ -63,6 +63,16 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('Box(Modifier.size(48.dp).then', style)
         field = (UI / 'subagent/ConversationAgentForm.kt').read_text()
         self.assertIn('.heightIn(min = 48.dp).background(colors.field', field)
+
+    def test_choice_content_has_bounded_scroll_without_column_scope_weight(self):
+        form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
+        choices = form.split('SubAgentChoiceWindow(title = when (field)', 1)[1]
+        body = choices.split('options.forEach', 1)[0]
+        self.assertIn('Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll', body)
+        self.assertNotIn('.weight(', body)
+        window = (UI / 'subagent/ConversationAgentChoice.kt').read_text()
+        self.assertIn('content: @Composable () -> Unit', window)
+        self.assertIn('Box(Modifier.padding(6.dp)) { content() }', window)
 
     def test_existing_model_picker_is_shared_with_identity_safe_display(self):
         picker = (UI / 'subagent/SubAgentModelPicker.kt').read_text()

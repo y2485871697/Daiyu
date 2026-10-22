@@ -19,9 +19,10 @@ fun AdaptiveTopAppBar(
     scrollBehavior: ScrollBehavior? = null,
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
+    compactTitle: Boolean = false,
     bottomContent: @Composable () -> Unit = {},
 ) {
-    if (rememberIsWideScreen()) {
+    if (compactTitle || rememberIsWideScreen()) {
         SmallTopAppBar(
             title = title,
             modifier = modifier,

@@ -6,6 +6,7 @@ import android.text.format.Formatter
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
@@ -37,7 +38,7 @@ private class WorkspaceDelete(val entry: PrivateWorkspaceFiles.Entry, val epoch:
 @Composable
 internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles? = null,
     parentVisit: AtomicBoolean = remember { AtomicBoolean(true) },
-    sharedBusy: () -> Boolean = { false }, onOccupied: (Boolean) -> Unit = {}, compact: Boolean = false): @Composable () -> Unit {
+    sharedBusy: () -> Boolean = { false }, onOccupied: (Boolean) -> Unit = {}, compact: Boolean = false): LinuxFilePanel {
     val context = LocalContext.current
     val files = suppliedFiles ?: remember(context) { PrivateWorkspaceFiles(context.applicationContext) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -161,19 +162,20 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
             try { importer.launch(arrayOf("*/*")) } catch (_: Exception) { pending = null; onOccupied(false); notice = "未能打开文件选择器" }
         }
     }
-    return { Column {
+    return LinuxFilePanel(actions = {
         if (compact) {
             val controlsEnabled = current() && !busy && !sharedBusy() && pending == null && request == null
-            LinuxFilePanelHeader("私有工作区") {
-                LinuxFileAction("导入文件", "workspace-private-import",
-                    enabled = controlsEnabled && listing != null, onClick = importFile)
-                IconButton(onClick = { load() }, enabled = controlsEnabled,
-                    modifier = Modifier.size(48.dp).testTag("workspace-private-refresh")) {
-                    DaiyuIcon(DaiyuIcons.Refresh, "刷新", size = 21.dp)
-                }
+            IconButton(onClick = importFile, enabled = controlsEnabled && listing != null,
+                modifier = Modifier.size(48.dp).testTag("workspace-private-import")) {
+                DaiyuIcon(DaiyuIcons.Import, "导入文件", size = 22.dp)
             }
-            LinuxFileDescription("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。")
-        } else {
+            IconButton(onClick = { load() }, enabled = controlsEnabled,
+                modifier = Modifier.size(48.dp).testTag("workspace-private-refresh")) {
+                DaiyuIcon(DaiyuIcons.Refresh, "刷新", size = 22.dp)
+            }
+        }
+    }, content = { Column {
+        if (!compact) {
             SettingsSectionTitle("私有工作区")
             SettingsNote("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。")
             SettingsCard { SettingsRow("导入文件", tag = "workspace-private-import", onClick = importFile) }
@@ -185,11 +187,11 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
         }
         listing?.let { shown ->
             val directoryContent: @Composable () -> Unit = {
-                if (compact) LinuxFileDirectoryHeader(shown.directory.relative)
+                if (compact) LinuxFileDirectoryHeader(shown.directory.relative, "workspace-private-parent",
+                    onParent = if (shown.directory.relative.isNotEmpty()) ({ load(parent = true) }) else null)
                 else SettingsSectionTitle(shown.directory.relative.ifEmpty { "/" })
-                if (shown.directory.relative.isNotEmpty()) {
-                    if (compact) SettingsRow("上级目录", onClick = { load(parent = true) }, tag = "workspace-private-parent")
-                    else SettingsCard { SettingsRow("上级目录", onClick = { load(parent = true) }, tag = "workspace-private-parent") }
+                if (!compact && shown.directory.relative.isNotEmpty()) {
+                    SettingsCard { SettingsRow("上级目录", onClick = { load(parent = true) }, tag = "workspace-private-parent") }
                 }
                 if (shown.entries.isEmpty()) {
                     if (compact) LinuxFileEmptyState("此私有目录为空") else SettingsNote("此私有目录为空")
@@ -197,17 +199,17 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                 if (shown.truncated) SettingsNote("仅显示前 100 项，请缩小目录范围")
                 shown.entries.forEach { entry ->
                     val entryContent: @Composable () -> Unit = {
-                        SettingsRow(entry.name, summary = if (entry.directory) "目录" else Formatter.formatShortFileSize(context, entry.size),
+                        SettingsRow(entry.name, summary = if (compact) entry.relative else if (entry.directory) "目录" else Formatter.formatShortFileSize(context, entry.size),
                             leading = { SettingsIcon(if (entry.directory) DaiyuIcons.Folder else DaiyuIcons.File) },
                             trailing = if (compact) ({
                                 IconButton(onClick = {
                                     if (current() && !busy && !sharedBusy() && pending == null && request == null)
                                         actions = WorkspaceDelete(entry, epoch.get())
                                 }, modifier = Modifier.size(48.dp).testTag("workspace-private-actions:${entry.relative}")) {
-                                    DaiyuIcon(DaiyuIcons.More, "文件操作", size = 20.dp)
+                                    DaiyuIcon(DaiyuIcons.More, "文件操作", modifier = Modifier.rotate(90f), size = 20.dp)
                                 }
                             }) else null,
-                            modifier = Modifier.combinedClickable(
+                            modifier = (if (compact) Modifier.heightIn(min = 80.dp) else Modifier).combinedClickable(
                                 enabled = current() && !busy && !sharedBusy() && pending == null && request == null,
                                 onClick = { if (entry.directory) load(entry) },
                                 onLongClickLabel = "文件操作", onLongClick = {
@@ -216,11 +218,10 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                                     }
                                 }), tag = "workspace-private-entry:${entry.relative}")
                     }
-                    if (compact) entryContent() else SettingsCard { entryContent() }
+                    if (compact) LinuxFileEntryCard { entryContent() } else SettingsCard { entryContent() }
                 }
             }
-            if (compact) SettingsCard { directoryContent() } else directoryContent()
+            directoryContent()
         }
-    }
-    }
+    } })
 }

@@ -1,57 +1,43 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.daiyu.android.ui.haptics.clickable
+import app.daiyu.android.ui.haptics.miuix.IconButton
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-@Composable
-internal fun LinuxFilePanelHeader(title: String, actions: @Composable RowScope.() -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 12.dp).heightIn(min = 56.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Text(title, modifier = Modifier.weight(1f),
-            style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-            color = MiuixTheme.colorScheme.onSurface)
-        actions()
-    }
+internal class LinuxFilePanel(val content: @Composable () -> Unit, val actions: @Composable () -> Unit) {
+    @Composable operator fun invoke() = content()
 }
 
 @Composable
-internal fun LinuxFileAction(text: String, tag: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Box(Modifier.testTag(tag).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-        .heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center) {
-        Text(text, style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 20.sp,
-            fontWeight = FontWeight.Medium),
-            color = MiuixTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else .45f))
-    }
+internal fun LinuxFileEntryCard(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth()
+        .clip(RoundedCornerShape(16.dp)).background(MiuixTheme.colorScheme.surface), content = content)
 }
 
 @Composable
-internal fun LinuxFileDescription(text: String) {
-    Text(text, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 16.dp),
-        style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 20.sp),
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-}
-
-@Composable
-internal fun LinuxFileDirectoryHeader(path: String) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        DaiyuIcon(DaiyuIcons.Folder, null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 18.dp)
+internal fun LinuxFileDirectoryHeader(path: String, parentTag: String, onParent: (() -> Unit)?) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 24.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        IconButton(onClick = { onParent?.invoke() }, enabled = onParent != null,
+            modifier = Modifier.size(48.dp).testTag(parentTag)) {
+            DaiyuIcon(DaiyuIcons.Back, "上级目录", size = 22.dp,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = if (onParent != null) 1f else .4f))
+        }
         Text(path.ifEmpty { "/" }, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 20.sp),
+            style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 20.sp),
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
 }

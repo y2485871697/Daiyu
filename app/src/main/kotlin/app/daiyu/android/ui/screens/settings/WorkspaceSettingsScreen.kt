@@ -203,8 +203,16 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         }) else null
     val rootfsPanel = if (integratedLinux && location == LinuxFileLocation.ROOTFS) key(rootfs) { rememberLinuxRootfsPanel(rootfs?.rootfs) } else null
     // Loading must not measure the retained position against a temporarily shorter list.
-    SettingsScaffoldPage(title = pageTitle, onBack = back, modifier = modifier,
+    SettingsScaffoldPage(title = pageTitle, onBack = back, modifier = modifier, compactTitle = integratedLinux,
         listState = if (showShared && (!loaded || restoringDirectory)) loadingListState else listState, actions = {
+        privatePanel?.actions?.invoke()
+        rootfsPanel?.actions?.invoke()
+        if (integratedLinux && showShared) app.daiyu.android.ui.haptics.miuix.IconButton(
+            onClick = { if (sharingCurrent()) refresh() },
+            enabled = loaded && !busy && !privateOccupied && pendingTree == null && request == null,
+            modifier = Modifier.size(48.dp).testTag("workspace-refresh")) {
+            app.daiyu.android.ui.icons.DaiyuIcon(app.daiyu.android.ui.icons.DaiyuIcons.Refresh, "刷新", size = 22.dp)
+        }
         if (onOpenTerminal != null) app.daiyu.android.ui.haptics.miuix.IconButton(onClick = {
             if (current() && !busy && !privateOccupied && pendingTree == null) onOpenTerminal()
         }, modifier = Modifier.size(48.dp).testTag("linux-open-terminal")) {
@@ -223,32 +231,17 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         if (rootfsPanel != null) item(key = "linux-rootfs") { rootfsPanel() }
         if (showShared) {
         item(key = "sharing") {
-            if (integratedLinux) {
-                LinuxFilePanelHeader("共享文件夹") {
-                    app.daiyu.android.ui.haptics.miuix.IconButton(onClick = { if (sharingCurrent()) refresh() },
-                        enabled = loaded && !busy && !privateOccupied && pendingTree == null && request == null,
-                        modifier = Modifier.size(48.dp).testTag("workspace-refresh")) {
-                        app.daiyu.android.ui.icons.DaiyuIcon(app.daiyu.android.ui.icons.DaiyuIcons.Refresh, "刷新", size = 21.dp)
-                    }
-                }
-                LinuxFileDescription("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
-                SettingsCard {
-                    SettingsRow("共享目录", onClick = { pick(true) }, tag = "workspace-pick-directory")
-                    SettingsRow("共享文件", onClick = { pick(false) }, tag = "workspace-pick-file")
-                }
-            } else {
-                SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
-                SettingsCard {
-                    SettingsRow("共享目录", onClick = { pick(true) }, tag = "workspace-pick-directory")
-                    SettingsRow("共享文件", onClick = { pick(false) }, tag = "workspace-pick-file")
-                    SettingsRow("刷新", onClick = { if (sharingCurrent()) refresh() }, tag = "workspace-refresh")
-                }
+            if (!integratedLinux) SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
+            SettingsCard {
+                SettingsRow("共享目录", onClick = { pick(true) }, tag = "workspace-pick-directory")
+                SettingsRow("共享文件", onClick = { pick(false) }, tag = "workspace-pick-file")
+                if (!integratedLinux) SettingsRow("刷新", onClick = { if (sharingCurrent()) refresh() }, tag = "workspace-refresh")
             }
             notice?.let { SettingsNote(it) }
             if (busy || !loaded) SettingsNote("正在读取共享状态")
             else if (request != null) SettingsNote("正在读取目录")
             else if (grants.isEmpty()) {
-                if (integratedLinux) SettingsCard { LinuxFileEmptyState("还没有共享目录或文件") }
+                if (integratedLinux) LinuxFileEmptyState("还没有共享目录或文件")
                 else SettingsNote("还没有共享目录或文件")
             }
         }
@@ -275,7 +268,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             }
             result.files.forEachIndexed { index, file ->
                 item(key = "file:${shownTree}:${file.uri}") {
-                    SettingsCard { SettingsRow(file.name, summary = if (file.directory) "子目录 · 点击复制引用" else "点击复制文件引用",
+                    SettingsCard { SettingsRow(file.name, summary = if (integratedLinux) null else if (file.directory) "子目录 · 点击复制引用" else "点击复制文件引用",
                         tag = "workspace-file:$index", onClick = { copy(file.uri) }) }
                 }
             }

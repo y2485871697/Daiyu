@@ -35,12 +35,13 @@ internal fun SettingsScaffoldPage(
     actions: @Composable RowScope.() -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
+    compactTitle: Boolean = false,
     content: LazyListScope.() -> Unit,
 ) {
     CompositionLocalProvider(LocalSettingsPageStyle provides true) {
         MiuixScaffoldPage(title = title, onBack = onBack, modifier = modifier, actions = actions, listState = listState,
             containerColor = settingsPageBackground(), scrollBehavior = scrollBehavior,
-            listModifier = Modifier.background(settingsPageBackground()), content = content)
+            listModifier = Modifier.background(settingsPageBackground()), compactTitle = compactTitle, content = content)
     }
 }
 

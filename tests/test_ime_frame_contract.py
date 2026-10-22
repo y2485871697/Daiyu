@@ -48,6 +48,31 @@ class ImeFrameContractTest(unittest.TestCase):
                         pointer.index('click()'))
         self.assertNotIn('Thread.sleep', pointer)
 
+    def test_composer_baseline_explicitly_hides_initial_window_ime(self):
+        text = (TEST / 'ChatComposerImeActivityTest.kt').read_text()
+        body = text.split('fun testKeyboardKeepsComposerAboveImeAndDoesNotPanHeader()', 1)[1]
+        self.assertLess(body.index('dismissIme()'), body.index('val emptyWindow = settledFrame(visible = false)'))
+        self.assertLess(body.index('val emptyWindow'), body.index('setDraft('))
+        self.assertIn('repeat(2)', body)
+        self.assertIn('KeyEvent.KEYCODE_BACK', body)
+        self.assertIn('val restored = settledFrame(visible = false, before = before)', body)
+
+    def test_more_background_uses_opaque_theme_and_hidden_ime_without_relaxed_colors(self):
+        text = (TEST / 'ChatChromeActivityTest.kt').read_text()
+        self.assertIn('opaqueBackground: Boolean = false', text)
+        self.assertIn('if (opaqueBackground) Modifier.background(MiuixTheme.colorScheme.background) else Modifier', text)
+        body = text.split('fun testMoreButtonHasNoPressedOrExpandedBackgroundInEitherTheme()', 1)[1].split('\n    fun ', 1)[0]
+        self.assertIn('listOf(false, true)', body)
+        self.assertIn('show(composer(), dark = dark, opaqueBackground = true)', body)
+        self.assertLess(body.index('dismissIme()'), body.index('awaitImeFrame(more, visible = false)'))
+        self.assertLess(body.index('awaitImeFrame(more, visible = false)'), body.index('val idle = captureScreenNode(more)'))
+        self.assertEqual(3, body.count('captureScreenNode(more)'))
+        self.assertIn('"pressed" to pressed, "expanded" to expanded', body)
+        for channel in ['red', 'green', 'blue']:
+            self.assertIn(f'expected.{channel}, actual.{channel}, .01f', body)
+        self.assertIn('finally { more.performTouchInput { up() } }', body)
+        self.assertNotIn('Thread.sleep', body)
+
     def test_voice_completes_show_hide_before_navigation_back(self):
         text = (TEST / 'VoiceSettingsStructureActivityTest.kt').read_text()
         body = text.split('fun testDoubaoSubpagesDoNotStartNetworkAndBackPreservesWizard()', 1)[1]

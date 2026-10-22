@@ -69,6 +69,7 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
     fun testKeyboardKeepsComposerAboveImeAndDoesNotPanHeader() {
         assertEquals(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
             activity.window.attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST)
+        dismissIme()
         val emptyWindow = settledFrame(visible = false)
         setDraft("键盘位置回归草稿")
         // Finish the show initiated by text replacement before requesting the baseline hide.

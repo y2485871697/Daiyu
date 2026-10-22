@@ -18,6 +18,31 @@ class ControllerRunControlTest:InstrumentationTestCase() {
     override fun tearDown() {
         try {fixtures.forEach {it.close()}} finally {super.tearDown()}
     }
+    fun testWorkerPausedBoundaryNotifiesChangedWithoutAnotherModelEvent() {
+        val f=fresh();val first=f.session(releaseOnCancel=false);val owner=start(f)
+        assertTrue(first.entered.await(5,TimeUnit.SECONDS))
+        val pausedObserved=java.util.concurrent.CountDownLatch(1)
+        val listener:()->Unit={
+            if(f.controller.runState(owner)?.let {it.pauseRequested && it.phase==ExecutionPhase.PAUSED}==true)
+                pausedObserved.countDown()
+        }
+        try {
+            controlMain {f.controller.observe(listener);assertTrue(f.controller.pause(owner))}
+            assertTrue(first.cancelled.await(5,TimeUnit.SECONDS))
+            instrumentation.waitForIdleSync()
+            controlMain {
+                assertEquals(ExecutionPhase.STREAMING,f.controller.runState(owner)!!.phase)
+                assertEquals(1L,pausedObserved.count)
+            }
+            first.release.countDown()
+            assertTrue("PAUSED must reach changed observer",pausedObserved.await(5,TimeUnit.SECONDS))
+            controlMain {
+                assertEquals(owner.id,f.controller.active!!.id);assertEquals(owner.runId,f.controller.active!!.runId)
+                assertEquals(RunStatus.RUNNING,f.controller.active!!.status)
+                assertEquals(ExecutionPhase.PAUSED,f.controller.runState(owner)!!.phase);assertEquals(1,f.opens.get())
+            }
+        } finally {controlMain {f.controller.unobserve(listener)};first.release.countDown()}
+    }
     fun testPauseWaitsForExplicitResumeKeepsOwnerAndRejectsLateEvents() {
         val f=fresh();val first=f.session("cancelled-body");val second=f.session("resumed-body")
         val owner=start(f);assertTrue(first.entered.await(5,TimeUnit.SECONDS))

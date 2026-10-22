@@ -116,12 +116,20 @@ collect_diagnostics() {
   timeout --kill-after=5 10 adb shell cat /proc/meminfo > smoke/memory-exit.txt 2>&1 || true
   timeout --kill-after=5 15 adb logcat -d -b all > smoke/logcat-exit.txt 2>&1 || true
   timeout --kill-after=5 15 adb shell dumpsys dropbox --print data_app_anr > smoke/anr-dropbox.txt 2>&1 || true
+  timeout --kill-after=5 10 adb shell ime list -a > smoke/ime-list-exit.txt 2>&1 || true
+  timeout --kill-after=5 10 adb shell dumpsys input_method > smoke/input-method-exit.txt 2>&1 || true
+  timeout --kill-after=5 10 adb shell dumpsys window > smoke/window-exit.txt 2>&1 || true
+  timeout --kill-after=5 10 adb shell dumpsys input > smoke/input-exit.txt 2>&1 || true
+  timeout --kill-after=5 10 adb shell dumpsys package com.google.android.inputmethod.latin > smoke/ime-package.txt 2>&1 || true
 }
 trap collect_diagnostics EXIT
 adb_stage device 60 wait-for-device
 api=$(adb_stage api 15 shell getprop ro.build.version.sdk | tr -d '\r')
 # Observe the image's renderer without restarting framework processes or hiding startup crashes.
 adb_stage image-state 15 shell getprop > smoke/properties-before.txt
+adb_stage ime-list 15 shell ime list -a > smoke/ime-list-before.txt
+adb_stage ime-default 15 shell settings get secure default_input_method > smoke/ime-default-before.txt
+adb_stage ime-state 15 shell dumpsys input_method > smoke/input-method-before.txt
 adb_stage hwui-state 15 shell getprop debug.hwui.renderer | tr -d '\r' > smoke/hwui-renderer.txt
 # Current gfxstream images crash in gesture-bar region sampling before app install.
 if test "$api" -ge 36; then

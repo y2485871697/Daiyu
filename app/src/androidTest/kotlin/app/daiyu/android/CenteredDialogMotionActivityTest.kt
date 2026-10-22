@@ -2,8 +2,14 @@ package app.daiyu.android
 
 import android.app.Dialog
 import android.content.Context
-import android.util.Xml
 import android.view.ContextThemeWrapper
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
+import android.view.animation.AnimationSet
+import android.view.animation.AnimationUtils
+import android.view.animation.ScaleAnimation
+import android.view.animation.Transformation
+import android.view.animation.TranslateAnimation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,7 +35,6 @@ import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.UsageGlassDialog
 import app.daiyu.android.ui.components.prepareDaiyuCenterMotion
 import app.daiyu.android.ui.haptics.material.TextButton
-import org.xmlpull.v1.XmlPullParser
 
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
@@ -66,31 +71,75 @@ class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
         return try { values.getResourceId(0, 0) } finally { values.recycle() }
     }
 
+    private fun assertOneShot(animation: Animation, diagnostic: String) {
+        assertEquals("Exit must not repeat: $diagnostic", 0, animation.repeatCount)
+        if (animation is AnimationSet) animation.animations.forEach { assertOneShot(it, diagnostic) }
+    }
+
+    private fun assertStationaryFade(diagnostic: String, create: () -> Animation) {
+        val identity = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+        for (size in listOf(intArrayOf(320, 640, 1080, 1920), intArrayOf(1080, 1920, 1080, 1920))) {
+            val prototype = create().apply { initialize(size[0], size[1], size[2], size[3]) }
+            assertOneShot(prototype, diagnostic)
+            val duration = prototype.computeDurationHint()
+            assertTrue("Finite positive exit duration: $diagnostic", duration in 1L..10_000L)
+            for (step in 0..64) {
+                val loaded = create().apply {
+                    initialize(size[0], size[1], size[2], size[3])
+                    startTime = 0L
+                }
+                val transformation = Transformation()
+                loaded.getTransformation(duration * step / 64L, transformation)
+                val matrix = FloatArray(9)
+                transformation.matrix.getValues(matrix)
+                val sample = "$diagnostic type=${loaded.javaClass.simpleName} " +
+                    "size=${size.contentToString()} step=$step alpha=${transformation.alpha} matrix=${matrix.contentToString()}"
+                for (index in identity.indices) {
+                    assertEquals("Centered exit must have identity matrix: $sample", identity[index], matrix[index], .0001f)
+                }
+                assertTrue("Finite fade alpha in [0,1]: $sample",
+                    transformation.alpha.isFinite() && transformation.alpha in 0f..1f)
+                if (step == 0) assertEquals("Exit starts opaque: $sample", 1f, transformation.alpha, .0001f)
+                if (step == 64) assertEquals("Exit ends transparent: $sample", 0f, transformation.alpha, .0001f)
+            }
+        }
+    }
+
     private fun assertExitIsAlphaFade(context: Context, animation: Int) {
         val values = context.obtainStyledAttributes(animation, intArrayOf(android.R.attr.windowExitAnimation))
         val exit = try { values.getResourceId(0, 0) } finally { values.recycle() }
         assertTrue("Dialog style supplies an exit animation", exit != 0)
-        val parser = context.resources.getXml(exit)
-        var foundAlpha = false
-        try {
-            while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-                if (parser.eventType == XmlPullParser.START_TAG) {
-                    assertFalse("Centered exit must not translate", parser.name == "translate")
-                    assertFalse("Centered exit must not scale", parser.name == "scale")
-                    if (parser.name == "alpha") {
-                        val alpha = context.obtainStyledAttributes(Xml.asAttributeSet(parser),
-                            intArrayOf(android.R.attr.fromAlpha, android.R.attr.toAlpha))
-                        try {
-                            assertEquals(1f, alpha.getFloat(0, Float.NaN), 0.0001f)
-                            assertEquals(0f, alpha.getFloat(1, Float.NaN), 0.0001f)
-                        } finally { alpha.recycle() }
-                        foundAlpha = true
-                    }
-                }
-                parser.next()
+        val diagnostic = "style=${context.resources.getResourceName(animation)} exit=${context.resources.getResourceName(exit)}"
+        android.util.Log.i("CenteredMotionDiag", diagnostic)
+        assertStationaryFade(diagnostic) { AnimationUtils.loadAnimation(context, exit) }
+    }
+
+    fun testFadeVerifierAcceptsIdentityTranslateAndScale() {
+        assertStationaryFade("identity translation and scale") {
+            AnimationSet(false).apply {
+                addAnimation(AlphaAnimation(1f, 0f).apply { duration = 160L })
+                addAnimation(TranslateAnimation(0f, 0f, 0f, 0f).apply { duration = 160L })
+                addAnimation(ScaleAnimation(1f, 1f, 1f, 1f).apply { duration = 160L })
             }
-        } finally { parser.close() }
-        assertTrue("Exit contains alpha 1 to 0", foundAlpha)
+        }
+    }
+
+    fun testFadeVerifierRejectsRealMotionAndWrongAlphaEndpoints() {
+        val invalid = listOf<() -> Animation>(
+            { TranslateAnimation(0f, 12f, 0f, 0f).apply { duration = 160L } },
+            { ScaleAnimation(1f, .9f, 1f, .9f).apply { duration = 160L } },
+            { AlphaAnimation(1f, 1f).apply { duration = 160L } },
+            { AlphaAnimation(.5f, 0f).apply { duration = 160L } },
+            { AlphaAnimation(1f, 0f).apply { duration = 160L; repeatCount = 1; repeatMode = Animation.REVERSE } },
+            { AnimationSet(false).apply {
+                addAnimation(AlphaAnimation(1f, 0f).apply { duration = 160L; repeatCount = 1; repeatMode = Animation.REVERSE })
+            } })
+        for ((index, create) in invalid.withIndex()) {
+            var rejected = false
+            try { assertStationaryFade("negative-$index", create) }
+            catch (_: junit.framework.AssertionFailedError) { rejected = true }
+            assertTrue("Non-fade must be rejected: $index", rejected)
+        }
     }
 
     private fun assertWindowAnimation(tag: String, platformFade: Boolean = true) {

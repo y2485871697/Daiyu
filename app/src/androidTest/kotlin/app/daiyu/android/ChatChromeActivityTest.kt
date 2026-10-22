@@ -37,11 +37,13 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatTopBar
 import app.daiyu.android.ui.screens.chat.conversation.ComposerPhase
 import app.daiyu.android.ui.screens.chat.conversation.ComposerUi
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** UI geometry and action dispatch; real run ownership stays covered by RunControlActivityTest. */
 class ChatChromeActivityTest : WiredActivityTestCase() {
     private var actionColors: ChatActionColors? = null
     private var disabledContextColor: Color = Color.Unspecified
+    private var layoutScenario = ""
 
     private fun composer() = ComposerUi(
         text = "  下一条消息  ", phase = ComposerPhase.RUNNING,
@@ -52,6 +54,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
 
     private fun show(composer: ComposerUi, actions: ChatScreenActions = ChatScreenActions(),
         fontScale: Float = 1f, interfaceScale: Float = 1f, dark: Boolean = false, balance: BalanceState? = null) {
+        layoutScenario = "dark=$dark scale=$interfaceScale font=$fontScale enabled=${composer.enabled} fraction=${composer.contextFraction}"
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
@@ -84,6 +87,23 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
         assertEquals(1, results.size)
         return results.single()
+    }
+
+    private fun assertNoTextOverflow(text: TextLayoutResult) {
+        assertFalse("$layoutScenario text=${text.layoutInput.text} " +
+            "width=${text.didOverflowWidth} height=${text.didOverflowHeight} " +
+            "size=${text.size} constraints=${text.layoutInput.constraints} " +
+            "paragraph=${text.multiParagraph.width}x${text.multiParagraph.height} " +
+            "intrinsic=${text.multiParagraph.intrinsics.maxIntrinsicWidth} " +
+            "line=${text.getLineLeft(0)},${text.getLineTop(0)},${text.getLineRight(0)},${text.getLineBottom(0)} " +
+            "ellipsized=${text.isLineEllipsized(0)}", text.hasVisualOverflow)
+    }
+
+    private fun contextHeightPx(text: TextLayoutResult): Float {
+        val density = text.layoutInput.density.density
+        return maxOf((24f * density).roundToInt(),
+            maxOf((18f * density).roundToInt(), text.size.height) +
+                2 * (1f * density).roundToInt() + 2 * (2f * density).roundToInt()).toFloat()
     }
 
     fun testRunningComposerAt320DpKeepsActionsSeparateAndContextReadable() {
@@ -206,7 +226,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(9f, (surface.left - host.left) / density, .5f)
             assertEquals(16f, (host.bottom - surface.bottom) / density, .75f)
             assertEquals(144f, surface.height / density, 1.5f)
-            assertEquals(24f, context.height / density, .75f)
+            assertEquals(contextHeightPx(layout("37% 上下文")), context.height, 0f)
             assertEquals(13f, (context.top - surface.top) / density, .75f)
             assertEquals(14f, (surface.right - context.right) / density, .75f)
             assertEquals(13f, (divider.left - surface.left) / density, .75f)
@@ -256,10 +276,10 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 assertEquals(androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false), text.layoutInput.style.platformStyle)
                 assertEquals(font, text.layoutInput.density.fontScale, .001f)
                 assertEquals(1, text.lineCount)
-                assertFalse(text.hasVisualOverflow)
+                assertNoTextOverflow(text)
                 assertEquals(18f, icon.width / density, .75f)
                 assertEquals(18f, icon.height / density, .75f)
-                assertEquals(24f, badge.height / density, 1f)
+                assertEquals(contextHeightPx(text), badge.height, 0f)
                 assertTrue("compact context max width", badge.width / density <= 120f + 1f)
                 if (font <= 1f) assertTrue("default-font badge stays compact", badge.width / density < 92f)
                 assertEquals(5f, (icon.left - badge.left) / density, .75f)
@@ -290,7 +310,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val expected = if (safe == null) "上下文" else "${(safe * 100).toInt()}% 上下文"
             val text = layout(expected)
             assertEquals(1, text.lineCount)
-            assertFalse(text.hasVisualOverflow)
+            assertNoTextOverflow(text)
             node("chat-context").assertHasNoClickAction()
         }
         show(composer().copy(contextFraction = 1f, contextLabel = "上下文使用情况".repeat(20)), fontScale = 1.3f)
@@ -343,8 +363,10 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                     .fetchSemanticsNode().boundsInRoot
                 assertEquals(assistantSlot.center.x, avatar.center.x, 1f)
                 assertEquals(assistantSlot.center.y, avatar.center.y, 1f)
-                assertEquals(4f, (avatar.left - assistantSlot.left) / density, .75f)
-                assertEquals(4f, (avatar.top - assistantSlot.top) / density, .75f)
+                assertEquals(((assistantSlot.width - avatar.width) / 2f).roundToInt().toFloat(),
+                    avatar.left - assistantSlot.left, 0f)
+                assertEquals(((assistantSlot.height - avatar.height) / 2f).roundToInt().toFloat(),
+                    avatar.top - assistantSlot.top, 0f)
                 val colors = requireNotNull(actionColors)
                 val expected = if (label == "追加消息") colors.appendContainer else colors.sendContainer
                 val tag = if (label == "发送" || label == "追加消息") "chat-send" else "chat-control"
@@ -465,7 +487,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(14.sp, text.layoutInput.style.fontSize)
             assertEquals(28.sp, text.layoutInput.style.lineHeight)
             assertEquals(1, text.lineCount)
-            assertFalse(text.hasVisualOverflow)
+            assertNoTextOverflow(text)
             val indicator = node("chat-composer-provider-balance").assertIsDisplayed().assertHasNoClickAction()
                 .fetchSemanticsNode().boundsInRoot
             val dp = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f

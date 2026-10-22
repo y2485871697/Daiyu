@@ -110,11 +110,14 @@ class DialogMotionContractTest(unittest.TestCase):
                          "assertEquals(1, disposals)", "window.attributes.windowAnimations",
                          "android.R.attr.windowAnimationStyle", "assertFalse(dialog.isShowing)",
                          "android.R.attr.dialogTheme", "ContextThemeWrapper(activity, theme)",
-                         "android.R.attr.windowExitAnimation", "context.resources.getXml(exit)",
-                         "XmlPullParser.START_TAG", "android.R.attr.fromAlpha", "android.R.attr.toAlpha",
-                         'parser.name == "translate"', 'parser.name == "scale"',
-                         "assertEquals(1f, alpha.getFloat(0, Float.NaN), 0.0001f)",
-                         "assertEquals(0f, alpha.getFloat(1, Float.NaN), 0.0001f)", "parser.close()"]:
+                         "android.R.attr.windowExitAnimation", "AnimationUtils.loadAnimation(context, exit)",
+                         "loaded.getTransformation(", "transformation.matrix.getValues(matrix)",
+                         '"Centered exit must have identity matrix: $sample"',
+                         "identity[index], matrix[index], .0001f", "for (step in 0..64)",
+                         "1f, transformation.alpha, .0001f", "0f, transformation.alpha, .0001f",
+                         "testFadeVerifierAcceptsIdentityTranslateAndScale", "testFadeVerifierRejectsRealMotionAndWrongAlphaEndpoints",
+                         "assertOneShot(prototype, diagnostic)", "0, animation.repeatCount",
+                         "animation.animations.forEach { assertOneShot(it, diagnostic) }", "repeatMode = Animation.REVERSE"]:
             self.assertIn(fragment, test)
         self.assertIn('assertWindowAnimation("bottom-preview", platformFade = false)', test)
         self.assertIn('assertWindowAnimation("daiyu-choice-sheet", platformFade = false)', test)

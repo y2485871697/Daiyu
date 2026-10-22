@@ -20,6 +20,108 @@ class RunnerControlTest {
         override fun save(message: Message) { writes.add(message) }
     }
 
+    private class PauseStore(private val failBeforeCommit: Boolean = false,
+        private val loseReceipt: Boolean = false) : AtomicRuntimeStore {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val attempts = java.util.concurrent.CopyOnWriteArrayList<RunCheckpoint>()
+        @Volatile var latest: RunCheckpoint? = null
+        var recoveries = 0
+        override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+            attempts.add(checkpoint)
+            if (checkpoint.phase == ExecutionPhase.PAUSED) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                if (failBeforeCommit) error("write failed")
+                latest = checkpoint
+                if (loseReceipt) error("receipt lost")
+            } else latest = checkpoint
+        }
+        override fun readCommittedCheckpoint(checkpoint: RunCheckpoint) = latest
+        override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
+            recoveries++
+            error("live owner must not recover")
+        }
+    }
+
+    @Test fun pausedCommitPrecedesPublicationAndObserverExceptionCannotFailRun() {
+        for (throwObserver in listOf(false, true)) {
+            val runtime = PauseStore()
+            val published = java.util.concurrent.CopyOnWriteArrayList<Message>()
+            val pausedPublished = CountDownLatch(1)
+            val opens = AtomicInteger()
+            lateinit var runner: ChatRunner
+            runner = ChatRunner(ModelPort { opens.incrementAndGet(); session { _, _ -> } },
+                object : ConversationStore { override fun save(message: Message) = error("atomic writer only") },
+                BatteryTool { error("unused") }, RunnerOptions(runtimeStore = runtime)) { message ->
+                published.add(message)
+                if (message.status == RunStatus.RUNNING) {
+                    assertEquals(ExecutionPhase.PAUSED, runtime.latest!!.phase)
+                    assertEquals(message, runtime.latest!!.message)
+                    assertEquals(ExecutionPhase.PAUSED, runner.state().phase)
+                    assertTrue(runner.state().pauseRequested)
+                    pausedPublished.countDown()
+                    if (throwObserver) error("observer unavailable")
+                }
+            }
+            assertTrue(runner.pause())
+            val task = FutureTask { runner.run(initial(), emptyList()) }
+            val worker = Thread(task).apply { isDaemon = true; start() }
+            try {
+                assertTrue(runtime.entered.await(5, TimeUnit.SECONDS))
+                assertEquals(ExecutionPhase.PAUSED, runner.state().phase)
+                assertNull(runtime.latest)
+                assertTrue(published.isEmpty())
+                assertEquals(0, opens.get())
+                runtime.release.countDown()
+                assertTrue(pausedPublished.await(5, TimeUnit.SECONDS))
+                assertFalse(task.isDone)
+                assertTrue(runner.resume())
+                val result = task.get(5, TimeUnit.SECONDS)
+                assertEquals(RunStatus.COMPLETED, result.status)
+                assertEquals(initial().id, result.id)
+                assertEquals(initial().runId, result.runId)
+                assertEquals(1, opens.get())
+                assertEquals(listOf(result), published.filter { it.status != RunStatus.RUNNING })
+                assertEquals(result, runtime.latest!!.message)
+                assertEquals(0, runtime.recoveries)
+            } finally {
+                runtime.release.countDown(); runner.stop(); worker.join(5_000)
+                assertFalse(worker.isAlive)
+            }
+        }
+    }
+
+    @Test fun failedOrUnconfirmedPausedCommitNeverPublishesSuccessfulPause() {
+        for (lostReceipt in listOf(false, true)) {
+            val runtime = PauseStore(failBeforeCommit = !lostReceipt, loseReceipt = lostReceipt)
+            val published = java.util.concurrent.CopyOnWriteArrayList<Message>()
+            val opens = AtomicInteger()
+            val runner = ChatRunner(ModelPort { opens.incrementAndGet(); error("must not open") },
+                object : ConversationStore { override fun save(message: Message) = error("atomic writer only") },
+                BatteryTool { error("unused") }, RunnerOptions(runtimeStore = runtime), published::add)
+            assertTrue(runner.pause())
+            val task = FutureTask { runner.run(initial(), emptyList()) }
+            val worker = Thread(task).apply { isDaemon = true; start() }
+            try {
+                assertTrue(runtime.entered.await(5, TimeUnit.SECONDS))
+                assertTrue(published.isEmpty())
+                runtime.release.countDown()
+                val result = task.get(5, TimeUnit.SECONDS)
+                assertEquals(RunStatus.FAILED, result.status)
+                assertTrue(result.error!!.startsWith("保存失败"))
+                assertTrue(published.none { it.status == RunStatus.RUNNING })
+                assertEquals(0, opens.get())
+                assertEquals(1, runtime.attempts.size)
+                assertEquals(0, runtime.recoveries)
+                assertEquals(if (lostReceipt) ExecutionPhase.PAUSED else null, runtime.latest?.phase)
+            } finally {
+                runtime.release.countDown(); runner.stop(); worker.join(5_000)
+                assertFalse(worker.isAlive)
+            }
+        }
+    }
+
     @Test fun sameItemAcrossToolKeepsEventOrderAndFinalCorrection() {
         var rounds = 0
         val runner = ChatRunner(ModelPort { session { _, sink ->

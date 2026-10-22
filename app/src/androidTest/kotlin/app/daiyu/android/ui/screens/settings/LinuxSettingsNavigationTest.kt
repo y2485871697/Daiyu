@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -15,17 +17,25 @@ import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
+import top.yukonga.miuix.kmp.theme.Colors
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.abs
 
 class LinuxSettingsNavigationTest : WiredActivityTestCase() {
+    private lateinit var colors: Colors
+
     private fun show(dark: Boolean = false, fontScale: Float = 1f, locationsEnabled: Boolean = true) {
+        val showKey = Any()
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                     AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = false) {
-                        var tab by remember { mutableStateOf(LinuxSettingsTab.BASIC) }
-                        var location by remember { mutableStateOf(LinuxFileLocation.WORKSPACE) }
+                        val themeColors = MiuixTheme.colorScheme
+                        SideEffect { colors = themeColors }
+                        var tab by remember(showKey) { mutableStateOf(LinuxSettingsTab.BASIC) }
+                        var location by remember(showKey) { mutableStateOf(LinuxFileLocation.WORKSPACE) }
                         Column(Modifier.width(320.dp)) {
                             LinuxFileLocationTabs(location, locationsEnabled) { location = it }
                             LinuxSettingsTabs(tab) { tab = it }
@@ -65,6 +75,41 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
         node("linux-files:workspace").assertIsNotSelected()
         ui.onNodeWithTag("linux-files-indicator:rootfs", useUnmergedTree = true).assertExists()
         node("linux-files:shared").performClick().assertIsSelected()
+    }
+
+    fun testNavigationUsesThemeColorPairsBeforeAndAfterSelectionInBothThemes() {
+        for (dark in listOf(false, true)) {
+            show(dark = dark)
+            ui.waitForIdle()
+            assertColorPair(ui.onNodeWithTag("linux-tab-indicator:basic", useUnmergedTree = true),
+                colors.primary, colors.onPrimary)
+            assertColorPair(node("linux-tab:files"), colors.primaryContainer, colors.onPrimaryContainer)
+            assertColorPair(node("linux-files:workspace"), colors.primary, colors.onPrimary)
+            assertColorPair(node("linux-files:rootfs"), colors.primaryContainer, colors.onPrimaryContainer)
+
+            node("linux-tab:files").performClick().assertIsSelected()
+            node("linux-files:rootfs").performClick().assertIsSelected()
+            assertColorPair(ui.onNodeWithTag("linux-tab-indicator:files", useUnmergedTree = true),
+                colors.primary, colors.onPrimary)
+            assertColorPair(node("linux-tab:basic"), colors.primaryContainer, colors.onPrimaryContainer)
+            assertColorPair(node("linux-files:rootfs"), colors.primary, colors.onPrimary)
+            assertColorPair(node("linux-files:workspace"), colors.primaryContainer, colors.onPrimaryContainer)
+        }
+    }
+
+    private fun assertColorPair(target: SemanticsNodeInteraction, background: Color, foreground: Color) {
+        val pixels = target.captureToImage().toPixelMap()
+        fun Color.matches(expected: Color) = abs(red - expected.red) < .035f &&
+            abs(green - expected.green) < .035f && abs(blue - expected.blue) < .035f
+        var backgroundCount = 0
+        var foregroundCount = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val pixel = pixels[x, y]
+            if (pixel.matches(background)) backgroundCount++
+            if (pixel.matches(foreground)) foregroundCount++
+        }
+        assertTrue("Missing theme background $background", backgroundCount > pixels.width * pixels.height * .04f)
+        assertTrue("Missing paired theme foreground $foreground", foregroundCount > 8)
     }
 
     fun testCompactNavigationRemainsVisibleAt320DpWithLargeLabelsInBothThemes() {

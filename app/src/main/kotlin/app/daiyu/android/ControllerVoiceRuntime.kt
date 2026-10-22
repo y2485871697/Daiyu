@@ -22,29 +22,37 @@ internal data class VoiceConfiguration(
     val engine: String = "SYSTEM",
     val endpoint: String = "", val key: String = "", val model: String = "",
     val provider: String = "", val voice: String = "",
-    val dictation: String = "SYSTEM", val asrKey: String = "", val asrResource: String = "",
+    val dictation: String = "SYSTEM", val asrKey: String = "", val asrResource: String = DoubaoAsrProtocol.resources.first(),
     val duplexKey: String = "", val duplexVoice: String = DoubaoDuplexProtocol.DEFAULT_VOICE,
     val instructions: String = "你是代鱼，一个简洁、自然、友善的中文语音助手。",
+    val customHeaders: app.daiyu.android.model.ProviderHeaders = app.daiyu.android.model.ProviderHeaders.EMPTY,
+    val duplexProvider: String = "",
+    val modelIdentity: String = "", val modelLabel: String = "",
 ) {
     override fun toString() = "VoiceConfiguration(redacted)"
     fun referenceOwner(): String = java.security.MessageDigest.getInstance("SHA-256")
-        .digest(listOf(provider, endpoint, key).joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8))
+        .digest((listOf(provider, endpoint, key) + if (customHeaders.isEmpty) emptyList() else listOf(customHeaders.encode())).joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
     fun speech() = SpeechProviderConfig(SpeechEngine.valueOf(engine), endpoint, key, model,
-        if (voice.startsWith(MimoPersonalVoices.PREFIX)) referenceOwner() else provider)
+        if (voice.startsWith(MimoPersonalVoices.PREFIX)) referenceOwner() else provider,
+        JSONObject(customHeaders.encode()).let { json -> json.keys().asSequence().associateWith { json.getString(it) } })
     fun encode(): String = JSONObject().apply {
         put("revision", revision); put("engine", engine); put("endpoint", endpoint); put("key", key)
         put("model", model); put("provider", provider); put("voice", voice); put("dictation", dictation)
         put("asrKey", asrKey); put("asrResource", asrResource); put("duplexKey", duplexKey)
         put("duplexVoice", duplexVoice); put("instructions", instructions)
+        put("customHeaders", JSONObject(customHeaders.encode())); put("duplexProvider", duplexProvider)
+        put("modelIdentity", modelIdentity); put("modelLabel", modelLabel)
     }.toString()
     companion object {
         fun decode(text: String): VoiceConfiguration {
             val j = JSONObject(text)
             return VoiceConfiguration(j.getString("revision"), j.getString("engine"), j.getString("endpoint"),
                 j.getString("key"), j.getString("model"), j.getString("provider"), j.getString("voice"),
-                j.getString("dictation"), j.getString("asrKey"), j.getString("asrResource"),
-                j.getString("duplexKey"), j.getString("duplexVoice"), j.getString("instructions"))
+                j.getString("dictation"), j.getString("asrKey"), j.getString("asrResource").ifBlank { DoubaoAsrProtocol.resources.first() },
+                j.getString("duplexKey"), j.getString("duplexVoice"), j.getString("instructions"),
+                app.daiyu.android.model.ProviderHeaders.parse(j.optJSONObject("customHeaders")?.toString().orEmpty()),
+                j.optString("duplexProvider"), j.optString("modelIdentity"), j.optString("modelLabel"))
         }
     }
 }
@@ -69,20 +77,25 @@ internal class FrozenVoiceSpeech(
     val doubaoResolver: (() -> DoubaoPersonalVoice?)? = null,
     val upload: PersonalCascadeUpload? = null,
     val playbackLimitMs: Long = 120_000L,
+    val previewAccount: VoiceConfiguration? = null,
 ) {
     val isPersonal: Boolean get() = configuration.voice.startsWith(MimoPersonalVoices.PREFIX) ||
         (configuration.engine == "DOUBAO" && (configuration.voice.startsWith("S_") || configuration.voice.startsWith("etaClone")))
-    fun withUpload(value: PersonalCascadeUpload, limitMs: Long) = FrozenVoiceSpeech(configuration, reference,
-        profile, doubaoPersonal, doubaoResolver, value, limitMs)
+    fun withUpload(value: PersonalCascadeUpload, limitMs: Long): FrozenVoiceSpeech {
+        check(previewAccount == null)
+        return FrozenVoiceSpeech(configuration, reference, profile, doubaoPersonal, doubaoResolver, value, limitMs)
+    }
     override fun toString() = "FrozenVoiceSpeech(redacted)"
 }
 
 /** Versioned encrypted envelope; absence is unconfigured, never another profile's selection. */
-internal class VoiceProfileEnvelope(val profiles: Map<VoiceProfile, VoiceConfiguration>, val legacy: VoiceConfiguration? = null) {
+internal class VoiceProfileEnvelope(val profiles: Map<VoiceProfile, VoiceConfiguration>, val legacy: VoiceConfiguration? = null,
+    val accounts: Map<String, VoiceConfiguration> = emptyMap()) {
     fun encode(): String = JSONObject().apply {
         put("schema", 2)
         put("profiles", JSONObject().apply { profiles.forEach { (profile, config) -> put(profile.name, JSONObject(config.encode())) } })
         legacy?.let { put("legacyPending", JSONObject(it.encode())) }
+        put("accounts", JSONObject().apply { accounts.forEach { (engine, config) -> put(engine, JSONObject(config.encode())) } })
     }.toString()
     companion object {
         fun decode(text: String): VoiceProfileEnvelope {
@@ -93,7 +106,9 @@ internal class VoiceProfileEnvelope(val profiles: Map<VoiceProfile, VoiceConfigu
             val values = json.getJSONObject("profiles")
             return VoiceProfileEnvelope(VoiceProfile.entries.mapNotNull { profile ->
                 if (values.has(profile.name)) profile to VoiceConfiguration.decode(values.getJSONObject(profile.name).toString()) else null
-            }.toMap(), json.optJSONObject("legacyPending")?.let { VoiceConfiguration.decode(it.toString()) })
+            }.toMap(), json.optJSONObject("legacyPending")?.let { VoiceConfiguration.decode(it.toString()) },
+                listOf("DOUBAO", "MIMO").mapNotNull { engine -> json.optJSONObject("accounts")?.optJSONObject(engine)
+                    ?.let { engine to VoiceConfiguration.decode(it.toString()) } }.toMap())
         }
     }
 }
@@ -111,6 +126,8 @@ internal class ControllerVoiceRuntime(
     val conversationConfiguration = conversation.asStateFlow()
     private val legacy = MutableStateFlow<VoiceConfiguration?>(null)
     val legacyConfiguration = legacy.asStateFlow()
+    private val accountState = MutableStateFlow<Map<String, VoiceConfiguration>>(emptyMap())
+    val accountConfigurations = accountState.asStateFlow()
     /** Envelope readiness only; personal media index loading is independent. */
     internal enum class LoadState { NOT_STARTED, LOADING, LOADED, FAILED, CANCELLED }
     @Volatile internal var loadState = LoadState.NOT_STARTED
@@ -129,6 +146,7 @@ internal class ControllerVoiceRuntime(
         mutable.value = value.profiles[VoiceProfile.READ_ALOUD]
         conversation.value = value.profiles[VoiceProfile.CONVERSATION]
         legacy.value = value.legacy
+        accountState.value = value.accounts
     }
     fun profileConfiguration(profile: VoiceProfile) = when (profile) {
         VoiceProfile.READ_ALOUD -> configuration
@@ -157,6 +175,7 @@ internal class ControllerVoiceRuntime(
                     val loaded = VoiceProfileEnvelope.decode(vault.load().apiKey)
                     loaded.profiles.values.forEach(::validate)
                     loaded.legacy?.let(::validate)
+                    loaded.accounts.forEach { (engine, value) -> require(value.engine == engine); validate(value) }
                     publish(loaded); failed = false
                     loadState = LoadState.LOADED
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -181,23 +200,36 @@ internal class ControllerVoiceRuntime(
     suspend fun save(value: VoiceConfiguration, profile: VoiceProfile = VoiceProfile.READ_ALOUD,
         consumeLegacy: Boolean = false) = withContext(Dispatchers.IO) {
         validate(value)
-        envelope(VoiceProfileEnvelope(state.profiles + (profile to value), state.legacy.takeUnless { consumeLegacy }).encode()).validate()
+        envelope(VoiceProfileEnvelope(state.profiles + (profile to value), state.legacy.takeUnless { consumeLegacy }, state.accounts).encode()).validate()
         // Fence new work first, then revoke and drain WITHOUT holding the storage/control lock.
         failed = true
         invalidateSpeech(profile)
         synchronized(lock) {
             val next = VoiceProfileEnvelope(state.profiles + (profile to value.copy(revision = UUID.randomUUID().toString())),
-                state.legacy.takeUnless { consumeLegacy })
+                state.legacy.takeUnless { consumeLegacy }, state.accounts)
             val encoded = next.encode()
-            try {
-                vault.save(envelope(encoded))
-                check(vault.load().apiKey == encoded) { "voice_save_unconfirmed" }
-                publish(next); failed = false
-            } catch (failure: Exception) {
-                publish(VoiceProfileEnvelope(emptyMap(), state.legacy)); throw failure
-            }
+            vault.save(envelope(encoded))
+            check(vault.load().apiKey == encoded) { "voice_save_unconfirmed" }
+            publish(next); failed = false
         }
     }
+    suspend fun saveAccount(value: VoiceConfiguration) = withContext(Dispatchers.IO) {
+        require(value.engine in setOf("DOUBAO", "MIMO"))
+        validate(value)
+        envelope(VoiceProfileEnvelope(state.profiles, state.legacy, state.accounts + (value.engine to value)).encode()).validate()
+        failed = true
+        invalidateSpeech()
+        synchronized(lock) {
+            val next = VoiceProfileEnvelope(state.profiles, state.legacy,
+                state.accounts + (value.engine to value.copy(revision = UUID.randomUUID().toString())))
+            val encoded = next.encode()
+            vault.save(envelope(encoded))
+            check(vault.load().apiKey == encoded) { "voice_account_save_unconfirmed" }
+            publish(next); failed = false
+        }
+    }
+    fun accountCurrent(value: VoiceConfiguration): Boolean = !failed && state.accounts[value.engine] == value
+
     /** Atomic explicit move into ONE chosen profile, without copying credentials into both. */
     suspend fun migrateLegacy(profile: VoiceProfile) {
         val previous = checkNotNull(legacy.value) { "voice_no_legacy_configuration" }
@@ -209,7 +241,17 @@ internal class ControllerVoiceRuntime(
     }
     fun current(value: VoiceConfiguration, profile: VoiceProfile = VoiceProfile.READ_ALOUD): Boolean =
         !failed && state.profiles[profile] == value
-    fun current(value: FrozenVoiceSpeech): Boolean = current(value.configuration, value.profile)
+    fun current(value: FrozenVoiceSpeech): Boolean {
+        val account = value.previewAccount ?: return current(value.configuration, value.profile)
+        return accountCurrent(account) && value.configuration == account.copy(
+            voice = value.configuration.voice, model = MimoPersonalVoices.MODEL) &&
+            personal.state.value.any { it.id == value.configuration.voice && it.providerId == account.referenceOwner() }
+    }
+    fun preparePersonalPreview(account: VoiceConfiguration, voice: String): FrozenVoiceSpeech {
+        require(account.engine == "MIMO" && accountCurrent(account))
+        require(personal.state.value.any { it.id == voice && it.providerId == account.referenceOwner() })
+        return FrozenVoiceSpeech(account.copy(voice = voice, model = MimoPersonalVoices.MODEL), previewAccount = account)
+    }
 
     fun prepareSpeech(profile: VoiceProfile = VoiceProfile.READ_ALOUD): FrozenVoiceSpeech {
         val value = snapshot(profile)
@@ -222,6 +264,19 @@ internal class ControllerVoiceRuntime(
             doubaoPersonalResolver?.let { lookup -> { lookup(value) } } else null
         return FrozenVoiceSpeech(value, profile = profile, doubaoPersonal = resolver?.invoke(), doubaoResolver = resolver)
     }
+    fun prepareDuplex(value: VoiceConfiguration): app.daiyu.android.voice.duplex.DoubaoDuplexConfig {
+        check(current(value))
+        val personal = value.duplexVoice.startsWith("S_") || value.duplexVoice.startsWith("etaClone")
+        val voice = if (personal) {
+            val lookup = value.copy(engine = "DOUBAO", endpoint = "https://openspeech.bytedance.com",
+                key = value.duplexKey, provider = value.duplexProvider, model = "seed-tts-2.0", voice = value.duplexVoice,
+                customHeaders = app.daiyu.android.model.ProviderHeaders.EMPTY)
+            check(doubaoPersonalResolver?.invoke(lookup)?.availableFor(value.duplexKey) == true)
+            value.duplexVoice
+        } else value.duplexVoice.takeIf { id -> realtimeSpeechVoices.any { it.id == id } } ?: DoubaoDuplexProtocol.DEFAULT_VOICE
+        return app.daiyu.android.voice.duplex.DoubaoDuplexConfig(value.duplexKey, voice,
+            value.instructions.ifBlank { "你是代鱼，一个简洁、自然、友善的中文语音助手。" })
+    }
     /** Local-only freeze; authorization is still required before any HTTP request. */
     suspend fun authorizeReference(prepared: FrozenVoiceSpeech): FrozenVoiceSpeech = withContext(Dispatchers.IO) {
         val value = prepared.configuration
@@ -232,11 +287,11 @@ internal class ControllerVoiceRuntime(
         references[value.voice] = ReferenceRecord(record, PersonalVoiceCascadeGrant.digest(reference))
         check(current(prepared)) { "voice_configuration_changed" }
         FrozenVoiceSpeech(value, reference, prepared.profile, prepared.doubaoPersonal, prepared.doubaoResolver,
-            prepared.upload, prepared.playbackLimitMs)
+            prepared.upload, prepared.playbackLimitMs, prepared.previewAccount)
     }
     /** Cheap live state only. Suitable for grant callbacks: no I/O, runtime lock, or grant re-entry. */
     fun personalBinding(prepared: FrozenVoiceSpeech): PersonalVoiceCascadeBinding? {
-        if (!current(prepared)) return null
+        if (prepared.previewAccount != null || !current(prepared)) return null
         val value = state.profiles[prepared.profile] ?: return null
         val digest = if (value.voice.startsWith(MimoPersonalVoices.PREFIX)) {
             val cached = references[value.voice] ?: return null
@@ -274,7 +329,7 @@ internal class ControllerVoiceRuntime(
             require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.rawUserInfo == null &&
                 uri.rawFragment == null && uri.rawQuery == null)
         }
-        if (v.dictation == "DOUBAO") require(v.asrKey.isNotBlank() && v.asrResource in DoubaoAsrProtocol.resources)
+        if (v.dictation == "DOUBAO") require(v.asrResource in DoubaoAsrProtocol.resources)
         if (v.voice.startsWith(MimoPersonalVoices.PREFIX))
             require(v.engine == "MIMO" && v.model == MimoPersonalVoices.MODEL)
         require(v.duplexVoice.isNotBlank())

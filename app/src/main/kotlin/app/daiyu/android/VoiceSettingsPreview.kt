@@ -23,7 +23,7 @@ internal fun stopVoicePreview(host: VoiceHost, gate: AudioOwnerGate): Boolean =
 internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: VoiceProfile,
     enabled: Boolean, isCurrent: () -> Boolean, installRevoke: (() -> Unit) -> (() -> Unit),
     sampleText: String = "你好，这是代鱼的语音试听。", configuration: VoiceConfiguration? = null,
-    onInitialize: (() -> Unit)? = null) {
+    onInitialize: (() -> Unit)? = null, personalPreview: FrozenVoiceSpeech? = null, embedded: Boolean = false) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -84,7 +84,7 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
     }
     LaunchedEffect(enabled, configuration) { if (!enabled) stop() }
     val active = preparing || voiceHostIsActive(state)
-    SettingsCard {
+    val previewRow: @Composable () -> Unit = {
         SettingsRow(if (active) "停止试听" else "试听", tag = "voice-preview",
             summary = when {
                 error.isNotBlank() -> error
@@ -97,12 +97,13 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
                 else if (current() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                     error = ""
                     try {
-                        val frozen = runtime.prepareSpeech(profile)
+                        val frozen = personalPreview ?: runtime.prepareSpeech(profile)
                         if (frozen.configuration.engine == "SYSTEM") play(frozen) else consent = frozen
                     } catch (_: Exception) { error = "请先选择模型和音色。" }
                 }
             }))
     }
+    if (embedded) previewRow() else VoiceSettingsCard { previewRow() }
     if (initialize) DaiyuConfirmDialog("启用系统语音", "将为此分组保存系统语音设置。保存后可点击试听，不会迁移其他分组的配置。",
         "启用", false, onConfirm = { initialize = false; if (current()) onInitialize?.invoke() },
         onDismiss = { initialize = false })

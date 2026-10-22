@@ -1,0 +1,134 @@
+package app.daiyu.android
+
+import app.daiyu.android.model.ProviderHeaders
+import app.daiyu.android.voice.providers.*
+import org.json.JSONObject
+import org.junit.Assert.*
+import org.junit.Test
+
+class VoiceSettingsParityTest {
+    private fun cloud() = VoiceConfiguration(revision = "account", engine = "MIMO", provider = "provider-A",
+        endpoint = "https://speech.invalid/v1", key = "fixture-only", model = "mimo-v2.5-tts", voice = "mimo_default",
+        customHeaders = ProviderHeaders.parse("{\"x-fixture\":\"fixture-only\"}"), modelIdentity = "local-model-A")
+
+    @Test fun speechSelectionPreservesRecognitionRealtimeAndRevision() {
+        val current = VoiceConfiguration(revision = "profile", dictation = "DOUBAO", asrKey = "asr-only",
+            asrResource = DoubaoAsrProtocol.resources.last(), duplexKey = "duplex-only", duplexProvider = "realtime-provider",
+            duplexVoice = realtimeSpeechVoices.last().id, instructions = "local instructions")
+        val next = current.withSpeech(cloud())
+        assertEquals(current.revision, next.revision)
+        assertEquals(current.dictation, next.dictation)
+        assertEquals(current.asrKey, next.asrKey)
+        assertEquals(current.asrResource, next.asrResource)
+        assertEquals(current.duplexKey, next.duplexKey)
+        assertEquals(current.duplexProvider, next.duplexProvider)
+        assertEquals(current.duplexVoice, next.duplexVoice)
+        assertEquals(current.instructions, next.instructions)
+        assertEquals(cloud().customHeaders, next.customHeaders)
+        assertEquals(cloud().modelIdentity, next.modelIdentity)
+        assertEquals(cloud().voice, next.voice)
+    }
+
+    @Test fun savedLeafUpdateKeepsUnsubmittedDraftAndAdoptsCurrentRevision() {
+        val previous = cloud().copy(revision = "old", asrKey = "old-key", instructions = "old instructions")
+        val pending = previous.copy(model = "other-tts", modelIdentity = "other-local", voice = "other-voice")
+        val saved = previous.copy(revision = "saved", asrKey = "saved-key", instructions = "saved instructions")
+        val merged = mergeVoiceSettingsDraft(previous, pending, saved)
+        assertEquals(saved.revision, merged.revision)
+        assertEquals(saved.asrKey, merged.asrKey)
+        assertEquals(saved.instructions, merged.instructions)
+        assertEquals(pending.model, merged.model)
+        assertEquals(pending.voice, merged.voice)
+        assertEquals(pending.modelIdentity, merged.modelIdentity)
+    }
+
+    @Test fun profileAndIndependentAccountEnvelopeRoundTripWithoutSharingSelections() {
+        val reading = cloud().copy(revision = "reading", voice = "冰糖")
+        val conversation = cloud().copy(revision = "conversation", voice = "茉莉", asrKey = "conversation-key")
+        val account = cloud().copy(revision = "personal-account", provider = "personal-provider")
+        val encoded = VoiceProfileEnvelope(mapOf(VoiceProfile.READ_ALOUD to reading,
+            VoiceProfile.CONVERSATION to conversation), accounts = mapOf("MIMO" to account)).encode()
+        val restored = VoiceProfileEnvelope.decode(encoded)
+        assertEquals(reading, restored.profiles[VoiceProfile.READ_ALOUD])
+        assertEquals(conversation, restored.profiles[VoiceProfile.CONVERSATION])
+        assertEquals(account, restored.accounts["MIMO"])
+        assertNotEquals(restored.accounts["MIMO"], restored.profiles[VoiceProfile.READ_ALOUD])
+    }
+
+    @Test fun oldConfigurationWithoutNewFieldsDecodesAndHeadersReachSpeechRequest() {
+        val original = cloud()
+        val old = JSONObject(original.encode()).apply {
+            remove("customHeaders"); remove("duplexProvider"); remove("modelIdentity"); remove("modelLabel")
+        }
+        val restored = VoiceConfiguration.decode(old.toString())
+        assertTrue(restored.customHeaders.isEmpty)
+        assertEquals("", restored.duplexProvider)
+        assertEquals("", restored.modelIdentity)
+        val request = SpeechProtocols.request(original.speech(), "fixture text", original.voice)
+        assertEquals("fixture-only", request.header("x-fixture"))
+        assertFalse(original.toString().contains("fixture-only"))
+    }
+
+    @Test fun readAloudFilterAcceptsSynthesisAndRejectsChatRecognitionAndCreation() {
+        listOf("tts-1", "gpt-4o-mini-tts", "seed-tts-2.0", "mimo-v2.5-tts", "speech-2.8-hd",
+            "stepaudio-2.5-tts", "qwen-audio-3.0-tts-flash", "canopylabs/orpheus-v1-english",
+            "CosyVoice2", "MOSS-TTSD", "eleven_multilingual_v2", "eleven_flash_v2_5").forEach {
+            assertTrue(it, SpeechModelCapabilities.readAloud(it))
+        }
+        listOf("gpt-4o", "whisper-1", "qwen-asr", "seed-audio-1.0", "mimo-v2.5-tts-voiceclone",
+            "qwen3-tts-voicedesign", "tts-transcribe").forEach { assertFalse(it, SpeechModelCapabilities.readAloud(it)) }
+    }
+
+    @Test fun allThirteenEnginesResolveAndFishDoesNotInventAVoiceCatalog() {
+        val examples = listOf(
+            Triple("https://api.openai.com", "tts-1", SpeechEngine.OPENAI),
+            Triple("https://openspeech.bytedance.com", "seed-tts-2.0", SpeechEngine.DOUBAO),
+            Triple("https://api.xiaomimimo.com", "mimo-v2.5-tts", SpeechEngine.MIMO),
+            Triple("https://api.minimax.io", "speech-2.8-hd", SpeechEngine.MINIMAX),
+            Triple("https://api.stepfun.com", "step-tts-mini", SpeechEngine.STEP),
+            Triple("https://dashscope.aliyuncs.com", "qwen-audio-3.0-tts-flash", SpeechEngine.QWEN),
+            Triple("https://api.groq.com", "canopylabs/orpheus-v1-english", SpeechEngine.GROQ),
+            Triple("https://api.x.ai", "tts", SpeechEngine.XAI),
+            Triple("https://generativelanguage.googleapis.com", "gemini-tts", SpeechEngine.GEMINI),
+            Triple("https://api.elevenlabs.io", "eleven_multilingual_v2", SpeechEngine.ELEVENLABS),
+            Triple("https://api.fish.audio", "fish-speech", SpeechEngine.FISH),
+            Triple("https://relay.invalid", "CosyVoice2", SpeechEngine.COSYVOICE),
+            Triple("https://relay.invalid", "MOSS-TTSD", SpeechEngine.MOSS),
+        )
+        assertEquals(SpeechEngine.entries.toSet(), examples.map { it.third }.toSet())
+        examples.forEach { (endpoint, model, engine) ->
+            assertEquals(engine, SpeechModelCapabilities.engine(endpoint, model))
+            val voices = SpeechVoices.catalog(engine, model)
+            if (engine == SpeechEngine.FISH) assertTrue(voices.isEmpty()) else assertTrue(voices.isNotEmpty())
+            assertEquals(voices.size, voices.map { it.id }.distinct().size)
+        }
+    }
+
+    @Test fun builtInSpeechModelsDoNotNeedAnImportedChatCatalog() {
+        val expected = mapOf(
+            "https://openspeech.bytedance.com" to "seed-tts-2.0",
+            "https://api.xiaomimimo.com" to "mimo-v2.5-tts",
+            "https://api.minimax.io" to "speech-2.8-hd",
+            "https://api.stepfun.com" to "step-tts-mini",
+            "https://dashscope.aliyuncs.com/compatible-mode" to "qwen-audio-3.0-tts-flash",
+            "https://api.groq.com" to "canopylabs/orpheus-v1-english",
+        )
+        expected.forEach { (endpoint, model) ->
+            val models = SpeechModelCapabilities.builtInModels(endpoint)
+            assertEquals(model, models.first().first)
+            assertTrue(models.all { SpeechModelCapabilities.readAloud(it.first) })
+        }
+        assertTrue(SpeechModelCapabilities.builtInModels("https://relay.invalid").isEmpty())
+        assertTrue(SpeechModelCapabilities.builtInModels("https://openspeech.bytedance.com.attacker.invalid").isEmpty())
+    }
+
+    @Test fun historyUsesLocalModelIdentityAndRealtimeKeepsItsOwnFourVoices() {
+        assertEquals("local-model-A", cloud().historyModel)
+        assertEquals(cloud().model, cloud().copy(modelIdentity = "").historyModel)
+        assertEquals(listOf("Vivi", "小何", "云舟", "小天"), realtimeSpeechVoices.map { it.name })
+        assertTrue(realtimeSpeechVoices.all { "jupiter" in it.id })
+        assertFalse(realtimeSpeechVoices.any { DoubaoVoices.contains(it.id) })
+        assertEquals(realtimeSpeechVoices.take(2), parseRealtimeSpeechVoices(realtimeSpeechVoices.take(2).joinToString { it.id }))
+        assertTrue(parseRealtimeSpeechVoices("unknown voice").isEmpty())
+    }
+}

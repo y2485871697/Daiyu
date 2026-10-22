@@ -56,7 +56,7 @@ internal class AndroidUniversalRecognition(
         }
     }
     private fun permitted() = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-    private fun offlineReady() = OfflineSpeechPack.state.value.enabled && OfflineSpeechPack.state.value.ready
+    private fun offlineReady() = OfflineSpeechPack.state.value.ready
 
     private fun system(owner: VoiceOwner, config: UniversalRecognitionConfiguration.System,
         allowed: () -> Boolean, events: VoiceControlPorts.RecognitionEvents): VoiceControlRecognition {

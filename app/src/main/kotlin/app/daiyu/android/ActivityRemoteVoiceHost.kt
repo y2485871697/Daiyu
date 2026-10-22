@@ -73,6 +73,7 @@ internal class ActivityRemoteVoiceHost(
             mutable.value = "豆包听写未启动：检查独立语音设置或音频占用"
         }
     }
+    val duplexActive: Boolean get() = duplex != null
     fun startDuplex(admission: () -> Boolean) {
         try {
             val config = runtime.snapshot()
@@ -82,7 +83,7 @@ internal class ActivityRemoteVoiceHost(
             invalidate()
             val token = ++epoch
             val next = DoubaoDuplexSession(VoiceOwner("voice-call", UUID.randomUUID().toString()),
-                DoubaoDuplexConfig(config.duplexKey, config.duplexVoice, config.instructions),
+                runtime.prepareDuplex(config),
                 VoiceNetworkAdapters.duplex(), AndroidDuplexAudio(), gate)
             duplex = next
             observation = scope.launch {

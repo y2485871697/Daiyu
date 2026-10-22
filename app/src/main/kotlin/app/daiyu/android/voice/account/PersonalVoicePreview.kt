@@ -25,6 +25,7 @@ internal class AccountPreviewRequest(
     val configuration: SpeechProviderConfig,
     val voice: DoubaoPersonalVoice,
     val demoUrl: String,
+    val demoOnly: Boolean = false,
 ) {
     override fun toString() = "AccountPreviewRequest(redacted)"
 }
@@ -43,13 +44,13 @@ internal class PersonalVoicePreview(private val port: VoiceAccountPreviewPort) {
         if (mutable.value.matches(voice.account, voice.id)) { stop(); return }
         stop()
         val identity = VoiceAccountIdentity.from(config)
-        require(identity.fingerprint == voice.account && voice.tts && voice.accepted) { "请先确认此账户音色可用" }
+        require(identity.fingerprint == voice.account && voice.tts) { "请先确认此账户音色可用" }
         val url = try { URI(voice.demo) } catch (_: Exception) { throw IllegalArgumentException("试听地址无效") }
         require(url.scheme == "https" && !url.host.isNullOrBlank() && url.rawUserInfo == null && url.rawFragment == null) { "试听需要 HTTPS 地址" }
         val token = ++generation
         mutable.value = State(voice.account, voice.id, loading = true)
         try {
-            val owned = port.play(AccountPreviewRequest(config, voice.providerVoice(), voice.demo), object : VoiceAccountPreviewPort.Listener {
+            val owned = port.play(AccountPreviewRequest(config, voice.providerVoice(), voice.demo, demoOnly = true), object : VoiceAccountPreviewPort.Listener {
                 override fun started() {
                     if (token == generation) mutable.value = State(voice.account, voice.id)
                 }

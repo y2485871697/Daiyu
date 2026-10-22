@@ -203,16 +203,16 @@ internal fun UserTurnMenu(expanded: Boolean, onDismiss: () -> Unit, id: String, 
 
 @Composable
 internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
-    selected: ChatMenuAction = ChatMenuAction.VOICE_INPUT) {
+    selected: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
+    available: Set<ChatMenuAction> = setOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO)) {
     ChatAnchoredMenu(expanded, onDismiss) {
         Column {
             listOf(
                 MenuEntry("语音输入", DaiyuIcons.Voice, ChatMenuAction.VOICE_INPUT),
                 MenuEntry("语音对话", DaiyuIcons.Speak, ChatMenuAction.VOICE_CHAT),
                 MenuEntry("豆包实时通话", DaiyuIcons.Voice, ChatMenuAction.VOICE_DOUBAO),
-            ).forEach { entry ->
-                ChatMenuItem(entry, onDismiss, onAction, checked = entry.action == selected,
-                    enabled = entry.action != ChatMenuAction.VOICE_DOUBAO)
+            ).filter { it.action in available }.forEach { entry ->
+                ChatMenuItem(entry, onDismiss, onAction, checked = entry.action == selected)
             }
         }
     }

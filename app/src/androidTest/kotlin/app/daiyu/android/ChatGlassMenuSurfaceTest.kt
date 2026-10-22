@@ -1,6 +1,8 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,8 +19,10 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.components.PopupMotion
 import app.daiyu.android.ui.screens.chat.conversation.ChatGlassMenuSurface
 import kotlin.math.roundToInt
+import kotlin.math.abs
 
 class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
     fun testInsetHighlightAndOutsideShadowKeepMenuGeometryInBothThemes() {
@@ -57,6 +61,79 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
             val sy = (bounds.bottom - hostBounds.top + 3f * density).roundToInt()
             assertTrue("shadow is visible outside the menu, dark=$dark",
                 image[sx, sy].luminance() < background.luminance())
+        }
+    }
+
+    fun testOutsideShadowSurvivesPartialRevealAndAlphaThroughReopenAndExitInBothThemes() {
+        data class Frame(val fraction: Float, val alpha: Float, val expanded: Boolean = true)
+        val frames = listOf(
+            Frame(0f, 0f), Frame(.25f, .5f), Frame(.65f, .8f),
+            Frame(.999f, .999f), Frame(1f, 1f),
+            Frame(.75f, .7f, false), Frame(.25f, .3f, false), Frame(0f, 0f, false),
+            Frame(.25f, .5f), Frame(1f, .999f), Frame(1f, 1f),
+        )
+        for (dark in listOf(false, true)) {
+            var density = 1f
+            val background = if (dark) Color(0xFF282330) else Color(0xFFF8F5FC)
+            val fraction = mutableStateOf(0f)
+            val alpha = mutableStateOf(0f)
+            val visible = MutableTransitionState(false)
+            val motion = PopupMotion(visible, fraction, alpha)
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        density = LocalDensity.current.density
+                        Box(Modifier.fillMaxSize().background(background).testTag("animated-menu-host"),
+                            contentAlignment = Alignment.Center) {
+                            ChatGlassMenuSurface(null,
+                                Modifier.requiredSize(156.dp, 120.dp).testTag("animated-menu-surface"), motion = motion) {}
+                        }
+                    }
+                }
+            }
+            var almostOpaqueShadow: Float? = null
+            for (frame in frames) {
+                mainThread {
+                    visible.targetState = frame.expanded
+                    fraction.value = frame.fraction
+                    alpha.value = frame.alpha
+                }
+                ui.waitForIdle()
+                val menu = ui.onNodeWithTag("animated-menu-surface")
+                menu.assertWidthIsEqualTo(156.dp).assertHeightIsEqualTo(120.dp)
+                val bounds = menu.fetchSemanticsNode().boundsInRoot
+                val host = ui.onNodeWithTag("animated-menu-host")
+                val hostBounds = host.fetchSemanticsNode().boundsInRoot
+                val pixels = host.captureToImage().toPixelMap()
+                val reveal = if (frame.expanded) frame.fraction else 1f
+                val x = (bounds.left - hostBounds.left - 3f * density).roundToInt()
+                val y = (bounds.top - hostBounds.top + bounds.height * reveal / 2f).roundToInt()
+                val actual = pixels[x, y].luminance()
+                if (frame.alpha > 0f) {
+                    assertTrue("outside shadow missing: dark=$dark frame=$frame",
+                        actual < background.luminance() - .0001f)
+                } else {
+                    assertEquals("hidden menu leaves no shadow: dark=$dark frame=$frame",
+                        background.luminance(), actual, .002f)
+                }
+                if (frame.fraction == 1f && frame.alpha == .999f) almostOpaqueShadow = actual
+                if (frame.fraction == 1f && frame.alpha == 1f) {
+                    almostOpaqueShadow?.let {
+                        assertEquals("shadow is continuous at full opacity: dark=$dark", it, actual, .002f)
+                    }
+                }
+                if (frame.expanded && frame.fraction in .01f..0.3f) {
+                    val centerX = (bounds.center.x - hostBounds.left).roundToInt()
+                    val body = pixels[centerX, y]
+                    val bodyDifference = abs(body.red - background.red) + abs(body.green - background.green) +
+                        abs(body.blue - background.blue)
+                    assertTrue("revealed body is visible: dark=$dark frame=$frame", bodyDifference > .002f)
+                    val hiddenY = (bounds.bottom - hostBounds.top - 4f * density).roundToInt()
+                    assertEquals("body still reveals from the top: dark=$dark frame=$frame",
+                        background.luminance(), pixels[centerX, hiddenY].luminance(), .002f)
+                }
+            }
         }
     }
 }

@@ -54,6 +54,9 @@ internal class CatalogBrowserBinding private constructor(
         private val loadingOriginal: () -> Boolean,
         private val closeOriginal: () -> Unit,
         private val pageOriginal: () -> app.daiyu.android.browser.openminis.BrowserVisiblePage = { app.daiyu.android.browser.openminis.BrowserVisiblePage("", "", emptyList()) },
+        private val controlOriginal: (app.daiyu.android.browser.openminis.BrowserVisibleAction) -> Unit = {},
+        private val configureOriginal: (app.daiyu.android.browser.openminis.BrowserVisibleConfiguration) -> Unit = {},
+        private val downloadOriginal: (app.daiyu.android.browser.openminis.BrowserVisibleDownload?) -> Unit = {},
     ) : AutoCloseable {
         private var closed = false
         fun navigate(url: String) {
@@ -68,6 +71,9 @@ internal class CatalogBrowserBinding private constructor(
             check(!closed) { "browser_visible_attachment_closed" }
             return pageOriginal()
         }
+        fun control(action: app.daiyu.android.browser.openminis.BrowserVisibleAction) { check(!closed); controlOriginal(action) }
+        fun configure(configuration: app.daiyu.android.browser.openminis.BrowserVisibleConfiguration) { check(!closed); configureOriginal(configuration) }
+        fun downloads(listener: app.daiyu.android.browser.openminis.BrowserVisibleDownload?) { check(!closed); downloadOriginal(listener) }
         override fun close() {
             if (closed) return
             closed = true
@@ -81,7 +87,8 @@ internal class CatalogBrowserBinding private constructor(
             checkNotNull(host.webHost) { "browser_visible_unsupported" }
         }
         val original = originalWebHost.attach(token, parent)
-        return VisibleAttachment({ original.navigate(it) }, { original.isLoading }, { original.close() }, { original.page() })
+        return VisibleAttachment(original::navigate, { original.isLoading }, original::close, original::page,
+            original::control, original::configure, original::downloads)
     }
     val requiredWrites: Set<WriteEffect> = java.util.Collections.unmodifiableSet(
         confirmed.preview.writes.map { it.effect }.toSet())

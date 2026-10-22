@@ -10,3 +10,7 @@
 原许可文本保存在`upstream-licenses/openminis-4ef2900-LICENSE`。旧冻结NOTICE声明GPL version3，抽样ported文件头标GPL-3.0-only；本告知不重新选择only/or-later，不作额外授权，也不把许可证文本本身版权视为OpenMinis源码作者。迁入内容原有版权/许可头和其它适用通知须原样保留；如上游另有适用NOTICE，不得以本文件替代。
 
 本次固定来源20 Kotlin＋3 XML不同于旧ported树23 Kotlin。快照不覆盖宿主适配、工具注册、下载/分享provider、日志封装、其它新增/衍生实现或T02 Skill，未列入也不意味着已证独立自研。后续实际变更须注明范围及日期；本包仅记录来源与变换，不证明生产功能或全部分发条件已完成。
+
+## 浏览器 UI 迁入补充
+
+本批将旧 Eta 固定修订 `3196270e361c82cc1f399218d914ec49de0d83cc` 中的 OpenMinis 衍生浏览器 UI 迁入 `browser/ported/`：BrowserSheet、BrowserSettingsSheet、BrowserHistorySheet、BrowserDownloadsSheet、StandardChatSheet、Theme、ChatColors、MinisButton 与 BringIntoViewOnFocus。保留 GPL-3.0-only 文件头及原布局/文案，调整包名、资源命名空间、统一触感与弹窗动效适配；移除旧全局池依赖，改接当前任务 lease 或人工会话，新增 UA/viewport/下载/历史控制及安全生命周期。三语言 `openminis_browser.xml` 对应迁入页面引用。该补充不改原 20 文件快照摘要，也不把本地衍生 UI 误标为未修改上游文件。

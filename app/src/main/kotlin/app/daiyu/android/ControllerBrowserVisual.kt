@@ -30,18 +30,25 @@ internal class ControllerBrowserVisual(
         val tabs: List<BrowserTabLease> = emptyList(),
         val page: app.daiyu.android.browser.openminis.BrowserVisiblePage? = null,
     )
-    internal class Visit internal constructor(private val controller: ControllerBrowserVisual) : AutoCloseable {
+    internal class Visit internal constructor(private val controller: ControllerBrowserVisual) : BrowserVisualVisit {
         internal val active = AtomicBoolean(true)
         val owner: Message get() = controller.owner
-        fun snapshot() = controller.snapshot(this)
-        fun takeover(lease: BrowserTabLease) = controller.takeover(this, lease)
-        fun mount(parent: ViewGroup) = controller.mount(this, parent)
-        fun unmount(parent: ViewGroup) = controller.unmount(this, parent)
-        fun navigate(url: String) = controller.navigate(this, url)
-        fun newTab() = controller.newTab(this)
-        fun restore() = controller.restore(this)
-        fun closeTab() = controller.closeTab(this)
-        fun stop() = controller.stop(this)
+        override val conversationId get() = owner.conversationId
+        override val memory get() = controller.uiMemory
+        override val taskOwned: Boolean get() = true
+        override fun snapshot() = controller.snapshot(this)
+        override fun takeover(lease: BrowserTabLease) = controller.takeover(this, lease)
+        override fun mount(parent: ViewGroup) = controller.mount(this, parent)
+        override fun unmount(parent: ViewGroup) = controller.unmount(this, parent)
+        override fun navigate(url: String) = controller.navigate(this, url)
+        override fun newTab() = controller.newTab(this)
+        override fun restore() = controller.restore(this)
+        override fun closeTab() = controller.closeTab(this)
+        override fun stop() = controller.stop(this)
+        override fun selectTab(lease: BrowserTabLease) = controller.selectTab(this, lease)
+        override fun control(action: app.daiyu.android.browser.openminis.BrowserVisibleAction) = controller.control(this, action)
+        override fun configure(configuration: app.daiyu.android.browser.openminis.BrowserVisibleConfiguration) = controller.configure(this, configuration)
+        override fun downloads(listener: app.daiyu.android.browser.openminis.BrowserVisibleDownload?) = controller.downloads(this, listener)
         override fun close() = controller.leave(this)
     }
     private class Mount(val visit: Visit, val token: BrowserToolTakeoverToken, val parent: ViewGroup) {
@@ -51,6 +58,7 @@ internal class ControllerBrowserVisual(
     private class Pending(val visit: Visit, val lease: BrowserTabLease?, val create: Boolean = false) {
         var admitted = false
     }
+    private val uiMemory = app.daiyu.android.browser.ui.BrowserUiMemory("task:${owner.runId.value}")
     private val pending = AtomicReference<Pending?>()
     private val main = Handler(Looper.getMainLooper())
     private val revoked = AtomicBoolean()
@@ -59,6 +67,8 @@ internal class ControllerBrowserVisual(
     @Volatile private var token: BrowserToolTakeoverToken? = null
     @Volatile private var unknown = false
     @Volatile private var notice = "打开页面不会发送消息。接管只使用本会话原浏览器；网站登录状态可能共享。"
+    private var configuration: app.daiyu.android.browser.openminis.BrowserVisibleConfiguration? = null
+    private var downloadListener: app.daiyu.android.browser.openminis.BrowserVisibleDownload? = null
     private val failedAttachments = mutableListOf<CatalogBrowserBinding.VisibleAttachment>()
     val automationHeld: Boolean get() = pending.get() != null || token != null || unknown
 
@@ -87,10 +97,11 @@ internal class ControllerBrowserVisual(
     private fun takeover(visit: Visit, lease: BrowserTabLease) {
         requireMain()
         if (!current(visit) || unknown || token != null || pending.get() != null) return
-        if (binding.session.currentTab != lease) { notice = "原标签已变化；未接管。"; return }
+        if (lease !in binding.session.visibleTabs) { notice = "原标签已变化；未接管。"; return }
+        if (binding.session.currentTab != lease) binding.session.selectVisibleTab(lease)
         val request = Pending(visit, lease)
         pending.set(request)
-        val accepted = try { pauseOriginal() } catch (_: Exception) { false }
+        val accepted = try { originalPaused() || pauseOriginal() } catch (_: Exception) { false }
         if (!accepted) {
             pending.compareAndSet(request, null)
             notice = "原任务暂停未受理；未接管。"
@@ -195,6 +206,8 @@ internal class ControllerBrowserVisual(
         mounted.set(attempt)
         try {
             attempt.attachment = attachVisible(held, parent)
+            configuration?.let { attempt.attachment?.configure(it) }
+            attempt.attachment?.downloads(downloadListener)
             if (!current(visit) || mounted.get() !== attempt) detach(attempt)
         } catch (_: Exception) { markUnknown("原标签挂载 UNKNOWN；不重试或创建替代 WebView。") }
     }
@@ -224,6 +237,39 @@ internal class ControllerBrowserVisual(
         }
         try { original.attachment?.navigate(url); notice = "已请求导航；不代表加载完成，未发送聊天消息。" }
         catch (_: Exception) { markUnknown("人工导航 UNKNOWN；不会重发或恢复自动化。") }
+    }
+    private fun selectTab(visit: Visit, lease: BrowserTabLease) {
+        requireMain()
+        if (!current(visit) || unknown || pending.get() != null || lease !in binding.session.visibleTabs) return
+        if (token?.lease == lease) return
+        try {
+            mounted.get()?.let(::detach)
+            if (unknown) return
+            token?.let { binding.session.releaseTakeover(it); token = null }
+            val target = binding.session.visibleTabs.firstOrNull { it.tabId == lease.tabId && it.owner == lease.owner } ?: return
+            binding.session.selectVisibleTab(target)
+            takeover(visit, target)
+        } catch (_: Exception) { markUnknown("标签切换未确认；未恢复自动化。") }
+    }
+    private fun control(visit: Visit, action: app.daiyu.android.browser.openminis.BrowserVisibleAction) {
+        requireMain()
+        if (!current(visit) || unknown || pending.get() != null) return
+        try { mounted.get()?.takeIf { it.visit === visit && !it.closeStarted }?.attachment?.control(action) }
+        catch (_: Exception) { markUnknown("浏览器操作结果未确认；未重放操作。") }
+    }
+    private fun configure(visit: Visit, value: app.daiyu.android.browser.openminis.BrowserVisibleConfiguration) {
+        requireMain()
+        if (!current(visit) || unknown) return
+        configuration = value
+        try { mounted.get()?.takeIf { it.visit === visit && !it.closeStarted }?.attachment?.configure(value) }
+        catch (_: Exception) { markUnknown("浏览器设置结果未确认；请关闭面板后重新打开。") }
+    }
+    private fun downloads(visit: Visit, listener: app.daiyu.android.browser.openminis.BrowserVisibleDownload?) {
+        requireMain()
+        if (!current(visit) || unknown) return
+        downloadListener = listener
+        try { mounted.get()?.takeIf { it.visit === visit && !it.closeStarted }?.attachment?.downloads(listener) }
+        catch (_: Exception) { markUnknown("下载监听绑定未确认；未重试或恢复任务。") }
     }
     private fun restore(visit: Visit) {
         requireMain()

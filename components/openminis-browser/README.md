@@ -27,8 +27,12 @@ and the app browser sources into the app source set; see `app/build.gradle.kts` 
 `THIRD_PARTY/license-bundle/source-index.md`; the existing complete `assets/licenses/GPL-3.0.txt`
 is byte-identical to the fixed upstream GPL LICENSE, with this project's source/transform
 notice at `assets/licenses/openminis/NOTICE.md`.
-The selected runtime needs coroutines core/android, not the upstream Compose UI,
-global tab pool, Google router or Custom Tabs. Keep minSdk 26 and API26/API37.2 regression.
+The selected runtime needs coroutines core/android, not the global upstream tab pool, Google router or Custom Tabs.
+The original browser Compose sheets and theme are now adapted under
+`app/src/main/kotlin/app/daiyu/android/browser/ported/`; `BrowserUiPool` is a UI
+projection of the selected task lease or explicit human-only session, not another
+model tab pool. DownloadManager handles human downloads; browser_use fetch retains
+its independent bounded download route. Keep minSdk 26 and API26/API37.2 regression.
 Do not compile the entire preserved upstream directory or its duplicate host definitions.
 
 The adapter supplies a real `AndroidBrowserRunHost` composition for the pinned manager,
@@ -39,8 +43,9 @@ refactor checklist for business/UI acceptance rather than treating this README a
 Only host seams are replaced: path resolution, logging, private session storage, opening
 callbacks, external navigation, and tool input/output conversion. Local file/minis/search
 navigation stays disabled until an explicit path capability exists. Raw cookie values and
-arbitrary fetch bytes must not reach tool messages/logs. Unsupported parameter modes and
-UA switching are rejected before native dispatch, not by destroying an existing page.
+arbitrary fetch bytes must not reach tool messages/logs. Unsupported parameter modes are rejected before native dispatch, not by destroying an
+existing page. UA/viewport and history controls use explicit host-owned commands;
+manual callbacks never complete the pinned manager's uncorrelated navigation deferred.
 
 Task 6 owns browser_use registration/ledger; Task 19 owns repository-wide NOTICE
 and source inventory. This staging is a source delivery, not completed business acceptance.

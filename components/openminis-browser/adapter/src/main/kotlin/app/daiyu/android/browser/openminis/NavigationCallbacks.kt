@@ -22,6 +22,7 @@ internal class NavigationCallbacks(
     private val reject: (String) -> Unit,
     private val permits: (String?) -> Boolean = OpenMinisNavigationPolicy::permits,
     private val nowNanos: () -> Long = System::nanoTime,
+    private val withoutHistory: (() -> Unit) -> Unit = { it() },
 ) {
     internal enum class Phase { IDLE, AWAITING_START, LOADING, FORWARDING, FINISHED, QUARANTINED }
 
@@ -37,6 +38,8 @@ internal class NavigationCallbacks(
     private var begunNanos = 0L
     private var budgetNanos = 0L
 
+    var manualSequence: Long = 0
+        private set
     @Volatile var isManual: Boolean = false
         private set
 
@@ -55,7 +58,6 @@ internal class NavigationCallbacks(
         val key = permittedKey(url) ?: return false
         if (!mainFrame) return true
         if (phase == Phase.IDLE) {
-            if (key in used) return fail("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE")
             used += key
             epochUrls += key
             pending = key
@@ -67,11 +69,16 @@ internal class NavigationCallbacks(
         }
         if (phase !in setOf(Phase.AWAITING_START, Phase.LOADING)) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
         if (key == pending) return true
-        if (key in used) return fail("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE")
         used += key
         epochUrls += key
         pending = key
         return true
+    }
+
+    @Synchronized fun cancelManualLoad() {
+        if (!isManual || phase == Phase.QUARANTINED) return
+        current = null; pending = null; epochUrls.clear(); started.clear()
+        directLoadSeen = false; begunNanos = 0L; budgetNanos = 0L; phase = Phase.IDLE
     }
 
     @Synchronized
@@ -86,7 +93,6 @@ internal class NavigationCallbacks(
         budgetNanos = minOf(timeoutMillis, 30_000) * 1_000_000
         val key = permittedKey(url) ?: return false
         if (key in used) return fail("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE")
-        if (!approve(url, "")) return false
         // The command itself reserves the URL even if loadUrl/start never arrives.
         used += key
         epochUrls += key
@@ -120,7 +126,6 @@ internal class NavigationCallbacks(
         if (key == pending) return true
         // Repeated/same-document main-frame navigation is ambiguous too. Fail before upstream.
         if (key in used) return fail("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE")
-        if (!approve(url, "")) return false
         used += key
         epochUrls += key
         pending = key
@@ -135,6 +140,15 @@ internal class NavigationCallbacks(
         if (!directLoadSeen || phase !in setOf(Phase.AWAITING_START, Phase.LOADING)) {
             return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
         }
+        if (isManual) {
+            manualSequence++
+            used += key
+            epochUrls += key
+            current = key
+            pending = null
+            phase = Phase.LOADING
+            return true
+        }
         if (key in started || (key in used && key !in epochUrls)) {
             return fail("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE")
         }
@@ -144,7 +158,6 @@ internal class NavigationCallbacks(
         if (key !in epochUrls) {
             // Some WebView redirect paths have a start without an override callback.
             if (phase != Phase.LOADING) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
-            if (!isManual && !approve(checkNotNull(url), "")) return false
             used += key
             epochUrls += key
         }
@@ -182,11 +195,12 @@ internal class NavigationCallbacks(
             phase = Phase.IDLE
             return true
         }
-        if (!approve(checkNotNull(url), title)) return false
+        // The host may suppress history persistence without forbidding normal navigation.
+        val recordHistory = try { approveHistory(checkNotNull(url), title) } catch (_: Exception) { false }
         if (!available()) return false
         phase = Phase.FORWARDING
         return try {
-            forward()
+            if (recordHistory) forward() else withoutHistory(forward)
             if (!available() || phase != Phase.FORWARDING) return false
             phase = Phase.FINISHED
             true
@@ -233,11 +247,6 @@ internal class NavigationCallbacks(
         return keyOf(url) ?: run { fail("BROWSER_OPENMINIS_PAGE_URL_BLOCKED"); null }
     }
 
-    private fun approve(url: String, title: String): Boolean {
-        val allowed = try { approveHistory(url, title) } catch (_: Exception) { false }
-        if (!allowed) return fail("BROWSER_OPENMINIS_HISTORY_APPROVAL_REQUIRED")
-        return available()
-    }
 
     private fun fail(reason: String): Boolean {
         if (phase != Phase.QUARANTINED) {

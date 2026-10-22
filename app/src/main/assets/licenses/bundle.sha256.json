@@ -74,8 +74,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/openminis/NOTICE.md",
-      "bytes": 1572,
-      "sha256": "6467ae64081123ee1f223f2e8e0adbbbc6a925548d6a2df9f57613197d8d51db"
+      "bytes": 2321,
+      "sha256": "d505f36ca835c38e55705ffc1b14f22660203fa65b463e26d6c3efa053478577"
     },
     {
       "path": "app/src/main/assets/licenses/proot-5.1.107.92.txt",
@@ -134,8 +134,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/source-index.md",
-      "bytes": 14992,
-      "sha256": "18bc91e7bbb730873c686acb7ed5e7c80912a83c4c176dda3277c54835e3a051"
+      "bytes": 15491,
+      "sha256": "48b9c6905cff65e0a04213e79862f8005611b597930e9c88c96c71aa4a7a3b54"
     },
     {
       "path": "app/src/main/assets/licenses/talloc-2.4.3.txt",

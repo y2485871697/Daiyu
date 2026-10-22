@@ -116,7 +116,14 @@ class DialogMotionContractTest(unittest.TestCase):
         choice = self.text("ui/components/DaiyuDialogs.kt").split("internal fun DaiyuChoiceSheet(", 1)[1]
         self.assertIn("bottomSheet = true", choice)
         browser = self.text("ui/screens/browser/BrowserVisualScreen.kt")
-        self.assertIn("decorFitsSystemWindows = false), bottomSheet = true)", browser)
+        self.assertIn("BrowserSheet(pool, onBack)", browser)
+        self.assertNotIn("DaiyuDialog(", browser)
+        sheet = self.text("browser/ported/ui/browser/BrowserSheet.kt")
+        standard = self.text("browser/ported/ui/chat/StandardChatSheet.kt")
+        self.assertIn("StandardChatSheet(", sheet)
+        self.assertIn("ModalBottomSheet(", standard)
+        self.assertIn("rememberModalBottomSheetState(skipPartiallyExpanded = true)", standard)
+        self.assertIn("onDismissRequest = onDismiss", standard)
 
     def test_android_regression_covers_center_bottom_and_immediate_owner_disposal(self):
         test = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/CenteredDialogMotionActivityTest.kt").read_text()

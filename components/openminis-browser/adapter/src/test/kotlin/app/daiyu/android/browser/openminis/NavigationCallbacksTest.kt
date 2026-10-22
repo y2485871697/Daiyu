@@ -15,10 +15,15 @@ class NavigationCallbacksTest {
         val approvals = mutableListOf<Pair<String, String>>()
         val rejections = mutableListOf<String>()
         val upstreamFinishes = mutableListOf<String>()
+        val recordedHistory = mutableListOf<String>()
+        private var suppressHistory = false
         val gate = NavigationCallbacks({ live }, { url, title ->
             approvals += url to title
             approval(url, title)
-        }, { rejections += it })
+        }, { rejections += it }, withoutHistory = { action ->
+            suppressHistory = true
+            try { action() } finally { suppressHistory = false }
+        })
 
         fun load(url: String) {
             assertTrue(gate.begin(url))
@@ -27,7 +32,10 @@ class NavigationCallbacksTest {
         }
 
         fun finish(url: String, visible: String = url): Boolean =
-            gate.onFinished(url, "title", visible) { upstreamFinishes += url }
+            gate.onFinished(url, "title", visible) {
+                upstreamFinishes += url
+                if (!suppressHistory) recordedHistory += url
+            }
     }
 
     @Test fun `request during handoff is denied without poisoning resumed navigation`() {
@@ -67,7 +75,7 @@ class NavigationCallbacksTest {
         assertTrue(h.gate.begin(a))
         assertTrue(h.gate.directLoad(a))
         assertFalse(h.finish(a))
-        assertEquals(listOf(a to ""), h.approvals)
+        assertTrue(h.approvals.isEmpty())
         assertTrue(h.upstreamFinishes.isEmpty())
         assertFalse(h.gate.returned(true)) // Fixed manager timeout can return success.
         assertEquals(NavigationCallbacks.Phase.QUARANTINED, h.gate.phase)
@@ -87,7 +95,7 @@ class NavigationCallbacksTest {
         assertTrue(h.finish(b))
         assertTrue(h.gate.returned(true))
         assertEquals(listOf(a, b), h.upstreamFinishes)
-        assertEquals(4, h.approvals.size) // No hook at either old finish.
+        assertEquals(2, h.approvals.size) // No hook at either old finish.
     }
 
     @Test fun `unmatched observed finish URL cannot become a future epoch identity`() {
@@ -122,7 +130,7 @@ class NavigationCallbacksTest {
         assertTrue(h.finish(b))
         assertTrue(h.gate.returned(true))
         assertEquals(listOf(b), h.upstreamFinishes)
-        assertEquals(listOf(a to "", b to "", b to "title"), h.approvals)
+        assertEquals(listOf(b to "title"), h.approvals)
         assertFalse(h.gate.begin(a)) // Redirect source also remains ambiguous forever.
     }
 
@@ -133,44 +141,34 @@ class NavigationCallbacksTest {
         assertFalse(h.finish(a, b))
         assertTrue(h.finish(b))
         assertTrue(h.gate.returned(true))
-        assertEquals(listOf(a to "", b to "", b to "title"), h.approvals)
+        assertEquals(listOf(b to "title"), h.approvals)
     }
 
-    @Test fun `initial deny and throw never reach load or upstream finish`() {
+    @Test fun `history denial or failed consent lookup does not forbid navigation`() {
         for (throws in listOf(false, true)) {
             val h = Harness()
             h.approval = { _, _ -> if (throws) error("approval failed") else false }
-            assertFalse(h.gate.begin(a))
-            assertFalse(h.gate.directLoad(a))
-            assertFalse(h.gate.onStarted(a))
-            assertFalse(h.finish(a))
-            assertEquals("BROWSER_OPENMINIS_HISTORY_APPROVAL_REQUIRED", h.rejections.single())
-            assertTrue(h.upstreamFinishes.isEmpty())
+            h.load(a)
+            assertTrue(h.finish(a))
+            assertTrue(h.gate.returned(true))
+            assertEquals(listOf(a), h.upstreamFinishes)
+            assertTrue(h.recordedHistory.isEmpty())
+            assertTrue(h.rejections.isEmpty())
         }
     }
 
-    @Test fun `redirect deny and throw fail closed both override and start paths`() {
+    @Test fun `redirect without history consent still reaches its actual final page`() {
         for (throws in listOf(false, true)) for (useOverride in listOf(false, true)) {
             val h = Harness()
-            h.load(a)
             h.approval = { _, _ -> if (throws) error("approval failed") else false }
-            assertFalse(if (useOverride) h.gate.allowOverride(b, true) else h.gate.onStarted(b))
-            assertFalse(h.finish(a))
-            assertFalse(h.finish(b))
-            assertFalse(h.gate.returned(true))
-            assertTrue(h.upstreamFinishes.isEmpty())
-        }
-    }
-
-    @Test fun `finish deny and throw cannot run upstream global history write`() {
-        for (throws in listOf(false, true)) {
-            val h = Harness()
             h.load(a)
-            h.approval = { _, _ -> if (throws) error("approval failed") else false }
-            assertFalse(h.finish(a))
-            assertFalse(h.gate.returned(true))
-            assertTrue(h.upstreamFinishes.isEmpty())
-            assertEquals("BROWSER_OPENMINIS_HISTORY_APPROVAL_REQUIRED", h.rejections.single())
+            if (useOverride) assertTrue(h.gate.allowOverride(b, true))
+            assertTrue(h.gate.onStarted(b))
+            assertFalse(h.finish(a, b))
+            assertTrue(h.finish(b))
+            assertTrue(h.gate.returned(true))
+            assertEquals(listOf(b), h.upstreamFinishes)
+            assertTrue(h.recordedHistory.isEmpty())
         }
     }
 
@@ -246,7 +244,7 @@ class NavigationCallbacksTest {
         assertFalse(h.finish(b, a))
         assertTrue(h.finish(a))
         assertTrue(h.gate.returned(true))
-        assertEquals(listOf(a to "", a to "title"), h.approvals)
+        assertEquals(listOf(a to "title"), h.approvals)
     }
 
     @Test fun `visible URL mismatch quarantines and no duplicate finish history write`() {
@@ -343,6 +341,36 @@ class NavigationCallbacksTest {
         assertFalse(h.finish(a))
         assertFalse(h.gate.manualOverride(b, true))
         assertTrue(h.upstreamFinishes.isEmpty())
+    }
+
+    @Test fun manualReloadAndBackForwardAllowRepeatedUrlsWithoutAcknowledgingTools() {
+        val h = Harness()
+        h.gate.enterManual()
+        for (url in listOf(a, b, a, b, b)) {
+            assertTrue(h.gate.manualOverride(url, true))
+            assertTrue(h.gate.onStarted(url))
+            assertTrue(h.finish(url))
+            assertEquals(NavigationCallbacks.Phase.IDLE, h.gate.phase)
+        }
+        assertEquals(5L, h.gate.manualSequence)
+        assertTrue(h.recordedHistory.isEmpty())
+        assertTrue(h.upstreamFinishes.isEmpty())
+        assertTrue(h.rejections.isEmpty())
+        h.gate.leaveManual()
+        assertFalse(h.gate.begin(a))
+    }
+
+    @Test fun explicitManualStopAllowsDetachWithoutRearmingAnyToolEpoch() {
+        val h = Harness()
+        h.gate.enterManual()
+        assertTrue(h.gate.manualOverride(a, true))
+        assertTrue(h.gate.onStarted(a))
+        h.gate.cancelManualLoad()
+        assertEquals(NavigationCallbacks.Phase.IDLE, h.gate.phase)
+        h.gate.leaveManual()
+        assertFalse(h.finish(a))
+        assertTrue(h.upstreamFinishes.isEmpty())
+        assertFalse(h.gate.begin(a))
     }
 
 }

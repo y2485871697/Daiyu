@@ -94,10 +94,10 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
         val lease = requireNotNull(host.currentTab)
         val rejected = listOf(
             mapOf("action" to "navigate", "url" to "https://browser-fixture.invalid/other", "timeout_ms" to 1000),
-            mapOf("action" to "set_viewport", "viewport_width" to 800, "viewport_height" to 600),
+            mapOf("action" to "set_viewport", "viewport_width" to 800),
             mapOf("action" to "type", "selector" to "body", "text" to "test", "submit" to true),
             mapOf("action" to "screenshot", "read_image" to true),
-            mapOf("action" to "set_user_agent", "user_agent" to "mobile_chrome"),
+            mapOf("action" to "set_user_agent", "user_agent" to "forged"),
         )
         for (arguments in rejected) {
             assertTrue("unsupported mode must reject before WebView entry",
@@ -107,6 +107,66 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
             assertTrue("original page must remain usable", body.contains("0123456789abcdefghijklmnop"))
         }
         assertEquals("https://browser-fixture.invalid/preflight", main { host.webHost.currentUrl(lease) })
+    }
+
+    fun testNativeHistoryAndConfigurationUseTheLoadedResource() {
+        val host = host()
+        confirmed(host, "action" to "new_tab")
+        val first = "https://browser-fixture.invalid/native-first"
+        val second = "https://browser-fixture.invalid/native-second"
+        confirmed(host, "action" to "navigate", "url" to first)
+        confirmed(host, "action" to "navigate", "url" to second)
+        val original = requireNotNull(host.currentTab)
+        confirmed(host, "action" to "go_back")
+        assertEquals(first, main { host.webHost.currentUrl(original) })
+        assertTrue(confirmed(host, "action" to "get_page_info").result.text.contains(first))
+        val backScreenshot = confirmed(host, "action" to "screenshot").result
+        screenshots.add(java.nio.file.Paths.get(requireNotNull(backScreenshot.filePath)))
+        assertTrue(backScreenshot.text.lineSequence().any { it.trim() == "URL: $first" })
+        confirmed(host, "action" to "go_forward")
+        assertEquals(second, main { host.webHost.currentUrl(original) })
+        confirmed(host, "action" to "reload")
+        confirmed(host, "action" to "set_user_agent", "user_agent" to "desktop_chrome")
+        confirmed(host, "action" to "set_viewport", "viewport_width" to 800, "viewport_height" to 600)
+        val token = main { host.session.takeover(original) }
+        main {
+            val parent = android.widget.FrameLayout(instrumentation.targetContext)
+            val attachment = host.webHost.attach(token, parent)
+            val view = parent.getChildAt(0) as android.webkit.WebView
+            assertTrue(view.settings.userAgentString.contains("Windows NT"))
+            assertEquals(second, attachment.page().url)
+            attachment.close()
+            host.session.releaseTakeover(token)
+        }
+        assertTrue(confirmed(host, "action" to "get_text", "selector" to "body")
+            .result.text.contains("0123456789abcdefghijklmnop"))
+    }
+
+    fun testBlankVisibleTabMountsOnlyAfterNavigationAndSurvivesLateDetachedCallback() {
+        val host = host()
+        confirmed(host, "action" to "new_tab")
+        val token = main { host.session.takeover(requireNotNull(host.currentTab)) }
+        val parent = main { android.widget.FrameLayout(instrumentation.targetContext) }
+        val attachment = main { host.webHost.attach(token, parent) }
+        main {
+            assertEquals(0, parent.childCount)
+            attachment.navigate("https://browser-fixture.invalid/blank-first-load")
+            assertEquals(1, parent.childCount)
+        }
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (main { attachment.isLoading } && System.nanoTime() < deadline) Thread.sleep(10)
+        main {
+            assertFalse(attachment.isLoading)
+            val view = parent.getChildAt(0) as android.webkit.WebView
+            attachment.close()
+            view.webViewClient.onPageFinished(view, view.url)
+            assertEquals(0, parent.childCount)
+            val remounted = host.webHost.attach(token, parent)
+            assertSame(view, parent.getChildAt(0))
+            remounted.control(app.daiyu.android.browser.openminis.BrowserVisibleAction.STOP)
+            remounted.close()
+            host.session.releaseTakeover(token)
+        }
     }
 
     fun testCookieSummaryPrivateOffloadAndCloseCleanup() {
@@ -207,6 +267,11 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
             second.close()
             host.session.releaseTakeover(secondToken)
         }
+        val manualUrl = "https://browser-fixture.invalid/manual-original"
+        assertTrue(confirmed(host, "action" to "get_page_info").result.text.contains(manualUrl))
+        val screenshot = confirmed(host, "action" to "screenshot").result
+        screenshots.add(java.nio.file.Paths.get(requireNotNull(screenshot.filePath)))
+        assertTrue(screenshot.text.lineSequence().any { it.trim() == "URL: $manualUrl" })
         confirmed(host, "action" to "navigate", "url" to "https://browser-fixture.invalid/model-after-human")
     }
 

@@ -47,8 +47,6 @@ class OpenMinisPreflightTest {
             val lease = f.session.currentTab
             val cases = listOf(
                 mapOf("action" to "navigate", "url" to "https://example.invalid/", "timeout_ms" to 1000),
-                mapOf("action" to "set_viewport", "viewport_width" to 800, "viewport_height" to 600),
-                mapOf("action" to "reload"), mapOf("action" to "go_back"), mapOf("action" to "go_forward"),
                 mapOf("action" to "type", "selector" to "input", "text" to "test", "submit" to true),
                 mapOf("action" to "type", "coordinate_x" to 1, "coordinate_y" to 1, "text" to "test"),
                 mapOf("action" to "hover", "coordinate_x" to 1, "coordinate_y" to 1),
@@ -69,15 +67,30 @@ class OpenMinisPreflightTest {
         }
     }
 
-    @Test fun userAgentSwitchIsRejectedBeforeImplicitReloadCanStart() {
+    @Test fun nativeConfigurationAndHistoryCommandsEnterTheExactExistingLease() {
         Fixture().use { f ->
             f.call("new_tab")
             f.call("navigate", "url" to "https://example.invalid/")
+            val original = f.session.currentTab
+            val commands = listOf(
+                mapOf("action" to "set_user_agent", "user_agent" to "mobile_chrome"),
+                mapOf("action" to "set_user_agent", "user_agent" to "desktop_chrome"),
+                mapOf("action" to "set_viewport", "viewport_width" to 800, "viewport_height" to 600),
+                mapOf("action" to "set_viewport", "reset" to true),
+                mapOf("action" to "reload"), mapOf("action" to "go_back"), mapOf("action" to "go_forward"),
+            )
+            for (args in commands) {
+                val before = f.calls.size
+                assertTrue("$args", f.session.execute(args) is BrowserOutcome.Confirmed)
+                assertEquals(before + 1, f.calls.size)
+                assertEquals(args.getValue("action"), f.calls.last().action)
+                assertEquals(original, f.session.currentTab)
+                assertEquals(setOf(original), f.live)
+            }
             val before = f.calls.size
-            assertEquals(BrowserOutcome.NotExecuted("BROWSER_OPENMINIS_USER_AGENT_UNSUPPORTED"),
-                f.call("set_user_agent", "user_agent" to "mobile_chrome"))
+            assertTrue(f.call("set_viewport", "viewport_width" to 800) is BrowserOutcome.NotExecuted)
+            assertTrue(f.call("set_user_agent", "user_agent" to "forged") is BrowserOutcome.NotExecuted)
             assertEquals(before, f.calls.size)
-            assertTrue(f.call("get_text") is BrowserOutcome.Confirmed)
         }
     }
 

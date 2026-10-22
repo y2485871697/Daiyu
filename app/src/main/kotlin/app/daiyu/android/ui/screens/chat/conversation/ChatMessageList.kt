@@ -52,8 +52,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.domain.RunStatus
+import app.daiyu.android.domain.BottomFollowMotion
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -75,7 +77,9 @@ internal fun ChatMessageList(
     var wasDragged by remember { mutableStateOf(false) }
     var touchEpoch by remember { mutableStateOf(0L) }
     var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
-    val occlusionPx = with(LocalDensity.current) { composerBottomInset.roundToPx() }
+    val density = LocalDensity.current
+    val occlusionPx = with(density) { composerBottomInset.roundToPx() }
+    val currentDensity by rememberUpdatedState(density.density)
     val currentOcclusionPx by rememberUpdatedState(occlusionPx)
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
@@ -109,33 +113,48 @@ internal fun ChatMessageList(
             if (!canScroll && !scrolling && !currentDragging && wasDragged) followBottom = true
         }
     }
-    // Observe measured height as well as item count, so streaming text also stays in view.
+    // Keep a single motion across target-height updates instead of snapping each new line.
     LaunchedEffect(listState) {
         snapshotFlow {
-            if (!followBottom || currentDragging || currentTurns.isEmpty()) null
-            else {
-                val index = currentTurns.lastIndex
-                val layout = listState.layoutInfo
-                val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
-                val overflow = last?.let {
-                    it.offset + it.size + layout.afterContentPadding - layout.viewportEndOffset
-                }
-                if (overflow == null || overflow > 0) index to overflow else null
-            }
-        }.collectLatest { pending ->
-            if (pending == null) return@collectLatest
-            // Layout notifications can resume this collector during measurement.
-            withFrameNanos { }
-            if (followBottom && !currentDragging && currentTurns.isNotEmpty()) {
-                val index = currentTurns.lastIndex
-                if (listState.layoutInfo.visibleItemsInfo.none { it.index == index })
-                    listState.scrollToItem(index)
-                val layout = listState.layoutInfo
-                val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
-                if (last != null) {
+            followBottom && !currentDragging && currentTurns.isNotEmpty() &&
+                (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
+        }.collectLatest { canFollow ->
+            if (!canFollow) return@collectLatest
+            val motion = BottomFollowMotion()
+            try {
+                while (true) {
+                    // Layout notifications may arrive during measurement; scroll only on a frame.
+                    val frameTime = withFrameNanos { it }
+                    if (!followBottom || currentDragging || currentTurns.isEmpty() ||
+                        (currentScrollSerial != null && currentScrollSerial != consumedScrollSerial)) {
+                        motion.reset()
+                        continue
+                    }
+                    val index = currentTurns.lastIndex
+                    val layout = listState.layoutInfo
+                    val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
+                    if (last == null) {
+                        listState.scrollToItem(index)
+                        motion.reset()
+                        continue
+                    }
                     val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
-                    if (overflow > 0) listState.scrollBy(overflow.toFloat())
+                    if (overflow <= 0) {
+                        motion.reset()
+                        // Recheck on subscription, including growth coalesced with reaching bottom.
+                        snapshotFlow {
+                            val nextIndex = currentTurns.lastIndex
+                            val nextLayout = listState.layoutInfo
+                            val nextLast = nextLayout.visibleItemsInfo.lastOrNull { it.index == nextIndex }
+                            nextLast == null || nextLast.offset + nextLast.size + nextLayout.afterContentPadding > nextLayout.viewportEndOffset
+                        }.first { it }
+                        continue
+                    }
+                    val delta = motion.step(overflow.toFloat(), frameTime, currentDensity)
+                    if (delta > 0f) listState.scrollBy(delta)
                 }
+            } finally {
+                motion.reset()
             }
         }
     }

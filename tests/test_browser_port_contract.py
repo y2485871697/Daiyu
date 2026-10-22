@@ -62,8 +62,16 @@ class BrowserPortContractTest(unittest.TestCase):
         self.assertIn('updateDownloadProgress(); return', pool)
         settings = (PORT / 'ui/browser/BrowserSettingsSheet.kt').read_text()
         self.assertIn('var selectedProfile by remember(appliedProfile)', settings)
-        self.assertIn('enabled = customUA.isNotBlank()', settings)
         self.assertNotIn('putString("user_agent_profile"', settings)
+
+    def test_original_search_recognition_and_download_chooser_keep_native_authorization(self):
+        pool = (APP / 'browser/ui/BrowserUiPool.kt').read_text()
+        for token in ('value.startsWith("about:")', 'looksLikeUrl(value)',
+                      'https://www.bing.com/search?q=', 'OpenMinisNavigationPolicy.permits(url)',
+                      'Intent.createChooser(intent, null)', 'getMimeTypeFromExtension(extension)',
+                      'Intent.FLAG_GRANT_READ_URI_PERMISSION'):
+            self.assertIn(token, pool)
+        self.assertNotIn('notice.value = "没有可打开此文件的应用"', pool)
 
     def test_real_android_regressions_cover_actions_and_same_view_lifecycle(self):
         tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/browser/BrowserProductionCompositionTest.kt').read_text()

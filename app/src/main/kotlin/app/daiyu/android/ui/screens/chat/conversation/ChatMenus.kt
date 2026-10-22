@@ -155,7 +155,8 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
         MenuEntry("目录引用", DaiyuIcons.Folder, ChatMenuAction.ATTACH_FOLDER),
     )
     val colors = usagePalette()
-    ChatSelectionSheet("附件", onDismiss, subtitle = "选择你要添加的内容", showCloseButton = false) {
+    ChatSelectionSheet("附件", onDismiss, subtitle = "选择你要添加的内容", showCloseButton = false,
+        titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             entries.forEach { entry ->
                 val tint = when (entry.action) {
@@ -164,14 +165,14 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
                     else -> Color(0xFF568E90)
                 }
                 Row(Modifier.fillMaxWidth().testTag("chat-attachment:${entry.action.name}")
-                    .heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+                    .heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                         role = Role.Button) { onDismiss(); onAction(entry.action) }
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(entry.icon, null, Modifier.size(18.dp), tint = tint)
-                    Text(entry.title, Modifier.weight(1f), fontSize = 12.sp, color = colors.text)
-                    Icon(DaiyuIcons.ChevronRight, null, Modifier.size(11.dp).alpha(.4f), tint = colors.muted)
+                    .padding(horizontal = 12.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(entry.icon, null, Modifier.size(24.dp).testTag("chat-attachment-icon:${entry.action.name}"), tint = tint)
+                    Text(entry.title, Modifier.weight(1f), fontSize = 16.sp, lineHeight = 24.sp, color = colors.text)
+                    Icon(DaiyuIcons.ChevronRight, null, Modifier.size(18.dp).testTag("chat-attachment-chevron:${entry.action.name}").alpha(.4f), tint = colors.muted)
                 }
             }
         }

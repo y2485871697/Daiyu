@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.components.bottomSheetContentInsets
@@ -37,6 +38,8 @@ internal fun ChatSelectionSheet(
     height: Dp? = null,
     subtitle: String? = null,
     showCloseButton: Boolean = true,
+    titleFontSize: TextUnit = 18.sp,
+    subtitleFontSize: TextUnit = 12.sp,
     footer: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -56,8 +59,8 @@ internal fun ChatSelectionSheet(
                 .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))
             Row(Modifier.fillMaxWidth().padding(bottom = 13.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text(title, color = colors.text, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
-                    subtitle?.let { Text(it, color = colors.muted, fontSize = 12.sp, lineHeight = 18.sp,
+                    Text(title, color = colors.text, fontSize = titleFontSize, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
+                    subtitle?.let { Text(it, color = colors.muted, fontSize = subtitleFontSize, lineHeight = 18.sp,
                         modifier = Modifier.padding(top = 4.dp)) }
                 }
                 if (showCloseButton) Box(Modifier.size(40.dp).clip(RoundedCornerShape(9.dp))

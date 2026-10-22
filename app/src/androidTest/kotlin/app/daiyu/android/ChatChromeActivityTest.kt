@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -30,6 +31,7 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
 import app.daiyu.android.ui.screens.chat.conversation.ChatComposer
 import app.daiyu.android.ui.screens.chat.conversation.ChatActionColors
 import app.daiyu.android.ui.screens.chat.conversation.chatActionColors
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
 import app.daiyu.android.ui.screens.chat.conversation.ChatTopBar
 import app.daiyu.android.ui.screens.chat.conversation.ComposerPhase
@@ -39,6 +41,7 @@ import kotlin.math.abs
 /** UI geometry and action dispatch; real run ownership stays covered by RunControlActivityTest. */
 class ChatChromeActivityTest : WiredActivityTestCase() {
     private var actionColors: ChatActionColors? = null
+    private var disabledContextColor: Color = Color.Unspecified
 
     private fun composer() = ComposerUi(
         text = "  下一条消息  ", phase = ComposerPhase.RUNNING,
@@ -56,7 +59,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(interfaceScale = interfaceScale,
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = true) {
                         val colors = chatActionColors()
-                        SideEffect { actionColors = colors }
+                        val disabledColor = MiuixTheme.colorScheme.disabledOnSurface
+                        SideEffect { actionColors = colors; disabledContextColor = disabledColor }
                         ChatMenuLayer(Modifier.fillMaxSize()) {
                             Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
                                 ChatTopBar("测试会话", actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
@@ -202,11 +206,11 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(9f, (surface.left - host.left) / density, .5f)
             assertEquals(16f, (host.bottom - surface.bottom) / density, .75f)
             assertEquals(144f, surface.height / density, 1.5f)
-            assertEquals(26f, context.height / density, .75f)
-            assertEquals(12f, (context.top - surface.top) / density, .75f)
+            assertEquals(24f, context.height / density, .75f)
+            assertEquals(13f, (context.top - surface.top) / density, .75f)
             assertEquals(14f, (surface.right - context.right) / density, .75f)
             assertEquals(13f, (divider.left - surface.left) / density, .75f)
-            assertEquals(4f, (divider.top - context.bottom) / density, .75f)
+            assertEquals(5f, (divider.top - context.bottom) / density, .75f)
             assertEquals(36f, bottom.height / density, .75f)
             assertEquals(12f, (surface.bottom - bottom.bottom) / density, .75f)
             assertEquals(32f, send.width / density, .75f)
@@ -223,13 +227,83 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val chip = node("chat-model").fetchSemanticsNode().boundsInRoot
             val label = ui.onNodeWithTag("composer-model-label", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             assertEquals(chip.center.y - .75f * density, label.center.y, 1f)
-            assertEquals(12.sp, layout("37% 上下文").layoutInput.style.fontSize)
-            assertEquals(18.sp, layout("37% 上下文").layoutInput.style.lineHeight)
+            assertEquals(10.sp, layout("37% 上下文").layoutInput.style.fontSize)
+            assertEquals(14.sp, layout("37% 上下文").layoutInput.style.lineHeight)
             val placeholder = layout("给代鱼发消息")
             assertEquals(16.sp, placeholder.layoutInput.style.fontSize)
             assertEquals(24.sp, placeholder.layoutInput.style.lineHeight)
             assertEquals(.9f, placeholder.layoutInput.density.fontScale, .001f)
         }
+    }
+
+    fun testCompactContextKeepsReferenceColorAndIconTextProportions() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            for (font in listOf(.9f, 1.3f)) for (enabled in listOf(true, false)) {
+                val state = composer().copy(contextFraction = 1f, enabled = enabled)
+                show(state, dark = dark, interfaceScale = scale, fontScale = font)
+                val density = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f
+                val badge = node("chat-context").assertIsDisplayed().assertHasNoClickAction().fetchSemanticsNode().boundsInRoot
+                val iconNode = ui.onNodeWithTag("chat-context-icon", useUnmergedTree = true).assertIsDisplayed()
+                val icon = iconNode.fetchSemanticsNode().boundsInRoot
+                val label = ui.onNodeWithTag("chat-context-label", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                val model = node("chat-model").fetchSemanticsNode().boundsInRoot
+                val text = layout("100% 上下文")
+                val expected = if (!enabled) disabledContextColor else Color(if (dark) 0xFFB4A3F7 else 0xFF7663BD)
+                assertEquals(expected, text.layoutInput.style.color)
+                assertEquals(10.sp, text.layoutInput.style.fontSize)
+                assertEquals(14.sp, text.layoutInput.style.lineHeight)
+                assertEquals(FontWeight.Normal, text.layoutInput.style.fontWeight)
+                assertEquals(androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false), text.layoutInput.style.platformStyle)
+                assertEquals(font, text.layoutInput.density.fontScale, .001f)
+                assertEquals(1, text.lineCount)
+                assertFalse(text.hasVisualOverflow)
+                assertEquals(18f, icon.width / density, .75f)
+                assertEquals(18f, icon.height / density, .75f)
+                assertEquals(24f, badge.height / density, 1f)
+                assertTrue("compact context max width", badge.width / density <= 120f + 1f)
+                if (font <= 1f) assertTrue("default-font badge stays compact", badge.width / density < 92f)
+                assertEquals(5f, (icon.left - badge.left) / density, .75f)
+                assertEquals(4f, (label.left - icon.right) / density, .75f)
+                assertEquals(5f, (badge.right - label.right) / density, .75f)
+                assertEquals(badge.center.y, icon.center.y, 1f)
+                assertEquals(icon.center.y, label.center.y, 1f)
+                assertEquals(model.center.y, badge.center.y, 1f)
+                assertTrue("model remains before context", model.right <= badge.left + 1f)
+                if (enabled && scale == 1f && font == .9f) {
+                    val pixels = iconNode.captureToImage().toPixelMap()
+                    val matches = (0 until pixels.height).any { y -> (0 until pixels.width).any { x ->
+                        val color = pixels[x, y]
+                        abs(color.red - expected.red) < .04f && abs(color.green - expected.green) < .04f && abs(color.blue - expected.blue) < .04f
+                    } }
+                    assertTrue("context stroke uses the text accent, dark=$dark", matches)
+                }
+            }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testCompactContextKeepsClampingFallbackAndLongLabelInsideItsBadge() {
+        for (fraction in listOf(null, Float.NaN, Float.POSITIVE_INFINITY, -.2f, 0f, .37f, 1f, 1.2f)) {
+            val state = composer().copy(contextFraction = fraction)
+            show(state)
+            val safe = fraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
+            val expected = if (safe == null) "上下文" else "${(safe * 100).toInt()}% 上下文"
+            val text = layout(expected)
+            assertEquals(1, text.lineCount)
+            assertFalse(text.hasVisualOverflow)
+            node("chat-context").assertHasNoClickAction()
+        }
+        show(composer().copy(contextFraction = 1f, contextLabel = "上下文使用情况".repeat(20)), fontScale = 1.3f)
+        val density = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f
+        val badge = node("chat-context").fetchSemanticsNode().boundsInRoot
+        val icon = ui.onNodeWithTag("chat-context-icon", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val label = ui.onNodeWithTag("chat-context-label", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals(120f, badge.width / density, 1f)
+        assertEquals(18f, icon.width / density, .75f)
+        assertTrue(label.right <= badge.right + 1f)
+        assertTrue(layout("100% " + "上下文使用情况".repeat(20)).isLineEllipsized(0))
+        assertTrue(node("chat-model").fetchSemanticsNode().boundsInRoot.width > 0f)
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testComposerVisibleControlsStayBalancedWithAvatarAcrossActionStates() {

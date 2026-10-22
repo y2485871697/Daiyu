@@ -239,4 +239,25 @@ class ChatTurnMapperTest {
         assertNull(turns.last().workProcess!!.segments.single().steps.single().dedicatedKey)
     }
 
+
+    @Test fun streamingOwnerMarksOnlyItsLastExactHistorySegmentAndCanBeClearedWithoutRows() {
+        val active = message(text("live", "answer"), status = RunStatus.RUNNING)
+        val history = ChatTurnMapper.map(listOf(active.copy(blocks = listOf(text("old", "before"))), active))
+        val live = ChatTurnMapper.withStreamingOwner(history, active)
+        assertEquals(listOf(false, true), live.filterIsInstance<ChatTurnUi.Assistant>().map { it.isStreaming })
+        assertEquals(history.map { it.listKey }, live.map { it.listKey })
+        val paused = ChatTurnMapper.withStreamingOwner(live, null)
+        assertTrue(paused.filterIsInstance<ChatTurnUi.Assistant>().none { it.isStreaming })
+        assertEquals(history, paused)
+    }
+
+    @Test fun streamingOwnerNeverBorrowsSameMessageIdFromAnotherRunOrConversation() {
+        val active = message(text("live", "answer"), status = RunStatus.RUNNING)
+        val turns = ChatTurnMapper.map(listOf(active))
+        for (wrong in listOf(active.copy(runId = RunId("other-run")),
+            active.copy(conversationId = ConversationId("other-conversation")), active.copy(status = RunStatus.COMPLETED))) {
+            assertTrue(ChatTurnMapper.withStreamingOwner(turns, wrong).filterIsInstance<ChatTurnUi.Assistant>().none { it.isStreaming })
+        }
+    }
+
 }

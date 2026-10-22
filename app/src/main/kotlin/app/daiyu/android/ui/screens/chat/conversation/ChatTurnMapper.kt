@@ -53,6 +53,19 @@ object ChatTurnMapper {
         }
     }
 
+    fun withStreamingOwner(turns: List<ChatTurnUi>, owner: Message?): List<ChatTurnUi> {
+        val live = owner?.takeIf { it.role == Message.ASSISTANT_ROLE && it.status == RunStatus.RUNNING }
+        val last = if (live == null) -1 else turns.indexOfLast { turn ->
+            turn is ChatTurnUi.Assistant && turn.ownerMessageId == live.id.value &&
+                turn.listKey == TurnOwner(live.conversationId.value, live.runId.value, turn.id).listKey(turn.segmentIndex)
+        }
+        return turns.mapIndexed { index, turn ->
+            if (turn is ChatTurnUi.Assistant && turn.isStreaming != (index == last)) {
+                turn.copy(isStreaming = index == last)
+            } else turn
+        }
+    }
+
     /**
      * Count segments within their conversation/run/message identity, never within the loaded
      * window. Prepending other owners therefore leaves existing keys unchanged. All turns,

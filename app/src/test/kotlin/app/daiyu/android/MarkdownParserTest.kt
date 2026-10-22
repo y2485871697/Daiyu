@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.concurrent.CancellationException
 
 /** Actual parser contracts, not snapshots of a mock renderer. No network or new dependencies. */
 class MarkdownParserTest {
@@ -223,4 +224,75 @@ class MarkdownParserTest {
         val table = MarkdownParser.parse("a | b\n--- | ---\n${"long".repeat(10_000)} | last").single() as MarkdownBlock.Table
         assertEquals(40_000, text(table.rows.single().first()).length)
     }
+
+    @Test fun atxClosingHashesKeepExistingWhitespaceSemantics() {
+        for ((source, expected) in listOf(
+            "# title ###" to "title", "# title \t### \t" to "title",
+            "# title### \t" to "title### \t", "# title \t" to "title \t",
+            "# ###" to "###", "# ### \t" to "### \t",
+            "# title ### x \t" to "title ### x \t",
+        )) assertEquals(source, expected, text((MarkdownParser.parse(source).single() as MarkdownBlock.Heading).content))
+    }
+
+    @Test(timeout = 10_000) fun longAtxSuffixesStayReadableWithoutBacktracking() {
+        val spaces = " \t".repeat(50_000)
+        val plain = "heading$spaces"
+        assertEquals(plain, text((MarkdownParser.parse("# $plain").single() as MarkdownBlock.Heading).content))
+        assertEquals("heading", text((MarkdownParser.parse("# heading$spaces${"#".repeat(50_000)}$spaces")
+            .single() as MarkdownBlock.Heading).content))
+    }
+
+    private fun assertCooperativeCancellation(action: (() -> Unit) -> Unit) {
+        val expected = CancellationException("parser-test")
+        var checks = 0
+        try {
+            action { if (++checks == 3) throw expected }
+            fail("Expected cancellation inside a parser traversal")
+        } catch (actual: CancellationException) { assertSame(expected, actual) }
+        assertEquals(3, checks)
+    }
+
+    @Test fun cancellationIsCooperativeInsideInlineAndBlockWork() {
+        assertCooperativeCancellation { MarkdownParser.inline("x".repeat(30_000), it) }
+        assertCooperativeCancellation { MarkdownParser.parse("_".repeat(30_000), it) }
+        assertCooperativeCancellation { MarkdownParser.parse("# heading" + " \t".repeat(30_000), it) }
+        assertCooperativeCancellation { MarkdownParser.parse("```\n" + "body\n".repeat(8_000) + "```", it) }
+        assertCooperativeCancellation { MarkdownParser.parse("a | b\n--- | ---\n" + "x | y\n".repeat(6_000), it) }
+    }
+
+    @Test fun cancellationChecksAreLowFrequencyAndDoNotChangeSyntax() {
+        val source = "x".repeat(100_000)
+        var checks = 0
+        assertEquals(MarkdownParser.inline(source), MarkdownParser.inline(source) { checks++ })
+        assertTrue(checks >= 3)
+        assertTrue(checks < 1_000)
+        val markdown = "> ## title ###\n>\n> - **bold** [x](https://example.test)"
+        assertEquals(MarkdownParser.parse(markdown), MarkdownParser.parse(markdown) {})
+    }
+
+    @Test fun quotedLinkTitlesDoNotParticipateInParenthesisPreflight() {
+        for (title in listOf("\"unmatched (\"", "\"unmatched )\"", "'a \"quote\" and ('",
+            "\"tick ` and (\"", "\"escaped \\\"quote\\\" and (\"", "'escaped \\'quote\\' and )'")) {
+            val source = "[x](https://example.test $title)"
+            val work = MarkdownParser.LinkWork(source.length)
+            val link = MarkdownParser.inline(source, work).single() as MarkdownInline.Link
+            assertEquals(title, "x", text(link.content))
+            assertEquals("https://example.test", link.destination)
+            assertFalse(work.exhausted)
+            assertTrue(work.operations <= work.limit)
+        }
+    }
+
+    @Test fun backticksInSeparateTitlesDoNotHideLabelsOrBecomeCode() {
+        val source = "[a](https://a.test \"first `\") [b](https://b.test 'second `') `[hidden](https://hidden.test)`"
+        val nodes = MarkdownParser.inline(source)
+        assertEquals(listOf("https://a.test", "https://b.test"), nodes.filterIsInstance<MarkdownInline.Link>().map { it.destination })
+        assertEquals(listOf(MarkdownInline.Code("[hidden](https://hidden.test)")), nodes.filterIsInstance<MarkdownInline.Code>())
+        for (destination in listOf("javascript:alert(1)", "https://user@example.test")) {
+            val rejected = "[**no**]($destination \"title ( ` \\\"quoted\\\"\")"
+            assertEquals(listOf(MarkdownInline.Text(rejected)), MarkdownParser.inline(rejected))
+        }
+        assertTrue(MarkdownParser.inline("[x](https://example.test \"escaped \\\" only)").none { it is MarkdownInline.Link })
+    }
+
 }

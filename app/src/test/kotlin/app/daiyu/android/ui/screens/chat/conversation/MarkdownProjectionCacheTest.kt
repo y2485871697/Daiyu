@@ -50,6 +50,8 @@ class MarkdownProjectionCacheTest {
         cache.put(value)
         assertNotNull(cache.get(value.sources, first))
         assertNull(cache.get(value.sources, second))
+        assertSame(value.blocks["**body**"], cache.getBlocks("**body**", first))
+        assertNull(cache.getBlocks("**body**", second))
     }
 
     @Test fun entryLimitEvictsLeastRecentlyUsedProjection() {
@@ -107,4 +109,85 @@ class MarkdownProjectionCacheTest {
         }
         assertNull(cache.get(listOf("failed"), failed))
     }
+
+    @Test fun appendedMixedSourcesReuseOnlyExactCompletedSegments() = runBlocking {
+        val cache = MarkdownProjectionCache()
+        val calls = mutableListOf<String>()
+        val parse: (String) -> List<MarkdownBlock> = { calls += it; parser(it) }
+        val first = projectMarkdown(listOf("a"), parse, cache)
+        val second = projectMarkdown(listOf("a", "b"), parse, cache)
+        val third = projectMarkdown(listOf("a", "b", "c"), parse, cache)
+        assertEquals(listOf("a", "b", "c"), calls)
+        assertSame(first.blocks["a"], second.blocks["a"])
+        assertSame(second.blocks["b"], third.blocks["b"])
+        projectMarkdown(listOf("a changed", "b", "c"), parse, cache)
+        assertEquals(listOf("a", "b", "c", "a changed"), calls)
+        assertNotNull(cache.get(listOf("a", "b", "c"), parse))
+    }
+
+    @Test fun segmentLookupUsesParserIdentityAndTheExistingLruBudget() {
+        val cache = MarkdownProjectionCache(maxEntries = 2, maxSourceChars = 4)
+        val other: (String) -> List<MarkdownBlock> = { parser(it) }
+        cache.put(projection("aa")); cache.put(projection("bb"))
+        assertNull(cache.getBlocks("aa", other))
+        assertNotNull(cache.getBlocks("aa", parser))
+        cache.put(projection("cc"))
+        assertNull(cache.getBlocks("bb", parser))
+        assertNotNull(cache.getBlocks("aa", parser))
+        assertNotNull(cache.getBlocks("cc", parser))
+        cache.put(projection("oversized"))
+        assertNull(cache.getBlocks("oversized", parser))
+    }
+
+    @Test fun failureDoesNotCacheFreshSegmentsFromAnIncompleteProjection() = runBlocking {
+        val cache = MarkdownProjectionCache()
+        val calls = mutableListOf<String>()
+        val parse: (String) -> List<MarkdownBlock> = {
+            calls += it
+            check(it != "fail") { "parse failed" }
+            parser(it)
+        }
+        projectMarkdown(listOf("retained"), parse, cache)
+        try {
+            projectMarkdown(listOf("retained", "fresh", "fail"), parse, cache)
+            fail("The incomplete projection must fail")
+        } catch (expected: IllegalStateException) {
+            assertEquals("parse failed", expected.message)
+        }
+        assertEquals(listOf("retained", "fresh", "fail"), calls)
+        assertNotNull(cache.getBlocks("retained", parse))
+        assertNull(cache.getBlocks("fresh", parse))
+        assertNull(cache.get(listOf("retained", "fresh", "fail"), parse))
+    }
+
+
+    @Test fun cancellationDoesNotPublishFreshSegmentsBeforeTheWholeProjectionCompletes() = runBlocking {
+        val cache = MarkdownProjectionCache()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val parse: (String) -> List<MarkdownBlock> = {
+            calls.incrementAndGet()
+            if (it == "blocked") {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            parser(it)
+        }
+        val sources = listOf("fresh", "blocked", "unseen")
+        val pending = async(start = CoroutineStart.UNDISPATCHED) { projectMarkdown(sources, parse, cache) }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            pending.cancel()
+            release.countDown()
+            pending.join()
+            assertEquals(2, calls.get())
+            assertNull(cache.get(sources, parse))
+            assertNull(cache.getBlocks("fresh", parse))
+            assertNull(cache.getBlocks("blocked", parse))
+        } finally { release.countDown(); pending.cancelAndJoin() }
+        projectMarkdown(sources, parse, cache)
+        assertEquals(5, calls.get())
+    }
+
 }

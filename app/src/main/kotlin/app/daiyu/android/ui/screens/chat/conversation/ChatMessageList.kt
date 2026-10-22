@@ -84,6 +84,7 @@ internal fun ChatMessageList(
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
     val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
+    val revealedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
@@ -168,7 +169,7 @@ internal fun ChatMessageList(
                     it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
             }.map { it.key }.toSet()
             currentReadAction to currentTurns.filterIsInstance<ChatTurnUi.Assistant>()
-                .filter { it.status == RunStatus.COMPLETED && it.listKey in visibleKeys && readyTurns[it.listKey] == it }
+                .filter { it.status == RunStatus.COMPLETED && it.listKey in visibleKeys && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it }
         }.collect { (readAction, completed) ->
             if (completed.isNotEmpty()) {
                 // Wait for the formatted terminal body, not a shorter raw-text placeholder.
@@ -182,7 +183,7 @@ internal fun ChatMessageList(
                 }.map { it.key }.toSet()
                 val current = currentTurns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
                 readAction(completed.filter {
-                    it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it
+                    it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
                 }.map { it.listKey }.toSet())
             }
         }
@@ -205,7 +206,10 @@ internal fun ChatMessageList(
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
-                            AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent) { ready ->
+                            AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent,
+                                onRevealSettled = { settled ->
+                                    if (settled) revealedTurns[turn.listKey] = turn else revealedTurns.remove(turn.listKey)
+                                }) { ready ->
                                 if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
                             }
                             turnExtras(turn)
@@ -233,7 +237,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
                 if (turn.content.isNotEmpty()) {
                     MessageContent(turn.content, actions, imageLoader, markdown = false,
-                        textBody = { text, modifier -> UserMessageText(text, modifier) })
+                        textBody = { text, modifier -> UserMessageText(text.text, modifier) })
                 } else {
                     UserMessageText(turn.text)
                 }
@@ -260,6 +264,7 @@ internal fun AssistantTurn(
     imageLoader: MessageImageLoader? = null,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
+    onRevealSettled: (Boolean) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
 ) = key(turn.listKey) {
     val sources = remember(turn.content, turn.finalText) {
@@ -267,8 +272,10 @@ internal fun AssistantTurn(
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { it.text }
     }
     val projection = rememberMarkdownProjection(sources)
+    val reveal = rememberMarkdownReveal(turn, projection)
     SideEffect { onContentReady(projection != null) }
-    DisposableEffect(turn.listKey) { onDispose { onContentReady(false) } }
+    SideEffect { onRevealSettled(reveal.settled) }
+    DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false) } }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val identity = turn.assistantIdentity
         val avatar by produceState<android.graphics.Bitmap?>(null, identity?.avatarPng) {
@@ -284,10 +291,11 @@ internal fun AssistantTurn(
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent) { text, modifier ->
-                ProjectedMessageMarkdown(text, projection?.blocks?.get(text), modifier)
+                ProjectedMessageMarkdown(text.text, projection?.blocks?.get(text.text), modifier,
+                    visibleCharacters = reveal.limit(text.itemId))
             }
         } else {
-            AssistantTextContent(turn, actions, projection, toolContent)
+            AssistantTextContent(turn, actions, projection, reveal, toolContent)
         }
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = conversationColors().error,
@@ -307,10 +315,10 @@ internal fun AssistantTurn(
 }
 
 @Composable
-private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, toolContent: @Composable (WorkStepUi) -> Unit) {
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, toolContent: @Composable (WorkStepUi) -> Unit) {
     turn.workProcess?.let { WorkProcessCard(it, turn.listKey, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
-        ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText))
+        ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), visibleCharacters = reveal.limit("final"))
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
         Text("正在思考…", color = conversationColors().muted,
             style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp))

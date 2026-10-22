@@ -707,4 +707,136 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.onNodeWithText(owner.conversationId, substring = true).assertDoesNotExist()
         assertTrue(opened.isEmpty())
     }
+
+    fun testStreamingRevealUsesCachedAstWithoutPerFrameParsingAndDrainsUnicodeText() {
+        val plain = "TYPE😀𠮷e\u0301 " + "word ".repeat(80) + "END"
+        val source = "**$plain**"
+        val calls = AtomicInteger()
+        val ready = AtomicBoolean()
+        val settled = AtomicBoolean()
+        val parser: (String) -> List<MarkdownBlock> = { calls.incrementAndGet(); MarkdownParser.parse(it) }
+        markdownProjectionCache.put(MarkdownProjection(listOf(""), mapOf("" to emptyList()), parser))
+        markdownProjectionCache.put(MarkdownProjection(listOf(source), mapOf(source to parser(source)), parser))
+        var turn by mutableStateOf(ChatTurnUi.Assistant("typing-live", status = RunStatus.RUNNING, isStreaming = true))
+        show {
+            CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                Column(Modifier.width(320.dp).testTag("typing-live")) {
+                    AssistantTurn(turn, ChatScreenActions(), onRevealSettled = { settled.set(it) }, onContentReady = { ready.set(it) })
+                }
+            }
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { turn = turn.copy(finalText = source) }
+            ui.mainClock.advanceTimeBy(80)
+            ui.waitForIdle()
+            val matcher = hasAnyAncestor(hasTestTag("typing-live")) and hasText("TYPE", substring = true)
+            val partial = annotation(ui.onNode(matcher, useUnmergedTree = true))
+            assertTrue(partial.length in 1 until plain.length)
+            assertTrue(plain.startsWith(partial.text))
+            assertTrue(partial.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+            assertTrue(ready.get())
+            assertFalse(settled.get())
+            repeat(6) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                val text = annotation(ui.onNode(matcher, useUnmergedTree = true)).text
+                text.forEachIndexed { index, c ->
+                    if (c.isHighSurrogate()) assertTrue(index + 1 < text.length && text[index + 1].isLowSurrogate())
+                    if (c.isLowSurrogate()) assertTrue(index > 0 && text[index - 1].isHighSurrogate())
+                }
+            }
+            assertEquals(1, calls.get())
+            ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
+            ui.mainClock.advanceTimeBy(400)
+            ui.waitForIdle()
+            body("typing-live", plain).assertTextEquals(plain)
+            assertTrue(settled.get())
+            assertEquals(1, calls.get())
+            assertTrue(opened.isEmpty())
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testNewMixedTextUsesTurnMountBaselineAndLiveRemountDoesNotReplay() {
+        val plain = "MIXED " + "word ".repeat(50) + "END"
+        val source = "**$plain**"
+        val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
+        markdownProjectionCache.put(MarkdownProjection(listOf(""), mapOf("" to emptyList()), parser))
+        markdownProjectionCache.put(MarkdownProjection(listOf(source), mapOf(source to parser(source)), parser))
+        var mounted by mutableStateOf(true)
+        var turn by mutableStateOf(ChatTurnUi.Assistant("typing-mixed", status = RunStatus.RUNNING,
+            isStreaming = true, content = listOf(MessageContentUi.Text("new-part", ""))))
+        show {
+            CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                if (mounted) Column(Modifier.width(320.dp).testTag("typing-mixed")) { AssistantTurn(turn, ChatScreenActions()) }
+            }
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { turn = turn.copy(content = listOf(MessageContentUi.Text("new-part", source))) }
+            ui.mainClock.advanceTimeBy(80)
+            ui.waitForIdle()
+            val partial = annotation(ui.onNode(hasTestTag("message-content-text:0") and hasText("MIXED", substring = true), useUnmergedTree = true))
+            assertTrue(partial.length in 1 until plain.length)
+            ui.runOnUiThread { mounted = false }
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            ui.runOnUiThread { mounted = true }
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            body("typing-mixed", plain).assertTextEquals(plain)
+            assertTrue(opened.isEmpty())
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testCompletedReadWaitsForCurrentRevealToDrainEvenWithAnAlreadyCachedProjection() {
+        val source = "READ-DRAIN " + "next ".repeat(24)
+        val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
+        markdownProjectionCache.put(MarkdownProjection(listOf(""), mapOf("" to emptyList()), parser))
+        markdownProjectionCache.put(MarkdownProjection(listOf(source), mapOf(source to parser(source)), parser))
+        val confirmed = CopyOnWriteArrayList<Set<String>>()
+        var turn by mutableStateOf(ChatTurnUi.Assistant("typing-read", status = RunStatus.RUNNING, isStreaming = true))
+        show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
+            ChatMessageList(listOf(turn), ChatScreenActions(onVisibleCompleted = { confirmed += it }))
+        } }
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { turn = turn.copy(finalText = source) }
+            ui.mainClock.advanceTimeBy(64)
+            ui.waitForIdle()
+            ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
+            ui.mainClock.advanceTimeBy(80)
+            ui.waitForIdle()
+            assertTrue(confirmed.none { turn.listKey in it })
+            ui.mainClock.advanceTimeBy(400)
+            repeat(4) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+            assertTrue(confirmed.any { turn.listKey in it })
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testTableWidthHintsFollowFontScaleWithoutTruncatingLongCellContent() {
+        val header = "汉".repeat(8)
+        val tail = "long cell ".repeat(40) + "TAIL-END"
+        val source = "$header | other\n--- | ---\nshort | $tail"
+        val blocks = MarkdownParser.parse(source)
+        var fontScale by mutableStateOf(1f)
+        show {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                Column(Modifier.width(320.dp).testTag("scaled-table")) { ParsedMessageMarkdown(source, blocks) }
+            }
+        }
+        fun width(): Float {
+            val results = mutableListOf<TextLayoutResult>()
+            body("scaled-table", header).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
+            return results.single().size.width.toFloat()
+        }
+        val initial = width()
+        ui.runOnUiThread { fontScale = 1.6f }
+        ui.waitForIdle()
+        assertTrue(width() > initial)
+        body("scaled-table", tail).assertTextEquals(tail)
+        assertTrue(opened.isEmpty())
+    }
+
 }

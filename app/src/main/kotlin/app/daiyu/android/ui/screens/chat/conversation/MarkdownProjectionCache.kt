@@ -23,6 +23,14 @@ internal class MarkdownProjectionCache(
         entries[Key(sources, MarkdownParserIdentity(parser))]?.projection
 
     @Synchronized
+    fun getBlocks(source: String, parser: (String) -> List<MarkdownBlock>): List<MarkdownBlock>? {
+        val key = entries.entries.lastOrNull {
+            it.value.projection.parser === parser && it.value.projection.blocks.containsKey(source)
+        }?.key ?: return null
+        return entries[key]?.projection?.blocks?.get(source)
+    }
+
+    @Synchronized
     fun put(projection: MarkdownProjection) {
         val chars = projection.sources.sumOf { it.length.toLong() }
         if (chars > maxSourceChars) return

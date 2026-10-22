@@ -18,6 +18,51 @@ object MarkdownText {
 
     fun render(source: String): CharSequence = renderBlocks(MarkdownParser.parse(source))
 
+    /** Bounded width hint only; display and copy always consume the complete AST. */
+    internal fun tableCellWidthEm(content: List<MarkdownInline>): Float {
+        var charactersLeft = 32
+        var nodesLeft = 128
+        var line = 0f
+        var widest = 0f
+        fun newline() { widest = maxOf(widest, line); line = 0f }
+        fun sample(text: String) {
+            var offset = 0
+            while (offset < text.length && charactersLeft > 0) {
+                val cp = Character.codePointAt(text, offset)
+                offset += Character.charCount(cp)
+                charactersLeft--
+                if (cp == '\n'.code || cp == '\r'.code) newline()
+                else {
+                    val type = Character.getType(cp)
+                    line += when {
+                    type == Character.NON_SPACING_MARK.toInt() || type == Character.ENCLOSING_MARK.toInt() ||
+                        type == Character.FORMAT.toInt() -> 0f
+                    cp == '\t'.code -> 1.32f
+                    cp == ' '.code -> 0.33f
+                    cp in 0x21..0x7e -> 0.56f
+                    else -> 1f
+                    }
+                }
+            }
+        }
+        fun visit(nodes: List<MarkdownInline>) {
+            var index = 0
+            while (index < nodes.size && charactersLeft > 0 && nodesLeft > 0) {
+                nodesLeft--
+                when (val node = nodes[index++]) {
+                    is MarkdownInline.Text -> sample(node.text)
+                    is MarkdownInline.Code -> sample(node.text)
+                    is MarkdownInline.Emphasis -> visit(node.content)
+                    is MarkdownInline.Strike -> visit(node.content)
+                    is MarkdownInline.Link -> visit(node.content)
+                    MarkdownInline.Break -> { charactersLeft--; newline() }
+                }
+            }
+        }
+        visit(content)
+        return maxOf(widest, line)
+    }
+
     internal fun renderInline(content: List<MarkdownInline>): Spanned = SpannableStringBuilder().apply {
         appendInline(content)
     }

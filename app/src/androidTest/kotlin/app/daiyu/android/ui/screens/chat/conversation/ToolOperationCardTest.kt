@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toPixelMap
 import app.daiyu.android.data.model.AppearanceThemeMode
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
@@ -131,19 +132,24 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
+            val layoutsByTitle = mutableMapOf<String, androidx.compose.ui.text.TextLayoutResult>()
             for (tag in listOf("tool-document:命令", "tool-document:标准输出")) {
                 val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
                 ui.onNodeWithTag(tag, useUnmergedTree = true).performSemanticsAction(
                     androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
                 assertEquals(androidx.compose.ui.text.font.FontFamily.Monospace, layouts.single().layoutInput.style.fontFamily)
                 assertEquals(13.sp, layouts.single().layoutInput.style.fontSize)
+                layoutsByTitle[tag.substringAfter(':')] = layouts.single()
             }
             for (title in listOf("命令", "标准输出")) {
                 val pixels = captureScreenNode(ui.onNodeWithTag("tool-document-frame:$title", useUnmergedTree = true)).toPixelMap()
-                val actual = pixels[pixels.width / 2, (pixels.height * .15f).toInt()]
+                val sampleY = (4f * layoutsByTitle.getValue(title).layoutInput.density.density).roundToInt()
+                assertTrue("sample must stay between the border and text padding", sampleY in 1 until pixels.height)
+                val actual = pixels[pixels.width / 2, sampleY]
                 val expected = Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
                 assertEquals(expected.red, actual.red, .025f)
-                assertEquals(expected.green, actual.green, .025f)
+                assertEquals("dark=$dark title=$title sampleY=$sampleY frame=${pixels.width}x${pixels.height}",
+                    expected.green, actual.green, .025f)
                 assertEquals(expected.blue, actual.blue, .025f)
             }
             ui.onNodeWithTag("tool-output-hint:标准输出").assertDoesNotExist()

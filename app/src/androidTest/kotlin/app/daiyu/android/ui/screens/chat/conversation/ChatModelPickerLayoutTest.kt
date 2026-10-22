@@ -243,7 +243,14 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
                 hasAnyAncestor(hasTestTag("chat-model-provider-balance:a")), useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
             assertEquals(1, layouts.size)
-            assertFalse("ordinary amount must not be ellipsized", layouts.single().hasVisualOverflow)
+            val layout = layouts.single()
+            val input = layout.layoutInput
+            assertFalse("ordinary amount must not be ellipsized: dark=$dark scale=$scale " +
+                "overflowWidth=${layout.didOverflowWidth} overflowHeight=${layout.didOverflowHeight} " +
+                "constraints=${input.constraints} size=${layout.size} " +
+                "paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height} " +
+                "lines=${layout.lineCount} font=${input.style.fontSize} lineHeight=${input.style.lineHeight} " +
+                "density=${input.density.density} fontScale=${input.density.fontScale}", layout.hasVisualOverflow)
             node("chat-model-option:same").assertIsSelected()
             node("chat-model-provider:a").performClick()
             assertAmount("a", "17.177208")

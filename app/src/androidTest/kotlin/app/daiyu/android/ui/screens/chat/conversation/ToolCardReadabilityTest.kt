@@ -136,6 +136,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             val stateLayout = layout(stateNode)
             assertFalse("dark=$dark scale=$scale large=$large narrow=$narrow " +
                 "constraints=${stateLayout.layoutInput.constraints} size=${stateLayout.size} " +
+                "paragraph=${stateLayout.multiParagraph.width}x${stateLayout.multiParagraph.height} " +
                 "lines=${stateLayout.lineCount} overflowWidth=${stateLayout.didOverflowWidth} " +
                 "overflowHeight=${stateLayout.didOverflowHeight}", stateLayout.hasVisualOverflow)
             val headerBounds = ui.onNodeWithTag("tool-step-header:readability").fetchSemanticsNode().boundsInRoot

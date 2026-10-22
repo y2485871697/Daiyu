@@ -1,5 +1,7 @@
 package app.daiyu.android.balance.ui
 
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,7 +50,7 @@ internal fun ProviderBalanceAmount(amount: String, modifier: Modifier = Modifier
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         Icon(MoneyBag02, contentDescription = null,
             modifier = Modifier.padding(end = 4.dp).size(12.dp), tint = neutral)
-        Text(amount, style = textStyle, color = neutral,
+        Text(amount, modifier = Modifier.width(IntrinsicSize.Max), style = textStyle, color = neutral,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

@@ -60,7 +60,7 @@ internal fun SearchHistoryDialog(
     val scope = rememberCoroutineScope()
     val feedbackView = LocalView.current
     val requests = remember(scope) { MessageSearchRequestState(scope) }
-    val snapshot by requests.state.collectAsState()
+    val snapshot = requests.state.collectAsState().value
     val latestSearch by rememberUpdatedState(onSearchPage)
     val currentOwner by rememberUpdatedState(ownerCurrent)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -96,13 +96,17 @@ internal fun SearchHistoryDialog(
     }
     LaunchedEffect(request, query, resumed, renderedVisit) { search() }
     val phase = if (snapshot.request == request) snapshot.phase else SearchPhase.Idle
-    LaunchedEffect(resumed, restoring, snapshot.generation, snapshot.phase, snapshot.results.size, snapshot.appendPhase) {
-        if (resumed && restoring) {
-            val now = requests.state.value
-            if (now.request == request && now.phase == SearchPhase.Results && now.appendPhase == SearchAppendPhase.Idle) {
-                if (now.results.size < restoreCount && now.nextCursor != null) requests.loadMore()
-                else { restoring = false; restoreCount = 0 }
-            }
+    // The lazy content and its list position must use the same render version.
+    val renderResumed = resumed
+    val renderRestoring = restoring
+    val renderRestoreCount = restoreCount
+    val useResultsPosition = renderResumed && !renderRestoring && phase == SearchPhase.Results
+    LaunchedEffect(request, renderResumed, renderRestoring, renderRestoreCount, snapshot) {
+        if (renderResumed && renderRestoring && available() &&
+            snapshot.generation == requests.state.value.generation && snapshot.request == request &&
+            snapshot.phase == SearchPhase.Results && snapshot.appendPhase == SearchAppendPhase.Idle) {
+            if (snapshot.results.size < renderRestoreCount && snapshot.nextCursor != null) requests.loadMore()
+            else { restoring = false; restoreCount = 0 }
         }
     }
     fun cancelSearch() {
@@ -122,7 +126,7 @@ internal fun SearchHistoryDialog(
                 fieldModifier = Modifier.testTag("search:query"), minHeight = 44.dp, bottomSpacing = 8.dp)
             LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 360.dp)
                 .testTag("search-history-results"),
-                state = if (!resumed || restoring || phase != SearchPhase.Results) loadingListState else listState) {
+                state = if (useResultsPosition) listState else loadingListState) {
                 when {
                     request.query.isBlank() -> item("prompt") {
                         SearchNotice(stringResource(R.string.search_history_empty), "search:prompt")
@@ -135,18 +139,18 @@ internal fun SearchHistoryDialog(
                         SearchNotice(stringResource(R.string.search_cancelled))
                         TextButton(text = stringResource(R.string.search_retry), onClick = { search() })
                     }
-                    restoring && snapshot.appendPhase == SearchAppendPhase.ReadError -> item("restore-error") {
+                    renderRestoring && snapshot.appendPhase == SearchAppendPhase.ReadError -> item("restore-error") {
                         SearchReadError { if (available()) requests.loadMore() }
                     }
-                    restoring && snapshot.appendPhase == SearchAppendPhase.Cancelled -> item("restore-cancelled") {
+                    renderRestoring && snapshot.appendPhase == SearchAppendPhase.Cancelled -> item("restore-cancelled") {
                         SearchNotice(stringResource(R.string.search_cancelled))
                         TextButton(text = stringResource(R.string.search_retry), onClick = { search() })
                     }
-                    restoring && snapshot.appendPhase == SearchAppendPhase.Invalidated -> item("restore-invalidated") {
+                    renderRestoring && snapshot.appendPhase == SearchAppendPhase.Invalidated -> item("restore-invalidated") {
                         SearchNotice(stringResource(R.string.search_history_changed), "search:history_changed")
                         TextButton(text = stringResource(R.string.search_refresh), onClick = { search() })
                     }
-                    !resumed || restoring || phase == SearchPhase.Idle || phase == SearchPhase.Loading -> item("loading") {
+                    !renderResumed || renderRestoring || phase == SearchPhase.Idle || phase == SearchPhase.Loading -> item("loading") {
                         SearchLoading { cancelSearch() }
                     }
                     else -> {

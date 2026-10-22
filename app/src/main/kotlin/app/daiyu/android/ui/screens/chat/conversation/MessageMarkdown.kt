@@ -75,17 +75,19 @@ internal val LocalMarkdownParser = staticCompositionLocalOf<(String) -> List<Mar
 @Composable
 internal fun rememberMarkdownProjection(sources: List<String>): MarkdownProjection? {
     val parser = LocalMarkdownParser.current
-    val completed by produceState<MarkdownProjection?>(null, sources, parser) {
-        value = projectMarkdown(sources, parser)
+    val parserIdentity = MarkdownParserIdentity(parser)
+    val cached = remember(sources, parserIdentity) { markdownProjectionCache.get(sources, parser) }
+    val completed by produceState<MarkdownProjection?>(cached, sources, parserIdentity) {
+        value = cached ?: projectMarkdown(sources, parser)
     }
-    // produceState retains its old value until the replacement effect starts.
-    return completed?.takeIf { it.sources == sources && it.parser == parser }
+    // A return visit must reuse its AST before the replacement effect starts.
+    return completed?.takeIf { it.sources == sources && it.parser === parser } ?: cached
 }
 
 @Composable
 internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, modifier: Modifier = Modifier) {
     val parser = LocalMarkdownParser.current
-    var published by remember(parser) { mutableStateOf<MarkdownBodySnapshot?>(null) }
+    var published by remember(MarkdownParserIdentity(parser)) { mutableStateOf<MarkdownBodySnapshot?>(null) }
     // Keep the displayed source and AST together while an appended chunk parses off-thread.
     val body = markdownBodySnapshot(text, blocks, published)
     SideEffect { published = body }

@@ -15,6 +15,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
@@ -32,7 +35,9 @@ import app.daiyu.android.MarkdownBlock
 import app.daiyu.android.MarkdownParser
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.domain.MessageImageOwner
 import app.daiyu.android.domain.MessageImageReference
 import app.daiyu.android.domain.RunStatus
@@ -51,6 +56,125 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     private val reference = MessageImageReference(owner, "00000000-0000-0000-0000-000000000001",
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
+
+    fun testRemountUsesCachedProjectionInFirstCompositionWhileParserWorkerIsBlocked() {
+        val source = "First **answer**.\n\nSecond paragraph."
+        val busy = "Unrelated blocked parse for return visit"
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val sourceParses = AtomicInteger()
+        val returning = AtomicBoolean(false)
+        val firstCompositions = CopyOnWriteArrayList<MarkdownProjection?>()
+        var chat by mutableStateOf(true)
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            assertNotSame(android.os.Looper.getMainLooper().thread, Thread.currentThread())
+            if (text == source) sourceParses.incrementAndGet()
+            if (text == busy) { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
+        try {
+            show {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    if (chat) {
+                        val projection = rememberMarkdownProjection(listOf(source))
+                        SideEffect { if (returning.get()) firstCompositions += projection }
+                        Column(Modifier.width(320.dp).testTag("return-body")) {
+                            ProjectedMessageMarkdown(source, projection?.blocks?.get(source))
+                        }
+                    } else MessageMarkdown(busy, Modifier.testTag("other-page"))
+                }
+            }
+            val firstBounds = body("return-body", "First answer.").fetchSemanticsNode().boundsInRoot
+            val secondBounds = body("return-body", "Second paragraph.").fetchSemanticsNode().boundsInRoot
+            mainThread { chat = false }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            mainThread { returning.set(true); chat = true }
+            ui.waitForIdle()
+            assertTrue(firstCompositions.isNotEmpty())
+            assertTrue("Every return composition already has the exact AST", firstCompositions.all { it?.sources == listOf(source) })
+            assertEquals(firstBounds, body("return-body", "First answer.").fetchSemanticsNode().boundsInRoot)
+            assertEquals(secondBounds, body("return-body", "Second paragraph.").fetchSemanticsNode().boundsInRoot)
+            assertTrue(annotation(body("return-body", "First answer.")).spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+            assertEquals(1, sourceParses.get())
+            assertEquals(1L, release.count)
+            ui.onNodeWithText(source, useUnmergedTree = true).assertDoesNotExist()
+        } finally { release.countDown() }
+    }
+
+    fun testCachedChatReturnIsFormattedAndReadReadyWithoutWaitingForAnotherParse() {
+        val source = "Cached **answer**."
+        val busy = "Blocked parse while the real chat list is away"
+        val turn = ChatTurnUi.Assistant("cached-return", finalText = source, status = RunStatus.COMPLETED)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val confirmed = CopyOnWriteArrayList<Set<String>>()
+        val calls = AtomicInteger()
+        var chat by mutableStateOf(true)
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == source) calls.incrementAndGet()
+            if (text == busy) { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
+        try {
+            show {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    if (chat) ChatMessageList(listOf(turn), ChatScreenActions(onVisibleCompleted = { confirmed += it }))
+                    else MessageMarkdown(busy)
+                }
+            }
+            awaitNodes(hasText("Cached answer."))
+            ui.waitUntil(5_000) { confirmed.any { turn.listKey in it } }
+            mainThread { chat = false }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            confirmed.clear()
+            mainThread { chat = true }
+            ui.mainClock.advanceTimeBy(100)
+            awaitNodes(hasText("Cached answer."))
+            ui.waitUntil(5_000) { confirmed.any { turn.listKey in it } }
+            assertEquals(1, calls.get())
+            assertEquals(1L, release.count)
+            ui.onNodeWithText(source, useUnmergedTree = true).assertDoesNotExist()
+            assertTrue(opened.isEmpty())
+        } finally { release.countDown() }
+    }
+
+    fun testCachedAstUsesCurrentThemeAndFontAfterRemount() {
+        val source = "Theme **answer**."
+        val calls = AtomicInteger()
+        var chat by mutableStateOf(true)
+        var dark by mutableStateOf(false)
+        var font by mutableStateOf(.9f)
+        var expectedColor = Color.Unspecified
+        val parser: (String) -> List<MarkdownBlock> = { calls.incrementAndGet(); MarkdownParser.parse(it) }
+        show {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, font)) {
+                AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                    applyInterfaceScale = false) {
+                    val currentColor = conversationColors().text
+                    SideEffect { expectedColor = currentColor }
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        if (chat) Column(Modifier.testTag("return-theme")) { MessageMarkdown(source) }
+                    }
+                }
+            }
+        }
+        body("return-theme", "Theme answer.").assertIsDisplayed()
+        val oldColor = expectedColor
+        mainThread { chat = false }
+        ui.waitForIdle()
+        mainThread { dark = true; font = 1.3f; chat = true }
+        val node = body("return-theme", "Theme answer.")
+        val layouts = mutableListOf<TextLayoutResult>()
+        node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        val layout = layouts.single()
+        assertEquals(expectedColor, layout.layoutInput.style.color)
+        assertFalse(oldColor == expectedColor)
+        assertEquals(1.3f, layout.layoutInput.density.fontScale, .001f)
+        assertTrue(annotation(node).spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+        assertEquals(1, calls.get())
+        assertTrue(opened.isEmpty())
+    }
 
     fun testBlockedOldParseCannotReplaceCurrentPendingOrFormattedBody() {
         for (mixed in listOf(false, true)) {

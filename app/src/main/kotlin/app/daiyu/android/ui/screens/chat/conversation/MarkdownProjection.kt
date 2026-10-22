@@ -7,7 +7,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-internal data class MarkdownProjection(
+internal class MarkdownProjection(
     val sources: List<String>,
     val blocks: Map<String, List<MarkdownBlock>>,
     val parser: (String) -> List<MarkdownBlock>,
@@ -28,10 +28,18 @@ private val markdownDispatcher = Dispatchers.Default.limitedParallelism(1)
 internal suspend fun projectMarkdown(
     sources: List<String>,
     parser: (String) -> List<MarkdownBlock> = MarkdownParser::parse,
-): MarkdownProjection = withContext(markdownDispatcher) {
-    val blocks = sources.distinct().associateWith { source ->
-        currentCoroutineContext().ensureActive()
-        parser(source)
+    cache: MarkdownProjectionCache = markdownProjectionCache,
+): MarkdownProjection {
+    currentCoroutineContext().ensureActive()
+    cache.get(sources, parser)?.let { return it }
+    val projection = withContext(markdownDispatcher) {
+        val blocks = sources.distinct().associateWith { source ->
+            currentCoroutineContext().ensureActive()
+            parser(source)
+        }
+        MarkdownProjection(sources.toList(), blocks, parser)
     }
-    MarkdownProjection(sources, blocks, parser)
+    currentCoroutineContext().ensureActive()
+    cache.put(projection)
+    return projection
 }

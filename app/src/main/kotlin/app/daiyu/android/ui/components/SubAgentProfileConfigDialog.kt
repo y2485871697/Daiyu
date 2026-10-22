@@ -223,7 +223,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     else -> listOf(null to "跟随接口") + ImageResolutionTier.values.filter { !verifiedGrok || it in setOf("low", "high") }.map { it to ImageResolutionTier.label(it) }
                 }
                 SubAgentChoiceWindow(title = when (field) { "role" -> "职责"; "tier" -> "任务分工"; else -> "默认分辨率" }, onDismiss = { choices = null }) {
-                    Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
                         options.forEach { (value, label) ->
                             val select = { interact {
                                 session.edit { profile -> when (field) {

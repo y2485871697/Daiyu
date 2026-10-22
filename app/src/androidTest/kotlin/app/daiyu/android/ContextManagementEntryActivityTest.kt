@@ -41,6 +41,15 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         val getter = MainActivity::class.java.declaredMethods.single { it.name == "getContextManagementVisit" }
         assertNull(getter.apply { isAccessible = true }.invoke(activity))
     }
+    private fun assertChatRoute() {
+        mainThread {
+            val getter = MainActivity::class.java.declaredMethods.single { it.name == "getRetainedPage" }
+            assertEquals("chat", getter.apply { isAccessible = true }.invoke(activity))
+            assertNoVisit()
+        }
+        node("context-management").assertDoesNotExist()
+        ui.onNodeWithText("上下文页面已失效；请返回原会话重新打开").assertDoesNotExist()
+    }
     private fun stopped(block: () -> Unit) {
         val original = activity
         val stopped = java.util.concurrent.CountDownLatch(1)
@@ -224,8 +233,9 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPauseWithoutStopRevokesOldCompressionConfirmation() {
+    fun testPauseWithoutStopRevokesOldCompressionConfirmationAndClosesRoute() {
         seedAndSelect()
+        val before = fixture.database.exportBackup()
         val old = openAndAwait()
         mainThread {
             offerConfirmationMetadata(old)
@@ -239,6 +249,15 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
                 assertFalse(old.state.value.confirmingCompression)
             } finally { instrumentation.callActivityOnResume(activity) }
         }
+        assertChatRoute()
+        assertDraft("retained unsent draft")
+        val next = openAndAwait()
+        mainThread {
+            old.refresh(); old.confirmCompression()
+            assertSame(next, adapter())
+            assertNotNull(next.state.value.snapshot)
+        }
+        assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }
 
@@ -250,7 +269,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             old.refresh(); old.requestCompression(); old.confirmCompression()
         }
         assertNull(old.state.value.snapshot)
-        backToChat(activity)
+        assertChatRoute()
         mainThread { activity.select(conversation) }
         val next = openAndAwait()
         assertTrue(next.state.value.owner.generation > old.state.value.owner.generation)
@@ -262,6 +281,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         }
         assertNull(next.state.value.snapshot)
         node("context-management").assertDoesNotExist()
+        awaitUniqueTag("page:设置")
         assertEquals("retained unsent draft", fixture.database.conversations().single().draft)
         assertEquals(0, fixture.opens.get())
     }
@@ -317,7 +337,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             visit.refresh(); visit.confirmCompression()
             assertNull(visit.state.value.operation)
         }
-        node("context-management").assertDoesNotExist()
+        assertChatRoute()
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }
@@ -396,8 +416,8 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             assertFalse(old.state.value.confirmingCompression)
             assertNoVisit()
         }
-        node("context-management").assertDoesNotExist()
-        backToChat(activity) // The stopped visit stays invalid; it is not reopened on resume.
+        assertChatRoute() // Resume closes the revoked modal without a manual Back workaround.
+        assertDraft("retained unsent draft")
         mainThread { oldClick(); backgroundClick(); oldConfirm(); assertNoVisit() }
         val next = openAndAwait()
         assertNotSame(old, next)
@@ -407,6 +427,24 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             assertSame(next, adapter())
             assertNotNull(next.state.value.snapshot)
         }
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testSameConversationReentryClosesRevokedRouteWithoutChangingHistoryOrDraft() {
+        val conversation = seedAndSelect()
+        val before = fixture.database.exportBackup()
+        val old = openAndAwait()
+        mainThread {
+            activity.select(conversation)
+            old.refresh(); old.requestCompression(); old.confirmCompression()
+            assertNull(old.state.value.snapshot)
+            assertNull(old.state.value.operation)
+        }
+        assertChatRoute()
+        assertDraft("retained unsent draft")
+        val next = openAndAwait()
+        assertNotSame(old, next)
+        assertEquals(conversation.id, next.state.value.owner.conversationId)
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }

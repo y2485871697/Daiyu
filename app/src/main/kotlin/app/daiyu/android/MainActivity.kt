@@ -731,11 +731,13 @@ class MainActivity : ComponentActivity() {
     // Entry authority is separate from the shared editor generation and is never restored/saved.
     private var contextManagementEntryEpoch by mutableStateOf(0L)
     // Revoke BEFORE navigation/lifecycle changes, including when no route has been opened yet.
-    private fun revokeContextManagementEntry(): Boolean {
+    private fun revokeContextManagementEntry(closeRoute: Boolean = true): Boolean {
         contextManagementEntryEpoch++
         val visit = contextManagementVisit ?: return false
-        controller.invalidateContextManagement(visit.adapter)
         contextManagementVisit = null
+        controller.invalidateContextManagement(visit.adapter)
+        // A revoked visit cannot leave its modal route mounted. Navigation owns its destination.
+        if (closeRoute && retainedPage == "context-management") retainedPage = "chat"
         return true
     }
     private var legacyPage by mutableStateOf<LegacyLibraryHost.Page?>(null)
@@ -834,7 +836,7 @@ class MainActivity : ComponentActivity() {
             }
             if (value != "browser") closeBrowserVisualVisit()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
-            if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
+            if (value != retainedPageState && revokeContextManagementEntry(closeRoute = false)) editorGeneration++
             if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
             if (value != "chat") cancelBrowserDownloadVisit()
             if (value != "reconnect-settings") {

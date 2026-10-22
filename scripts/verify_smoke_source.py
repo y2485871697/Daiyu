@@ -51,6 +51,11 @@ def verify(env, record, source_run, jobs, changed):
         raise ValueError('应用或构建输入已变化，不能复用旧应用包')
 
 
+LEGACY_SMOKE_PRELAUNCH = '          pre-emulator-launch-script: |\n            "$ANDROID_HOME/emulator/emulator" -version > smoke/emulator-version.txt 2>&1 && cat smoke/emulator-version.txt\n            cp "$ANDROID_HOME/emulator/source.properties" smoke/emulator-package.txt\n            if test \'${{ matrix.api }}\' = 26; then grep -Fx \'Pkg.Revision=35.6.11\' smoke/emulator-package.txt && grep -Fx \'Pkg.BuildId=13610412\' smoke/emulator-package.txt; fi\n            bash scripts/install_bounded_adb.sh\n            python3 -c \'import os; from pathlib import Path; p=Path(os.environ["ANDROID_AVD_HOME"])/"test.avd/config.ini"; values={"hw.lcd.width":"1216","hw.lcd.height":"2432","hw.lcd.density":"160","skin.name":"1216x2432","skin.path":"1216x2432"}; lines=[line for line in p.read_text().splitlines() if line.split("=",1)[0].strip() not in values]; p.write_text("\\n".join(lines+[f"{key}={value}" for key,value in values.items()])+"\\n")\'\n            cp "$ANDROID_AVD_HOME/test.ini" smoke/avd.ini\n            cp "$ANDROID_AVD_HOME/test.avd/config.ini" smoke/avd-config.ini\n            cat smoke/avd.ini\n            grep -Fx \'target=android-${{ matrix.api }}\' smoke/avd.ini\n'
+SMOKE_PRELAUNCH = '          pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"\n'
+SMOKE_HOST_DEPENDENCIES = '      - name: 安装模拟器宿主依赖\n        run: |\n          sudo apt-get update\n          sudo apt-get install --no-install-recommends -y libpulse0\n'
+
+
 def candidate_workflow_inputs(workflow):
     # Only the reviewed API26 image, candidate-source wiring and 1-to-4 shard migration may differ.
     prefix, smoke = workflow.split('  smoke:\n', 1)
@@ -77,6 +82,12 @@ def candidate_workflow_inputs(workflow):
                           'include: ${{ fromJSON(' + parallel + ') }}')
     smoke = smoke.replace("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'candidate' && 1 || 4 }}",
                           "SMOKE_SHARD_COUNT: '4'")
+    # Normalize only the exact reviewed host-only preparation migration.
+    smoke = smoke.replace(LEGACY_SMOKE_PRELAUNCH, SMOKE_PRELAUNCH)
+    smoke = smoke.replace(SMOKE_HOST_DEPENDENCIES, '')
+    smoke = smoke.replace('          rm -f smoke/prelaunch-ready.txt\n', '')
+    smoke = smoke.replace('test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh',
+                          'bash scripts/smoke_boot.sh')
     return prefix + '  smoke:\n' + smoke
 
 
@@ -95,7 +106,7 @@ def verify_candidate(env, root, source_run, jobs, changed, source_workflow, curr
         raise ValueError('候选复用只允许非空定向补检')
     allowed_files = {'scripts/smoke_boot.sh', 'scripts/verify_smoke_source.py',
                      'scripts/adb_bounded.sh', 'scripts/install_bounded_adb.sh',
-                     'scripts/verify_boundaries.py', '.github/workflows/build.yml',
+                     'scripts/prepare_smoke_emulator.sh', 'scripts/verify_boundaries.py', '.github/workflows/build.yml',
                      'docs/重构清单.md', '更新说明.md'}
     allowed_dirs = ('scripts/acceptance/', 'tests/', 'docs/acceptance/')
     if any(not isinstance(path, str) or '\\' in path

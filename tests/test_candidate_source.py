@@ -73,7 +73,8 @@ class CandidateSourceTests(unittest.TestCase):
     def test_workflow_only_permits_reviewed_infrastructure_diff(self):
         for old, new in [(':app:assembleRelease', ':app:assembleDebug'),
                          ("-gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }}", '-gpu host'),
-                         ('"hw.lcd.density":"160"', '"hw.lcd.density":"525"'),
+                         ('pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh',
+                          'pre-emulator-launch-script: bash scripts/unreviewed.sh'),
                          ('timeout-minutes: 160', 'timeout-minutes: 170'),
                          ('"ram":4096', '"ram":8192'),
                          ('"shard":3', '"shard":4'),
@@ -92,6 +93,29 @@ class CandidateSourceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.verify()
             target.unlink()
+
+    def test_exact_prelaunch_infrastructure_migration_reuses_unchanged_candidate(self):
+        for snippet in (source.SMOKE_PRELAUNCH, source.SMOKE_HOST_DEPENDENCIES,
+                        '          rm -f smoke/prelaunch-ready.txt\n',
+                        'test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh'):
+            with self.subTest(snippet=snippet):
+                self.assertEqual(self.current.count(snippet), 1)
+        previous = self.current.replace(source.SMOKE_PRELAUNCH, source.LEGACY_SMOKE_PRELAUNCH)
+        previous = previous.replace(source.SMOKE_HOST_DEPENDENCIES, '')
+        previous = previous.replace('          rm -f smoke/prelaunch-ready.txt\n', '')
+        previous = previous.replace('test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh',
+                                    'bash scripts/smoke_boot.sh')
+        self.verify(source_workflow=previous,
+                    changed=['scripts/prepare_smoke_emulator.sh', '.github/workflows/build.yml'])
+        for old, new in [('libpulse0', 'arbitrary-package'),
+                         ('test -s smoke/prelaunch-ready.txt', 'true'),
+                         ('rm -f smoke/prelaunch-ready.txt', 'rm -f smoke/unreviewed-marker.txt'),
+                         ('prepare_smoke_emulator.sh', 'unknown.sh')]:
+            with self.subTest(old=old), self.assertRaises(ValueError):
+                self.verify(source_workflow=previous, current_workflow=self.current.replace(old, new))
+        with self.assertRaises(ValueError):
+            self.verify(source_workflow=previous.replace('"hw.lcd.density":"160"',
+                                                        '"hw.lcd.density":"525"'))
 
     def archive(self):
         output = io.BytesIO()

@@ -22,6 +22,7 @@ class DialogMotionContractTest(unittest.TestCase):
         for name in ("Theme.Daiyu.CenterDialog", "Theme.Daiyu.Dialog"):
             self.assertEqual(items(name)["android:windowAnimationStyle"], "@style/Animation.Daiyu.CenterDialog")
         self.assertEqual(styles["Theme.Daiyu.Dialog"].attrib["parent"], "android:style/ThemeOverlay.Material.Dialog.Alert")
+        self.assertEqual(styles["Animation.Daiyu.CenterDialog"].get("parent"), "android:style/Animation.Dialog")
         self.assertEqual(items("Animation.Daiyu.CenterDialog"), {
             "android:windowEnterAnimation": "@android:anim/fade_in",
             "android:windowExitAnimation": "@android:anim/fade_out"})

@@ -12,7 +12,7 @@
         <item name="android:colorControlHighlight">@android:color/transparent</item>
         <item name="android:windowAnimationStyle">@style/Animation.Daiyu.CenterDialog</item>
     </style>
-    <style name="Animation.Daiyu.CenterDialog" parent="android:style/Animation.Material.Dialog">
+    <style name="Animation.Daiyu.CenterDialog" parent="android:style/Animation.Dialog">
         <item name="android:windowEnterAnimation">@android:anim/fade_in</item>
         <item name="android:windowExitAnimation">@android:anim/fade_out</item>
     </style>

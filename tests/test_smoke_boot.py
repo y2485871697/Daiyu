@@ -103,7 +103,7 @@ class SourceTests(unittest.TestCase):
                      '          name: 代鱼工具证据-smoke-API${{ matrix.api }}-分片${{ matrix.shard }}'):
             self.assertIn(name + suffix, workflow)
         smoke = workflow.split('  smoke:\n', 1)[1]
-        self.assertIn("SMOKE_SHARD_COUNT: ${{ (inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && 1 || 4 }}", smoke)
+        self.assertIn("SMOKE_SHARD_COUNT: '4'", smoke)
         matrix = re.search(r"\|\| '(\[[^']*\])'\) }}", smoke).group(1)
         self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
                          {(api, index) for api in ('26', '37.2') for index in range(4)})
@@ -111,7 +111,7 @@ class SourceTests(unittest.TestCase):
     def test_api26_uses_aosp_without_changing_gpu_or_formal_matrix(self):
         smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
         matrices = [json.loads(value) for value in re.findall(r"'(\[[^']*\])'", smoke)]
-        self.assertEqual(len(matrices), 6)
+        self.assertEqual(len(matrices), 3)
         for matrix in matrices:
             for item in matrix:
                 self.assertEqual(item['target'], 'default' if item['api'] == '26' else 'google_apis_ps16k')
@@ -488,6 +488,41 @@ exit 0
         self.assertEqual(observed, set(all_names))
         self.assertEqual(manifest["total_tests"], 9)
 
+    def test_duration_plan_is_identical_on_both_apis_and_preserves_inventory(self):
+        import hashlib
+        sources = {f"Extra{i}.kt": f"package app.daiyu.android\nclass Extra{i}Test : android.test.InstrumentationTestCase() {{\n fun testOne() {{}}\n}}\n" for i in range(8)}
+        rows = {f'app.daiyu.android.Extra{i}Test': dict(tests=1,
+                milliseconds=900 if i == 4 else 100,
+                source_path=f'app/src/androidTest/Extra{i}.kt',
+                source_sha256=hashlib.sha256(sources[f'Extra{i}.kt'].encode()).hexdigest())
+                for i in range(8)}
+        data = self.root / 'scripts/acceptance/instrumentation-durations.json'
+        data.parent.mkdir(parents=True, exist_ok=True)
+        data.write_text(json.dumps(dict(schema_version=1, classes=rows)))
+        # FirstTest is unmeasured and receives the measured median (100ms).
+        expected = [[4], [0, 3, 7], [1, 5], [2, 6]]
+        groups = [[f'app.daiyu.android.Extra{i}Test' for i in group] for group in expected]
+        groups[2].append('app.daiyu.android.FirstTest')
+        reference = None
+        for api, index in [(26, i) for i in range(4)] + [(37, i) for i in range(4)]:
+            result = self.smoke(api=api, mode='candidate', extra_sources=sources,
+                                test_classes=','.join(sorted(rows) + ['app.daiyu.android.FirstTest']),
+                                expected_classes=','.join(groups[index]),
+                                reported_count=len(groups[index]), shard_count=4, shard_index=index)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            inventory = json.loads((self.root / 'smoke/instrumentation-shards.json').read_text())
+            self.assertEqual([shard['classes'] for shard in inventory['shards']], groups)
+            self.assertEqual(inventory['total_tests'], 9)
+            receipt = json.loads((self.root / 'smoke/shard-plan.json').read_text())
+            self.assertEqual(receipt['strategy'], 'duration_lpt')
+            self.assertEqual(receipt['estimated_shard_ms'], [900, 300, 300, 200])
+            self.assertEqual(receipt['duration_data_sha256'], hashlib.sha256(data.read_bytes()).hexdigest())
+            self.assertTrue(receipt['estimates_only'])
+            self.assertFalse(receipt['formal_acceptance'])
+            if reference is not None:
+                self.assertEqual(receipt, reference)
+            reference = receipt
+
     def test_candidate_runs_new_selected_class_on_both_apis(self):
         selected = 'app.daiyu.android.other.SecondTest'
         for api in (26, 37):
@@ -516,8 +551,8 @@ exit 0
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((self.root / 'smoke/adb-calls.txt').exists())
 
-    def test_candidate_rejects_multiple_shards_before_adb(self):
-        for count, index in ((4, 0), (4, 1), (1, 1)):
+    def test_candidate_rejects_invalid_shards_before_adb(self):
+        for count, index in ((2, 0), (3, 1), (1, 1), (4, 4)):
             result = self.smoke(mode='candidate', test_classes='app.daiyu.android.FirstTest',
                                 shard_count=count, shard_index=index)
             self.assertNotEqual(result.returncode, 0)
@@ -595,12 +630,13 @@ exit 0
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((self.root / 'smoke/adb-calls.txt').exists())
 
-    def test_filter_intersects_original_shards_and_empty_shards_still_launch(self):
+    def test_filter_balances_requested_classes_preserves_inventory_and_empty_shards_still_launch(self):
         sources = {f"Extra{i}.kt": f"package app.daiyu.android\nclass Extra{i}Test : android.test.InstrumentationTestCase() {{\n fun testOne() {{}}\n}}\n" for i in range(8)}
         all_names = sorted(['app.daiyu.android.FirstTest'] + [f'app.daiyu.android.Extra{i}Test' for i in range(8)])
         groups = [all_names[i::4] for i in range(4)]
-        # Extra0 belongs to shard0, First to shard0; other shards must not run either.
         requested = [all_names[0], all_names[-1]]
+        remaining = [name for name in all_names if name not in requested]
+        groups = [sorted(([requested[i]] if i < len(requested) else []) + remaining[i::4]) for i in range(4)]
         for api in (26, 37):
             observed = set()
             for index in range(4):

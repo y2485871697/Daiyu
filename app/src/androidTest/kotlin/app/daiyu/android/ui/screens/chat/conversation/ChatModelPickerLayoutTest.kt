@@ -113,10 +113,9 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
     fun testLongCatalogRemainsLazyAndRunningStateDisablesSelection() {
         val many = (0..999).map { ModelCatalogEntryUi("model-$it", "长模型名称 $it") }
         show(ChatModelPickerState("model-999", many, enabled = false), font = 1.3f)
-        node("chat-model-list").performScrollToIndex(many.size)
-        ui.mainClock.advanceTimeByFrame()
-        ui.waitForIdle()
-        node("chat-model-option:model-999").assertIsDisplayed().assertIsSelected().assertIsNotEnabled()
+        awaitVisualIdle()
+        listItem("model:current:model-999", "chat-model-option:model-999")
+            .assertIsSelected().assertIsNotEnabled().performClick()
         node("chat-model-option:model-0").assertDoesNotExist()
         assertTrue(selected.isEmpty())
     }
@@ -230,7 +229,11 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
             assertEquals(header.center.y, expand.center.y, 1f)
             assertTrue("provider touch target must be at least 56dp", header.height / contentDensity >= 55.5f)
             assertTrue("search touch target must be at least 48dp", bounds("chat-model-search").height / contentDensity >= 47.5f)
+            listItem("model:a:same", "chat-model-option:same").scrollToVisible()
             val model = bounds("chat-model-option:same")
+            val viewport = bounds("chat-model-list")
+            assertTrue("model top must be inside list", model.top >= viewport.top - 1f)
+            assertTrue("model bottom must be inside list", model.bottom <= viewport.bottom + 1f)
             assertTrue("model touch target must be at least 56dp", model.height / contentDensity >= 55.5f)
             for (tag in listOf("chat-model-brand:a:same", "chat-model-indicator:a:same")) {
                 val icon = bounds(tag)
@@ -238,6 +241,8 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
                 assertEquals("$tag height", 22f, icon.height / contentDensity, .5f)
             }
             assertTrue(bounds("chat-model-name:a:same").bottom <= bounds("chat-model-id:a:same").top + 1f)
+            node("chat-model-option:same").assertIsSelected()
+            assertAmount("a", "17.177208")
             val layouts = mutableListOf<TextLayoutResult>()
             ui.onNode(hasText(formatBalanceDisplay("17.177208")) and
                 hasAnyAncestor(hasTestTag("chat-model-provider-balance:a")), useUnmergedTree = true)
@@ -251,7 +256,6 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
                 "paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height} " +
                 "lines=${layout.lineCount} font=${input.style.fontSize} lineHeight=${input.style.lineHeight} " +
                 "density=${input.density.density} fontScale=${input.density.fontScale}", layout.hasVisualOverflow)
-            node("chat-model-option:same").assertIsSelected()
             node("chat-model-provider:a").performClick()
             assertAmount("a", "17.177208")
             node("chat-model-option:same").assertDoesNotExist()

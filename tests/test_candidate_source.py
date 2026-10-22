@@ -75,6 +75,8 @@ class CandidateSourceTests(unittest.TestCase):
                          ('-gpu swiftshader', '-gpu host'),
                          ('"hw.lcd.density":"160"', '"hw.lcd.density":"525"'),
                          ('timeout-minutes: 160', 'timeout-minutes: 170'),
+                         ('"ram":4096', '"ram":8192'),
+                         ('"shard":3', '"shard":4'),
                          ('needs.release.result == \'success\'', 'true')]:
             self.assertIn(old, self.current)
             with self.subTest(old=old), self.assertRaises(ValueError):
@@ -201,6 +203,28 @@ class CandidateSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '不唯一'):
             self.main_fixture(artifacts=lambda item: dict(total_count=2, artifacts=[item, dict(item, id=457)]))
 
+    def test_legacy_single_shard_workflow_migrates_only_exact_reviewed_matrix(self):
+        def matrix(api, shards):
+            return json.dumps([dict(api=api, target='default' if api == '26' else 'google_apis_ps16k',
+                                    ram=4096 if api == '26' else 6144, shard=i) for i in shards],
+                              separators=(',', ':'))
+        a, b = matrix('26', [0]), matrix('37.2', [0])
+        c, d = matrix('26', range(4)), matrix('37.2', range(4))
+        legacy = (f"inputs.mode == 'candidate' && inputs.smoke_api == '26' && '{a}' || "
+                  f"inputs.mode == 'candidate' && inputs.smoke_api == '37.2' && '{b}' || "
+                  f"inputs.mode == 'candidate' && '{a[:-1]},{b[1:]}' || "
+                  f"inputs.mode == 'smoke' && inputs.smoke_api == '26' && '{c}' || "
+                  f"inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '{d}' || '{c[:-1]},{d[1:]}'")
+        current_matrix = re.search(r"include: \$\{\{ fromJSON\((.*?)\) \}\}", self.current).group(0)
+        previous = self.current.replace(current_matrix, 'include: ${{ fromJSON(' + legacy + ') }}')
+        previous = previous.replace("SMOKE_SHARD_COUNT: '4'",
+                                    "SMOKE_SHARD_COUNT: ${{ inputs.mode == 'candidate' && 1 || 4 }}")
+        self.verify(source_workflow=previous)
+        for old, new in [('"ram":4096', '"ram":8192'), ('"shard":0', '"shard":9'),
+                         ('timeout-minutes: 160', 'timeout-minutes: 170')]:
+            with self.subTest(old=old), self.assertRaises(ValueError):
+                self.verify(source_workflow=previous.replace(old, new))
+
     def test_actual_matrix_selection_for_all_modes_and_requested_apis(self):
         smoke = self.current.split('  smoke:\n', 1)[1]
         expression = re.search(r'include: \$\{\{ fromJSON\((.*?)\) \}\}', smoke).group(1)
@@ -212,20 +236,19 @@ class CandidateSourceTests(unittest.TestCase):
                         value = value.replace('inputs.' + key, repr(item))
                     matrix = json.loads(eval(value.replace('&&', ' and ').replace('||', ' or '),
                                              {'__builtins__': {}}, {}))
-                    single = mode == 'candidate' or (mode == 'smoke' and variant == 'candidate')
                     apis = [api] if api != 'all' and mode in ['candidate', 'smoke'] else ['26', '37.2']
-                    shards = [0] if single else range(4)
+                    shards = range(4)
                     self.assertEqual({(item['api'], item['shard']) for item in matrix},
                                      {(a, shard) for a in apis for shard in shards}, (mode, variant, api))
                     for item in matrix:
                         self.assertEqual(item['target'], 'default' if item['api'] == '26' else 'google_apis_ps16k')
                         self.assertEqual(item['ram'], 4096 if item['api'] == '26' else 6144)
 
-    def test_workflow_wires_candidate_download_and_single_shard_without_rebuild(self):
+    def test_workflow_wires_candidate_download_and_four_shards_without_rebuild(self):
         smoke = self.current.split('  smoke:\n', 1)[1]
         condition = "(inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate'))"
         self.assertIn(condition + " && '代鱼定向候选包-filtered'", smoke)
-        self.assertIn('SMOKE_SHARD_COUNT: ${{ ' + condition + ' && 1 || 4 }}', smoke)
+        self.assertIn("SMOKE_SHARD_COUNT: '4'", smoke)
         self.assertNotIn('gradlew', smoke)
         self.assertIn('target: ${{ matrix.target }}', smoke)
         self.assertIn('options: [debug, release, candidate]', self.current)

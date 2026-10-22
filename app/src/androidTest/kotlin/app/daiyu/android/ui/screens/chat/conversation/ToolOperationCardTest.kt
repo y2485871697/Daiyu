@@ -142,7 +142,13 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 layoutsByTitle[tag.substringAfter(':')] = layouts.single()
             }
             for (title in listOf("命令", "标准输出")) {
-                val pixels = captureScreenNode(ui.onNodeWithTag("tool-document-frame:$title", useUnmergedTree = true)).toPixelMap()
+                val frame = ui.onNodeWithTag("tool-document-frame:$title", useUnmergedTree = true).scrollToVisible()
+                awaitVisualIdle()
+                val geometry = frame.fetchSemanticsNode()
+                val size = geometry.layoutInfo.coordinates.size
+                assertEquals("$title frame must not be vertically clipped", size.height.toFloat(), geometry.boundsInRoot.height, 1f)
+                assertEquals("$title frame must not be horizontally clipped", size.width.toFloat(), geometry.boundsInRoot.width, 1f)
+                val pixels = captureScreenNode(frame).toPixelMap()
                 val sampleY = (4f * layoutsByTitle.getValue(title).layoutInput.density.density).roundToInt()
                 assertTrue("sample must stay between the border and text padding", sampleY in 1 until pixels.height)
                 val actual = pixels[pixels.width / 2, sampleY]

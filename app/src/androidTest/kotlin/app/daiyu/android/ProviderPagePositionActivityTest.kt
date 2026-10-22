@@ -97,8 +97,10 @@ class ProviderPagePositionActivityTest : WiredActivityTestCase() {
         reveal(tag, lazyKey = tag)
         val before = position(tag)
         assertTrue("the model list was scrolled well past its header", before.scroll > 10f)
-        backgroundAndResume()
-        assertPositionWithoutScrolling(tag, before)
+        repeat(2) {
+            backgroundAndResume()
+            assertPositionWithoutScrolling(tag, before)
+        }
         // Inspect the restored tab/filter only after proving the position without scrolling.
         reveal("settings-radio:模型").assertIsSelected()
         node("local-model-search").assertEditableText("scroll-restore")

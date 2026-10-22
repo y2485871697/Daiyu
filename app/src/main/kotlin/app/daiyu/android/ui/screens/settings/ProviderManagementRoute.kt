@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -259,6 +260,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     val p = permit
     val enabled = version.let { current(p) && controller.ready && controller.active == null &&
         !controller.dataBusy && !controller.hasLiveChildTasks() && busy == null && !loading && !checkingRegistry }
+    val modelScrollOwner = detail?.pageUi ?: pausedDraft?.pageUi
+    val modelScrollBehavior = key(modelScrollOwner) { MiuixScrollBehavior() }
     val d = detail
     val newProvider = creating
     if (newProvider != null) key(newProvider) {
@@ -483,7 +486,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             headersUnavailable = d.editing.headersUnavailable,
             testConnection = connection, localModelActions = actions, testBalance = balanceTest,
-            onDelete = delete, pageUi = d.pageUi)
+            onDelete = delete, pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior)
     } else if (loading) {
         SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
     } else if (authentication) {

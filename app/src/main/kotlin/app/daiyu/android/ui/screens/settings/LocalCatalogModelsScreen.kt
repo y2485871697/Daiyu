@@ -8,6 +8,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.FlowRow
@@ -64,6 +66,7 @@ internal fun <T> LocalCatalogModelsScreen(
     onFetchModels: (() -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
     queryState: MutableState<String> = remember { mutableStateOf("") },
+    scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -76,6 +79,7 @@ internal fun <T> LocalCatalogModelsScreen(
     var editing by remember { mutableStateOf<CatalogModelSelection<T>?>(null) }
     var query by queryState
     val loadingListState = rememberLazyListState()
+    val loadingScrollBehavior = MiuixScrollBehavior()
     var adding by remember { mutableStateOf<Any?>(null) }
     var deleting by remember { mutableStateOf<CatalogModelSelection<T>?>(null) }
     fun current() = visit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
@@ -185,7 +189,8 @@ internal fun <T> LocalCatalogModelsScreen(
     }
     SettingsScaffoldPage(pageTitle, onBack = back,
         // The short loading list must not clamp the retained model position to its first rows.
-        listState = if (snapshot == null) loadingListState else listState) {
+        listState = if (snapshot == null) loadingListState else listState,
+        scrollBehavior = if (snapshot == null) loadingScrollBehavior else scrollBehavior) {
         headerContent()
         item("catalog-state") {
             val add = if (actions.add != null && enabled && request == null && loaded && snapshot != null)

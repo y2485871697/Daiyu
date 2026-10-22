@@ -492,7 +492,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && inputs.smoke_api == '26' && '[{"api":"26","target":"default","ram":4096,"shard":0}]' || (inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]' || (inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && '[{"api":"26","target":"default","ram":4096,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]' || inputs.mode == 'smoke' && inputs.smoke_api == '26' && '[{"api":"26","target":"default","ram":4096,"shard":0},{"api":"26","target":"default","ram":4096,"shard":1},{"api":"26","target":"default","ram":4096,"shard":2},{"api":"26","target":"default","ram":4096,"shard":3}]' || inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"default","ram":4096,"shard":0},{"api":"26","target":"default","ram":4096,"shard":1},{"api":"26","target":"default","ram":4096,"shard":2},{"api":"26","target":"default","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
+        include: ${{ fromJSON((inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '26' && '[{"api":"26","target":"default","ram":4096,"shard":0},{"api":"26","target":"default","ram":4096,"shard":1},{"api":"26","target":"default","ram":4096,"shard":2},{"api":"26","target":"default","ram":4096,"shard":3}]' || (inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"default","ram":4096,"shard":0},{"api":"26","target":"default","ram":4096,"shard":1},{"api":"26","target":"default","ram":4096,"shard":2},{"api":"26","target":"default","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
     steps:
       - name: 限定定向过滤仅用于smoke或candidate
         shell: bash
@@ -566,7 +566,7 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
-          SMOKE_SHARD_COUNT: ${{ (inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && 1 || 4 }}
+          SMOKE_SHARD_COUNT: '4'
           SMOKE_SHARD_INDEX: ${{ matrix.shard }}
         with:
           api-level: ${{ matrix.api }}

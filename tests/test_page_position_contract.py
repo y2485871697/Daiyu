@@ -27,6 +27,20 @@ class PagePositionContract(unittest.TestCase):
         self.assertIn('listing = result; shownTree = uri; lastTree = uri', page)
         self.assertNotIn('lastTree = uri; request', page)
 
+    def test_provider_model_topbar_stays_with_retained_page_and_loading_is_isolated(self):
+        route = source('ui/screens/settings/ProviderManagementRoute.kt')
+        self.assertIn('val modelScrollOwner = detail?.pageUi ?: pausedDraft?.pageUi', route)
+        self.assertIn('key(modelScrollOwner) { MiuixScrollBehavior() }', route)
+        self.assertLess(route.index('key(modelScrollOwner)'), route.index('key(d)'))
+        self.assertIn('pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior', route)
+        catalog = source('ui/screens/settings/ProviderCatalogSettingsScreen.kt')
+        self.assertEqual(catalog.count('scrollBehavior = modelScrollBehavior'), 2)
+        page = source('ui/screens/settings/LocalCatalogModelsScreen.kt')
+        self.assertIn('scrollBehavior = if (snapshot == null) loadingScrollBehavior else scrollBehavior', page)
+        scaffold = source('ui/screens/settings/SettingsScaffold.kt')
+        self.assertIn('scrollBehavior: ScrollBehavior = MiuixScrollBehavior()', scaffold)
+        self.assertIn('containerColor = settingsPageBackground(), scrollBehavior = scrollBehavior', scaffold)
+
     def test_gateway_keeps_view_but_renews_save_admission(self):
         host = source('MainActivity.kt')
         stop = host.split('override fun onStop() {', 1)[1].split('override fun onDestroy()', 1)[0]

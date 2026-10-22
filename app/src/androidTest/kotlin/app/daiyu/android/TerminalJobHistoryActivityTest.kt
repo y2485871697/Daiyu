@@ -69,6 +69,8 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         node("terminal-task-output").assertDoesNotExist()
         node("terminal-task-read:0").performClick()
         node("terminal-task-output").assertTextContains("tail-last", substring = true)
+        ui.onNodeWithText("状态未知").assertExists()
+        node("terminal-task-stop:0").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 

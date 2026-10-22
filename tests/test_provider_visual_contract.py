@@ -74,8 +74,8 @@ class ProviderVisualContractTest(unittest.TestCase):
     def test_android_regressions_keep_pixel_touch_and_business_assertions(self):
         actions = (ANDROID / 'ProviderSettingsLayoutActivityTest.kt').read_text()
         for fragment in ('listOf(false, true)', 'listOf(.9f, 1.3f)', 'key(dark, fontScale)',
-                         'assertHeightIsEqualTo(48.dp)', 'captureToImage().toPixelMap()',
-                         '40f * density, paintedRows.size.toFloat(), 2f', 'click(Offset(center.x, 2f * density))',
+                         'assertTouchHeightIsEqualTo(48.dp)', 'val bitmap = host.captureToImage()', 'bitmap.toPixelMap(startX = left, startY = top, width = width, height = height)',
+                         '40f * density, paintedRows.size.toFloat(), 2f', 'click(topPoint - hostBounds.topLeft)', 'click(bottomPoint - hostBounds.topLeft)',
                          'assertIsNotEnabled()', 'button.performTouchInput { click() }',
                          'paintedRows.last() - paintedRows.first() + 1', 'outside.green',
                          'testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToChat',

@@ -43,8 +43,9 @@ class SubAgentResumeGeometryActivityTest : WiredActivityTestCase() {
         finally { preferencesName?.let { instrumentation.targetContext.deleteSharedPreferences(it) } }
     }
 
-    private fun reload(loaded: List<SubAgentProvider>) = runBlocking {
-        withContext(Dispatchers.Main) { source.refreshAll { loaded } }
+    private fun reload(loaded: List<SubAgentProvider>) {
+        runBlocking { withContext(Dispatchers.Main) { source.refreshAll { loaded } } }
+        awaitVisualIdle()
     }
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
@@ -141,7 +142,21 @@ class SubAgentResumeGeometryActivityTest : WiredActivityTestCase() {
                 ui.onNodeWithText("模型不可用").assertDoesNotExist()
             }
             reload(listOf(provider))
+            mainThread {
+                assertFalse("refresh completed", source.refreshing.value)
+                assertEquals(listOf(provider), source.providers.value)
+                assertEquals(listOf(provider), source.displayProviders.value)
+                assertTrue("editor remains editable", editor.enabled)
+            }
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodesWithContentDescription("Worker GPT 速度", substring = true)
+                    .fetchSemanticsNodes().singleOrNull()?.let {
+                        !it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+                    } == true
+            }
             speed.assertIsEnabled()
+            ui.onNodeWithContentDescription("Worker模型").assertIsEnabled()
             assertEquals(before.height, node("subagent-resume-row").fetchSemanticsNode().boundsInRoot.height, 2f)
             assertEquals(saved, repository.snapshot(owner))
             reload(emptyList())

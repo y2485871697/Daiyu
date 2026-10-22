@@ -126,8 +126,21 @@ class ChatUsageDialogTest : WiredActivityTestCase() {
                 }, onDismiss = { dismissed.incrementAndGet() })
                 awaitControl("held usage reader entered") { entered.count == 0L }
                 assertNoIntermediateDialog()
+                awaitVisualIdle()
+                ui.waitUntil(5_000) {
+                    var ready = false
+                    instrumentation.runOnMainSync {
+                        ready = activity.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.RESUMED &&
+                            activity.window.decorView.isAttachedToWindow && activity.window.decorView.hasWindowFocus() &&
+                            activity.onBackPressedDispatcher.hasEnabledCallbacks()
+                    }
+                    ready
+                }
                 instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-                awaitControl("pending usage dismissed") { dismissed.get() == 1 }
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    dismissed.get() == 1
+                }
                 assertNoIntermediateDialog()
                 show(second, AppearanceThemeMode.LIGHT)
                 ui.onNodeWithText("61").assertIsDisplayed()
@@ -139,6 +152,7 @@ class ChatUsageDialogTest : WiredActivityTestCase() {
                 ui.onNodeWithText("17").assertDoesNotExist()
                 ui.onNodeWithText("用量读取失败").assertDoesNotExist()
                 assertEquals(1, dismissed.get())
+                awaitNodeWindowFocus(node("chat-usage-dialog"))
                 instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
                 ui.waitUntil(5_000) {
                     ui.mainClock.advanceTimeByFrame()

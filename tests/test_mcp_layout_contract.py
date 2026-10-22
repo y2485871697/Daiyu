@@ -73,7 +73,7 @@ class McpLayoutContractTest(unittest.TestCase):
                       'assertTrue(store.snapshot().servers.isEmpty())', 'activity.onBackPressedDispatcher.onBackPressed()',
                       'assertTrue(McpSettingsStore(context) { key }.snapshot().servers.isEmpty())',
                       'node("mcp-server-endpoint").performTextReplacement("https://fixture.invalid/mcp")',
-                      'store.save(emptyList(), owner, beforeRevocation)', 'assertEquals(beforeRevocation, store.snapshot())',
+                      'store.save(emptyList(), owner, beforeRevocation)', 'assertEquals(beforeRevocation.revision, afterRevocation.revision)', 'assertSame(beforeRevocation.stamp, afterRevocation.stamp)', 'before.catalog.zip(after.catalog)',
                       'for (y in listOf(.15f, .85f))',
                       '"Bearer Token（留空保留）"', 'assertEquals("synthetic-fixture-token", store.snapshot().servers.single().bearer)',
                       'assertEquals(0, fixture.opens.get())'):

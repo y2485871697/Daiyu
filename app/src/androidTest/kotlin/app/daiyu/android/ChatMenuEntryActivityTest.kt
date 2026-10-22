@@ -115,6 +115,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         node("chat-context").performTouchInput { longClick() }
         node("chat-usage-dialog").assertDoesNotExist()
         menu(ChatMenuAction.CONTEXT_STATS)
+        awaitUniqueTag("chat-usage-dialog")
         node("chat-usage-dialog").assertExists()
         awaitUniqueTag("chat-usage-empty")
         ui.onNodeWithText("暂无用量").assertIsDisplayed()

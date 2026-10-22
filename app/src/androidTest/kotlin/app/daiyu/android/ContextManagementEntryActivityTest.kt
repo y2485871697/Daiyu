@@ -241,14 +241,14 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             offerConfirmationMetadata(old)
             old.requestCompression()
             assertTrue(old.state.value.confirmingCompression)
-            instrumentation.callActivityOnPause(activity)
-            try {
-                assertNoVisit()
-                old.confirmCompression()
-                assertNull(old.state.value.snapshot)
-                assertFalse(old.state.value.confirmingCompression)
-            } finally { instrumentation.callActivityOnResume(activity) }
         }
+        realPauseResume(activity, atPause = {
+            assertNoVisit()
+            old.confirmCompression()
+            assertNull(old.state.value.snapshot)
+            assertFalse(old.state.value.confirmingCompression)
+        })
+        awaitUniqueTag("chat-draft")
         assertChatRoute()
         assertDraft("retained unsent draft")
         val next = openAndAwait()

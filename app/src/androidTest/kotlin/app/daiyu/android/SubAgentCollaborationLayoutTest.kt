@@ -194,8 +194,6 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             val confirm = ui.onNode(hasText("确认") and hasClickAction())
             cancel.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             confirm.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
-            val cancelBounds = cancel.fetchSemanticsNode().boundsInRoot
-            val confirmBounds = confirm.fetchSemanticsNode().boundsInRoot
             val actions = node("subagent-config-actions")
             awaitNodeWindowFocus(actions)
             val view = (actions.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
@@ -213,10 +211,17 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             }
             dismissIme(view.rootView)
             awaitImeFrame(actions, visible = false)
+            awaitDialogEnter(actions)
             val windowBefore = windowFrame()
-            val actionsBefore = actions.fetchSemanticsNode().boundsInRoot
-            assertEquals(cancelBounds.height, confirmBounds.height, 1f)
-            assertEquals(cancelBounds.top, confirmBounds.top, 1f)
+            val cancelNode = cancel.fetchSemanticsNode()
+            val confirmNode = confirm.fetchSemanticsNode()
+            val actionsNode = actions.fetchSemanticsNode()
+            val (cancelBounds, confirmBounds, actionsBefore) = ui.runOnIdle {
+                Triple(cancelNode.boundsInRoot, confirmNode.boundsInRoot, actionsNode.boundsInRoot)
+            }
+            val baseline = "dark=$dark fontScale=$fontScale window=$windowBefore cancel=$cancelBounds confirm=$confirmBounds actions=$actionsBefore"
+            assertEquals(baseline, cancelBounds.height, confirmBounds.height, 1f)
+            assertEquals(baseline, cancelBounds.top, confirmBounds.top, 1f)
             val speed = ui.onNodeWithContentDescription("草稿GPT速度")
             for (mode in listOf(GptSpeedMode.FAST, GptSpeedMode.ULTRA_FAST, GptSpeedMode.NORMAL)) {
                 speed.scrollToVisible().assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()

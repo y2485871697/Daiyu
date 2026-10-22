@@ -560,11 +560,11 @@ class MainActivity : ComponentActivity() {
                 dialog.show()
             }
     }
-    private fun fenceVideoRoute() {
+    private fun fenceVideoRoute(detachHost: Boolean = true) {
         videoPickEntry = null
         controller.invalidateVideo(videoUi) // Gate and real session first; dismiss is not revocation.
         videoDialog?.dismiss(); videoDialog = null
-        if (controller.ownsVideoUi(videoUi)) videoHost.detach()
+        if (detachHost && controller.ownsVideoUi(videoUi)) videoHost.detach()
     }
     private fun videoComposerAvailable() = terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
         shizukuEditor == null && mcpApproval == null && !mcpPreparing && browserApproval == null && generationApproval == null &&
@@ -5076,7 +5076,8 @@ class MainActivity : ComponentActivity() {
         historySearchEpoch++
         if (revokeContextManagementEntry()) editorGeneration++
         voiceConversationDialogOwner = null
-        fenceVideoRoute()
+        // Replacing the editor retires its visit, not the mounted chat route.
+        fenceVideoRoute(detachHost = false)
         val shizukuOwned = shizukuEditor != null || shizukuWritesBlocked
         cancelShizukuEditor()
         cancelBrowserEditor()

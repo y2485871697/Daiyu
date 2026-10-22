@@ -14,6 +14,7 @@ import app.daiyu.android.ui.haptics.material.IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -26,8 +27,7 @@ import app.daiyu.android.ui.components.subagent.*
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAgentProvider>, enabled: Boolean = true,
-    settings: Boolean = false, draftAllowed: Boolean = enabled, draftRetry: (() -> Unit)? = null,
-    authorization: (@Composable () -> Unit)? = null) {
+    settings: Boolean = false, draftAllowed: Boolean = enabled, draftRetry: (() -> Unit)? = null) {
     val editor = LocalConversationSubAgentEditor.current
     val usable = enabled && editor?.enabled == true
     val currentUsable by rememberUpdatedState(usable)
@@ -48,6 +48,9 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             !profile.acceptsModel(model.supportsImageGeneration, model.supportsVideoGeneration)) null
         else runCatching { buildSubAgentModelConfig(provider, model) }.getOrNull()
     }
+    val speedProvider = providers.singleOrNull { it.id == profile.providerId && it.isEnabled }
+    val speedModel = speedProvider?.models?.singleOrNull { it.id == profile.modelId && it.isEnabled }
+    val showGptSpeed = supportsGptSpeedBinding(speedProvider, speedModel)
     val media = if (profile.isMedia && config != null) MediaReasoningSettings.resolve(config, profile.role) else null
     val canThink = config != null && (!profile.isMedia || media?.status == MediaReasoningSettings.Status.SUPPORTED)
     val thinking = config?.let { subAgentThinkingPreference(profile, it) }
@@ -113,31 +116,34 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
                 color = androidx.compose.ui.graphics.Color(if (colors.dark) 0x03ffffff else 0x1cffffff),
                 border = androidx.compose.foundation.BorderStroke(1.dp, colors.line), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(10.dp)) {
-                    Row(Modifier.fillMaxWidth().padding(bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(profile.name, Modifier.weight(1f), fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(profile.name, Modifier.weight(1f), fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.text)
-                        authorization?.invoke()
+                        SubAgentRoleIcon(profile)
                         app.daiyu.android.ui.components.subagent.ConversationAgentIconButton(
-                            modifier = Modifier.size(27.dp, 29.dp), enabled = usable, onClick = {
+                            modifier = Modifier.size(48.dp), enabled = usable, onClick = {
                             if (currentUsable && editor != null) SubAgentProfileDraftSession.open(editor, profile)?.let { profileDraft = it }
-                        }) { Icon(Icons.Rounded.MoreHoriz, "配置${profile.name}", Modifier.size(16.dp), tint = colors.accent) }
+                        }) { Icon(Icons.Rounded.MoreHoriz, "配置${profile.name}", Modifier.size(22.dp), tint = colors.accent) }
                     }
-                    Row(Modifier.fillMaxWidth().semantics { contentDescription = "${profile.name}模型" }
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = "${profile.name}模型" }
                         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                             role = Role.Button, enabled = usable,
                             onClickLabel = "选择${profile.name}模型", onLongClickLabel = "调整${profile.name}思考深度",
                             onClick = { if (currentUsable) { modelPicker = true } },
                             onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } })
                         .padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Icon(Icons.Rounded.ViewInAr, null, Modifier.size(12.dp), tint = colors.accent)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        app.daiyu.android.ui.icons.ModelBrandIcon(config?.model.orEmpty(), Modifier.size(20.dp),
+                            displayName = config?.modelDisplayName.orEmpty(), tint = colors.accent)
                         Text(config?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (profile.modelId.isBlank()) "无" else "模型不可用",
-                            Modifier.weight(1f), fontSize = 10.sp, color = if (config == null) colors.muted else colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Rounded.ExpandMore, null, Modifier.size(12.dp), tint = colors.accent)
+                            Modifier.weight(1f), fontSize = 14.sp, color = if (config == null) colors.muted else colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(Icons.Rounded.ExpandMore, null, Modifier.size(20.dp), tint = colors.accent)
                     }
-                    HorizontalDivider(color = colors.line)
-                    SubAgentGptSpeedButton(profile, providers, usable, Modifier.padding(top = 7.dp))
+                    if (showGptSpeed) {
+                        HorizontalDivider(Modifier.testTag("subagent-gpt-divider-${profile.id}"), color = colors.line)
+                        SubAgentGptSpeedButton(profile, providers, usable, Modifier.padding(top = 8.dp))
+                    }
                 }
             }
         } else {
@@ -194,7 +200,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
         }, "选择${profile.name}模型", onClearSelection = {
             if (currentUsable) editor?.saveModel(profile.id, ModelFeatureSelection(true, "", ""), expected = profile)
             modelPicker = false
-        }, highlightSelection = true)
+        })
     }
     if (usable && thinkingPicker && config != null && canThink) {
         val effort = requireNotNull(effective)

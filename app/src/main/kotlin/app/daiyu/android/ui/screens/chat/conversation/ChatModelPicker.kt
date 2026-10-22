@@ -70,6 +70,7 @@ internal fun ChatModelPicker(
     title: String = "选择模型",
     modifier: Modifier = Modifier,
     showStatusMessages: Boolean = true,
+    onClearSelection: (() -> Unit)? = null,
 ) {
     var query by remember { mutableStateOf("") }
     var searchFocused by remember { mutableStateOf(false) }
@@ -85,7 +86,7 @@ internal fun ChatModelPicker(
             listOf(ChatModelProviderUi(state.providerId, "当前供应商", state.models))
         }.mapNotNull { provider ->
             val models = provider.models.filter {
-                provider.name.contains(search, true) || it.id.contains(search, true) || it.displayName.contains(search, true)
+                provider.name.contains(search, true) || it.apiModelId.contains(search, true) || it.displayName.contains(search, true)
             }
             if (models.isEmpty()) null else provider.copy(models = models)
         }
@@ -127,6 +128,14 @@ internal fun ChatModelPicker(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
                 LazyColumn(Modifier.testTag("chat-model-list").fillMaxWidth().weight(1f).padding(end = 2.dp),
                     state = listState) {
+                    if (onClearSelection != null && search.isEmpty()) item(key = "clear-selection") {
+                        Row(Modifier.testTag("chat-model-clear").fillMaxWidth().heightIn(min = 48.dp)
+                            .clickable(enabled = canSelect, role = Role.Button,
+                                interactionSource = remember { MutableInteractionSource() }, indication = null,
+                                onClick = onClearSelection).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            Text("无", color = colors.muted, fontSize = 14.sp, lineHeight = 22.sp)
+                        }
+                    }
                     groups.forEach { provider ->
                         val open = if (search.isNotEmpty()) provider.id !in searchCollapsed else expanded == provider.id
                         val surface = Color.White.copy(alpha = if (colors.dark) .012f else .14f)
@@ -176,14 +185,14 @@ internal fun ChatModelPicker(
                                         })
                                     .heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    ModelBrandIcon(model.id, Modifier.size(22.dp).testTag("chat-model-brand:${provider.id}:${model.id}"), displayName = model.displayName, tint = colors.accent)
+                                    ModelBrandIcon(model.apiModelId, Modifier.size(22.dp).testTag("chat-model-brand:${provider.id}:${model.id}"), displayName = model.displayName, tint = colors.accent)
                                     Column(Modifier.weight(1f)) {
                                         Text(model.displayName, color = if (selected) colors.accent else colors.text,
                                             fontSize = 16.sp, lineHeight = 24.sp,
                                             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                                             maxLines = 2, overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.testTag("chat-model-name:${provider.id}:${model.id}"))
-                                        if (model.displayName != model.id) Text(model.id, color = colors.muted,
+                                        if (model.displayName != model.apiModelId) Text(model.apiModelId, color = colors.muted,
                                             fontSize = 12.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.padding(top = 3.dp).testTag("chat-model-id:${provider.id}:${model.id}"))
                                     }

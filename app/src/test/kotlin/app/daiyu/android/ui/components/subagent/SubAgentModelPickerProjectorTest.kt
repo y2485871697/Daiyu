@@ -13,6 +13,7 @@ class SubAgentModelPickerProjectorTest {
             "provider", "selection-b")
         assertEquals(listOf("selection-a", "selection-b"), state.providerGroups.single().models.map { it.id })
         assertEquals("selection-b", state.selectedModel?.id)
+        assertEquals(listOf("same-api", "same-api"), state.providerGroups.single().models.map { it.apiModelId })
     }
 
     @Test fun caseDistinctApiModelsKeepOrderAndSelectionIdentity() {

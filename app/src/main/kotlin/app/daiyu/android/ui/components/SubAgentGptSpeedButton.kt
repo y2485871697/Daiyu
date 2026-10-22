@@ -75,7 +75,7 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
     val chatStyle = app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current
     val chatColors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
     val chipShape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
-    Row(modifier = (if (chatStyle) modifier.clip(chipShape).background(chatColors.soft).border(1.dp, chatColors.line, chipShape).padding(horizontal = 6.dp, vertical = 4.dp)
+    Row(modifier = (if (chatStyle) modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp).clip(chipShape).background(chatColors.soft).border(1.dp, chatColors.line, chipShape)
         else modifier.defaultMinSize(minWidth = SubAgentGptSpeedMinTouchSize, minHeight = SubAgentGptSpeedMinTouchSize))
         .semantics(mergeDescendants = true) { contentDescription = subAgentGptSpeedDescription(profile.name, mode) }
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = usable,
@@ -94,7 +94,9 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
                         progress.animateTo(targetValue = 1f, animationSpec = tween(durationMillis = SubAgentGptSpeedAnimationDurationMillis, easing = LinearEasing))
                     } finally { gate.finish(token) }
                 }
-            }), verticalAlignment = Alignment.CenterVertically,
+            })
+        .then(if (chatStyle) Modifier.padding(horizontal = 6.dp, vertical = 4.dp) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {
         if (!chatStyle) Icon(imageVector = ImageVector.vectorResource(R.drawable.ic_atom), contentDescription = null,
             modifier = Modifier.size(SubAgentGptSpeedIconSize).graphicsLayer {
@@ -102,7 +104,7 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
                 val scale = subAgentGptSpeedScale(progress.value); scaleX = scale; scaleY = scale
             }, tint = displayedColor)
         Text(text = (if (chatStyle) "GPT 速度 · " else "") + subAgentGptSpeedDisplayName(mode), style = MaterialTheme.typography.labelMedium,
-            fontSize = if (chatStyle) 8.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
-            color = if (chatStyle) chatColors.accent else displayedColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            fontSize = if (chatStyle) 12.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+            color = if (chatStyle) chatColors.accent.copy(alpha = if (usable) 1f else .38f) else displayedColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

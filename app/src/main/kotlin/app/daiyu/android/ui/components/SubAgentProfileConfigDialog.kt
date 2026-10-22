@@ -12,8 +12,7 @@ import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.*
@@ -96,11 +95,7 @@ internal fun resolveSubAgentProfileConfig(profile: SubAgentProfile, providers: L
     if (model.supportsSpeechSynthesis || !profile.acceptsModel(model.supportsImageGeneration, model.supportsVideoGeneration)) return null
     return runCatching { buildSubAgentModelConfig(provider, model) }.getOrNull()
 }
-private fun Modifier.profileDialogScrollableBody(): Modifier = layout { measurable, constraints ->
-    val maximum = if (constraints.hasBoundedHeight) (constraints.maxHeight - 144.dp.roundToPx()).coerceAtLeast(1).coerceAtMost(520.dp.roundToPx()) else 520.dp.roundToPx()
-    val placeable = measurable.measure(constraints.copy(minHeight = constraints.minHeight.coerceAtMost(maximum), maxHeight = maximum))
-    layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
-}
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,7 +109,6 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     LaunchedEffect(session, current) { if (!current) { session.dismiss(); latestDismiss() } }
     if (!current) return
     val scope = rememberCoroutineScope()
-    val view = LocalView.current
     val draft = session.draft
     val presentationProviders = session.editor.modelDisplayProviders?.collectAsState()?.value ?: providers
     val modelRefreshing by session.editor.modelRefreshing.collectAsState()
@@ -152,7 +146,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
         WithoutPressRipple {
             SubAgentConfigurationWindow(title = if (session.expectedProfile == null) "添加子代理" else "子代理配置", onDismiss = userDismiss) {
-                Column(Modifier.fillMaxWidth().profileDialogScrollableBody().verticalScroll(rememberScrollState())) {
+                Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 520.dp).testTag("subagent-config-body").verticalScroll(rememberScrollState())) {
                     if (LocalConversationAgentStyle.current) ConversationAgentField("名称", session.name, { if (usable) session.name = it.take(80) }, usable)
                     else EtaFormTextField(session.name, { if (usable) session.name = it.take(80) }, hint = "名称", singleLine = true, enabled = usable, modifier = Modifier.fillMaxWidth())
                     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -162,13 +156,13 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     }
                     SubAgentSettingRow("模型", boundConfig?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (draft.modelId.isBlank()) "选择模型" else "模型不可用",
                         Icons.Rounded.ViewInAr, "草稿模型", usable, badge = boundConfig?.providerName,
-                        onClick = { interact { modelPicker = true } }, onLongClick = { if (usable && canThink) { thinkingPicker = true } })
+                        onClick = { interact { modelPicker = true } }, onLongClick = { if (usable && canThink) { thinkingPicker = true } }, divider = canEditSpeed)
                     if (canEditSpeed) SubAgentSettingRow("GPT 速度", subAgentGptSpeedDisplayName(draft.gptSpeedForModel()), Icons.Rounded.Speed, "草稿GPT速度", usable, onClick = { interact {
                         session.edit { profile ->
                             if (profile.providerId != draft.providerId || profile.modelId != draft.modelId || profile.role != draft.role) profile
                             else profile.copy(gptSpeedByModel = profile.gptSpeedByModel + (SubAgentProfile.modelReasoningKey(profile.providerId, profile.modelId) to profile.gptSpeedForModel().next()))
                         }
-                    } })
+                    } }, divider = true)
                     SubAgentSettingRow("职责", draft.roleLabel, Icons.Rounded.Assignment, "草稿职责", usable, onClick = { interact { choices = "role" } })
                     if (draft.supportsTaskTier) SubAgentSettingRow("任务分工", draft.tier?.label ?: "未设置分工", Icons.Rounded.AccountTree, "草稿任务分工", usable, onClick = { interact { choices = "tier" } })
                     SubAgentSettingRow("思考深度", thinkingLabel, Icons.Rounded.AutoAwesome, "草稿思考深度", usable && canThink, onClick = { interact { thinkingPicker = true } })
@@ -213,7 +207,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     if (session.canCommit(latestEditor, latestEnabled)) session.selectModel(ModelFeatureSelection(true, provider, model)); modelPicker = false
                 }, "选择${draft.name}模型", onClearSelection = {
                     if (session.canCommit(latestEditor, latestEnabled)) session.selectModel(ModelFeatureSelection(true, "", "")); modelPicker = false
-                }, highlightSelection = true)
+                })
             }
             if (usable && thinkingPicker && canThink && effective != null) {
                 val binding = draft
@@ -229,7 +223,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     else -> listOf(null to "跟随接口") + ImageResolutionTier.values.filter { !verifiedGrok || it in setOf("low", "high") }.map { it to ImageResolutionTier.label(it) }
                 }
                 SubAgentChoiceWindow(title = when (field) { "role" -> "职责"; "tier" -> "任务分工"; else -> "默认分辨率" }, onDismiss = { choices = null }) {
-                    Column(Modifier.fillMaxWidth().profileDialogScrollableBody().verticalScroll(rememberScrollState())) {
+                    Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
                         options.forEach { (value, label) ->
                             val select = { interact {
                                 session.edit { profile -> when (field) {
@@ -253,12 +247,11 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
 }
 @Composable
 private fun SubAgentDraftDialogActions(confirmEnabled: Boolean, cancelEnabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
-    val view = LocalView.current
     if (LocalConversationAgentStyle.current) {
         HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ConversationAgentButton("取消", cancelEnabled, modifier = Modifier.weight(1f)) { onCancel() }
-            ConversationAgentButton("确认", confirmEnabled, primary = true, modifier = Modifier.weight(1f), onClick = onConfirm)
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(top = 10.dp).testTag("subagent-config-actions"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ConversationAgentButton("取消", cancelEnabled, modifier = Modifier.weight(1f).fillMaxHeight()) { onCancel() }
+            ConversationAgentButton("确认", confirmEnabled, primary = true, modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onConfirm)
         }
         return
     }

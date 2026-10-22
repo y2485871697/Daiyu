@@ -29,10 +29,21 @@ class SavedCatalogSubAgentModelSourceTest {
         assertEquals(selection, model.id)
         assertEquals("gpt-image-video-reasoner", model.modelId)
         assertFalse(model.supportsImageGeneration); assertFalse(model.supportsVideoGeneration)
-        assertFalse(model.supportsSpeechSynthesis); assertFalse(model.supportsGptSpeed)
+        assertFalse(model.supportsSpeechSynthesis); assertTrue(model.supportsGptSpeed)
         assertTrue(model.reasoningEfforts.isEmpty()); assertFalse(model.reasoningMandatory)
         assertFalse(model.reasoningCanDisable); assertFalse(model.mediaReasoningSupported); assertFalse(model.grokImage)
         assertEquals(value, projectSubAgentProvider(snapshot().copy(models = listOf(row)), ProviderProtocol.RESPONSES))
+    }
+
+    @Test fun gptSpeedFollowsTheRequestProtocolAndActualApiModel() {
+        for ((api, expected) in listOf("gpt-6.1-sol" to true, "vendor/GPT-6" to true,
+            "foo-gpt-6" to false, "claude-gpt" to false, "gemini" to false)) {
+            for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)) {
+                val record = snapshot().models.single().copy(id = api, displayName = "gpt-display-only")
+                val model = projectSubAgentProvider(snapshot().copy(models = listOf(record)), protocol).models.single()
+                assertEquals(protocol == ProviderProtocol.RESPONSES && expected, model.supportsGptSpeed)
+            }
+        }
     }
 
     @Test fun sameDisplayNameAndCaseDistinctApiModelsKeepTheirSavedOrderAndIdentity() {

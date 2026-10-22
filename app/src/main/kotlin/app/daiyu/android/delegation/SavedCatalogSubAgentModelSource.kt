@@ -1,5 +1,6 @@
 package app.daiyu.android.delegation
 
+import app.daiyu.android.model.GptServiceTier
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.model.catalog.SavedModelCatalogSnapshot
@@ -71,6 +72,7 @@ internal fun projectSubAgentProvider(
     return SubAgentProvider(snapshot.providerIdentity, "主模型服务商", snapshot.models.map { record ->
         val enabled = try { record.settings.requestOptions.validate(protocol); true } catch (_: Exception) { false }
         SubAgentModel(id = record.settings.localIdentity, modelId = record.id,
-            displayName = record.displayName, isEnabled = enabled)
+            displayName = record.displayName, isEnabled = enabled,
+            supportsGptSpeed = protocol == ProviderProtocol.RESPONSES && GptServiceTier.isGptSpeedModel(record.id))
     })
 }

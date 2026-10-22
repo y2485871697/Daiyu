@@ -25,8 +25,8 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val settings = ModelSettingsStore(app, alias)
         val childOpened = AtomicInteger(); val parentOpened = AtomicInteger()
         val entered = CountDownLatch(1); val cancelled = CountDownLatch(1); val release = CountDownLatch(if (held) 1 else 0)
-        val child = SubAgentModel("child-record", "child-api")
-        val provider = SubAgentProvider("explicit-provider", "Fixture", listOf(child))
+        val child = SubAgentModel(UUID.randomUUID().toString(), "child-api")
+        val provider = SubAgentProvider("primary", "Fixture", listOf(child))
         val profile = SubAgentProfile("review", "Reviewer", "review", providerId = provider.id, modelId = child.id)
         val preferences = ConversationSubAgentPreferences(app.getSharedPreferences("subagent_configuration", 0))
         val toolName = if (background) "start_child_tasks" else "run_child_models"
@@ -34,6 +34,11 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         lateinit var conversation: Conversation
         init {
             settings.save(ModelSettings("https://example.invalid", "parent-api", "synthetic-key", false))
+            val catalog = settings.modelCatalogSnapshot()
+            check(settings.modelCatalog.compareAndAppend(catalog.providerIdentity, catalog.revision,
+                listOf(app.daiyu.android.model.catalog.SavedCatalogModel(child.modelId, child.displayName,
+                    app.daiyu.android.model.catalog.CatalogModelParameters(localIdentity = child.id)))) { false }
+                == app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED)
             val factory: (ModelSettings) -> ModelPort = { config ->
                 object : ModelPort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
@@ -90,7 +95,6 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
 
     fun testSessionAwareChildAndParentToolContinuationUseTheDurableParentConversation() {
         val f = fresh(sessionAware = true)
-        controlMain { assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider)) }
         assertNotNull(f.controller.sendWithChildren(f.conversation, "session parent"))
         awaitControl("parent tool continuation completed") { f.controller.active == null }
         assertNull(f.controller.problem)
@@ -112,19 +116,19 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         assertEquals(3, f.sessionOwners.size)
     }
 
-    fun testSessionAwareUnboundChildStillRejectsWithoutAnyFactory() {
+    fun testSessionAwareMissingSavedSelectionRejectsWithoutAnyFactory() {
         val f = fresh(sessionAware = true)
-        assertNull(f.controller.sendWithChildren(f.conversation, "not bound"))
+        f.preferences.update(SubAgentConfigKey.Conversation(f.conversation.id.value)) {
+            it.copy(profiles = listOf(f.profile.copy(modelId = "deleted-selection")))
+        }
+        assertNull(f.controller.sendWithChildren(f.conversation, "missing selection"))
         assertTrue(f.sessionOwners.isEmpty()); assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
         assertTrue(f.database.messages(f.conversation.id).isEmpty())
         assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)
     }
 
-    fun testExplicitBindingRunsChildAndPersistsParentReceiptAndTaskRecord() {
+    fun testSavedConfigurationRunsWithoutShieldAndPersistsParentReceiptAndTaskRecord() {
         val f = fresh()
-        controlMain {
-            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-        }
         assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
         awaitControl("completed with child receipt") { f.controller.active == null }
         assertNull(f.controller.problem); assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
@@ -146,22 +150,13 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         } finally { reopened.close() }
     }
 
-    fun testUnboundWrongScopeAndFailedRebindNeverOpenOrConsumeDraft() {
+    fun testUnavailableSavedSelectionsNeverOpenOrConsumeDraft() {
         val f = fresh()
-        assertNull(f.controller.sendWithChildren(f.conversation, "unbound"))
-        controlMain {
-            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-            val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
-            assertTrue(f.preferences.update(key) { it.copy(enabled = false) } is ConversationSubAgentPreferences.WriteResult.Saved)
-            assertFalse(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-            assertTrue(f.preferences.update(key) { it.copy(enabled = true) } is ConversationSubAgentPreferences.WriteResult.Saved)
+        val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
+        for (profile in listOf(f.profile.copy(providerId = "deleted-provider"), f.profile.copy(modelId = "deleted-model"))) {
+            f.preferences.update(key) { it.copy(profiles = listOf(profile)) }
+            assertNull(f.controller.sendWithChildren(f.conversation, "unavailable selection"))
         }
-        assertNull(f.controller.sendWithChildren(f.conversation, "failed precheck rebind"))
-        controlMain {
-            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-            assertFalse(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, "different-api", f.provider))
-        }
-        assertNull(f.controller.sendWithChildren(f.conversation, "failed rebind"))
         assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
         assertTrue(f.database.messages(f.conversation.id).isEmpty())
         assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)
@@ -169,9 +164,6 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
 
     fun testStopCancelsChildAndRetainsResourcesUntilActualExit() {
         val f = fresh(true)
-        controlMain {
-            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-        }
         assertNotNull(f.controller.sendWithChildren(f.conversation, "held parent"))
         assertTrue(f.entered.await(5, TimeUnit.SECONDS))
         val owner = checkNotNull(f.controller.active)
@@ -186,9 +178,6 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
     }
     fun testBackgroundChildOutlivesParentAndPersistsAttributedUsage() {
         val f = fresh(held = true, background = true)
-        controlMain {
-            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-        }
         assertNotNull(f.controller.sendWithChildren(f.conversation, "background parent"))
         assertTrue(f.entered.await(5, TimeUnit.SECONDS))
         awaitControl("parent released while child is live") { f.controller.active == null }
@@ -212,9 +201,6 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
 
     fun testIndependentStopKeepsLeaseUntilChildActuallyExits() {
         val f = fresh(held = true, background = true)
-        controlMain {
-            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-        }
         assertNotNull(f.controller.sendWithChildren(f.conversation, "background stop"))
         assertTrue(f.entered.await(5, TimeUnit.SECONDS))
         awaitControl("parent released") { f.controller.active == null }

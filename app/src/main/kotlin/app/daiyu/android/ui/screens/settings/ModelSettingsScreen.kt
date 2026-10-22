@@ -67,7 +67,7 @@ internal data class ModelSettingsDraftUi(
 
 internal val RetainedModelSaveAction = SemanticsPropertyKey<() -> Unit>("RetainedModelSaveAction")
 
-internal data class ModelCatalogEntryUi(val id: String, val displayName: String = id)
+internal data class ModelCatalogEntryUi(val id: String, val displayName: String = id, val apiModelId: String = id)
 
 /** Changing protocols deliberately clears the key and the previous binding authorization. */
 internal fun ModelSettingsDraftUi.selectProtocol(selected: ProviderProtocol): ModelSettingsDraftUi =

@@ -19,6 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.daiyu.android.balance.BalanceMoney
+import app.daiyu.android.balance.BalanceResult
+import app.daiyu.android.balance.BalanceState
+import app.daiyu.android.balance.formatBalanceDisplay
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -44,7 +48,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
     )
 
     private fun show(composer: ComposerUi, actions: ChatScreenActions = ChatScreenActions(),
-        fontScale: Float = 1f, interfaceScale: Float = 1f, dark: Boolean = false) {
+        fontScale: Float = 1f, interfaceScale: Float = 1f, dark: Boolean = false, balance: BalanceState? = null) {
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
@@ -56,7 +60,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                         ChatMenuLayer(Modifier.fillMaxSize()) {
                             Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
                                 ChatTopBar("测试会话", actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
-                                ChatComposer(composer, actions)
+                                ChatComposer(composer, actions, balanceState = balance)
                             }
                         }
                     }
@@ -364,6 +368,83 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         button("更多").assertIsNotSelected()
         ui.mainClock.advanceTimeBy(176)
         node("chat-overflow-menu").assertDoesNotExist()
+    }
+
+    fun testComposerBalanceIsReadableAndKeepsControlsSeparateAt320Dp() {
+        val state = composer().copy(text = "ready", phase = ComposerPhase.IDLE)
+        val amount = formatBalanceDisplay("17.35")
+        for (dark in listOf(false, true)) for (font in listOf(1f, 1.3f)) {
+            val sent = mutableListOf<String>()
+            val balance = BalanceState(result = BalanceResult.Available(BalanceMoney("17.35".toBigDecimal(), "USD"), 1L))
+            show(state, ChatScreenActions(onSend = { sent += it }), fontScale = font, dark = dark, balance = balance)
+            val amountNode = ui.onNode(hasText(amount) and hasAnyAncestor(hasTestTag("chat-composer-provider-balance")),
+                useUnmergedTree = true)
+            amountNode.assertIsDisplayed().assertHasNoClickAction()
+            val text = layout(amount)
+            assertEquals(14.sp, text.layoutInput.style.fontSize)
+            assertEquals(28.sp, text.layoutInput.style.lineHeight)
+            assertEquals(1, text.lineCount)
+            assertFalse(text.hasVisualOverflow)
+            val indicator = node("chat-composer-provider-balance").assertIsDisplayed().assertHasNoClickAction()
+                .fetchSemanticsNode().boundsInRoot
+            val dp = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f
+            assertTrue(indicator.width <= 72f * dp + 1f)
+            val textBounds = amountNode.fetchSemanticsNode().boundsInRoot
+            assertTrue("16dp icon plus 4dp gap", abs(indicator.width - textBounds.width - 20f * dp) <= 2f)
+            val voice = button("语音输入").assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp).fetchSemanticsNode().boundsInRoot
+            val send = node("chat-send").assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp).fetchSemanticsNode().boundsInRoot
+            assertTrue("balance clears centered voice", voice.right <= indicator.left + 1f)
+            assertTrue("balance stays before send", indicator.right <= send.left + 1f)
+            assertTrue("send stays inside composer", send.right <= node("chrome-host").fetchSemanticsNode().boundsInRoot.right + 1f)
+            node("chat-send").performClick()
+            assertEquals(listOf("ready"), sent)
+        }
+    }
+
+    fun testLongComposerBalanceStaysSingleLineWithoutPushingVoiceOrSend() {
+        val amount = "123456789012345678901234567890.12"
+        val balance = BalanceState(result = BalanceResult.Available(BalanceMoney(amount.toBigDecimal(), "USD"), 1L))
+        for (dark in listOf(false, true)) {
+            show(composer().copy(text = "ready", phase = ComposerPhase.IDLE), fontScale = 1.3f, dark = dark, balance = balance)
+            val text = layout(formatBalanceDisplay(amount))
+            assertEquals(14.sp, text.layoutInput.style.fontSize)
+            assertEquals(1, text.lineCount)
+            assertTrue("long amount is ellipsized", text.isLineEllipsized(0))
+            val indicator = node("chat-composer-provider-balance").assertIsDisplayed().assertHasNoClickAction()
+                .fetchSemanticsNode().boundsInRoot
+            val dp = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f
+            assertTrue("long amount reaches 72dp cap", abs(indicator.width - 72f * dp) <= 1f)
+            val voice = button("语音输入").assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp).fetchSemanticsNode().boundsInRoot
+            val send = node("chat-send").assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp).fetchSemanticsNode().boundsInRoot
+            assertTrue(voice.right <= indicator.left + 1f)
+            assertTrue(indicator.right <= send.left + 1f)
+        }
+    }
+
+    fun testBalanceIconSizingKeepsSharedDefaultInStaticAndAnimatedBranches() {
+        val amount = formatBalanceDisplay("17.35")
+        val balance = BalanceState(result = BalanceResult.Available(BalanceMoney("17.35".toBigDecimal(), "USD"), 1L))
+        for (animated in listOf(false, true)) for (large in listOf(false, true)) {
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(themeMode = AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                        Column(Modifier.requiredWidth(320.dp).testTag("balance-size-host")) {
+                            val modifier = Modifier.testTag("balance-size-fixture")
+                            if (large) app.daiyu.android.balance.ui.ProviderBalanceIndicator(balance, modifier,
+                                animateChanges = animated, iconSize = 16.dp)
+                            else app.daiyu.android.balance.ui.ProviderBalanceIndicator(balance, modifier,
+                                animateChanges = animated)
+                        }
+                    }
+                }
+            }
+            val indicator = node("balance-size-fixture").assertIsDisplayed().assertHasNoClickAction()
+                .fetchSemanticsNode().boundsInRoot
+            val text = ui.onNodeWithText(amount, useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val dp = node("balance-size-host").fetchSemanticsNode().boundsInRoot.width / 320f
+            assertTrue("icon size in animated=$animated, large=$large",
+                abs(indicator.width - text.width - (if (large) 20f else 16f) * dp) <= 2f)
+        }
     }
 
     fun testIdleTextDispatchesSendAndNeverSupplement() {

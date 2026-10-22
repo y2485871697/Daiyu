@@ -200,8 +200,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-composer-provider-balance")
-                                    .widthIn(max = 60.dp), animateChanges = true,
-                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 28.sp))
+                                    .widthIn(max = 72.dp), animateChanges = true, iconSize = 16.dp,
+                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 28.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (!textAction) actions.onPrimaryTap()
                                 else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)

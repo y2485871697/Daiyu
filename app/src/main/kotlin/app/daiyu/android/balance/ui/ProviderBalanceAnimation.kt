@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.balance.BalanceState
 import app.daiyu.android.balance.formatBalanceDisplay
@@ -74,7 +75,7 @@ private data class BalanceBurst(val delta: BigDecimal, val level: BalanceEffectL
 
 @Composable
 internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: String, modifier: Modifier,
-    textStyle: TextStyle = MiuixTheme.textStyles.footnote1) {
+    textStyle: TextStyle = MiuixTheme.textStyles.footnote1, iconSize: Dp = 12.dp) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val neutralColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
@@ -175,7 +176,7 @@ internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: Strin
     Box(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(MoneyBag02, contentDescription = null,
-                modifier = Modifier.padding(end = 4.dp).size(12.dp).graphicsLayer { rotationZ = iconRotation.value },
+                modifier = Modifier.padding(end = 4.dp).size(iconSize).graphicsLayer { rotationZ = iconRotation.value },
                 tint = amountColor)
             Text(text = displayText, style = textStyle, color = amountColor,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,

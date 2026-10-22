@@ -165,6 +165,8 @@ class BalanceProductionOwnershipTest {
         assertFalse(topBar.contains("chat-provider-balance"))
         assertFalse(topBar.contains("ProviderBalanceIndicator("))
         assertTrue(composer.contains("animateChanges = true"))
+        assertTrue(composer.contains(".widthIn(max = 72.dp), animateChanges = true, iconSize = 16.dp"))
+        assertTrue(composer.contains("fontSize = 14.sp, lineHeight = 28.sp"))
         val screen = source("balance/ui/BalanceSettingsScreen.kt")
         assertTrue(screen.contains("BalanceLifecycleBinding(lifecycle, scope, runtime, poll = false)"))
         assertTrue(screen.contains("manualOwner?.requestRefresh()"))

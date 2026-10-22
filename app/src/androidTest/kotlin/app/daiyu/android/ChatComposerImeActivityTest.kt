@@ -112,4 +112,104 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
             assertEquals(0, fixture.opens.get())
         }
     }
+
+    private fun assertHostSelection(start: Int, end: Int) {
+        mainThread {
+            fun endpoint(name: String) = MainActivity::class.java.getDeclaredField(name)
+                .apply { isAccessible = true }.getInt(activity)
+            assertEquals(start, endpoint("selectionStart"))
+            assertEquals(end, endpoint("selectionEnd"))
+        }
+    }
+
+    private fun keyboardBackgroundRoundTrip(hideBeforeLeaving: Boolean) {
+        dismissIme()
+        val before = settledFrame(visible = false)
+        val draft = " 后台返回\n保留草稿 "
+        setDraft(draft)
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        awaitImeFrame(node("chat-draft"), visible = true)
+        setSelection(1, 4, relativeToOriginalText = true)
+        assertHostSelection(1, 4)
+        if (hideBeforeLeaving) {
+            dismissIme()
+            settledFrame(visible = false)
+        }
+        node("chat-draft").assertIsFocused()
+        val database = fixture.database.exportBackup()
+        val original = activity
+        val task = original.taskId
+        val stopped = java.util.concurrent.CountDownLatch(1)
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
+        }
+        mainThread { original.lifecycle.addObserver(observer) }
+        try {
+            assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+            assertTrue("HOME must stop the original Activity", stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        } finally {
+            instrumentation.runOnMainSync { original.lifecycle.removeObserver(observer) }
+            instrumentation.targetContext.startActivity(
+                android.content.Intent(instrumentation.targetContext, MainActivity::class.java).addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        }
+        awaitHostWindowFocus(original)
+        assertFalse(original.isDestroyed)
+        assertEquals(task, original.taskId)
+        node("chat-draft").assertIsNotFocused()
+        // No dismissIme here: a return-triggered keyboard would be a product failure.
+        val returned = settledFrame(visible = false, before = before)
+        assertEquals(before.headerBottom, returned.headerBottom, 2f)
+        assertDraft(draft)
+        assertSelection(1, 4)
+        assertHostSelection(1, 4)
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        node("chat-draft").assertIsFocused()
+        awaitImeFrame(node("chat-draft"), visible = true)
+        val reopened = settledFrame(visible = true, before = returned)
+        assertTrue(reopened.composerBottom < returned.composerBottom - 48f * activity.resources.displayMetrics.density)
+        assertEquals(returned.headerBottom, reopened.headerBottom, 2f)
+        dismissIme()
+        settledFrame(visible = false, before = returned)
+        assertDraft(draft)
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testReturningFromHomeDoesNotReopenVisibleKeyboardOrLoseSelection() {
+        keyboardBackgroundRoundTrip(hideBeforeLeaving = false)
+    }
+
+    fun testReturningFromHomeDoesNotReopenHiddenFocusedKeyboard() {
+        keyboardBackgroundRoundTrip(hideBeforeLeaving = true)
+    }
+
+    fun testPauseWithoutStopDoesNotClearDraftFocusOrSelection() {
+        dismissIme()
+        setDraft(" 暂时遮盖的草稿 ")
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        awaitImeFrame(node("chat-draft"), visible = true)
+        setSelection(1, 4, relativeToOriginalText = true)
+        val database = fixture.database.exportBackup()
+        realPauseResume(activity)
+        node("chat-draft").assertIsFocused()
+        assertDraft(" 暂时遮盖的草稿 ")
+        assertSelection(1, 4)
+        assertHostSelection(1, 4)
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
 }

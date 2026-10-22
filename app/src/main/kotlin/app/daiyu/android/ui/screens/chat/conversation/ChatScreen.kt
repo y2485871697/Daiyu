@@ -66,7 +66,7 @@ internal fun DaiyuChatScreen(
     ChatMenuLayer(modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
-            .statusBarsPadding().navigationBarsPadding().imePadding(),
+            .statusBarsPadding().navigationBarsPadding(),
     ) {
         ChatTopBar(state.title, actions, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,
@@ -80,7 +80,7 @@ internal fun DaiyuChatScreen(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1)
         }
-        ChatConversationLayers(Modifier.weight(1f), messages = { bottomInset ->
+        ChatConversationLayers(Modifier.weight(1f).imePadding(), messages = { bottomInset ->
             androidx.compose.runtime.key(state.conversationKey) {
                 ChatMessageList(state.turns, actions, Modifier.fillMaxSize(),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset)

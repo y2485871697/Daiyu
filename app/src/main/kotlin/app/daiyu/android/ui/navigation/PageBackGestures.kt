@@ -61,6 +61,7 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: Boolean,
+    private val scope: kotlinx.coroutines.CoroutineScope,
     val commit: (Float, Boolean, Float, () -> Unit) -> Unit) {
     var alive = true
     var transitionBlocked = false
@@ -76,13 +77,13 @@ private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: 
     var committing = false
         private set
 
-    fun commitBack(scope: kotlinx.coroutines.CoroutineScope, back: () -> Unit) {
+    fun commitBack(back: () -> Unit) {
         if (!alive || (transitionBlocked && swipeCommit == null) || committing) return
         val visual = swipeCommit
         swipeCommit = null
         committing = true
         try { commit(if (previewAllowed) visual?.progress ?: progress else 0f, visual?.predictive ?: predictive, visual?.direction ?: direction, back) }
-        finally { scope.launch { withFrameNanos { }; committing = false } }
+        finally { scope.launch { try { withFrameNanos { } } finally { committing = false } } }
     }
     private class SwipeCommit(val progress: Float, val predictive: Boolean, val direction: Float)
     private var swipeCommit: SwipeCommit? = null
@@ -147,7 +148,6 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
         BackHandler(enabled, onBack)
         return
     }
-    val scope = rememberCoroutineScope()
     val previewOwner = remember(state) { PageBackGestureState.PreviewOwner(enabled, previewEnabled) }
     DisposableEffect(state, previewOwner) {
         state.previewOwners.add(previewOwner)
@@ -205,7 +205,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
                 val activeState = currentState
                 try {
                     if (!session.rejected && activeState.alive && currentEnabled) {
-                        activeState.commitBack(scope) { currentBack() }
+                        activeState.commitBack { currentBack() }
                     }
                 } finally {
                     handleOnBackCancelled()
@@ -269,7 +269,7 @@ internal fun PageBackGestureHost(
     SideEffect { layers.trim(frame, target, departure.takeIf { departing }) }
     val currentTarget by rememberUpdatedState(target)
     val state = remember(routeKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, backTargetKey) {
-        PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed) { value, predictive, direction, back ->
+        PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, scope) { value, predictive, direction, back ->
             val request = if (value > 0f && currentTarget != null && backTargetKey != null) {
                 layers.prepare(frame, backTargetKey, value, predictive, direction)
             } else null

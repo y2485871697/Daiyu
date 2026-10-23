@@ -24,6 +24,7 @@ class R59BatchContract(unittest.TestCase):
                       'activity.createConfigurationContext(configuration)',
                       'assertEquals("没有打开的标签页", context.getString(R.string.om_browser_no_tab_open))',
                       'LocalContext provides context', 'LocalConfiguration provides context.resources.configuration',
+                      'LocalResources provides context.resources',
                       'BrowserVisualScreen(null, { false }, { closed++ })',
                       'assertTextEquals("没有打开的标签页")', 'assertEquals(0, fixture.opens.get())'):
             self.assertIn(token, method)

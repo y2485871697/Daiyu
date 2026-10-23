@@ -38,7 +38,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.graphicsLayer
@@ -46,6 +45,7 @@ import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -359,23 +359,12 @@ internal fun PageBackGestureHost(
                     shape = RoundedCornerShape(20.dp)
                     clip = visibleProgress > 0f
                     shadowElevation = 8.dp.toPx() * visibleProgress
-                }.testTag("page-back-surface").drawWithContent {
-                    var insideExplicitRecord = true
-                    try {
-                        frame.layer.record {
-                            if (app.daiyu.android.BuildConfig.DEBUG) android.util.Log.d(
-                                "DaiyuBackRecord",
-                                "layer=${System.identityHashCode(frame.layer)} " +
-                                    "current=${frame.key == layers.currentKey} explicit=$insideExplicitRecord size=$size " +
-                                    "released=${frame.layer.isReleased}",
-                            )
-                            this@drawWithContent.drawContent()
-                        }
-                    } finally {
-                        insideExplicitRecord = false
+                }.testTag("page-back-surface").layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width, placeable.height) {
+                        frame.size = IntSize(placeable.width, placeable.height)
+                        placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)
                     }
-                    frame.size = viewport
-                    drawLayer(frame.layer)
                 }.background(background)) { content() }
             }
             if (departure != null && departing) Box(Modifier.fillMaxSize().graphicsLayer {

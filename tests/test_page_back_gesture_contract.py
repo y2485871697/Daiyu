@@ -154,7 +154,7 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_previous_page_is_readonly_recorded_content_not_a_second_composition(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        self.assertIn('frame.layer.record {', self.host)
+        self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', self.host)
         self.assertIn('drawLayer(target.layer)', self.host)
         self.assertIn('drawLayer(departure.frame.layer)', self.host)
         self.assertIn('if (target != null && state.previewAllowed) progress else 0f', self.host)
@@ -165,8 +165,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertEqual(1, self.host.count('{ content() }'))
         surface = self.host.split('key(routeKey) {', 1)[1].split('if (departure != null && departing)', 1)[0]
         self.assertIn('testTag("page-back-surface")', surface)
-        recording = surface.split('frame.layer.record {', 1)[1].split('\n                        }', 1)[0]
-        self.assertIn('this@drawWithContent.drawContent()', recording)
+        self.assertIn('frame.size = IntSize(placeable.width, placeable.height)', surface)
+        self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', surface)
+        self.assertNotIn('frame.layer.record', surface)
+        self.assertNotIn('drawWithContent', surface)
         self.assertEqual(1, surface.count('{ content() }'))
         self.assertNotIn('drawLayer(target.layer)', surface)
         for tag in ('page-back-target', 'page-back-departure'):

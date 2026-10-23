@@ -80,10 +80,12 @@ class R67FixtureContract(unittest.TestCase):
         self.assertLess(enabled, method.index('mount(capturePreviousPage = true)'))
         self.assertLess(method.index('finally'), method.index('setDrawingEnabled(false)'))
         production = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/navigation/PageBackGestures.kt').read_text()
-        for token in ('if (app.daiyu.android.BuildConfig.DEBUG)', 'DaiyuBackRecord',
-                      'current=${frame.key == layers.currentKey} explicit=$insideExplicitRecord',
-                      'insideExplicitRecord = false', 'this@drawWithContent.drawContent()'):
+        for token in ('import androidx.compose.ui.layout.layout',
+                      'frame.size = IntSize(placeable.width, placeable.height)',
+                      'placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)'):
             self.assertIn(token, production)
+        for token in ('frame.layer.record', 'this@drawWithContent.drawContent()', 'DaiyuBackRecord'):
+            self.assertNotIn(token, production)
 
         for token in ('logPreviewPixels("source", sourceImage)', 'logPreviewPixels("target", previewImage)',
                       'page-back-$phase.png', 'DaiyuBackPreview'):

@@ -174,6 +174,13 @@ internal fun VoiceSettingsPanel(
         saved?.let { draftBases[profile] = it }
         cloud = preferences.cloudEnabled(profile, draft.engine != "SYSTEM")
     }
+    LaunchedEffect(personalAccounts, lifecycleState) {
+        val opened = accountPage
+        if (opened != null && current()) {
+            val updated = personalAccounts[opened.engine]
+            if (updated != null && updated != opened && runtime.accountCurrent(updated)) accountPage = updated
+        }
+    }
     LaunchedEffect(profile, draft.asrKey, draft.asrResource, conversationAsrDirty) {
         if (profile == VoiceProfile.CONVERSATION && conversationAsrDirty && !busy) {
             kotlinx.coroutines.delay(300)
@@ -204,6 +211,7 @@ internal fun VoiceSettingsPanel(
     }
     BackHandler(enabled = accountPage == null) {
         if (choosingSection) choosingSection = false
+        else if (child == "DOUBAO_ACCOUNT") leavePage { child = "DOUBAO_VOICES"; notice = "" }
         else if (child != null) leaveChild()
         else leavePage { picker.close(); onBack() }
     }
@@ -211,7 +219,10 @@ internal fun VoiceSettingsPanel(
     if (accountConfiguration != null) {
         key(profile, accountConfiguration.revision) {
             ProductionVoiceAccountPage(runtime, accounts, profile, accountConfiguration,
-                isCurrent = isCurrent, installPreviewRevoke = installPreviewRevoke, onBack = { accountPage = null }, standalone = true)
+                isCurrent = isCurrent, installPreviewRevoke = installPreviewRevoke, onBack = { accountPage = null }, standalone = true,
+                onAccountSaved = { updated ->
+                    if (isCurrent() && accountPage == accountConfiguration && runtime.accountCurrent(updated)) accountPage = updated
+                })
         }
         return
     }
@@ -219,12 +230,23 @@ internal fun VoiceSettingsPanel(
         OfflineSpeechSettingsScreen(context, onBack = ::leaveChild, ownerCurrent = ::current)
         return
     }
+    if (child == "DOUBAO_VOICES") {
+        VoicePersonalEmptyPage(isCurrent = ::current,
+            onConfigure = { if (current() && !busy && stopAudio()) { child = "DOUBAO_ACCOUNT" } },
+            onBack = ::leaveChild)
+        return
+    }
     if (child == "DOUBAO_ACCOUNT") {
-        SettingsScaffoldPage("声音复刻账户", ::leaveChild) {
+        SettingsScaffoldPage("声音复刻账户", { leavePage { child = "DOUBAO_VOICES"; notice = "" } }) {
             item { VoiceSettingsCard {
-                SettingsTextField("声音复刻 API Key", accountKeyDraft, { accountKeyDraft = it }, password = true)
-                SettingsRow("保存账户", showChevron = true, onClick = if (busy || accountKeyDraft.isBlank()) null else ({
-                    if (current() && stopAudio()) {
+                SettingsTextField("声音复刻 API Key", accountKeyDraft, { if (!busy) accountKeyDraft = it },
+                    password = true, enabled = !busy, compact = true)
+                TextButton("保存账户", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    .fillMaxWidth().testTag("voice-account-save"),
+                    minHeight = 48.dp, cornerRadius = 24.dp,
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    enabled = !busy && accountKeyDraft.isNotBlank(), onClick = {
+                    if (current() && !busy && stopAudio()) {
                         val value = VoiceConfiguration(engine = "DOUBAO", provider = "personal-doubao",
                             endpoint = "https://openspeech.bytedance.com", key = accountKeyDraft.trim(),
                             model = "seed-tts-2.0", voice = DoubaoVoices.DEFAULT_ID)
@@ -238,7 +260,7 @@ internal fun VoiceSettingsPanel(
                             finally { busy = false }
                         }
                     }
-                }))
+                })
                 SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
             }; SettingsNote("声音复刻 API Key 与音色名额须属于同一项目；不会改动朗读或实时通话的账户。") }
             if (notice.isNotBlank()) item { SettingsNote(notice, error = true) }
@@ -324,9 +346,13 @@ internal fun VoiceSettingsPanel(
                                     catch (_: Exception) { picker.deliver(null); pickerPending = picker.pending; resultRevision++; notice = "未能打开录音选择器" }
                                 } else notice = "请先选择 MiMo 提供商。"
                             }))
-                        SettingsRow("保存参考声音", tag = "voice-sample-save", showChevron = true, onClick = if (busy || selectedSample == null) null else ({
+                        TextButton("保存参考声音", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            .fillMaxWidth().testTag("voice-sample-save"),
+                            minHeight = 48.dp, cornerRadius = 24.dp,
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                            enabled = !busy && selectedSample != null, onClick = {
                             val selection = selectedSample
-                            if (current() && selection != null && selection.configuration == mimoConnection()) {
+                            if (current() && !busy && selection != null && selection.configuration == mimoConnection()) {
                                 busy = true
                                 scope.launch {
                                     try { runtime.personal.import(context, selection.value, selection.name, selection.configuration.referenceOwner()); selectedSample = null; notice = "参考声音已保存在本机" }
@@ -335,7 +361,7 @@ internal fun VoiceSettingsPanel(
                                     finally { busy = false }
                                 }
                             }
-                        }))
+                        })
                     }; SettingsTextField("试听文字", sampleText, { sampleText = it.take(300) }, multiline = true)
                     SettingsNote("支持 MP3 / WAV，参考录音不超过 7.5 MB。导入仅保存在本机；试听与朗读时，会在单次确认后把参考录音和文字发送到所选 MiMo 提供商。") }
                     items(voices.size, key = { voices[it].id }) { index ->
@@ -450,7 +476,7 @@ internal fun VoiceSettingsPanel(
                                 invalidatePicker()
                                 val selected = personalAccounts["DOUBAO"]
                                 if (selected != null && runtime.accountCurrent(selected)) accountPage = selected
-                                else child = "DOUBAO_ACCOUNT"
+                                else child = "DOUBAO_VOICES"
                             }
                         }))
                         SettingsRow("MiMo 语音", tag = "voice-mimo-open", showChevron = true, onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "MIMO"; notice = "" } }))
@@ -515,7 +541,7 @@ internal fun VoiceSettingsPanel(
             }
         }, onSelect = { if (current()) { dialog = null; save(draft.copy(voice = it), speechOnly = true) } }, onDismiss = { dialog = null })
         "ASR_ADVANCED" -> ChatSelectionSheet("识别服务", onDismiss = { dialog = null },
-            subtitle = "仅在控制台开通了不同服务时更改。", titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
+            subtitle = "仅在控制台开通了不同服务时更改。", showCloseButton = false, titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("voice-asr-service-sheet")) {
                 DoubaoAsrProtocol.resources.forEachIndexed { index, resource ->
                     SettingsRadioRow(listOf("识别 2.0 · 按时长", "识别 2.0 · 按并发", "识别 1.0 · 按时长", "识别 1.0 · 按并发")[index],

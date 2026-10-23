@@ -1,7 +1,16 @@
 package app.daiyu.android
 
 import app.daiyu.android.model.ProviderHeaders
+import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.model.catalog.CatalogModelParameters
+import app.daiyu.android.model.catalog.CatalogModelSelection
+import app.daiyu.android.model.catalog.SavedCatalogModel
+import app.daiyu.android.storage.ProviderEditorSlot
+import app.daiyu.android.ui.screens.settings.SettingsModelChoice
+import app.daiyu.android.ui.screens.settings.SettingsSpeechModelChoice
+import app.daiyu.android.ui.screens.settings.SettingsVoiceProviderChoice
 import app.daiyu.android.voice.providers.*
+import app.daiyu.android.voice.account.PersonalVoices
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -10,6 +19,53 @@ class VoiceSettingsParityTest {
     private fun cloud() = VoiceConfiguration(revision = "account", engine = "MIMO", provider = "provider-A",
         endpoint = "https://speech.invalid/v1", key = "fixture-only", model = "mimo-v2.5-tts", voice = "mimo_default",
         customHeaders = ProviderHeaders.parse("{\"x-fixture\":\"fixture-only\"}"), modelIdentity = "local-model-A")
+
+    @Test fun speechPickerKeysKeepLocalIdentityAndSeparateBuiltInModelIds() {
+        val editor = ProviderEditorSlot("provider-A", 1)
+        val connection = SettingsVoiceProviderChoice(editor, "Speech", "https://speech.invalid", 1)
+        fun cached(identity: String) = SettingsSpeechModelChoice(connection, "tts-1", "Speech",
+            SettingsModelChoice(editor, "Speech", ProviderProtocol.CHAT_COMPLETIONS,
+                CatalogModelSelection("catalog-A", 1,
+                    SavedCatalogModel("tts-1", "Speech", CatalogModelParameters(localIdentity = identity)))))
+        val first = cached("identity-A")
+        val second = cached("identity-B")
+        assertEquals("local:identity-A", first.speechPickerId)
+        assertNotEquals(first.speechPickerId, second.speechPickerId)
+        assertEquals(first.speechPickerId, first.copy(name = "Renamed").speechPickerId)
+        val builtIn = SettingsSpeechModelChoice(connection, "tts-1", "Built-in")
+        assertEquals("model:tts-1", builtIn.speechPickerId)
+        assertNotEquals(builtIn.speechPickerId, cached("tts-1").speechPickerId)
+        assertNotEquals(builtIn.speechPickerId, builtIn.copy(model = "tts-1-hd").speechPickerId)
+    }
+
+    @Test fun personalSlotsSortUnusedFirstAndKeepFriendlyLabelsAndQuotaOnce() {
+        val used = PersonalVoices.Voice("S_used", "A made voice", "account", status = 2,
+            models = setOf(4), remaining = 3)
+        val unused = PersonalVoices.Voice("S_unused", "S_unused", "account", catalogState = "Unknown", remaining = 2)
+        val other = used.copy(id = "etaClone123", name = "Postpaid")
+        assertEquals(listOf(unused, used), personalVoiceSlots(listOf(used, other, unused), true, false))
+        assertEquals(emptyList<PersonalVoices.Voice>(), personalVoiceSlots(listOf(used, unused), true, true))
+        assertEquals(listOf(used, other), personalVoiceSlots(listOf(unused, other, used), false, false))
+        assertEquals("音色名额 1", personalVoiceSlotTitle(unused, 0))
+        assertEquals(used.name, personalVoiceSlotTitle(used, 1))
+        assertEquals("未使用名额 · 剩余 2 次", voiceSlotSummary(unused))
+        assertTrue(voiceSlotSummary(used).contains("剩余 3 次"))
+        assertTrue(voiceSlotSummary(used).contains("再次制作可能覆盖已有声音"))
+        assertTrue(voiceSlotSummary(used.copy(remaining = -1)).contains("次数待查询"))
+    }
+
+    @Test fun personalVoiceStatePreservesUncertainExpiredReclaimedAndTrainingBoundaries() {
+        val voice = PersonalVoices.Voice("S_test", "Fixture", "account")
+        assertTrue(voiceStatus(voice.copy(uncertain = true)).contains("提交结果未知"))
+        assertEquals("已到期", voiceStatus(voice.copy(catalogState = "Expired")))
+        assertEquals("已回收", voiceStatus(voice.copy(catalogState = "Reclaimed")))
+        assertEquals("制作中", voiceStatus(voice.copy(status = 1)))
+        assertEquals("已锁定", voiceStatus(voice.copy(catalogState = "Active")))
+        assertEquals("制作次数已用完", voiceStatus(voice.copy(remaining = 0)))
+        assertFalse(voice.copy(uncertain = true).canTrain)
+        assertFalse(voice.copy(status = 1).canTrain)
+        assertFalse(voice.copy(catalogState = "Active").canTrain)
+    }
 
     @Test fun speechSelectionPreservesRecognitionRealtimeAndRevision() {
         val current = VoiceConfiguration(revision = "profile", dictation = "DOUBAO", asrKey = "asr-only",

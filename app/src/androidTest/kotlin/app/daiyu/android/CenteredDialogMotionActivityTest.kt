@@ -213,13 +213,13 @@ class CenteredDialogMotionActivityTest : WiredActivityTestCase() {
         closeAndAssertDisposed("usage-close")
     }
 
-    fun testCollaborationSheetCanUseCenterFadeAndDisposeOnDismiss() {
+    fun testCollaborationSheetUsesBottomMotionAndDisposesOnDismiss() {
         show { dismiss ->
-            ConversationAgentSheet(dismiss, bottomSheetMotion = false) {
+            ConversationAgentSheet(dismiss) {
                 TextButton(onClick = dismiss, modifier = Modifier.testTag("collaboration-close")) { Text("完成") }
             }
         }
-        assertWindowAnimation("collaboration-close")
+        assertWindowAnimation("collaboration-close", platformFade = false)
         closeAndAssertDisposed("collaboration-close")
     }
 

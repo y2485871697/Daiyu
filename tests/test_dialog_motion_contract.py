@@ -49,12 +49,13 @@ class DialogMotionContractTest(unittest.TestCase):
                 self.assertEqual(tuple(float(interpolator.get(android + key)) for key in
                     ("controlX1", "controlY1", "controlX2", "controlY2")), points)
 
-    def test_requested_collaboration_panel_uses_fade_without_changing_other_sheets(self):
+    def test_collaboration_panel_keeps_bottom_sheet_motion_not_centered_fade(self):
         panel = self.text("ui/components/ConversationCollaborationDialog.kt")
-        self.assertIn("ConversationAgentSheet(onDismiss, bottomSheetMotion = false,", panel)
+        self.assertIn("ConversationAgentSheet(onDismiss,", panel)
+        self.assertNotIn("bottomSheetMotion", panel)
         style = self.text("ui/components/subagent/ConversationAgentStyle.kt")
-        self.assertIn("bottomSheetMotion: Boolean = true", style)
-        self.assertIn("PreviewDialog(onDismiss, bottomSheet = bottomSheetMotion)", style)
+        self.assertIn("PreviewDialog(onDismiss, bottomSheet = true)", style)
+        self.assertNotIn("bottomSheetMotion", style)
         self.assertIn("modifier.align(Alignment.BottomCenter)", style)
         self.assertIn(".padding(10.dp)", style)
 
@@ -174,7 +175,8 @@ class DialogMotionContractTest(unittest.TestCase):
                          "Triple(android.R.attr.windowExitAnimation, 150L, false)",
                          "expectedDuration = duration", "0L, animation.startOffset",
                          'assertStationaryFade("negative-$index", create = create)',
-                         "ConversationAgentSheet(dismiss, bottomSheetMotion = false)",
+                         "ConversationAgentSheet(dismiss)",
+                         'assertWindowAnimation("collaboration-close", platformFade = false)',
                          "testFadeVerifierAcceptsIdentityTranslateAndScale", "testFadeVerifierRejectsRealMotionAndWrongAlphaEndpoints",
                          "assertOneShot(prototype, diagnostic)", "0, animation.repeatCount",
                          "animation.animations.forEach { assertOneShot(it, diagnostic) }", "repeatMode = Animation.REVERSE"]:

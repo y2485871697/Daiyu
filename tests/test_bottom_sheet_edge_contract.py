@@ -39,10 +39,7 @@ class BottomSheetEdgeContractTest(unittest.TestCase):
                 self.assertIn(shape, shell)
                 self.assertNotIn("bottomSheetContentInsets", shell)
                 self.assertNotIn("RoundedCornerShape(topStart =", shell)
-                if path.endswith("ConversationAgentStyle.kt"):
-                    self.assertIn("bottomSheetMotion: Boolean = true", shell)
-                    self.assertIn("bottomSheet = bottomSheetMotion", shell)
-                elif not path.endswith(("UsagePresentation.kt", "DaiyuDialogs.kt")):
+                if not path.endswith(("UsagePresentation.kt", "DaiyuDialogs.kt")):
                     self.assertIn("bottomSheet = true", shell)
 
     def test_compact_usage_keeps_center_alignment_width_and_padding(self):

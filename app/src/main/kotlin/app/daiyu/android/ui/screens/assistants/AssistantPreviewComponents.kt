@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import app.daiyu.android.ui.components.PreviewDialog
+import app.daiyu.android.ui.components.defaultBottomSheetHeight
 import app.daiyu.android.ui.components.previewGlassBlur
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -89,8 +90,7 @@ internal fun AssistantPreviewDialog(
     if (!show) return
     val density = LocalDensity.current
     PreviewDialog(onDismiss, bottomSheet = true, onOutsideDismiss = onOutsideDismiss) {
-        val availableHeight = (maxHeight - 20.dp).coerceAtLeast(0.dp)
-        val sheetHeight = minOf((maxHeight - 48.dp).coerceIn(300.dp, 520.dp), availableHeight)
+        val sheetHeight = defaultBottomSheetHeight(maxHeight)
         CompositionLocalProvider(LocalDensity provides density) {
             AssistantPreviewSheet(title, onDismiss, onBack, showCloseButton, footer,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)

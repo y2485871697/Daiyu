@@ -28,6 +28,9 @@ import app.daiyu.android.ui.components.subagent.ConversationThinkingPicker
 import app.daiyu.android.ui.screens.assistants.AssistantPickerDialog
 import app.daiyu.android.ui.screens.chat.conversation.ChatAttachmentSheet
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
+import app.daiyu.android.ui.screens.chat.conversation.SubAgentStatusDialog
+import app.daiyu.android.ui.screens.chat.conversation.SubAgentStatusRow
+import app.daiyu.android.domain.delegation.ChildRunOwner
 import app.daiyu.android.ui.screens.settings.CatalogModelEditorDialog
 
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
@@ -159,6 +162,50 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             assertFloating("conversation-agent-sheet", "thinking-depth-slider")
             close("conversation-agent-sheet")
             assertEquals(0, changes)
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testStatusSheetMatchesAssistantHeightForEveryState() {
+        val assets = FileAssistantAssets(instrumentation.targetContext)
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            show(dark, scale) { dismiss -> AssistantPickerDialog(true, emptyList(), null, {}, {}, dismiss,
+                onCopy = {}, onDelete = {}, assets = assets) }
+            assertFloating("assistant-sheet", "assistant-done")
+            val expectedHeight = rawBounds(node("assistant-sheet").fetchSemanticsNode()).height
+            close("assistant-sheet")
+            for (state in listOf(0, 1, 2, 3, 4)) {
+                val count = when (state) { 3 -> 1; 4 -> 40; else -> 0 }
+                val rows = (0 until count).map { index ->
+                    SubAgentStatusRow(ChildRunOwner("chat", "run", "group", 1, "task-$index", "answer"),
+                        "代理 $index", "执行中", model = "冻结模型 $index")
+                }
+                show(dark, scale) { dismiss ->
+                    SubAgentStatusDialog(rows, loading = state == 0, failed = state == 2, onDismiss = dismiss)
+                }
+                assertFloating("conversation-agent-sheet")
+                val status = node("conversation-agent-sheet").fetchSemanticsNode()
+                assertEquals("Status and assistant surfaces share a default height", expectedHeight, rawBounds(status).height, 2f)
+                if (state == 0) ui.onNodeWithText("正在读取任务状态…").assertIsDisplayed()
+                if (state == 2) ui.onNodeWithText("任务状态读取失败；未改变任何任务").assertIsDisplayed()
+                if (state == 1) {
+                    val empty = node("subagent-status-empty").fetchSemanticsNode()
+                    val text = ui.onNodeWithText("本会话暂无子代理任务").assertIsDisplayed().fetchSemanticsNode()
+                    assertEquals(rawBounds(empty).center.y, rawBounds(text).center.y, 1f)
+                }
+                if (state == 4) {
+                    node("subagent-status-list").performScrollToIndex(rows.lastIndex)
+                    node("subagent-status:task-39").performScrollTo().assertIsDisplayed()
+                    ui.onNodeWithText("冻结模型 39").assertDoesNotExist()
+                    node("subagent-status:task-39").performClick()
+                    ui.onNodeWithText("冻结模型 39").scrollToVisible().assertIsDisplayed()
+                    assertEquals(expectedHeight, rawBounds(node("conversation-agent-sheet").fetchSemanticsNode()).height, 2f)
+                    node("subagent-status:task-39").performScrollTo().performClick()
+                    ui.onNodeWithText("冻结模型 39").assertDoesNotExist()
+                    assertEquals(expectedHeight, rawBounds(node("conversation-agent-sheet").fetchSemanticsNode()).height, 2f)
+                }
+                close("conversation-agent-sheet")
+            }
         }
         assertEquals(0, fixture.opens.get())
     }

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components.subagent
 
+import app.daiyu.android.ui.components.defaultBottomSheetHeight
+
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
@@ -55,11 +57,15 @@ internal data class ConversationAgentColors(val dark: Boolean) {
 /** Floating glass sheet with rounded corners. */
 @Composable
 internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, modifier: Modifier = Modifier,
+    useDefaultHeight: Boolean = false,
     content: @Composable ColumnScope.() -> Unit) {
     val colors = conversationAgentColors()
     val shape = RoundedCornerShape(radius.dp)
     PreviewDialog(onDismiss, bottomSheet = true) {
-        Column(modifier.align(Alignment.BottomCenter).heightIn(max = (maxHeight - 20.dp).coerceAtLeast(0.dp)).padding(10.dp).fillMaxWidth().testTag("conversation-agent-sheet")
+        val heightModifier = if (useDefaultHeight) {
+            Modifier.padding(10.dp).height(defaultBottomSheetHeight(maxHeight))
+        } else Modifier.heightIn(max = (maxHeight - 20.dp).coerceAtLeast(0.dp)).padding(10.dp)
+        Column(modifier.align(Alignment.BottomCenter).then(heightModifier).fillMaxWidth().testTag("conversation-agent-sheet")
             .shadow(18.dp, shape, ambientColor = Color(0x24352044), spotColor = Color(0x24352044))
             .clip(shape)
             .previewGlassBlur(shape)

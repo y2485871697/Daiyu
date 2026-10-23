@@ -21,7 +21,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,9 +77,8 @@ internal fun SubAgentStatusHost(controller: ChatController, conversationId: Stri
 internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolean, failed: Boolean,
     onDismiss: () -> Unit) {
     val colors = conversationAgentColors()
-    val maximumHeight = (appWindowSize().height - 48.dp).coerceAtLeast(0.dp)
-    ConversationAgentSheet(onDismiss, radius = 26, modifier = Modifier.heightIn(max = maximumHeight)) {
-        Column(Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp).testTag("subagent-status")) {
+    ConversationAgentSheet(onDismiss, radius = 26, useDefaultHeight = true) {
+        Column(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp).testTag("subagent-status")) {
             ConversationAgentHandle()
             Row(Modifier.fillMaxWidth().padding(bottom = 10.dp).heightIn(min = 28.dp), verticalAlignment = Alignment.Top) {
                 Text("子代理状态", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
@@ -90,13 +88,13 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                 loading -> Text("正在读取任务状态…", color = colors.taskMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
                 failed -> Text("任务状态读取失败；未改变任何任务", color = Color(if (colors.dark) 0xffe5a8b7 else 0xffa15468), fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
                 rows.isEmpty() -> Box(
-                    Modifier.fillMaxWidth().testTag("subagent-status-empty").padding(vertical = 32.dp),
+                    Modifier.fillMaxWidth().weight(1f).testTag("subagent-status-empty").padding(vertical = 32.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("本会话暂无子代理任务", color = colors.taskMuted, fontSize = 13.sp,
                         textAlign = TextAlign.Center)
                 }
-                else -> LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("subagent-status-list")) {
+                else -> LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("subagent-status-list")) {
                     items(rows, key = { subAgentStatusItemKey(it.owner) }) { row ->
                         var expanded by remember(subAgentStatusItemKey(row.owner)) { mutableStateOf(false) }
                         Column(Modifier.fillMaxWidth()) {

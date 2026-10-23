@@ -19,11 +19,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import app.daiyu.android.ui.screens.settings.ProviderActionButton
+import app.daiyu.android.ui.screens.settings.ProviderSettingsTheme
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -34,6 +38,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         val endpoint = reveal("settings-field:Base URL-container").fetchSemanticsNode().boundsInRoot
         val key = reveal("settings-field:API Key-container").fetchSemanticsNode().boundsInRoot
         val eye = node("settings-secret-visibility:API Key").fetchSemanticsNode().boundsInRoot
+        reveal("model-connection-test").assertHeightIsAtLeast(48.dp)
         val density = activity.resources.displayMetrics.density
         assertTrue("name must not reserve multiline space", name.height / density < 80f)
         assertTrue("URL must not reserve multiline space", endpoint.height / density < 80f)
@@ -87,27 +92,41 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())
     }
-    fun testCompactProviderActionsKeepFortyDpFillAndFortyEightDpTouchTargets() {
+    fun testProviderActionsHaveFullHeightAccentFillAndScalableLabels() {
+        val titles = listOf("测试连接", "测试余额查询", "保存配置", "删除提供商")
         for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
-            val clicks = IntArray(3)
+            val clicks = IntArray(titles.size)
             val enabled = mutableStateOf(true)
             var density = 1f
+            var primary = Color.Unspecified
+            var onPrimary = Color.Unspecified
+            var deleteFill = Color.Unspecified
+            var deleteText = Color.Unspecified
             mainThread { activity.setContent {
                 val platform = LocalDensity.current
                 density = platform.density
                 CompositionLocalProvider(LocalDensity provides Density(density, fontScale)) {
                     AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = false) {
-                        key(dark, fontScale) {
-                            Box(Modifier.fillMaxSize().systemBarsPadding()) {
-                                Column(Modifier.width(250.dp).background(Color.Magenta).testTag("compact-provider-host")) {
-                                    listOf("测试余额查询", "保存配置", "删除提供商").forEachIndexed { index, title ->
-                                        ProviderActionButton(title, { clicks[index]++ },
-                                            Modifier.testTag("compact-provider-action:$index"), enabled = enabled.value,
-                                            colors = if (index == 2) ButtonDefaults.textButtonColorsPrimary(
-                                                color = MiuixTheme.colorScheme.surfaceVariant,
-                                                textColor = assistantPreviewPalette().danger)
-                                            else ButtonDefaults.textButtonColorsPrimary())
+                        ProviderSettingsTheme {
+                            primary = MiuixTheme.colorScheme.primary
+                            onPrimary = MiuixTheme.colorScheme.onPrimary
+                            deleteFill = MiuixTheme.colorScheme.surfaceVariant
+                            deleteText = assistantPreviewPalette().danger
+                            key(dark, fontScale) {
+                                Box(Modifier.fillMaxSize().systemBarsPadding()) {
+                                    Column(Modifier.width(250.dp).background(Color.Magenta).testTag("provider-action-host")) {
+                                        titles.forEachIndexed { index, title ->
+                                            val buttonModifier = Modifier.testTag("provider-action:$index")
+                                            if (index == titles.lastIndex) {
+                                                ProviderActionButton(title, { clicks[index]++ }, buttonModifier,
+                                                    enabled = enabled.value, colors = ButtonDefaults.textButtonColorsPrimary(
+                                                        color = MiuixTheme.colorScheme.surfaceVariant,
+                                                        textColor = assistantPreviewPalette().danger))
+                                            } else {
+                                                ProviderActionButton(title, { clicks[index]++ }, buttonModifier, enabled = enabled.value)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -116,12 +135,29 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
-            val host = node("compact-provider-host")
+            val host = node("provider-action-host")
             val hostBounds = host.fetchSemanticsNode().boundsInRoot
-            repeat(3) { index ->
-                val button = node("compact-provider-action:$index").assertIsEnabled()
-                    .assertHeightIsEqualTo(40.dp).assertTouchHeightIsEqualTo(48.dp)
+            var previousBottom = hostBounds.top
+            titles.forEachIndexed { index, title ->
+                val button = node("provider-action:$index").assertIsEnabled()
+                    .assertHeightIsAtLeast(48.dp)
+                val bounds = button.fetchSemanticsNode().boundsInRoot
                 val touch = button.fetchSemanticsNode().touchBoundsInRoot
+                assertTrue("touch target is at least 48dp", touch.height >= kotlin.math.round(48f * density))
+                assertEquals("touch and fill top", bounds.top, touch.top, 1f)
+                assertEquals("touch and fill bottom", bounds.bottom, touch.bottom, 1f)
+                assertTrue("touch targets do not overlap", touch.top >= previousBottom)
+                previousBottom = touch.bottom
+                val layouts = mutableListOf<TextLayoutResult>()
+                val label = ui.onNodeWithText(title, useUnmergedTree = true)
+                label.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+                val layout = layouts.single()
+                assertEquals(16.sp, layout.layoutInput.style.fontSize)
+                assertEquals(22.sp, layout.layoutInput.style.lineHeight)
+                assertEquals(if (index == titles.lastIndex) deleteText else onPrimary, layout.layoutInput.style.color)
+                assertFalse("label must not clip", layout.hasVisualOverflow)
+                assertEquals(bounds.center.y, label.fetchSemanticsNode().boundsInRoot.center.y, 1f)
+                if (fontScale > 1f) assertTrue("large font grows the fill", bounds.height > 48f * density)
                 val left = (touch.left - hostBounds.left).toInt()
                 val top = (touch.top - hostBounds.top).toInt()
                 val bitmap = captureScreenNode(host)
@@ -130,43 +166,40 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                 val height = touch.height.toInt()
                 check(left >= 0 && top >= 0 && left + width <= image.width && top + height <= image.height)
                 val pixels = bitmap.toPixelMap(startX = left, startY = top, width = width, height = height)
-                // Sample the vertical content padding, not the centered label.
-                val fill = pixels[pixels.width / 2, (8f * density).toInt()]
-                fun sameColor(color: Color) = kotlin.math.abs(color.red - fill.red) < .02f &&
-                    kotlin.math.abs(color.green - fill.green) < .02f && kotlin.math.abs(color.blue - fill.blue) < .02f
+                val expected = if (index == titles.lastIndex) deleteFill else primary
+                fun sameColor(color: Color) = kotlin.math.abs(color.red - expected.red) < .02f &&
+                    kotlin.math.abs(color.green - expected.green) < .02f && kotlin.math.abs(color.blue - expected.blue) < .02f
                 val paintedRows = (0 until pixels.height).filter { y ->
                     (0 until pixels.width).any { x -> sameColor(pixels[x, y]) }
                 }
-                assertEquals("compact fill dark=$dark font=$fontScale index=$index", 40f * density, paintedRows.size.toFloat(), 2f)
+                assertEquals("full-height fill dark=$dark font=$fontScale index=$index", bounds.height, paintedRows.size.toFloat(), 2f)
                 assertEquals("continuous fill", paintedRows.last() - paintedRows.first() + 1, paintedRows.size)
-                assertEquals("top touch margin", 4f * density, paintedRows.first().toFloat(), 2f)
-                assertEquals("bottom fill edge", 44f * density, (paintedRows.last() + 1).toFloat(), 2f)
-                val outside = pixels[pixels.width / 2, (2f * density).toInt()]
-                assertFalse("edge tap must be outside the fill", sameColor(outside))
-                assertEquals(1f, outside.red, .01f)
-                assertEquals(0f, outside.green, .01f)
-                assertEquals(1f, outside.blue, .01f)
-                val fillBounds = button.fetchSemanticsNode().boundsInRoot
+                assertEquals("no transparent top inset", 0f, paintedRows.first().toFloat(), 2f)
+                assertEquals("no transparent bottom inset", bounds.height, (paintedRows.last() + 1).toFloat(), 2f)
+                assertTrue("top edge follows the expected theme color", sameColor(pixels[pixels.width / 2, (2f * density).toInt()]))
+                assertTrue("bottom edge follows the expected theme color", sameColor(pixels[pixels.width / 2, pixels.height - 1 - (2f * density).toInt()]))
                 val topPoint = Offset(touch.center.x, touch.top + 2f * density)
                 val bottomPoint = Offset(touch.center.x, touch.bottom - 2f * density)
-                assertTrue("top edge is outside fill", topPoint.y < fillBounds.top)
-                assertTrue("bottom edge is outside fill", bottomPoint.y > fillBounds.bottom)
-                host.performTouchInput { click(topPoint - hostBounds.topLeft) }
+                assertTrue("top tap is inside fill", topPoint.y > bounds.top)
+                assertTrue("bottom tap is inside fill", bottomPoint.y < bounds.bottom)
+                button.performTouchInput { click() }
                 assertEquals(1, clicks[index])
-                host.performTouchInput { click(bottomPoint - hostBounds.topLeft) }
+                host.performTouchInput { click(topPoint - hostBounds.topLeft) }
                 assertEquals(2, clicks[index])
+                host.performTouchInput { click(bottomPoint - hostBounds.topLeft) }
+                assertEquals(3, clicks[index])
             }
             mainThread { enabled.value = false }
             ui.waitForIdle()
-            repeat(3) { index ->
-                val button = node("compact-provider-action:$index").assertIsNotEnabled()
+            titles.indices.forEach { index ->
+                val button = node("provider-action:$index").assertIsNotEnabled()
                 button.performTouchInput { click() }
                 val touch = button.fetchSemanticsNode().touchBoundsInRoot
                 host.performTouchInput { click(Offset(touch.center.x, touch.top + 2f * density) - hostBounds.topLeft) }
                 host.performTouchInput { click(Offset(touch.center.x, touch.bottom - 2f * density) - hostBounds.topLeft) }
-                assertEquals(2, clicks[index])
+                assertEquals(3, clicks[index])
             }
-            assertTrue("disabled edge touches must not invoke any action", clicks.all { it == 2 })
+            assertTrue("disabled edge touches must not invoke any action", clicks.all { it == 3 })
         }
         assertEquals(0, fixture.opens.get())
     }

@@ -8,26 +8,41 @@ ANDROID = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
 
 
 class ProviderVisualContractTest(unittest.TestCase):
-    def test_compact_actions_use_local_explicit_sizes_and_haptic_button(self):
+    def test_provider_actions_use_local_comfortable_sizes_and_haptic_button(self):
         source = (SRC / 'ProviderSettingsComponents.kt').read_text()
         helper = source.split('internal fun ProviderActionButton(', 1)[1]
         self.assertIn('import app.daiyu.android.ui.haptics.miuix.TextButton', source)
         for fragment in ('TextButton(', 'onClick = onClick', 'enabled = enabled', 'colors = colors',
-                         'minHeight = 40.dp', 'PaddingValues(horizontal = 12.dp, vertical = 6.dp)',
-                         'fontSize = 14.sp, lineHeight = 20.sp',
-                         'modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 4.dp)'):
+                         'minHeight = 48.dp', 'PaddingValues(horizontal = 16.dp, vertical = 12.dp)',
+                         'fontSize = 16.sp, lineHeight = 22.sp',
+                         'modifier.fillMaxWidth().heightIn(min = 48.dp)',
+                         'color = MiuixTheme.colorScheme.primary', 'textColor = MiuixTheme.colorScheme.onPrimary'):
             self.assertIn(fragment, helper)
-        for forbidden in ('pointerInput', 'LocalDensity', 'requiredHeight', 'clickable(', 'alpha('):
+        for forbidden in ('pointerInput', 'LocalDensity', 'requiredHeight', 'clickable(', 'alpha(', '.padding(vertical = 4.dp)'):
             self.assertNotIn(forbidden, helper)
 
-    def test_only_three_provider_actions_use_the_compact_helper(self):
+    def test_only_four_provider_actions_use_the_local_helper(self):
         calls = []
         for path in SRC.glob('*.kt'):
             count = path.read_text().count('ProviderActionButton(')
             if path.name == 'ProviderSettingsComponents.kt':
                 count -= 1
             calls.extend([path.name] * count)
-        self.assertCountEqual(calls, ['ModelSettingsScreen.kt', 'ModelSettingsScreen.kt', 'ProviderBalanceFields.kt'])
+        self.assertCountEqual(calls, ['ModelSettingsScreen.kt', 'ModelSettingsScreen.kt', 'ModelSettingsScreen.kt', 'ProviderBalanceFields.kt'])
+
+    def test_connection_uses_primary_helper_only_on_provider_page(self):
+        source = (SRC / 'ModelSettingsScreen.kt').read_text()
+        block = source.split('if (testConnection != null) {', 1)[1].split('connection.status?.let', 1)[0]
+        provider, normal = block.split('if (providerName != null) {', 1)[1].split('} else {', 1)
+        self.assertIn('ProviderActionButton(', provider)
+        self.assertNotIn('ProviderActionButton(', normal)
+        self.assertIn('TextButton(', normal)
+        self.assertIn('fillMaxWidth().padding(12.dp)', normal)
+        self.assertIn('padding(horizontal = 12.dp, vertical = 8.dp)', provider)
+        for branch in (provider, normal):
+            self.assertIn('if (connection.running) "正在测试连接" else "测试连接"', branch)
+            self.assertIn('enabled = enabled && !connection.running, onClick = connection.start', branch)
+            self.assertIn('testTag("model-connection-test")', branch)
 
     def test_nonprovider_save_retains_its_existing_size_and_owner(self):
         source = (SRC / 'ModelSettingsScreen.kt').read_text()
@@ -37,6 +52,7 @@ class ProviderVisualContractTest(unittest.TestCase):
         self.assertIn('ProviderActionButton(', provider)
         self.assertIn('text = "保存配置"', provider)
         self.assertIn('onClick = submit', provider)
+        self.assertIn('enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid', provider)
         self.assertIn('padding(horizontal = 20.dp, vertical = 4.dp)', provider)
         for fragment in ('TextButton(', 'text = "保存"', 'onClick = submit',
                          'colors = ButtonDefaults.textButtonColorsPrimary()',
@@ -74,10 +90,17 @@ class ProviderVisualContractTest(unittest.TestCase):
     def test_android_regressions_keep_pixel_touch_and_business_assertions(self):
         actions = (ANDROID / 'ProviderSettingsLayoutActivityTest.kt').read_text()
         for fragment in ('listOf(false, true)', 'listOf(.9f, 1.3f)', 'key(dark, fontScale)',
-                         'assertTouchHeightIsEqualTo(48.dp)', 'val bitmap = captureScreenNode(host)', 'bitmap.toPixelMap(startX = left, startY = top, width = width, height = height)',
-                         '40f * density, paintedRows.size.toFloat(), 2f', 'click(topPoint - hostBounds.topLeft)', 'click(bottomPoint - hostBounds.topLeft)',
+                         'touch.height >= kotlin.math.round(48f * density)', 'assertHeightIsAtLeast(48.dp)',
+                         'val bitmap = captureScreenNode(host)', 'bitmap.toPixelMap(startX = left, startY = top, width = width, height = height)',
+                         'bounds.height, paintedRows.size.toFloat(), 2f', 'click(topPoint - hostBounds.topLeft)', 'click(bottomPoint - hostBounds.topLeft)',
                          'assertIsNotEnabled()', 'button.performTouchInput { click() }',
-                         'paintedRows.last() - paintedRows.first() + 1', 'outside.green',
+                         'paintedRows.last() - paintedRows.first() + 1', 'ProviderSettingsTheme {',
+                         'val expected = if (index == titles.lastIndex) deleteFill else primary',
+                         'assertEquals(16.sp, layout.layoutInput.style.fontSize)',
+                         'assertEquals(22.sp, layout.layoutInput.style.lineHeight)',
+                         'deleteText else onPrimary, layout.layoutInput.style.color)',
+                         'layout.hasVisualOverflow', 'large font grows the fill',
+                         'listOf("测试连接", "测试余额查询", "保存配置", "删除提供商")',
                          'testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToChat',
                          'testNameIsSavedInsideConfigurationWithoutChangingModelOrCredentials'):
             self.assertIn(fragment, actions)

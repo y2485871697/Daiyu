@@ -51,6 +51,8 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
     val tabs = MutableStateFlow<List<Tab>>(emptyList())
     val selectedTabId = MutableStateFlow<Int?>(null)
     val busy = MutableStateFlow(visit == null)
+    val agentBrowsing = MutableStateFlow(false)
+    val unavailable = MutableStateFlow(false)
     val currentUserAgentProfile = MutableStateFlow(runCatching {
         UserAgentProfile.valueOf(prefs.getString("user_agent_profile", UserAgentProfile.MOBILE_CHROME.name)!!)
     }.getOrDefault(UserAgentProfile.MOBILE_CHROME))
@@ -110,6 +112,8 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
     fun refresh() {
         val state = visit?.snapshot() ?: return
         notice.value = state.notice
+        unavailable.value = !state.live || state.unknown
+        agentBrowsing.value = visit.taskOwned && !unavailable.value && state.tabs.isNotEmpty() && !state.takenOver
         busy.value = !state.live || state.waiting || state.unknown || (state.tabs.isNotEmpty() && !state.takenOver)
         val liveIds = state.tabs.map { it.tabId }.toSet()
         models.keys.retainAll(liveIds)
@@ -128,6 +132,7 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
     }
     fun ensureTabForUI() {
         val state = visit?.snapshot() ?: return
+        if (!state.live || state.unknown) return
         if (state.tabs.isEmpty()) visit.newTab()
         else if (!state.takenOver && !state.waiting) state.lease?.let(visit::takeover)
         refresh()

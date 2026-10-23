@@ -316,6 +316,7 @@ class NavigationCallbacksTest {
     @Test fun humanLinkAndRedirectStayManualWithoutApprovingModelHistory() {
         val h = Harness()
         h.gate.enterManual()
+        assertTrue(h.gate.manualOverride(a, true))
         assertTrue(h.gate.onStarted(a))
         assertTrue(h.gate.manualOverride(b, true))
         assertTrue(h.gate.onStarted(b))
@@ -371,6 +372,65 @@ class NavigationCallbacksTest {
         assertFalse(h.finish(a))
         assertTrue(h.upstreamFinishes.isEmpty())
         assertFalse(h.gate.begin(a))
+    }
+
+    @Test fun cancelledHumanStartCannotRestartLoadingOrConsumeNextNavigation() {
+        val h = Harness()
+        h.gate.enterManual()
+        assertTrue(h.gate.manualOverride(a, true))
+        assertTrue(h.gate.onStarted(a))
+        h.gate.cancelManualLoad()
+        assertFalse(h.gate.onStarted(a))
+        assertEquals(NavigationCallbacks.Phase.IDLE, h.gate.phase)
+        assertTrue(h.gate.manualOverride(b, true))
+        assertFalse(h.gate.onStarted(a))
+        assertEquals(NavigationCallbacks.Phase.AWAITING_START, h.gate.phase)
+        assertTrue(h.gate.onStarted(b))
+        assertFalse(h.gate.onStarted(a))
+        assertTrue(h.finish(b))
+        assertTrue(h.rejections.isEmpty())
+        assertTrue(h.approvals.isEmpty())
+        assertTrue(h.upstreamFinishes.isEmpty())
+    }
+
+    @Test fun mismatchedHumanFinishDoesNotRetireTabOrApproveModelHistory() {
+        val h = Harness()
+        h.gate.enterManual()
+        assertTrue(h.gate.manualOverride(a, true))
+        assertTrue(h.gate.onStarted(a))
+        assertFalse(h.finish(a, b))
+        assertEquals(NavigationCallbacks.Phase.LOADING, h.gate.phase)
+        assertTrue(h.gate.manualOverride(b, true))
+        assertTrue(h.gate.onStarted(b))
+        assertTrue(h.finish(b))
+        assertTrue(h.rejections.isEmpty())
+        assertTrue(h.recordedHistory.isEmpty())
+        assertTrue(h.upstreamFinishes.isEmpty())
+    }
+
+    @Test fun humanRedirectStartWithoutOverrideCanFinishWithoutModelApproval() {
+        val h = Harness()
+        h.gate.enterManual()
+        assertTrue(h.gate.manualOverride(a, true))
+        assertTrue(h.gate.onStarted(b))
+        assertTrue(h.finish(b))
+        assertEquals(NavigationCallbacks.Phase.IDLE, h.gate.phase)
+        assertTrue(h.rejections.isEmpty())
+        assertTrue(h.approvals.isEmpty())
+        assertTrue(h.upstreamFinishes.isEmpty())
+    }
+
+    @Test fun freshHumanFormStartWithoutOverrideCanStillLoad() {
+        val h = Harness()
+        h.gate.enterManual()
+        assertTrue(h.gate.onStarted(a))
+        assertTrue(h.finish(a))
+        assertTrue(h.gate.onStarted(b))
+        assertTrue(h.finish(b))
+        assertEquals(NavigationCallbacks.Phase.IDLE, h.gate.phase)
+        assertTrue(h.rejections.isEmpty())
+        assertTrue(h.approvals.isEmpty())
+        assertTrue(h.upstreamFinishes.isEmpty())
     }
 
 }

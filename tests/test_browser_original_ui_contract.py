@@ -20,6 +20,22 @@ UI_CALLS = {
     'ViewportSection', 'UaMismatchBanner', 'DaiyuDialog', 'PreviewDialog',
     'SettingsNote', 'SettingsRow', 'SettingsSectionTitle', 'SettingsCard',
 }
+APPROVED_BROWSER_BRANDING = {
+    'values': ('Minis is browsing', 'Daiyu is browsing'),
+    'values-b+zh+Hans': ('Minis 正在浏览', '代鱼 正在浏览'),
+    'values-b+zh+Hant': ('Minis 正在瀏覽', '代魚 正在瀏覽'),
+}
+
+
+def approved_original_browser_resources(locale, source):
+    old, new = APPROVED_BROWSER_BRANDING[locale]
+    old = ('<string name="om_browser_minis_browsing">' + old + '</string>').encode()
+    new = ('<string name="om_browser_minis_browsing">' + new + '</string>').encode()
+    if source.count(new) != 1 or old in source:
+        raise AssertionError('browser branding must use the exact approved translation: ' + locale)
+    return source.replace(new, old, 1)
+
+
 VISUAL_BINDINGS = {
     'ui/browser/BrowserSheet.kt': ('accent', 'secondaryBg', 'tertiaryBg', 'title', 'domain',
                                    'displayTitle', 'bg', 'borderColor', 'textColor', 'angle', 'breathingAlpha'),
@@ -328,7 +344,25 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
     def test_original_three_language_resource_bytes(self):
         for locale, expected in self.baseline['resources'].items():
             source = ROOT / 'app/src/main/res' / locale / 'openminis_browser.xml'
-            self.assertEqual(expected, hashlib.sha256(source.read_bytes()).hexdigest(), locale)
+            self.assertEqual(expected, hashlib.sha256(approved_original_browser_resources(locale, source.read_bytes())).hexdigest(), locale)
+
+    def test_branding_adaptation_rejects_other_copy_layout_or_missing_brand(self):
+        for locale, (old, new) in APPROVED_BROWSER_BRANDING.items():
+            source = (ROOT / 'app/src/main/res' / locale / 'openminis_browser.xml').read_bytes()
+            old, new = old.encode(), new.encode()
+            for changed in (source.replace(new, old), source.replace(new, b'Other brand'),
+                            source.replace(new, new + b'!'), source.replace(new, b''),
+                            source.replace(b'</resources>', b'<string name="extra">extra</string></resources>'),
+                            source.replace(b'<?xml', b' <?xml')):
+                with self.subTest(locale=locale, changed=changed[:20]):
+                    try:
+                        digest = hashlib.sha256(approved_original_browser_resources(locale, changed)).hexdigest()
+                    except AssertionError:
+                        continue
+                    self.assertNotEqual(self.baseline['resources'][locale], digest)
+            tag = ('<string name="om_browser_minis_browsing">' + new.decode() + '</string>').encode()
+            with self.assertRaises(AssertionError):
+                approved_original_browser_resources(locale, source + tag)
 
     def test_no_added_task_description_controls_or_notice_area(self):
         settings = (PORT / 'ui/browser/BrowserSettingsSheet.kt').read_text()

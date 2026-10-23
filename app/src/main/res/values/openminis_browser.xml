@@ -17,7 +17,7 @@
     <string name="om_browser_history_empty_title">No browsing history</string>
     <string name="om_browser_history_search">Search history</string>
     <string name="om_browser_history_title">History</string>
-    <string name="om_browser_minis_browsing">Minis is browsing</string>
+    <string name="om_browser_minis_browsing">Daiyu is browsing</string>
 
     <string name="om_browser_nav_back">Back</string>
     <string name="om_browser_nav_forward">Forward</string>

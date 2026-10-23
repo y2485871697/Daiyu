@@ -136,7 +136,11 @@ internal class NavigationCallbacks(
     fun onStarted(url: String?): Boolean {
         if (!available()) return false
         val key = permittedKey(url) ?: return false
-        if (isManual && phase == Phase.IDLE && !manualOverride(checkNotNull(url), true)) return false
+        if (isManual && phase == Phase.IDLE) {
+            if (key in used || !manualOverride(checkNotNull(url), true)) return false
+        }
+        if (isManual && (pending != null && key != pending && key in used ||
+                pending == null && phase == Phase.LOADING && key in used && key != current)) return false
         if (!directLoadSeen || phase !in setOf(Phase.AWAITING_START, Phase.LOADING)) {
             return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
         }
@@ -183,7 +187,10 @@ internal class NavigationCallbacks(
             used += key
             return false
         }
-        if (key != keyOf(visibleUrl)) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
+        if (key != keyOf(visibleUrl)) {
+            if (isManual) { used += key; return false }
+            return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
+        }
         if (isManual) {
             current = null
             pending = null

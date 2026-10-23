@@ -85,14 +85,18 @@ internal class LocalBrowserVisual(context: Context, private val conversation: Co
         override val memory get() = uiMemory
         override val taskOwned: Boolean get() = false
         private fun current() = live && active === this && !closed
-        private inline fun change(action: () -> Unit) {
+        private fun failed(stage: String, failure: Exception) {
+            unknown = true
+            android.util.Log.w("DaiyuBrowser", "human:$stage:${failure.javaClass.simpleName}")
+        }
+        private inline fun change(stage: String, action: () -> Unit) {
             requireMain()
             if (!current() || unknown) return
-            try { action() } catch (_: Exception) { unknown = true }
+            try { action() } catch (failure: Exception) { failed(stage, failure) }
         }
         override fun snapshot(): ControllerBrowserVisual.State {
             requireMain()
-            val page = if (current() && !unknown) try { attachment?.page() } catch (_: Exception) { unknown = true; null } else null
+            val page = if (current() && !unknown) try { attachment?.page() } catch (failure: Exception) { failed("page", failure); null } else null
             if (page != null && token != null) uiMemory.pages[checkNotNull(token).lease.tabId] = page
             return ControllerBrowserVisual.State(live = current(), lease = token?.lease ?: host.session.currentTab,
                 takenOver = token != null, mounted = attachment != null, unknown = unknown,
@@ -100,7 +104,7 @@ internal class LocalBrowserVisual(context: Context, private val conversation: Co
                 tabs = if (closed) emptyList() else host.session.visibleTabs, page = page)
         }
         override fun takeover(lease: BrowserTabLease) = selectTab(lease)
-        override fun newTab() = change {
+        override fun newTab() = change("newTab") {
             if (host.session.visibleTabs.size >= 3) return@change
             release()
             when (host.session.execute(mapOf("action" to "new_tab"))) {
@@ -109,14 +113,14 @@ internal class LocalBrowserVisual(context: Context, private val conversation: Co
                 is BrowserOutcome.NotExecuted -> Unit
             }
         }
-        override fun selectTab(lease: BrowserTabLease) = change {
+        override fun selectTab(lease: BrowserTabLease) = change("selectTab") {
             if (token?.lease == lease) return@change
             if (lease !in host.session.visibleTabs) return@change
             release()
             val target = host.session.visibleTabs.first { it.tabId == lease.tabId }
             acquire(target)
         }
-        override fun mount(parent: ViewGroup) = change {
+        override fun mount(parent: ViewGroup) = change("mount") {
             if (this@LocalBrowserVisual.parent === parent && attachment != null) return@change
             detach()
             val held = token ?: return@change
@@ -126,19 +130,19 @@ internal class LocalBrowserVisual(context: Context, private val conversation: Co
             attachment?.downloads(downloadListener)
             restoreUrls.remove(held.lease.tabId)?.let { attachment?.navigate(it) }
         }
-        override fun unmount(parent: ViewGroup) = change {
+        override fun unmount(parent: ViewGroup) = change("unmount") {
             if (this@LocalBrowserVisual.parent === parent) detach()
         }
-        override fun navigate(url: String) = change { attachment?.navigate(url) }
-        override fun control(action: BrowserVisibleAction) = change { attachment?.control(action) }
-        override fun configure(configuration: BrowserVisibleConfiguration) = change {
+        override fun navigate(url: String) = change("navigate") { attachment?.navigate(url) }
+        override fun control(action: BrowserVisibleAction) = change("control") { attachment?.control(action) }
+        override fun configure(configuration: BrowserVisibleConfiguration) = change("configure") {
             this@LocalBrowserVisual.configuration = configuration
             attachment?.configure(configuration)
         }
-        override fun downloads(listener: BrowserVisibleDownload?) = change {
+        override fun downloads(listener: BrowserVisibleDownload?) = change("downloads") {
             downloadListener = listener; attachment?.downloads(listener)
         }
-        override fun closeTab() = change {
+        override fun closeTab() = change("closeTab") {
             val held = token ?: return@change
             host.session.closeTab(held); token = null; detach()
             uiMemory.pages.remove(held.lease.tabId); restoreUrls.remove(held.lease.tabId)

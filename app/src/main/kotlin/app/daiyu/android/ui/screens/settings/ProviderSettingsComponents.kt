@@ -130,17 +130,19 @@ internal fun ProviderActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: TextButtonColors = ButtonDefaults.textButtonColorsPrimary(),
+    colors: TextButtonColors = ButtonDefaults.textButtonColorsPrimary(
+        color = MiuixTheme.colorScheme.primary,
+        textColor = MiuixTheme.colorScheme.onPrimary,
+    ),
 ) {
     TextButton(
         text = text,
         onClick = onClick,
         enabled = enabled,
         colors = colors,
-        minHeight = 40.dp,
-        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        textStyle = MiuixTheme.textStyles.body1.copy(fontSize = 14.sp, lineHeight = 20.sp),
-        // Reserve 48dp for Compose's minimum touch target around the compact fill.
-        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 4.dp),
+        minHeight = 48.dp,
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        textStyle = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 22.sp),
+        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp),
     )
 }

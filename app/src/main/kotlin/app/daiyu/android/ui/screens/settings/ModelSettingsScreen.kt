@@ -165,9 +165,15 @@ internal fun ModelSettingsScreen(
                     changeDraft(draft.copy(openAiWebSearchEnabled = it))
                 }
                 if (testConnection != null) {
-                    TextButton(text = if (connection.running) "正在测试连接" else "测试连接",
-                        enabled = enabled && !connection.running, onClick = connection.start,
-                        modifier = Modifier.testTag("model-connection-test").fillMaxWidth().padding(12.dp))
+                    if (providerName != null) {
+                        ProviderActionButton(text = if (connection.running) "正在测试连接" else "测试连接",
+                            enabled = enabled && !connection.running, onClick = connection.start,
+                            modifier = Modifier.testTag("model-connection-test").padding(horizontal = 12.dp, vertical = 8.dp))
+                    } else {
+                        TextButton(text = if (connection.running) "正在测试连接" else "测试连接",
+                            enabled = enabled && !connection.running, onClick = connection.start,
+                            modifier = Modifier.testTag("model-connection-test").fillMaxWidth().padding(12.dp))
+                    }
                     connection.status?.let { SettingsNote(it) }
                 }
                 if (requestOptionsUnavailable) {

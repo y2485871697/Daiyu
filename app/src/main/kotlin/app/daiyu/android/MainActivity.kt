@@ -360,6 +360,29 @@ class MainActivity : ComponentActivity() {
             if (universalVoiceDelegate.isInitialized() && universalVoice.state.value.active) revokeUniversalVoice()
         }
     }
+    private fun voiceConfigurationToast(text: String) { Toast.makeText(this, text, Toast.LENGTH_SHORT).show() }
+    private fun chatVoiceConfigurationProblem(mode: ChatMenuAction): String? {
+        val missing = when (mode) {
+            ChatMenuAction.VOICE_INPUT -> "请先配置语音输入"
+            ChatMenuAction.VOICE_DOUBAO -> "请先配置豆包实时通话"
+            else -> "请先配置语音对话"
+        }
+        val config = try {
+            if (mode == ChatMenuAction.VOICE_CHAT) voiceRuntime.prepareSpeech(VoiceProfile.CONVERSATION).configuration
+            else voiceRuntime.snapshot()
+        } catch (_: Exception) { return missing }
+        if (mode == ChatMenuAction.VOICE_DOUBAO) return missing.takeIf { config.duplexKey.isBlank() }
+        val offlineReady = app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready
+        if (mode == ChatMenuAction.VOICE_CHAT && offlineReady) return null
+        return when (config.dictation) {
+            "DOUBAO" -> missing.takeIf {
+                config.asrKey.isBlank() || config.asrResource !in app.daiyu.android.voice.providers.DoubaoAsrProtocol.resources
+            }
+            "SYSTEM" -> if (offlineReady) null
+                else "请先下载离线语音包"
+            else -> missing
+        }
+    }
     private fun startUniversalVoice(profile: VoiceControlProfile, limits: VoiceControlLimits) {
         if (!VoiceSettingsPreferences(applicationContext).enabled("conversation")) { toast("请先在语音设置中启用语音会话"); return }
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible) return
@@ -2240,7 +2263,7 @@ class MainActivity : ComponentActivity() {
                     when (config?.dictation) {
                         "SYSTEM" -> {
                             if (app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready) startOfflineDictation()
-                            else { toast("请先下载语音包"); retainedPage = "voice-settings" }
+                            else voiceConfigurationToast("请先下载离线语音包")
                         }
                         "DOUBAO" -> {
                             val ownedTarget = remoteVoice.dictationTarget?.takeIf(::voiceEditorCurrent) ?: target
@@ -2278,6 +2301,10 @@ class MainActivity : ComponentActivity() {
                 else -> "conversation"
             }
             if (!VoiceSettingsPreferences(applicationContext).enabled(feature)) return@voice
+            if (!currentChat()) return@voice
+            if (voiceEntryMode != ChatMenuAction.VOICE_DOUBAO || !remoteVoice.duplexActive) {
+                chatVoiceConfigurationProblem(voiceEntryMode)?.let { voiceConfigurationToast(it); return@voice }
+            }
             when (voiceEntryMode) {
                 ChatMenuAction.VOICE_INPUT -> requestDictation()
                 ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) {

@@ -186,6 +186,9 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
     }
 
     fun testVoiceMenuOpensRealControlsWithoutMicrophoneOrProviderRequest() {
+        kotlinx.coroutines.runBlocking {
+            fixture.controller.voiceRuntime.save(VoiceConfiguration(dictation = "DOUBAO", asrKey = "fixture-asr"), VoiceProfile.CONVERSATION)
+        }
         selectDraft()
         openVoiceConversationPanel()
         node("voice-universal-control").assertExists()
@@ -197,6 +200,9 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
     }
 
     fun testVoiceMenuRequestFollowsOnlyItsOwnEditorMigrations() {
+        kotlinx.coroutines.runBlocking {
+            fixture.controller.voiceRuntime.save(VoiceConfiguration(dictation = "DOUBAO", asrKey = "fixture-asr"), VoiceProfile.CONVERSATION)
+        }
         selectDraft()
         openVoiceConversationPanel()
         node("voice-universal-control").assertExists()

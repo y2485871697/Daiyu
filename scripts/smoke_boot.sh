@@ -152,8 +152,8 @@ wait_for_framework_ready() {
     fi
     if test "$boot_changed" = 1 && test -n "$current" && test "$current" = "$previous" &&
        test "$(timeout --kill-after=5 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 &&
-       timeout --kill-after=5 5 adb shell cmd package path android > smoke/package-ready.txt 2>&1 &&
-       grep -q '^package:' smoke/package-ready.txt; then
+       timeout --kill-after=5 5 adb shell cmd package list packages -f android 2>&1 | tr -d '\r' > smoke/package-ready.txt &&
+       grep -Eq '^package:/[^[:space:]=]+\.apk=android$' smoke/package-ready.txt; then
       stable=$((stable + 1))
     else
       stable=0
@@ -202,8 +202,8 @@ cmp smoke/ime-default-before.txt smoke/ime-default-restored.txt
 if test "$api" = 26; then
   fixture_ime=jp.co.omronsoft.openwnn/.OpenWnnJAJP
   adb_stage ime-enabled-before 15 shell settings get secure enabled_input_methods > smoke/ime-enabled-before.txt
-  adb_stage ime-fixture-path 15 shell cmd package path jp.co.omronsoft.openwnn > smoke/ime-fixture-path.txt
-  grep -Fx 'package:/system/app/OpenWnn/OpenWnn.apk' smoke/ime-fixture-path.txt
+  adb_stage ime-fixture-path 15 shell cmd package list packages -f jp.co.omronsoft.openwnn | tr -d '\r' > smoke/ime-fixture-path.txt
+  grep -Fx 'package:/system/app/OpenWnn/OpenWnn.apk=jp.co.omronsoft.openwnn' smoke/ime-fixture-path.txt
   adb_stage ime-fixture-enable 15 shell ime enable "$fixture_ime" > smoke/ime-fixture-enable.txt
   adb_stage ime-fixture-set 15 shell ime set "$fixture_ime" > smoke/ime-fixture-set.txt
   adb_stage ime-enabled-selected 15 shell settings get secure enabled_input_methods > smoke/ime-enabled-selected.txt
@@ -239,8 +239,8 @@ assert len(started) == len(finished) == 1 and started == finished, "WebView relr
 print(current[0])
 PYWEBVIEW
 )
-adb_stage webview-package 15 shell cmd package path "$provider" > smoke/webview-package.txt
-grep -q '^package:' smoke/webview-package.txt
+adb_stage webview-package 15 shell cmd package list packages -f "$provider" | tr -d '\r' > smoke/webview-package.txt
+awk -F= -v package="$provider" '$0 ~ /^package:\/[^[:space:]=]+\.apk=/ && $NF == package { found=1 } END { exit !found }' smoke/webview-package.txt
 adb_stage logcat-restored 20 logcat -d -b all > smoke/logcat-before.txt
 if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat-before.txt; then exit 1; fi
 adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt

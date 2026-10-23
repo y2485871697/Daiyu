@@ -399,9 +399,17 @@ case "$*" in
    printf ':jp.co.omronsoft.openwnn/.OpenWnnJAJP'
   fi
   printf '\n' ;;
- 'shell cmd package path jp.co.omronsoft.openwnn')
-  [ "$CASE" != fixture-package-missing ] || exit 7
-  printf 'package:/system/app/OpenWnn/OpenWnn.apk\n' ;;
+ 'shell cmd package path '*)
+  [ "$API" != 26 ] || { printf 'Unknown command: path\n'; exit 255; }
+  case "$5" in
+   android) printf 'package:/system/framework/framework-res.apk\n' ;;
+   jp.co.omronsoft.openwnn) printf 'package:/system/app/OpenWnn/OpenWnn.apk\n' ;;
+   com.android.chrome) printf 'package:/system/app/Chrome/Chrome.apk\n' ;;
+   *) exit 17 ;;
+  esac ;;
+ 'shell cmd package list packages -f jp.co.omronsoft.openwnn')
+  [ "$CASE" != fixture-package-missing ] || exit 0
+  printf 'package:/system/app/OpenWnn/OpenWnn.apk=jp.co.omronsoft.openwnn\n' ;;
  'shell ime enable jp.co.omronsoft.openwnn/.OpenWnnJAJP')
   [ "$CASE" != fixture-enable-fail ] || exit 7 ;;
  'shell ime set jp.co.omronsoft.openwnn/.OpenWnnJAJP')
@@ -410,7 +418,9 @@ case "$*" in
  'reboot') [ "$CASE" != reboot-fail ] || exit 7; touch smoke/rebooted ;;
 
  *pidof*) fake_boot_id; printf '123\n456\n' ;;
- 'shell cmd package path android') printf 'package:/system/framework/framework-res.apk\n' ;;
+ 'shell cmd package list packages -f android')
+  [ "$CASE" != framework-package-missing ] || { printf 'package:/system/framework/fake.apk=not.android\n'; exit 0; }
+  printf 'package:/system/framework/framework-res.apk=android\n' ;;
  'shell getprop debug.hwui.renderer') printf '\n' ;;
  'shell dumpsys webviewupdate')
   [ "$CASE" != webview-command-fail ] || exit 8
@@ -420,11 +430,17 @@ case "$*" in
   dirty=false; [ "$CASE" != webview-dirty ] || dirty=true
   finished=2; [ "$CASE" != webview-relro ] || finished=1
   printf 'Any WebView package installed: true\nWebView package dirty: %s\nNumber of relros started: 2\nNumber of relros finished: %s\n' "$dirty" "$finished" ;;
- 'shell cmd package path com.android.chrome')
-  [ "$CASE" = webview-no-path ] || printf 'package:/system/app/Chrome/Chrome.apk\n' ;;
+ 'shell cmd package list packages -f com.android.chrome')
+  [ "$CASE" != webview-query-fail ] || exit 8
+  if [ "$CASE" = webview-near-package ]; then printf 'package:/system/app/Chrome/Chrome.apk=com.android.chrome.beta\n'
+  elif [ "$CASE" != webview-no-path ]; then printf 'package:/system/app/Chrome/Chrome.apk=com.android.chrome\n'; fi ;;
 
  'shell cat /proc/meminfo') printf 'MemTotal: 5000000 kB\n' ;;
  'install '*) printf 'Success\n'; [ "$CASE" != install-fail ] || exit 7 ;;
+ 'shell cmd package '*)
+  [ "$*" = 'shell cmd package list packages' ] || { printf 'Unsupported mock package command\n'; exit 255; }
+  if [ "$CASE" = old-package ]; then printf 'package:io.github.mangi.eta\n'
+  else printf 'package:app.daiyu.android\n'; fi ;;
  'shell am instrument '*)
   printf '%s\n' "$@" > smoke/instrumentation-args.txt
   [ "$4" = -w ] && [ "$5" = -r ] || exit 11
@@ -478,9 +494,6 @@ case "$*" in
    *) printf 'Status: ok\n' ;;
   esac
   case "$CASE" in launch-timeout) exit 124 ;; launch-fail) exit 9 ;; esac ;;
- 'shell cmd package list '*)
-  if [ "$CASE" = old-package ]; then printf 'package:io.github.mangi.eta\n'
-  else printf 'package:app.daiyu.android\n'; fi ;;
  'shell uiautomator dump '*) [ "$CASE" != dump-fail ] || exit 8 ;;
  'pull '*) [ "$CASE" != pull-fail ] || exit 8; cat "$FAKE_UI" > "$3" ;;
  'logcat '*)
@@ -489,7 +502,7 @@ case "$*" in
    reboot-crash) [ ! -f smoke/rebooted ] || printf 'Fatal signal 6 (SIGABRT)\n' ;;
 
    pre-native-crash) printf 'Fatal signal 6 (SIGABRT)\n' ;;
-   late-pre-native-crash) grep -q 'shell cmd package path android' smoke/adb-calls.txt && printf 'Fatal signal 6 (SIGABRT)\n'; true ;;
+   late-pre-native-crash) grep -q 'shell cmd package list packages -f android' smoke/adb-calls.txt && printf 'Fatal signal 6 (SIGABRT)\n'; true ;;
    pre-gl-crash) printf 'GL errors! frameworks/base/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp:110\n' ;;
    crash) [ ! -f smoke/launch-args.txt ] || printf 'FATAL EXCEPTION\n' ;;
    native-crash) [ ! -f smoke/launch-args.txt ] || printf 'Fatal signal 6 (SIGABRT)\n' ;;
@@ -553,7 +566,7 @@ exit 0
             probe = calls.index('shell dumpsys webviewupdate')
             install = next(i for i, value in enumerate(calls) if value.startswith('install '))
             self.assertLess(probe, install)
-            self.assertIn('shell cmd package path com.android.chrome', calls)
+            self.assertIn('shell cmd package list packages -f com.android.chrome', calls)
             self.assertNotIn('root', calls)
             self.assertFalse(any('setprop debug.hwui.renderer' in value or 'stop &&' in value for value in calls))
             self.assertLess(calls.index('shell getprop debug.hwui.renderer'), probe)
@@ -643,15 +656,25 @@ exit 0
                 result = self.smoke(api=api)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
-                self.assertIn('shell cmd package path com.android.chrome', calls)
+                self.assertIn('shell cmd package list packages -f com.android.chrome', calls)
                 if api == 26:
-                    self.assertIn('shell cmd package path android', calls)
-                    self.assertIn('shell cmd package path jp.co.omronsoft.openwnn', calls)
+                    self.assertIn('shell cmd package list packages -f android', calls)
+                    self.assertIn('shell cmd package list packages -f jp.co.omronsoft.openwnn', calls)
                 else:
-                    self.assertNotIn('shell cmd package path jp.co.omronsoft.openwnn', calls)
+                    self.assertNotIn('shell cmd package list packages -f jp.co.omronsoft.openwnn', calls)
                 self.assertTrue(any(call.startswith('shell cmd package list packages') for call in calls))
                 self.assertFalse(any(call.startswith('shell pm ') for call in calls))
+                self.assertFalse(any(call.startswith('shell cmd package path ') for call in calls))
+                self.assertTrue((self.root / 'smoke/instrumentation-args.txt').exists())
+                if api == 26:
+                    self.assertIn('stable=15 boot_changed=1', (self.root / 'smoke/readiness.txt').read_text())
                 self.assertFalse(any('logcat -c' in call for call in calls))
+
+    def test_package_filter_cannot_substitute_another_framework_package(self):
+        result = self.smoke(case='framework-package-missing')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
+        self.assertIn('stable=0 boot_changed=1', (self.root / 'smoke/readiness.txt').read_text())
 
     def test_startup_java_and_native_crashes_cannot_start_tests(self):
         for case in ('pre-crash', 'pre-native-crash', 'pre-gl-crash', 'late-pre-native-crash'):
@@ -666,7 +689,7 @@ exit 0
 
     def test_unready_webview_cannot_start_tests(self):
         for case in ('webview-command-fail', 'webview-garbage', 'webview-null',
-                     'webview-dirty', 'webview-relro', 'webview-no-path'):
+                     'webview-dirty', 'webview-relro', 'webview-no-path', 'webview-near-package', 'webview-query-fail'):
             with self.subTest(case=case):
                 result = self.smoke(case=case)
                 self.assertNotEqual(result.returncode, 0)

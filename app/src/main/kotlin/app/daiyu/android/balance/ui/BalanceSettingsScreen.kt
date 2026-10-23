@@ -31,7 +31,7 @@ import androidx.compose.material3.Icon
 import app.daiyu.android.ui.haptics.material.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import app.daiyu.android.ui.haptics.material.Switch
+import app.daiyu.android.ui.screens.settings.SettingsSwitch as Switch
 import androidx.compose.material3.Text
 import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.runtime.Composable

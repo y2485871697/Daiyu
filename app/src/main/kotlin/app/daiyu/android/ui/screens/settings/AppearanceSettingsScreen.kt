@@ -209,7 +209,7 @@ internal fun AppearanceSettingsScreen(
                             onChange(state.copy(morphLoadingIndicator = true)); loadingExpanded = true
                         } else loadingExpanded = !loadingExpanded
                     }, trailing = {
-                        app.daiyu.android.ui.haptics.material.Switch(checked = state.morphLoadingIndicator,
+                        SettingsSwitch(checked = state.morphLoadingIndicator,
                             colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
                                 checkedBorderColor = DaiyuPalette.switchTrack),
                             onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) })

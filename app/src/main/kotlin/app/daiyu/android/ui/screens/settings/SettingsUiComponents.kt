@@ -25,7 +25,7 @@ import app.daiyu.android.ui.haptics.selectable
 import app.daiyu.android.ui.haptics.toggleable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import app.daiyu.android.ui.haptics.material.Switch
+import app.daiyu.android.ui.screens.settings.SettingsSwitch as Switch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff

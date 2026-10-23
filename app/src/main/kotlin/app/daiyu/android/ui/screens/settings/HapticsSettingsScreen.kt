@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import app.daiyu.android.ui.haptics.toggleable
 import androidx.compose.material3.Slider as IntensityPreviewSlider
-import app.daiyu.android.ui.haptics.material.Switch
+import app.daiyu.android.ui.screens.settings.SettingsSwitch as Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect

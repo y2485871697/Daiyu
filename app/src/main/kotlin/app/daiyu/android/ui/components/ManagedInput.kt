@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewConfiguration
 import android.view.Window
 import android.view.ViewTreeObserver
@@ -105,7 +106,20 @@ internal fun Modifier.managedInput(): Modifier = composed {
     val focus = LocalFocusManager.current
     val state = remember(view, focus) { ComposeInputRegion() }
     val entry = remember(view, focus) {
-        InputEntry(view, { state.focused }, { state.bounds }) { focus.clearFocus(force = true) }
+        InputEntry(view, { state.focused }, { state.bounds }) {
+            // Keep Android's clearFocus fallback out of the Compose editor tree.
+            val root = view.rootView
+            root.isFocusableInTouchMode = true
+            if (root is ViewGroup) {
+                val previous = root.descendantFocusability
+                try {
+                    root.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+                    root.requestFocus()
+                } finally { root.descendantFocusability = previous }
+            } else root.requestFocus()
+            inputTrace("dismiss root=${root.javaClass.simpleName} focused=${root.isFocused}")
+            if (state.focused) focus.clearFocus(force = true)
+        }
     }
     DisposableEffect(entry) {
         val detach = bindInput(entry)

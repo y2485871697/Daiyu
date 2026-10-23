@@ -155,7 +155,8 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
         node.children.forEach { yieldAll(walk(it)) }
     }
     private data class Frame(val geometry: Map<String, Rect>, val summary: Rect,
-        val actionable: Boolean, val gateReleased: Boolean, val windowHeight: Int, val imeBottom: Int)
+        val actionable: Boolean, val gateReleased: Boolean, val windowHeight: Int, val imeBottom: Int,
+        val focusState: String)
 
     fun testRealBackgroundResumeKeepsGeometryAcrossBlockedRegistryRefresh() {
         val registry = fixture.controller.providers.snapshot()
@@ -171,7 +172,17 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("provider-add")
         ui.waitUntil(5_000) { row("provider-add").fetchSemanticsNode().config.contains(SemanticsActions.OnClick) }
         // Normalize editing before recording; every return frame remains in scope.
-        mainThread { directoryFocusManager.clearFocus(force = true) }
+        mainThread {
+            val root = activity.window.decorView as android.view.ViewGroup
+            root.isFocusableInTouchMode = true
+            val previous = root.descendantFocusability
+            try {
+                root.descendantFocusability = android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS
+                assertTrue(root.requestFocus())
+            } finally { root.descendantFocusability = previous }
+            assertTrue("Non-editing native focus must be retained before background", root.isFocused)
+            directoryFocusManager.clearFocus(force = true)
+        }
         dismissIme()
         row("provider-search").assertIsNotFocused()
         awaitImeFrame(row("provider-add"), visible = false)
@@ -214,7 +225,11 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
                     }
                     frames += Frame(tags.associateWith { rect(checkNotNull(tagged[it])) }, rect(summaryNode),
                         add.config.contains(SemanticsActions.OnClick), gateReleased.get(), view.rootView.height,
-                        ViewCompat.getRootWindowInsets(view)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0)
+                        ViewCompat.getRootWindowInsets(view)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0,
+                        "search=${tagged["provider-search"]?.config?.getOrNull(SemanticsProperties.Focused)} " +
+                            "view=${view.hasFocus()} window=${view.hasWindowFocus()} " +
+                            "native=${view.rootView.findFocus()?.javaClass?.simpleName} " +
+                            "softInput=${activity.window.attributes.softInputMode}")
                 } catch (caught: Throwable) { failure.compareAndSet(null, caught) }
             }
             true

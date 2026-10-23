@@ -1,6 +1,13 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -120,15 +127,29 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         assertEquals(0, executions)
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testCommandAndShortLogKeepLavenderFramesAndMonospace() {
         for (dark in listOf(false, true)) {
             val backdrop = if (dark) Color(0xFF101218) else Color.White
+            var observedSoft = Color.Unspecified
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                     applyInterfaceScale = false) {
+                    val soft = conversationColors().soft
+                    androidx.compose.runtime.SideEffect { observedSoft = soft }
                     Column(Modifier.background(backdrop).systemBarsPadding().verticalScroll(rememberScrollState())) {
                         ToolCategoryContent("terminal", ToolCategoryDetails.project("terminal",
                             """{"command":"printf hello"}""", """{"stdout":"hello","exit_code":0}"""))
+                        Row {
+                            Box(Modifier.size(40.dp, 24.dp).background(backdrop).testTag("tool-swatch:backdrop"))
+                            Box(Modifier.size(40.dp, 24.dp).background(soft).testTag("tool-swatch:soft"))
+                            Box(Modifier.size(40.dp, 24.dp).drawBehind {
+                                drawRect(Color(if (dark) 0xFFBEA8D7 else 0xFF8A779A), alpha = (if (dark) 19f else 16f) / 255f)
+                            }.testTag("tool-swatch:alpha"))
+                            Box(Modifier.size(40.dp, 24.dp).background(
+                                Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
+                            ).testTag("tool-swatch:opaque"))
+                        }
                     }
                 }
             } }
@@ -156,6 +177,40 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 val expected = Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
                 val sample = "dark=$dark title=$title sampleY=$sampleY frame=${pixels.width}x${pixels.height} " +
                     "actual=$actual expected=$expected bounds=${geometry.boundsInRoot}"
+                if (kotlin.math.abs(expected.red - actual.red) > .025f ||
+                    kotlin.math.abs(expected.green - actual.green) > .025f ||
+                    kotlin.math.abs(expected.blue - actual.blue) > .025f) {
+                    // Compare independent capture channels without changing the original oracle.
+                    try {
+                        val root = ui.onNode(isRoot() and hasAnyDescendant(hasTestTag("tool-document-frame:$title")), useUnmergedTree = true)
+                        val rootNode = root.fetchSemanticsNode()
+                        val native = (rootNode.root as androidx.compose.ui.platform.ViewRootForTest).view
+                        val location = IntArray(2)
+                        instrumentation.runOnMainSync { native.getLocationOnScreen(location) }
+                        val screen = captureScreenNode(root).toPixelMap()
+                        val enabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
+                        val compose = try {
+                            if (!enabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+                            root.captureToImage().toPixelMap()
+                        } finally {
+                            if (!enabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+                        }
+                        fun both(tag: String, inset: Int? = null): String {
+                            val target = ui.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode()
+                            val relative = target.boundsInRoot.translate(-rootNode.boundsInRoot.topLeft)
+                            val x = relative.center.x.roundToInt()
+                            val y = if (inset == null) relative.center.y.roundToInt() else relative.top.roundToInt() + inset
+                            return "$tag bounds=${target.boundsInRoot} screen=${screen[x, y]} compose=${compose[x, y]}"
+                        }
+                        android.util.Log.d("ToolFrameDiagnostic", "$sample soft=${observedSoft.toArgb()} alpha=${observedSoft.alpha} " +
+                            "native=${location.toList()} nodeScreen=${geometry.positionOnScreen} nodeRoot=${geometry.positionInRoot} " +
+                            "screen=${screen.width}x${screen.height} compose=${compose.width}x${compose.height} " +
+                            both("tool-document-frame:$title", sampleY) + " " +
+                            listOf("backdrop", "soft", "alpha", "opaque").joinToString { both("tool-swatch:$it") })
+                    } catch (diagnostic: Throwable) {
+                        android.util.Log.e("ToolFrameDiagnostic", "capture diagnostic failed for $sample", diagnostic)
+                    }
+                }
                 assertEquals(sample, expected.red, actual.red, .025f)
                 assertEquals(sample, expected.green, actual.green, .025f)
                 assertEquals(sample, expected.blue, actual.blue, .025f)

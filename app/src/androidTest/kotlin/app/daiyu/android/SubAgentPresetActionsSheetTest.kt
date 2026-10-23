@@ -50,6 +50,15 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
                 }
             }
         }
+        // Establish a closed, non-editing window before freezing the animation clock.
+        val root = focusedWindowRoot()
+        dismissIme(root)
+        awaitStableWindowFrame(root) {
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
+            val ime = androidx.core.view.WindowInsetsCompat.Type.ime()
+            if (insets != null && !insets.isVisible(ime) && insets.getInsets(ime).bottom == 0 &&
+                motionWindow.width > 0 && motionWindow.height > 0) root.height to motionWindow else null
+        }
     }
 
     private data class Geometry(val bounds: Rect, val windowHeight: Float)
@@ -104,7 +113,7 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
                     assertEquals(settled.bounds.center.x, first.bounds.center.x, 1f)
                     assertEquals(settled.bounds.center.y, first.bounds.center.y, 1f)
                 } else {
-                    assertEquals("Exactly one entry translation must be removed", motionWindow.height.toFloat(),
+                    assertEquals("Exactly one entry translation must be removed: first=$first entering=$entering settled=$settled host=$motionWindow", motionWindow.height.toFloat(),
                         first.bounds.top - settled.bounds.top, 1f)
                 }
                 repeat(8) {

@@ -3,6 +3,9 @@ package app.daiyu.android
 import androidx.compose.ui.test.*
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
@@ -96,14 +99,16 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = false) {
                         key(dark, fontScale) {
-                            Column(Modifier.width(250.dp).background(Color.Magenta).testTag("compact-provider-host")) {
-                                listOf("测试余额查询", "保存配置", "删除提供商").forEachIndexed { index, title ->
-                                    ProviderActionButton(title, { clicks[index]++ },
-                                        Modifier.testTag("compact-provider-action:$index"), enabled = enabled.value,
-                                        colors = if (index == 2) ButtonDefaults.textButtonColorsPrimary(
-                                            color = MiuixTheme.colorScheme.surfaceVariant,
-                                            textColor = assistantPreviewPalette().danger)
-                                        else ButtonDefaults.textButtonColorsPrimary())
+                            Box(Modifier.fillMaxSize().systemBarsPadding()) {
+                                Column(Modifier.width(250.dp).background(Color.Magenta).testTag("compact-provider-host")) {
+                                    listOf("测试余额查询", "保存配置", "删除提供商").forEachIndexed { index, title ->
+                                        ProviderActionButton(title, { clicks[index]++ },
+                                            Modifier.testTag("compact-provider-action:$index"), enabled = enabled.value,
+                                            colors = if (index == 2) ButtonDefaults.textButtonColorsPrimary(
+                                                color = MiuixTheme.colorScheme.surfaceVariant,
+                                                textColor = assistantPreviewPalette().danger)
+                                            else ButtonDefaults.textButtonColorsPrimary())
+                                    }
                                 }
                             }
                         }
@@ -125,11 +130,13 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                 val height = touch.height.toInt()
                 check(left >= 0 && top >= 0 && left + width <= image.width && top + height <= image.height)
                 val pixels = bitmap.toPixelMap(startX = left, startY = top, width = width, height = height)
-                val x = pixels.width / 8
-                val fill = pixels[x, pixels.height / 2]
+                // Sample the vertical content padding, not the centered label.
+                val fill = pixels[pixels.width / 2, (8f * density).toInt()]
                 fun sameColor(color: Color) = kotlin.math.abs(color.red - fill.red) < .02f &&
                     kotlin.math.abs(color.green - fill.green) < .02f && kotlin.math.abs(color.blue - fill.blue) < .02f
-                val paintedRows = (0 until pixels.height).filter { sameColor(pixels[x, it]) }
+                val paintedRows = (0 until pixels.height).filter { y ->
+                    (0 until pixels.width).any { x -> sameColor(pixels[x, y]) }
+                }
                 assertEquals("compact fill dark=$dark font=$fontScale index=$index", 40f * density, paintedRows.size.toFloat(), 2f)
                 assertEquals("continuous fill", paintedRows.last() - paintedRows.first() + 1, paintedRows.size)
                 assertEquals("top touch margin", 4f * density, paintedRows.first().toFloat(), 2f)

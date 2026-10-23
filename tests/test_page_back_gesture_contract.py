@@ -1,5 +1,6 @@
 """Source-wiring guards; device behavior is covered by the deferred Android tests."""
 from pathlib import Path
+import xml.etree.ElementTree as ET
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,14 +64,43 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('val progress by key(state)', self.host)
         self.assertNotIn('key(predictiveBackEnabled)', self.host)
 
-    def test_swipe_respects_ime_controls_pointer_count_and_axis_intent(self):
+    def test_swipe_is_full_page_and_lets_children_arbitrate_before_claiming(self):
         for guard in ('canNavigateBack && swipeDismissEnabled && resumed && !imeVisible',
-                      'fromEdge > edgeWidth || down.isConsumed || state.active',
-                      'event.changes.size != 1', 'change.id != down.id || change.isConsumed',
+                      'if (state.active) return@awaitEachGesture', 'event.changes.size != 1',
+                      'if (change.id != down.id) break', 'if (consumedMovement) break',
+                      'change.position == change.previousPosition',
+                      'viewConfiguration.longPressTimeoutMillis',
                       'dy > viewConfiguration.touchSlop', 'dx <= dy * 1.5f',
-                      'PointerEventPass.Main', 'LayoutDirection.Ltr'):
+                      'if (claimed) PointerEventPass.Initial else PointerEventPass.Final', 'LayoutDirection.Ltr'):
             self.assertIn(guard, self.host)
+        for obsolete in ('edgeWidth', 'fromEdge', 'down.isConsumed',
+                         'change.id != down.id || change.isConsumed'):
+            self.assertNotIn(obsolete, self.host)
         self.assertNotIn('systemGestureExclusion', self.host)
+
+    def test_predictive_platform_opt_in_is_explicit_and_scoped_to_main_activity(self):
+        manifest = ET.parse(ROOT / 'app/src/main/AndroidManifest.xml').getroot()
+        android = '{http://schemas.android.com/apk/res/android}'
+        application = manifest.find('application')
+        main = next(e for e in application.findall('activity') if e.get(android + 'name') == '.MainActivity')
+        self.assertEqual('true', main.get(android + 'enableOnBackInvokedCallback'))
+        self.assertIsNone(application.get(android + 'enableOnBackInvokedCallback'))
+        self.assertNotIn('HiddenApiBypass', self.host)
+
+    def test_android_regressions_cover_real_clickable_rows_and_competing_controls(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
+        for method in ('testMiddleOfPageSwipeNavigatesWithPredictionDisabled',
+                       'testClickableSettingRowYieldsItsPressToPageSwipeWithoutFiringClick',
+                       'testVerticalSettingListScrollStaysWithTheList',
+                       'testSliderMovementStaysWithTheControl',
+                       'testLongPressTextSelectionDoesNotBecomePageBack',
+                       'testDisablingSwipeCancelsAnInFlightDrag',
+                       'testPointerCancellationBeyondThresholdDoesNotNavigate',
+                       'testHorizontalChildHasFirstRefusalOverPageBack',
+                       'testPredictiveProgressCancellationCommitAndLowApiFallback'):
+            self.assertIn('fun ' + method + '(', test)
+        for control in ('LazyColumn(', '.clickable { rowClicks++ }', 'material.Slider(', 'BasicTextField('):
+            self.assertIn(control, test)
 
     def test_each_swipe_samples_current_width_and_only_dispatches_on_committed_up(self):
         gesture = self.host.index('awaitEachGesture {')
@@ -78,7 +108,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         down = self.host.index('val down = awaitFirstDown', gesture)
         self.assertLess(down, width)
         self.assertIn('maxOf(72.dp.toPx(), gestureWidth * 0.30f)', self.host)
-        self.assertIn('if (claimed && distance >= threshold && state.alive) currentBack()', self.host)
+        self.assertIn('if (dx >= threshold && state.alive) currentBack()', self.host)
+        self.assertIn('if (claimed && change.changedToUp()) {\n                                    change.consume()', self.host)
         self.assertNotIn('retainedPage =', self.host)
 
     def test_existing_persistent_keys_are_unchanged(self):

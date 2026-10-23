@@ -9,7 +9,7 @@ class R51BatchContract(unittest.TestCase):
   helper=managed.split('internal fun clearManagedInputFocus',1)[1].split('private class ComposeInputRegion',1)[0]
   self.assertIn('): Boolean {',helper)
   self.assertIn('if (host != null) return host.dismiss(view, action)',helper)
-  self.assertLess(helper.index('InputDismissal.run(action)'),helper.index('return true'))
+  self.assertLess(helper.index('action()'),helper.index('return true'))
   common=managed.split('fun dismiss(view: View, clear: () -> Unit): Boolean {',1)[1].split('fun remove(entry:',1)[0]
   self.assertIn('onCheckIsTextEditor() == true)) return false',common)
   self.assertLess(common.index('return false'),common.index('hideSoftInputFromWindow'))

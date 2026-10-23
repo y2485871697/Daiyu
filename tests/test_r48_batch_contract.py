@@ -13,13 +13,15 @@ class R48BatchContract(unittest.TestCase):
         clear = source.split('InputEntry(view, { state.focused }', 1)[1].split('DisposableEffect(entry)', 1)[0]
         self.assertNotIn('root.requestFocus()', clear)
         dismiss = source.split('fun dismiss(view: View, clear: () -> Unit)', 1)[1].split('fun remove(entry:', 1)[0]
-        self.assertLess(dismiss.index('InputDismissal.run { clear() }'), dismiss.index('root.requestFocus()'))
+        self.assertLess(dismiss.index('if (nativeBefore !is EditText)'), dismiss.index('root.requestFocus()'))
+        self.assertLess(dismiss.index('root.requestFocus()'), dismiss.index('clear()'))
         self.assertIn('root.isFocusableInTouchMode = true', dismiss)
         self.assertNotIn('view.requestFocus()', clear)
         self.assertIn('root.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS', source)
         self.assertIn('root.descendantFocusability = previous', source)
         self.assertIn('if (state.focused) focus.clearFocus(force = true)', clear)
-        self.assertIn('InputDismissal.run { clear() }', source)
+        self.assertIn('InputDismissal.run {', dismiss)
+        self.assertIn('                clear()', dismiss)
         test = (TEST / 'ManagedInputActivityTest.kt').read_text()
         self.assertIn('inputView.rootView.isFocused', test)
         self.assertIn('assertEquals(5, selection.start)', test)

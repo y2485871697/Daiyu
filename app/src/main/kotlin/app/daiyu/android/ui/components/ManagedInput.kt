@@ -133,7 +133,13 @@ internal fun clearManagedInputFocus(view: View, clear: () -> Unit): Boolean {
     val host = view.inputWindow()?.let { InputWindows.windows[it] }
     if (host != null) return host.dismiss(view, action)
     val before = view.rootView.findFocus()
-    InputDismissal.run(action)
+    InputDismissal.run {
+        if (before !is EditText) {
+            view.rootView.isFocusableInTouchMode = true
+            view.rootView.requestFocus()
+        }
+        action()
+    }
     val next = view.rootView.findFocus()
     if (next !== before && next?.onCheckIsTextEditor() == true) return false
     InputDismissal.run {
@@ -151,6 +157,8 @@ private fun clearWithoutNativeFocusFallback(view: View, clear: () -> Unit) {
         clear()
         return
     }
+    val start = field.selectionStart
+    val end = field.selectionEnd
     val listener = field.onFocusChangeListener
     val focusable = root.focusable
     val touchFocusable = root.isFocusableInTouchMode
@@ -174,6 +182,8 @@ private fun clearWithoutNativeFocusFallback(view: View, clear: () -> Unit) {
             root.isFocusableInTouchMode = touchFocusable
             root.descendantFocusability = order
         }
+        if (start >= 0 && end >= 0)
+            field.setSelection(start.coerceAtMost(field.length()), end.coerceAtMost(field.length()))
     }
 }
 
@@ -188,9 +198,7 @@ internal fun EditText.manageInput(window: Window? = null) {
     val entry = InputEntry(field, { field.hasFocus() }, {
         field.visibleInputBounds()
     }) {
-        val start = field.selectionStart; val end = field.selectionEnd
         clearWithoutNativeFocusFallback(field) { field.clearFocus() }
-        if (start >= 0 && end >= 0) field.setSelection(start.coerceAtMost(field.length()), end.coerceAtMost(field.length()))
     }
     bindInput(entry, window)
     val cursor = android.view.ViewTreeObserver.OnPreDrawListener {
@@ -360,7 +368,16 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         val nativeBefore = window.currentFocus
         clearing++
         try {
-            InputDismissal.run { clear() }
+            InputDismissal.run {
+                if (nativeBefore !is EditText) {
+                    holdRestingFocus()
+                    decor?.let { root ->
+                        root.isFocusableInTouchMode = true
+                        root.requestFocus()
+                    }
+                }
+                clear()
+            }
             if (entries.none { it.focused() } &&
                 !(window.currentFocus !== nativeBefore && window.currentFocus?.onCheckIsTextEditor() == true)) {
                 holdRestingFocus()

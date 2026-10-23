@@ -17,6 +17,18 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         source = (SRC / 'delegation/SavedCatalogSubAgentModelSource.kt').read_text()
         self.assertIn('protocol == ProviderProtocol.RESPONSES && GptServiceTier.isGptSpeedModel(record.id)', source)
 
+    def test_chat_card_compacts_model_content_without_shrinking_action_rows(self):
+        row = (UI / 'SubAgentProfileRow.kt').read_text()
+        chat = row.split('} else if (LocalConversationAgentStyle.current) {', 1)[1].split('\n        } else {', 1)[0]
+        self.assertIn('Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp))', chat)
+        self.assertEqual(2, chat.count('.heightIn(min = 48.dp)'))
+        self.assertIn('modifier = Modifier.size(48.dp)', chat)
+        model = chat.split('contentDescription = "${profile.name}模型"', 1)[1]
+        self.assertIn('.padding(top = 0.dp, bottom = 12.dp)', model)
+        self.assertLess(model.index('.combinedClickable('), model.index('.padding(top = 0.dp'))
+        self.assertNotIn('.offset(', chat)
+        self.assertNotIn('.padding(vertical = 7.dp)', chat)
+
     def test_speed_cycles_inline_and_draft_remains_uncommitted(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
         speed = form.split('if (canEditSpeed) SubAgentSettingRow("GPT 速度"', 1)[1].split('SubAgentSettingRow("职责"', 1)[0]

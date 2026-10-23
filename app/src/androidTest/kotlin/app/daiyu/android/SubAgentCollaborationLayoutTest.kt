@@ -241,6 +241,20 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
             chip.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
             val label = layouts.single()
+            val density = label.layoutInput.density.density
+            val title = ui.onNodeWithText("Worker", useUnmergedTree = true)
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val gapDp = (model.top - title.bottom) / density
+            val centerDistanceDp = (model.center.y - title.center.y) / density
+            val geometry = "dark=$dark fontScale=$fontScale title=$title model=$model"
+            assertTrue("Model remains below the title: $geometry", gapDp >= -1f / density)
+            assertTrue("Title/model gap stays compact: $geometry", gapDp <= 24f + 1f / density)
+            assertTrue("Title/model centers stay compact: $geometry",
+                centerDistanceDp > 0f && centerDistanceDp <= 44f + 1f / density)
+            val configure = ui.onNodeWithContentDescription("配置Worker")
+                .assertHasClickAction().assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue("Configure and model touch rows do not overlap", configure.bottom <= row.top + 1f)
             assertTrue("Provider chip is bounded to 96dp", provider.width <= 96f * label.layoutInput.density.density + 1f)
             assertEquals(11f, label.layoutInput.style.fontSize.value, .01f)
             assertEquals(ConversationAgentColors(dark).accent, label.layoutInput.style.color)

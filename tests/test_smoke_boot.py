@@ -78,7 +78,7 @@ class SourceTests(unittest.TestCase):
         maximum = 600 + sum(seconds + 5 for _, seconds in stages)
         maximum += 60 * (3 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1)
         # EXIT diagnostics, two extra display-function calls, and final UI sleep.
-        maximum += 190 + 80 + 1
+        maximum += 240 + 80 + 1
         self.assertGreater(step, maximum)
         self.assertGreaterEqual(job - step, 600)
 
@@ -502,6 +502,12 @@ case "$*" in
   esac
   case "$CASE" in launch-timeout) exit 124 ;; launch-fail) exit 9 ;; esac ;;
  'shell uiautomator dump '*) [ "$CASE" != dump-fail ] || exit 8 ;;
+ 'pull /sdcard/Android/data/app.daiyu.android/files/settings-ui '*)
+  case "$CASE" in
+   status-fail|instrument-fail|instrument-timeout)
+    mkdir -p "$3"; printf '\211PNG\r\n\032\n' > "$3/busy-test.png" ;;
+   *) printf 'remote diagnostics missing\n' >&2; exit 1 ;;
+  esac ;;
  'pull '*) [ "$CASE" != pull-fail ] || exit 8; cat "$FAKE_UI" > "$3" ;;
  'logcat '*)
   case "$CASE" in
@@ -1013,6 +1019,27 @@ exit 0
             self.assertEqual(self.selection()['status'], 'planned')
             self.assertNotIn('instrumentation', self.selection())
             self.assertFalse((self.root / 'smoke/launch-args.txt').exists())
+
+    def test_failed_instrumentation_collects_original_png_without_changing_failure(self):
+        for api in (26, 37):
+            for case, expected in (("status-fail", 2), ("instrument-fail", 9), ("instrument-timeout", 124), ("count", 2)):
+                with self.subTest(api=api, case=case):
+                    result = self.smoke(api=api, case=case, mode="candidate",
+                                        test_classes="app.daiyu.android.FirstTest")
+                    self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                    calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+                    pull = 'pull /sdcard/Android/data/app.daiyu.android/files/settings-ui smoke/settings-ui'
+                    self.assertEqual(calls.count(pull), 1)
+                    self.assertTrue((self.root / 'smoke/settings-ui-pull.txt').is_file())
+                    png = self.root / 'smoke/settings-ui/busy-test.png'
+                    self.assertEqual(png.exists(), case != 'count')
+                    if png.exists():
+                        self.assertEqual(png.read_bytes(), b'\x89PNG\r\n\x1a\n')
+                    self.assertEqual(self.selection()['status'], 'planned')
+                    self.assertNotIn('phase=settings-previews', (self.root / 'smoke/stages.txt').read_text())
+                    if case in ('status-fail', 'count'):
+                        self.assertFalse(json.loads((self.root / 'smoke/instrumentation-result.json').read_text())['valid'])
+                    self.assertFalse((self.root / 'smoke/launch-args.txt').exists())
 
     def test_invalid_shard_parameters_fail_before_instrumentation(self):
         for count, index in [(0, 0), (4, -1), (4, 4), (17, 0), (4, 0), ("bad", 0)]:

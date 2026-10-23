@@ -81,13 +81,13 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
     private class ProfileFixture(val repository: ConversationSubAgentPreferences,
         val editor: ConversationSubAgentEditor, val provider: SubAgentProvider, val profile: SubAgentProfile)
 
-    private fun profileFixture(): ProfileFixture {
+    private fun profileFixture(providerName: String = "Provider", modelName: String = "gpt-6.1-sol"): ProfileFixture {
         val name = "subagent-layout-${UUID.randomUUID()}"
         preferenceNames += name
         val repository = ConversationSubAgentPreferences(instrumentation.targetContext.getSharedPreferences(name, 0))
         val owner = SubAgentConfigKey.Conversation("layout-fixture")
-        val provider = SubAgentProvider("provider", "Provider", listOf(
-            SubAgentModel("gpt-local", "gpt-6.1-sol", supportsGptSpeed = true),
+        val provider = SubAgentProvider("provider", providerName, listOf(
+            SubAgentModel("gpt-local", "gpt-6.1-sol", displayName = modelName, supportsGptSpeed = true),
             SubAgentModel("other-local", "gemini-3")))
         val profile = SubAgentProfile("worker", "Worker", role = "implementation", providerId = provider.id,
             modelId = "gpt-local", tier = SubAgentTaskTier.entries.first())
@@ -205,6 +205,74 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testModelProviderChipStaysBetweenFlexibleNameAndArrowInBothThemes() {
+        val providerName = "Very long provider display name that must never take the arrow slot"
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
+            val data = profileFixture(providerName, "Very long model display name that must ellipsize")
+            mainThread { activity.setContent {
+                key(data.editor, dark, fontScale) {
+                    CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                        AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                            applyInterfaceScale = false) {
+                            CompositionLocalProvider(LocalConversationAgentStyle provides true,
+                                LocalConversationSubAgentEditor provides data.editor) {
+                                Box(Modifier.requiredWidth(280.dp)) {
+                                    SubAgentProfileRow(data.profile, listOf(data.provider))
+                                }
+                            }
+                        }
+                    }
+                }
+            } }
+            val chip = ui.onNodeWithTag("subagent-model-provider-worker", useUnmergedTree = true)
+                .assertIsDisplayed().assertTextEquals(providerName).assertHasNoClickAction()
+                .assert(SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsActions.OnLongClick))
+            val model = ui.onNodeWithTag("subagent-model-name-worker", useUnmergedTree = true)
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val provider = chip.fetchSemanticsNode().boundsInRoot
+            val arrow = ui.onNodeWithTag("subagent-model-arrow-worker", useUnmergedTree = true)
+                .assertIsDisplayed().assertWidthIsEqualTo(20.dp).fetchSemanticsNode().boundsInRoot
+            val row = ui.onNodeWithContentDescription("Worker模型").assertHeightIsAtLeast(48.dp)
+                .assertHasClickAction().assertIsEnabled().fetchSemanticsNode().boundsInRoot
+            assertTrue("Model keeps flexible space", model.width > 0f)
+            assertTrue("Provider follows model", model.right <= provider.left)
+            assertTrue("Arrow follows provider", provider.right <= arrow.left)
+            assertTrue("Arrow stays within touch row", arrow.right <= row.right)
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            chip.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            val label = layouts.single()
+            assertTrue("Provider chip is bounded to 96dp", provider.width <= 96f * label.layoutInput.density.density + 1f)
+            assertEquals(11f, label.layoutInput.style.fontSize.value, .01f)
+            assertEquals(ConversationAgentColors(dark).accent, label.layoutInput.style.color)
+            assertEquals(1, label.lineCount)
+            assertTrue("Long provider is ellipsized", label.isLineEllipsized(0))
+        }
+    }
+
+    fun testModelProviderChipOmitsUnselectedUnavailableAndBlankProviderNames() {
+        for (providerName in listOf("Provider", "   ")) {
+            val data = profileFixture(providerName)
+            var profile by mutableStateOf(data.profile)
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    CompositionLocalProvider(LocalConversationAgentStyle provides true,
+                        LocalConversationSubAgentEditor provides data.editor) {
+                        SubAgentProfileRow(profile, listOf(data.provider), enabled = false)
+                    }
+                }
+            } }
+            val chip = ui.onNodeWithTag("subagent-model-provider-worker", useUnmergedTree = true)
+            if (providerName.isBlank()) chip.assertDoesNotExist() else chip.assertIsDisplayed()
+            ui.onNodeWithContentDescription("Worker模型").assertIsNotEnabled().assertHeightIsAtLeast(48.dp)
+            mainThread { profile = data.profile.copy(modelId = "missing-model") }
+            ui.onNodeWithText("模型不可用").assertExists()
+            chip.assertDoesNotExist()
+            mainThread { profile = data.profile.copy(providerId = "", modelId = "") }
+            ui.onNodeWithText("无").assertExists()
+            chip.assertDoesNotExist()
+        }
+    }
+
     fun testProfileFormKeepsEqualFooterAndScrollsAtPhysicalWidthAndLargeFont() {
         for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
             val data = profileFixture()
@@ -250,6 +318,18 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             dismissIme(view.rootView)
             awaitImeFrame(actions, visible = false)
             awaitDialogEnter(actions)
+            val titleBounds = ui.onNodeWithText("子代理配置").fetchSemanticsNode().boundsInRoot
+            val formBounds = node("subagent-config-window").fetchSemanticsNode().boundsInRoot
+            assertEquals("Main configuration title must be centered", formBounds.center.x, titleBounds.center.x, 1f)
+            // The main model row hides its provider badge without changing picker identity/grouping.
+            ui.onAllNodes(hasText(data.provider.name) and hasAnyAncestor(hasContentDescription("草稿模型")),
+                useUnmergedTree = true).assertCountEquals(0)
+            val speedLabel = ui.onNode(hasText("GPT 速度") and hasAnyAncestor(hasContentDescription("草稿GPT速度")),
+                useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val speedValue = ui.onNode(hasText("标准") and hasAnyAncestor(hasContentDescription("草稿GPT速度")),
+                useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("Compact row must keep label left of current value", speedLabel.right < speedValue.left)
+            assertEquals("Compact row label/value share one line", speedLabel.center.y, speedValue.center.y, 1f)
             val windowBefore = windowFrame()
             val cancelNode = cancel.fetchSemanticsNode()
             val confirmNode = confirm.fetchSemanticsNode()

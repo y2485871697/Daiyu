@@ -110,17 +110,14 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
 
 @Composable
 private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
-    modifier: Modifier = Modifier, checked: Boolean? = null, enabled: Boolean = true, previewStyle: Boolean = false,
-    dismissOnAction: Boolean = true, selectionBackground: Color? = null) {
+    modifier: Modifier = Modifier, checked: Boolean? = null, enabled: Boolean = true, previewStyle: Boolean = false) {
     val colors = chatChromeColors()
     val scheme = MiuixTheme.colorScheme
     val dark = scheme.background.luminance() < .3f
     Row(modifier.testTag("chat-menu:${entry.action.name}").fillMaxWidth().heightIn(min = 38.dp)
         .clip(RoundedCornerShape(11.dp))
-        .background(if (checked == true) selectionBackground ?: Color.Transparent else Color.Transparent)
-        .semantics { if (selectionBackground != null) selected = checked == true }
         .conversationClickable(enabled = enabled) {
-            if (dismissOnAction && entry.action != ChatMenuAction.INTERACTIVE_MODE && entry.action != ChatMenuAction.AUTO_COMPRESS) onDismiss()
+            if (entry.action != ChatMenuAction.INTERACTIVE_MODE && entry.action != ChatMenuAction.AUTO_COMPRESS) onDismiss()
             onAction(entry.action)
         }
         .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -209,6 +206,7 @@ internal fun UserTurnMenu(expanded: Boolean, onDismiss: () -> Unit, id: String, 
 internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
     selected: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
     available: Set<ChatMenuAction> = setOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO)) {
+    if (!expanded) return
     val entries = listOf(
         MenuEntry("语音输入", DaiyuIcons.Voice, ChatMenuAction.VOICE_INPUT),
         MenuEntry("语音对话", DaiyuIcons.Speak, ChatMenuAction.VOICE_CHAT),
@@ -217,11 +215,27 @@ internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onActio
     if (entries.isEmpty()) return
     val colors = usagePalette()
     val selectionBackground = if (colors.dark) colors.bubble else Color(0xFFEFEDFB)
-    ChatAnchoredMenu(expanded, onDismiss, Modifier.testTag("chat-voice-mode-menu")) {
-        Column(Modifier.padding(1.dp)) {
+    ChatSelectionSheet("语音功能", onDismiss, subtitle = "选择要使用的语音功能", showCloseButton = false,
+        titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
+        Column(Modifier.testTag("chat-voice-mode-menu").fillMaxWidth().verticalScroll(rememberScrollState())) {
             entries.forEach { entry ->
-                ChatMenuItem(entry, onDismiss, onAction, checked = entry.action == selected, previewStyle = true,
-                    dismissOnAction = false, selectionBackground = selectionBackground)
+                val isSelected = entry.action == selected
+                Row(Modifier.fillMaxWidth().testTag("chat-menu:${entry.action.name}")
+                    .heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (isSelected) selectionBackground else Color.Transparent)
+                    .semantics { this.selected = isSelected }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                        role = Role.RadioButton) { onAction(entry.action) }
+                    .padding(horizontal = 12.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(entry.icon, null, Modifier.size(24.dp), tint = colors.accent)
+                    Text(entry.title, Modifier.weight(1f), fontSize = 16.sp, lineHeight = 24.sp,
+                        color = if (isSelected) colors.accent else colors.text)
+                    Box(Modifier.size(22.dp).background(if (isSelected) colors.accent else Color.Transparent, CircleShape),
+                        contentAlignment = Alignment.Center) {
+                        if (isSelected) Icon(DaiyuIcons.Check, null, Modifier.size(14.dp), tint = Color.White)
+                    }
+                }
             }
         }
     }

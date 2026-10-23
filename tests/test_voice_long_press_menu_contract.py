@@ -1,4 +1,4 @@
-"""Source contracts only; Compose, audio and physical haptics run in the approved unified batch."""
+"""Source contracts only; modal UI, audio and physical haptics await the approved Android batch."""
 from pathlib import Path
 import unittest
 
@@ -7,23 +7,48 @@ SRC = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 CHAT = SRC / 'ui/screens/chat/conversation'
 
 
+def voice_sheet():
+    return (CHAT / 'ChatMenus.kt').read_text().split('internal fun ChatVoiceModeMenu(', 1)[1]
+
+
 class VoiceLongPressMenuContractTest(unittest.TestCase):
-    def test_menu_uses_shared_popup_and_row_style_after_filtering(self):
-        menu = (CHAT / 'ChatMenus.kt').read_text().split('internal fun ChatVoiceModeMenu(', 1)[1]
+    def test_voice_reuses_attachment_bottom_sheet_after_visibility_and_availability_gates(self):
+        sheet = voice_sheet()
+        self.assertIn('if (!expanded) return', sheet)
         labels = ['MenuEntry("语音输入"', 'MenuEntry("语音对话"', 'MenuEntry("豆包实时通话"']
-        positions = [menu.index(label) for label in labels]
+        positions = [sheet.index(label) for label in labels]
         self.assertEqual(positions, sorted(positions))
-        self.assertLess(menu.index('.filter { it.action in available }'), menu.index('if (entries.isEmpty()) return'))
-        self.assertLess(menu.index('if (entries.isEmpty()) return'), menu.index('ChatAnchoredMenu('))
-        self.assertIn('Modifier.testTag("chat-voice-mode-menu")', menu)
-        self.assertIn('checked = entry.action == selected, previewStyle = true', menu)
-        self.assertNotIn('ChatSelectionSheet(', menu)
+        self.assertLess(sheet.index('.filter { it.action in available }'), sheet.index('if (entries.isEmpty()) return'))
+        self.assertLess(sheet.index('if (entries.isEmpty()) return'), sheet.index('ChatSelectionSheet('))
+        self.assertIn('ChatSelectionSheet("语音功能", onDismiss,', sheet)
+        self.assertIn('showCloseButton = false', sheet)
+        self.assertIn('titleFontSize = 20.sp, subtitleFontSize = 14.sp', sheet)
+        self.assertIn('Modifier.testTag("chat-voice-mode-menu").fillMaxWidth().verticalScroll(rememberScrollState())', sheet)
+        self.assertNotIn('ChatAnchoredMenu(', sheet)
+
+    def test_voice_rows_match_attachment_density_not_small_popup(self):
+        sheet = voice_sheet()
+        attachment = (CHAT / 'ChatMenus.kt').read_text().split('internal fun ChatAttachmentSheet(', 1)[1].split('internal fun UserTurnMenu(', 1)[0]
+        for fragment in ('.heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))',
+                         '.padding(horizontal = 12.dp, vertical = 14.dp)', 'Arrangement.spacedBy(16.dp)',
+                         'Modifier.size(24.dp)', 'fontSize = 16.sp, lineHeight = 24.sp'):
+            self.assertIn(fragment, sheet)
+            self.assertIn(fragment, attachment)
+        self.assertNotIn('ChatMenuItem(', sheet)
 
     def test_menu_state_is_revoked_by_availability_disabled_or_editor_changes(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()
         self.assertIn('var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes)', composer)
         self.assertIn('val voiceMenuEnabled = state.enabled && state.voiceModes.isNotEmpty()', composer)
         self.assertIn('ChatVoiceModeMenu(voiceModes && voiceMenuEnabled,', composer)
+
+    def test_only_long_press_can_open_the_mode_picker(self):
+        button = (CHAT / 'ChatComposer.kt').read_text().split('SpeechMorphButton(', 1)[1].split('onLongClick =', 1)[0]
+        self.assertIn('onClick = { if (state.voiceMode in state.voiceModes) actions.onVoice() }', button)
+        for forbidden in ('voiceModes = true', 'actions.onMenuAction', '.single()', 'size != 1'):
+            self.assertNotIn(forbidden, button)
+        composer = (CHAT / 'ChatComposer.kt').read_text()
+        self.assertEqual(1, composer.count('voiceModes = true'))
 
     def test_disabled_long_press_is_removed_before_feedback_and_callback(self):
         composer = (CHAT / 'ChatComposer.kt').read_text().split('SpeechMorphButton(', 1)[1]
@@ -36,25 +61,18 @@ class VoiceLongPressMenuContractTest(unittest.TestCase):
         self.assertNotIn('performHapticFeedback', button)
         self.assertNotIn('TouchHaptics.longPress', button)
 
-    def test_long_press_and_menu_selection_do_not_start_audio(self):
-        composer = (CHAT / 'ChatComposer.kt').read_text().split('onLongClick = if (voiceMenuEnabled)', 1)[1].split('ChatVoiceModeMenu(', 1)[0]
-        self.assertNotIn('actions.onVoice()', composer)
-        menus = (CHAT / 'ChatMenus.kt').read_text().split('internal fun ChatVoiceModeMenu(', 1)[1]
-        self.assertIn('ChatMenuItem(entry, onDismiss, onAction,', menus)
-        for fragment in ('onVoice()', 'startDuplex', 'requestDictation', 'VoiceSettingsPreferences'):
-            self.assertNotIn(fragment, menus)
-
-    def test_voice_selection_keeps_menu_open_and_uses_model_picker_background(self):
-        menus = (CHAT / 'ChatMenus.kt').read_text()
-        voice = menus.split('internal fun ChatVoiceModeMenu(', 1)[1]
-        self.assertIn('dismissOnAction = false, selectionBackground = selectionBackground', voice)
-        self.assertIn('if (colors.dark) colors.bubble else Color(0xFFEFEDFB)', voice)
+    def test_selection_stays_open_without_audio_and_uses_model_picker_background(self):
+        sheet = voice_sheet()
+        self.assertIn('if (colors.dark) colors.bubble else Color(0xFFEFEDFB)', sheet)
         self.assertIn('if (colors.dark) colors.bubble else Color(0xFFEFEDFB)', (CHAT / 'ChatModelPicker.kt').read_text())
-        row = menus.split('private fun ChatMenuItem(', 1)[1].split('internal fun ChatAttachmentSheet(', 1)[0]
-        self.assertIn('dismissOnAction: Boolean = true, selectionBackground: Color? = null', row)
-        self.assertIn('if (dismissOnAction && entry.action !=', row)
-        self.assertIn('.background(if (checked == true) selectionBackground ?: Color.Transparent else Color.Transparent)', row)
-        self.assertIn('if (selectionBackground != null) selected = checked == true', row)
+        self.assertIn('.background(if (isSelected) selectionBackground else Color.Transparent)', sheet)
+        self.assertIn('.semantics { this.selected = isSelected }', sheet)
+        self.assertIn('role = Role.RadioButton) { onAction(entry.action) }', sheet)
+        self.assertIn('if (isSelected) Icon(DaiyuIcons.Check,', sheet)
+        for forbidden in ('onDismiss()', 'onVoice()', 'startDuplex', 'requestDictation', 'VoiceSettingsPreferences'):
+            self.assertNotIn(forbidden, sheet)
+        menus = (CHAT / 'ChatMenus.kt').read_text()
+        self.assertNotIn('dismissOnAction', menus)
 
     def test_real_settings_projection_and_execution_rechecks_remain(self):
         main = (SRC / 'MainActivity.kt').read_text()
@@ -62,17 +80,23 @@ class VoiceLongPressMenuContractTest(unittest.TestCase):
             self.assertIn(f'if (voiceSettings.enabled("{feature}")) add(ChatMenuAction.{action})', main)
         self.assertIn('if (!VoiceSettingsPreferences(applicationContext).enabled(feature)) return@voice', main)
 
-    def test_device_regression_source_covers_combinations_reset_and_haptic_positive_control(self):
+    def test_device_source_covers_modal_geometry_and_real_short_press_matrix(self):
         device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatVoiceModeMenuActivityTest.kt').read_text()
-        for fragment in ('for (mask in 0..7)', 'performTouchInput { longClick() }',
+        for fragment in ('for (mask in 0..7) for (selected in modes)', 'performTouchInput { click(center) }',
+                         'listOf("voice:${selected.name}")', 'assertEquals(selected, state.voiceMode)',
+                         'for (mask in 0..7)', 'performTouchInput { longClick() }',
                          'item.assertDoesNotExist()', 'assertTrue(events.isEmpty())',
                          'assertTrue(requests.isEmpty())', 'listOf(HapticKind.LONG_PRESS)',
                          'generation = state.editorGeneration + 1', 'enabled = false',
-                         'assertEquals(listOf("long", mode.name)', 'menu.bottom <= button.top + 1f',
+                         'node("chat-selection-sheet")', 'node("preview-dialog-viewport")',
+                         'surface.width >= window.width * .75f', 'awaitNodeWindowFocus',
+                         '@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)',
+                         'node("preview-dialog-scrim").performTouchInput', 'KeyEvent.KEYCODE_BACK',
                          'state = state.copy(voiceMode = it)', 'row.assertIsSelected()',
                          'row.assertIsNotSelected()', 'captureScreenNode(row)', 'Color(0xFFEFEDFB)',
                          'applyInterfaceScale = false', 'candidate == mode, hasSelectedBackground'):
             self.assertIn(fragment, device)
+        self.assertNotIn('menu.bottom <= button.top', device)
 
 
 if __name__ == '__main__':

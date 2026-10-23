@@ -47,7 +47,7 @@ class MarkdownReturnContract(unittest.TestCase):
         self.assertNotIn("catch (", self.projection)
 
     def test_uncached_streaming_geometry_and_current_readiness_are_not_replaced_by_plaintext(self):
-        for token in ["markdownBodySnapshot(text, blocks, published)", "if (body == null) Box(modifier)",
+        for token in ["markdownBodySnapshot(text, blocks, published)", "if (body == null) MarkdownBodyLoading(modifier, text.isNotBlank())",
                       "ParsedMessageMarkdown(body.text, body.blocks, modifier, visibleCharacters)",
                       "else previous?.takeIf { text.startsWith(it.text) }"]:
             self.assertIn(token, self.ui + self.projection)

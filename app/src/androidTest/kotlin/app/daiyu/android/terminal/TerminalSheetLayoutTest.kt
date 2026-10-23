@@ -80,11 +80,16 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
 
     private fun assertFooter() {
         assertNoCloseIcon()
-        val sheet = tagged("assistant-sheet").fetchSemanticsNode().boundsInRoot
-        val footer = tagged("assistant-sheet-footer").fetchSemanticsNode().boundsInRoot
-        val create = node("terminal-create-session").fetchSemanticsNode().boundsInRoot
+        awaitDialogEnter(tagged("assistant-sheet"))
+        val sheetNode = tagged("assistant-sheet").fetchSemanticsNode()
+        val footerNode = tagged("assistant-sheet-footer").fetchSemanticsNode()
+        val createNode = node("terminal-create-session").fetchSemanticsNode()
+        val (sheet, footer, create) = ui.runOnIdle {
+            Triple(sheetNode.boundsInRoot, footerNode.boundsInRoot, createNode.boundsInRoot)
+        }
         assertTrue("Filled button must be at least 48dp", create.height >= 48f * density.get().density - 1f)
-        assertTrue(create.top >= footer.top && create.bottom <= footer.bottom)
+        assertTrue("Create must stay inside footer: create=$create footer=$footer sheet=$sheet",
+            create.top >= footer.top && create.bottom <= footer.bottom)
         assertTrue(footer.bottom <= sheet.bottom)
         assertTrue(create.left >= sheet.left && create.right <= sheet.right)
         node("terminal-create-session").assertIsDisplayed()

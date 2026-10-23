@@ -57,8 +57,8 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertNotIn('Lifecycle.Event.ON_RESUME', text)
         self.assertNotIn('.show(', text)
         self.assertNotIn('.setText(', text)
-        self.assertIn('ViewCompat.getWindowInsetsController(entry.view)', text)
-        self.assertIn('hideSoftInputFromWindow(entry.view.windowToken, 0)', text)
+        self.assertIn('ViewCompat.getWindowInsetsController(view)', text)
+        self.assertIn('hideSoftInputFromWindow(view.windowToken, 0)', text)
 
     def test_registration_cleanup_preserves_later_window_wrappers(self):
         text = SOURCE.read_text()

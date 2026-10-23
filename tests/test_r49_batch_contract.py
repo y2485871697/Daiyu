@@ -25,7 +25,7 @@ class R49BatchContract(unittest.TestCase):
                       'root.descendantFocusability = previous']:
             self.assertIn(token, host)
         dismiss = host.split('private fun dismiss(entry:', 1)[1].split('fun remove(entry:', 1)[0]
-        self.assertLess(dismiss.index('holdRestingFocus()'), dismiss.index('InputDismissal.run { entry.clear() }'))
+        self.assertLess(dismiss.index('holdRestingFocus()'), dismiss.index('InputDismissal.run { clear() }'))
         self.assertIn('if (clearing == 0 && (decor?.isFocused != true || entries.any { it.focused() })) releaseRestingFocus()', dismiss)
         remove = host.split('fun remove(entry:', 1)[1]
         self.assertLess(remove.index('if (entries.isEmpty())'), remove.index('releaseRestingFocus()'))

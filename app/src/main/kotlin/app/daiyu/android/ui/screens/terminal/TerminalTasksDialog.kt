@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.screens.terminal
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -8,18 +10,19 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ui.components.WithoutPressRipple
-import top.yukonga.miuix.kmp.window.WindowDialog
+import androidx.compose.ui.unit.sp
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewDialog
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 
 internal data class TerminalTaskRow(val title: String, val summary: String, val onRead: () -> Unit,
     val onStop: (() -> Unit)? = null, val id: String = title)
@@ -33,41 +36,46 @@ internal fun TerminalTasksDialog(busy: Boolean, rows: List<TerminalTaskRow>, out
     LaunchedEffect(outputId, output, busy) {
         if (outputId != null && !busy) logs[outputId] = output.ifEmpty { "暂无日志输出" }
     }
-    WithoutPressRipple {
-        WindowDialog(show = true, title = "后台任务", onDismissRequest = onDismiss) {
-            Column(Modifier.fillMaxWidth().testTag("terminal-tasks-dialog")) {
-                error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                if (rows.isEmpty() && !busy && error == null) Text("暂无后台任务",
-                    Modifier.fillMaxWidth().padding(vertical = 24.dp), textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+    val colors = assistantPreviewPalette()
+    AssistantPreviewDialog(show = true, title = "后台任务", onDismiss = onDismiss) {
+        Column(Modifier.fillMaxWidth().weight(1f).testTag("terminal-tasks-dialog")) {
+            error?.let { Text(it, Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState()),
+                fontSize = 14.sp, lineHeight = 22.sp, color = colors.danger) }
+            if (rows.isEmpty() && !busy && error == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无后台任务", color = colors.muted, fontSize = 14.sp, lineHeight = 22.sp)
+            }
+            LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("terminal-task-list"),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(rows, key = { _, row -> row.id }) { index, row ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).testTag("terminal-task-row:$index")) {
-                        Text(row.title, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(row.summary, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TerminalAction(if (row.id in expanded) "收起日志" else "日志", "terminal-task-read:$index", !busy || row.id in expanded) {
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(colors.soft)
+                        .border(1.dp, colors.line, RoundedCornerShape(13.dp)).padding(12.dp).testTag("terminal-task-row:$index")) {
+                        Text(row.title, fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 22.sp,
+                            color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(row.summary, Modifier.weight(1f), fontSize = 12.sp, lineHeight = 18.sp,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis, color = colors.muted)
+                            AssistantPreviewButton(if (row.id in expanded) "收起日志" else "日志", {
                                 if (row.id in expanded) expanded = expanded - row.id else {
                                     expanded = expanded + row.id
                                     if (row.id !in logs) row.onRead()
                                 }
-                            }
-                            row.onStop?.let { TerminalAction("停止", "terminal-task-stop:$index", !busy, destructive = true, onClick = it) }
+                            }, Modifier.heightIn(min = 48.dp).testTag("terminal-task-read:$index"), enabled = !busy || row.id in expanded)
+                            row.onStop?.let { AssistantPreviewButton("停止", it,
+                                Modifier.heightIn(min = 48.dp).testTag("terminal-task-stop:$index"), danger = true, enabled = !busy) }
                         }
                         if (row.id in expanded) {
                             if (busy && row.id !in logs) CircularProgressIndicator(
-                                Modifier.padding(8.dp).size(14.dp).testTag("terminal-task-loading:${row.id}"), strokeWidth = 2.dp)
+                                Modifier.padding(8.dp).size(14.dp).testTag("terminal-task-loading:${row.id}"), strokeWidth = 2.dp,
+                                color = colors.accent)
                             SelectionContainer {
                                 Text(logs[row.id] ?: if (outputId == null && !busy) output.ifEmpty { "暂无日志输出" } else "",
                                     Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState())
-                                        .background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp).testTag("terminal-task-output"),
-                                    fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                                        .background(colors.fieldBackground).padding(8.dp).testTag("terminal-task-output"),
+                                    fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, color = colors.text)
                             }
                         }
                     }
-                }
                 }
             }
         }

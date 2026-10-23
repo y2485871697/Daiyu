@@ -23,22 +23,33 @@ class TerminalSheetStyleContractTest(unittest.TestCase):
     def test_create_is_filled_primary_footer_outside_scrolling_sessions(self):
         footer = SESSIONS.split('footer = {', 1)[1].split('}) {', 1)[0]
         self.assertIn('AssistantPreviewButton("新建会话", onNew', footer)
-        self.assertIn('Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("terminal-create-session")', footer)
+        self.assertIn('Modifier.fillMaxWidth().heightIn(min = actionMinHeight).testTag("terminal-create-session")', footer)
         self.assertIn('primary = true, enabled = canCreate', footer)
         self.assertNotIn('TerminalAction(', SESSIONS)
         self.assertIn('LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("terminal-session-list")', SESSIONS)
 
     def test_sheet_actions_have_real_minimum_height_and_preserve_permissions(self):
         for tag in ('terminal-restart:${entry.id}', 'terminal-close:${entry.id}'):
-            self.assertIn('Modifier.heightIn(min = 48.dp).testTag("' + tag + '")', SESSIONS)
+            self.assertIn('Modifier.heightIn(min = actionMinHeight).testTag("' + tag + '")', SESSIONS)
         self.assertIn('enabled = !entry.restarting', SESSIONS)
         for tag in ('terminal-task-read:$index', 'terminal-task-stop:$index'):
-            self.assertIn('Modifier.heightIn(min = 48.dp).testTag("' + tag + '")', TASKS)
+            self.assertIn('Modifier.heightIn(min = actionMinHeight).testTag("' + tag + '")', TASKS)
         self.assertIn('enabled = !busy || row.id in expanded', TASKS)
         self.assertIn('danger = true, enabled = !busy', TASKS)
         self.assertIn('if (row.id !in logs) row.onRead()', TASKS)
         self.assertIn('LaunchedEffect(outputId, output, busy)', TASKS)
         self.assertIn('itemsIndexed(rows, key = { _, row -> row.id })', TASKS)
+
+    def test_sheet_minimum_uses_upward_pixel_alignment_and_scroll_completion(self):
+        self.assertIn('ceil(48.dp.toPx().toDouble()).toInt().toDp()', TASKS)
+        for text in (SESSIONS, TASKS):
+            self.assertIn('val actionMinHeight = terminalSheetActionMinHeight()', text)
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/terminal/TerminalSheetLayoutTest.kt').read_text()
+        for index in ('performScrollToIndex(5)', 'performScrollToIndex(19)'):
+            after = source.split(index, 1)[1]
+            self.assertLess(after.index('advanceTimeByFrame()'), after.index('assertIsDisplayed()'))
+            self.assertLess(after.index('waitForIdle()'), after.index('assertIsDisplayed()'))
+        self.assertEqual(2, source.count('assertHeightIsAtLeast(48.dp)'))
 
     def test_local_typography_and_cards_follow_assistant_palette(self):
         for text in (SESSIONS, TASKS):

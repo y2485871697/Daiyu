@@ -8,11 +8,11 @@ class R50BatchContract(unittest.TestCase):
  def test_chat_hiding_uses_window_owned_dismissal_before_focus_is_cleared(self):
   managed=(M/'ManagedInput.kt').read_text();chat=(M/'ChatInputIme.kt').read_text()
   helper=managed.split('internal fun clearManagedInputFocus',1)[1].split('private class ComposeInputRegion',1)[0]
-  for token in ['view.inputWindow()?.let { InputWindows.windows[it] }','host.dismiss(view, action)','root.requestFocus()','clear()','InputDismissal.run(action)']:self.assertIn(token,helper)
-  self.assertLess(helper.index('root.requestFocus()'),helper.index('clear()'))
+  for token in ['view.inputWindow()?.let { InputWindows.windows[it] }','host.dismiss(view, action)','view.rootView.requestFocus()','clear()','InputDismissal.run(action)']:self.assertIn(token,helper)
+  self.assertLess(helper.index('InputDismissal.run(action)'),helper.index('view.rootView.requestFocus()'))
   self.assertIn('clearManagedInputFocus(view) { focusManager.clearFocus(force = true) }',chat)
   common=managed.split('fun dismiss(view: View, clear: () -> Unit)',1)[1].split('fun remove(entry:',1)[0]
-  self.assertLess(common.index('holdRestingFocus()'),common.index('InputDismissal.run { clear() }'))
+  self.assertLess(common.index('InputDismissal.run { clear() }'),common.index('holdRestingFocus()'))
   self.assertIn('if (entries.any { it.focused() } ||',common)
   self.assertIn('hideSoftInputFromWindow(view.windowToken, 0)',common)
  def test_lazy_last_row_waits_for_queued_scroll_without_losing_height_checks(self):

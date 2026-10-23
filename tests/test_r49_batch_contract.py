@@ -25,12 +25,16 @@ class R49BatchContract(unittest.TestCase):
                       'root.descendantFocusability = previous']:
             self.assertIn(token, host)
         dismiss = host.split('private fun dismiss(entry:', 1)[1].split('fun remove(entry:', 1)[0]
-        self.assertLess(dismiss.index('holdRestingFocus()'), dismiss.index('InputDismissal.run { clear() }'))
+        self.assertLess(dismiss.index('InputDismissal.run { clear() }'), dismiss.index('holdRestingFocus()'))
         self.assertIn('if (clearing == 0 && (decor?.isFocused != true || entries.any { it.focused() })) releaseRestingFocus()', dismiss)
         remove = host.split('fun remove(entry:', 1)[1]
         self.assertLess(remove.index('if (entries.isEmpty())'), remove.index('releaseRestingFocus()'))
         self.assertNotIn('Lifecycle.Event.ON_RESUME', source)
-        self.assertNotIn('FOCUS_BLOCK_DESCENDANTS', source)
+        self.assertNotIn('FOCUS_BLOCK_DESCENDANTS', host)
+        guard = source.split('private fun clearWithoutNativeFocusFallback', 1)[1].split('private class ComposeInputRegion', 1)[0]
+        self.assertLess(guard.index('listener?.onFocusChange'), guard.index('FOCUS_BLOCK_DESCENDANTS'))
+        self.assertIn('finally {', guard)
+        self.assertIn('root.descendantFocusability = order', guard)
 
     def test_directory_uses_production_dismissal_before_recording_all_return_frames(self):
         source = (TEST / 'ProviderDirectoryResumeGeometryActivityTest.kt').read_text()

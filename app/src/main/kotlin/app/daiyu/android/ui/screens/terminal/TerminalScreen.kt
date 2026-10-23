@@ -262,9 +262,10 @@ private fun TerminalBlock(block: TerminalCommandBlock, onReinput: (String) -> Un
 private fun TerminalSessionsDialog(entries: List<TerminalSessionEntry>, active: String?, canCreate: Boolean,
     onDismiss: () -> Unit, onSelect: (String) -> Unit, onRestart: (String) -> Unit, onClose: (String) -> Unit, onNew: () -> Unit) {
     val colors = assistantPreviewPalette()
+    val actionMinHeight = terminalSheetActionMinHeight()
     AssistantPreviewDialog(show = true, title = "会话", onDismiss = onDismiss, footer = {
         AssistantPreviewButton("新建会话", onNew,
-            Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("terminal-create-session"), primary = true, enabled = canCreate)
+            Modifier.fillMaxWidth().heightIn(min = actionMinHeight).testTag("terminal-create-session"), primary = true, enabled = canCreate)
     }) {
         Column(Modifier.fillMaxWidth().weight(1f).testTag("terminal-sessions-dialog")) {
             if (entries.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -295,9 +296,9 @@ private fun TerminalSessionsDialog(entries: List<TerminalSessionEntry>, active: 
                                 Modifier.weight(1f), color = if (entry.running) colors.accent else colors.muted,
                                 fontSize = 12.sp, lineHeight = 18.sp)
                             AssistantPreviewButton("重启", { onRestart(entry.id) },
-                                Modifier.heightIn(min = 48.dp).testTag("terminal-restart:${entry.id}"), enabled = !entry.restarting)
+                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-restart:${entry.id}"), enabled = !entry.restarting)
                             AssistantPreviewButton("关闭", { onClose(entry.id) },
-                                Modifier.heightIn(min = 48.dp).testTag("terminal-close:${entry.id}"), danger = true)
+                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-close:${entry.id}"), danger = true)
                         }
                     }
                 }

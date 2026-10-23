@@ -436,9 +436,12 @@ case "$*" in
   fi
   [ "$6" = -e ] && [ "$7" = class ] && [ "$8" = "$TEST_CLASSES" ] &&
    [ "$9" = app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner ] || exit 11
-  if [ "$CASE" = androidx-ok ]; then
-   printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=testOne\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 1\n'
-   printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=testOne\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_RESULT: stream=\nTime: 0.01\n'
+  if [ "$CASE" = androidx-ok ] || [ "$CASE" = androidx-error-name ] || [ "$CASE" = androidx-exception-name ]; then
+   method=testOne
+   [ "$CASE" != androidx-error-name ] || method=testPreferenceWriteFailureKeepsConfirmedChoiceAndShowsError
+   [ "$CASE" != androidx-exception-name ] || method=testRejectsException
+   printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=%s\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 1\n' "$method"
+   printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=%s\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_RESULT: stream=\nTime: 0.01\n' "$method"
   fi
   [ "$CASE" != status-skip ] || printf 'INSTRUMENTATION_STATUS_CODE: -3\n'
   [ "$CASE" != status-ignore ] || printf 'INSTRUMENTATION_STATUS_CODE: -4\n'
@@ -691,6 +694,14 @@ exit 0
                 result = self.smoke(api=api, case='androidx-ok')
                 self.assertEqual(result.returncode, 0, result.stderr.decode())
                 self.assertTrue((self.root / 'smoke/启动.png').is_file())
+
+    def test_error_and_exception_method_names_pass_live_smoke_on_both_apis(self):
+        for api in (26, 37):
+            for case in ('androidx-error-name', 'androidx-exception-name'):
+                with self.subTest(api=api, case=case):
+                    result = self.smoke(api=api, case=case)
+                    self.assertEqual(result.returncode, 0, result.stderr.decode())
+                    self.assertTrue((self.root / 'smoke/启动.png').is_file())
 
     def test_pretty_ok_cannot_replace_the_raw_terminal_receipt(self):
         output = self.root / 'pretty-or-raw.txt'

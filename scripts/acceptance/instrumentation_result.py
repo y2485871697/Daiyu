@@ -16,6 +16,9 @@ NEGATIVE = re.compile(
     r"abort(?:ed)?|timed[ -]?out|timeout|cancel(?:led|ed)?|skipped|ignored)\b"
     r"|\b[A-Za-z_$][\w$]*(?:Error|Exception)\b"
     r"|INSTRUMENTATION_(?:FAILED|ABORTED)|shortMsg\s*=", re.IGNORECASE)
+IDENTIFIER = r"[A-Za-z_$][A-Za-z0-9_$]*"
+TEST_METADATA = re.compile(
+    rf"INSTRUMENTATION_STATUS: (?:id|class|test)={IDENTIFIER}(?:\.{IDENTIFIER})*\Z")
 OK = re.compile(r"OK \(([1-9][0-9]{0,8}) tests?\)\Z")
 MAX_TEXT_BYTES = 4 * 1024 * 1024
 
@@ -29,21 +32,23 @@ def require(condition, code):
         raise ResultError(code)
 
 
-def report_text(raw):
+def report_text(raw, *, allow_test_metadata=False):
     try:
         text = raw.decode("utf-8").replace("\r\n", "\n")
     except UnicodeError:
         raise ResultError("invalid_report_encoding") from None
     require(text.strip() and all(c in "\n\t" or (ord(c) >= 32 and ord(c) != 127)
                                  for c in text), "invalid_report_text")
-    require(not NEGATIVE.search(text), "negative_report_signal")
+    diagnostic = "\n".join(line for line in text.split("\n")
+                           if not (allow_test_metadata and TEST_METADATA.fullmatch(line)))
+    require(not NEGATIVE.search(diagnostic), "negative_report_signal")
     return text
 
 
 def instrumentation(raw, expected_tests):
     require(type(expected_tests) is int and 0 < expected_tests <= 999999999,
             "invalid_expected_tests")
-    text = report_text(raw)
+    text = report_text(raw, allow_test_metadata=True)
     successes, terminal_codes = [], []
     for line in text.split("\n"):
         require("INSTRUMENTATION_" not in line

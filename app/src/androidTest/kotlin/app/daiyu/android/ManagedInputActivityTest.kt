@@ -87,7 +87,10 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         return awaitStableWindowFrame(view) {
             if (view.windowToken != token || !target.layoutInfo.isPlaced ||
                 !target.layoutInfo.coordinates.isAttached) null else {
-                val bounds = target.boundsInRoot.translate(target.positionOnScreen - target.positionInRoot)
+                val origin = IntArray(2)
+                view.getLocationOnScreen(origin)
+                val bounds = target.boundsInRoot.translate(
+                    androidx.compose.ui.geometry.Offset(origin[0].toFloat(), origin[1].toFloat()))
                 bounds.takeIf { it.width > 0f && it.height > 0f &&
                     listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() } }
             }

@@ -101,6 +101,8 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
             node("terminal-create-session").assertIsNotEnabled()
             val before = tagged("assistant-sheet-footer").fetchSemanticsNode().boundsInRoot
             node("terminal-session-list").performScrollToIndex(5)
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
             node("terminal-close:session-5").assertIsDisplayed().assertIsEnabled()
             assertEquals(before, tagged("assistant-sheet-footer").fetchSemanticsNode().boundsInRoot)
             assertFooter()
@@ -124,6 +126,8 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
             node("terminal-task-read:0").assertIsNotEnabled()
             ui.runOnIdle { busy = false }
             node("terminal-task-list").performScrollToIndex(19)
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
             node("terminal-task-read:19").assertIsDisplayed()
             node("terminal-task-stop:19").assertDoesNotExist()
             ui.onNodeWithContentDescription("关闭").performClick()

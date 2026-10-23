@@ -300,6 +300,8 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                 assertFalse(first.hasFocus())
                 assertTrue(second.hasFocus())
                 assertSame(second, activity.window.currentFocus)
+                assertSame(second, activity.window.decorView.findFocus())
+                assertFalse(activity.window.decorView.isFocused)
             }
             awaitStableWindowFrame(second) {
                 val insets = ViewCompat.getRootWindowInsets(second)
@@ -317,6 +319,44 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                 assertEquals(1, first.selectionEnd)
                 assertEquals("继续编辑第二项", second.text.toString())
             }
+            // Exercise the native managed-entry path with an actual outside touch too.
+            mainThread {
+                first.onFocusChangeListener = null
+                assertTrue(first.requestFocus())
+                first.setSelection(5, 1)
+                transfers = 0
+                first.onFocusChangeListener = android.view.View.OnFocusChangeListener { _, focused ->
+                    if (!focused) {
+                        transfers++
+                        assertTrue(second.requestFocus())
+                    }
+                }
+            }
+            val outside = awaitStableWindowFrame(first) {
+                val location = IntArray(2)
+                first.rootView.getLocationOnScreen(location)
+                val local = IntArray(2)
+                first.getLocationOnScreen(local)
+                androidx.compose.ui.geometry.Offset(location[0] + 4f, local[1] + first.height / 2f)
+            }
+            val down = android.os.SystemClock.uptimeMillis()
+            for ((action, elapsed) in listOf(android.view.MotionEvent.ACTION_DOWN to 0L,
+                                           android.view.MotionEvent.ACTION_UP to 40L)) {
+                val event = android.view.MotionEvent.obtain(down, down + elapsed, action, outside.x, outside.y, 0)
+                event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
+            }
+            ui.waitForIdle()
+            mainThread {
+                assertEquals(1, transfers)
+                assertSame(second, activity.window.currentFocus)
+                assertSame(second, activity.window.decorView.findFocus())
+                assertFalse(activity.window.decorView.isFocused)
+                assertEquals(5, first.selectionStart)
+                assertEquals(1, first.selectionEnd)
+                assertEquals(0, keyboardHideCalls)
+            }
+            awaitImeFrame(node("ime-focus-transfer-fixture"), visible = true)
             assertEquals(database, fixture.database.exportBackup())
             assertEquals(0, fixture.opens.get())
         } finally {

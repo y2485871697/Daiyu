@@ -32,8 +32,9 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
 
     def test_role_indicators_are_not_buttons(self):
         icon = (UI / 'SubAgentRoleIcon.kt').read_text()
-        for role in ('implementation', 'review', 'image_generation', 'video_generation'):
-            self.assertIn(f'"{role}" -> Icons.Rounded.', icon)
+        for role, glyph in (('implementation', 'Build'), ('review', 'FactCheck'),
+                            ('image_generation', 'Image'), ('video_generation', 'Videocam')):
+            self.assertIn(f'"{role}" -> Icons.Rounded.{glyph}', icon)
         for removed in ('clickable', 'onClick', 'IconButton', 'Role.Button'):
             self.assertNotIn(removed, icon)
         dialog = (UI / 'ConversationCollaborationDialog.kt').read_text()
@@ -55,14 +56,32 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('.height(IntrinsicSize.Min)', form)
         style = (UI / 'subagent/ConversationAgentStyle.kt').read_text()
         self.assertIn('defaultMinSize(minHeight = 48.dp)', style)
-        speed = (UI / 'SubAgentGptSpeedButton.kt').read_text()
-        clickable = speed.index('.combinedClickable(')
-        padding = speed.index('.then(if (chatStyle) Modifier.padding(horizontal = 6.dp, vertical = 4.dp)')
-        self.assertLess(clickable, padding)
-        self.assertIn('minWidth = 48.dp, minHeight = 48.dp', speed)
         self.assertIn('Box(Modifier.size(48.dp).then', style)
         field = (UI / 'subagent/ConversationAgentForm.kt').read_text()
         self.assertIn('.heightIn(min = 48.dp).background(colors.field', field)
+
+    def test_chat_speed_is_a_compact_tag_without_shrinking_settings_controls(self):
+        speed = (UI / 'SubAgentGptSpeedButton.kt').read_text()
+        chat, settings = speed.split('Row(modifier = (if (chatStyle)', 1)[1].split('.semantics(mergeDescendants', 1)[0].split('else modifier', 1)
+        self.assertIn('heightIn(min = 24.dp)', chat)
+        self.assertNotIn('48.dp', chat)
+        self.assertIn('clip(chipShape).background(chatColors.soft).border(1.dp, chatColors.line, chipShape)', chat)
+        self.assertIn('SubAgentGptSpeedMinTouchSize', settings)
+        self.assertIn('private val SubAgentGptSpeedMinTouchSize = 48.dp', speed)
+        self.assertIn('fontSize = if (chatStyle) 10.sp', speed)
+        self.assertIn('lineHeight = if (chatStyle) 16.sp', speed)
+        clickable = speed.index('.combinedClickable(')
+        padding = speed.index('.then(if (chatStyle) Modifier.padding(horizontal = 8.dp, vertical = 3.dp)')
+        self.assertLess(clickable, padding)
+        self.assertIn('editor?.cycleGptSpeed(profile.id, profile.providerId, profile.modelId, expected = profile)', speed)
+        self.assertIn('if (!eligible) return', speed)
+
+    def test_passive_role_uses_a_small_glyph_not_a_button_sized_slot(self):
+        role = (UI / 'SubAgentRoleIcon.kt').read_text()
+        self.assertIn('Box(Modifier.size(24.dp)', role)
+        self.assertIn('Modifier.size(16.dp).testTag("subagent-role-glyph-${profile.id}")', role)
+        self.assertNotIn('size(40.dp)', role)
+        self.assertNotIn('size(22.dp)', role)
 
     def test_choice_content_has_bounded_scroll_without_column_scope_weight(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()

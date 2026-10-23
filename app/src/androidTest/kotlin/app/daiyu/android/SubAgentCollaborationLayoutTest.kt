@@ -100,13 +100,22 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
 
     fun testFourRoleIndicatorsHaveNoClickAction() {
         val roles = listOf("implementation", "review", "image_generation", "video_generation")
-        mainThread { activity.setContent {
-            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                Column { roles.forEach { SubAgentRoleIcon(SubAgentProfile(it, it, it)) } }
+        for (dark in listOf(false, true)) {
+            mainThread { activity.setContent {
+                key(dark) {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        Column { roles.forEach { SubAgentRoleIcon(SubAgentProfile(it, it, it)) } }
+                    }
+                }
+            } }
+            roles.forEach { role ->
+                node("subagent-role-$role").assertIsDisplayed().assertHasNoClickAction()
+                    .assertWidthIsEqualTo(24.dp).assertHeightIsEqualTo(24.dp)
+                    .assert(SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsActions.OnLongClick))
+                ui.onNodeWithTag("subagent-role-glyph-$role", useUnmergedTree = true).assertIsDisplayed().assertHasNoClickAction()
+                    .assertWidthIsEqualTo(16.dp).assertHeightIsEqualTo(16.dp)
             }
-        } }
-        roles.forEach { role ->
-            node("subagent-role-$role").assertIsDisplayed().assertHasNoClickAction()
         }
     }
 
@@ -144,9 +153,25 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             }
         } }
         val role = node("subagent-role-worker")
-        role.assertIsDisplayed().assertHasNoClickAction().performTouchInput { click() }
+        role.assertIsDisplayed().assertHasNoClickAction().assertWidthIsEqualTo(24.dp).assertHeightIsEqualTo(24.dp)
+            .performTouchInput { click() }
         ui.onNodeWithText("子代理配置").assertDoesNotExist()
-        ui.onNodeWithContentDescription("Worker GPT 速度：标准，点击切换速度").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        val speed = node("subagent-gpt-speed-worker").assertIsDisplayed().assertHeightIsAtLeast(24.dp)
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        ui.onNodeWithText("GPT 速度 · 标准", useUnmergedTree = true)
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        val label = layouts.single()
+        assertEquals(10f, label.layoutInput.style.fontSize.value, .01f)
+        assertEquals(16f, label.layoutInput.style.lineHeight.value, .01f)
+        assertFalse(label.hasVisualOverflow)
+        val speedBounds = speed.fetchSemanticsNode().boundsInRoot
+        val density = label.layoutInput.density.density
+        assertTrue("Compact speed does not keep the old 48dp painted block", speedBounds.height < 32f * density)
+        speed.performTouchInput { click() }
+        awaitControl("compact speed still saves the next mode") {
+            data.repository.snapshot(data.editor.owner).profiles.single().gptSpeedForModel() == GptSpeedMode.FAST
+        }
+        ui.onNodeWithText("GPT 速度 · 快速").assertIsDisplayed()
         node("subagent-gpt-divider-worker").assertExists()
         ui.onNodeWithContentDescription("Worker模型").assertHeightIsAtLeast(48.dp).performClick()
         node("chat-model-picker").assertIsDisplayed()

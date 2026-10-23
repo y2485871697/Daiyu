@@ -90,6 +90,14 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         var cropped: Bitmap? = null
         try {
             if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+            fun sampleBounds() = node.boundsInRoot.translate(node.positionOnScreen - node.positionInRoot)
+            val bounds = awaitStableWindowFrame(view) {
+                if (view.windowToken != token || !node.layoutInfo.isPlaced ||
+                    !node.layoutInfo.coordinates.isAttached) null else sampleBounds().takeIf {
+                    it.width > 0f && it.height > 0f &&
+                        listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() }
+                }
+            }
             instrumentation.runOnMainSync {
                 if (android.os.Build.VERSION.SDK_INT >= 29 && view.isHardwareAccelerated) {
                     view.viewTreeObserver.registerFrameCommitCallback { frame.countDown() }
@@ -101,15 +109,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 }
                 view.invalidate()
             }
-            check(frame.await(2, java.util.concurrent.TimeUnit.SECONDS)) { "截图前未提交绘制帧" }
-            fun sampleBounds() = node.boundsInRoot.translate(node.positionOnScreen - node.positionInRoot)
-            val bounds = awaitStableWindowFrame(view) {
-                if (view.windowToken != token || !node.layoutInfo.isPlaced ||
-                    !node.layoutInfo.coordinates.isAttached) null else sampleBounds().takeIf {
-                    it.width > 0f && it.height > 0f &&
-                        listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() }
-                }
-            }
+            check(frame.await(2, java.util.concurrent.TimeUnit.SECONDS)) { "截图前未提交稳定几何后的绘制帧" }
             val captured = checkNotNull(instrumentation.uiAutomation.takeScreenshot()) { "截图未返回图像" }
             screen = captured
             val after = ui.runOnIdle { sampleBounds() }
@@ -539,9 +539,9 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         data class ScrollFrame(val viewport: Rect, val target: Rect, val x: Float?, val y: Float?)
         fun frame(): ScrollFrame {
             val parent = container.fetchSemanticsNode()
-            val coordinates = target.fetchSemanticsNode().layoutInfo.coordinates
-            var root = coordinates
-            while (true) root = root.parentLayoutCoordinates ?: break
+            val targetNode = target.fetchSemanticsNode()
+            val targetBounds = Rect(targetNode.positionInRoot,
+                androidx.compose.ui.geometry.Size(targetNode.size.width.toFloat(), targetNode.size.height.toFloat()))
             val parentCoordinates = parent.layoutInfo.coordinates
             val bounds = parentCoordinates.boundsInParent().translate(
                 parentCoordinates.parentLayoutCoordinates?.positionInRoot() ?: Offset.Zero)
@@ -549,7 +549,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             val bar = page?.let { ui.onAllNodesWithTag("page-topbar:${it.removePrefix("page:")}")
                 .fetchSemanticsNodes().singleOrNull()?.boundsInRoot }
             val viewport = Rect(bounds.left, maxOf(bounds.top, bar?.bottom ?: bounds.top), bounds.right, bounds.bottom)
-            return ScrollFrame(viewport, root.localBoundingBoxOf(coordinates, clipBounds = false),
+            return ScrollFrame(viewport, targetBounds,
                 parent.config.getOrNull(SemanticsProperties.HorizontalScrollAxisRange)?.value?.invoke(),
                 parent.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.value?.invoke())
         }

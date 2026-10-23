@@ -32,8 +32,10 @@ import app.daiyu.android.ui.screens.settings.SettingsTextField
 
 class ManagedInputActivityTest : WiredActivityTestCase() {
     private var fieldToolbar: androidx.compose.ui.platform.TextToolbar? = null
+    private val cursorlessTag = mutableStateOf<String?>(null)
     private var fieldsInDialog = false
     private fun showFields(dialog: Boolean = false) {
+        cursorlessTag.value = null
         fieldsInDialog = dialog
         mainThread {
             activity.setContent {
@@ -55,8 +57,10 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                                     unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                                     focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
                                     unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
-                                    cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
-                                    errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)))
+                                    cursorColor = if (cursorlessTag.value == "managed-second") androidx.compose.ui.graphics.Color.Transparent
+                                        else materialImeCursorColor(MaterialTheme.colorScheme.primary),
+                                    errorCursorColor = if (cursorlessTag.value == "managed-second") androidx.compose.ui.graphics.Color.Transparent
+                                        else materialImeCursorColor(MaterialTheme.colorScheme.error)))
                             androidx.compose.material3.Text("外部标题", Modifier.testTag("managed-outside"))
                             app.daiyu.android.ui.haptics.material.TextButton(onClick = { clicks++ },
                                 modifier = Modifier.testTag("managed-button")) {
@@ -102,7 +106,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                 points.lastIndex -> android.view.MotionEvent.ACTION_UP
                 else -> android.view.MotionEvent.ACTION_MOVE
             }
-            val event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(),
+            val event = android.view.MotionEvent.obtain(down, down + elapsed,
                 action, point.x, point.y, 0)
             event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
             try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
@@ -223,12 +227,46 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         for (tag in listOf("managed-first", "managed-second")) {
             tapField(tag)
             val shown = pixels(tag)
+            val normalSamples = mutableListOf(shown)
             var changed = false
             repeat(3) {
                 ui.mainClock.advanceTimeBy(550)
-                if (!shown.contentEquals(pixels(tag))) changed = true
+                val sample = pixels(tag)
+                normalSamples += sample
+                if (!shown.contentEquals(sample)) changed = true
             }
             assertTrue("Visible IME must show the caret to this test", changed)
+            fun materialState(): List<Any?> {
+                val field = node(tag).fetchSemanticsNode()
+                val root = field.root as androidx.compose.ui.platform.ViewRootForTest
+                return listOf(field.id, root.view, root.view.windowToken, field.boundsInRoot,
+                    field.positionOnScreen, field.config[androidx.compose.ui.semantics.SemanticsProperties.EditableText],
+                    field.config[androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange])
+            }
+            if (tag == "managed-second") {
+                val before = materialState()
+                try {
+                    mainThread { cursorlessTag.value = tag }
+                    awaitFieldIme(tag, visible = true)
+                    node(tag).assertIsFocused()
+                    assertEquals(before, materialState())
+                    val transparent = pixels(tag)
+                    repeat(3) {
+                        ui.mainClock.advanceTimeBy(550)
+                        assertTrue(transparent.contentEquals(pixels(tag)))
+                    }
+                    assertTrue("Explicit transparent cursor must differ from visible production cursor",
+                        normalSamples.any { !it.contentEquals(transparent) })
+                } finally { mainThread { cursorlessTag.value = null } }
+                assertEquals(before, materialState())
+                val restored = pixels(tag)
+                var blinking = false
+                repeat(3) {
+                    ui.mainClock.advanceTimeBy(550)
+                    if (!restored.contentEquals(pixels(tag))) blinking = true
+                }
+                assertTrue("Restored production cursor must blink", blinking)
+            }
             // This test hides only IME, deliberately preserving input focus.
             dismissIme()
             awaitFieldIme(tag, visible = false)
@@ -239,14 +277,31 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                 node(tag).assertIsFocused()
                 assertTrue(hidden.contentEquals(pixels(tag)))
             }
+            if (tag == "managed-second") {
+                val before = materialState()
+                try {
+                    mainThread { cursorlessTag.value = tag }
+                    awaitFieldIme(tag, visible = false)
+                    node(tag).assertIsFocused()
+                    assertEquals(before, materialState())
+                    val cursorlessBaseline = pixels(tag)
+                    repeat(3) {
+                        ui.mainClock.advanceTimeBy(550)
+                        assertTrue(cursorlessBaseline.contentEquals(pixels(tag)))
+                    }
+                    assertTrue("Hidden IME must not draw a steady caret either: field=$tag",
+                        hidden.contentEquals(cursorlessBaseline))
+                } finally { mainThread { cursorlessTag.value = null } }
+            }
             realTap("managed-outside")
             awaitFieldFocus(tag, false)
             node(tag).assertIsNotFocused()
+            awaitFieldIme(tag, visible = false)
             val unfocused = pixels(tag)
             ui.mainClock.advanceTimeByFrame()
             assertTrue("Unfocused pixel baseline must be stable: field=$tag", unfocused.contentEquals(pixels(tag)))
             val firstDifference = hidden.indices.firstOrNull { it >= unfocused.size || hidden[it] != unfocused[it] }
-            assertTrue("Hidden IME must not draw a steady caret either: field=$tag " +
+            if (tag == "managed-first") assertTrue("Hidden IME must not draw a steady caret either: field=$tag " +
                 "hidden=${hidden.size} unfocused=${unfocused.size} firstDifference=$firstDifference",
                 hidden.contentEquals(unfocused))
         }
@@ -256,28 +311,90 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     fun testLongPressAndDragDoNotDismissEditing() {
         showFields()
         tapField("managed-first")
-        realLongPress("managed-first")
-        val selected = node("managed-first").fetchSemanticsNode().config[
-            androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
-        assertFalse("Real long press selects text", selected.collapsed)
-        realDrag("managed-first")
-        node("managed-first").assertIsFocused()
-        val dragged = node("managed-first").fetchSemanticsNode().config[
-            androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
-        assertFalse("Real long-press drag retains a text selection", dragged.collapsed)
-        mainThread { checkNotNull(fieldToolbar).hide() }
-        ui.waitUntil(5_000) {
-            var hidden = false
-            instrumentation.runOnMainSync {
-                hidden = fieldToolbar?.status == androidx.compose.ui.platform.TextToolbarStatus.Hidden
+        val originalHost = activity
+        val root = node("managed-first").fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest
+        val view = root.view
+        val token = view.windowToken
+        var mode: android.view.ActionMode? = null
+        val originalCallback = originalHost.window.callback
+        val callback = object : android.view.Window.Callback by originalCallback {
+            override fun onActionModeStarted(started: android.view.ActionMode) {
+                mode = started
+                originalCallback.onActionModeStarted(started)
             }
-            hidden
+            override fun onActionModeFinished(finished: android.view.ActionMode) {
+                if (mode === finished) mode = null
+                originalCallback.onActionModeFinished(finished)
+            }
         }
-        realLongPress("managed-outside")
-        node("managed-first").assertIsFocused()
-        realDrag("managed-outside")
-        node("managed-first").assertIsFocused()
-        awaitFieldIme("managed-first", visible = true)
+        var baselineWindows = emptyList<android.view.View>()
+        instrumentation.runOnMainSync {
+            baselineWindows = androidx.test.platform.view.inspector.WindowInspectorCompat.getGlobalWindowViews().toList()
+            originalHost.window.callback = callback
+        }
+        fun assertHost() {
+            instrumentation.runOnMainSync {
+                assertSame(originalHost, activity)
+                assertFalse("Gesture finished the original Activity", originalHost.isFinishing || originalHost.isDestroyed)
+                assertEquals(androidx.lifecycle.Lifecycle.State.RESUMED, originalHost.lifecycle.currentState)
+                assertTrue("Original Compose root lost attachment", view.isAttachedToWindow)
+                assertSame(token, view.windowToken)
+                assertTrue("Original Compose root lost window focus", view.hasWindowFocus())
+            }
+        }
+        try {
+            realLongPress("managed-first")
+            val selected = node("managed-first").fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
+            assertFalse("Real long press selects text", selected.collapsed)
+            realDrag("managed-first")
+            node("managed-first").assertIsFocused()
+            val dragged = node("managed-first").fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
+            assertFalse("Real long-press drag retains a text selection", dragged.collapsed)
+            instrumentation.runOnMainSync {
+                checkNotNull(fieldToolbar).hide()
+                mode?.finish()
+            }
+            val outside = screenBounds("managed-outside")
+            ui.waitUntil(5_000) {
+                var ready = false
+                instrumentation.runOnMainSync {
+                    val blocked = androidx.test.platform.view.inspector.WindowInspectorCompat.getGlobalWindowViews().any { popup ->
+                        val params = popup.layoutParams as? android.view.WindowManager.LayoutParams
+                        if (popup in baselineWindows || !popup.isShown || params == null ||
+                            params.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0) false
+                        else {
+                            val origin = IntArray(2)
+                            popup.getLocationOnScreen(origin)
+                            val bounds = androidx.compose.ui.geometry.Rect(origin[0].toFloat(), origin[1].toFloat(),
+                                (origin[0] + popup.width).toFloat(), (origin[1] + popup.height).toFloat())
+                            bounds.overlaps(outside)
+                        }
+                    }
+                    ready = mode == null && fieldToolbar?.status == androidx.compose.ui.platform.TextToolbarStatus.Hidden &&
+                        view.isAttachedToWindow && view.windowToken === token && view.hasWindowFocus() && !blocked
+                }
+                ready
+            }
+            assertHost()
+            node("managed-first").assertIsFocused()
+            assertEquals(dragged, node("managed-first").fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange])
+            awaitFieldIme("managed-first", visible = true)
+            realLongPress("managed-outside")
+            assertHost()
+            node("managed-first").assertIsFocused()
+            realDrag("managed-outside")
+            assertHost()
+            node("managed-first").assertIsFocused()
+            awaitFieldIme("managed-first", visible = true)
+        } finally {
+            instrumentation.runOnMainSync {
+                mode?.finish()
+                if (originalHost.window.callback === callback) originalHost.window.callback = originalCallback
+            }
+        }
     }
 
     fun testNativeFieldsKeepDraftAndSelectionWhenOutsideTapClearsFocus() {

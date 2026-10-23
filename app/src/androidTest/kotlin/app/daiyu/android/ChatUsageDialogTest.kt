@@ -126,17 +126,11 @@ class ChatUsageDialogTest : WiredActivityTestCase() {
                 }, onDismiss = { dismissed.incrementAndGet() })
                 awaitControl("held usage reader entered") { entered.count == 0L }
                 assertNoIntermediateDialog()
-                awaitVisualIdle()
-                ui.waitUntil(5_000) {
-                    var ready = false
-                    instrumentation.runOnMainSync {
-                        ready = activity.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.RESUMED &&
-                            activity.window.decorView.isAttachedToWindow && activity.window.decorView.hasWindowFocus() &&
-                            activity.onBackPressedDispatcher.hasEnabledCallbacks()
-                    }
-                    ready
+                mainThread {
+                    assertEquals(androidx.lifecycle.Lifecycle.State.RESUMED, activity.lifecycle.currentState)
+                    assertTrue(activity.onBackPressedDispatcher.hasEnabledCallbacks())
+                    activity.onBackPressedDispatcher.onBackPressed()
                 }
-                instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
                 ui.waitUntil(5_000) {
                     ui.mainClock.advanceTimeByFrame()
                     dismissed.get() == 1

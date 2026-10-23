@@ -5,6 +5,8 @@ import android.view.Choreographer
 import android.view.ViewTreeObserver
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.positionInRoot
@@ -160,11 +162,20 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
         val saved = fixture.settings.load()
         val slot = registry.providers.single().slotId
         val tags = listOf("provider-add", "provider-add-anthropic", "provider-add-speech", "provider-open-$slot")
-        dismissIme()
-        show(false, .9f) { ProviderManagementRoute(fixture.controller, { true }, {}) }
+        lateinit var directoryFocusManager: FocusManager
+        show(false, .9f) {
+            val focusManager = LocalFocusManager.current
+            SideEffect { directoryFocusManager = focusManager }
+            ProviderManagementRoute(fixture.controller, { true }, {})
+        }
         awaitUniqueTag("provider-add")
         ui.waitUntil(5_000) { row("provider-add").fetchSemanticsNode().config.contains(SemanticsActions.OnClick) }
+        // Normalize editing before recording; every return frame remains in scope.
+        mainThread { directoryFocusManager.clearFocus(force = true) }
+        dismissIme()
+        row("provider-search").assertIsNotFocused()
         awaitImeFrame(row("provider-add"), visible = false)
+        row("provider-search").assertIsNotFocused()
         val before = bounds(tags)
         val textBefore = textGeometry("provider-add", summary)
         val testRoot = row("provider-add").fetchSemanticsNode().root as ViewRootForTest

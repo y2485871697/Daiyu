@@ -8,6 +8,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.Window
+import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -87,6 +88,10 @@ private fun View.visibleInputBounds(): RectF? {
     return RectF(bounds).apply { offset(origin[0].toFloat(), origin[1].toFloat()) }
 }
 
+private fun inputTrace(message: String) {
+    if (app.daiyu.android.BuildConfig.DEBUG) android.util.Log.d("ManagedInput", message)
+}
+
 private class InputEntry(
     val view: View,
     val focused: () -> Boolean,
@@ -114,7 +119,10 @@ internal fun Modifier.managedInput(): Modifier = composed {
             state.bounds = RectF(bounds.left + screen[0] - window[0], bounds.top + screen[1] - window[1],
                 bounds.right + screen[0] - window[0], bounds.bottom + screen[1] - window[1])
         } else state.bounds = null
-    }.onFocusChanged { state.focused = it.hasFocus }
+    }.onFocusChanged {
+        if (state.focused != it.hasFocus) inputTrace("compose focus=${it.hasFocus} attached=${view.isAttachedToWindow}")
+        state.focused = it.hasFocus
+    }
 }
 
 private class ComposeInputRegion {
@@ -157,17 +165,35 @@ private fun bindInput(entry: InputEntry, explicitWindow: Window? = null): () -> 
         if (disposed || !view.isAttachedToWindow) return false
         if (host != null) return true
         val window = explicitWindow ?: view.inputWindow() ?: return false
+        if (view.windowToken == null || window.decorView.windowToken != view.windowToken) return false
         host = InputWindows.acquire(window, entry)
+        inputTrace("bound entries=${host?.entries?.size}")
         return true
     }
-    // Child attachment can precede DecorView's token; retry only after this traversal.
-    val retryAttach = Runnable { tryAttach() }
+    // A child can attach before its window token is published. Observe natural
+    // traversals until ready; never manufacture frames or rebind an acquired host.
+    var pendingTree: ViewTreeObserver? = null
+    lateinit var ready: ViewTreeObserver.OnPreDrawListener
+    fun stopWaiting() {
+        pendingTree?.takeIf { it.isAlive }?.removeOnPreDrawListener(ready)
+        pendingTree = null
+    }
+    ready = ViewTreeObserver.OnPreDrawListener {
+        if (tryAttach()) {
+            stopWaiting()
+            inputTrace("bound on traversal")
+        }
+        true
+    }
     fun attach() {
-        view.removeCallbacks(retryAttach)
-        if (!disposed && view.isAttachedToWindow && !tryAttach()) view.post(retryAttach)
+        stopWaiting()
+        if (!disposed && view.isAttachedToWindow && !tryAttach()) {
+            pendingTree = view.viewTreeObserver.also { it.addOnPreDrawListener(ready) }
+            inputTrace("binding pending attached=${view.isAttachedToWindow}")
+        }
     }
     fun detach() {
-        view.removeCallbacks(retryAttach)
+        stopWaiting()
         host?.remove(entry); host = null
     }
     val listener = object : View.OnAttachStateChangeListener {
@@ -189,6 +215,7 @@ private object InputWindows {
         val host = windows.getOrPut(window) {
             val lifecycle = entry.view.findViewTreeLifecycleOwner()?.lifecycle
                 ?: (window.context.inputActivity() as? LifecycleOwner)?.lifecycle
+            inputTrace("new window lifecycle=${lifecycle?.currentState}")
             InputWindow(window, lifecycle)
         }
         host.entries.add(entry)
@@ -200,7 +227,10 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
     val entries = mutableSetOf<InputEntry>()
     private val original = window.callback
     private val observer = LifecycleEventObserver { _, event ->
-        if (event == Lifecycle.Event.ON_STOP) entries.firstOrNull { it.focused() }?.let { dismiss(it) }
+        if (event == Lifecycle.Event.ON_STOP) {
+            inputTrace("stop entries=${entries.size} focused=${entries.count { it.focused() }}")
+            entries.firstOrNull { it.focused() }?.let { dismiss(it) }
+        }
     }
     private var candidate: InputEntry? = null
     private var nativeFocus: View? = null
@@ -224,6 +254,9 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
             if (event.pointerCount != 1 || hypot(event.rawX - x, event.rawY - y) > slop ||
                 event.eventTime - downTime >= ViewConfiguration.getLongPressTimeout()) tap = false
             if (window.decorView.visibleInputBounds()?.contains(event.rawX, event.rawY) != true) tap = false
+            if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) {
+                inputTrace("touch action=${event.actionMasked} outside=$outside focused=${entries.count { it.focused() }} tap=$tap elapsed=${event.eventTime - downTime} windowFocus=${window.decorView.hasWindowFocus()}")
+            }
             val before = candidate
             val shouldDismiss = event.actionMasked == MotionEvent.ACTION_UP && tap && outside
             // Child clicks and focus changes complete first; return the original result unchanged.
@@ -248,6 +281,7 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         if (!entry.focused() || entry !in entries) return
         val nativeBefore = window.currentFocus
         InputDismissal.run { entry.clear() }
+        inputTrace("cleared focused=${entries.count { it.focused() }} nativeSame=${window.currentFocus === nativeBefore}")
         // A focus listener may have explicitly moved editing to a different field/view.
         if (entries.any { it.focused() } ||
             (window.currentFocus !== nativeBefore && window.currentFocus?.onCheckIsTextEditor() == true)) return

@@ -23,14 +23,19 @@ class CandidateWindowPublicationContract(unittest.TestCase):
         self.assertIn('DisposableEffect(videoHost, this@MainActivity)', host)
         self.assertNotIn('DisposableEffect(videoHost, editorGeneration)', host)
 
-    def test_input_attach_retries_once_and_cancels_detached_registration(self):
+    def test_input_attach_waits_for_natural_traversal_and_cancels_registration(self):
         source = (MAIN / 'ui/components/ManagedInput.kt').read_text()
         attach = source.split('private fun bindInput(', 1)[1].split('private object InputWindows', 1)[0]
-        self.assertIn('val retryAttach = Runnable { tryAttach() }', attach)
-        self.assertEqual(1, attach.count('view.post(retryAttach)'))
+        self.assertIn('ready = ViewTreeObserver.OnPreDrawListener', attach)
+        self.assertEqual(1, attach.count('it.addOnPreDrawListener(ready)'))
+        self.assertIn('if (host != null) return true', attach)
+        self.assertNotIn('view.post(', attach)
+        self.assertNotIn('invalidate()', attach)
         self.assertIn('disposed || !view.isAttachedToWindow', attach)
         self.assertIn('val window = explicitWindow ?: view.inputWindow() ?: return false', attach)
-        self.assertIn('view.removeCallbacks(retryAttach)', attach)
+        self.assertIn('removeOnPreDrawListener(ready)', attach)
+        self.assertIn('view.windowToken == null || window.decorView.windowToken != view.windowToken', attach)
+        self.assertGreaterEqual(attach.count('stopWaiting()'), 4)
         self.assertIn('disposed = true', attach)
         self.assertIn('override fun onViewDetachedFromWindow(v: View) { detach() }', attach)
         self.assertIn('host?.remove(entry); host = null', attach)

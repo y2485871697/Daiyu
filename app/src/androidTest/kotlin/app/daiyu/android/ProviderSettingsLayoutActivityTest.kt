@@ -119,7 +119,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                 val touch = button.fetchSemanticsNode().touchBoundsInRoot
                 val left = (touch.left - hostBounds.left).toInt()
                 val top = (touch.top - hostBounds.top).toInt()
-                val bitmap = host.captureToImage()
+                val bitmap = captureScreenNode(host)
                 val image = bitmap.toPixelMap()
                 val width = touch.width.toInt()
                 val height = touch.height.toInt()

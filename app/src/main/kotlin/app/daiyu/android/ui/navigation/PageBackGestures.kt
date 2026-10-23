@@ -3,7 +3,8 @@ package app.daiyu.android.ui.navigation
 import android.os.Build
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
@@ -56,8 +57,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.abs
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -90,12 +89,12 @@ private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: 
     var dispatching = false
         private set
 
-    fun dispatchBack(scope: kotlinx.coroutines.CoroutineScope, back: () -> Unit) {
+    fun dispatchBack(back: () -> Unit) {
         if (!alive || transitionBlocked || committing || dispatching) return
         swipeCommit = SwipeCommit(progress, predictive, direction)
         dispatching = true
         try { back() }
-        finally { scope.launch { withFrameNanos { }; swipeCommit = null; dispatching = false } }
+        finally { swipeCommit = null; dispatching = false }
     }
     private var owner: Any? = null
     var progress by mutableFloatStateOf(0f)
@@ -116,6 +115,25 @@ private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: 
         this.owner = null
         active = false
         progress = 0f
+    }
+}
+
+private class PageBackCallbackSession {
+    var gesture: Pair<PageBackGestureState, Any>? = null
+    var started = false
+    var rejected = false
+
+    fun clear() {
+        gesture?.let { (state, owner) -> state.reset(owner) }
+        gesture = null
+        started = false
+        rejected = false
+    }
+
+    fun invalidate() {
+        val rejectCompletion = started || rejected
+        clear()
+        rejected = rejectCompletion
     }
 }
 
@@ -141,25 +159,70 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
         previewOwner.previewEnabled = previewEnabled
         state.refreshPreview()
     }
-    val predictive = state.predictiveEnabled
+    val dispatcher = checkNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentState by rememberUpdatedState(state)
     val currentBack by rememberUpdatedState(onBack)
-    val currentEnabled by rememberUpdatedState(enabled && predictive && state.resumed)
+    val currentEnabled by rememberUpdatedState(enabled && state.resumed)
     val currentPreview by rememberUpdatedState(previewEnabled)
-    BackHandler(enabled = enabled && state.resumed && !predictive) {
-        state.commitBack(scope) { currentBack() }
-    }
-    PredictiveBackHandler(enabled = enabled && state.resumed && predictive) { events ->
-        val owner = Any()
-        try {
-            events.collect { event ->
-                if (!state.alive || !currentEnabled || state.transitionBlocked || state.committing) throw CancellationException()
-                state.update(owner, if (currentPreview) event.progress else 0f, predictive = true,
-                    direction = if (event.swipeEdge == BackEventCompat.EDGE_RIGHT) -1f else 1f)
+    val session = remember(dispatcher) { PageBackCallbackSession() }
+    val callback = remember(dispatcher) {
+        object : OnBackPressedCallback(false) {
+
+            override fun handleOnBackStarted(backEvent: BackEventCompat) {
+                handleOnBackCancelled()
+                session.started = true
+                val activeState = currentState
+                if (!activeState.predictiveEnabled) return
+                if (!activeState.alive || !currentEnabled || activeState.transitionBlocked || activeState.committing) {
+                    session.rejected = true
+                    return
+                }
+                val owner = Any()
+                session.gesture = activeState to owner
+                activeState.update(owner, 0f, predictive = true,
+                    direction = if (backEvent.swipeEdge == BackEventCompat.EDGE_RIGHT) -1f else 1f)
             }
-            if (state.alive && currentEnabled) state.commitBack(scope) { currentBack() }
-        } finally {
-            state.reset(owner)
+
+            override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+                val (activeState, owner) = session.gesture ?: return
+                if (activeState !== currentState || !activeState.alive || !currentEnabled ||
+                    activeState.transitionBlocked || activeState.committing) {
+                    activeState.reset(owner)
+                    session.gesture = null
+                    session.rejected = true
+                    return
+                }
+                activeState.update(owner, if (currentPreview) backEvent.progress else 0f, predictive = true,
+                    direction = if (backEvent.swipeEdge == BackEventCompat.EDGE_RIGHT) -1f else 1f)
+            }
+
+            override fun handleOnBackCancelled() {
+                session.clear()
+            }
+
+            override fun handleOnBackPressed() {
+                val activeState = currentState
+                try {
+                    if (!session.rejected && activeState.alive && currentEnabled) {
+                        activeState.commitBack(scope) { currentBack() }
+                    }
+                } finally {
+                    handleOnBackCancelled()
+                }
+            }
         }
+    }
+    SideEffect {
+        callback.isEnabled = enabled && state.resumed
+        if (!callback.isEnabled) session.invalidate()
+    }
+    DisposableEffect(state, callback) {
+        onDispose { session.invalidate() }
+    }
+    DisposableEffect(dispatcher, lifecycleOwner, callback) {
+        dispatcher.addCallback(lifecycleOwner, callback)
+        onDispose { callback.handleOnBackCancelled(); callback.remove() }
     }
 }
 
@@ -254,7 +317,7 @@ internal fun PageBackGestureHost(
                                 if (claimed && change.changedToUp()) {
                                     change.consume()
                                     if (dx >= threshold && state.alive) {
-                                        state.dispatchBack(scope) { currentBack() }
+                                        state.dispatchBack { currentBack() }
                                     }
                                 }
                                 break
@@ -286,20 +349,22 @@ internal fun PageBackGestureHost(
             if (target != null && state.previewAllowed && progress > 0f) Box(Modifier.fillMaxSize().drawBehind {
                 drawLayer(target.layer)
             }.testTag("page-back-target"))
-            Box(Modifier.fillMaxSize().graphicsLayer {
-                val visibleProgress = if (target != null && state.previewAllowed) progress else 0f
-                translationX = state.direction * size.width * visibleProgress * if (state.predictive) 0.12f else 1f
-                val scale = if (state.predictive) 1f - 0.06f * visibleProgress else 1f
-                scaleX = scale
-                scaleY = scale
-                shape = RoundedCornerShape(20.dp)
-                clip = visibleProgress > 0f
-                shadowElevation = 8.dp.toPx() * visibleProgress
-            }.testTag("page-back-surface").drawWithContent {
-                frame.layer.record { this@drawWithContent.drawContent() }
-                frame.size = viewport
-                drawLayer(frame.layer)
-            }.background(background)) { content() }
+            key(routeKey) {
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    val visibleProgress = if (target != null && state.previewAllowed) progress else 0f
+                    translationX = state.direction * size.width * visibleProgress * if (state.predictive) 0.12f else 1f
+                    val scale = if (state.predictive) 1f - 0.06f * visibleProgress else 1f
+                    scaleX = scale
+                    scaleY = scale
+                    shape = RoundedCornerShape(20.dp)
+                    clip = visibleProgress > 0f
+                    shadowElevation = 8.dp.toPx() * visibleProgress
+                }.testTag("page-back-surface").drawWithContent {
+                    frame.layer.record { this@drawWithContent.drawContent() }
+                    frame.size = viewport
+                    drawLayer(frame.layer)
+                }.background(background)) { content() }
+            }
             if (departure != null && departing) Box(Modifier.fillMaxSize().graphicsLayer {
                 val fromX = departure.direction * size.width * departure.progress * if (departure.predictive) 0.12f else 1f
                 translationX = fromX + (departure.direction * size.width - fromX) * exit.value

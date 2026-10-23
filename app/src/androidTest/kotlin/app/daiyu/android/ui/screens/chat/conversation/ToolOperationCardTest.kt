@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toPixelMap
@@ -180,33 +181,101 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 if (kotlin.math.abs(expected.red - actual.red) > .025f ||
                     kotlin.math.abs(expected.green - actual.green) > .025f ||
                     kotlin.math.abs(expected.blue - actual.blue) > .025f) {
-                    // Compare independent capture channels without changing the original oracle.
                     try {
                         val root = ui.onNode(isRoot() and hasAnyDescendant(hasTestTag("tool-document-frame:$title")), useUnmergedTree = true)
                         val rootNode = root.fetchSemanticsNode()
                         val native = (rootNode.root as androidx.compose.ui.platform.ViewRootForTest).view
                         val location = IntArray(2)
                         instrumentation.runOnMainSync { native.getLocationOnScreen(location) }
-                        val screen = captureScreenNode(root).toPixelMap()
-                        val enabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
-                        val compose = try {
-                            if (!enabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
-                            root.captureToImage().toPixelMap()
-                        } finally {
-                            if (!enabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+                        val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics").apply { mkdirs() }
+                        val prefix = "tool-frame-${if (dark) "dark" else "light"}-$title-${android.os.SystemClock.elapsedRealtimeNanos()}"
+                        android.util.Log.d("ToolFrameDiagnostic", "$sample prefix=$prefix soft=${observedSoft.toArgb()} " +
+                            "alpha=${observedSoft.alpha} native=${location.toList()} root=${rootNode.boundsInRoot} " +
+                            "nodeScreen=${geometry.positionOnScreen} nodeRoot=${geometry.positionInRoot}")
+                        fun save(bitmap: android.graphics.Bitmap, name: String) {
+                            java.io.File(directory, "$prefix-$name.png").outputStream().use {
+                                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                            }
                         }
-                        fun both(tag: String, inset: Int? = null): String {
-                            val target = ui.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode()
-                            val relative = target.boundsInRoot.translate(-rootNode.boundsInRoot.topLeft)
-                            val x = relative.center.x.roundToInt()
-                            val y = if (inset == null) relative.center.y.roundToInt() else relative.top.roundToInt() + inset
-                            return "$tag bounds=${target.boundsInRoot} screen=${screen[x, y]} compose=${compose[x, y]}"
+                        fun capture(name: String, block: () -> android.graphics.Bitmap) {
+                            try {
+                                val bitmap = block()
+                                try {
+                                    save(bitmap, name)
+                                    if (name.endsWith("root")) {
+                                        val x = (geometry.boundsInRoot.center.x - rootNode.boundsInRoot.left).roundToInt()
+                                        val y = (geometry.boundsInRoot.top - rootNode.boundsInRoot.top).roundToInt() + sampleY
+                                        val profile = (-8..8).filter { y + it in 0 until bitmap.height && x in 0 until bitmap.width }
+                                            .joinToString { "$it:${bitmap.getPixel(x, y + it).toUInt().toString(16)}" }
+                                        android.util.Log.d("ToolFrameDiagnostic", "$name size=${bitmap.width}x${bitmap.height} sample=$x,$y profile=$profile")
+                                    }
+                                } finally { bitmap.recycle() }
+                            } catch (diagnostic: Throwable) {
+                                android.util.Log.e("ToolFrameDiagnostic", "$name capture failed", diagnostic)
+                            }
                         }
-                        android.util.Log.d("ToolFrameDiagnostic", "$sample soft=${observedSoft.toArgb()} alpha=${observedSoft.alpha} " +
-                            "native=${location.toList()} nodeScreen=${geometry.positionOnScreen} nodeRoot=${geometry.positionInRoot} " +
-                            "screen=${screen.width}x${screen.height} compose=${compose.width}x${compose.height} " +
-                            both("tool-document-frame:$title", sampleY) + " " +
-                            listOf("backdrop", "soft", "alpha", "opaque").joinToString { both("tool-swatch:$it") })
+                        capture("display") { checkNotNull(instrumentation.uiAutomation.takeScreenshot()) }
+                        capture("screen-root") { captureScreenNode(root).asAndroidBitmap() }
+                        try {
+                            var windowBitmap: android.graphics.Bitmap? = null
+                            var requestFailure: Throwable? = null
+                            val copied = java.util.concurrent.CountDownLatch(1)
+                            val ownership = Any()
+                            var completed = false
+                            var abandoned = false
+                            var copyResult = -1
+                            instrumentation.runOnMainSync {
+                                try {
+                                    val bitmap = android.graphics.Bitmap.createBitmap(activity.window.decorView.width,
+                                        activity.window.decorView.height, android.graphics.Bitmap.Config.ARGB_8888)
+                                    windowBitmap = bitmap
+                                    android.view.PixelCopy.request(activity.window, bitmap, {
+                                        synchronized(ownership) {
+                                            copyResult = it
+                                            completed = true
+                                            if (abandoned) bitmap.recycle()
+                                        }
+                                        copied.countDown()
+                                    }, android.os.Handler(android.os.Looper.getMainLooper()))
+                                } catch (failure: Throwable) { requestFailure = failure }
+                            }
+                            if (requestFailure != null) {
+                                windowBitmap?.recycle()
+                                throw checkNotNull(requestFailure)
+                            }
+                            val arrived = try { copied.await(2, java.util.concurrent.TimeUnit.SECONDS) }
+                            catch (interrupted: InterruptedException) {
+                                synchronized(ownership) {
+                                    if (completed) windowBitmap?.recycle() else abandoned = true
+                                }
+                                Thread.currentThread().interrupt()
+                                throw interrupted
+                            }
+                            synchronized(ownership) {
+                                if (completed) {
+                                    val bitmap = checkNotNull(windowBitmap)
+                                    try {
+                                        android.util.Log.d("ToolFrameDiagnostic", "pixelCopy=$copyResult window=${bitmap.width}x${bitmap.height}")
+                                        if (copyResult == android.view.PixelCopy.SUCCESS) save(bitmap, "window")
+                                    } finally { bitmap.recycle() }
+                                } else {
+                                    abandoned = true
+                                    android.util.Log.d("ToolFrameDiagnostic", "PixelCopy completion pending after bounded wait=$arrived")
+                                }
+                            }
+                        } catch (diagnostic: Throwable) {
+                            android.util.Log.e("ToolFrameDiagnostic", "window capture failed", diagnostic)
+                        }
+                        capture("compose-root") {
+                            val enabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
+                            try {
+                                if (!enabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+                                root.captureToImage().asAndroidBitmap()
+                            } finally {
+                                if (!enabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+                            }
+                        }
+                        capture("display-after") { checkNotNull(instrumentation.uiAutomation.takeScreenshot()) }
                     } catch (diagnostic: Throwable) {
                         android.util.Log.e("ToolFrameDiagnostic", "capture diagnostic failed for $sample", diagnostic)
                     }

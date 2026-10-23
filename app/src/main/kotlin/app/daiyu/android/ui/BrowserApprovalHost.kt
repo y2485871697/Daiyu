@@ -1,7 +1,7 @@
 package app.daiyu.android.ui
 
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -81,8 +81,8 @@ internal fun BrowserApprovalHost(
                     writes = writes.toMutableList().also { it[index] = value }
                 }, enabled = preparation == null, modifier = Modifier.managedInput().fillMaxWidth(),
                     label = { Text("写操作 ${index + 1}：完整参数 JSON 对象") },
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                )
                 TextButton(enabled = preparation == null, onClick = {
                     writes = writes.filterIndexed { position, _ -> position != index }
                 }) { Text("移除此写操作") }

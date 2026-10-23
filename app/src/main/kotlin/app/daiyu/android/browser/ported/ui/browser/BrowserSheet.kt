@@ -276,8 +276,7 @@ internal fun BrowserSheet(
                                 keyboardController?.hide()
                                 focusManager.clearFocus()
                             }),
-                            modifier = Modifier.managedInput().fillMaxWidth().testTag("browser-visual-address"),
-                        )
+                            modifier = Modifier.managedInput().fillMaxWidth().testTag("browser-visual-address"))
                         if (urlInput.isEmpty()) {
                             Text(
                                 stringResource(R.string.om_browser_search_placeholder),

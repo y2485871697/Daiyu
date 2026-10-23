@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -43,7 +44,6 @@ internal fun CompactDialogTextField(
                     if (value.isEmpty()) Text(placeholder, style = style, color = colors.onSurfaceVariantSummary)
                     editor()
                 }
-            },
-        )
+            })
     }
 }

@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.imeCursorBrush
+import app.daiyu.android.ui.components.managedInput
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*

@@ -3,8 +3,8 @@
 // Local/private integration; see app/src/main/assets/licenses/openminis/NOTICE.md.
 package app.daiyu.android.browser.ported.ui.browser
 
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
 
 import androidx.compose.ui.res.stringResource
 import android.webkit.CookieManager
@@ -206,9 +206,8 @@ internal fun BrowserSettingsSheet(
                     modifier = Modifier.managedInput().fillMaxWidth().padding(top = 8.dp),
                     singleLine = false,
                     textStyle = MaterialTheme.typography.bodySmall,
-
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                )
                 MinisTextButton(onClick = {
                     tabPool.setUserAgentFromUI(UserAgentProfile.CUSTOM, customUA)
                 }) {
@@ -312,9 +311,8 @@ internal fun BrowserSettingsSheet(
                     // every time the user taps it.
                     modifier = Modifier.managedInput().weight(1f).bringIntoViewOnFocus(),
                     textStyle = MaterialTheme.typography.bodyMedium,
-
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                )
                 Spacer(Modifier.size(8.dp))
                 MinisTextButton(
                     onClick = {
@@ -355,9 +353,8 @@ internal fun BrowserSettingsSheet(
                     singleLine = true,
                     modifier = Modifier.managedInput().fillMaxWidth().padding(bottom = 8.dp),
                     textStyle = MaterialTheme.typography.bodySmall,
-
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                )
             }
 
             if (domains.isEmpty()) {
@@ -566,7 +563,6 @@ private fun ViewportSection(
                 modifier = Modifier.managedInput().width(110.dp).bringIntoViewOnFocus(),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
             )
             Spacer(Modifier.size(8.dp))
@@ -582,7 +578,6 @@ private fun ViewportSection(
                 modifier = Modifier.managedInput().width(110.dp).bringIntoViewOnFocus(),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
             )
             Spacer(Modifier.size(8.dp))

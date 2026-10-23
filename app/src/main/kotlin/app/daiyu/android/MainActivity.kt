@@ -1,7 +1,7 @@
 package app.daiyu.android
 
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
 
 import app.daiyu.android.ui.haptics.setHapticNegativeButton
 import app.daiyu.android.ui.haptics.setHapticPositiveButton
@@ -2840,8 +2840,8 @@ class MainActivity : ComponentActivity() {
                     enabled = terminalInputEditable(editor),
                     label = { androidx.compose.material3.Text("精确终端命令（包含所需换行）") },
                     modifier = Modifier.managedInput().fillMaxWidth().testTag("terminal-exact-command"),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                )
                 val canChoose = terminalInputEditable(editor)
                 app.daiyu.android.ui.haptics.material.TextButton(enabled = canChoose, onClick = {
                     if (terminalInputEditable(editor)) editor.linux = null

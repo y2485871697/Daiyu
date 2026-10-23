@@ -124,8 +124,7 @@ internal fun ChatModelPicker(
                                 input()
                             }
                         }
-                    },
-                )
+                    })
                 Spacer(Modifier.height(16.dp))
                 if (showStatusMessages && status != null) Text(status, color = colors.muted, fontSize = 13.sp, lineHeight = 20.sp,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))

@@ -23,6 +23,9 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
     private val density = AtomicReference<Density>()
     private var tasksVisible by mutableStateOf(false)
     private var created = 0
+    private var restarted = 0
+    private var closed = 0
+    private var selected = 0
     private var reads = 0
     private var stops = 0
     private var dismissed = 0
@@ -33,6 +36,7 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
     private fun show(dark: Boolean = false, fontScale: Float = .9f, sessions: Int = 0, tasks: Int = 0) {
         tasksVisible = false
         created = 0; reads = 0; stops = 0; dismissed = 0
+        restarted = 0; closed = 0; selected = 0
         busy = false; outputId = null; output = ""
         mainThread {
             activity.setContent {
@@ -48,7 +52,7 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
                                 TerminalEnvironmentState(phase = "RUNNING", ownsResources = true, acceptsInput = true)) }
                             TerminalScreenContent(TerminalWorkspaceState(true, false, null, entries, TerminalLinuxState()),
                                 onCreateSession = { created++ }, onSend = { _, _ -> error("Unexpected execution") },
-                                onSelectEnvironment = {}, onSelectSession = {}, onRestart = {}, onClose = {},
+                                onSelectEnvironment = {}, onSelectSession = { selected++ }, onRestart = { restarted++ }, onClose = { closed++ },
                                 onStop = {}, onResize = { _, _, _ -> }, onSimple = {}, onBack = {}, onOpenEnvironment = {},
                                 onOpenTasks = { tasksVisible = true })
                             if (tasksVisible) TerminalTasksDialog(busy, List(tasks) { index -> TerminalTaskRow(
@@ -70,7 +74,12 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
     }
 
     private fun tagged(tag: String) = ui.onNodeWithTag(tag, useUnmergedTree = true)
+    private fun assertNoCloseIcon() {
+        ui.onNodeWithContentDescription("关闭", useUnmergedTree = true).assertDoesNotExist()
+    }
+
     private fun assertFooter() {
+        assertNoCloseIcon()
         val sheet = tagged("assistant-sheet").fetchSemanticsNode().boundsInRoot
         val footer = tagged("assistant-sheet-footer").fetchSemanticsNode().boundsInRoot
         val create = node("terminal-create-session").fetchSemanticsNode().boundsInRoot
@@ -112,13 +121,42 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
         }
     }
 
+    fun testSessionActionsKeepFullTouchAreaWithoutSelectingTheCard() {
+        for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
+            show(dark, fontScale, sessions = 1)
+            node("terminal-sessions").performClick()
+            assertFooter()
+            for (tag in listOf("terminal-restart:session-0", "terminal-close:session-0")) {
+                val bounds = node(tag).fetchSemanticsNode().boundsInRoot
+                assertTrue("Inline actions must retain a 48dp touch layout", bounds.height >= 48f * density.get().density - 1f)
+            }
+            node("terminal-restart:session-0").performTouchInput {
+                click(androidx.compose.ui.geometry.Offset(center.x, 1f))
+            }
+            ui.runOnIdle { assertEquals(1, restarted); assertEquals(0, closed); assertEquals(0, selected) }
+            node("terminal-sessions-dialog").assertIsDisplayed()
+            node("terminal-close:session-0").performTouchInput {
+                click(androidx.compose.ui.geometry.Offset(center.x, height - 1f))
+            }
+            ui.runOnIdle { assertEquals(1, restarted); assertEquals(1, closed); assertEquals(0, selected) }
+            node("terminal-sessions-dialog").assertIsDisplayed()
+            node("preview-dialog-scrim").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+            node("terminal-sessions-dialog").assertDoesNotExist()
+        }
+    }
+
     fun testTaskSheetRetainsLogControlsBusyGatesAndDismissal() {
         for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
             show(dark, fontScale, tasks = 20)
             node("terminal-tasks").performClick()
-            node("terminal-task-read:0").assertHeightIsAtLeast(48.dp).performClick()
+            assertNoCloseIcon()
+            node("terminal-task-read:0").assertHeightIsAtLeast(48.dp).performTouchInput {
+                click(androidx.compose.ui.geometry.Offset(center.x, 1f))
+            }
             node("terminal-task-output").assertIsDisplayed()
-            node("terminal-task-stop:0").assertHeightIsAtLeast(48.dp).performClick()
+            node("terminal-task-stop:0").assertHeightIsAtLeast(48.dp).performTouchInput {
+                click(androidx.compose.ui.geometry.Offset(center.x, height - 1f))
+            }
             ui.runOnIdle { assertEquals(1, reads); assertEquals(1, stops); busy = true }
             node("terminal-task-stop:0").assertIsNotEnabled()
             node("terminal-task-read:0").assertIsEnabled().performClick()
@@ -130,7 +168,8 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
             ui.waitForIdle()
             node("terminal-task-read:19").assertIsDisplayed()
             node("terminal-task-stop:19").assertDoesNotExist()
-            ui.onNodeWithContentDescription("关闭").performClick()
+            assertNoCloseIcon()
+            pressBackAndWait()
             node("terminal-tasks-dialog").assertDoesNotExist()
             ui.runOnIdle { assertEquals(1, dismissed); assertEquals(1, reads); assertEquals(1, stops) }
         }
@@ -139,10 +178,12 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
     fun testEmptyTaskSheetClosesFromScrimAndBackWithoutStartingAnything() {
         show(tasks = 0)
         node("terminal-tasks").performClick()
+        assertNoCloseIcon()
         ui.onNodeWithText("暂无后台任务").assertIsDisplayed()
         node("preview-dialog-scrim").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
         node("terminal-tasks-dialog").assertDoesNotExist()
         node("terminal-tasks").performClick()
+        assertNoCloseIcon()
         pressBackAndWait()
         node("terminal-tasks-dialog").assertDoesNotExist()
         ui.runOnIdle { assertEquals(2, dismissed); assertEquals(0, reads); assertEquals(0, stops); assertEquals(0, created) }

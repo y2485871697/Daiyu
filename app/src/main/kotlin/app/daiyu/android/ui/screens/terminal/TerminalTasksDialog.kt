@@ -45,7 +45,7 @@ internal fun TerminalTasksDialog(busy: Boolean, rows: List<TerminalTaskRow>, out
     }
     val colors = assistantPreviewPalette()
     val actionMinHeight = terminalSheetActionMinHeight()
-    AssistantPreviewDialog(show = true, title = "后台任务", onDismiss = onDismiss) {
+    AssistantPreviewDialog(show = true, title = "后台任务", onDismiss = onDismiss, showCloseButton = false) {
         Column(Modifier.fillMaxWidth().weight(1f).testTag("terminal-tasks-dialog")) {
             error?.let { Text(it, Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState()),
                 fontSize = 14.sp, lineHeight = 22.sp, color = colors.danger) }
@@ -68,9 +68,9 @@ internal fun TerminalTasksDialog(busy: Boolean, rows: List<TerminalTaskRow>, out
                                     expanded = expanded + row.id
                                     if (row.id !in logs) row.onRead()
                                 }
-                            }, Modifier.heightIn(min = actionMinHeight).testTag("terminal-task-read:$index"), enabled = !busy || row.id in expanded)
+                            }, Modifier.heightIn(min = actionMinHeight).testTag("terminal-task-read:$index"), enabled = !busy || row.id in expanded, compact = true)
                             row.onStop?.let { AssistantPreviewButton("停止", it,
-                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-task-stop:$index"), danger = true, enabled = !busy) }
+                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-task-stop:$index"), danger = true, enabled = !busy, compact = true) }
                         }
                         if (row.id in expanded) {
                             if (busy && row.id !in logs) CircularProgressIndicator(

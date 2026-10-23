@@ -161,6 +161,7 @@ internal fun AssistantPreviewButton(
     enabled: Boolean = true,
     icon: ImageVector? = null,
     actionRow: Boolean = false,
+    compact: Boolean = false,
 ) {
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
@@ -172,10 +173,13 @@ internal fun AssistantPreviewButton(
             color = when { primary -> colors.primary; danger -> Color(0x40AE687A); else -> colors.line },
             cornerRadius = cornerRadius)
     val foreground = when { danger -> colors.danger; primary -> colors.onPrimary; else -> colors.accent }
-    Row(modifier.heightIn(min = (if (actionRow) 48 else 44).dp * s).alpha(if (enabled) 1f else .4f)
+    val click = Modifier.clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() },
+        indication = null, role = if (compact) Role.Button else null, onClick = onClick)
+    Row(modifier.heightIn(min = (if (actionRow || compact) 48 else 44).dp * s).alpha(if (enabled) 1f else .4f)
+        .then(if (compact) click.padding(vertical = 8.dp * s) else Modifier)
         .then(surface)
-        .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-        .padding(1.dp).padding(horizontal = 10.dp * s, vertical = 8.dp * s),
+        .then(if (compact) Modifier else click)
+        .padding(1.dp).padding(horizontal = 10.dp * s, vertical = (if (compact) 4 else 8).dp * s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (actionRow) Arrangement.Start else Arrangement.Center) {
         if (icon != null) { Icon(icon, null, Modifier.size(18.dp * s), tint = foreground); Spacer(Modifier.width(6.dp * s)) }

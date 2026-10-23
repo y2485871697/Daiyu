@@ -37,7 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import app.daiyu.android.ui.haptics.material.Checkbox
 import androidx.compose.material3.OutlinedTextField
 import app.daiyu.android.ui.haptics.material.IconButton
-import app.daiyu.android.ui.haptics.material.Switch
+import app.daiyu.android.ui.screens.settings.SettingsSwitch as Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect

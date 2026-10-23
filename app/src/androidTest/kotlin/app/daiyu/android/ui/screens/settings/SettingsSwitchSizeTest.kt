@@ -11,8 +11,12 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
@@ -30,9 +34,50 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.DaiyuPalette
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.ceil
 
 class SettingsSwitchSizeTest : WiredActivityTestCase() {
     private var pixelsPerDp = 1f
+
+    private val reference = Color(0xFF82728F)
+
+    private fun Modifier.switchDiagnosticCanvas() = testTag("switch-diagnostic-canvas").drawBehind {
+        drawRect(reference, Offset(size.width - 24f, size.height - 24f), Size(16f, 16f))
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun assertTrackWithControl(target: SemanticsNodeInteraction, diagnostic: String, bounds: String) {
+        val canvas = node("switch-diagnostic-canvas").assertIsDisplayed()
+        fun screenRect(part: SemanticsNodeInteraction): Rect {
+            val node = part.fetchSemanticsNode()
+            return node.boundsInRoot.translate(node.positionOnScreen - node.positionInRoot)
+        }
+        val before = listOf(screenRect(canvas), screenRect(target))
+        val control = Rect(before[0].right - 24f, before[0].bottom - 24f,
+            before[0].right - 8f, before[0].bottom - 8f)
+        check(!before[1].overlaps(control))
+        val frame = captureScreenNode(canvas)
+        check(before == listOf(screenRect(canvas), screenRect(target))) { "diagnostic geometry changed" }
+        val bitmap = frame.asAndroidBitmap()
+        val originX = floor(before[0].left.toDouble()).toInt()
+        val originY = floor(before[0].top.toDouble()).toInt()
+        fun crop(rect: Rect): ImageBitmap {
+            val left = floor(rect.left.toDouble()).toInt() - originX
+            val top = floor(rect.top.toDouble()).toInt() - originY
+            val right = ceil(rect.right.toDouble()).toInt() - originX
+            val bottom = ceil(rect.bottom.toDouble()).toInt() - originY
+            check(left >= 0 && top >= 0 && right <= frame.width && bottom <= frame.height && right > left && bottom > top)
+            return android.graphics.Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top).asImageBitmap()
+        }
+        val solid = crop(control).toPixelMap()
+        val center = solid[solid.width / 2, solid.height / 2]
+        val distance = maxOf(abs(center.red - reference.red), abs(center.green - reference.green), abs(center.blue - reference.blue))
+        val extra = "solidCenter=$center solidDistance=$distance bitmapConfig=${bitmap.config} " +
+            "bitmapColorSpace=${bitmap.colorSpace} canvas=${frame.width}x${frame.height} regions=$before control=$control"
+        android.util.Log.i("DaiyuSwitchSize", "$diagnostic $extra")
+        assertCompactTrack(crop(before[1]), diagnostic, "$bounds $extra")
+    }
 
     private fun assertCompactTrack(image: ImageBitmap, diagnostic: String, bounds: String) {
         val pixels = image.toPixelMap()
@@ -85,7 +130,7 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
                 var calls = 0
                 mainThread {
                     activity.setContent {
-                        Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        Box(Modifier.fillMaxSize().safeDrawingPadding().switchDiagnosticCanvas()) {
                             val platform = LocalDensity.current
                             CompositionLocalProvider(LocalDensity provides Density(platform.density, 1.3f),
                                 LocalLayoutDirection provides direction) {
@@ -105,7 +150,7 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
                 val bounds = target.fetchSemanticsNode().boundsInRoot
                 assertEquals(48f * pixelsPerDp, bounds.width, 1f)
                 assertEquals(48f * pixelsPerDp, bounds.height, 1f)
-                assertCompactTrack(captureScreenNode(target), "interactive-dark-$dark-scale-$scale-$direction",
+                assertTrackWithControl(target, "interactive-dark-$dark-scale-$scale-$direction",
                     "root=$bounds window=${target.fetchSemanticsNode().boundsInWindow}")
                 ui.onAllNodes(hasClickAction() and (hasTestTag("compact-interactive-switch") or
                     hasAnyAncestor(hasTestTag("compact-interactive-switch"))), useUnmergedTree = true).assertCountEquals(1)
@@ -128,7 +173,7 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
             var calls = 0
             mainThread {
                 activity.setContent {
-                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                    Box(Modifier.fillMaxSize().safeDrawingPadding().switchDiagnosticCanvas()) {
                         val platform = LocalDensity.current
                         CompositionLocalProvider(LocalDensity provides Density(platform.density, 1.3f)) {
                             AgentAppTheme(AppearanceSettings(interfaceScale = scale,
@@ -148,7 +193,7 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
             }
             val row = node("compact-row").assertIsEnabled().assertIsOn()
             assertEquals(64f * pixelsPerDp, row.fetchSemanticsNode().boundsInRoot.height, 1f)
-            assertCompactTrack(captureScreenNode(row), "row-dark-$dark-scale-$scale",
+            assertTrackWithControl(row, "row-dark-$dark-scale-$scale",
                 "root=${row.fetchSemanticsNode().boundsInRoot} window=${row.fetchSemanticsNode().boundsInWindow}")
             row.performClick()
             ui.runOnIdle { assertEquals(1, calls) }

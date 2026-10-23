@@ -125,6 +125,15 @@ class SourceTests(unittest.TestCase):
         self.assertEqual({(item['api'], item['shard']) for item in matrices[-1]},
                          {(api, shard) for api in ('26', '37.2') for shard in range(4)})
 
+    def test_api26_disables_only_gl_dma_transport_after_guest_kernel_panic(self):
+        smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
+        options = next(line for line in smoke.splitlines() if 'emulator-options:' in line)
+        self.assertIn("${{ matrix.api == '26' && '-feature -GLDMA' || '' }}", options)
+        self.assertLess(options.index('-feature -GLDMA'), options.index('-qemu'))
+        self.assertIn("-gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }}", options)
+        self.assertIn('-no-snapshot', options)
+        self.assertIn('-show-kernel', options)
+
     def test_prelaunch_hook_is_atomic_and_gates_smoke_after_action_catches_failure(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         self.assertIn('pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"', workflow)

@@ -9,10 +9,18 @@ TEST = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
 class R67FixtureContract(unittest.TestCase):
     def test_switch_fixtures_avoid_system_bars_without_relaxing_track_or_busy_oracles(self):
         size = (TEST / 'ui/screens/settings/SettingsSwitchSizeTest.kt').read_text()
-        self.assertEqual(2, size.count('Box(Modifier.fillMaxSize().safeDrawingPadding())'))
+        self.assertEqual(2, size.count('Box(Modifier.fillMaxSize().safeDrawingPadding().switchDiagnosticCanvas())'))
         for token in ('36.4f * pixelsPerDp', '22.4f * pixelsPerDp', '48f * pixelsPerDp',
                       'assertEquals(1, calls)', 'assertEquals(2, calls)'):
             self.assertIn(token, size)
+        diagnostic = size.split('private fun assertTrackWithControl', 1)[1].split('private fun assertCompactTrack', 1)[0]
+        self.assertEqual(1, diagnostic.count('captureScreenNode('))
+        self.assertIn('captureScreenNode(canvas)', diagnostic)
+        self.assertIn('check(!before[1].overlaps(control))', diagnostic)
+        self.assertIn('assertCompactTrack(crop(before[1]), diagnostic,', diagnostic)
+        self.assertIn('solidDistance=$distance', diagnostic)
+        self.assertNotIn('captureToImage', size)
+        self.assertNotIn('Thread.sleep', size)
         busy = (TEST / 'ui/screens/settings/SettingsSwitchBusyAppearanceTest.kt').read_text()
         self.assertIn('expectedChange = true) > 0', busy)
         self.assertIn('assertEquals(0, differentPixels(disabled, captureScreenNode(pending)', busy)
@@ -68,7 +76,9 @@ class R67FixtureContract(unittest.TestCase):
         self.assertLess(stable, method.index('userAgent.assertIsDisplayed()'))
         helper = source.split('private fun awaitBrowserWindowStable', 1)[1].split('private class StateVisit', 1)[0]
         for token in ('view.windowToken != token', 'bounds.width <= 0f', 'bounds.height <= 0f',
-                      '!insets.isVisible(ime)', 'insets.getInsets(ime).bottom == 0', '!imeReady'):
+                      '!insets.isVisible(ime)', 'insets.getInsets(ime).bottom == 0', '!imeReady',
+                      'Browser sampler diagnostic:', 'clipBounds = false',
+                      'coordinatesAttached=${current.layoutInfo.coordinates.isAttached}'):
             self.assertIn(token, helper)
         for token in ('performScrollTo', 'Thread.sleep', 'SystemClock.sleep'):
             self.assertNotIn(token, method)
@@ -86,6 +96,14 @@ class R67FixtureContract(unittest.TestCase):
             self.assertIn(token, production)
         for token in ('frame.layer.record', 'this@drawWithContent.drawContent()', 'DaiyuBackRecord'):
             self.assertNotIn(token, production)
+
+        horizontal = source.split('fun testHorizontalSwipeCommitsTheRecordedDepartureWithPredictionDisabled()', 1)[1].split('fun testHorizontalSwipeWithPredictionEnabled', 1)[0]
+        for token in ('mount(capturePreviousPage = true)', 'swipe previous page must be red',
+                      'backdrop.red > 0.9f && backdrop.blue < 0.1f', 'swipe departure must be blue',
+                      'outgoing.blue > 0.9f && outgoing.red < 0.1f'):
+            self.assertIn(token, horizontal)
+        self.assertNotIn('Build.VERSION.SDK_INT', horizontal)
+        self.assertIn('departure.frame.capture?.join()', production)
 
         for token in ('logPreviewPixels("source", sourceImage)', 'logPreviewPixels("target", previewImage)',
                       'page-back-$phase.png', 'DaiyuBackPreview'):

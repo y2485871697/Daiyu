@@ -211,20 +211,41 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
         val current = target.fetchSemanticsNode()
         val view = (current.root as androidx.compose.ui.platform.ViewRootForTest).view
         val token = view.windowToken
-        awaitStableWindowFrame(view) {
-            val bounds = current.boundsInRoot
-            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view)
-            val ime = androidx.core.view.WindowInsetsCompat.Type.ime()
-            val imeReady = !requireImeHidden || (insets != null &&
-                !insets.isVisible(ime) && insets.getInsets(ime).bottom == 0)
-            if (view.windowToken != token || !current.layoutInfo.isPlaced ||
-                !current.layoutInfo.coordinates.isAttached || bounds.width <= 0f || bounds.height <= 0f ||
-                !listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() } || !imeReady) null
-            else {
-                val position = IntArray(2)
-                view.getLocationOnScreen(position)
-                Triple(bounds, view.width to view.height, position.toList())
+        val diagnostic = java.util.concurrent.atomic.AtomicReference("sampler-not-called")
+        try {
+            awaitStableWindowFrame(view) {
+                val bounds = current.boundsInRoot
+                val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+                val ime = androidx.core.view.WindowInsetsCompat.Type.ime()
+                val imeReady = !requireImeHidden || (insets != null &&
+                    !insets.isVisible(ime) && insets.getInsets(ime).bottom == 0)
+                runCatching {
+                    val chain = generateSequence(current) { it.parent }.take(12).joinToString("; ") { node ->
+                        val coordinates = node.layoutInfo.coordinates
+                        val attached = coordinates.isAttached
+                        val raw = if (attached) {
+                            var root = coordinates
+                            while (true) root = root.parentLayoutCoordinates ?: break
+                            root.localBoundingBoxOf(coordinates, clipBounds = false)
+                        } else null
+                        "id=${node.id} placed=${node.layoutInfo.isPlaced} attached=$attached " +
+                            "clipped=${node.boundsInRoot} raw=$raw"
+                    }
+                    diagnostic.set("tokenMatches=${view.windowToken == token} placed=${current.layoutInfo.isPlaced} " +
+                        "coordinatesAttached=${current.layoutInfo.coordinates.isAttached} bounds=$bounds " +
+                        "imeReady=$imeReady insetsPresent=${insets != null}; $chain")
+                }
+                if (view.windowToken != token || !current.layoutInfo.isPlaced ||
+                    !current.layoutInfo.coordinates.isAttached || bounds.width <= 0f || bounds.height <= 0f ||
+                    !listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() } || !imeReady) null
+                else {
+                    val position = IntArray(2)
+                    view.getLocationOnScreen(position)
+                    Triple(bounds, view.width to view.height, position.toList())
+                }
             }
+        } catch (failure: AssertionError) {
+            throw AssertionError("${failure.message}\nBrowser sampler diagnostic: ${diagnostic.get()}", failure)
         }
     }
 

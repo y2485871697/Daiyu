@@ -61,7 +61,7 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
     private fun confirmed(host: AndroidBrowserRunHost, vararg args: Pair<String, Any?>): BrowserOutcome.Confirmed {
         assertFalse("execute must never wait on main Looper", Looper.myLooper() == Looper.getMainLooper())
         val outcome = host.execute(mapOf(*args))
-        assertTrue("Expected Confirmed, got $outcome", outcome is BrowserOutcome.Confirmed)
+        assertTrue("Expected Confirmed action=${mapOf(*args)["action"]}, got $outcome", outcome is BrowserOutcome.Confirmed)
         return outcome as BrowserOutcome.Confirmed
     }
 

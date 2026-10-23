@@ -451,7 +451,19 @@ private class AndroidBlankResource(
         if (command.action == "go_back" && !view.canGoBack() || command.action == "go_forward" && !view.canGoForward())
             return BrowserActionResult(text = "No further history entry")
         navigation.enterManual()
+        val started = System.nanoTime()
+        var stage = "dispatch"
+        fun mark(next: String, failure: Exception? = null) {
+            runCatching {
+                android.util.Log.w("DaiyuBrowser", "host:${command.action}:$stage->$next:" +
+                    "elapsedMs=${(System.nanoTime() - started) / 1_000_000}:attached=${view.isAttachedToWindow}:" +
+                    "phase=${navigation.phase}:sequenceChanged=${navigation.manualSequence != sequence}:" +
+                    "failure=${failure?.let(::browserFailureKind) ?: "none"}")
+            }
+            stage = next
+        }
         try {
+            mark("dispatch")
             when (command.action) {
                 "go_back" -> {
                     val list = view.copyBackForwardList()
@@ -478,21 +490,27 @@ private class AndroidBlankResource(
             }
             if (hasPage) {
                 // Observe a real new start and matching finish, not an upstream timeout's Unit.
+                mark("wait-finish")
                 while (navigation.manualSequence == sequence || navigation.phase != NavigationCallbacks.Phase.IDLE) {
                     check(!destroyed && live() && navigation.phase != NavigationCallbacks.Phase.QUARANTINED)
                     kotlinx.coroutines.delay(16)
                 }
+                mark("wait-visual")
                 awaitVisualState()
+                mark("history")
                 val url = view.url.orEmpty()
                 if (runCatching { history.allowUpstreamRecord(lease, url, view.title.orEmpty()) }.getOrDefault(false))
                     com.openminis.app.browser.BrowserHistoryStore.getInstance(context).record(url, view.title.orEmpty())
             }
+            mark("publish")
             navigation.leaveManual()
             if (command.action == "set_user_agent" || command.action == "set_viewport") {
                 appliedVisibleConfiguration = null
             }
+            mark("completed")
             return BrowserActionResult(text = "${command.action} completed")
         } catch (failure: Exception) {
+            mark(stage, failure)
             navigation.retire()
             throw failure
         }

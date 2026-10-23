@@ -20,6 +20,12 @@ import kotlinx.coroutines.withTimeout
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
+internal fun browserFailureKind(failure: Throwable): String = when (failure) {
+    is kotlinx.coroutines.TimeoutCancellationException, is java.util.concurrent.TimeoutException -> "timeout"
+    is java.util.concurrent.CancellationException -> "cancel"
+    else -> "other"
+}
+
 /** Internal seam for deterministic host tests; production always uses the fixed BrowserUseManager. */
 internal interface BlankBrowserResource {
     /** Thread-safe, bounded snapshot. False while any native callback/operation can still target
@@ -213,6 +219,7 @@ internal class LeaseBrowserHost(
                         }
                     } catch (failure: Exception) {
                         // Fixed-source deferreds have no callback token: unknown means never reuse.
+                        runCatching { android.util.Log.w("DaiyuBrowser", "lease:execution:${browserFailureKind(failure)}") }
                         try { retire(slot, "BROWSER_OPENMINIS_EXECUTION_UNKNOWN") }
                         finally { pending.completeExceptionally(failure) }
                     } finally {
@@ -383,6 +390,15 @@ internal class LeaseBrowserHost(
         synchronized(lock) {
             if (slot.retired) return
             slot.retired = true
+            runCatching {
+                val diagnostic = when (reason) {
+                    "BROWSER_OPENMINIS_EXECUTION_UNKNOWN", "BROWSER_OPENMINIS_RENDERER_FAILED",
+                    "BROWSER_OPENMINIS_CANCELLED", "BROWSER_OPENMINIS_CLOSED",
+                    "BROWSER_LEASE_INVALIDATED" -> reason
+                    else -> "other"
+                }
+                android.util.Log.w("DaiyuBrowser", "lease:retire:reason=$diagnostic:operation=${slot.operation}")
+            }
             val resource = slot.resource
             resource?.revokeAdmission()
             slot.resource = null

@@ -581,7 +581,7 @@ jobs:
           ram-size: ${{ matrix.ram }}M
           cores: 4
           emulator-build: ${{ matrix.api == '26' && '13610412' || '' }}
-          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel ${{ matrix.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}
+          emulator-options: -memory ${{ matrix.ram }} -no-window -gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel ${{ matrix.api == '26' && '-feature -GLDMA' || '' }} ${{ matrix.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}
           emulator-boot-timeout: 180
           pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
           disable-animations: true

@@ -10,6 +10,7 @@ import androidx.compose.ui.res.stringResource
 import android.webkit.CookieManager
 import android.webkit.WebStorage
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,7 +57,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -120,6 +125,15 @@ internal fun BrowserSettingsSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
+        val initialFocus = remember { FocusRequester() }
+        val windowFocused = LocalWindowInfo.current.isWindowFocused
+        var initialFocusAssigned by remember { mutableStateOf(false) }
+        LaunchedEffect(windowFocused) {
+            if (windowFocused && !initialFocusAssigned) {
+                initialFocusAssigned = true
+                initialFocus.requestFocus()
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -139,7 +153,7 @@ internal fun BrowserSettingsSheet(
         ) {
             // Header
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(initialFocus).focusable(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(

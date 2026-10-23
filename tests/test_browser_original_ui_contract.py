@@ -61,6 +61,14 @@ def approved_original_ui_source(path, source):
         chip = chip.replace(TAB_CHIP_STABLE_CLOSE, TAB_CHIP_ORIGINAL_CLOSE, 1)
         chip = chip.replace(TAB_CHIP_STABLE_PADDING, TAB_CHIP_ORIGINAL_PADDING, 1)
         return prefix + marker + chip
+    if path == 'ui/browser/BrowserSettingsSheet.kt':
+        source = source.replace(
+            'modifier = Modifier.fillMaxWidth().focusRequester(initialFocus).focusable(),',
+            'modifier = Modifier.fillMaxWidth(),', 1)
+        for name in ('androidx.compose.foundation.focusable', 'androidx.compose.ui.focus.FocusRequester',
+                     'androidx.compose.ui.focus.focusRequester', 'androidx.compose.ui.platform.LocalWindowInfo'):
+            source = source.replace('import ' + name + '\n', '', 1)
+        return source
     if path != HISTORY_PATH:
         return source
     source = source.replace('import androidx.compose.ui.platform.LocalLocale', 'import java.util.Locale')
@@ -306,6 +314,35 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
                 self.assertNotEqual(expected, contract(changed))
             self.assertNotEqual(expected, contract(source.replace('.managedInput()', '.padding(1.dp).managedInput()', 1)))
             self.assertNotEqual(expected, contract(source.replace('.managedInput()', '.managedInput(Color.Red)', 1)))
+
+    def test_settings_initial_focus_is_once_per_dialog_without_scrolling_or_visual_changes(self):
+        path = 'ui/browser/BrowserSettingsSheet.kt'
+        source = (PORT / path).read_text()
+        content = source.split('sheetState = sheetState,', 1)[1]
+        self.assertLess(content.index('LocalWindowInfo.current.isWindowFocused'), content.index('Column('))
+        for token in ('val initialFocus = remember { FocusRequester() }',
+                      'var initialFocusAssigned by remember { mutableStateOf(false) }',
+                      'LaunchedEffect(windowFocused)', 'if (windowFocused && !initialFocusAssigned)',
+                      'initialFocusAssigned = true', 'initialFocus.requestFocus()'):
+            self.assertIn(token, content)
+        self.assertEqual(1, source.count('initialFocus.requestFocus()'))
+        self.assertEqual(1, source.count('.focusRequester(initialFocus).focusable()'))
+        self.assertIn('Modifier.managedInput().weight(1f).bringIntoViewOnFocus()', source)
+        for token in ('scrollTo(', 'animateScrollTo(', 'captureFocus(', 'clearFocus('):
+            self.assertNotIn(token, source)
+        original = approved_original_ui_source(path, source)
+        expected = render_contract(original)
+        for old, new in [('.fillMaxWidth().focusRequester(initialFocus)', '.width(240.dp).focusRequester(initialFocus)'),
+                         ('.focusRequester(initialFocus).focusable()', '.focusRequester(initialFocus).focusable().padding(1.dp)'),
+                         ('Modifier.managedInput().weight(1f)', 'Modifier.managedInput().weight(2f)')]:
+            self.assertNotEqual(expected, render_contract(approved_original_ui_source(path, source.replace(old, new, 1))))
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/BrowserVisualLayoutTest.kt').read_text()
+        method = test.split('fun testTaskBrowserKeepsOriginalPopupWithoutExtraDescriptionsOrTaskButtons()', 1)[1].split('fun testBusyTabKeeps', 1)[0]
+        self.assertEqual(2, method.count('idleTimeout.assertIsNotFocused()'))
+        self.assertEqual(2, method.count('userAgent.assertIsDisplayed()'))
+        self.assertEqual(2, method.count('node("browser-visual-controls").performClick()'))
+        for token in ('scrollTo', 'performScroll', 'Thread.sleep', 'SystemClock.sleep'):
+            self.assertNotIn(token, method)
 
     def test_input_normalization_never_erases_literal_copy(self):
         for literal in ('.managedInput()', 'imeCursorBrush(accent)', 'colors = cursorColor'):

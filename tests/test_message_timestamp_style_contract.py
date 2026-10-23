@@ -27,7 +27,11 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
     def test_production_user_and_assistant_calls_preserve_visibility_and_alignment(self):
         turns = (CHAT / 'ChatMessageList.kt').read_text(encoding='utf-8')
         self.assertIn('endAligned = true', turns)
-        self.assertIn('if (turn.status != RunStatus.RUNNING)', turns)
+        user, assistant = turns.split('internal fun AssistantTurn(', 1)
+        self.assertIn('endAligned = true', user)
+        self.assertNotIn('endAligned = true', assistant)
+        self.assertIn('val initialBodyPending = sources.any { it.isNotBlank() } && projection == null && !hasProjectedBody', assistant)
+        self.assertIn('if (turn.status != RunStatus.RUNNING && !initialBodyPending)', assistant)
         self.assertIn('allowSpeech = hasTextActions, showCopyAction = hasTextActions', turns)
 
     def test_time_precision_and_format_are_not_changed_by_visual_fix(self):

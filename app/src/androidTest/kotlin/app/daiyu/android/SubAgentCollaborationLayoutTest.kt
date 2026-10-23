@@ -163,7 +163,15 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         val label = layouts.single()
         assertEquals(10f, label.layoutInput.style.fontSize.value, .01f)
         assertEquals(16f, label.layoutInput.style.lineHeight.value, .01f)
-        assertFalse(label.hasVisualOverflow)
+        val paragraph = label.multiParagraph
+        val geometry = "size=${label.size} constraints=${label.layoutInput.constraints} " +
+            "density=${label.layoutInput.density} style=${label.layoutInput.style} " +
+            "paragraph=${paragraph.width}x${paragraph.height} " +
+            "overflowWidth=${label.didOverflowWidth} overflowHeight=${label.didOverflowHeight} " +
+            "exceededMaxLines=${paragraph.didExceedMaxLines} lineCount=${label.lineCount} " +
+            "line0=${label.getLineLeft(0)}..${label.getLineRight(0)} " +
+            "line0Bottom=${label.getLineBottom(0)} ellipsized=${label.isLineEllipsized(0)}"
+        assertFalse(geometry, label.hasVisualOverflow)
         val speedBounds = speed.fetchSemanticsNode().boundsInRoot
         val density = label.layoutInput.density.density
         assertTrue("Compact speed does not keep the old 48dp painted block", speedBounds.height < 32f * density)

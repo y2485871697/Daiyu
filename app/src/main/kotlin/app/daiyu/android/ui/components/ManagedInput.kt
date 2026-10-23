@@ -133,6 +133,17 @@ internal fun Modifier.managedInput(): Modifier = composed {
     }
 }
 
+internal fun clearManagedInputFocus(view: View, clear: () -> Unit) {
+    val action = {
+        val root = view.rootView
+        root.isFocusableInTouchMode = true
+        root.requestFocus()
+        clear()
+    }
+    val host = view.inputWindow()?.let { InputWindows.windows[it] }
+    if (host != null) host.dismiss(view, action) else InputDismissal.run(action)
+}
+
 private class ComposeInputRegion {
     var focused = false
     var bounds: RectF? = null
@@ -312,11 +323,14 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
     }
     private fun dismiss(entry: InputEntry) {
         if (!entry.focused() || entry !in entries) return
+        dismiss(entry.view, entry.clear)
+    }
+    fun dismiss(view: View, clear: () -> Unit) {
         val nativeBefore = window.currentFocus
         holdRestingFocus()
         clearing++
         try {
-            InputDismissal.run { entry.clear() }
+            InputDismissal.run { clear() }
         } finally {
             clearing--
             if (clearing == 0 && (decor?.isFocused != true || entries.any { it.focused() })) releaseRestingFocus()
@@ -325,9 +339,9 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         // A focus listener may have explicitly moved editing to a different field/view.
         if (entries.any { it.focused() } ||
             (window.currentFocus !== nativeBefore && window.currentFocus?.onCheckIsTextEditor() == true)) return
-        ViewCompat.getWindowInsetsController(entry.view)?.hide(WindowInsetsCompat.Type.ime())
-        (entry.view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-            ?.hideSoftInputFromWindow(entry.view.windowToken, 0)
+        ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
+        (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.hideSoftInputFromWindow(view.windowToken, 0)
     }
     fun remove(entry: InputEntry) {
         entries.remove(entry)

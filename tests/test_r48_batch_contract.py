@@ -19,7 +19,7 @@ class R48BatchContract(unittest.TestCase):
         self.assertIn('root.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS', source)
         self.assertIn('root.descendantFocusability = previous', source)
         self.assertIn('if (state.focused) focus.clearFocus(force = true)', clear)
-        self.assertIn('InputDismissal.run { entry.clear() }', source)
+        self.assertIn('InputDismissal.run { clear() }', source)
         test = (TEST / 'ManagedInputActivityTest.kt').read_text()
         self.assertIn('inputView.rootView.isFocused', test)
         self.assertIn('assertEquals(5, selection.start)', test)

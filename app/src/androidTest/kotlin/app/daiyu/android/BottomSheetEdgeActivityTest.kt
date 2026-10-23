@@ -195,12 +195,14 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                 }
                 if (state == 4) {
                     node("subagent-status-list").performScrollToIndex(rows.lastIndex)
-                    node("subagent-status:task-39").performScrollTo().assertIsDisplayed()
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                    node("subagent-status:task-39").scrollToVisible().assertIsDisplayed()
                     ui.onNodeWithText("冻结模型 39").assertDoesNotExist()
                     node("subagent-status:task-39").performClick()
                     ui.onNodeWithText("冻结模型 39").scrollToVisible().assertIsDisplayed()
                     assertEquals(expectedHeight, rawBounds(node("conversation-agent-sheet").fetchSemanticsNode()).height, 2f)
-                    node("subagent-status:task-39").performScrollTo().performClick()
+                    node("subagent-status:task-39").scrollToVisible().performClick()
                     ui.onNodeWithText("冻结模型 39").assertDoesNotExist()
                     assertEquals(expectedHeight, rawBounds(node("conversation-agent-sheet").fetchSemanticsNode()).height, 2f)
                 }

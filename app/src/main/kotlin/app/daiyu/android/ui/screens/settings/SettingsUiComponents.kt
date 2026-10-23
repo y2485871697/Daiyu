@@ -102,6 +102,7 @@ internal fun SettingsRow(
     modifier: Modifier = Modifier,
     tag: String = "settings-row:$title",
     showChevron: Boolean = onClick != null,
+    textModifier: Modifier = Modifier,
 ) {
     val feedbackView = LocalView.current
     Row(
@@ -114,7 +115,7 @@ internal fun SettingsRow(
             leading()
             Spacer(Modifier.width(12.dp))
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.weight(1f).then(textModifier), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium),
                 color = MiuixTheme.colorScheme.onSurface)
             if (!summary.isNullOrBlank()) {

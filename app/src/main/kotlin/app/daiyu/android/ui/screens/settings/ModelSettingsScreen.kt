@@ -14,6 +14,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
@@ -247,6 +248,7 @@ internal fun ModelSettingsScreen(
                     SettingsCard {
                         SettingsRow(
                             title = entry.displayName,
+                            textModifier = Modifier.modelNameOpticalAlignment(),
                             summary = entry.id.takeIf { it != entry.displayName },
                             onClick = { changeDraft(draft.copy(model = entry.id)) },
                             leading = {

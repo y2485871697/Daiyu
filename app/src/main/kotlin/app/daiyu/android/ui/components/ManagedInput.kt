@@ -159,7 +159,6 @@ private fun clearWithoutNativeFocusFallback(view: View, clear: () -> Unit) {
     }
     val start = field.selectionStart
     val end = field.selectionEnd
-    inputTrace("native-clear snapshot=$start,$end focused=${field.hasFocus()}")
     val listener = field.onFocusChangeListener
     val focusable = root.focusable
     val touchFocusable = root.isFocusableInTouchMode
@@ -185,7 +184,6 @@ private fun clearWithoutNativeFocusFallback(view: View, clear: () -> Unit) {
         }
         if (start >= 0 && end >= 0)
             field.setSelection(start.coerceAtMost(field.length()), end.coerceAtMost(field.length()))
-        inputTrace("native-clear restored=${field.selectionStart},${field.selectionEnd} focused=${field.hasFocus()}")
     }
 }
 
@@ -205,11 +203,7 @@ internal fun EditText.manageInput(window: Window? = null) {
     bindInput(entry, window)
     val cursor = android.view.ViewTreeObserver.OnPreDrawListener {
         val visible = ViewCompat.getRootWindowInsets(field)?.isVisible(WindowInsetsCompat.Type.ime()) == true
-        if (field.isCursorVisible != visible) {
-            inputTrace("cursor-before selection=${field.selectionStart},${field.selectionEnd} visible=${field.isCursorVisible} ime=$visible focused=${field.hasFocus()}")
-            field.isCursorVisible = visible
-            inputTrace("cursor-after selection=${field.selectionStart},${field.selectionEnd}")
-        }
+        if (field.isCursorVisible != visible) field.isCursorVisible = visible
         true
     }
     field.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {

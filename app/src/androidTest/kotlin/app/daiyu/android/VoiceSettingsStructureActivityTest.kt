@@ -169,8 +169,12 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
     }
 
     private fun backFromSelectionSheet() {
+        awaitNodeWindowFocus(node("chat-selection-sheet"))
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
-        awaitHostWindowFocus(activity)
+        ui.waitUntil(timeoutMillis = 5000) {
+            ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty() &&
+                activity.window.decorView.hasWindowFocus()
+        }
         node("chat-selection-sheet").assertDoesNotExist()
     }
     private fun assertSelectionSheet(tag: String) {
@@ -320,7 +324,9 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         ui.waitUntil(timeoutMillis = 5000) {
             fixture.controller.voiceRuntime.accountConfigurations.value["DOUBAO"]?.key == "synthetic-clone-account"
         }
+        awaitUniqueTag("page:我的声音")
         node("voice-account").assertExists()
+        node("voice-account-add").assertIsDisplayed()
         assertEquals(readingBefore, fixture.controller.voiceRuntime.configuration.value)
         assertEquals(conversationBefore, fixture.controller.voiceRuntime.conversationConfiguration.value)
         assertEquals(0, fixture.opens.get())

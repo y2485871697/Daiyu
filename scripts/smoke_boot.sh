@@ -110,6 +110,10 @@ if test "$expected" -gt 0; then
 fi
 printf '%s\n%s\n' "$expected" "$test_classes" > smoke/instrumentation-targets.txt
 collect_diagnostics() {
+  local exit_status=$?
+  if test "$exit_status" -ne 0 && test -f smoke/platform-tests.txt; then
+    timeout --kill-after=5 20 adb pull /sdcard/Android/data/app.daiyu.android/files/settings-ui smoke/settings-ui > smoke/settings-ui-pull.txt 2>&1 || true
+  fi
   timeout --kill-after=5 10 adb devices -l > smoke/devices.txt 2>&1 || true
   timeout --kill-after=5 10 adb shell getprop > smoke/properties.txt 2>&1 || true
   timeout --kill-after=5 10 adb shell df -h /data > smoke/storage.txt 2>&1 || true
@@ -124,6 +128,7 @@ collect_diagnostics() {
   timeout --kill-after=5 10 adb shell 'getprop vendor.qemu.vport.uwb; ls -l /dev/hvc2 /dev/uwb0; for p in /sys/class/virtio-ports/*; do printf "%s " "$p"; cat "$p/name"; done' > smoke/uwb-transport.txt 2>&1 || true
   timeout --kill-after=5 20 adb pull /sdcard/Android/data/app.daiyu.android/files/visual-diagnostics smoke/visual-diagnostics > smoke/visual-diagnostics-pull.txt 2>&1 || true
   ps axww -o args= | grep '[q]emu-system-' > smoke/qemu-command.txt || true
+  return "$exit_status"
 }
 trap collect_diagnostics EXIT
 adb_stage device 60 wait-for-device

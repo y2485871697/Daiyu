@@ -24,42 +24,74 @@ import app.daiyu.android.ui.app.AgentAppTheme
 class ToolCardReadabilityTest : WiredActivityTestCase() {
     private var displayRestore: String? = null
     private var originalEffectiveSize: String? = null
+    private var densityRestore: String? = null
+    private var originalEffectiveDensity: String? = null
 
-    private fun displaySize(command: String): String =
+    private fun displayState(command: String): String =
         android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
             .bufferedReader().use { it.readText() }
 
     private fun effectiveSize(sizes: String): String =
         checkNotNull(Regex("(?:Override|Physical) size: (\\d+x\\d+)").findAll(sizes).lastOrNull()) { sizes }.groupValues[1]
 
+    private fun effectiveDensity(densities: String): String =
+        checkNotNull(Regex("(?:Override|Physical) density: (\\d+)").findAll(densities).lastOrNull()) { densities }.groupValues[1]
+
     override fun setUp() {
-        val sizes = displaySize("wm size")
+        val sizes = displayState("wm size")
         val original = Regex("Override size: (\\d+x\\d+)").find(sizes)?.groupValues?.get(1) ?: "reset"
         check(Regex("Physical size: \\d+x\\d+").containsMatchIn(sizes)) { sizes }
+        val densities = displayState("wm density")
+        val originalDensity = Regex("Override density: (\\d+)").find(densities)?.groupValues?.get(1) ?: "reset"
+        check(Regex("Physical density: \\d+").containsMatchIn(densities)) { densities }
         originalEffectiveSize = effectiveSize(sizes)
         displayRestore = original
-        check(displaySize("wm size 1216x2432").isBlank())
-        val applied = displaySize("wm size")
+        originalEffectiveDensity = effectiveDensity(densities)
+        densityRestore = originalDensity
+        // Keep SystemUI in the same phone configuration as the Compose fixture.
+        check(displayState("wm density 525").isBlank())
+        val appliedDensity = displayState("wm density")
+        check(effectiveDensity(appliedDensity) == "525") { "Requested phone density; actual: $appliedDensity" }
+        check(displayState("wm size 1216x2432").isBlank())
+        val applied = displayState("wm size")
         check(effectiveSize(applied) == "1216x2432") { "Requested 1216x2432 fixture; actual: $applied" }
+        android.util.Log.i("DaiyuToolCardDisplay", "applied size=${effectiveSize(applied)} density=${effectiveDensity(appliedDensity)}")
         instrumentation.waitForIdleSync()
         super.setUp()
         ui.waitUntil(5_000) {
-            var width = 0
-            instrumentation.runOnMainSync { width = activity.window.decorView.width }
-            width == 1216
+            var ready = false
+            instrumentation.runOnMainSync {
+                ready = activity.window.decorView.width == 1216 && activity.resources.displayMetrics.densityDpi == 525
+            }
+            ready
         }
     }
 
     override fun cleanupAfterLegacy() {
         try { super.cleanupAfterLegacy() }
         finally {
-            displayRestore?.let { original ->
-                check(displaySize("wm size $original").isBlank())
-                val restored = displaySize("wm size")
-                check(effectiveSize(restored) == originalEffectiveSize) { "Display restore failed: $restored" }
-                displayRestore = null
-                originalEffectiveSize = null
-                instrumentation.waitForIdleSync()
+            try {
+                displayRestore?.let { original ->
+                    check(displayState("wm size $original").isBlank())
+                    val restored = displayState("wm size")
+                    check(effectiveSize(restored) == originalEffectiveSize) { "Display restore failed: $restored" }
+                    android.util.Log.i("DaiyuToolCardDisplay", "restored size=${effectiveSize(restored)}")
+                    displayRestore = null
+                    originalEffectiveSize = null
+                }
+            } finally {
+                try {
+                    densityRestore?.let { original ->
+                        check(displayState("wm density $original").isBlank())
+                        val restored = displayState("wm density")
+                        check(effectiveDensity(restored) == originalEffectiveDensity) { "Density restore failed: $restored" }
+                        android.util.Log.i("DaiyuToolCardDisplay", "restored density=${effectiveDensity(restored)}")
+                        densityRestore = null
+                        originalEffectiveDensity = null
+                    }
+                } finally {
+                    instrumentation.waitForIdleSync()
+                }
             }
         }
     }

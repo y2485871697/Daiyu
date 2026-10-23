@@ -60,3 +60,36 @@ class RegressionSamplingContract(unittest.TestCase):
     def test_browser_hint_uses_resource(self):
         text = (TEST / 'ChatMenuEntryActivityTest.kt').read_text()
         self.assertIn('activity.getString(R.string.om_browser_enter_url_hint)', text)
+
+    def test_tool_card_native_framebuffer_uses_phone_density_before_size(self):
+        text = (TEST / 'ui/screens/chat/conversation/ToolCardReadabilityTest.kt').read_text()
+        setup = text.split('override fun setUp()', 1)[1].split('override fun cleanupAfterLegacy()', 1)[0]
+        for token in ('val densities = displayState("wm density")',
+                      'originalEffectiveDensity = effectiveDensity(densities)',
+                      'densityRestore = originalDensity', 'effectiveDensity(appliedDensity) == "525"',
+                      'effectiveSize(applied) == "1216x2432"'):
+            self.assertIn(token, setup)
+        self.assertLess(setup.index('densityRestore = originalDensity'), setup.index('wm density 525'))
+        self.assertLess(setup.index('wm density 525'), setup.index('wm size 1216x2432'))
+        self.assertLess(setup.index('wm size 1216x2432'), setup.index('super.setUp()'))
+        self.assertIn('private val phoneDensity = 525f / 160f', text)
+        self.assertIn('LocalDensity provides Density(phoneDensity, fontScale)', text)
+        self.assertIn('activity.window.decorView.width == 1216', setup)
+        self.assertIn('activity.resources.displayMetrics.densityDpi == 525', setup)
+        self.assertIn('hasVisualOverflow', text)
+
+    def test_tool_card_restores_size_and_density_even_after_setup_failure(self):
+        text = (TEST / 'ui/screens/chat/conversation/ToolCardReadabilityTest.kt').read_text()
+        cleanup = text.split('override fun cleanupAfterLegacy()', 1)[1].split('private val phoneDensity', 1)[0]
+        self.assertLess(cleanup.index('wm size $original'), cleanup.index('wm density $original'))
+        between = cleanup.split('wm size $original', 1)[1].split('wm density $original', 1)[0]
+        self.assertIn('} finally {', between)
+        for token in ('effectiveSize(restored) == originalEffectiveSize',
+                      'effectiveDensity(restored) == originalEffectiveDensity',
+                      'densityRestore = null', 'originalEffectiveDensity = null'):
+            self.assertIn(token, cleanup)
+        base = (TEST / 'ComposeActivityTestCase.kt').read_text()
+        lifecycle = base.split('override fun runBare()', 1)[1].split('protected open fun cleanupAfterLegacy()', 1)[0]
+        self.assertIn('try { runLegacy() }', lifecycle)
+        self.assertIn('finally {', lifecycle)
+        self.assertIn('try { cleanupAfterLegacy() }', lifecycle)

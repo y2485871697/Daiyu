@@ -40,7 +40,8 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
             tier = SubAgentTaskTier.entries.first())
         repository.update(owner) { it.copy(profiles = listOf(profile)) }
         mainThread { activity.setContent {
-            AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT)) {
+            AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                applyInterfaceScale = false) {
                 SubAgentSettingsScreen(onBack = {}, repositoryFactory = { repository }, modelSource = source)
             }
         } }

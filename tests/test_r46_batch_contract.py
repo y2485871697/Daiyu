@@ -49,12 +49,18 @@ class R46BatchContract(unittest.TestCase):
         self.assertIn('assertEquals(geometry, actionsBefore.top, after.top, 1f)', footer)
 
     def test_touch_bounds_are_distinct_from_compact_fill(self):
+        # R63: the approved provider design now paints its complete, scalable target.
         text = (TEST / 'ProviderSettingsLayoutActivityTest.kt').read_text()
-        self.assertIn('.assertHeightIsEqualTo(40.dp).assertTouchHeightIsEqualTo(48.dp)', text)
-        self.assertIn('host.performTouchInput { click(topPoint - hostBounds.topLeft) }', text)
-        self.assertIn('host.performTouchInput { click(bottomPoint - hostBounds.topLeft) }', text)
-        self.assertIn('40f * density, paintedRows.size.toFloat(), 2f', text)
-        self.assertIn('touch targets do not overlap', text)
+        for token in ['.assertHeightIsAtLeast(48.dp)',
+                      'touch.height >= kotlin.math.round(48f * density)',
+                      'assertEquals("touch and fill top", bounds.top, touch.top, 1f)',
+                      'assertEquals("touch and fill bottom", bounds.bottom, touch.bottom, 1f)',
+                      'host.performTouchInput { click(topPoint - hostBounds.topLeft) }',
+                      'host.performTouchInput { click(bottomPoint - hostBounds.topLeft) }',
+                      'bounds.height, paintedRows.size.toFloat(), 2f',
+                      'assertTrue("large font grows the fill", bounds.height > 48f * density)',
+                      'touch targets do not overlap', 'clicks.all { it == 3 }']:
+            self.assertIn(token, text)
 
     def test_caret_comparison_and_dialog_window_evidence_are_preserved(self):
         text = (TEST / 'ManagedInputActivityTest.kt').read_text()

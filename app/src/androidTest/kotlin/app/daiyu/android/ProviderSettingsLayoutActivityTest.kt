@@ -21,6 +21,9 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.TextLayoutResult
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -32,6 +35,20 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
+    // String semantics rebuilds at the parent width; measure in the actual label box.
+    private fun measuredLabelLayout(result: TextLayoutResult): TextLayoutResult {
+        val input = result.layoutInput
+        return TextMeasurer(input.fontFamilyResolver, input.density, input.layoutDirection, cacheSize = 0).measure(
+            text = input.text,
+            style = input.style,
+            overflow = input.overflow,
+            softWrap = input.softWrap,
+            maxLines = input.maxLines,
+            placeholders = input.placeholders,
+            constraints = Constraints.fixed(result.size.width, result.size.height),
+        )
+    }
+
     fun testConnectionFieldsStayCompactAndSecretActionSharesTheFieldCenter() {
         openModels()
         val name = reveal("provider-name-container").fetchSemanticsNode().boundsInRoot
@@ -151,7 +168,11 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                 val layouts = mutableListOf<TextLayoutResult>()
                 val label = ui.onNodeWithText(title, useUnmergedTree = true)
                 label.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
-                val layout = layouts.single()
+                val semanticsLayout = layouts.single()
+                val layout = measuredLabelLayout(semanticsLayout)
+                assertEquals(semanticsLayout.size, layout.size)
+                assertTrue("a one-pixel label must still report overflow", measuredLabelLayout(
+                    semanticsLayout.copy(size = IntSize(1, semanticsLayout.size.height))).hasVisualOverflow)
                 assertEquals(16.sp, layout.layoutInput.style.fontSize)
                 assertEquals(22.sp, layout.layoutInput.style.lineHeight)
                 assertEquals(if (index == titles.lastIndex) deleteText else onPrimary, layout.layoutInput.style.color)
@@ -160,6 +181,9 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                         "density=$density layoutDensity=${layout.layoutInput.density} " +
                         "button=$bounds touch=$touch host=$hostBounds " +
                         "label=${label.fetchSemanticsNode().boundsInRoot} " +
+                        "semanticsConstraints=${semanticsLayout.layoutInput.constraints} " +
+                        "semanticsSize=${semanticsLayout.size} " +
+                        "semanticsParagraph=${semanticsLayout.multiParagraph.width}x${semanticsLayout.multiParagraph.height} " +
                         "constraints=${layout.layoutInput.constraints} size=${layout.size} " +
                         "paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height} " +
                         "overflowWidth=${layout.didOverflowWidth} overflowHeight=${layout.didOverflowHeight} " +

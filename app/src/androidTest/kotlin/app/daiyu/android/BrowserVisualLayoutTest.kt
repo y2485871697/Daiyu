@@ -92,7 +92,10 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
         prepareBrowserGeometry(node("browser-visual-page"))
         node("browser-visual-controls").performClick()
         val userAgent = ui.onNodeWithText(activity.getString(R.string.om_browser_settings_user_agent))
-        awaitBrowserWindowStable(userAgent)
+        awaitNodeWindowFocus(userAgent)
+        dismissIme()
+        awaitImeFrame(userAgent, visible = false)
+        awaitBrowserWindowStable(userAgent, requireImeHidden = true)
         logBrowserWindow(userAgent, "settings-open")
         userAgent.assertIsDisplayed()
         ui.onNodeWithText("查看网页会暂停当前任务；关闭面板不会自动继续。").assertDoesNotExist()
@@ -201,18 +204,26 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
     }
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    private fun awaitBrowserWindowStable(target: SemanticsNodeInteraction) {
+    private fun awaitBrowserWindowStable(target: SemanticsNodeInteraction, requireImeHidden: Boolean = false) {
         awaitVisualIdle()
         awaitNodeWindowFocus(target)
         ui.waitForIdle()
         val current = target.fetchSemanticsNode()
         val view = (current.root as androidx.compose.ui.platform.ViewRootForTest).view
+        val token = view.windowToken
         awaitStableWindowFrame(view) {
-            if (!current.layoutInfo.isPlaced || !current.layoutInfo.coordinates.isAttached) null
+            val bounds = current.boundsInRoot
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+            val ime = androidx.core.view.WindowInsetsCompat.Type.ime()
+            val imeReady = !requireImeHidden || (insets != null &&
+                !insets.isVisible(ime) && insets.getInsets(ime).bottom == 0)
+            if (view.windowToken != token || !current.layoutInfo.isPlaced ||
+                !current.layoutInfo.coordinates.isAttached || bounds.width <= 0f || bounds.height <= 0f ||
+                !listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() } || !imeReady) null
             else {
                 val position = IntArray(2)
                 view.getLocationOnScreen(position)
-                Triple(current.boundsInRoot, view.width to view.height, position.toList())
+                Triple(bounds, view.width to view.height, position.toList())
             }
         }
     }

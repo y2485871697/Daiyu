@@ -38,12 +38,12 @@ class R62BatchContract(unittest.TestCase):
         source = (TEST / 'BrowserVisualLayoutTest.kt').read_text()
         method = source.split('fun testTaskBrowserKeepsOriginalPopupWithoutExtraDescriptionsOrTaskButtons()', 1)[1].split('fun testBusyTabKeeps', 1)[0]
         self.assertIn('awaitBrowserWindowStable(node("browser-visual-page"))', method)
-        self.assertLess(method.index('awaitBrowserWindowStable(userAgent)'), method.index('userAgent.assertIsDisplayed()'))
+        self.assertLess(method.index('awaitBrowserWindowStable(userAgent, requireImeHidden = true)'), method.index('userAgent.assertIsDisplayed()'))
         self.assertNotIn('scrollTo', method)
         helper = source.split('private fun awaitBrowserWindowStable', 1)[1].split('private class StateVisit', 1)[0]
         self.assertIn('awaitNodeWindowFocus(target)', helper)
         sample = helper.split('awaitStableWindowFrame(view)', 1)[1]
-        self.assertIn('Triple(current.boundsInRoot, view.width to view.height, position.toList())', sample)
+        self.assertIn('Triple(bounds, view.width to view.height, position.toList())', sample)
         for forbidden in ('ui.', 'fetchSemanticsNode', 'runOnIdle'):
             self.assertNotIn(forbidden, sample)
         empty = source.split('fun testEmptySheetShowsOriginalStructureWithoutCreatingBrowser()', 1)[1].split('fun testTaskBrowserKeeps', 1)[0]

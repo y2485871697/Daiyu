@@ -14,11 +14,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.haptics.miuix.TextButton
@@ -135,14 +137,18 @@ internal fun ProviderActionButton(
         textColor = MiuixTheme.colorScheme.onPrimary,
     ),
 ) {
+    val actionMinHeight: Dp = maxOf(
+        48.dp,
+        with(LocalDensity.current) { 22.sp.toDp() } + 24.dp,
+    )
     TextButton(
         text = text,
         onClick = onClick,
         enabled = enabled,
         colors = colors,
-        minHeight = 48.dp,
+        minHeight = actionMinHeight,
         insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         textStyle = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 22.sp),
-        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp),
+        modifier = modifier.fillMaxWidth().heightIn(min = actionMinHeight),
     )
 }

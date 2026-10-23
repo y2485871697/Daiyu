@@ -12,13 +12,19 @@ class ProviderVisualContractTest(unittest.TestCase):
         source = (SRC / 'ProviderSettingsComponents.kt').read_text()
         helper = source.split('internal fun ProviderActionButton(', 1)[1]
         self.assertIn('import app.daiyu.android.ui.haptics.miuix.TextButton', source)
+        self.assertIn('import androidx.compose.ui.platform.LocalDensity', source)
+        self.assertIn('import androidx.compose.ui.unit.Dp', source)
+        self.assertIn('val actionMinHeight: Dp = maxOf(', helper)
+        self.assertIn('48.dp,', helper)
+        self.assertIn('with(LocalDensity.current) { 22.sp.toDp() } + 24.dp', helper)
+
         for fragment in ('TextButton(', 'onClick = onClick', 'enabled = enabled', 'colors = colors',
-                         'minHeight = 48.dp', 'PaddingValues(horizontal = 16.dp, vertical = 12.dp)',
+                         'minHeight = actionMinHeight', 'PaddingValues(horizontal = 16.dp, vertical = 12.dp)',
                          'fontSize = 16.sp, lineHeight = 22.sp',
-                         'modifier.fillMaxWidth().heightIn(min = 48.dp)',
+                         'modifier.fillMaxWidth().heightIn(min = actionMinHeight)',
                          'color = MiuixTheme.colorScheme.primary', 'textColor = MiuixTheme.colorScheme.onPrimary'):
             self.assertIn(fragment, helper)
-        for forbidden in ('pointerInput', 'LocalDensity', 'requiredHeight', 'clickable(', 'alpha(', '.padding(vertical = 4.dp)'):
+        for forbidden in ('pointerInput', 'LocalDensity provides', 'CompositionLocalProvider', 'remember', '.height(', 'maxHeight =', 'requiredHeight', 'clickable(', 'alpha(', '.padding(vertical = 4.dp)'):
             self.assertNotIn(forbidden, helper)
 
     def test_only_four_provider_actions_use_the_local_helper(self):

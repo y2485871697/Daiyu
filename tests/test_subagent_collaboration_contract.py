@@ -14,6 +14,8 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('HorizontalDivider(Modifier.testTag("subagent-gpt-divider-${profile.id}")', block)
         self.assertIn('SubAgentGptSpeedButton(', block)
         self.assertEqual(1, row.count('HorizontalDivider('))
+        self.assertIn('Modifier.padding(top = 8.dp, bottom = 4.dp)', block)
+        self.assertIn('testTag("subagent-card-${profile.id}")', row)
         source = (SRC / 'delegation/SavedCatalogSubAgentModelSource.kt').read_text()
         self.assertIn('protocol == ProviderProtocol.RESPONSES && GptServiceTier.isGptSpeedModel(record.id)', source)
 
@@ -34,7 +36,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         speed = form.split('if (canEditSpeed) SubAgentSettingRow("GPT 速度"', 1)[1].split('SubAgentSettingRow("职责"', 1)[0]
         self.assertIn('session.edit { profile ->', speed)
         self.assertIn('profile.gptSpeedForModel().next()', speed)
-        self.assertIn('divider = true', speed)
+        self.assertNotIn('divider =', speed)
         self.assertNotIn('choices =', speed)
         self.assertNotIn('Picker', speed)
         modes = (SRC / 'model/GptServiceTier.kt').read_text().split('enum class GptSpeedMode {', 1)[1].split(';', 1)[0]
@@ -98,6 +100,32 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('if (canEditSpeed)', shared)
         self.assertIn('if (draft.supportsTaskTier)', shared)
 
+    def test_config_body_has_no_extra_dividers_and_enabled_uses_the_label_column(self):
+        form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
+        body = form.split('SubAgentConfigurationWindow(title =', 1)[1].split('SubAgentDraftDialogActions(ready', 1)[0]
+        self.assertNotIn('divider =', body)
+        self.assertNotIn('HorizontalDivider(', body)
+        self.assertIn('.padding(start = 30.dp, top = 8.dp, bottom = 8.dp)', body)
+        self.assertIn('Text("启用", Modifier.weight(1f)', body)
+        self.assertIn('fontSize = 14.sp, lineHeight = 22.sp, color = conversationAgentColors().text', body)
+        self.assertIn('ConversationAgentSwitch(draft.enabled, usable)', body)
+        self.assertIn('active -> interact { session.edit { it.copy(enabled = active) } }', body)
+        footer = form.split('private fun SubAgentDraftDialogActions', 1)[1]
+        self.assertEqual(1, footer.count('HorizontalDivider('))
+
+    def test_config_fields_center_editable_content_and_keep_only_the_outline(self):
+        field = (UI / 'subagent/ConversationAgentForm.kt').read_text().split('@Composable internal fun ConversationAgentField', 1)[1]
+        self.assertIn('decorationBox = { editor ->', field)
+        self.assertIn('Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 10.dp)', field)
+        self.assertIn('contentAlignment = Alignment.CenterStart', field)
+        self.assertIn('Box(Modifier.testTag("subagent-field-editor:$label")) { editor() }', field)
+        self.assertEqual(1, field.count('drawRoundRect('))
+        self.assertIn('drawRoundRect(colors.line', field)
+        self.assertNotIn('colors.field', field)
+        self.assertNotIn('.background(', field)
+        self.assertIn('clipOp = ClipOp.Difference', field)
+        self.assertIn('LocalLayoutDirection.current == LayoutDirection.Rtl', field)
+
     def test_form_and_footer_use_available_space_not_fixed_footer_budget(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
         self.assertIn('.weight(1f, fill = false).heightIn(max = 520.dp).testTag("subagent-config-body").verticalScroll', form)
@@ -108,7 +136,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('Box(Modifier.size(48.dp).then', style)
         field = (UI / 'subagent/ConversationAgentForm.kt').read_text()
         self.assertIn('.heightIn(min = 48.dp)', field)
-        self.assertIn('drawRoundRect(colors.field', field)
+        self.assertNotIn('drawRoundRect(colors.field', field)
         self.assertIn('clipOp = ClipOp.Difference', field)
 
     def test_chat_speed_is_a_compact_tag_without_shrinking_settings_controls(self):

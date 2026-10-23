@@ -1,6 +1,21 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.components.subagent.ConversationAgentField
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -74,12 +89,69 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("草稿职责").assertExists()
         ui.onNodeWithContentDescription("草稿任务分工").assertExists()
         ui.onNodeWithContentDescription("草稿思考深度").assertExists()
+        val enable = ui.onNode(hasText("启用") and hasAnyAncestor(hasTestTag("subagent-config-body")),
+            useUnmergedTree = true).scrollToVisible().fetchSemanticsNode().boundsInRoot
+        val modelLabel = ui.onNode(hasText("模型") and hasAnyAncestor(hasContentDescription("草稿模型")),
+            useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val switch = formSwitch().assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals("Enable label shares the model text column", modelLabel.left, enable.left, 1f)
+        assertEquals("Enable label centers on the switch", switch.center.y, enable.center.y, 1f)
     }
 
     private fun nameField(value: String) = ui.onNode(hasSetTextAction() and hasText(value))
     private fun formSwitch() = ui.onNode(isToggleable() and hasAnyAncestor(hasTestTag("subagent-config-window")))
     private fun confirm() = ui.onNode(hasText("确认") and hasClickAction())
     private fun cancel() = ui.onNode(hasText("取消") and hasClickAction())
+
+    fun testProfileFieldsCenterTextAndKeepNameAndParallelBackgroundTransparent() {
+        val backdrop = Color(0xff643a82)
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f))
+            for (direction in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
+                mainThread { activity.setContent {
+                    val density = LocalDensity.current
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale),
+                        LocalLayoutDirection provides direction) {
+                        AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                            applyInterfaceScale = false) {
+                            Box(Modifier.requiredWidth(280.dp).background(backdrop).padding(12.dp)) {
+                                Column {
+                                    ConversationAgentField("名称", "子代理 1", {}, enabled = true)
+                                    ConversationAgentField("并行上限（0 为不限）", "1", {}, enabled = true,
+                                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+                                }
+                            }
+                        }
+                    }
+                } }
+                for (label in listOf("名称", "并行上限（0 为不限）")) {
+                    val field = ui.onNodeWithTag("subagent-field:$label", useUnmergedTree = true)
+                        .assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+                    val frame = field.fetchSemanticsNode().boundsInRoot
+                    val editor = ui.onNodeWithTag("subagent-field-editor:$label", useUnmergedTree = true)
+                        .fetchSemanticsNode().boundsInRoot
+                    val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                    field.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) {
+                        assertTrue(it(layouts))
+                    }
+                    val text = layouts.single()
+                    val context = "$label dark=$dark scale=$fontScale direction=$direction"
+                    assertEquals("Editor is vertically centered: $context", frame.center.y, editor.center.y, 1f)
+                    assertEquals("Actual text layout is vertically centered: $context", frame.center.y,
+                        editor.top + text.size.height / 2f, 1f)
+                    assertFalse("Text does not overflow: $context", text.hasVisualOverflow)
+                    val inset = if (direction == LayoutDirection.Ltr) editor.left - frame.left else frame.right - editor.right
+                    assertEquals("Editor keeps Start padding: $context", 12f * text.layoutInput.density.density, inset, 1f)
+                    val pixels = field.captureToImage().toPixelMap()
+                    val x = if (direction == LayoutDirection.Ltr) pixels.width * 3 / 4 else pixels.width / 4
+                    val actual = pixels[x, pixels.height / 2]
+                    assertEquals("No field fill red: $context", backdrop.red, actual.red, .01f)
+                    assertEquals("No field fill green: $context", backdrop.green, actual.green, .01f)
+                    assertEquals("No field fill blue: $context", backdrop.blue, actual.blue, .01f)
+                }
+            }
+    }
 
     fun testSettingsEditUsesSharedSheetAndNewSwitchButCancelDiscardsAllChanges() {
         val (repository, owner) = openGroup()

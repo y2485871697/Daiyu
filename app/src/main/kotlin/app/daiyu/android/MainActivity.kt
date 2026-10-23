@@ -4765,6 +4765,8 @@ class MainActivity : ComponentActivity() {
         "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings",
         "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings",
         "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> "settings"
+        "generation-settings" -> if (generationSettingsVisit != null) "settings" else "chat"
+        "legacy-library" -> if (legacyPage != null) "backup" else "chat"
         "terminal" -> terminalReturnPage
         "usage" -> usageReturnPage
         "providers" -> providersReturnPage

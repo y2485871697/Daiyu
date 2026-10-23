@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.DaiyuPalette
+
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
 
@@ -545,7 +547,7 @@ private fun SkillSwitch(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val colors = MiuixTheme.colorScheme
-    val checkedTrack = if (muted) colors.onSurfaceVariantSummary else colors.primary
+    val checkedTrack = if (muted) colors.onSurfaceVariantSummary else DaiyuPalette.switchTrack
     Switch(
         checked = checked,
         onCheckedChange = onCheckedChange,

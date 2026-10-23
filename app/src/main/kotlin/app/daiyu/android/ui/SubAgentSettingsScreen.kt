@@ -1,5 +1,7 @@
 package app.daiyu.android.ui
 
+import app.daiyu.android.ui.app.DaiyuPalette
+
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -209,7 +211,8 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                                             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
                                                 Switch(profile.enabled, enabled = editable, onCheckedChange = { active ->
                                                     if (editor.enabled) { editor.updateProfile(profile.id) { it.copy(enabled = active) } }
-                                                }, modifier = Modifier.scale(0.7f))
+                                                }, colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                                    checkedBorderColor = DaiyuPalette.switchTrack), modifier = Modifier.scale(0.7f))
                                             }
                                         }
                                         var expanded by remember(editor, profile.id) { mutableStateOf(false) }

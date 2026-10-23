@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components.subagent
 
+import app.daiyu.android.ui.app.DaiyuPalette
+
 import app.daiyu.android.ui.components.defaultBottomSheetHeight
 
 import androidx.compose.ui.input.pointer.pointerInput
@@ -91,8 +93,8 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
         enabled = enabled, role = Role.Switch, interactionSource = remember { MutableInteractionSource() },
         indication = null, onValueChange = onCheckedChange) else Modifier), contentAlignment = Alignment.Center) {
         Box(Modifier.size(36.dp, 22.dp).alpha(if (enabled) 1f else .4f).clip(shape)
-            .background(if (checked) Color(0xff82728f) else Color(0x28b4aabb))
-            .border(1.dp, if (checked) Color(0xff82728f) else colors.line, shape),
+            .background(if (checked) DaiyuPalette.switchTrack else Color(0x28b4aabb))
+            .border(1.dp, if (checked) DaiyuPalette.switchTrack else colors.line, shape),
             contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart) {
             Box(Modifier.padding(horizontal = 2.dp).size(16.dp).background(if (checked) Color.White else Color(0xffa69baa), CircleShape))
         }

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.material3.SwitchDefaults
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -208,6 +210,8 @@ internal fun AppearanceSettingsScreen(
                         } else loadingExpanded = !loadingExpanded
                     }, trailing = {
                         app.daiyu.android.ui.haptics.material.Switch(checked = state.morphLoadingIndicator,
+                            colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                checkedBorderColor = DaiyuPalette.switchTrack),
                             onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) })
                     })
                 if (state.morphLoadingIndicator && loadingExpanded) {

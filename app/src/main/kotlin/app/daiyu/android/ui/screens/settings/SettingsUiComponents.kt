@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.DaiyuPalette
+
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -150,8 +152,8 @@ internal fun SettingsSwitchRow(title: String, checked: Boolean, enabled: Boolean
             onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = colors.onPrimary,
-                checkedTrackColor = colors.primary,
-                checkedBorderColor = colors.primary,
+                checkedTrackColor = DaiyuPalette.switchTrack,
+                checkedBorderColor = DaiyuPalette.switchTrack,
                 uncheckedThumbColor = colors.onSurfaceVariantSummary,
                 uncheckedTrackColor = colors.surface,
                 uncheckedBorderColor = colors.onSurfaceVariantSummary,

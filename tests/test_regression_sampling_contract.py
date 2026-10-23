@@ -61,33 +61,61 @@ class RegressionSamplingContract(unittest.TestCase):
         text = (TEST / 'ChatMenuEntryActivityTest.kt').read_text()
         self.assertIn('activity.getString(R.string.om_browser_enter_url_hint)', text)
 
-    def test_tool_card_native_framebuffer_uses_phone_density_before_size(self):
+    def test_tool_card_native_framebuffer_keeps_every_intermediate_in_phone_configuration(self):
+        import re
         text = (TEST / 'ui/screens/chat/conversation/ToolCardReadabilityTest.kt').read_text()
         setup = text.split('override fun setUp()', 1)[1].split('override fun cleanupAfterLegacy()', 1)[0]
-        for token in ('val densities = displayState("wm density")',
-                      'originalEffectiveDensity = effectiveDensity(densities)',
-                      'densityRestore = originalDensity', 'effectiveDensity(appliedDensity) == "525"',
-                      'effectiveSize(applied) == "1216x2432"'):
-            self.assertIn(token, setup)
-        self.assertLess(setup.index('densityRestore = originalDensity'), setup.index('wm density 525'))
-        self.assertLess(setup.index('wm density 525'), setup.index('wm size 1216x2432'))
-        self.assertLess(setup.index('wm size 1216x2432'), setup.index('super.setUp()'))
+        self.assertIn('verifyDisplay("320x640", "160")', setup)
+        steps = re.findall(r'changeDisplay\("wm (size|density) ([0-9x]+)", "([0-9x]+)", "([0-9]+)"\)', setup)
+        self.assertEqual(steps, [
+            ('size', '560x1120', '560x1120', '160'),
+            ('density', '280', '560x1120', '280'),
+            ('size', '980x1960', '980x1960', '280'),
+            ('density', '490', '980x1960', '490'),
+            ('size', '1216x2432', '1216x2432', '490'),
+            ('density', '525', '1216x2432', '525'),
+        ])
+        states = [('320x640', '160')]
+        for kind, value, expected_size, expected_density in steps:
+            size, density = states[-1]
+            if kind == 'size':
+                size = value
+            else:
+                density = value
+            self.assertEqual((size, density), (expected_size, expected_density))
+            states.append((size, density))
+        for size, density in states + list(reversed(states)):
+            width, height = map(int, size.split('x'))
+            self.assertGreaterEqual(width * 160 / int(density), 320)
+            self.assertLessEqual(width * 160 / int(density), 560)
+            self.assertEqual(height, width * 2)
+        self.assertLess(setup.index('wm density 525'), setup.index('super.setUp()'))
         self.assertIn('private val phoneDensity = 525f / 160f', text)
         self.assertIn('LocalDensity provides Density(phoneDensity, fontScale)', text)
         self.assertIn('activity.window.decorView.width == 1216', setup)
         self.assertIn('activity.resources.displayMetrics.densityDpi == 525', setup)
         self.assertIn('hasVisualOverflow', text)
 
-    def test_tool_card_restores_size_and_density_even_after_setup_failure(self):
+    def test_tool_card_rolls_back_verified_steps_after_setup_failure_and_stops_on_restore_failure(self):
         text = (TEST / 'ui/screens/chat/conversation/ToolCardReadabilityTest.kt').read_text()
+        change = text.split('private fun changeDisplay(', 1)[1].split('override fun setUp()', 1)[0]
+        self.assertLess(change.index('displayRestore.addFirst('), change.index('displayState(command)'))
+        self.assertIn('DisplayRestoreStep(undo, effectiveSize(sizes), effectiveDensity(densities))', change)
+        self.assertIn('verifyDisplay(size, density)', change)
+        self.assertIn('Override size:', change)
+        self.assertIn('Override density:', change)
+        self.assertEqual(change.count('?: "reset"'), 2)
+        verify = text.split('private fun verifyDisplay(', 1)[1].split('private fun changeDisplay(', 1)[0]
+        self.assertIn('effectiveSize(actualSize) == size && effectiveDensity(actualDensity) == density', verify)
         cleanup = text.split('override fun cleanupAfterLegacy()', 1)[1].split('private val phoneDensity', 1)[0]
-        self.assertLess(cleanup.index('wm size $original'), cleanup.index('wm density $original'))
-        between = cleanup.split('wm size $original', 1)[1].split('wm density $original', 1)[0]
-        self.assertIn('} finally {', between)
-        for token in ('effectiveSize(restored) == originalEffectiveSize',
-                      'effectiveDensity(restored) == originalEffectiveDensity',
-                      'densityRestore = null', 'originalEffectiveDensity = null'):
-            self.assertIn(token, cleanup)
+        self.assertIn('try { super.cleanupAfterLegacy() }', cleanup)
+        self.assertIn('while (displayRestore.isNotEmpty())', cleanup)
+        self.assertIn('val step = displayRestore.first()', cleanup)
+        self.assertLess(cleanup.index('displayState(step.command)'), cleanup.index('verifyDisplay(step.size, step.density)'))
+        self.assertLess(cleanup.index('verifyDisplay(step.size, step.density)'), cleanup.index('displayRestore.removeFirst()'))
+        self.assertNotIn('catch', cleanup)
+        self.assertIn('} finally {', cleanup)
+        self.assertIn('instrumentation.waitForIdleSync()', cleanup)
         base = (TEST / 'ComposeActivityTestCase.kt').read_text()
         lifecycle = base.split('override fun runBare()', 1)[1].split('protected open fun cleanupAfterLegacy()', 1)[0]
         self.assertIn('try { runLegacy() }', lifecycle)

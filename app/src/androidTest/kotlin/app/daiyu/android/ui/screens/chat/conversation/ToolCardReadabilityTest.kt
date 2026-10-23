@@ -22,10 +22,8 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 
 class ToolCardReadabilityTest : WiredActivityTestCase() {
-    private var displayRestore: String? = null
-    private var originalEffectiveSize: String? = null
-    private var densityRestore: String? = null
-    private var originalEffectiveDensity: String? = null
+    private data class DisplayRestoreStep(val command: String, val size: String, val density: String)
+    private val displayRestore = ArrayDeque<DisplayRestoreStep>()
 
     private fun displayState(command: String): String =
         android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
@@ -37,25 +35,37 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
     private fun effectiveDensity(densities: String): String =
         checkNotNull(Regex("(?:Override|Physical) density: (\\d+)").findAll(densities).lastOrNull()) { densities }.groupValues[1]
 
-    override fun setUp() {
+    private fun verifyDisplay(size: String, density: String) {
+        val actualSize = displayState("wm size")
+        val actualDensity = displayState("wm density")
+        check(effectiveSize(actualSize) == size && effectiveDensity(actualDensity) == density) {
+            "Requested display $size@$density; actual: $actualSize $actualDensity"
+        }
+        android.util.Log.i("DaiyuToolCardDisplay", "verified size=$size density=$density")
+    }
+
+    private fun changeDisplay(command: String, size: String, density: String) {
         val sizes = displayState("wm size")
-        val original = Regex("Override size: (\\d+x\\d+)").find(sizes)?.groupValues?.get(1) ?: "reset"
-        check(Regex("Physical size: \\d+x\\d+").containsMatchIn(sizes)) { sizes }
         val densities = displayState("wm density")
-        val originalDensity = Regex("Override density: (\\d+)").find(densities)?.groupValues?.get(1) ?: "reset"
-        check(Regex("Physical density: \\d+").containsMatchIn(densities)) { densities }
-        originalEffectiveSize = effectiveSize(sizes)
-        displayRestore = original
-        originalEffectiveDensity = effectiveDensity(densities)
-        densityRestore = originalDensity
-        // Keep SystemUI in the same phone configuration as the Compose fixture.
-        check(displayState("wm density 525").isBlank())
-        val appliedDensity = displayState("wm density")
-        check(effectiveDensity(appliedDensity) == "525") { "Requested phone density; actual: $appliedDensity" }
-        check(displayState("wm size 1216x2432").isBlank())
-        val applied = displayState("wm size")
-        check(effectiveSize(applied) == "1216x2432") { "Requested 1216x2432 fixture; actual: $applied" }
-        android.util.Log.i("DaiyuToolCardDisplay", "applied size=${effectiveSize(applied)} density=${effectiveDensity(appliedDensity)}")
+        val undo = if (command.startsWith("wm size ")) {
+            "wm size " + (Regex("Override size: (\\d+x\\d+)").find(sizes)?.groupValues?.get(1) ?: "reset")
+        } else {
+            "wm density " + (Regex("Override density: (\\d+)").find(densities)?.groupValues?.get(1) ?: "reset")
+        }
+        displayRestore.addFirst(DisplayRestoreStep(undo, effectiveSize(sizes), effectiveDensity(densities)))
+        check(displayState(command).isBlank())
+        verifyDisplay(size, density)
+    }
+
+    override fun setUp() {
+        verifyDisplay("320x640", "160")
+        // Every intermediate configuration stays between 320dp and 560dp wide.
+        changeDisplay("wm size 560x1120", "560x1120", "160")
+        changeDisplay("wm density 280", "560x1120", "280")
+        changeDisplay("wm size 980x1960", "980x1960", "280")
+        changeDisplay("wm density 490", "980x1960", "490")
+        changeDisplay("wm size 1216x2432", "1216x2432", "490")
+        changeDisplay("wm density 525", "1216x2432", "525")
         instrumentation.waitForIdleSync()
         super.setUp()
         ui.waitUntil(5_000) {
@@ -71,27 +81,14 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         try { super.cleanupAfterLegacy() }
         finally {
             try {
-                displayRestore?.let { original ->
-                    check(displayState("wm size $original").isBlank())
-                    val restored = displayState("wm size")
-                    check(effectiveSize(restored) == originalEffectiveSize) { "Display restore failed: $restored" }
-                    android.util.Log.i("DaiyuToolCardDisplay", "restored size=${effectiveSize(restored)}")
-                    displayRestore = null
-                    originalEffectiveSize = null
+                while (displayRestore.isNotEmpty()) {
+                    val step = displayRestore.first()
+                    check(displayState(step.command).isBlank())
+                    verifyDisplay(step.size, step.density)
+                    displayRestore.removeFirst()
                 }
             } finally {
-                try {
-                    densityRestore?.let { original ->
-                        check(displayState("wm density $original").isBlank())
-                        val restored = displayState("wm density")
-                        check(effectiveDensity(restored) == originalEffectiveDensity) { "Density restore failed: $restored" }
-                        android.util.Log.i("DaiyuToolCardDisplay", "restored density=${effectiveDensity(restored)}")
-                        densityRestore = null
-                        originalEffectiveDensity = null
-                    }
-                } finally {
-                    instrumentation.waitForIdleSync()
-                }
+                instrumentation.waitForIdleSync()
             }
         }
     }

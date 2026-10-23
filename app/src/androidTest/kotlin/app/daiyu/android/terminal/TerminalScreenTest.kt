@@ -89,7 +89,7 @@ class TerminalScreenTest : WiredActivityTestCase() {
     fun testActualOutputInputAndCloseStayWiredWithoutAutoReopen() {
         state = TerminalEnvironmentState(phase = "RUNNING", ownsResources = true, acceptsInput = true, output = "real-pty-output\n")
         show()
-        node("terminal-output").assertTextEquals("real-pty-output")
+        ui.onNodeWithTag("terminal-output", useUnmergedTree = true).assertTextEquals("real-pty-output")
         node("terminal-input").performTextReplacement("printf user-input")
         node("terminal-send").performClick()
         node("terminal-sessions").performClick()
@@ -119,10 +119,10 @@ class TerminalScreenTest : WiredActivityTestCase() {
         node("terminal-shortcuts").assertIsDisplayed()
         val raw = node("terminal-output-region").fetchSemanticsNode().boundsInRoot
         assertTrue(node("terminal-toolbar").fetchSemanticsNode().boundsInRoot.bottom <= raw.top)
-        node("terminal-grid-line:0").assertTextContains("retained output", substring = true)
+        ui.onNodeWithTag("terminal-grid-line:0", useUnmergedTree = true).assertTextContains("retained output", substring = true)
         node("terminal-mode").performClick()
         node("terminal-input").assertTextEquals("draft not sent")
-        node("terminal-output").assertTextEquals("retained output")
+        ui.onNodeWithTag("terminal-output", useUnmergedTree = true).assertTextEquals("retained output")
         ui.runOnIdle { assertTrue(created.isEmpty()); assertEquals(0, closes); assertTrue(sent.isEmpty()) }
     }
     fun testRawKeysAndControlUseOriginalSendAndDisableAfterUnknown() {
@@ -200,7 +200,7 @@ class TerminalScreenTest : WiredActivityTestCase() {
             output = (1..200).joinToString("\n") { "output line $it" })
         show()
         node("terminal-mode").performClick()
-        val scroll = node("terminal-output-scroll")
+        val scroll = ui.onNodeWithTag("terminal-output-scroll", useUnmergedTree = true)
         val range = androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange
         val before = scroll.fetchSemanticsNode().config[range].value()
         scroll.performTouchInput { if (before > 0f) swipeDown() else swipeUp() }

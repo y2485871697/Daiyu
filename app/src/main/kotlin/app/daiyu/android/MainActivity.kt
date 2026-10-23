@@ -372,7 +372,8 @@ class MainActivity : ComponentActivity() {
             else voiceRuntime.snapshot()
         } catch (_: Exception) { return missing }
         if (mode == ChatMenuAction.VOICE_DOUBAO) return missing.takeIf { config.duplexKey.isBlank() }
-        val offlineReady = app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready
+        val offlineReady = if (mode == ChatMenuAction.VOICE_INPUT) offlineSpeechReady()
+            else app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready
         if (mode == ChatMenuAction.VOICE_CHAT && offlineReady) return null
         return when (config.dictation) {
             "DOUBAO" -> missing.takeIf {
@@ -512,12 +513,32 @@ class MainActivity : ComponentActivity() {
             requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) },
             applyDraft = ::applyRecognizedDraft)
     }
+    @Volatile private var offlineSpeechReady: () -> Boolean = {
+        app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready
+    }
+    private var offlineSpeechSessionFactory: (
+        VoiceOwner, () -> Boolean, app.daiyu.android.voice.offline.OfflineSpeechSession.Events,
+    ) -> app.daiyu.android.voice.offline.OfflineSpeechAttempt = { owner, allowed, events ->
+        app.daiyu.android.voice.offline.OfflineSpeechSession(audioGate, owner, allowed,
+            app.daiyu.android.voice.offline.AndroidOfflineSpeechDevice(applicationContext), events)
+    }
+    private var offlineMicrophonePermissionOwner: app.daiyu.android.voice.offline.OfflineComposerHost? = null
     private val offlineMicrophonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val original = offlineMicrophonePermissionOwner
+        offlineMicrophonePermissionOwner = null
+        original?.permissionResult(granted)
         if (activityUsable()) toast(if (granted) "麦克风权限已授予，请再次点击离线语音" else "麦克风权限被拒绝；草稿未更改")
     }
-    private val offlineHost by lazy {
+    private val offlineHost: app.daiyu.android.voice.offline.OfflineComposerHost by lazy {
         app.daiyu.android.voice.offline.OfflineComposerHost(applicationContext,
-            requestPermission = { offlineMicrophonePermission.launch(android.Manifest.permission.RECORD_AUDIO) },
+            requestPermission = {
+                check(offlineMicrophonePermissionOwner == null)
+                offlineMicrophonePermissionOwner = offlineHost
+                try { offlineMicrophonePermission.launch(android.Manifest.permission.RECORD_AUDIO) }
+                catch (failure: Exception) { offlineMicrophonePermissionOwner = null; throw failure }
+            },
+            ready = { offlineSpeechReady() },
+            sessionFactory = { owner, allowed, events -> offlineSpeechSessionFactory(owner, allowed, events) },
             current = { target ->
                 activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                     selectionReady && controller.ready && !controller.dataBusy && pendingTextSend == null &&
@@ -1525,6 +1546,7 @@ class MainActivity : ComponentActivity() {
                 }
                 app.daiyu.android.ui.navigation.PageBackGestureHost(
                     routeKey = retainedPage,
+                    contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,
                     canNavigateBack = retainedPage != "chat",
                     swipeDismissEnabled = appearance.swipeDismissEnabled,
                     predictiveBackEnabled = appearance.predictiveBackEnabled,
@@ -2264,7 +2286,7 @@ class MainActivity : ComponentActivity() {
                     val config = try { voiceRuntime.snapshot() } catch (_: Exception) { null }
                     when (config?.dictation) {
                         "SYSTEM" -> {
-                            if (app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.ready) startOfflineDictation()
+                            if (offlineSpeechReady()) startOfflineDictation()
                             else voiceConfigurationToast("请先下载离线语音包")
                         }
                         "DOUBAO" -> {

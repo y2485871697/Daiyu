@@ -69,7 +69,8 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
             ui.onNodeWithContentDescription("草稿思考深度").scrollToVisible().assertIsEnabled().performClick()
             awaitUniqueTag("thinking-depth-slider")
             awaitNodeWindowFocus(node("thinking-depth-slider"))
-            node("conversation-agent-sheet").assertIsDisplayed()
+            ui.onNode(hasTestTag("conversation-agent-sheet") and
+                hasAnyDescendant(hasTestTag("thinking-depth-slider")), useUnmergedTree = true).assertIsDisplayed()
             node("subagent-thinking-value").assertTextEquals("选择思考深度")
             node("thinking-depth-slider").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ProgressBarRangeInfo))
             node("thinking-depth-slider").performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(4f)) }

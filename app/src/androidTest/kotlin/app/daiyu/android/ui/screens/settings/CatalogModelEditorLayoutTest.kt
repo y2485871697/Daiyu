@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
@@ -48,7 +49,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(interfaceScale = scale,
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), true) {
                         val accent = assistantPreviewPalette()
-                        Column {
+                        Column(Modifier.safeDrawingPadding()) {
                             ConversationAgentButton("", primary = true, primaryColor = accent.primary,
                                 onPrimaryColor = accent.onPrimary,
                                 modifier = Modifier.size(160.dp, 44.dp).testTag("collaboration-accent-reference"), onClick = {})

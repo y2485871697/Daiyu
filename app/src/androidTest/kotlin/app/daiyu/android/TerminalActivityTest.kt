@@ -8,6 +8,18 @@ class TerminalActivityTest : WiredActivityTestCase() {
         as app.daiyu.android.terminal.TerminalApplicationState.Ready).application.terminalSessions
     private val owner get() = (instrumentation.targetContext.applicationContext as ChatApplication).terminalOwner
 
+    override fun setUp() {
+        super.setUp()
+        val provider = (instrumentation.targetContext.applicationContext as ChatApplication).terminalProvider
+        awaitControl("terminal provider ready") {
+            provider.state.value is app.daiyu.android.terminal.TerminalApplicationState.Ready
+        }
+        mainThread {
+            workspace.setSimple(true)
+            workspace.selectEnvironment(false)
+        }
+    }
+
     private fun awaitTerminal() {
         awaitUniqueTag("terminal-screen") {
             val provider = (instrumentation.targetContext.applicationContext as ChatApplication).terminalProvider
@@ -90,32 +102,46 @@ class TerminalActivityTest : WiredActivityTestCase() {
         enterFromMenu()
         val caller = owner.caller.value
         mainThread { workspace.setSimple(false) }
-        node("terminal-shortcuts").assertIsDisplayed()
-        activity = recreateActivity(activity)
-        awaitTerminal()
-        node("terminal-shortcuts").assertIsDisplayed()
-        node("terminal-input").assertDoesNotExist()
-        val page = invokeHost(activity, "getTerminalPageOwner")
-        val open = MainActivity::class.java.getDeclaredMethod("createTerminalSession", Any::class.java).apply { isAccessible = true }
-        realPauseResume(activity) { open.invoke(activity, page) }
-        assertSame(caller, owner.caller.value)
-        assertFalse(owner.host.state.value.ownsResources)
-        assertTrue(workspace.state.value.sessions.isEmpty())
-        assertEquals(0, fixture.opens.get())
+        try {
+            node("terminal-shortcuts").assertIsDisplayed()
+            activity = recreateActivity(activity)
+            awaitTerminal()
+            node("terminal-shortcuts").assertIsDisplayed()
+            node("terminal-input").assertDoesNotExist()
+            val page = invokeHost(activity, "getTerminalPageOwner")
+            val open = MainActivity::class.java.getDeclaredMethod("createTerminalSession", Any::class.java).apply { isAccessible = true }
+            realPauseResume(activity) { open.invoke(activity, page) }
+            assertSame(caller, owner.caller.value)
+            assertFalse(owner.host.state.value.ownsResources)
+            assertTrue(workspace.state.value.sessions.isEmpty())
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            mainThread {
+                workspace.setSimple(true)
+                workspace.selectEnvironment(false)
+            }
+        }
     }
 
     fun testExistingConsoleSessionSurvivesActivityRecreation() {
         enterFromMenu()
         mainThread { workspace.setSimple(false); workspace.create() }
-        ui.waitUntil(10_000) { workspace.state.value.active?.state?.acceptsInput == true }
         val retained = workspace
         val session = checkNotNull(workspace.state.value.activeSessionId)
-        activity = recreateActivity(activity)
-        awaitTerminal()
-        assertSame(retained, workspace)
-        assertEquals(session, workspace.state.value.activeSessionId)
-        assertTrue(workspace.state.value.active?.state?.acceptsInput == true)
-        mainThread { workspace.closeSession(session) }
+        try {
+            ui.waitUntil(10_000) { workspace.state.value.active?.state?.acceptsInput == true }
+            activity = recreateActivity(activity)
+            awaitTerminal()
+            assertSame(retained, workspace)
+            assertEquals(session, workspace.state.value.activeSessionId)
+            assertTrue(workspace.state.value.active?.state?.acceptsInput == true)
+        } finally {
+            mainThread {
+                workspace.closeSession(session)
+                workspace.setSimple(true)
+                workspace.selectEnvironment(false)
+            }
+        }
     }
 
 }

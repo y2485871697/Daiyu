@@ -235,6 +235,7 @@ internal fun PageBackGestureHost(
     modifier: Modifier = Modifier,
     backTargetKey: Any? = null,
     previewScopeKey: Any? = null,
+    contentKey: Any = routeKey,
     content: @Composable () -> Unit,
 ) {
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
@@ -349,7 +350,7 @@ internal fun PageBackGestureHost(
             if (target != null && state.previewAllowed && progress > 0f) Box(Modifier.fillMaxSize().drawBehind {
                 target.image?.let { drawImage(it) }
             }.testTag("page-back-target"))
-            key(routeKey) {
+            key(contentKey) {
                 Box(Modifier.fillMaxSize().graphicsLayer {
                     val visibleProgress = if (target != null && state.previewAllowed) progress else 0f
                     translationX = state.direction * size.width * visibleProgress * if (state.predictive) 0.12f else 1f

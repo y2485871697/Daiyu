@@ -15,6 +15,7 @@ class TerminalTasksDialogTest : WiredActivityTestCase() {
     private var busy by mutableStateOf(false)
     private var reads = 0
     private var stops = 0
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testRowsKeepLogAndStopBesideTheTaskAndBusyCannotDispatch() {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -24,11 +25,20 @@ class TerminalTasksDialogTest : WiredActivityTestCase() {
                 ), output = "", error = null, onDismiss = {})
             }
         } }
-        val row = node("terminal-task-row:0").fetchSemanticsNode().boundsInRoot
-        val read = node("terminal-task-read:0").fetchSemanticsNode().boundsInRoot
-        val stop = node("terminal-task-stop:0").fetchSemanticsNode().boundsInRoot
-        assertTrue(read.top >= row.top && read.bottom <= row.bottom)
-        assertTrue(stop.top >= row.top && stop.bottom <= row.bottom && read.right <= stop.left)
+        awaitDialogEnter(node("terminal-task-row:0"))
+        val rowNode = node("terminal-task-row:0").fetchSemanticsNode()
+        val readNode = node("terminal-task-read:0").fetchSemanticsNode()
+        val stopNode = node("terminal-task-stop:0").fetchSemanticsNode()
+        val view = (rowNode.root as androidx.compose.ui.platform.ViewRootForTest).view
+        val (row, read, stop) = awaitStableWindowFrame(view) {
+            if (listOf(rowNode, readNode, stopNode).all {
+                    it.layoutInfo.isPlaced && it.layoutInfo.coordinates.isAttached
+                }) Triple(rowNode.boundsInRoot, readNode.boundsInRoot, stopNode.boundsInRoot)
+            else null
+        }
+        assertTrue("row=$row read=$read stop=$stop", read.top >= row.top && read.bottom <= row.bottom)
+        assertTrue("row=$row read=$read stop=$stop",
+            stop.top >= row.top && stop.bottom <= row.bottom && read.right <= stop.left)
         node("terminal-task-read:0").performClick()
         node("terminal-task-stop:0").performClick()
         node("terminal-task-stop:1").assertDoesNotExist()

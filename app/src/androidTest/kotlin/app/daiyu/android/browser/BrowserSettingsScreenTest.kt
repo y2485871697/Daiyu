@@ -60,7 +60,7 @@ class BrowserSettingsScreenTest : WiredActivityTestCase() {
             val reopened = BrowserSettingsStore(preferences)
             show(reopened)
             assertEquals(BrowserAccess.FULL, reopened.snapshot().access)
-            reveal("settings-row:历史记录：DENY", "浏览器").assertExists()
+            reveal("settings-row:任务历史记录：DENY", "浏览器").assertExists()
             reveal("settings-row:Cookie 名称：默认全部拒绝", "浏览器").assertExists()
             assertEquals("DENY", reopened.snapshot().historyConsent)
             assertTrue(reopened.snapshot().allowedCookieNames.isEmpty())

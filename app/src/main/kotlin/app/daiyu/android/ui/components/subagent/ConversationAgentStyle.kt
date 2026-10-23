@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.components.subagent
 
 import app.daiyu.android.ui.app.DaiyuPalette
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 
 import app.daiyu.android.ui.components.defaultBottomSheetHeight
 
@@ -102,7 +103,7 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
 }
 
 @Composable internal fun ConversationAgentButton(text: String, enabled: Boolean = true, primary: Boolean = false,
-    modifier: Modifier = Modifier, primaryColor: Color = conversationAgentColors().accent,
+    modifier: Modifier = Modifier, primaryColor: Color = assistantPreviewPalette().primary,
     onPrimaryColor: Color = if (conversationAgentColors().dark) Color(0xff211735) else Color.White, onClick: () -> Unit) {
     val colors = conversationAgentColors()
     Box(modifier.defaultMinSize(minHeight = 48.dp).alpha(if (enabled) 1f else .4f)

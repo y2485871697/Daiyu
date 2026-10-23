@@ -104,6 +104,7 @@ class OfflineSpeechContractsTest {
         assertEquals(1, requests)
         assertTrue(attempts.isEmpty())
         granted = true
+        host.permissionResult(true)
         assertTrue(attempts.isEmpty())
         host.start(target, "draft", 0, 5)
         current = false // edit, send, another conversation, or edit-then-undo revision mismatch.
@@ -117,6 +118,85 @@ class OfflineSpeechContractsTest {
         host.close()
         attempts.last().events.complete("after destruction")
         assertEquals(0, commits)
+    }
+
+    @Test fun pendingPermissionCannotRelaunchOrBorrowAnotherEditorsGrant() {
+        val attempts = mutableListOf<Attempt>()
+        var granted = false
+        var requests = 0
+        val target = DictationDraftTarget(null, 1, 2)
+        var currentTarget = target
+        val host = OfflineComposerHost(
+            factory = { _, events -> Attempt(events).also { attempts += it } },
+            enabled = { true }, permission = { granted }, requestPermission = { requests++ },
+            current = { it == currentTarget }, currentText = { "draft" },
+            applyDraft = { _, _, _ -> fail("permission result cannot edit a draft") })
+        host.start(target, "draft", 0, 5)
+        host.start(target, "draft", 0, 5)
+        assertEquals(1, requests)
+        assertTrue(attempts.isEmpty())
+        currentTarget = target.copy(sessionId = "other-editor")
+        granted = true
+        host.start(currentTarget, "draft", 0, 5)
+        assertTrue(attempts.isEmpty())
+        host.permissionResult(true)
+        assertEquals(OfflineComposerHost.State(), host.state.value)
+        assertTrue(attempts.isEmpty())
+        host.start(currentTarget, "draft", 0, 5)
+        assertEquals(1, attempts.single().starts)
+        host.close()
+    }
+
+    @Test fun permissionLaunchFailureReleasesPendingAndGrantStillRequiresExplicitRetry() {
+        var failLaunch = true
+        var requests = 0
+        var granted = false
+        val attempts = mutableListOf<Attempt>()
+        val target = DictationDraftTarget(null, 0, 0)
+        val host = OfflineComposerHost(
+            factory = { _, events -> Attempt(events).also { attempts += it } },
+            enabled = { true }, permission = { granted }, requestPermission = {
+                requests++
+                check(!failLaunch) { "launcher unavailable" }
+            }, current = { it == target }, currentText = { "draft" },
+            applyDraft = { _, _, _ -> fail("permission result cannot edit a draft") })
+        host.start(target, "draft", 0, 5)
+        assertTrue(host.state.value.status.contains("无法请求"))
+        failLaunch = false
+        host.start(target, "draft", 0, 5)
+        assertEquals(2, requests)
+        host.permissionResult(false)
+        assertTrue(host.state.value.status.contains("被拒绝"))
+        host.start(target, "draft", 0, 5)
+        assertEquals(3, requests)
+        granted = true
+        host.permissionResult(true)
+        assertTrue(host.state.value.status.contains("再次点击"))
+        assertTrue(attempts.isEmpty())
+        host.start(target, "draft", 0, 5)
+        assertEquals(1, attempts.single().starts)
+        host.close()
+    }
+
+    @Test fun latePermissionAfterInvalidationOrCloseDoesNotPublishOrStart() {
+        var requests = 0
+        val target = DictationDraftTarget(null, 0, 0)
+        val host = OfflineComposerHost(
+            factory = { _, _ -> error("late permission cannot create a session") },
+            enabled = { true }, permission = { false }, requestPermission = { requests++ },
+            current = { it == target }, currentText = { "draft" },
+            applyDraft = { _, _, _ -> fail("late permission cannot edit a draft") })
+        host.start(target, "draft", 0, 5)
+        host.invalidate()
+        host.permissionResult(true)
+        assertEquals(OfflineComposerHost.State(), host.state.value)
+        host.start(target, "draft", 0, 5)
+        assertEquals(2, requests)
+        host.close()
+        host.permissionResult(false)
+        host.start(target, "draft", 0, 5)
+        assertEquals(2, requests)
+        assertEquals(OfflineComposerHost.State(), host.state.value)
     }
 
     private class Events : OfflineSpeechSession.Events {

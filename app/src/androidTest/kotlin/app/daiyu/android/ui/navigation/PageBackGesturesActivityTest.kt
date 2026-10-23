@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.ScrollState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -107,6 +108,60 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         }
         mainThread { route = "test-page" }
         ui.waitForIdle()
+    }
+
+    fun testExplicitContentKeyKeepsLiveCompositionUntilContentActuallyChanges() {
+        var mounts = 0
+        var disposals = 0
+        mainThread {
+            route = "settings"
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    val renderedRoute = route
+                    PageBackGestureHost(
+                        routeKey = renderedRoute,
+                        canNavigateBack = true,
+                        swipeDismissEnabled = true,
+                        predictiveBackEnabled = true,
+                        dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
+                        contentKey = if (renderedRoute == "assistant-edit") "settings" else renderedRoute,
+                    ) {
+                        DisposableEffect(Unit) {
+                            mounts++
+                            onDispose { disposals++ }
+                        }
+                        Box(Modifier.fillMaxSize().testTag("keyed-live-content")) { Text(renderedRoute) }
+                    }
+                }
+            }
+        }
+        dismissIme()
+        ui.waitForIdle()
+        val original = ui.onNodeWithTag("keyed-live-content").fetchSemanticsNode().id
+        assertEquals(1, mounts)
+        assertEquals(0, disposals)
+        for (next in listOf("assistant-edit", "settings", "assistant-edit", "settings")) {
+            mainThread { route = next }
+            ui.waitForIdle()
+            assertEquals(original, ui.onNodeWithTag("keyed-live-content").fetchSemanticsNode().id)
+            assertEquals(1, mounts)
+            assertEquals(0, disposals)
+        }
+        mainThread { route = "other-page" }
+        ui.waitForIdle()
+        assertTrue(original != ui.onNodeWithTag("keyed-live-content").fetchSemanticsNode().id)
+        assertEquals(2, mounts)
+        assertEquals(1, disposals)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDefaultContentKeyStillFollowsRouteKey() {
+        mount()
+        val original = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().id
+        mainThread { route = "other-page" }
+        ui.waitForIdle()
+        assertTrue(original != ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().id)
+        assertEquals(0, fixture.opens.get())
     }
 
     private fun logPreviewPixels(phase: String, image: ImageBitmap) {

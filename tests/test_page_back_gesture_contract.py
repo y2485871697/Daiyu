@@ -152,6 +152,20 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (claimed && change.changedToUp()) {\n                                    change.consume()', self.host)
         self.assertNotIn('retainedPage =', self.host)
 
+    def test_content_key_only_controls_the_live_composition(self):
+        self.assertIn('contentKey: Any = routeKey,', self.host)
+        self.assertIn('key(contentKey) {', self.host)
+        self.assertNotIn('key(routeKey) {', self.host)
+        self.assertIn('val departure = remember(layers, routeKey) { layers.enter(routeKey) }', self.host)
+        self.assertIn('val frame = remember(layers, routeKey) { layers.frame(routeKey) }', self.host)
+        self.assertIn('remember(routeKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, backTargetKey)', self.host)
+        self.assertIn('routeKey = retainedPage,', self.main)
+        self.assertIn('contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,', self.main)
+        regressions = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
+        for method in ('testExplicitContentKeyKeepsLiveCompositionUntilContentActuallyChanges',
+                       'testDefaultContentKeyStillFollowsRouteKey'):
+            self.assertIn('fun ' + method + '()', regressions)
+
     def test_previous_page_is_readonly_recorded_content_not_a_second_composition(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', self.host)
@@ -171,7 +185,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('context.releaseGraphicsLayer(frame.layer)', layers)
         self.assertIn('onDispose { layers.close() }', self.host)
         self.assertEqual(1, self.host.count('{ content() }'))
-        surface = self.host.split('key(routeKey) {', 1)[1].split('if (departure != null && departing)', 1)[0]
+        surface = self.host.split('key(contentKey) {', 1)[1].split('if (departure != null && departing)', 1)[0]
         self.assertIn('testTag("page-back-surface")', surface)
         self.assertIn('frame.size = IntSize(placeable.width, placeable.height)', surface)
         self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', surface)

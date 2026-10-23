@@ -55,7 +55,15 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
 
     private fun assertCompactTail(marker: String) {
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithText(marker, substring = true).fetchSemanticsNodes().isNotEmpty()
+            if (ui.onAllNodesWithText(marker, substring = true).fetchSemanticsNodes().isEmpty()) {
+                false
+            } else {
+                val tail = ui.onNodeWithTag("chat-turn:tail").fetchSemanticsNode().layoutInfo.coordinates
+                val surface = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+                val fullTailBottom = tail.positionInRoot().y + tail.size.height
+                val gap = (surface.top - fullTailBottom) / density
+                ui.onNodeWithText(marker, substring = true).isDisplayed() && gap in 8f..28f
+            }
         }
         awaitVisualIdle()
         awaitVisualIdle()

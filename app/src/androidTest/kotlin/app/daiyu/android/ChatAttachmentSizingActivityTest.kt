@@ -27,12 +27,36 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 
 class ChatAttachmentSizingActivityTest : WiredActivityTestCase() {
+    private var sampleState = "default"
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun awaitSheetFrame() {
+        val sheet = node("chat-selection-sheet")
+        awaitUniqueTag("chat-selection-sheet")
+        awaitNodeWindowFocus(sheet)
+        awaitDialogEnter(sheet)
+        val semantic = sheet.fetchSemanticsNode()
+        val view = (semantic.root as androidx.compose.ui.platform.ViewRootForTest).view
+        awaitStableWindowFrame(view) {
+            val coordinates = semantic.layoutInfo.coordinates
+            if (coordinates.isAttached && coordinates.size.width > 0 && coordinates.size.height > 0) {
+                listOf(view.width.toFloat(), view.height.toFloat(), coordinates.positionInRoot().x,
+                    coordinates.positionInRoot().y, coordinates.size.width.toFloat(), coordinates.size.height.toFloat())
+            } else null
+        }
+    }
+
     private fun textLayout(text: String): TextLayoutResult {
         val results = mutableListOf<TextLayoutResult>()
         ui.onNodeWithText(text, useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
         assertEquals(1, results.size)
-        return results.single().also { assertFalse("Text overflows: $text", it.hasVisualOverflow) }
+        return results.single().also {
+            assertFalse("Text overflows: $text sample=$sampleState constraints=${it.layoutInput.constraints} " +
+                "density=${it.layoutInput.density} size=${it.size} paragraph=${it.multiParagraph.width}x${it.multiParagraph.height} " +
+                "width=${it.didOverflowWidth} height=${it.didOverflowHeight} maxLines=${it.multiParagraph.didExceedMaxLines}",
+                it.hasVisualOverflow)
+        }
     }
 
     private fun rawBounds(node: SemanticsNode) = Rect(node.positionInRoot,
@@ -60,10 +84,8 @@ class ChatAttachmentSizingActivityTest : WiredActivityTestCase() {
                     }
                 }
             }
-            awaitUniqueTag("chat-selection-sheet")
-            awaitNodeWindowFocus(node("chat-selection-sheet"))
-            ui.mainClock.advanceTimeBy(1_000)
-            awaitVisualIdle()
+            sampleState = "dark=$dark scale=$scale fontScale=$fontScale"
+            awaitSheetFrame()
             val title = textLayout("附件")
             assertEquals(20.sp, title.layoutInput.style.fontSize)
             assertEquals(26.sp, title.layoutInput.style.lineHeight)
@@ -78,7 +100,7 @@ class ChatAttachmentSizingActivityTest : WiredActivityTestCase() {
                 assertEquals(24.sp, text.layoutInput.style.lineHeight)
                 assertEquals(fontScale, text.layoutInput.density.fontScale, .001f)
                 val density = text.layoutInput.density.density
-                val row = node("chat-attachment:${action.name}").performScrollTo().assertIsDisplayed().assertHasClickAction()
+                val row = node("chat-attachment:${action.name}").scrollToVisible().assertIsDisplayed().assertHasClickAction()
                 val rowBounds = rawBounds(row.fetchSemanticsNode())
                 assertTrue("Row has at least a 56dp touch target", rowBounds.height >= 56f * density - 1f)
                 previousTag?.let {
@@ -96,7 +118,7 @@ class ChatAttachmentSizingActivityTest : WiredActivityTestCase() {
                 }
             }
             val action = entries[sample++ % entries.size].second
-            node("chat-attachment:${action.name}").performScrollTo().performTouchInput { click(Offset(4f, center.y)) }
+            node("chat-attachment:${action.name}").scrollToVisible().performTouchInput { click(Offset(4f, center.y)) }
             node("chat-selection-sheet").assertDoesNotExist()
             assertEquals(1, dismissals)
             assertEquals(listOf(action), actions)
@@ -115,9 +137,8 @@ class ChatAttachmentSizingActivityTest : WiredActivityTestCase() {
                 }
             }
         }
-        awaitUniqueTag("chat-selection-sheet")
-        ui.mainClock.advanceTimeBy(1_000)
-        awaitVisualIdle()
+        sampleState = "default-title fontScale=1.3"
+        awaitSheetFrame()
         val title = textLayout("默认标题")
         val subtitle = textLayout("默认说明")
         assertEquals(18.sp, title.layoutInput.style.fontSize)

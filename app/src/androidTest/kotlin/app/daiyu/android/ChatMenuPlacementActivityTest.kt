@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
     private data class MenuDraw(val bounds: Rect, val fraction: Float, val padding: Float)
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testMenuFirstDrawUsesMeasuredSizeAndDoesNotJumpAfterOpeningOrReopening() {
         for (direction in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
             for (bottom in listOf(false, true)) {
@@ -83,7 +84,18 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                     ui.onNodeWithTag("menu-position-content").assertIsDisplayed()
                     ui.mainClock.advanceTimeBy(1000)
                     ui.waitForIdle()
-                    val stable = ui.onNodeWithTag("menu-position-content").fetchSemanticsNode().boundsInRoot
+                    val menu = ui.onNodeWithTag("menu-position-content")
+                    awaitNodeWindowFocus(menu)
+                    val view = (menu.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+                    awaitStableWindowFrame(view) {
+                        val current = coordinates.get()
+                        if (current != null && current.isAttached && current.size.width > 0 && current.size.height > 0) {
+                            val origin = current.positionInRoot()
+                            listOf(view.width.toFloat(), view.height.toFloat(), origin.x, origin.y,
+                                current.size.width.toFloat(), current.size.height.toFloat())
+                        } else null
+                    }
+                    val stable = menu.fetchSemanticsNode().boundsInRoot
                     val anchor = ui.onNodeWithTag("menu-position-anchor").fetchSemanticsNode().boundsInRoot
                     val host = ui.onNodeWithTag("menu-position-host").fetchSemanticsNode().boundsInRoot
                     assertTrue("No drawn menu bounds: $direction bottom=$bottom", draws.isNotEmpty())
@@ -96,9 +108,12 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                         assertEquals(stable.width, draw.bounds.width, 1f)
                         assertEquals(stable.height, draw.bounds.height, 1f)
                     }
-                    assertTrue(stable.left >= host.left && stable.right <= host.right)
-                    assertTrue(stable.top >= host.top && stable.bottom <= host.bottom)
-                    if (bottom) assertTrue(stable.bottom <= anchor.top) else assertTrue(stable.top >= anchor.bottom)
+                    assertTrue("direction=$direction bottom=$bottom stable=$stable host=$host anchor=$anchor",
+                        stable.left >= host.left && stable.right <= host.right)
+                    assertTrue("direction=$direction bottom=$bottom stable=$stable host=$host anchor=$anchor",
+                        stable.top >= host.top && stable.bottom <= host.bottom)
+                    if (bottom) assertTrue("direction=$direction stable=$stable anchor=$anchor", stable.bottom <= anchor.top)
+                    else assertTrue("direction=$direction stable=$stable anchor=$anchor", stable.top >= anchor.bottom)
                     if (it == 0) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
                     else ui.onNodeWithTag("menu-position-host").performTouchInput {
                         click(Offset(5f, center.y))

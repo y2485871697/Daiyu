@@ -280,6 +280,81 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
         confirmed(host, "action" to "navigate", "url" to "https://browser-fixture.invalid/model-after-human")
     }
 
+
+    fun testHumanBlockedResourcesAndExternalNavigationDoNotRetireOriginalView() {
+        val host = host()
+        confirmed(host, "action" to "new_tab")
+        val parent = main { android.widget.FrameLayout(instrumentation.targetContext) }
+        val attachment = main { host.webHost.attach(host.session.takeover(requireNotNull(host.currentTab)), parent) }
+        val first = "https://browser-fixture.invalid/human-before-blocked"
+        main { attachment.navigate(first) }
+        val view = main { parent.getChildAt(0) as android.webkit.WebView }
+        fun awaitPage(url: String) {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            while (main { attachment.isLoading || view.progress != 100 || view.title != "Browser fixture" || view.url != url } &&
+                System.nanoTime() < deadline) Thread.sleep(10)
+            main {
+                assertFalse(attachment.isLoading)
+                assertEquals(100, view.progress)
+                assertEquals(url, attachment.page().url)
+                assertEquals("Browser fixture", view.title)
+                assertSame(view, parent.getChildAt(0))
+            }
+        }
+        awaitPage(first)
+        val blocked = listOf("file:///private", "content://private/item", "about:blank",
+            "intent://external/#Intent;end", "https://accounts.google.com/signin")
+        // Get the client on UI; invoke its request callback off the Looper like WebView does.
+        val client = main { view.webViewClient }
+        for (url in blocked) {
+            val request = object : android.webkit.WebResourceRequest {
+                override fun getUrl() = android.net.Uri.parse(url)
+                override fun isForMainFrame() = false
+                override fun isRedirect() = false
+                override fun hasGesture() = false
+                override fun getMethod() = "GET"
+                override fun getRequestHeaders() = mutableMapOf<String, String>()
+            }
+            val response = client.shouldInterceptRequest(view, request)
+            assertEquals(url, 403, requireNotNull(response).statusCode)
+        }
+        main {
+            for (url in blocked) {
+                @Suppress("DEPRECATION")
+                assertTrue(view.webViewClient.shouldOverrideUrlLoading(view, url))
+                assertEquals(first, attachment.page().url)
+                assertSame(view, parent.getChildAt(0))
+            }
+            attachment.navigate("https://browser-fixture.invalid/human-after-blocked")
+        }
+        awaitPage("https://browser-fixture.invalid/human-after-blocked")
+        main {
+            attachment.control(app.daiyu.android.browser.openminis.BrowserVisibleAction.BACK)
+        }
+        awaitPage(first)
+        assertTrue("human navigation must not approve model history", historyApprovals.isEmpty())
+        main { attachment.close() }
+    }
+
+    fun testStoppedHumanLateStartDoesNotMakePageBusyOrRetireView() {
+        val host = host()
+        confirmed(host, "action" to "new_tab")
+        val parent = main { android.widget.FrameLayout(instrumentation.targetContext) }
+        main {
+            val attachment = host.webHost.attach(host.session.takeover(requireNotNull(host.currentTab)), parent)
+            val old = "https://browser-fixture.invalid/human-cancelled"
+            attachment.navigate(old)
+            val view = parent.getChildAt(0) as android.webkit.WebView
+            attachment.control(app.daiyu.android.browser.openminis.BrowserVisibleAction.STOP)
+            view.webViewClient.onPageStarted(view, old, null)
+            assertFalse(attachment.isLoading)
+            attachment.page()
+            assertSame(view, parent.getChildAt(0))
+            attachment.close()
+        }
+        assertTrue(historyApprovals.isEmpty())
+    }
+
     fun testRetiredManualAttachmentCannotNavigateBeforeNativeCleanupRuns() {
         for (cancel in listOf(false, true)) {
             val host = host()

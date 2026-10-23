@@ -18,3 +18,5 @@
 本次原样纠偏移除迁移时自加的任务说明、任务按钮与主面板诊断区。`browser/ui/BrowserUiPool.kt` 的裸主机识别取自上述 Eta 修订的 `agent/browser/BrowserNavigation.kt::looksLikeUrl`；下载打开恢复原版应用选择器、扩展名 MIME 与只记日志的失败处理，文件仍由 Android DownloadManager 的 content URI 分享，不搬入旧私有缓存或新增存储权限。固定原始 UI 与三语言资源摘要见 `tests/fixtures/browser_original_ui.json`。
 
 2026-10-23：本地衍生 `BrowserHistorySheet.kt` 改为从 Compose 可观察的 `LocalLocale.current.platformLocale` 读取地区设置，保留 `HH:mm` 格式、原时间戳、字号、颜色与布局；未修改固定上游快照。
+
+浏览器人工浏览修复：分离真实任务占用与失效／UNKNOWN展示；人工页面拒绝不允许的URL和子资源时仍拦截，但不将整张WebView按模型操作UNKNOWN退役。人工历史写入移至完成回调并隔离存储错误，取消后的旧start和人工旧finish不重新武装模型。三语言只将`om_browser_minis_browsing`显示品牌改为Daiyu／代鱼／代魚；原固定资源摘要保留，测试仅批准该键精确品牌替换，不修改上游署名或技术标识。

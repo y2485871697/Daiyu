@@ -354,10 +354,6 @@ private class AndroidBlankResource(
         check(visibleIdentity === identity && resourceLive()) { "BROWSER_VISIBLE_EXPIRED" }
         val history = view.copyBackForwardList()
         val url = view.url.orEmpty()
-        if (navigation.phase == NavigationCallbacks.Phase.IDLE && OpenMinisNavigationPolicy.permits(url) && lastVisibleHistory != url) {
-            com.openminis.app.browser.BrowserHistoryStore.getInstance(context).record(url, view.title.orEmpty())
-            lastVisibleHistory = url
-        }
         return BrowserVisiblePage(url, view.title.orEmpty(),
             (maxOf(0, history.size - 100) until history.size).map { index ->
                 val item = history.getItemAtIndex(index)
@@ -419,7 +415,14 @@ private class AndroidBlankResource(
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
         view.webViewClient = GuardedClient(view.webViewClient, ui, ::resourceLive, reject, navigation, requestOverride, ::callbackFence,
-            humanControl = { visibleLease != null })
+            humanControl = { visibleLease != null },
+            manualFinished = { url, title ->
+                if (lastVisibleHistory != url) {
+                    lastVisibleHistory = url
+                    try { com.openminis.app.browser.BrowserHistoryStore.getInstance(context).record(url, title) }
+                    catch (_: Exception) { android.util.Log.w("DaiyuBrowser", "human:history-write-failed") }
+                }
+            })
         // No downloads/blob JS, new windows, external activities, or implicit tab mutation.
         view.setDownloadListener { url, userAgent, disposition, mime, _ ->
             if (!resourceLive()) return@setDownloadListener
@@ -628,11 +631,14 @@ private class GuardedClient(
     private val requestOverride: ((WebResourceRequest) -> WebResourceResponse?)?,
     private val callbackFence: (() -> Unit) -> Unit,
     private val humanControl: () -> Boolean,
+    private val manualFinished: (String, String) -> Unit,
 ) : WebViewClient() {
-    private fun blocked(url: String?): Boolean {
+    private fun blocked(url: String?, mainFrame: Boolean = false): Boolean {
         if (!live()) return true
         if (OpenMinisNavigationPolicy.permits(url)) return false
-        navigation.failed("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")
+        if (humanControl()) {
+            if (mainFrame) navigation.cancelManualLoad()
+        } else navigation.failed("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")
         return true
     }
 
@@ -647,7 +653,7 @@ private class GuardedClient(
         var denied = true
         fenced {
             val url = request.url.toString()
-            if (!blocked(url)) {
+            if (!blocked(url, request.isForMainFrame)) {
                 if (navigation.isManual) denied = !navigation.manualOverride(url, request.isForMainFrame)
                 else if (navigation.allowOverride(url, request.isForMainFrame) && live())
                     denied = upstream.shouldOverrideUrlLoading(view, request)
@@ -660,7 +666,7 @@ private class GuardedClient(
     override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
         var denied = true
         fenced {
-            if (!blocked(url)) {
+            if (!blocked(url, true)) {
                 if (navigation.isManual) denied = !navigation.manualOverride(url, true)
                 else if (navigation.allowOverride(url, true) && live())
                     denied = upstream.shouldOverrideUrlLoading(view, url)
@@ -672,7 +678,9 @@ private class GuardedClient(
     // Request callbacks are not UI callbacks. Never take navigation's monitor on that thread:
     // UI owns registry -> navigation ordering, and a request must not invert it.
     private fun requestBlocked(url: String?): Boolean =
-        pageRequestBlocked(live(), url, ::postRequestFailure)
+        pageRequestBlocked(live(), url) { reason ->
+            if (!humanControl()) postRequestFailure(reason)
+        }
     private fun postRequestFailure(reason: String) {
         try { ui.post { fenced { navigation.failed(reason) } } } catch (_: Exception) { reject(reason) }
     }
@@ -694,7 +702,11 @@ private class GuardedClient(
 
     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
         fenced {
-            if (blocked(url) || !navigation.onStarted(url)) { view.stopLoading(); return@fenced }
+            if (blocked(url, true)) { view.stopLoading(); return@fenced }
+            if (!navigation.onStarted(url)) {
+                if (!navigation.isManual) view.stopLoading()
+                return@fenced
+            }
             if (!navigation.isManual && live()) upstream.onPageStarted(view, url, favicon)
         }
     }
@@ -702,9 +714,10 @@ private class GuardedClient(
     override fun onPageFinished(view: WebView, url: String?) {
         fenced {
             if (blocked(url)) return@fenced
-            navigation.onFinished(url, view.title.orEmpty(), view.url) {
+            val finished = navigation.onFinished(url, view.title.orEmpty(), view.url) {
                 upstream.onPageFinished(view, url)
             }
+            if (finished && humanControl()) manualFinished(checkNotNull(url), view.title.orEmpty())
         }
     }
 

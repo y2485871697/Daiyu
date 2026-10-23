@@ -20,10 +20,16 @@ internal fun BrowserVisualScreen(
     val context = LocalContext.current
     val pool = remember(visit) { BrowserUiPool(context.applicationContext, visit) }
     val current by rememberUpdatedState(ownerCurrent)
+    val dismiss by rememberUpdatedState(onBack)
     DisposableEffect(visit) { onDispose { visit?.close() } }
     LaunchedEffect(visit) {
         while (true) {
             if (visit != null && !current()) { visit.close(); break }
+            if (visit != null && pool.unavailable.value) {
+                visit.close()
+                dismiss()
+                break
+            }
             kotlinx.coroutines.delay(250)
         }
     }

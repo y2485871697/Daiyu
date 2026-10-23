@@ -111,6 +111,7 @@ internal fun BrowserSheet(
     val canGoBack = selectedTab?.manager?.canGoBack?.collectAsState()?.value ?: false
     val canGoForward = selectedTab?.manager?.canGoForward?.collectAsState()?.value ?: false
     val isAgentBusy by tabPool.busy.collectAsState()
+    val isAgentBrowsing by tabPool.agentBrowsing.collectAsState()
     val userAgentProfile = tabPool.currentUserAgentProfile.collectAsState().value
 
     var urlInput by remember(currentURL) { mutableStateOf(currentURL) }
@@ -338,7 +339,7 @@ internal fun BrowserSheet(
                     }
                 }
 
-                if (isAgentBusy && tabPool.visit != null) {
+                if (isAgentBrowsing && selectedTab != null) {
                     AgentBrowsingOverlay(
                         accent = accent,
                         onTakeover = { tabPool.takeControl() },

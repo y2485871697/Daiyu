@@ -148,6 +148,88 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    private class StateVisit(override val taskOwned: Boolean) : BrowserVisualVisit {
+        private val lease = BrowserTabLease(BrowserOwner("busy-state", BrowserOwnerKind.MAIN), 0, 1L, 1L)
+        var state = ControllerBrowserVisual.State(live = true, lease = lease, takenOver = true,
+            tabs = listOf(lease))
+        var closed = 0
+        val navigations = mutableListOf<String>()
+        var newTabs = 0
+        var controls = 0
+        override val conversationId = null
+        override val memory = BrowserUiMemory("busy-state")
+        override fun snapshot() = state
+        override fun takeover(lease: BrowserTabLease) { state = state.copy(takenOver = true, waiting = false) }
+        override fun mount(parent: ViewGroup) = Unit
+        override fun unmount(parent: ViewGroup) = Unit
+        override fun navigate(url: String) { navigations += url }
+        override fun newTab() { newTabs++ }
+        override fun selectTab(lease: BrowserTabLease) = Unit
+        override fun closeTab() = Unit
+        override fun control(action: BrowserVisibleAction) { controls++ }
+        override fun configure(configuration: BrowserVisibleConfiguration) = Unit
+        override fun downloads(listener: BrowserVisibleDownload?) = Unit
+        override fun restore() = Unit
+        override fun stop() = Unit
+        override fun close() { closed++ }
+    }
+
+    fun testHumanFailureNeverShowsAgentBrowsingAndTaskTakeoverStillWorks() {
+        for (taskOwned in listOf(false, true)) {
+            val visit = StateVisit(taskOwned)
+            lateinit var pool: BrowserUiPool
+            mainThread {
+                pool = BrowserUiPool(activity.applicationContext, visit)
+                activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    BrowserSheet(pool, {})
+                } }
+            }
+            val brand = activity.getString(R.string.om_browser_minis_browsing)
+            ui.onNodeWithText(brand).assertDoesNotExist()
+            node("browser-visual-new-tab").assertIsEnabled()
+            node("browser-visual-history").assertIsEnabled()
+            mainThread {
+                visit.state = visit.state.copy(takenOver = false, waiting = false)
+                pool.refresh()
+            }
+            node("browser-visual-new-tab").assertIsNotEnabled()
+            if (taskOwned) {
+                ui.onNodeWithText(brand).assertIsDisplayed()
+                ui.onNodeWithText(activity.getString(R.string.om_browser_takeover)).performClick()
+                ui.onNodeWithText(brand).assertDoesNotExist()
+                node("browser-visual-new-tab").assertIsEnabled()
+            } else ui.onNodeWithText(brand).assertDoesNotExist()
+            mainThread { visit.state = visit.state.copy(unknown = true, takenOver = false, waiting = true); pool.refresh() }
+            assertTrue(pool.unavailable.value)
+            ui.onNodeWithText(brand).assertDoesNotExist()
+            ui.onNodeWithText(activity.getString(R.string.om_browser_takeover)).assertDoesNotExist()
+            node("browser-visual-new-tab").assertIsNotEnabled()
+            node("browser-visual-history").assertIsNotEnabled()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testFailedVisualReturnsOnceWithoutReplayingUnknownNavigation() {
+        val visit = StateVisit(false)
+        visit.state = visit.state.copy(unknown = true)
+        var dismisses = 0
+        mainThread {
+            activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                BrowserVisualScreen(visit, { true }, { dismisses++ })
+            } }
+        }
+        ui.waitUntil(5_000) { dismisses == 1 }
+        ui.runOnIdle {
+            assertEquals(1, dismisses)
+            assertTrue(visit.closed > 0)
+            assertTrue(visit.navigations.isEmpty())
+            assertEquals(0, visit.newTabs)
+            assertEquals(0, visit.controls)
+        }
+        ui.onNodeWithText(activity.getString(R.string.om_browser_minis_browsing)).assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testAddressNormalizationKeepsOriginalSearchAndHostRecognition() {
         val cases = listOf(
             " example.com/path " to "https://example.com/path",

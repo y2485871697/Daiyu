@@ -168,12 +168,24 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun backFromSelectionSheet() {
-        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        val sheet = node("chat-selection-sheet")
+        awaitNodeWindowFocus(sheet)
+        val root = (sheet.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+        dismissIme(root)
+        awaitDialogImeFrame(sheet, visible = false)
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
-        ui.waitUntil(timeoutMillis = 5000) {
-            ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty() &&
-                activity.window.decorView.hasWindowFocus()
+        var sheetGone = false
+        var hostFocused = false
+        try {
+            ui.waitUntil(timeoutMillis = 5000) {
+                sheetGone = ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty()
+                instrumentation.runOnMainSync { hostFocused = activity.window.decorView.hasWindowFocus() }
+                sheetGone && hostFocused
+            }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("Picker BACK: sheetGone=$sheetGone hostFocused=$hostFocused", timeout)
         }
         node("chat-selection-sheet").assertDoesNotExist()
     }
@@ -252,6 +264,31 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         node("settings-radio:${voices.first { it.id == saved.voice }.name}").assertIsSelected()
         backFromSelectionSheet()
         assertEquals(saved, fixture.controller.voiceRuntime.configuration.value)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testReadAloudPickerBackHidesImeBeforeCancellingSelection() {
+        systemProfiles(); enter(); section("朗读")
+        node("voice-cloud-enable").performClick()
+        val readingBefore = fixture.controller.voiceRuntime.configuration.value
+        val conversationBefore = fixture.controller.voiceRuntime.conversationConfiguration.value
+        val modelBefore = fixture.settings.load()
+        val catalogBefore = fixture.settings.localModelCatalogSnapshot()
+        reveal("voice-model-open", "语音设置").performClick(); awaitSpeechPicker()
+        node("chat-model-search").performClick()
+        awaitDialogImeFrame(node("chat-selection-sheet"), visible = true)
+        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        awaitDialogImeFrame(node("chat-selection-sheet"), visible = false)
+        node("chat-selection-sheet").assertIsDisplayed()
+        node("voice-model-dialog").assertExists()
+        assertEquals(readingBefore, fixture.controller.voiceRuntime.configuration.value)
+        assertEquals(conversationBefore, fixture.controller.voiceRuntime.conversationConfiguration.value)
+        backFromSelectionSheet()
+        assertEquals(readingBefore, fixture.controller.voiceRuntime.configuration.value)
+        assertEquals(conversationBefore, fixture.controller.voiceRuntime.conversationConfiguration.value)
+        assertEquals(modelBefore, fixture.settings.load())
+        assertEquals(catalogBefore, fixture.settings.localModelCatalogSnapshot())
         assertEquals(0, fixture.opens.get())
     }
 

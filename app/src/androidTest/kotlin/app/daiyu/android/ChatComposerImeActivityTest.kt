@@ -293,7 +293,14 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         }
         try {
             mainThread {
+                first.setSelection(5, 1)
+                assertEquals(5, first.selectionStart)
+                assertEquals(1, first.selectionEnd)
+                android.util.Log.d("DaiyuTestStep", "transfer-before selection=${first.selectionStart},${first.selectionEnd}")
                 hideChatInputIme(focus, keyboard, first)
+                android.util.Log.d("DaiyuTestStep", "transfer-return selection=${first.selectionStart},${first.selectionEnd}")
+                assertEquals(5, first.selectionStart)
+                assertEquals(1, first.selectionEnd)
                 assertEquals(1, clearCalls)
                 assertEquals(1, transfers)
                 assertEquals("Outer hide must respect the managed focus-transfer veto", 0, keyboardHideCalls)
@@ -312,6 +319,7 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
             }
             awaitImeFrame(node("ime-focus-transfer-fixture"), visible = true)
             mainThread {
+                android.util.Log.d("DaiyuTestStep", "transfer-stable selection=${first.selectionStart},${first.selectionEnd} cursor=${first.isCursorVisible}")
                 assertEquals(0, keyboardHideCalls)
                 assertSame(second, activity.window.currentFocus)
                 assertEquals("保留第一个编辑器", first.text.toString())

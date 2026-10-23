@@ -73,7 +73,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('gesture = null', self.host)
         self.assertNotIn('commitBack', cancelled)
         self.assertIn('if (!session.rejected && activeState.alive && currentEnabled)', pressed)
-        self.assertEqual(1, pressed.count('activeState.commitBack(scope) { currentBack() }'))
+        self.assertEqual(1, pressed.count('activeState.commitBack { currentBack() }'))
         self.assertIn('finally {\n                    handleOnBackCancelled()', pressed)
         self.assertIn('val callback = remember(dispatcher)', handler)
         self.assertIn('val currentState by rememberUpdatedState(state)', handler)

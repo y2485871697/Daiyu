@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import app.daiyu.android.browser.ported.ui.browser.BrowserSheet
@@ -36,13 +37,15 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
             assertEquals("没有打开的标签页", context.getString(R.string.om_browser_no_tab_open))
             activity.setContent {
                 CompositionLocalProvider(LocalContext provides context,
-                    LocalConfiguration provides context.resources.configuration) {
+                    LocalConfiguration provides context.resources.configuration,
+                    LocalResources provides context.resources) {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                         BrowserVisualScreen(null, { false }, { closed++ })
                     }
                 }
             }
         }
+        awaitBrowserWindowStable(node("browser-visual-page"))
         node("browser-visual-page").assertIsDisplayed()
         ui.onNodeWithTag("browser-visual-empty", useUnmergedTree = true).assertTextEquals("没有打开的标签页")
         node("browser-visual-tabs").assertTextEquals("0/3")
@@ -84,9 +87,12 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
                 }
             }
         }
+        awaitBrowserWindowStable(node("browser-visual-page"))
         ui.onNodeWithText(diagnostic).assertDoesNotExist()
         node("browser-visual-controls").performClick()
-        ui.onNodeWithText(activity.getString(R.string.om_browser_settings_user_agent)).assertIsDisplayed()
+        val userAgent = ui.onNodeWithText(activity.getString(R.string.om_browser_settings_user_agent))
+        awaitBrowserWindowStable(userAgent)
+        userAgent.assertIsDisplayed()
         ui.onNodeWithText("查看网页会暂停当前任务；关闭面板不会自动继续。").assertDoesNotExist()
         ui.onNodeWithText("归还浏览器并继续任务").assertDoesNotExist()
         ui.onNodeWithText("停止任务").assertDoesNotExist()
@@ -137,11 +143,13 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
             }
             val chip = ui.onNode(hasText("Tab 0") and hasClickAction())
             val title = ui.onNodeWithText("Tab 0", useUnmergedTree = true)
+            awaitBrowserWindowStable(chip)
             val chipBounds = chip.fetchSemanticsNode().boundsInRoot
             val titleBounds = title.fetchSemanticsNode().boundsInRoot
             val close = ui.onNodeWithContentDescription(activity.getString(R.string.om_browser_close_tab))
             close.assertExists()
             mainThread { busy = true; pool.refresh() }
+            awaitBrowserWindowStable(chip)
             close.assertDoesNotExist()
             assertEquals(chipBounds, chip.fetchSemanticsNode().boundsInRoot)
             assertEquals(titleBounds, title.fetchSemanticsNode().boundsInRoot)
@@ -149,16 +157,35 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
             mainThread { pool.closeTabFromUI(lease.tabId) }
             assertEquals(0, closes)
             mainThread { busy = false; pool.refresh() }
+            awaitBrowserWindowStable(chip)
             assertEquals(chipBounds, chip.fetchSemanticsNode().boundsInRoot)
             assertEquals(titleBounds, title.fetchSemanticsNode().boundsInRoot)
             close.performClick()
             ui.waitForIdle()
             assertEquals(1, closes)
             mainThread { busy = true; pool.refresh() }
+            awaitBrowserWindowStable(chip)
             close.assertDoesNotExist()
             assertEquals(chipBounds, chip.fetchSemanticsNode().boundsInRoot)
         }
         assertEquals(0, fixture.opens.get())
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun awaitBrowserWindowStable(target: SemanticsNodeInteraction) {
+        awaitVisualIdle()
+        awaitNodeWindowFocus(target)
+        ui.waitForIdle()
+        val current = target.fetchSemanticsNode()
+        val view = (current.root as androidx.compose.ui.platform.ViewRootForTest).view
+        awaitStableWindowFrame(view) {
+            if (!current.layoutInfo.isPlaced || !current.layoutInfo.coordinates.isAttached) null
+            else {
+                val position = IntArray(2)
+                view.getLocationOnScreen(position)
+                Triple(current.boundsInRoot, view.width to view.height, position.toList())
+            }
+        }
     }
 
     private class StateVisit(override val taskOwned: Boolean) : BrowserVisualVisit {

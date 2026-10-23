@@ -21,7 +21,7 @@ class ConversationProviderChipContractTest(unittest.TestCase):
         self.assertEqual(1, source.count('testTag("subagent-model-provider-${profile.id}")'))
         self.assertLess(chat.index('testTag("subagent-model-name-${profile.id}")'), chat.index("Text(providerName,"))
         self.assertLess(chat.index("Text(providerName,"), chat.index("Icon(Icons.Rounded.ExpandMore"))
-        self.assertIn('Modifier.weight(1f).testTag("subagent-model-name-${profile.id}")', chat)
+        self.assertIn('Modifier.weight(1f).modelNameOpticalAlignment().testTag("subagent-model-name-${profile.id}")', chat)
         self.assertIn('Modifier.size(20.dp).testTag("subagent-model-arrow-${profile.id}")', chat)
         self.assertIn(".heightIn(min = 48.dp)", chat)
         self.assertIn("ModelBrandIcon(config?.model.orEmpty()", chat)

@@ -15,6 +15,7 @@ import app.daiyu.android.ui.haptics.material.IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -140,7 +141,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                         app.daiyu.android.ui.icons.ModelBrandIcon(config?.model.orEmpty(), Modifier.size(20.dp),
                             displayName = config?.modelDisplayName.orEmpty(), tint = colors.accent)
                         Text(config?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (profile.modelId.isBlank()) "无" else "模型不可用",
-                            Modifier.weight(1f).testTag("subagent-model-name-${profile.id}"), fontSize = 14.sp,
+                            Modifier.weight(1f).modelNameOpticalAlignment().testTag("subagent-model-name-${profile.id}"), fontSize = 14.sp,
                             color = if (config == null) colors.muted else colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         config?.providerName?.takeIf { it.isNotBlank() }?.let { providerName ->
                             Text(providerName, Modifier.widthIn(max = 96.dp)

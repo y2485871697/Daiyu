@@ -272,7 +272,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 modelText.layoutInput.style.lineHeightStyle?.alignment)
             val chip = node("chat-model").fetchSemanticsNode().boundsInRoot
             val label = ui.onNodeWithTag("composer-model-label", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            assertEquals(chip.center.y - .75f * density, label.center.y, 1f)
+            assertEquals(chip.center.y - density.roundToInt(), label.center.y, 1f)
             assertEquals(10.sp, layout("37% 上下文").layoutInput.style.fontSize)
             assertEquals(14.sp, layout("37% 上下文").layoutInput.style.lineHeight)
             val placeholder = layout("给代鱼发消息")

@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -71,6 +72,7 @@ internal fun ProviderDirectoryPage(
         rows.forEach { registration -> item(registration.slotId) {
             SettingsCard(Modifier.padding(bottom = 8.dp)) {
                 SettingsRow(registration.name, tag = "provider-open-${registration.slotId}",
+                    textModifier = Modifier.modelNameOpticalAlignment(),
                     summary = summaries[registration.slotId]?.description(registration.enabled),
                     leading = { DaiyuIcon(DaiyuIcons.Provider, null) },
                     trailing = { if (registry?.activeSlotId == registration.slotId) DaiyuIcon(DaiyuIcons.Check, "当前提供商") },

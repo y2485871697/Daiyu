@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -188,7 +189,7 @@ internal fun ChatModelPicker(
                                     .heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     ModelBrandIcon(model.apiModelId, Modifier.size(22.dp).testTag("chat-model-brand:${provider.id}:${model.id}"), displayName = model.displayName, tint = colors.accent)
-                                    Column(Modifier.weight(1f)) {
+                                    Column(Modifier.weight(1f).modelNameOpticalAlignment()) {
                                         Text(model.displayName, color = if (selected) colors.accent else colors.text,
                                             fontSize = 16.sp, lineHeight = 24.sp,
                                             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,

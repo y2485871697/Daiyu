@@ -23,6 +23,8 @@ class R67FixtureContract(unittest.TestCase):
     def test_collaboration_footer_uses_its_own_exact_contract_and_real_edge_touches(self):
         source = (TEST / 'CollaborationEmptyStateTest.kt').read_text()
         self.assertNotIn('AssistantPreviewPalette', source)
+        self.assertIn('import androidx.compose.ui.graphics.Color', source)
+        self.assertIn('import androidx.compose.ui.geometry.Offset', source)
         for token in ('assertHeightIsEqualTo(48.dp)', '0xFFC6B7D5 else 0xFF756980',
                       '0xFF211735 else 0xFFFFFFFF', 'click(Offset(centerX, 2f * density))',
                       'click(Offset(centerX, height - 2f * density))',

@@ -1,5 +1,8 @@
 package app.daiyu.android
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue

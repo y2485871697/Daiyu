@@ -117,8 +117,10 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         nameField("子代理 2").performTextReplacement("Added worker")
         ui.onNodeWithContentDescription("草稿模型").scrollToVisible().performClick()
         // The nested picker inherits the same style scope as the settings profile sheet.
-        ui.onNodeWithText(provider.name).assertExists()
-        ui.onNode(hasText(model.displayName) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+        val inPicker = hasAnyAncestor(hasTestTag("chat-model-picker"))
+        ui.onNode(hasTestTag("chat-model-provider:${provider.id}") and hasText(provider.name) and inPicker).assertExists()
+        ui.onNode(hasTestTag("chat-model-option:${model.id}") and hasText(model.displayName) and inPicker
+            and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
             .assertIsEnabled().performClick()
         assertSheet()
         ui.waitUntil(5_000) {
@@ -129,6 +131,8 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { repository.snapshot(owner).profiles.size == 2 }
         node("subagent-config-window").assertDoesNotExist()
         val added = repository.snapshot(owner).profiles.single { it.name == "Added worker" }
+        ui.onNode(hasContentDescription("${added.name}模型") and hasText(provider.name) and hasText(model.displayName))
+            .assertExists()
         assertEquals(provider.id, added.providerId)
         assertEquals(model.id, added.modelId)
         assertEquals(before.profiles.single(), repository.snapshot(owner).profiles.first())

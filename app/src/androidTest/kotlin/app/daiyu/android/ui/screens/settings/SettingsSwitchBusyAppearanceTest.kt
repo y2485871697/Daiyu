@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
@@ -30,16 +31,36 @@ import kotlin.math.abs
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
-    private fun differentPixels(before: ImageBitmap, after: ImageBitmap): Int {
+    private fun differentPixels(before: ImageBitmap, after: ImageBitmap, diagnostic: String = "busy-appearance"): Int {
         assertEquals(before.width, after.width)
         assertEquals(before.height, after.height)
         val left = before.toPixelMap()
         val right = after.toPixelMap()
         var different = 0
+        var minX = left.width
+        var minY = left.height
+        var maxX = -1
+        var maxY = -1
         for (y in 0 until left.height) for (x in 0 until left.width) {
             val a = left[x, y]
             val b = right[x, y]
-            if (maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue)) > .01f) different++
+            if (maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue)) > .01f) {
+                different++
+                minX = minOf(minX, x)
+                minY = minOf(minY, y)
+                maxX = maxOf(maxX, x)
+                maxY = maxOf(maxY, y)
+            }
+        }
+        if (different != 0) {
+            android.util.Log.e("DaiyuSwitchPixels", "$diagnostic different=$different bbox=$minX,$minY,$maxX,$maxY image=${left.width}x${left.height}")
+            val directory = File(checkNotNull(activity.getExternalFilesDir(null)), "settings-ui")
+            check(directory.isDirectory || directory.mkdirs())
+            listOf("before" to before, "pending" to after).forEach { (phase, image) ->
+                File(directory, "$diagnostic-$phase.png").outputStream().use {
+                    check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
         }
         return different
     }
@@ -62,7 +83,7 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
             val before = captureScreenNode(node("busy-switch").assertIsEnabled())
             mainThread { busy.value = true }
             val pending = node("busy-switch").assertIsNotEnabled()
-            assertEquals(0, differentPixels(before, captureScreenNode(pending)))
+            assertEquals(0, differentPixels(before, captureScreenNode(pending), "busy-dark-$dark-checked-$checked"))
             pending.performTouchInput { click() }
             ui.runOnIdle { assertEquals(0, calls) }
             mainThread { busy.value = false }

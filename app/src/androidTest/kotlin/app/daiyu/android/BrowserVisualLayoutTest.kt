@@ -89,9 +89,11 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
         }
         awaitBrowserWindowStable(node("browser-visual-page"))
         ui.onNodeWithText(diagnostic).assertDoesNotExist()
+        prepareBrowserGeometry(node("browser-visual-page"))
         node("browser-visual-controls").performClick()
         val userAgent = ui.onNodeWithText(activity.getString(R.string.om_browser_settings_user_agent))
         awaitBrowserWindowStable(userAgent)
+        logBrowserWindow(userAgent, "settings-open")
         userAgent.assertIsDisplayed()
         ui.onNodeWithText("查看网页会暂停当前任务；关闭面板不会自动继续。").assertDoesNotExist()
         ui.onNodeWithText("归还浏览器并继续任务").assertDoesNotExist()
@@ -144,13 +146,16 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
             val chip = ui.onNode(hasText("Tab 0") and hasClickAction())
             val title = ui.onNodeWithText("Tab 0", useUnmergedTree = true)
             awaitBrowserWindowStable(chip)
+            prepareBrowserGeometry(chip)
             val chipBounds = chip.fetchSemanticsNode().boundsInRoot
             val titleBounds = title.fetchSemanticsNode().boundsInRoot
+            logBrowserWindow(chip, "baseline dark=$dark fontScale=$fontScale")
             val close = ui.onNodeWithContentDescription(activity.getString(R.string.om_browser_close_tab))
             close.assertExists()
             mainThread { busy = true; pool.refresh() }
             awaitBrowserWindowStable(chip)
             close.assertDoesNotExist()
+            logBrowserWindow(chip, "busy dark=$dark fontScale=$fontScale")
             assertEquals(chipBounds, chip.fetchSemanticsNode().boundsInRoot)
             assertEquals(titleBounds, title.fetchSemanticsNode().boundsInRoot)
             chip.performTouchInput { click() }
@@ -169,6 +174,30 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
             assertEquals(chipBounds, chip.fetchSemanticsNode().boundsInRoot)
         }
         assertEquals(0, fixture.opens.get())
+    }
+
+    private fun prepareBrowserGeometry(target: SemanticsNodeInteraction) {
+        // The fake visit starts with an empty address; Go ends editing without navigating.
+        node("browser-visual-address").performImeAction()
+        dismissIme()
+        awaitImeFrame(target, visible = false)
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun logBrowserWindow(target: SemanticsNodeInteraction, label: String) {
+        val current = target.fetchSemanticsNode()
+        val view = (current.root as androidx.compose.ui.platform.ViewRootForTest).view
+        instrumentation.runOnMainSync {
+            val position = IntArray(2)
+            view.getLocationOnScreen(position)
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+            val ime = androidx.core.view.WindowInsetsCompat.Type.ime()
+            android.util.Log.i("DaiyuBrowserGeometry", "$label bounds=${current.boundsInRoot} " +
+                "view=${view.width}x${view.height} screen=${position.toList()} " +
+                "density=${view.resources.displayMetrics.density} " +
+                "imeVisible=${insets?.isVisible(ime)} imeBottom=${insets?.getInsets(ime)?.bottom} " +
+                "focus=${view.findFocus()?.javaClass?.name}")
+        }
     }
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)

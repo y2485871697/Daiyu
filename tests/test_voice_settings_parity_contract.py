@@ -26,13 +26,156 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('source.withSpeechModel(choice)', dialog)
         self.assertIn('groupBy { it.connection.provider.slotId }', dialog)
         self.assertNotIn('SettingsModelPicker(', dialog)
+        for shared in ('ChatModelPicker(', 'ChatModelPickerState(', 'ChatModelProviderUi('):
+            self.assertIn(shared, dialog)
+        self.assertNotIn('WindowDialog(', dialog)
+        self.assertNotIn('voice-catalog-open:', dialog)
+        self.assertIn('ModelCatalogEntryUi(it.speechPickerId, it.name, apiModelId = it.model)', dialog)
+        self.assertIn('current = selected?.speechPickerId.orEmpty()', dialog)
+        self.assertIn('it.connection.provider.slotId == provider && it.speechPickerId == model', dialog)
+        self.assertIn('if (identity.isBlank()) "model:$model" else "local:$identity"', dialog)
         model_source = source('ui/screens/settings/SettingsModelSource.kt')
         speech = model_source.split('fun speechChoices()', 1)[1].split('fun providerName(', 1)[0]
         self.assertIn('SpeechModelCapabilities.builtInModels', speech)
+        self.assertIn('.filter { SpeechModelCapabilities.readAloud(it.selection.record.id) }', speech)
+        self.assertIn('if (SpeechModelCapabilities.readAloud(current)', speech)
+        self.assertIn('require(SpeechModelCapabilities.readAloud(value.model))', speech)
         self.assertIn('catalog.revision == cached.selection.expectedRevision', speech)
         self.assertIn('it == cached.selection.record', speech)
         self.assertNotIn('save(', speech)
         self.assertIn('voice = initial.voice.takeIf', dialog)
+
+    def test_selection_only_voice_dialogs_share_sheet_without_close_buttons(self):
+        text = source('VoiceSettingsDialogs.kt')
+        for name in ('VoiceChoiceDialog', 'VoiceProviderDialog', 'VoiceToneDialog'):
+            dialog = text.split(f'internal fun {name}(', 1)[1].split('\n@Composable', 1)[0]
+            self.assertIn('ChatSelectionSheet(title, onDismiss = onDismiss, showCloseButton = false', dialog)
+            self.assertNotIn('WindowDialog(', dialog)
+            self.assertNotIn('TextButton(', dialog)
+        tone = text.split('internal fun VoiceToneDialog(', 1)[1]
+        self.assertIn('choices.distinctBy { it.first }', tone)
+        self.assertIn('listOf("女声", "男声", "", "个人声音")', tone)
+        self.assertIn('selected = id == initial', tone)
+        panel = source('VoiceSettingsPanel.kt')
+        self.assertIn('"VOICE" -> VoiceToneDialog(', panel)
+        self.assertIn('"DUPLEX_VOICE" -> VoiceToneDialog(', panel)
+        advanced = panel.split('"ASR_ADVANCED" -> ChatSelectionSheet(', 1)[1].split('"ASR_RESOURCE"', 1)[0]
+        self.assertIn('showCloseButton = false', advanced)
+        editor = text.split('internal fun VoiceTextDialog(', 1)[1].split('\n@Composable', 1)[0]
+        self.assertIn('MiuixDialogActions("保存", onCancel = onDismiss', editor)
+
+    def test_clone_account_uses_compact_secret_eye_and_explicit_theme_pill_save(self):
+        panel = source('VoiceSettingsPanel.kt')
+        account = panel.split('if (child == "DOUBAO_ACCOUNT") {', 1)[1].split('val pageTitle =', 1)[0]
+        field, button = account.split('TextButton("保存账户"', 1)
+        self.assertIn('SettingsTextField("声音复刻 API Key"', field)
+        self.assertIn('password = true, enabled = !busy, compact = true', field)
+        self.assertIn('{ if (!busy) accountKeyDraft = it }', field)
+        for required in ('fillMaxWidth().testTag("voice-account-save")',
+                         'minHeight = 48.dp, cornerRadius = 24.dp',
+                         'colors = ButtonDefaults.textButtonColorsPrimary()',
+                         'enabled = !busy && accountKeyDraft.isNotBlank()',
+                         'runtime.saveAccount(value)', 'key = accountKeyDraft.trim()'):
+            self.assertIn(required, button)
+        self.assertNotIn('SettingsRow("保存账户"', account)
+        self.assertNotIn('save(draft', account)
+        self.assertIn('child = null; accountKeyDraft = ""', button)
+        self.assertIn('账户未保存，请检查密钥后重试。', button)
+        self.assertIn('SettingsRow("打开豆包控制台"', button)
+
+    def test_doubao_without_account_opens_browsing_home_and_only_then_requests_credentials(self):
+        panel = source('VoiceSettingsPanel.kt')
+        entry = panel.split('"PERSONAL" -> item', 1)[1].split('SettingsRow("MiMo 语音"', 1)[0]
+        self.assertIn('if (selected != null && runtime.accountCurrent(selected)) accountPage = selected', entry)
+        self.assertIn('else child = "DOUBAO_VOICES"', entry)
+        self.assertNotIn('else child = "DOUBAO_ACCOUNT"', entry)
+        empty_route = panel.split('if (child == "DOUBAO_VOICES") {', 1)[1].split('if (child == "DOUBAO_ACCOUNT")', 1)[0]
+        self.assertIn('VoicePersonalEmptyPage(isCurrent = ::current', empty_route)
+        self.assertIn('child = "DOUBAO_ACCOUNT"', empty_route)
+        self.assertNotIn('ProductionVoiceAccountPage(', empty_route)
+        empty = source('VoicePersonalScaffold.kt').split('internal fun VoicePersonalEmptyPage(', 1)[1]
+        for marker in ('"我的声音"', '"还没有声音"', '"先配置账户，再添加自己的声音。"',
+                       '"voice-account-configure"', '"声音复刻账户"', '"同步音色名额"',
+                       'isEnabled = { it == "ACCOUNT" && isCurrent() }'):
+            self.assertIn(marker, empty)
+        self.assertNotIn('runtime.', empty)
+        self.assertNotIn('preview', empty)
+        self.assertNotIn('VoiceConfiguration(', empty)
+        choice = source('VoiceSettingsDialogs.kt').split('internal fun VoiceChoiceDialog(', 1)[1].split('internal fun VoiceModelDialog(', 1)[0]
+        self.assertIn('enabled = isEnabled(id)', choice)
+        self.assertIn('if (isEnabled(id)) onSelect(id)', choice)
+
+    def test_doubao_add_is_bottom_end_and_home_keeps_settings_menu(self):
+        scaffold = source('VoicePersonalScaffold.kt').split('internal fun VoicePersonalEmptyPage(', 1)[0]
+        self.assertIn('MiuixScaffoldPage(title, onBack, actions = {', scaffold)
+        self.assertIn('testTag("voice-account-menu")', scaffold)
+        self.assertIn('DaiyuIcon(DaiyuIcons.Settings, "声音设置")', scaffold)
+        actions, bottom = scaffold.split('if (onAdd != null) IconButton', 1)
+        self.assertNotIn('testTag("voice-account-add")', actions)
+        for marker in ('Alignment.BottomEnd', '.navigationBarsPadding()', 'testTag("voice-account-add")',
+                       'minHeight = 56.dp, minWidth = 56.dp', 'MiuixTheme.colorScheme.primary'):
+            self.assertIn(marker, bottom)
+        leaf = source('VoiceAccountPanel.kt')
+        self.assertIn('VoicePersonalScaffold(title, ::back', leaf)
+        self.assertIn('"CREATE" to "用录音制作声音", "IMPORT" to "导入已有声音"', leaf)
+        self.assertIn('if (page == "LIST")', leaf)
+
+    def test_saved_doubao_account_editor_uses_eye_pill_and_returns_real_new_snapshot(self):
+        leaf = source('VoiceAccountPanel.kt')
+        account = leaf.split('if (page == "ACCOUNT") item', 1)[1].split('if (page == "SYNC")', 1)[0]
+        for marker in ('password = true, enabled = !busy, compact = true', 'TextButton("保存账户"',
+                       'fillMaxWidth().testTag("voice-account-save")', 'minHeight = 48.dp, cornerRadius = 24.dp',
+                       'colors = ButtonDefaults.textButtonColorsPrimary()', 'onAccountKeyChange?.invoke(key)'):
+            self.assertIn(marker, account)
+        self.assertNotIn('SettingsRow("保存账户"', account)
+        page = source('ProductionVoiceAccountPage.kt')
+        saved = page.split('onAccountKeyChange = { key ->', 1)[1].split('stopPreviewStrictly = {', 1)[0]
+        self.assertLess(saved.index('runtime.saveAccount('), saved.index('runtime.accountConfigurations.value[frozen.engine]'))
+        self.assertIn('runtime.accountCurrent(updated) && onAccountSaved != null', saved)
+        self.assertIn('active.set(false); preview.close(); onAccountSaved(updated)', saved)
+        panel = source('VoiceSettingsPanel.kt')
+        self.assertIn('accountPage == accountConfiguration && runtime.accountCurrent(updated)', panel)
+        self.assertIn('LaunchedEffect(personalAccounts, lifecycleState)', panel)
+        self.assertIn('updated != opened && runtime.accountCurrent(updated)) accountPage = updated', panel)
+
+    def test_doubao_slot_and_recording_details_match_existing_flows_without_new_requests(self):
+        leaf = source('VoiceAccountPanel.kt')
+        self.assertIn('personalVoiceSlots(voices, creating = page == "CREATE", postpaid = postpaid)', leaf)
+        self.assertIn('personalVoiceSlotTitle(voice, index)', leaf)
+        self.assertIn('summary = voiceSlotSummary(voice)', leaf)
+        self.assertIn('.sortedWith(compareBy<PersonalVoices.Voice> { !it.unused }.thenBy { it.name })', leaf)
+        self.assertIn('if (voice.name == voice.id) "音色名额 ${index + 1}" else voice.name', leaf)
+        self.assertIn('OpenableColumns.DISPLAY_NAME', leaf)
+        self.assertIn('LaunchedEffect(sampleUri, lifecycleState, frozenConfiguration.revision)', leaf)
+        self.assertIn('if (current() && sampleUri == uri) sampleName = label', leaf)
+        self.assertIn('summary = if (sampleUri == null) "选择文件不会上传" else sampleName', leaf)
+        self.assertIn('首次正式合成可能产生音色费用', leaf)
+        self.assertIn('未正式使用的音色可能七天后删除', leaf)
+        project = leaf.split('if (projectPicker) ChatSelectionSheet(', 1)[1].split('voiceMenu?.let', 1)[0]
+        self.assertIn('showCloseButton = false', project)
+        self.assertIn('item.name.takeIf { it != item.displayName }', project)
+        self.assertNotIn('TextButton("关闭"', project)
+        self.assertIn('S_ 开头的音色 ID', leaf)
+        self.assertIn('resources.voices.importPurchased(speech!!, a, s, p)', leaf)
+        self.assertIn('resources.voices.create(speech!!, sample, n, slot, confirmed = true)', leaf)
+        self.assertIn('resources.voices.importExisting(speech!!, id, n)', leaf)
+        self.assertIn('if (!voice.uncertain) add("REMOVE"', leaf)
+        self.assertIn('仅移除本机记录，不删除云端音色或任务', leaf)
+
+    def test_reference_voice_save_uses_theme_pill_without_changing_import_boundary(self):
+        panel = source('VoiceSettingsPanel.kt')
+        button = panel.split('TextButton("保存参考声音"', 1)[1].split('SettingsTextField("试听文字"', 1)[0]
+        for required in ('fillMaxWidth().testTag("voice-sample-save")',
+                         'minHeight = 48.dp, cornerRadius = 24.dp',
+                         'colors = ButtonDefaults.textButtonColorsPrimary()',
+                         'enabled = !busy && selectedSample != null',
+                         'selection.configuration == mimoConnection()',
+                         'runtime.personal.import(context, selection.value, selection.name, selection.configuration.referenceOwner())',
+                         'selectedSample = null', '录音未保存，请检查名称及 MP3 / WAV 文件。'):
+            self.assertIn(required, button)
+        self.assertNotIn('SettingsRow("保存参考声音"', panel)
+        self.assertNotIn('runtime.saveAccount', button)
+        self.assertNotIn('remote.', button)
 
     def test_speech_and_account_tickets_recheck_configuration_before_loading_credentials(self):
         text = source('ui/screens/settings/SettingsModelSource.kt')

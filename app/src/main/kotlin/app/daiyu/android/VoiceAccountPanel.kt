@@ -2,22 +2,19 @@ package app.daiyu.android
 
 import android.net.Uri
 import android.os.Looper
+import android.provider.OpenableColumns
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.screens.settings.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -31,6 +28,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
 import app.daiyu.android.ui.haptics.miuix.TextButton
+import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 
 /** Keeps a swallowed lease-stop failure fail-closed for the lifetime of this mounted port. */
 internal class AccountLeafPreviewGuard(port: VoiceAccountPreviewPort) {
@@ -69,7 +69,8 @@ internal class AccountLeafPreviewGuard(port: VoiceAccountPreviewPort) {
 /**
  * Independently mounted leaf. frozenConfiguration MUST be a saved runtime snapshot (not a draft).
  * Selection is only a callback; the parent decides whether/how to save a new configuration.
- * No network on render/load/select/picker return. Every network operation has a second confirmation.
+ * No network on render/load/select/picker return. Control-plane queries and training require confirmation;
+ * demo playback only follows an explicit preview action.
  */
 @Composable
 internal fun VoiceAccountPanel(
@@ -112,6 +113,7 @@ internal fun VoiceAccountPanel(
     var slotId by remember(frozenConfiguration.revision) { mutableStateOf("") }
     var postpaid by remember(frozenConfiguration.revision) { mutableStateOf(false) }
     var sampleUri by remember(frozenConfiguration.revision) { mutableStateOf<Uri?>(null) }
+    var sampleName by remember(frozenConfiguration.revision) { mutableStateOf("") }
     val samplePicker = remember(resources) { AccountSamplePicker<Uri>() }
     var pickerPending by remember { mutableStateOf(false) }
     var pickerResult by remember { mutableIntStateOf(0) }
@@ -163,7 +165,19 @@ internal fun VoiceAccountPanel(
         val uri = samplePicker.take(frozenConfiguration.revision,
             lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED), latestCurrent(frozenConfiguration))
         pickerPending = samplePicker.pending
-        if (uri != null) { sampleUri = uri; confirmation = null }
+        if (uri != null) { sampleUri = uri; sampleName = "已选择录音"; confirmation = null }
+    }
+    LaunchedEffect(sampleUri, lifecycleState, frozenConfiguration.revision) {
+        val uri = sampleUri ?: return@LaunchedEffect
+        if (!current()) return@LaunchedEffect
+        val label = withContext(Dispatchers.IO) {
+            runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0)?.take(160) else null
+                }
+            }.getOrNull().orEmpty().ifBlank { "已选择录音" }
+        }
+        if (current() && sampleUri == uri) sampleName = label
     }
     var page by remember { mutableStateOf("LIST") }
     var parentPage by remember { mutableStateOf("LIST") }
@@ -207,12 +221,9 @@ internal fun VoiceAccountPanel(
         "SYNC" -> "同步音色名额"; "ACCOUNT" -> "声音复刻账户"
         "IMPORT" -> "导入声音"; "CREATE" -> "制作声音"; else -> "我的声音"
     }
-    MiuixScaffoldPage(title, ::back, modifier = Modifier.testTag("voice-account"), actions = {
-        if (page == "LIST") {
-            TextButton("+", enabled = !busy, modifier = Modifier.testTag("voice-account-add"), onClick = { if (current()) addMenu = true })
-            TextButton("更多", enabled = !busy, modifier = Modifier.testTag("voice-account-menu"), onClick = { if (current()) menu = true })
-        }
-    }) {
+    VoicePersonalScaffold(title, ::back, enabled = !busy && current(),
+        onAdd = if (page == "LIST") ({ if (current()) addMenu = true }) else null,
+        onSettings = if (page == "LIST") ({ if (current()) menu = true }) else null) {
         if (page == "LIST") {
             if (visibleVoices.isEmpty()) item { SettingsNote("还没有声音。点击 + 制作或导入声音。") }
             items(visibleVoices.size, key = { visibleVoices[it].id }) { index ->
@@ -235,11 +246,16 @@ internal fun VoiceAccountPanel(
         }
         if (page == "ACCOUNT") item {
             VoiceSettingsCard {
-                SettingsTextField("声音复刻 API Key", accountKey, { if (!busy) { accountKey = it; confirmation = null } }, password = true, enabled = !busy)
-                SettingsRow("保存账户", showChevron = true, onClick = if (busy || accountKey.isBlank() || onAccountKeyChange == null) null else ({
-                    val key = accountKey
-                    execute { onAccountKeyChange?.invoke(key) }
-                }))
+                SettingsTextField("声音复刻 API Key", accountKey, { if (!busy) { accountKey = it; confirmation = null } },
+                    password = true, enabled = !busy, compact = true)
+                TextButton("保存账户", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    .fillMaxWidth().testTag("voice-account-save"),
+                    minHeight = 48.dp, cornerRadius = 24.dp,
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    enabled = !busy && current() && accountKey.isNotBlank() && onAccountKeyChange != null, onClick = {
+                        val key = accountKey
+                        execute { onAccountKeyChange?.invoke(key) }
+                    })
             }
             SettingsNote("声音复刻账户独立保存；API Key 与音色名额须属于同一项目。")
             VoiceSettingsCard { SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") }) }
@@ -290,15 +306,18 @@ internal fun VoiceAccountPanel(
                     SettingsRow(if (advancedCreation) "收起高级设置" else "高级：新建后付费音色", onClick = { advancedCreation = !advancedCreation })
                     if (advancedCreation) SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) { postpaid = it; confirmation = null }
                 }
-                voices.filter { if (page == "CREATE") !postpaid && it.id.startsWith("S_") else !it.unused }.forEach { voice ->
+                personalVoiceSlots(voices, creating = page == "CREATE", postpaid = postpaid).forEachIndexed { index, voice ->
                     val selected = if (page == "CREATE") slotId == voice.id else existingId == voice.id
-                    SettingsRadioRow(voice.name, selected, enabled = enabled && (page != "CREATE" || voice.canTrain), summary = if (page == "CREATE") voiceSlotSummary(voice) else voiceStatus(voice)) {
+                    SettingsRadioRow(personalVoiceSlotTitle(voice, index), selected,
+                        enabled = enabled && (page != "CREATE" || voice.canTrain), summary = voiceSlotSummary(voice)) {
                         if (current()) { if (page == "CREATE") { slotId = voice.id; postpaid = false } else existingId = voice.id; confirmation = null }
                     }
                 }
                 SettingsRow("查找我的音色名额", showChevron = true, onClick = if (!enabled) null else ({ navigate("SYNC") }))
                 SettingsRow("备用方式：从控制台复制 ID", showChevron = true, onClick = if (busy) null else ({ manualId = !manualId }))
                 if (manualId) {
+                    SettingsNote("在豆包控制台进入声音复刻音色列表，将“已复刻”切换为“全部”或“未复刻”，复制 S_ 开头的音色 ID。API Key 与音色须属于同一项目。")
+                    SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
                     if (page == "CREATE") AccountField("名额 ID", slotId, busy) { slotId = it; confirmation = null }
                     else AccountField("已有音色 ID", existingId, busy) { existingId = it; confirmation = null }
                 }
@@ -309,14 +328,14 @@ internal fun VoiceAccountPanel(
                 }))
             }
             SettingsNote(if (page == "IMPORT") "仅查询已有声音，不上传录音、不重新制作。备注名称最多 80 字。"
-                else if (postpaid) "后付费音色可能收费，需先在控制台开通。请核对费用与有效期后再制作。"
+                else if (postpaid) "须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。"
                 else "优先使用已有或免费名额；列表为空不代表免费名额已用完。可同步名额，或从豆包控制台复制音色 ID。")
         }
         if (page == "CREATE" && step == 1) item {
             SettingsSectionTitle("2. 选择录音")
             VoiceSettingsCard {
                 SettingsRow(if (sampleUri == null) "选择录音" else "重新选择录音", tag = "voice-training-sample",
-                    summary = if (sampleUri == null) "选择文件不会上传" else "录音已选择", showChevron = true, onClick = if (!enabled || pickerPending) null else ({
+                    summary = if (sampleUri == null) "选择文件不会上传" else sampleName, showChevron = true, onClick = if (!enabled || pickerPending) null else ({
                         if (samplePicker.begin(frozenConfiguration.revision)) {
                             pickerPending = true
                             try { picker.launch("audio/*") }
@@ -352,13 +371,16 @@ internal fun VoiceAccountPanel(
         onSelect = { navigate(it) }, onDismiss = { menu = false })
     if (addMenu) VoiceChoiceDialog("添加声音", listOf("CREATE" to "用录音制作声音", "IMPORT" to "导入已有声音"), "",
         onSelect = { beginFlow(it) }, onDismiss = { addMenu = false })
-    if (projectPicker) top.yukonga.miuix.kmp.window.WindowDialog(show = true, title = "选择项目", onDismissRequest = { projectPicker = false }) {
+    if (projectPicker) ChatSelectionSheet("选择项目", onDismiss = { projectPicker = false },
+        showCloseButton = false, titleFontSize = 20.sp) {
         Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
             projects.forEach { item -> SettingsRadioRow(item.displayName, project == item.name,
-                enabled = item.allowed && !busy, summary = if (item.allowed) null else "无此项目访问权限") {
+                enabled = item.allowed && !busy, summary = listOfNotNull(
+                    item.name.takeIf { it != item.displayName },
+                    "无此项目访问权限".takeIf { !item.allowed },
+                ).joinToString(" · ").ifBlank { null }) {
                 if (current()) { project = item.name; projectPicker = false; confirmation = null; notice = "" }
             } }
-            TextButton("关闭", onClick = { projectPicker = false })
         }
     }
     voiceMenu?.let { voice ->
@@ -393,7 +415,7 @@ private fun AccountField(label: String, value: String, readOnly: Boolean, secret
     SettingsTextField(label, value, onChange, password = secret, enabled = !readOnly)
 }
 
-private fun voiceStatus(voice: PersonalVoices.Voice): String = when {
+internal fun voiceStatus(voice: PersonalVoices.Voice): String = when {
     voice.uncertain -> "提交结果未知，请查询原音色，不要重新制作"
     voice.catalogState == "Expired" -> "已到期"
     voice.catalogState == "Reclaimed" -> "已回收"
@@ -403,11 +425,18 @@ private fun voiceStatus(voice: PersonalVoices.Voice): String = when {
     voice.tts -> "已就绪 · 试听后确认使用"
     voice.status == 4 || voice.catalogState == "Active" -> "已锁定"
     voice.remaining == 0 -> "制作次数已用完"
-    voice.unused -> "未使用名额" + if (voice.remaining >= 0) " · 剩余 ${voice.remaining} 次" else ""
+    voice.unused -> "未使用名额"
     voice.status == 0 -> "未找到音色"
     else -> "待查询"
 }
 
-private fun voiceSlotSummary(voice: PersonalVoices.Voice): String =
+internal fun voiceSlotSummary(voice: PersonalVoices.Voice): String =
     voiceStatus(voice) + (if (voice.remaining >= 0) " · 剩余 ${voice.remaining} 次" else " · 次数待查询") +
         if (voice.showInMyVoices && voice.canTrain) " · 再次制作可能覆盖已有声音" else ""
+
+internal fun personalVoiceSlots(voices: List<PersonalVoices.Voice>, creating: Boolean, postpaid: Boolean): List<PersonalVoices.Voice> =
+    voices.filter { if (creating) !postpaid && it.id.startsWith("S_") else !it.unused }
+        .sortedWith(compareBy<PersonalVoices.Voice> { !it.unused }.thenBy { it.name })
+
+internal fun personalVoiceSlotTitle(voice: PersonalVoices.Voice, index: Int): String =
+    if (voice.name == voice.id) "音色名额 ${index + 1}" else voice.name

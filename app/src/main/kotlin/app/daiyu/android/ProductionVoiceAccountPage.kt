@@ -33,6 +33,7 @@ internal fun ProductionVoiceAccountPage(
     installPreviewRevoke: (() -> Unit) -> (() -> Unit),
     onBack: () -> Unit,
     standalone: Boolean = false,
+    onAccountSaved: ((VoiceConfiguration) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -78,7 +79,12 @@ internal fun ProductionVoiceAccountPage(
             onAccountKeyChange = { key ->
                 check(latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && configurationCurrent())
                 if (standalone) runtime.saveAccount(frozen.copy(key = key.trim(), voice = app.daiyu.android.voice.providers.DoubaoVoices.DEFAULT_ID)) else runtime.save(frozen.copy(key = key), profile)
-                if (latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) leave()
+                if (latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    val updated = if (standalone) runtime.accountConfigurations.value[frozen.engine] else null
+                    if (updated != null && runtime.accountCurrent(updated) && onAccountSaved != null) {
+                        active.set(false); preview.close(); onAccountSaved(updated)
+                    } else leave()
+                }
             },
             stopPreviewStrictly = {
                 if (!preview.stopPreviewStrictly()) false

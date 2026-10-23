@@ -23,6 +23,7 @@ import androidx.compose.material3.*
 
 import androidx.compose.runtime.*
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.layout.appWindowSize
@@ -59,22 +60,26 @@ import top.yukonga.miuix.kmp.window.WindowDialog
     val halfLabelHeight = with(density) { if (labelSize.height == 0) 10.sp.toDp() else (labelSize.height / 2f).toDp() }
     Box(Modifier.fillMaxWidth().padding(top = halfLabelHeight, bottom = 8.dp)) {
         BasicTextField(value, onValueChange, enabled = enabled, singleLine = true, keyboardOptions = keyboardOptions,
-            textStyle = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = colors.text),
-            modifier = Modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp)
+            textStyle = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = colors.text, textAlign = TextAlign.Start),
+            modifier = Modifier.managedInput().fillMaxWidth().testTag("subagent-field:$label")
                 .drawBehind {
                     val stroke = 1.dp.toPx()
                     val notchWidth = labelSize.width + 8.dp.toPx()
                     val notchStart = if (rtl) size.width - 8.dp.toPx() - notchWidth else 8.dp.toPx()
-                    // Exclude both fill and outline: the label reveals the sheet, not a white mask.
                     clipRect(left = notchStart, top = -halfLabelHeight.toPx() - stroke,
                         right = notchStart + notchWidth, bottom = halfLabelHeight.toPx(), clipOp = ClipOp.Difference) {
-                        drawRoundRect(colors.field, cornerRadius = CornerRadius(10.dp.toPx()))
                         drawRoundRect(colors.line, topLeft = Offset(stroke / 2, stroke / 2),
                             size = Size(size.width - stroke, size.height - stroke),
                             cornerRadius = CornerRadius(10.dp.toPx()), style = Stroke(stroke))
                     }
-                }.padding(horizontal = 12.dp, vertical = 10.dp),
+                },
             cursorBrush = imeCursorBrush(colors.accent),
+            decorationBox = { editor ->
+                Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.CenterStart) {
+                    Box(Modifier.testTag("subagent-field-editor:$label")) { editor() }
+                }
+            },
         )
         Text(label, fontSize = 13.sp, lineHeight = 20.sp, color = colors.text,
             maxLines = 1, overflow = TextOverflow.Ellipsis,

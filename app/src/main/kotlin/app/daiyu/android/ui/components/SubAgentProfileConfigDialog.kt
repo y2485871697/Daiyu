@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.components.subagent.*
 import kotlinx.coroutines.CancellationException
@@ -150,20 +151,20 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                 Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 520.dp).testTag("subagent-config-body").verticalScroll(rememberScrollState())) {
                     if (LocalConversationAgentStyle.current) ConversationAgentField("名称", session.name, { if (usable) session.name = it.take(80) }, usable)
                     else EtaFormTextField(session.name, { if (usable) session.name = it.take(80) }, hint = "名称", singleLine = true, enabled = usable, modifier = Modifier.fillMaxWidth())
-                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("启用", Modifier.weight(1f))
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 30.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("启用", Modifier.weight(1f), fontSize = 14.sp, lineHeight = 22.sp, color = conversationAgentColors().text)
                         if (LocalConversationAgentStyle.current) ConversationAgentSwitch(draft.enabled, usable) { active -> interact { session.edit { it.copy(enabled = active) } } }
                         else Switch(draft.enabled, enabled = usable, onCheckedChange = { active -> interact { session.edit { it.copy(enabled = active) } } })
                     }
                     SubAgentSettingRow("模型", boundConfig?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (draft.modelId.isBlank()) "选择模型" else "模型不可用",
                         Icons.Rounded.ViewInAr, "草稿模型", usable, badge = boundConfig?.providerName,
-                        onClick = { interact { modelPicker = true } }, onLongClick = { if (usable && canThink) { thinkingPicker = true } }, divider = canEditSpeed)
+                        onClick = { interact { modelPicker = true } }, onLongClick = { if (usable && canThink) { thinkingPicker = true } })
                     if (canEditSpeed) SubAgentSettingRow("GPT 速度", subAgentGptSpeedDisplayName(draft.gptSpeedForModel()), Icons.Rounded.Speed, "草稿GPT速度", usable, onClick = { interact {
                         session.edit { profile ->
                             if (profile.providerId != draft.providerId || profile.modelId != draft.modelId || profile.role != draft.role) profile
                             else profile.copy(gptSpeedByModel = profile.gptSpeedByModel + (SubAgentProfile.modelReasoningKey(profile.providerId, profile.modelId) to profile.gptSpeedForModel().next()))
                         }
-                    } }, divider = true)
+                    } })
                     SubAgentSettingRow("职责", draft.roleLabel, Icons.Rounded.Assignment, "草稿职责", usable, onClick = { interact { choices = "role" } })
                     if (draft.supportsTaskTier) SubAgentSettingRow("任务分工", draft.tier?.label ?: "未设置分工", Icons.Rounded.AccountTree, "草稿任务分工", usable, onClick = { interact { choices = "tier" } })
                     SubAgentSettingRow("思考深度", thinkingLabel, Icons.Rounded.AutoAwesome, "草稿思考深度", usable && canThink, onClick = { interact { thinkingPicker = true } })

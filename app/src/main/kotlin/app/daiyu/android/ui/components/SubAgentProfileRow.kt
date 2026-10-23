@@ -119,7 +119,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             val colors = conversationAgentColors()
             Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
                 color = androidx.compose.ui.graphics.Color(if (colors.dark) 0x03ffffff else 0x1cffffff),
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.line), modifier = Modifier.fillMaxWidth()) {
+                border = androidx.compose.foundation.BorderStroke(1.dp, colors.line), modifier = Modifier.fillMaxWidth().testTag("subagent-card-${profile.id}")) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(profile.name, Modifier.weight(1f), fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
@@ -156,7 +156,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                     }
                     if (showGptSpeed) {
                         HorizontalDivider(Modifier.testTag("subagent-gpt-divider-${profile.id}"), color = colors.line)
-                        SubAgentGptSpeedButton(profile, presentationProviders, usable, Modifier.padding(top = 8.dp))
+                        SubAgentGptSpeedButton(profile, presentationProviders, usable, Modifier.padding(top = 8.dp, bottom = 4.dp))
                     }
                 }
             }

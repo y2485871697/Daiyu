@@ -180,6 +180,15 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         val speedBounds = speed.fetchSemanticsNode().boundsInRoot
         val density = label.layoutInput.density.density
         assertTrue("Compact speed does not keep the old 48dp painted block", speedBounds.height < 32f * density)
+        val divider = node("subagent-gpt-divider-worker").fetchSemanticsNode().boundsInRoot
+        val card = node("subagent-card-worker").fetchSemanticsNode().boundsInRoot
+        val topGap = speedBounds.top - divider.bottom
+        val bottomGap = card.bottom - speedBounds.bottom
+        assertEquals("Speed tag has 8dp above it", 8f * density, topGap, 1.5f)
+        assertEquals("Speed tag centers between divider and card bottom", topGap, bottomGap, 1.5f)
+        val speedText = ui.onNodeWithText("GPT 速度 · 标准", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals("Speed text centers inside its tag", speedBounds.center.y, speedText.center.y, 1f)
         speed.performTouchInput { click() }
         awaitControl("compact speed still saves the next mode") {
             data.repository.snapshot(data.editor.owner).profiles.single().gptSpeedForModel() == GptSpeedMode.FAST

@@ -32,6 +32,7 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                     AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = false) {
+                        LinuxSettingsTheme {
                         val themeColors = MiuixTheme.colorScheme
                         SideEffect { colors = themeColors }
                         var tab by remember(showKey) { mutableStateOf(LinuxSettingsTab.BASIC) }
@@ -39,6 +40,7 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
                         Column(Modifier.width(320.dp)) {
                             LinuxFileLocationTabs(location, locationsEnabled) { location = it }
                             LinuxSettingsTabs(tab) { tab = it }
+                        }
                         }
                     }
                 }
@@ -81,6 +83,8 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) {
             show(dark = dark)
             ui.waitForIdle()
+            assertEquals(Color(0xff82728f), colors.primary)
+            assertEquals(Color.White, colors.onPrimary)
             assertColorPair(ui.onNodeWithTag("linux-tab-indicator:basic", useUnmergedTree = true),
                 colors.primary, colors.onPrimary)
             assertColorPair(node("linux-tab:files"), colors.primaryContainer, colors.onPrimaryContainer)

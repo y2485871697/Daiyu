@@ -176,7 +176,7 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                 modifier = Modifier.size(48.dp).testTag("workspace-private-import").semantics {
                     onClick { semanticImport(); true }
                 }) {
-                DaiyuIcon(DaiyuIcons.Import, "导入文件", size = 22.dp)
+                DaiyuIcon(DaiyuIcons.Export, "上传文件", size = 22.dp)
             }
             IconButton(onClick = refreshFiles, enabled = controlsEnabled,
                 modifier = Modifier.size(48.dp).testTag("workspace-private-refresh").semantics {

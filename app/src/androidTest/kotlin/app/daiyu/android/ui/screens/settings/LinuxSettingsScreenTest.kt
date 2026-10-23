@@ -26,8 +26,13 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
     private var owner: LinuxSettingsPageOwner? = null
     private val loads = AtomicInteger()
     private var pageTitle = "Linux 工具环境"
+    private val choicePreferences by lazy {
+        instrumentation.targetContext.getSharedPreferences("linux-choice-test-${java.util.UUID.randomUUID()}", android.content.Context.MODE_PRIVATE)
+    }
     private fun show(entries: List<LinuxInstallation> = emptyList(), filesOnly: Boolean = false,
-        onOpenTerminal: (() -> Unit)? = null) {
+        onOpenTerminal: (() -> Unit)? = null,
+        preferenceOverride: android.content.SharedPreferences? = null) {
+        settings?.close()
         pageTitle = if (filesOnly) "工作区" else "Linux 工具环境"
         val catalog = object : LinuxSettingsCatalogAccess {
             override fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval { writes.incrementAndGet(); error("no configuration writes") }
@@ -37,6 +42,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
             override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = false
             override suspend fun remove(reference: LinuxGenerationRef): List<LinuxInstallation> { writes.incrementAndGet(); error("no removal") }
         }
+        val preferences = LinuxInstallChoicePreferences(preferenceOverride ?: choicePreferences)
         val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()))
         settings = controller
         val page = controller.enterPage()
@@ -45,7 +51,8 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    LinuxSettingsScreen(controller, page, onBack = {}, runningModeStore = modes, filesOnly = filesOnly, onOpenTerminal = onOpenTerminal)
+                    LinuxSettingsScreen(controller, page, onBack = {}, runningModeStore = modes, filesOnly = filesOnly, onOpenTerminal = onOpenTerminal,
+                        suppliedChoicePreferences = preferences)
                 }
             }
         }
@@ -123,18 +130,23 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
 
     fun testBasicActionsRetainedAcrossTabsCannotChangeSelectionOrOpenTerminal() {
         val terminalNavigations = AtomicInteger()
+        assertTrue(LinuxInstallChoicePreferences(choicePreferences).save(
+            LinuxInstallChoice("alpine", LinuxExecutionMode.PROOT)))
         show(onOpenTerminal = { terminalNavigations.incrementAndGet() })
         val oldTerminal = checkNotNull(node("linux-open-terminal").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         node("linux-distribution-choice").performClick()
         val oldDebian = checkNotNull(node("linux-choice:linux-distribution-choice:1")
             .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        node("linux-choice:linux-distribution-choice:0").performClick()
-        node("linux-tab:files").performClick()
+        // Use the retained bottom-tab action while the old popup is still expanded.
+        val filesTab = checkNotNull(node("linux-tab:files").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        mainThread { filesTab() }
         mainThread { oldDebian(); oldTerminal() }
         assertEquals(0, terminalNavigations.get())
         node("linux-tab:basic").performClick()
         mainThread { oldDebian(); oldTerminal() }
         node("linux-distribution-choice").assertTextContains("Alpine")
+        assertEquals(LinuxInstallChoice("alpine", LinuxExecutionMode.PROOT),
+            LinuxInstallChoicePreferences(choicePreferences).read())
         assertEquals(0, terminalNavigations.get())
         node("linux-open-terminal").performClick()
         assertEquals(1, terminalNavigations.get())
@@ -233,6 +245,68 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
     }
+    fun testInstallChoicesPersistAcrossNewPageAndPreferenceInstancesWithoutInstalling() {
+        setRunningMode(RunningMode.ROOT)
+        show()
+        node("linux-distribution-choice").performClick()
+        node("linux-choice:linux-distribution-choice:1").performClick()
+        revealLinux("linux-execution-choice").performClick()
+        node("linux-choice:linux-execution-choice:1").performClick()
+        val previousOwner = checkNotNull(owner)
+        show()
+        assertTrue(previousOwner.state.value.revoked)
+        node("linux-distribution-choice").assertTextContains("Debian")
+        revealLinux("linux-execution-choice").assertTextContains("Root 模式 · chroot")
+        assertEquals(LinuxInstallChoice("debian", LinuxExecutionMode.CHROOT),
+            LinuxInstallChoicePreferences(choicePreferences).read())
+        setRunningMode(RunningMode.NORMAL)
+        revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
+        setRunningMode(RunningMode.ROOT)
+        revealLinux("linux-execution-choice").assertTextContains("Root 模式 · chroot")
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPreferenceWriteFailureKeepsConfirmedChoiceAndShowsError() {
+        val original = LinuxInstallChoice("alpine", LinuxExecutionMode.PROOT)
+        assertTrue(LinuxInstallChoicePreferences(choicePreferences).save(original))
+        val failing = object : android.content.SharedPreferences by choicePreferences {
+            override fun edit(): android.content.SharedPreferences.Editor {
+                val real = choicePreferences.edit()
+                return object : android.content.SharedPreferences.Editor by real {
+                    override fun putString(key: String?, value: String?): android.content.SharedPreferences.Editor {
+                        real.putString(key, value); return this
+                    }
+                    override fun commit(): Boolean { real.commit(); return false }
+                }
+            }
+        }
+        show(preferenceOverride = failing)
+        node("linux-distribution-choice").performClick()
+        node("linux-choice:linux-distribution-choice:1").performClick()
+        node("linux-distribution-choice").assertTextContains("Alpine")
+        ui.onNodeWithText("选项未保存，请重试。").assertExists()
+        assertEquals(original, LinuxInstallChoicePreferences(choicePreferences).read())
+        show()
+        node("linux-distribution-choice").assertTextContains("Alpine")
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRetainedDistributionCallbackCannotOverwritePreferenceAfterReentry() {
+        assertTrue(LinuxInstallChoicePreferences(choicePreferences).save(
+            LinuxInstallChoice("alpine", LinuxExecutionMode.PROOT)))
+        show()
+        node("linux-distribution-choice").performClick()
+        val oldDebian = checkNotNull(node("linux-choice:linux-distribution-choice:1")
+            .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        // Leave with the old popup still open so its expanded flag cannot mask the page guard.
+        show()
+        mainThread { oldDebian() }
+        node("linux-distribution-choice").assertTextContains("Alpine")
+        assertEquals(LinuxInstallChoice("alpine", LinuxExecutionMode.PROOT),
+            LinuxInstallChoicePreferences(choicePreferences).read())
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
     fun testChrootChoiceIsOnlyVisibleInRootModeAndOldPopupCannotSelectIt() {
         show()
         for (mode in listOf(RunningMode.NORMAL, RunningMode.SHIZUKU)) {
@@ -280,6 +354,6 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
     }
 
     override fun tearDown() {
-        try { settings?.close() } finally { super.tearDown() }
+        try { settings?.close(); choicePreferences.edit().clear().commit() } finally { super.tearDown() }
     }
 }

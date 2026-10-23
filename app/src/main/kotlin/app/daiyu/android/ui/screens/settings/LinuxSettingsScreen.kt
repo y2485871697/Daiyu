@@ -39,7 +39,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: LinuxSettingsPageOwner,
     onBack: () -> Unit, modifier: Modifier = Modifier, host: TerminalEnvironmentHost? = null,
     runningModeStore: RunningModeStore = AndroidRunningModeStore.get(LocalContext.current),
-    filesOnly: Boolean = false, onOpenTerminal: (() -> Unit)? = null) {
+    filesOnly: Boolean = false, onOpenTerminal: (() -> Unit)? = null,
+    suppliedChoicePreferences: LinuxInstallChoicePreferences? = null) = LinuxSettingsTheme {
     val runningMode by runningModeStore.mode.collectAsState()
     val rootMode = runningMode == RunningMode.ROOT
     val state by page.state.collectAsState()
@@ -47,8 +48,13 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     val proot = controller.installation?.state?.collectAsState()?.value
     val chroot = controller.chrootInstallation?.state?.collectAsState()?.value
     val selected = terminal?.linux?.choices?.find { it.reference == terminal.linux.selected }
-    var distributionDraft by remember(page) { mutableStateOf<String?>(null) }
-    var modeDraft by remember(page) { mutableStateOf<LinuxExecutionMode?>(null) }
+    val context = LocalContext.current
+    val choicePreferences = suppliedChoicePreferences ?: remember(context) {
+        LinuxInstallChoicePreferences(context.applicationContext.getSharedPreferences("linux-settings-v1", android.content.Context.MODE_PRIVATE))
+    }
+    var installChoice by remember(page, choicePreferences) { mutableStateOf(choicePreferences.read()) }
+    val distributionDraft = installChoice?.distribution
+    val modeDraft = installChoice?.executionMode
     val pendingMode = when {
         proot?.let { it.prepared != null && !it.registered || it.unknown || it.recoveryBlocked || it.cleanupPending } == true -> LinuxExecutionMode.PROOT
         chroot?.let { it.prepared != null && !it.registered || it.unknown || it.recoveryBlocked || it.cleanupPending } == true -> LinuxExecutionMode.CHROOT
@@ -56,10 +62,10 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     }
     val pendingInstall = if (pendingMode == LinuxExecutionMode.CHROOT) chroot else proot.takeIf { pendingMode != null }
     val distribution = if (filesOnly) selected?.label ?: terminal?.linux?.distribution ?: "alpine"
-        else distributionDraft ?: pendingInstall?.prepared?.artifact?.distribution ?: terminal?.linux?.distribution ?: "alpine"
+        else pendingInstall?.prepared?.artifact?.distribution ?: distributionDraft ?: terminal?.linux?.distribution ?: "alpine"
     val mode = if (!rootMode) LinuxExecutionMode.PROOT
         else if (filesOnly) selected?.executionMode ?: LinuxExecutionMode.PROOT
-        else modeDraft ?: pendingMode ?: selected?.executionMode ?: LinuxExecutionMode.PROOT
+        else pendingMode ?: modeDraft ?: selected?.executionMode ?: LinuxExecutionMode.PROOT
     val installation = if (mode == LinuxExecutionMode.CHROOT) chroot else proot
     val otherInstallation = if (mode == LinuxExecutionMode.CHROOT) proot else chroot
     val scope = rememberCoroutineScope()
@@ -99,8 +105,9 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
         if (!choiceCurrent() || !choiceEnabled || nextMode == LinuxExecutionMode.CHROOT && runningModeStore.mode.value != RunningMode.ROOT) return
         confirmInstall = false
         confirmUse = false
-        distributionDraft = nextDistribution
-        modeDraft = nextMode
+        val nextChoice = LinuxInstallChoice(nextDistribution, nextMode)
+        if (!choicePreferences.save(nextChoice)) { message = "选项未保存，请重试。"; return }
+        installChoice = nextChoice
         message = null
         val choice = terminal?.linux?.choices?.firstOrNull {
             it.label.equals(nextDistribution, ignoreCase = true) && it.executionMode == nextMode
@@ -110,9 +117,9 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
             scope.launch {
                 try {
                     val result = withContext(Dispatchers.IO) { host.selectLinux(choice.reference).get() }
-                    if (!result.ok) { distributionDraft = null; modeDraft = null; message = "环境未切换，请稍后重试。" }
+                    if (!result.ok) message = "选项已保存，但当前使用的环境未切换，请稍后重试。"
                 } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { distributionDraft = null; modeDraft = null; message = "环境未切换，请稍后重试。" }
+                catch (_: Exception) { message = "选项已保存，但当前使用的环境未切换，请稍后重试。" }
                 finally { selecting = false }
             }
         }
@@ -160,9 +167,12 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                                 if (pendingRequest && installation?.prepared != null && !installationMatches) {
                                     TextButton("继续上次安装", enabled = pageEnabled, onClick = {
                                         if (basicCurrent()) {
-                                            distributionDraft = installation.prepared.artifact.distribution
-                                            modeDraft = installation.prepared.installation.executionMode
-                                            confirmInstall = false; confirmUse = false
+                                            val nextChoice = LinuxInstallChoice(installation.prepared.artifact.distribution,
+                                                installation.prepared.installation.executionMode)
+                                            if (choicePreferences.save(nextChoice)) {
+                                                installChoice = nextChoice
+                                                confirmInstall = false; confirmUse = false
+                                            } else message = "选项未保存，请重试。"
                                         }
                                     })
                                 } else LinuxInstallAction(displayedInstallation, page, mode, distribution, enabled,
@@ -312,9 +322,11 @@ private fun LinuxInstallAction(state: LinuxInstallState?, page: LinuxSettingsPag
             TextButton("继续安装", enabled = ready, onClick = onInstall)
             TextButton("取消安装", enabled = ready, onClick = { if (ownerCurrent()) page.discardInstall(mode) })
         }
-        else -> Button(enabled = ready && !otherBlocked, modifier = Modifier.testTag("linux-install-environment"), onClick = {
+        else -> Button(enabled = ready && !otherBlocked,
+            colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.buttonColorsPrimary(),
+            modifier = Modifier.testTag("linux-install-environment"), onClick = {
             if (ownerCurrent() && page.prepareInstall(distribution, "primary", mode)) onInstall()
-        }) { Text("安装环境") }
+        }) { Text("安装环境", color = if (ready && !otherBlocked) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton) }
     }
     if (state?.notice?.startsWith("操作未确认成功：") == true && !state.busy)
         Text("操作未完成，请重试。", color = MiuixTheme.colorScheme.error)

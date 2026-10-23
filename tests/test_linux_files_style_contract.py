@@ -76,7 +76,7 @@ class LinuxFilesStyleContract(unittest.TestCase):
         self.assertIn('onClick { semanticImport(); true }', actions)
         self.assertIn('onClick { semanticRefresh(); true }', actions)
         self.assertIn('workspace-private-refresh', actions)
-        self.assertIn('DaiyuIcons.Import, "导入文件"', actions)
+        self.assertIn('DaiyuIcons.Export, "上传文件"', actions)
         self.assertNotIn('SettingsCard', actions)
         self.assertNotIn('SettingsNote', actions)
         parent = read('WorkspaceSettingsScreen.kt')

@@ -47,8 +47,8 @@ class R47BatchContract(unittest.TestCase):
 
     def test_provider_editing_normalization_is_only_before_recorder(self):
         text = (TEST / 'ProviderDirectoryResumeGeometryActivityTest.kt').read_text().split('fun testRealBackgroundResume', 1)[1]
-        self.assertLess(text.index('directoryFocusManager.clearFocus(force = true)'), text.index('val before = bounds(tags)'))
-        self.assertLess(text.index('dismissIme()'), text.index('val preDraw'))
+        self.assertLess(text.index('realTap(row("provider-search"))'), text.index('val before = bounds(tags)'))
+        self.assertLess(text.index('realTap(ui.onNodeWithText("新增提供商"))'), text.index('val preDraw'))
         self.assertEqual(2, text.count('row("provider-search").assertIsNotFocused()'))
         returned = text.split('val preDraw', 1)[1]
         self.assertNotIn('dismissIme()', returned)

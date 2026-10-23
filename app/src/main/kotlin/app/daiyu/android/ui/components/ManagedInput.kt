@@ -110,13 +110,7 @@ internal fun Modifier.managedInput(): Modifier = composed {
             // Keep Android's clearFocus fallback out of the Compose editor tree.
             val root = view.rootView
             root.isFocusableInTouchMode = true
-            if (root is ViewGroup) {
-                val previous = root.descendantFocusability
-                try {
-                    root.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
-                    root.requestFocus()
-                } finally { root.descendantFocusability = previous }
-            } else root.requestFocus()
+            root.requestFocus()
             inputTrace("dismiss root=${root.javaClass.simpleName} focused=${root.isFocused}")
             if (state.focused) focus.clearFocus(force = true)
         }
@@ -239,6 +233,31 @@ private object InputWindows {
 
 private class InputWindow(private val window: Window, private val lifecycle: Lifecycle?) {
     val entries = mutableSetOf<InputEntry>()
+    private val decor = window.decorView as? ViewGroup
+    private var clearing = 0
+    private var restingFocusOrder: Int? = null
+    private var restingFocusTree: ViewTreeObserver? = null
+    private val focusTransfer = ViewTreeObserver.OnGlobalFocusChangeListener { _, next ->
+        if (clearing == 0 && next != null && next !== decor && next.rootView === decor && decor?.findFocus() === next)
+            releaseRestingFocus()
+    }
+    private fun holdRestingFocus() {
+        val root = decor ?: return
+        if (restingFocusOrder != null) return
+        restingFocusOrder = root.descendantFocusability
+        restingFocusTree = root.viewTreeObserver.also { it.addOnGlobalFocusChangeListener(focusTransfer) }
+        root.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+    }
+    private fun releaseRestingFocus() {
+        val previous = restingFocusOrder ?: return
+        restingFocusOrder = null
+        restingFocusTree?.takeIf { it.isAlive }?.removeOnGlobalFocusChangeListener(focusTransfer)
+        restingFocusTree = null
+        decor?.let { root ->
+            if (root.descendantFocusability == ViewGroup.FOCUS_BEFORE_DESCENDANTS)
+                root.descendantFocusability = previous
+        }
+    }
     private val original = window.callback
     private val observer = LifecycleEventObserver { _, event ->
         if (event == Lifecycle.Event.ON_STOP) {
@@ -294,7 +313,14 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
     private fun dismiss(entry: InputEntry) {
         if (!entry.focused() || entry !in entries) return
         val nativeBefore = window.currentFocus
-        InputDismissal.run { entry.clear() }
+        holdRestingFocus()
+        clearing++
+        try {
+            InputDismissal.run { entry.clear() }
+        } finally {
+            clearing--
+            if (clearing == 0 && (decor?.isFocused != true || entries.any { it.focused() })) releaseRestingFocus()
+        }
         inputTrace("cleared focused=${entries.count { it.focused() }} nativeSame=${window.currentFocus === nativeBefore}")
         // A focus listener may have explicitly moved editing to a different field/view.
         if (entries.any { it.focused() } ||
@@ -307,6 +333,7 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         entries.remove(entry)
         if (candidate === entry) candidate = null
         if (entries.isEmpty()) {
+            releaseRestingFocus()
             lifecycle?.removeObserver(observer)
             if (window.callback === callback) window.callback = original
             InputWindows.windows.remove(window, this)

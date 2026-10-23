@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import android.content.Context
+import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import app.daiyu.android.data.model.AppearanceSettings
@@ -29,6 +35,7 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
 import app.daiyu.android.ui.screens.chat.conversation.ComposerUi
 import kotlin.math.abs
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
     private val modes = listOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO)
     private var state by mutableStateOf(ComposerUi())
@@ -42,7 +49,7 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
                     ChatMenuLayer(Modifier.fillMaxSize()) {
                         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
                             ChatComposer(state, ChatScreenActions(
-                                onVoice = { events += "voice" },
+                                onVoice = { events += "voice:${state.voiceMode.name}" },
                                 onVoiceLongPress = { events += "long" },
                                 onMenuAction = { events += it.name; state = state.copy(voiceMode = it) },
                             ))
@@ -59,8 +66,23 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
     }
 
     private fun open() {
+        awaitHostWindowFocus(activity)
         node("chat-voice").performTouchInput { longClick() }
+        awaitUniqueTag("chat-selection-sheet")
+        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        ui.mainClock.advanceTimeBy(1_000)
+        awaitVisualIdle()
         node("chat-voice-mode-menu").assertIsDisplayed()
+    }
+
+    private fun rawBounds(node: SemanticsNode) = Rect(node.positionInRoot,
+        Size(node.size.width.toFloat(), node.size.height.toFloat()))
+
+    private fun dismissByBack() {
+        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        assertClosed()
+        awaitHostWindowFocus(activity)
     }
 
     private fun assertClosed() {
@@ -88,9 +110,21 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
                     else { item.assertDoesNotExist(); null }
                 }
                 rows.zipWithNext().forEach { (first, next) -> assertTrue(first.bottom <= next.top + 1f) }
-                val menu = node("chat-voice-mode-menu").fetchSemanticsNode().boundsInRoot
-                val button = node("chat-voice").fetchSemanticsNode().boundsInRoot
-                assertTrue("Bottom voice menu must stay above its button", menu.bottom <= button.top + 1f)
+                val sheet = node("chat-selection-sheet").assertIsDisplayed().fetchSemanticsNode()
+                val viewport = node("preview-dialog-viewport").fetchSemanticsNode()
+                assertSame("Voice uses the shared bottom dialog", sheet.root, viewport.root)
+                val surface = rawBounds(sheet)
+                val window = rawBounds(viewport)
+                assertTrue("Voice is a wide bottom sheet, not a button popup", surface.width >= window.width * .75f)
+                assertTrue("Voice sheet stays near the bottom", surface.bottom > window.center.y)
+                for (mode in available) {
+                    val row = node("chat-menu:${mode.name}").fetchSemanticsNode()
+                    val bounds = rawBounds(row)
+                    val density = row.layoutInfo.density.density
+                    assertTrue("Attachment-sized row", bounds.height >= 56f * density - 1f)
+                    assertTrue("Whole voice row stays within sheet", bounds.left >= surface.left - 1f &&
+                        bounds.right <= surface.right + 1f && bounds.top >= surface.top - 1f && bounds.bottom <= surface.bottom + 1f)
+                }
                 ui.runOnIdle { assertEquals(listOf("long"), events.toList()) }
             }
         }
@@ -131,6 +165,7 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
                     assertEquals("Only current voice mode has the selected background", candidate == mode, hasSelectedBackground)
                 }
             }
+            dismissByBack()
         }
     }
 
@@ -153,6 +188,46 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
         update(modes.toSet(), generation = state.editorGeneration + 1)
         assertClosed()
         ui.runOnIdle { assertEquals(List(4) { "long" }, events.toList()) }
+    }
+
+    fun testShortPressOnlyUsesSelectedAvailableModeAcrossAllCombinations() {
+        show()
+        for (mask in 0..7) for (selected in modes) {
+            val available = modes.filterIndexed { index, _ -> mask and (1 shl index) != 0 }.toSet()
+            update(available)
+            ui.runOnIdle { state = state.copy(voiceMode = selected); events.clear() }
+            node("chat-voice").performTouchInput { click(center) }
+            assertClosed()
+            node("chat-selection-sheet").assertDoesNotExist()
+            ui.runOnIdle {
+                assertEquals(selected, state.voiceMode)
+                assertEquals(if (selected in available) listOf("voice:${selected.name}") else emptyList<String>(), events.toList())
+            }
+        }
+        update(modes.toSet(), enabled = false)
+        ui.runOnIdle { events.clear() }
+        node("chat-voice").performTouchInput { click(center) }
+        assertClosed()
+        ui.runOnIdle { assertTrue(events.isEmpty()) }
+    }
+
+    fun testSelectionStaysUntilOutsideOrBackAndNextTapUsesSelectedMode() {
+        show()
+        open()
+        node("chat-menu:VOICE_CHAT").performTouchInput { click(center) }
+        node("chat-voice-mode-menu").assertIsDisplayed()
+        ui.runOnIdle { assertEquals(listOf("long", "VOICE_CHAT"), events.toList()) }
+        node("preview-dialog-scrim").performTouchInput { click(Offset(center.x, 4f)) }
+        assertClosed()
+        awaitHostWindowFocus(activity)
+        node("chat-voice").performTouchInput { click(center) }
+        assertClosed()
+        ui.runOnIdle { assertEquals(listOf("long", "VOICE_CHAT", "voice:VOICE_CHAT"), events.toList()) }
+        open()
+        dismissByBack()
+        node("chat-voice").performTouchInput { click(center) }
+        assertClosed()
+        ui.runOnIdle { assertEquals("voice:VOICE_CHAT", events.last()) }
     }
 
     fun testAllDisabledLongPressHasNoCallbacksOrHapticsWithPositiveControl() {

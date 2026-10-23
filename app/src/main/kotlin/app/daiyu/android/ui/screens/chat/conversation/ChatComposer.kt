@@ -248,21 +248,15 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             generating = state.showGenerationLoading(),
                             listening = state.listening,
                             enabled = voiceMenuEnabled,
-                            onClick = {
-                                if (state.voiceMode !in state.voiceModes && state.voiceModes.size != 1) voiceModes = true
-                                else {
-                                    if (state.voiceMode !in state.voiceModes) actions.onMenuAction(state.voiceModes.single())
-                                    actions.onVoice()
-                                }
-                            },
+                            onClick = { if (state.voiceMode in state.voiceModes) actions.onVoice() },
                             onLongClick = if (voiceMenuEnabled) ({ actions.onVoiceLongPress(); voiceModes = true }) else null,
                         )
-                        ChatVoiceModeMenu(voiceModes && voiceMenuEnabled, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
                     }
                 }
         }
     }
     if (attachments) ChatAttachmentSheet({ attachments = false }, actions.onMenuAction)
+    ChatVoiceModeMenu(voiceModes && voiceMenuEnabled, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
 }
 
 @Composable

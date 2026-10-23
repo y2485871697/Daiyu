@@ -263,7 +263,7 @@ private fun TerminalSessionsDialog(entries: List<TerminalSessionEntry>, active: 
     onDismiss: () -> Unit, onSelect: (String) -> Unit, onRestart: (String) -> Unit, onClose: (String) -> Unit, onNew: () -> Unit) {
     val colors = assistantPreviewPalette()
     val actionMinHeight = terminalSheetActionMinHeight()
-    AssistantPreviewDialog(show = true, title = "会话", onDismiss = onDismiss, footer = {
+    AssistantPreviewDialog(show = true, title = "会话", onDismiss = onDismiss, showCloseButton = false, footer = {
         AssistantPreviewButton("新建会话", onNew,
             Modifier.fillMaxWidth().heightIn(min = actionMinHeight).testTag("terminal-create-session"), primary = true, enabled = canCreate)
     }) {
@@ -296,9 +296,9 @@ private fun TerminalSessionsDialog(entries: List<TerminalSessionEntry>, active: 
                                 Modifier.weight(1f), color = if (entry.running) colors.accent else colors.muted,
                                 fontSize = 12.sp, lineHeight = 18.sp)
                             AssistantPreviewButton("重启", { onRestart(entry.id) },
-                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-restart:${entry.id}"), enabled = !entry.restarting)
+                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-restart:${entry.id}"), enabled = !entry.restarting, compact = true)
                             AssistantPreviewButton("关闭", { onClose(entry.id) },
-                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-close:${entry.id}"), danger = true)
+                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-close:${entry.id}"), danger = true, compact = true)
                         }
                     }
                 }

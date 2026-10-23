@@ -20,6 +20,30 @@ class TerminalSheetStyleContractTest(unittest.TestCase):
             self.assertNotIn('LocalDensity provides', text)
             self.assertNotIn('DialogProperties(', text)
 
+    def test_terminal_sheets_hide_only_the_heading_close_icon(self):
+        for text in (SESSIONS, TASKS):
+            call = text.split('AssistantPreviewDialog(', 1)[1].split(') {', 1)[0]
+            self.assertIn('showCloseButton = false', call)
+        assistant = (SRC / 'assistants/AssistantPreviewComponents.kt').read_text()
+        self.assertIn('showCloseButton: Boolean = true', assistant)
+        self.assertIn('onClose(entry.id)', SESSIONS)
+
+    def test_inline_actions_inset_the_surface_inside_the_clickable_area(self):
+        self.assertEqual(2, SESSIONS.count('compact = true'))
+        self.assertEqual(2, TASKS.count('compact = true'))
+        footer = SESSIONS.split('footer = {', 1)[1].split('}) {', 1)[0]
+        self.assertNotIn('compact = true', footer)
+        assistant = (SRC / 'assistants/AssistantPreviewComponents.kt').read_text()
+        button = assistant.split('internal fun AssistantPreviewButton(', 1)[1].split('internal fun AssistantPreviewField(', 1)[0]
+        self.assertIn('compact: Boolean = false', button)
+        self.assertIn('if (actionRow || compact) 48 else 44', button)
+        inset = 'if (compact) click.padding(vertical = 8.dp * s) else Modifier'
+        self.assertIn(inset, button)
+        self.assertLess(button.index(inset), button.index('.then(surface)'))
+        self.assertIn('if (compact) Modifier else click', button)
+        self.assertIn('vertical = (if (compact) 4 else 8).dp * s', button)
+        self.assertNotIn('.height(32.dp)', button)
+
     def test_create_is_filled_primary_footer_outside_scrolling_sessions(self):
         footer = SESSIONS.split('footer = {', 1)[1].split('}) {', 1)[0]
         self.assertIn('AssistantPreviewButton("新建会话", onNew', footer)

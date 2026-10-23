@@ -119,7 +119,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
                 color = androidx.compose.ui.graphics.Color(if (colors.dark) 0x03ffffff else 0x1cffffff),
                 border = androidx.compose.foundation.BorderStroke(1.dp, colors.line), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(profile.name, Modifier.weight(1f), fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.text)
@@ -135,7 +135,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                             onClickLabel = "选择${profile.name}模型", onLongClickLabel = "调整${profile.name}思考深度",
                             onClick = { if (currentUsable) { modelPicker = true } },
                             onLongClick = { if (currentUsable && canThink) { thinkingPicker = true } })
-                        .padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
+                        .padding(top = 0.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         app.daiyu.android.ui.icons.ModelBrandIcon(config?.model.orEmpty(), Modifier.size(20.dp),
                             displayName = config?.modelDisplayName.orEmpty(), tint = colors.accent)

@@ -49,6 +49,9 @@ class R67FixtureContract(unittest.TestCase):
         self.assertIn('semanticsLayout.copy(size = IntSize(1, semanticsLayout.size.height))).hasVisualOverflow', source)
         self.assertIn('layout.hasVisualOverflow,', source)
         self.assertIn('semanticsParagraph=${semanticsLayout.multiParagraph.width}', source)
+        component = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/settings/ProviderSettingsComponents.kt').read_text()
+        self.assertIn('with(LocalDensity.current) { 22.sp.toDp() } + 24.dp', component)
+
         for token in ('requestedFontScale=$fontScale', 'layoutDensity=${layout.layoutInput.density}',
                       'heightDeltaPx=${bounds.height - 48f * density}', 'DaiyuProviderLayout',
                       'bounds.height > 48f * density'):
@@ -76,6 +79,12 @@ class R67FixtureContract(unittest.TestCase):
         enabled = method.index('setDrawingEnabled(true)')
         self.assertLess(enabled, method.index('mount(capturePreviousPage = true)'))
         self.assertLess(method.index('finally'), method.index('setDrawingEnabled(false)'))
+        production = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/navigation/PageBackGestures.kt').read_text()
+        for token in ('if (app.daiyu.android.BuildConfig.DEBUG)', 'DaiyuBackRecord',
+                      'current=${frame.key == layers.currentKey} explicit=$insideExplicitRecord',
+                      'insideExplicitRecord = false', 'this@drawWithContent.drawContent()'):
+            self.assertIn(token, production)
+
         for token in ('logPreviewPixels("source", sourceImage)', 'logPreviewPixels("target", previewImage)',
                       'page-back-$phase.png', 'DaiyuBackPreview'):
             self.assertIn(token, source)

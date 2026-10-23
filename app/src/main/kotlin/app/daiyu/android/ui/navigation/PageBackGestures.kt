@@ -360,7 +360,20 @@ internal fun PageBackGestureHost(
                     clip = visibleProgress > 0f
                     shadowElevation = 8.dp.toPx() * visibleProgress
                 }.testTag("page-back-surface").drawWithContent {
-                    frame.layer.record { this@drawWithContent.drawContent() }
+                    var insideExplicitRecord = true
+                    try {
+                        frame.layer.record {
+                            if (app.daiyu.android.BuildConfig.DEBUG) android.util.Log.d(
+                                "DaiyuBackRecord",
+                                "layer=${System.identityHashCode(frame.layer)} " +
+                                    "current=${frame.key == layers.currentKey} explicit=$insideExplicitRecord size=$size " +
+                                    "released=${frame.layer.isReleased}",
+                            )
+                            this@drawWithContent.drawContent()
+                        }
+                    } finally {
+                        insideExplicitRecord = false
+                    }
                     frame.size = viewport
                     drawLayer(frame.layer)
                 }.background(background)) { content() }

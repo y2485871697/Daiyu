@@ -291,6 +291,28 @@ class CloudReportTests(unittest.TestCase):
             self.change_text(text, role="logcat")
             self.reject("negative_report_signal")
 
+    def test_identifier_metadata_is_not_an_exception_but_diagnostics_still_reject(self):
+        suffix = "OK (2 tests)\nINSTRUMENTATION_CODE: -1\n"
+        for name in ("testPreferenceWriteFailureKeepsConfirmedChoiceAndShowsError", "testRejectsException"):
+            prefix = ("INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\n"
+                      "INSTRUMENTATION_STATUS: class=app.daiyu.android.FixtureException\n"
+                      f"INSTRUMENTATION_STATUS: test={name}\n")
+            for status in (0, -2, -3, -4):
+                with self.subTest(name=name, status=status):
+                    self.change_text(prefix + f"INSTRUMENTATION_STATUS_CODE: {status}\n" + suffix)
+                    if status == 0:
+                        self.assertTrue(self.verify()["cloud_regression_satisfied"])
+                        self.assertEqual(0, self.file_cli()[0])
+                    else:
+                        self.reject("instrumentation_status_conflict")
+            for signal in ("java.lang.AssertionError: nope", "INSTRUMENTATION_STATUS: stream=java.lang.Exception: nope",
+                           "INSTRUMENTATION_STATUS: test=fixture Error: nope", "INSTRUMENTATION_STATUS: test=foo\tException"):
+                self.change_text(prefix + signal + "\n" + suffix)
+                self.reject("negative_report_signal")
+        self.change_text(suffix)
+        self.change_text("INSTRUMENTATION_STATUS: test=testRejectsException\n", role="logcat")
+        self.reject("negative_report_signal")
+
     def test_mandatory_final_terminal_code_through_verify_and_file_cli(self):
         cases = (
             ("OK (2 tests)\n", "instrumentation_terminal_conflict"),

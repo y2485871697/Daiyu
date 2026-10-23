@@ -15,14 +15,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewDialog
 import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
+
+@Composable
+internal fun terminalSheetActionMinHeight(): Dp = with(LocalDensity.current) {
+    kotlin.math.ceil(48.dp.toPx().toDouble()).toInt().toDp()
+}
 
 internal data class TerminalTaskRow(val title: String, val summary: String, val onRead: () -> Unit,
     val onStop: (() -> Unit)? = null, val id: String = title)
@@ -37,6 +44,7 @@ internal fun TerminalTasksDialog(busy: Boolean, rows: List<TerminalTaskRow>, out
         if (outputId != null && !busy) logs[outputId] = output.ifEmpty { "暂无日志输出" }
     }
     val colors = assistantPreviewPalette()
+    val actionMinHeight = terminalSheetActionMinHeight()
     AssistantPreviewDialog(show = true, title = "后台任务", onDismiss = onDismiss) {
         Column(Modifier.fillMaxWidth().weight(1f).testTag("terminal-tasks-dialog")) {
             error?.let { Text(it, Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState()),
@@ -60,9 +68,9 @@ internal fun TerminalTasksDialog(busy: Boolean, rows: List<TerminalTaskRow>, out
                                     expanded = expanded + row.id
                                     if (row.id !in logs) row.onRead()
                                 }
-                            }, Modifier.heightIn(min = 48.dp).testTag("terminal-task-read:$index"), enabled = !busy || row.id in expanded)
+                            }, Modifier.heightIn(min = actionMinHeight).testTag("terminal-task-read:$index"), enabled = !busy || row.id in expanded)
                             row.onStop?.let { AssistantPreviewButton("停止", it,
-                                Modifier.heightIn(min = 48.dp).testTag("terminal-task-stop:$index"), danger = true, enabled = !busy) }
+                                Modifier.heightIn(min = actionMinHeight).testTag("terminal-task-stop:$index"), danger = true, enabled = !busy) }
                         }
                         if (row.id in expanded) {
                             if (busy && row.id !in logs) CircularProgressIndicator(

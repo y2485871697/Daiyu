@@ -11,10 +11,10 @@ class R48BatchContract(unittest.TestCase):
     def test_compose_dismissal_has_a_native_non_editor_focus_destination(self):
         source = (MAIN / 'ui/components/ManagedInput.kt').read_text()
         clear = source.split('InputEntry(view, { state.focused }', 1)[1].split('DisposableEffect(entry)', 1)[0]
-        for token in ['val root = view.rootView', 'root.isFocusableInTouchMode = true',
-                      'root.requestFocus()']:
-            self.assertIn(token, clear)
-        self.assertLess(clear.index('root.requestFocus()'), clear.index('focus.clearFocus(force = true)'))
+        self.assertNotIn('root.requestFocus()', clear)
+        dismiss = source.split('fun dismiss(view: View, clear: () -> Unit)', 1)[1].split('fun remove(entry:', 1)[0]
+        self.assertLess(dismiss.index('InputDismissal.run { clear() }'), dismiss.index('root.requestFocus()'))
+        self.assertIn('root.isFocusableInTouchMode = true', dismiss)
         self.assertNotIn('view.requestFocus()', clear)
         self.assertIn('root.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS', source)
         self.assertIn('root.descendantFocusability = previous', source)

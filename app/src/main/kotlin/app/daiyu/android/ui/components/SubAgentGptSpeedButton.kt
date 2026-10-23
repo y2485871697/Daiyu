@@ -13,6 +13,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
@@ -105,7 +107,9 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
                 rotationZ = subAgentGptSpeedRotationDegrees(progress.value)
                 val scale = subAgentGptSpeedScale(progress.value); scaleX = scale; scaleY = scale
             }, tint = displayedColor)
-        Text(text = (if (chatStyle) "GPT 速度 · " else "") + subAgentGptSpeedDisplayName(mode), style = MaterialTheme.typography.labelMedium,
+        Text(text = (if (chatStyle) "GPT 速度 · " else "") + subAgentGptSpeedDisplayName(mode),
+            modifier = if (chatStyle) Modifier.width(IntrinsicSize.Max) else Modifier,
+            style = MaterialTheme.typography.labelMedium,
             fontSize = if (chatStyle) 10.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
             lineHeight = if (chatStyle) 16.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
             color = if (chatStyle) chatColors.accent.copy(alpha = if (usable) 1f else .38f) else displayedColor, maxLines = 1, overflow = TextOverflow.Ellipsis)

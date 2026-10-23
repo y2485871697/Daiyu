@@ -107,11 +107,6 @@ internal fun Modifier.managedInput(): Modifier = composed {
     val state = remember(view, focus) { ComposeInputRegion() }
     val entry = remember(view, focus) {
         InputEntry(view, { state.focused }, { state.bounds }) {
-            // Keep Android's clearFocus fallback out of the Compose editor tree.
-            val root = view.rootView
-            root.isFocusableInTouchMode = true
-            root.requestFocus()
-            inputTrace("dismiss root=${root.javaClass.simpleName} focused=${root.isFocused}")
             if (state.focused) focus.clearFocus(force = true)
         }
     }
@@ -134,16 +129,52 @@ internal fun Modifier.managedInput(): Modifier = composed {
 }
 
 internal fun clearManagedInputFocus(view: View, clear: () -> Unit): Boolean {
-    val action: () -> Unit = {
-        val root = view.rootView
-        root.isFocusableInTouchMode = true
-        root.requestFocus()
-        clear()
-    }
+    val action: () -> Unit = { clearWithoutNativeFocusFallback(view, clear) }
     val host = view.inputWindow()?.let { InputWindows.windows[it] }
     if (host != null) return host.dismiss(view, action)
+    val before = view.rootView.findFocus()
     InputDismissal.run(action)
+    val next = view.rootView.findFocus()
+    if (next !== before && next?.onCheckIsTextEditor() == true) return false
+    InputDismissal.run {
+        view.rootView.isFocusableInTouchMode = true
+        view.rootView.requestFocus()
+    }
     return true
+}
+
+/** Let blur listeners transfer focus before suppressing Android's automatic root fallback. */
+private fun clearWithoutNativeFocusFallback(view: View, clear: () -> Unit) {
+    val root = view.rootView as? ViewGroup
+    val field = root?.findFocus() as? EditText
+    if (root == null || field == null) {
+        clear()
+        return
+    }
+    val listener = field.onFocusChangeListener
+    val focusable = root.focusable
+    val touchFocusable = root.isFocusableInTouchMode
+    val order = root.descendantFocusability
+    var suppressed = false
+    val wrapper = View.OnFocusChangeListener { target, focused ->
+        listener?.onFocusChange(target, focused)
+        if (!focused) {
+            suppressed = true
+            root.isFocusable = false
+            root.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        }
+    }
+    field.onFocusChangeListener = wrapper
+    try {
+        clear()
+    } finally {
+        if (field.onFocusChangeListener === wrapper) field.onFocusChangeListener = listener
+        if (suppressed) {
+            root.focusable = focusable
+            root.isFocusableInTouchMode = touchFocusable
+            root.descendantFocusability = order
+        }
+    }
 }
 
 private class ComposeInputRegion {
@@ -158,9 +189,7 @@ internal fun EditText.manageInput(window: Window? = null) {
         field.visibleInputBounds()
     }) {
         val start = field.selectionStart; val end = field.selectionEnd
-        field.rootView.isFocusableInTouchMode = true
-        field.rootView.requestFocus()
-        field.clearFocus()
+        clearWithoutNativeFocusFallback(field) { field.clearFocus() }
         if (start >= 0 && end >= 0) field.setSelection(start.coerceAtMost(field.length()), end.coerceAtMost(field.length()))
     }
     bindInput(entry, window)
@@ -329,10 +358,17 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
     }
     fun dismiss(view: View, clear: () -> Unit): Boolean {
         val nativeBefore = window.currentFocus
-        holdRestingFocus()
         clearing++
         try {
             InputDismissal.run { clear() }
+            if (entries.none { it.focused() } &&
+                !(window.currentFocus !== nativeBefore && window.currentFocus?.onCheckIsTextEditor() == true)) {
+                holdRestingFocus()
+                decor?.let { root ->
+                    root.isFocusableInTouchMode = true
+                    root.requestFocus()
+                }
+            }
         } finally {
             clearing--
             if (clearing == 0 && (decor?.isFocused != true || entries.any { it.focused() })) releaseRestingFocus()

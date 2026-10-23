@@ -172,6 +172,11 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             "line0=${label.getLineLeft(0)}..${label.getLineRight(0)} " +
             "line0Bottom=${label.getLineBottom(0)} ellipsized=${label.isLineEllipsized(0)}"
         assertFalse(geometry, label.hasVisualOverflow)
+        assertEquals(1, label.lineCount)
+        assertFalse(geometry, label.isLineEllipsized(0))
+        assertTrue(geometry, label.getLineLeft(0) >= 0f)
+        assertTrue(geometry, label.getLineRight(0) <= label.size.width.toFloat())
+        assertTrue(geometry, label.getLineBottom(0) <= label.size.height.toFloat())
         val speedBounds = speed.fetchSemanticsNode().boundsInRoot
         val density = label.layoutInput.density.density
         assertTrue("Compact speed does not keep the old 48dp painted block", speedBounds.height < 32f * density)

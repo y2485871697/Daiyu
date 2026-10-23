@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.DaiyuPalette
+
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.layout.Column
@@ -95,7 +97,9 @@ internal fun HapticsSettingsScreen(
                 SettingsRow("触感反馈", tag = "settings-switch:触感反馈",
                     summary = labels[settings.intensity.ordinal],
                     onClick = { if (canAct()) intensityDialog = true }, trailing = {
-                        Switch(checked = settings.touch, onCheckedChange = { save { copy(touch = it) } })
+                        Switch(checked = settings.touch,
+                            colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                checkedBorderColor = DaiyuPalette.switchTrack), onCheckedChange = { save { copy(touch = it) } })
                     })
                 HapticsSwitchRow("消息生成震动", settings.generationOn, settings.touch) {
                     save { copy(generation = it) }
@@ -113,6 +117,8 @@ internal fun HapticsSettingsScreen(
                         }
                     }) else null, trailing = {
                         Switch(checked = settings.backgroundOn, enabled = settings.generationOn,
+                            colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                checkedBorderColor = DaiyuPalette.switchTrack),
                             onCheckedChange = { expanded = it; save { copy(background = it) } })
                     })
                 if (expanded && settings.backgroundOn) HapticsSwitchRow(
@@ -157,7 +163,7 @@ private fun HapticsSwitchRow(title: String, checked: Boolean, enabled: Boolean,
     ), trailing = {
         Switch(checked = checked, enabled = enabled, onCheckedChange = null,
             colors = SwitchDefaults.colors(checkedThumbColor = colors.onPrimary,
-                checkedTrackColor = colors.primary, checkedBorderColor = colors.primary,
+                checkedTrackColor = DaiyuPalette.switchTrack, checkedBorderColor = DaiyuPalette.switchTrack,
                 uncheckedThumbColor = colors.onSurfaceVariantSummary,
                 uncheckedTrackColor = colors.surface, uncheckedBorderColor = colors.onSurfaceVariantSummary))
     })

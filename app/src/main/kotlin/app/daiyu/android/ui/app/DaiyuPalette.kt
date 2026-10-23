@@ -7,6 +7,8 @@ import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 /** Fixed lavender and charcoal surfaces shared by native and retained screens. */
 internal object DaiyuPalette {
+    val switchTrack = Color(0xFF82728F)
+
     val light: Colors = lightColorScheme(
         primary = Color(0xFF7563B4),
         onPrimary = Color.White,

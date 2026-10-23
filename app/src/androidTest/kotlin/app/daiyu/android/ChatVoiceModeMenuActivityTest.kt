@@ -278,4 +278,79 @@ class ChatVoiceModeMenuActivityTest : WiredActivityTestCase() {
             } finally { context.deleteSharedPreferences(preferenceName) }
         }
     }
+    fun testVoicePressEnlargesAndReleaseRestoresWithoutMovingHitTarget() {
+        show()
+        update(modes.toSet())
+        awaitHostWindowFocus(activity)
+        val indicator = ui.onNodeWithTag("chat-voice-indicator", useUnmergedTree = true)
+        val hitBounds = node("chat-voice").fetchSemanticsNode().boundsInRoot
+        val idleWidth = indicator.fetchSemanticsNode().boundsInRoot.width
+        val selected = state.voiceMode
+        ui.mainClock.autoAdvance = false
+        try {
+            node("chat-voice").performTouchInput { down(center) }
+            ui.mainClock.advanceTimeBy(160)
+            val pressedWidth = indicator.fetchSemanticsNode().boundsInRoot.width
+            assertTrue(pressedWidth > idleWidth)
+            assertEquals(hitBounds, node("chat-voice").fetchSemanticsNode().boundsInRoot)
+            node("chat-voice").performTouchInput { up() }
+            ui.mainClock.advanceTimeBy(1_200)
+            assertTrue(abs(indicator.fetchSemanticsNode().boundsInRoot.width - idleWidth) <= 1f)
+            assertEquals(hitBounds, node("chat-voice").fetchSemanticsNode().boundsInRoot)
+            ui.runOnIdle { assertEquals(listOf("voice:${selected.name}"), events.toList()) }
+            node("chat-voice-mode-menu").assertDoesNotExist()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testCancelledVoicePressRestoresWithoutClickOrMenu() {
+        show()
+        update(modes.toSet())
+        awaitHostWindowFocus(activity)
+        val indicator = ui.onNodeWithTag("chat-voice-indicator", useUnmergedTree = true)
+        val idleWidth = indicator.fetchSemanticsNode().boundsInRoot.width
+        ui.mainClock.autoAdvance = false
+        try {
+            node("chat-voice").performTouchInput { down(center) }
+            ui.mainClock.advanceTimeBy(160)
+            assertTrue(indicator.fetchSemanticsNode().boundsInRoot.width > idleWidth)
+            node("chat-voice").performTouchInput { cancel() }
+            ui.mainClock.advanceTimeBy(1_200)
+            assertTrue(abs(indicator.fetchSemanticsNode().boundsInRoot.width - idleWidth) <= 1f)
+            update(modes.toSet(), enabled = false)
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            node("chat-voice").assertIsNotEnabled()
+            node("chat-voice").performTouchInput { click(center) }
+            ui.mainClock.advanceTimeBy(160)
+            assertTrue(abs(indicator.fetchSemanticsNode().boundsInRoot.width - idleWidth) <= 1f)
+            ui.runOnIdle { assertTrue(events.isEmpty()) }
+            node("chat-voice-mode-menu").assertDoesNotExist()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testQuickVoiceClickStillEnlargesBeforeReturningToIdle() {
+        show()
+        update(modes.toSet())
+        awaitHostWindowFocus(activity)
+        val indicator = ui.onNodeWithTag("chat-voice-indicator", useUnmergedTree = true)
+        val idleWidth = indicator.fetchSemanticsNode().boundsInRoot.width
+        val selected = state.voiceMode
+        ui.mainClock.autoAdvance = false
+        try {
+            node("chat-voice").performTouchInput { click(center) }
+            ui.mainClock.advanceTimeBy(96)
+            assertTrue(indicator.fetchSemanticsNode().boundsInRoot.width > idleWidth)
+            ui.runOnIdle { assertEquals(listOf("voice:${selected.name}"), events.toList()) }
+            ui.mainClock.advanceTimeBy(1_200)
+            assertTrue(abs(indicator.fetchSemanticsNode().boundsInRoot.width - idleWidth) <= 1f)
+            node("chat-voice-mode-menu").assertDoesNotExist()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
 }

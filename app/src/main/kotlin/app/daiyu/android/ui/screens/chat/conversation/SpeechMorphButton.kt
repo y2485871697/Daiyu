@@ -5,12 +5,17 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -20,6 +25,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 /** ChatSpeechIndicator's visual/gesture layer, without permissions, capture or a speech backend. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -32,8 +38,19 @@ internal fun SpeechMorphButton(
     onLongClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    var tapSequence by remember(enabled) { mutableIntStateOf(0) }
+    var tapFeedback by remember(enabled) { mutableStateOf(false) }
+    LaunchedEffect(tapSequence, enabled) {
+        if (!enabled || tapSequence == 0) return@LaunchedEffect
+        tapFeedback = true
+        delay(180)
+        tapFeedback = false
+    }
+    val showPressFeedback = enabled && (pressed || tapFeedback)
     val diameter by animateDpAsState(
-        if (listening) 32.dp else 20.dp,
+        if (listening || showPressFeedback) 32.dp else 20.dp,
         spring(dampingRatio = 0.65f),
         label = "speechDiameter",
     )
@@ -48,13 +65,17 @@ internal fun SpeechMorphButton(
                 enabled = enabled,
                 role = Role.Button,
                 indication = null,
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 onLongClickLabel = if (onLongClick != null) "选择语音功能" else null,
                 onLongClick = onLongClick,
-                onClick = { onClick() },
+                onClick = { tapSequence++; onClick() },
             ),
         contentAlignment = Alignment.Center,
     ) {
-        ContainedMorphLoadingIndicator(indicatorSize = diameter, animate = generating || listening)
+        ContainedMorphLoadingIndicator(
+            modifier = Modifier.testTag("chat-voice-indicator"),
+            indicatorSize = diameter,
+            animate = generating || listening || showPressFeedback,
+        )
     }
 }

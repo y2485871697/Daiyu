@@ -35,6 +35,9 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
     }
 
     fun testRealUniversalPanelOpenAndSelectionNeverStartsAudioOrSends() {
+        kotlinx.coroutines.runBlocking {
+            fixture.controller.voiceRuntime.save(VoiceConfiguration(dictation = "DOUBAO", asrKey = "fixture-asr"), VoiceProfile.CONVERSATION)
+        }
         openVoiceConversationPanel()
         node("voice-universal-control").assertExists()
         assertEquals(0, fixture.opens.get())

@@ -155,7 +155,17 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                 assertEquals(16.sp, layout.layoutInput.style.fontSize)
                 assertEquals(22.sp, layout.layoutInput.style.lineHeight)
                 assertEquals(if (index == titles.lastIndex) deleteText else onPrimary, layout.layoutInput.style.color)
-                assertFalse("label must not clip", layout.hasVisualOverflow)
+                assertFalse(
+                    "label must not clip dark=$dark fontScale=$fontScale index=$index title=$title " +
+                        "density=$density layoutDensity=${layout.layoutInput.density} " +
+                        "button=$bounds touch=$touch host=$hostBounds " +
+                        "label=${label.fetchSemanticsNode().boundsInRoot} " +
+                        "constraints=${layout.layoutInput.constraints} size=${layout.size} " +
+                        "paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height} " +
+                        "overflowWidth=${layout.didOverflowWidth} overflowHeight=${layout.didOverflowHeight} " +
+                        "lines=${layout.lineCount} maxLines=${layout.layoutInput.maxLines}",
+                    layout.hasVisualOverflow,
+                )
                 assertEquals(bounds.center.y, label.fetchSemanticsNode().boundsInRoot.center.y, 1f)
                 if (fontScale > 1f) assertTrue("large font grows the fill", bounds.height > 48f * density)
                 val left = (touch.left - hostBounds.left).toInt()

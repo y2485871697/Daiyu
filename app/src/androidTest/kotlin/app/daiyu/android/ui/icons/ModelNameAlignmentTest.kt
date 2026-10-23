@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -28,8 +29,16 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 class ModelNameAlignmentTest : WiredActivityTestCase() {
     private var density = 1f
 
-    private fun bounds(tag: String) = ui.onNodeWithTag(tag, useUnmergedTree = true)
-        .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    private fun bounds(tag: String): Rect {
+        val node = ui.onNodeWithTag(tag, useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode()
+        // Alignment uses full layout geometry, not the viewport-clipped visible rect.
+        val position = node.positionInRoot
+        return Rect(
+            position.x, position.y,
+            position.x + node.size.width, position.y + node.size.height,
+        )
+    }
 
     fun testSharedCorrectionSupportsBothTextLibrariesWithoutMovingTouchRowOrIcon() {
         for (dark in listOf(false, true)) for (font in listOf(1f, 1.3f)) {

@@ -51,7 +51,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var inputText by mutableStateOf("a text field with selectable content")
     private lateinit var horizontal: ScrollState
 
-    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false) {
+    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -96,6 +96,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         }
         dismissIme()
         ui.waitForIdle()
+        if (capturePreviousPage) {
+            // Submit the source page's recorded drawing before leaving its route.
+            captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        }
         mainThread { route = "test-page" }
         ui.waitForIdle()
     }
@@ -293,14 +297,14 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     fun testPreviousPagePreviewCancelAndCommittedDeparture() {
         if (Build.VERSION.SDK_INT < 34) return
         navigateOnBack = true
-        mount()
+        mount(capturePreviousPage = true)
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT)) }
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_LEFT)) }
             ui.mainClock.advanceTimeBy(32)
             ui.onNodeWithTag("page-back-target").assertExists()
-            val previewPixels = ui.onNodeWithTag("page-back-target").captureToImage().toPixelMap()
+            val previewPixels = captureScreenNode(ui.onNodeWithTag("page-back-target")).toPixelMap()
             val backdrop = previewPixels[2, previewPixels.height / 2]
             assertTrue("recorded previous page must be red, actual=$backdrop", backdrop.red > 0.9f && backdrop.blue < 0.1f)
             assertEquals("test-page", route)

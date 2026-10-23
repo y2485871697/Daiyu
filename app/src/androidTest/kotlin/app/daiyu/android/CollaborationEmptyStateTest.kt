@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -9,13 +10,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
-import app.daiyu.android.delegation.ConversationSubAgentPreferences
-import app.daiyu.android.delegation.SubAgentConfigKey
+import app.daiyu.android.delegation.*
+import kotlinx.coroutines.flow.MutableStateFlow
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.ConversationCollaborationDialog
 import java.util.UUID
@@ -41,13 +43,17 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         return roots
     }
 
-    private fun show(id: String?, repository: ConversationSubAgentPreferences, dark: Boolean) {
+    private fun show(id: String?, repository: ConversationSubAgentPreferences, dark: Boolean,
+        fontScale: Float = 1f, modelSource: SubAgentModelSource = SubAgentModelSource.Empty) {
         rootsBeforeShow = runCatching { windowRoots() }.fold({ it }, { "root snapshot failed: $it" })
         mainThread { activity.setContent {
-            AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
-                density = LocalDensity.current.density
-                var open by remember(id, dark) { mutableStateOf(true) }
-                ConversationCollaborationDialog(open, id, { open = false }, repositoryFactory = { repository })
+            val currentDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(currentDensity.density, fontScale)) {
+                AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
+                    var open by remember(id, dark, fontScale) { mutableStateOf(true) }
+                    ConversationCollaborationDialog(open, id, { open = false }, repositoryFactory = { repository }, modelSource = modelSource)
+                }
             }
         } }
     }
@@ -119,6 +125,68 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 ui.onNodeWithText("关闭").performClick()
                 node("subagent-collaboration-card").assertDoesNotExist()
                 assertEquals(before, prefs.all)
+            } finally { prefs.edit().clear().commit() }
+        }
+    }
+
+    fun testCurrentPanelHintAndAddCenterInCompactRowForEmptyAndThreeProfiles() {
+        val provider = SubAgentProvider("provider", "Provider", listOf(
+            SubAgentModel("model", "gpt-6.1-sol", supportsGptSpeed = true)))
+        val source = object : SubAgentModelSource {
+            override val providers = MutableStateFlow(listOf(provider))
+        }
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (count in listOf(0, 3)) {
+            val prefs = instrumentation.targetContext.getSharedPreferences("collaboration-add-row-${UUID.randomUUID()}", 0)
+            try {
+                val repository = ConversationSubAgentPreferences(prefs)
+                val preset = repository.addPreset("Layout group")
+                repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = List(count) { index ->
+                    SubAgentProfile("worker-$index", "子代理 ${index + 1}", providerId = provider.id, modelId = "model")
+                }) }
+                val owner = SubAgentConfigKey.Conversation("layout-${UUID.randomUUID()}")
+                repository.createConversation(owner)
+                assertTrue(repository.applyPreset(owner, preset.id) is ConversationSubAgentPreferences.WriteResult.Saved)
+                val before = prefs.all.toMap()
+                show(owner.value, repository, dark, fontScale, source)
+                val row = node("subagent-collaboration-add-row").scrollToVisible().assertIsDisplayed().assertHeightIsEqualTo(48.dp)
+                val add = node("subagent-collaboration-add").assertIsEnabled().assertHasClickAction()
+                    .assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
+                awaitNodeWindowFocus(add)
+                val rowBounds = row.fetchSemanticsNode().boundsInRoot
+                val addBounds = add.fetchSemanticsNode().boundsInRoot
+                val hint = ui.onNodeWithTag("subagent-collaboration-hint", useUnmergedTree = true)
+                val hintBounds = hint.fetchSemanticsNode().boundsInRoot
+                val glyphBounds = ui.onNodeWithContentDescription("添加子代理", useUnmergedTree = true)
+                    .fetchSemanticsNode().boundsInRoot
+                val geometry = "profiles=$count dark=$dark fontScale=$fontScale"
+                assertEquals("Hint and add centers: $geometry", addBounds.center.y, hintBounds.center.y, 1f)
+                assertEquals("Add glyph centers: $geometry", addBounds.center.y, glyphBounds.center.y, 1f)
+                assertEquals("No extra top inset: $geometry", rowBounds.top, addBounds.top, 1f)
+                assertEquals("No extra bottom inset: $geometry", rowBounds.bottom, addBounds.bottom, 1f)
+                val layouts = mutableListOf<TextLayoutResult>()
+                hint.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+                val text = layouts.single()
+                assertFalse("Hint does not overflow: $geometry", text.hasVisualOverflow)
+                assertEquals("Text line box centers: $geometry", addBounds.center.y,
+                    hintBounds.top + (text.getLineTop(0) + text.getLineBottom(text.lineCount - 1)) / 2f, 1f)
+                if (count == 3) {
+                    val lastCard = node("subagent-card-worker-2").fetchSemanticsNode()
+                    val lastCardBottom = lastCard.positionInRoot.y + lastCard.size.height
+                    assertEquals("Last card gap stays 8dp: $geometry", 8f * density, rowBounds.top - lastCardBottom, 1.5f)
+                }
+                val divider = node("subagent-collaboration-footer-divider").fetchSemanticsNode().boundsInRoot
+                val body = node("subagent-collaboration-body").fetchSemanticsNode().boundsInRoot
+                assertEquals("Body has no stacked bottom inset: $geometry", body.bottom, rowBounds.bottom, 1.5f)
+                assertEquals("Footer gap stays 8dp: $geometry", 8f * density, divider.top - body.bottom, 1.5f)
+                assertEquals(before, prefs.all)
+                add.performTouchInput { click(androidx.compose.ui.geometry.Offset(2f * density, height / 2f)) }
+                node("subagent-config-window").assertIsDisplayed()
+                ui.onNodeWithText("取消").performClick()
+                node("subagent-config-window").assertDoesNotExist()
+                assertEquals(before, prefs.all)
+                ui.onNodeWithText("完成").performClick()
+                node("subagent-collaboration-card").assertDoesNotExist()
+                assertEquals(0, fixture.opens.get())
             } finally { prefs.edit().clear().commit() }
         }
     }

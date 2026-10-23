@@ -26,6 +26,8 @@ import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.components.subagent.*
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 
 internal class OwnerBoundPopup<Owner>(val owner: Owner) {
     private var active: Any? = null
@@ -125,7 +127,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                         }
                         Column(Modifier.fillMaxWidth().weight(1f, fill = emptyState).testTag("subagent-collaboration-body")
                             .verticalScroll(key(editor, choosing, current?.presetApplicationToken) { rememberScrollState() })
-                            .padding(bottom = 8.dp)) {
+                            .padding(bottom = if (panelEditor != null) 0.dp else 8.dp)) {
                             when (state) {
                                 is SubAgentEditorState.Error -> {
                                     Text("子代理配置读取或保存失败：${state.reason}")
@@ -196,9 +198,14 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                                 Spacer(Modifier.height(8.dp))
                                             }
                                         }
-                                        Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Text("点按模型切换 · 长按调整思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                                            ConversationAgentIconButton(modifier = Modifier.size(48.dp), enabled = panelEnabled, onClick = {
+                                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("subagent-collaboration-add-row"),
+                                            verticalAlignment = Alignment.CenterVertically) {
+                                            Text("点按模型切换 · 长按调整思考", style = MaterialTheme.typography.labelSmall.copy(
+                                                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                                lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)),
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f).testTag("subagent-collaboration-hint"))
+                                            ConversationAgentIconButton(modifier = Modifier.size(48.dp).testTag("subagent-collaboration-add"), enabled = panelEnabled, onClick = {
                                                 if (panelEnabled && panelEditor.enabled) SubAgentProfileDraftSession.open(panelEditor)?.let { addedDraft = it }
                                             }) { Icon(Icons.Rounded.Add, "添加子代理", Modifier.size(22.dp)) }
                                         }
@@ -210,7 +217,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                 }
                             }
                         }
-                        HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
+                        HorizontalDivider(Modifier.padding(top = if (panelEditor != null) 8.dp else 10.dp).testTag("subagent-collaboration-footer-divider"), color = conversationAgentColors().line)
                         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(top = 10.dp).testTag("subagent-collaboration-footer"),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (choosing && current != null && editor != null && chooserPopup != null) {

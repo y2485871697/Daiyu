@@ -5,6 +5,8 @@ import androidx.activity.BackEventCompat
 import androidx.activity.ExperimentalActivityApi
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.foundation.clickable
@@ -97,12 +99,34 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         dismissIme()
         ui.waitForIdle()
         if (capturePreviousPage) {
-            val sourcePixels = captureScreenNode(ui.onNodeWithTag("page-back-surface")).toPixelMap()
+            val sourceImage = captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+            logPreviewPixels("source", sourceImage)
+            val sourcePixels = sourceImage.toPixelMap()
             val source = sourcePixels[2, sourcePixels.height / 2]
             assertTrue("source previous page must be red, actual=$source", source.red > 0.9f && source.blue < 0.1f)
         }
         mainThread { route = "test-page" }
         ui.waitForIdle()
+    }
+
+    private fun logPreviewPixels(phase: String, image: ImageBitmap) {
+        val pixels = image.toPixelMap()
+        var red = 0
+        var blue = 0
+        var white = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val color = pixels[x, y]
+            if (color.red > 0.9f && color.blue < 0.1f) red++
+            if (color.blue > 0.9f && color.red < 0.1f) blue++
+            if (color.red > 0.9f && color.green > 0.9f && color.blue > 0.9f) white++
+        }
+        android.util.Log.i("DaiyuBackPreview", "$phase route=$route image=${pixels.width}x${pixels.height} " +
+            "red=$red blue=$blue white=$white edge=${pixels[2, pixels.height / 2]}")
+        val directory = java.io.File(checkNotNull(activity.getExternalFilesDir(null)), "settings-ui")
+        check(directory.isDirectory || directory.mkdirs())
+        java.io.File(directory, "page-back-$phase.png").outputStream().use {
+            check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        }
     }
 
     private fun swipeBack(startFraction: Float = 0.02f, endFraction: Float = 0.80f) {
@@ -308,7 +332,12 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_LEFT)) }
             ui.mainClock.advanceTimeBy(32)
             ui.onNodeWithTag("page-back-target").assertExists()
-            val previewPixels = captureScreenNode(ui.onNodeWithTag("page-back-target")).toPixelMap()
+            val targetNode = ui.onNodeWithTag("page-back-target")
+            val previewImage = captureScreenNode(targetNode)
+            logPreviewPixels("target", previewImage)
+            android.util.Log.i("DaiyuBackPreview", "target=${targetNode.fetchSemanticsNode().boundsInRoot} " +
+                "surface=${ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot}")
+            val previewPixels = previewImage.toPixelMap()
             val backdrop = previewPixels[2, previewPixels.height / 2]
             assertTrue("recorded previous page must be red, actual=$backdrop", backdrop.red > 0.9f && backdrop.blue < 0.1f)
             assertEquals("test-page", route)

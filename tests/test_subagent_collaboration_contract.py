@@ -31,6 +31,22 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertNotIn('.offset(', chat)
         self.assertNotIn('.padding(vertical = 7.dp)', chat)
 
+    def test_chat_hint_and_add_share_a_compact_centered_row_without_stacked_padding(self):
+        dialog = (UI / 'ConversationCollaborationDialog.kt').read_text()
+        row = dialog.split('Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("subagent-collaboration-add-row")', 1)[1].split('addedDraft?.let', 1)[0]
+        self.assertIn('verticalAlignment = Alignment.CenterVertically', row)
+        self.assertIn('PlatformTextStyle(includeFontPadding = false)', row)
+        self.assertIn('LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)', row)
+        self.assertIn('Modifier.weight(1f).testTag("subagent-collaboration-hint")', row)
+        self.assertIn('Modifier.size(48.dp).testTag("subagent-collaboration-add")', row)
+        self.assertNotIn('padding(vertical = 7.dp)', dialog)
+        self.assertNotIn('.offset(', row)
+        self.assertIn('if (panelEnabled && panelEditor.enabled) SubAgentProfileDraftSession.open(panelEditor)', row)
+        self.assertIn('.heightIn(min = 48.dp).testTag("subagent-collaboration-add-row")', dialog)
+        self.assertIn('.padding(bottom = if (panelEditor != null) 0.dp else 8.dp)', dialog)
+        self.assertIn('padding(top = if (panelEditor != null) 8.dp else 10.dp)', dialog)
+        self.assertIn('if (emptyState) Modifier.height(360.dp) else Modifier.heightIn(min = 360.dp)', dialog)
+
     def test_speed_cycles_inline_and_draft_remains_uncommitted(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
         speed = form.split('if (canEditSpeed) SubAgentSettingRow("GPT 速度"', 1)[1].split('SubAgentSettingRow("职责"', 1)[0]

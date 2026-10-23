@@ -152,7 +152,7 @@ wait_for_framework_ready() {
     fi
     if test "$boot_changed" = 1 && test -n "$current" && test "$current" = "$previous" &&
        test "$(timeout --kill-after=5 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 &&
-       timeout --kill-after=5 5 adb shell pm path android > smoke/package-ready.txt 2>&1 &&
+       timeout --kill-after=5 5 adb shell cmd package path android > smoke/package-ready.txt 2>&1 &&
        grep -q '^package:' smoke/package-ready.txt; then
       stable=$((stable + 1))
     else
@@ -202,7 +202,7 @@ cmp smoke/ime-default-before.txt smoke/ime-default-restored.txt
 if test "$api" = 26; then
   fixture_ime=jp.co.omronsoft.openwnn/.OpenWnnJAJP
   adb_stage ime-enabled-before 15 shell settings get secure enabled_input_methods > smoke/ime-enabled-before.txt
-  adb_stage ime-fixture-path 15 shell pm path jp.co.omronsoft.openwnn > smoke/ime-fixture-path.txt
+  adb_stage ime-fixture-path 15 shell cmd package path jp.co.omronsoft.openwnn > smoke/ime-fixture-path.txt
   grep -Fx 'package:/system/app/OpenWnn/OpenWnn.apk' smoke/ime-fixture-path.txt
   adb_stage ime-fixture-enable 15 shell ime enable "$fixture_ime" > smoke/ime-fixture-enable.txt
   adb_stage ime-fixture-set 15 shell ime set "$fixture_ime" > smoke/ime-fixture-set.txt
@@ -239,7 +239,7 @@ assert len(started) == len(finished) == 1 and started == finished, "WebView relr
 print(current[0])
 PYWEBVIEW
 )
-adb_stage webview-package 15 shell pm path "$provider" > smoke/webview-package.txt
+adb_stage webview-package 15 shell cmd package path "$provider" > smoke/webview-package.txt
 grep -q '^package:' smoke/webview-package.txt
 adb_stage logcat-restored 20 logcat -d -b all > smoke/logcat-before.txt
 if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat-before.txt; then exit 1; fi
@@ -277,7 +277,7 @@ if test "$api" = 26; then
   cmp smoke/ime-enabled-selected.txt smoke/ime-enabled-after.txt
 fi
 verify_display_baseline after
-adb_stage packages 20 shell pm list packages > smoke/packages.txt
+adb_stage packages 20 shell cmd package list packages > smoke/packages.txt
 if grep -q 'package:io.github.mangi.eta$' smoke/packages.txt; then exit 1; fi
 # Verify a fresh application launch, independent of instrumentation Activity state.
 adb_stage launch 30 shell am start -S -W -n app.daiyu.android/.MainActivity > smoke/start.txt 2>&1

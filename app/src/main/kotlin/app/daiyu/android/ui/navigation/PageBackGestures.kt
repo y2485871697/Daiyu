@@ -39,7 +39,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -251,7 +250,7 @@ internal fun PageBackGestureHost(
     val insetsKey = IntSize(bars.getTop(density), bars.getBottom(density))
     val scope = rememberCoroutineScope()
     val layers = remember(graphics, themeKey, configuration, insetsKey, density, layoutDirection, resumed, previewScopeKey) {
-        PageBackPreviewLayers(graphics)
+        PageBackPreviewLayers(graphics, scope)
     }
     DisposableEffect(layers) { onDispose { layers.close() } }
     val departure = remember(layers, routeKey) { layers.enter(routeKey) }
@@ -262,6 +261,7 @@ internal fun PageBackGestureHost(
     val exit = remember(departure) { Animatable(0f) }
     LaunchedEffect(departure) {
         if (departure != null) {
+            departure.frame.capture?.join()
             exit.animateTo(1f, tween(180))
             departing = false
         }
@@ -347,7 +347,7 @@ internal fun PageBackGestureHost(
             } else Modifier,
         )) {
             if (target != null && state.previewAllowed && progress > 0f) Box(Modifier.fillMaxSize().drawBehind {
-                drawLayer(target.layer)
+                target.image?.let { drawImage(it) }
             }.testTag("page-back-target"))
             key(routeKey) {
                 Box(Modifier.fillMaxSize().graphicsLayer {
@@ -377,7 +377,7 @@ internal fun PageBackGestureHost(
                 clip = true
                 shadowElevation = 8.dp.toPx() * departure.progress * (1f - exit.value)
             }.drawBehind {
-                drawLayer(departure.frame.layer)
+                departure.frame.image?.let { drawImage(it) }
             }.testTag("page-back-departure").pointerInput(departure) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false).consume()

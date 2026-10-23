@@ -1,36 +1,74 @@
 package app.daiyu.android.ui.navigation
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.GraphicsContext
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.unit.IntSize
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
-/** Retains drawing commands, not another mounted page or an on-disk screenshot. */
-internal class PageBackPreviewLayers(private val context: GraphicsContext) {
+/** Freezes the outgoing live layer before its nodes detach; historical pages are pixels only. */
+internal class PageBackPreviewLayers(private val context: GraphicsContext, private val scope: CoroutineScope) {
     internal class Frame(val key: Any, val layer: GraphicsLayer) {
         var size = IntSize.Zero
+        var image by mutableStateOf<ImageBitmap?>(null)
+        var capture: Job? = null
     }
     internal class Departure(val frame: Frame, val target: Any, val progress: Float,
         val predictive: Boolean, val direction: Float)
 
     private val frames = LinkedHashMap<Any, Frame>()
     private var pending: Departure? = null
+    private var closed = false
     var currentKey: Any? = null
         private set
 
     fun enter(key: Any): Departure? {
+        if (currentKey != key) frames[currentKey]?.let { freeze(it) }
         currentKey = key
         val departure = pending
         pending = null
         return departure?.takeIf { it.target == key && it.frame.key != key }
     }
 
+    private fun freeze(frame: Frame) {
+        if (frame.size == IntSize.Zero || frame.capture?.isActive == true) return
+        frame.capture = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                // API28+ completes here; API26 submits its hardware Surface before suspending.
+                val image = frame.layer.toImageBitmap()
+                if (!closed && frames[frame.key] === frame) frame.image = image
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (!closed && frames[frame.key] === frame) frame.image = null
+                android.util.Log.w("DaiyuBackPreview", "freeze failed type=${failure.javaClass.simpleName}")
+            }
+        }
+    }
+
     fun frame(key: Any): Frame {
-        frames.remove(key)?.let { frames[key] = it; return it }
+        frames.remove(key)?.let { release(it) }
         return Frame(key, context.createGraphicsLayer()).also { frames[key] = it }
     }
 
+    private fun release(frame: Frame) {
+        // Each visit owns its frame, so an older capture can never publish into a new visit.
+        val capture = frame.capture
+        if (capture != null && !capture.isCompleted) {
+            capture.invokeOnCompletion { context.releaseGraphicsLayer(frame.layer) }
+            capture.cancel()
+        } else context.releaseGraphicsLayer(frame.layer)
+    }
+
     fun find(key: Any?, size: IntSize): Frame? = frames[key]?.takeIf {
-        size != IntSize.Zero && it.size == size
+        size != IntSize.Zero && it.size == size && it.image != null
     }
 
     fun prepare(frame: Frame, target: Any, progress: Float, predictive: Boolean, direction: Float): Departure {
@@ -45,15 +83,20 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext) {
         val iterator = frames.entries.iterator()
         while (frames.size > 8 && iterator.hasNext()) {
             val frame = iterator.next().value
-            if (frame === current || frame === target || frame === departure?.frame) continue
+            if (frame === current || frame === target || frame === departure?.frame || frame.capture?.isActive == true) continue
             iterator.remove()
-            context.releaseGraphicsLayer(frame.layer)
+            frame.image = null
+            release(frame)
         }
     }
 
     fun close() {
+        closed = true
         pending = null
-        frames.values.forEach { context.releaseGraphicsLayer(it.layer) }
+        frames.values.forEach {
+            it.image = null
+            release(it)
+        }
         frames.clear()
     }
 }

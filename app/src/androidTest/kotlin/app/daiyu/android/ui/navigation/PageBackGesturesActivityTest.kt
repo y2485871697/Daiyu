@@ -389,23 +389,34 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     fun testHorizontalSwipeCommitsTheRecordedDepartureWithPredictionDisabled() {
         predictive = false
         navigateOnBack = true
-        mount()
-        ui.mainClock.autoAdvance = false
+        val drawingEnabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
         try {
+            if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+            mount(capturePreviousPage = true)
+            ui.mainClock.autoAdvance = false
             ui.onNodeWithTag("page-back-surface").performTouchInput {
                 down(Offset(width * 0.35f, height * 0.6f))
                 moveTo(Offset(width * 0.90f, height * 0.6f), 200)
             }
             ui.mainClock.advanceTimeBy(32)
-            ui.onNodeWithTag("page-back-target").assertExists()
+            val target = ui.onNodeWithTag("page-back-target").assertExists()
+            val targetPixels = captureScreenNode(target).toPixelMap()
+            val backdrop = targetPixels[2, targetPixels.height / 2]
+            assertTrue("swipe previous page must be red, actual=$backdrop", backdrop.red > 0.9f && backdrop.blue < 0.1f)
             ui.onNodeWithTag("page-back-surface").performTouchInput { up() }
             ui.mainClock.advanceTimeByFrame()
             assertEquals("previous-page", route)
             assertEquals(1, backCount)
-            ui.onNodeWithTag("page-back-departure").assertExists()
+            val departure = ui.onNodeWithTag("page-back-departure").assertExists()
+            val departurePixels = captureScreenNode(departure).toPixelMap()
+            val outgoing = departurePixels[departurePixels.width / 2, departurePixels.height / 2]
+            assertTrue("swipe departure must be blue, actual=$outgoing", outgoing.blue > 0.9f && outgoing.red < 0.1f)
             ui.mainClock.advanceTimeBy(240)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
-        } finally { ui.mainClock.autoAdvance = true }
+        } finally {
+            ui.mainClock.autoAdvance = true
+            if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+        }
     }
 
     fun testHorizontalSwipeWithPredictionEnabledKeepsItsCommitUntilDispatch() {

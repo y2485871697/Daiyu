@@ -209,7 +209,7 @@ internal fun VoiceSettingsPanel(
             pageCurrent() && child == "MIMO", mimoConnection()) ?: selectedSample
         pickerPending = picker.pending
     }
-    BackHandler(enabled = accountPage == null) {
+    BackHandler(enabled = accountPage == null, previewEnabled = child == null && !choosingSection) {
         if (choosingSection) choosingSection = false
         else if (child == "DOUBAO_ACCOUNT") leavePage { child = "DOUBAO_VOICES"; notice = "" }
         else if (child != null) leaveChild()

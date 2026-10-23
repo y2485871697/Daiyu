@@ -216,7 +216,7 @@ internal fun VoiceAccountPanel(
             else -> { operation?.cancel(); onBack() }
         }
     }
-    BackHandler { back() }
+    BackHandler(previewEnabled = false) { back() }
     val title = when (page) {
         "SYNC" -> "同步音色名额"; "ACCOUNT" -> "声音复刻账户"
         "IMPORT" -> "导入声音"; "CREATE" -> "制作声音"; else -> "我的声音"

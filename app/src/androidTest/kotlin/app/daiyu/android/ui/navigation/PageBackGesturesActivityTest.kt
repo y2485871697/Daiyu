@@ -4,6 +4,9 @@ import android.os.Build
 import androidx.activity.BackEventCompat
 import androidx.activity.ExperimentalActivityApi
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,7 +39,11 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var swipe by mutableStateOf(true)
     private var predictive by mutableStateOf(true)
     private var canBack by mutableStateOf(true)
+    private var route by mutableStateOf("previous-page")
+    private var previewAllowed by mutableStateOf(true)
+    private var navigateOnBack = false
     private var nested by mutableStateOf(false)
+    private var nestedPreview = true
     private var backCount = 0
     private var nestedCount = 0
     private var rowClicks = 0
@@ -48,10 +55,14 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    PageBackGestureHost("test-page", canBack, swipe, predictive,
-                        dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() }) {
-                        PageBackHandler(enabled = canBack) { backCount++ }
-                        if (nested) PageBackHandler {
+                    PageBackGestureHost(route, canBack, swipe, predictive,
+                        dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
+                        backTargetKey = if (route == "test-page") "previous-page" else null) {
+                        PageBackHandler(enabled = canBack, previewEnabled = previewAllowed) {
+                            backCount++
+                            if (navigateOnBack) route = "previous-page"
+                        }
+                        if (nested) PageBackHandler(previewEnabled = nestedPreview) {
                             nestedCount++
                             nested = false
                         }
@@ -75,12 +86,17 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                                 .horizontalScroll(horizontal)) {
                                 Box(Modifier.width(900.dp).height(120.dp)) { Text("scroll child") }
                             }
-                        } else Text("retained page")
+                        } else Box(Modifier.fillMaxSize().background(if (route == "previous-page") Color.Red else Color.Blue)) {
+                            Text(route)
+                        }
                     }
                 }
             }
         }
         dismissIme()
+        ui.waitForIdle()
+        mainThread { route = "test-page" }
+        ui.waitForIdle()
     }
 
     private fun swipeBack(startFraction: Float = 0.02f, endFraction: Float = 0.80f) {
@@ -255,19 +271,120 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    @OptIn(ExperimentalActivityApi::class)
+    fun testPreviousPagePreviewCancelAndCommittedDeparture() {
+        if (Build.VERSION.SDK_INT < 34) return
+        navigateOnBack = true
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT)) }
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_LEFT)) }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("page-back-target").assertExists()
+            val previewPixels = ui.onNodeWithTag("page-back-target").captureToImage().toPixelMap()
+            val backdrop = previewPixels[2, previewPixels.height / 2]
+            assertTrue("recorded previous page must be red, actual=$backdrop", backdrop.red > 0.9f && backdrop.blue < 0.1f)
+            assertEquals("test-page", route)
+            assertEquals(0, backCount)
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackCancelled() }
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-back-target").assertDoesNotExist()
+            assertEquals(0, backCount)
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_RIGHT)) }
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_RIGHT)) }
+            ui.mainClock.advanceTimeBy(32)
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("page-back-departure").assertExists()
+            assertEquals("previous-page", route)
+            assertEquals(1, backCount)
+            ui.mainClock.advanceTimeBy(240)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    @OptIn(ExperimentalActivityApi::class)
+    fun testLocalPreviewSuppressionUnregistersWhenNestedHandlerLeaves() {
+        if (Build.VERSION.SDK_INT < 34) return
+        nested = true
+        nestedPreview = false
+        mount()
+        val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+        fun begin() {
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT)) }
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_LEFT)) }
+        }
+        begin()
+        ui.onNodeWithTag("page-back-target").assertDoesNotExist()
+        assertEquals(initial, ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot)
+        mainThread { activity.onBackPressedDispatcher.dispatchOnBackCancelled() }
+        mainThread { nested = false }
+        ui.waitForIdle()
+        begin()
+        ui.onNodeWithTag("page-back-target").assertExists()
+        mainThread { activity.onBackPressedDispatcher.dispatchOnBackCancelled() }
+        assertEquals(0, backCount)
+        assertEquals(0, nestedCount)
+    }
+
+    fun testHorizontalSwipeCommitsTheRecordedDepartureWithPredictionDisabled() {
+        predictive = false
+        navigateOnBack = true
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag("page-back-surface").performTouchInput {
+                down(Offset(width * 0.35f, height * 0.6f))
+                moveTo(Offset(width * 0.90f, height * 0.6f), 200)
+            }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("page-back-target").assertExists()
+            ui.onNodeWithTag("page-back-surface").performTouchInput { up() }
+            ui.mainClock.advanceTimeByFrame()
+            assertEquals("previous-page", route)
+            assertEquals(1, backCount)
+            ui.onNodeWithTag("page-back-departure").assertExists()
+            ui.mainClock.advanceTimeBy(240)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testHorizontalSwipeWithPredictionEnabledKeepsItsCommitUntilDispatch() {
+        predictive = true
+        navigateOnBack = true
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag("page-back-surface").performTouchInput {
+                down(Offset(width * 0.35f, height * 0.6f))
+                moveTo(Offset(width * 0.90f, height * 0.6f), 200)
+            }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("page-back-target").assertExists()
+            ui.onNodeWithTag("page-back-surface").performTouchInput { up() }
+            ui.mainClock.advanceTimeByFrame()
+            assertEquals("previous-page", route)
+            assertEquals(1, backCount)
+            ui.onNodeWithTag("page-back-departure").assertExists()
+            ui.mainClock.advanceTimeBy(240)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testGesturePreferencesPersistIndependently() {
         val preferences = activity.getSharedPreferences("page-back-gestures-test", 0)
         assertTrue(preferences.edit().clear().commit())
         try {
-            val store = AppearanceSettingsStore(preferences)
-            val first = store.save(store.load().copy(swipeDismissEnabled = false, predictiveBackEnabled = true))
-            assertEquals(first, AppearanceSettingsStore(preferences).load())
-            val second = store.save(first.copy(swipeDismissEnabled = true))
-            assertTrue(second.predictiveBackEnabled)
-            val third = store.save(second.copy(predictiveBackEnabled = false))
-            assertTrue(third.swipeDismissEnabled)
-            assertEquals(third, AppearanceSettingsStore(preferences).load())
-        } finally { assertTrue(preferences.edit().clear().commit()) }
-        assertEquals(0, fixture.opens.get())
+                val store = AppearanceSettingsStore(preferences)
+                val first = store.save(store.load().copy(swipeDismissEnabled = false, predictiveBackEnabled = true))
+                assertEquals(first, AppearanceSettingsStore(preferences).load())
+                val second = store.save(first.copy(swipeDismissEnabled = true))
+                assertTrue(second.predictiveBackEnabled)
+                val third = store.save(second.copy(predictiveBackEnabled = false))
+                assertTrue(third.swipeDismissEnabled)
+                assertEquals(third, AppearanceSettingsStore(preferences).load())
+            } finally { assertTrue(preferences.edit().clear().commit()) }
+            assertEquals(0, fixture.opens.get())
+        }
     }
-}

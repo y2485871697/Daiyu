@@ -57,7 +57,7 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
             else -> PetSettingsPage.MORE
         }
     }
-    BackHandler(enabled = page != PetSettingsPage.HOME, onBack = back)
+    BackHandler(enabled = page != PetSettingsPage.HOME, previewEnabled = false, onBack = back)
     SettingsScaffoldPage(title = when (page) {
         PetSettingsPage.HOME -> "鲸鱼女仆"
         PetSettingsPage.MORE -> "更多设置"

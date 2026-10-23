@@ -52,7 +52,7 @@ internal fun ProductionVoiceAccountPage(
         }
     }
     fun leave() { active.set(false); preview.close(); onBack() }
-    BackHandler { leave() }
+    BackHandler(previewEnabled = false) { leave() }
     DisposableEffect(preview, lifecycle) {
         val uninstall = installPreviewRevoke { active.set(false); preview.admissionChanged() }
         // Invalidation may originate from runtime.save's IO worker; drain on main before it writes.

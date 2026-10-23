@@ -1529,6 +1529,8 @@ class MainActivity : ComponentActivity() {
                     swipeDismissEnabled = appearance.swipeDismissEnabled,
                     predictiveBackEnabled = appearance.predictiveBackEnabled,
                     dispatchBack = { onBackPressedDispatcher.onBackPressed() },
+                    backTargetKey = pageBackPreviewTarget(),
+                    previewScopeKey = selected?.id,
                 ) {
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
@@ -4758,6 +4760,22 @@ class MainActivity : ComponentActivity() {
         cancelRestorePreview(); prompt = null
         controller.unobserve(listener); super.onDestroy()
     }
+    private fun pageBackPreviewTarget(): String? = when (retainedPage) {
+        "chat" -> null
+        "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings",
+        "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings",
+        "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> "settings"
+        "terminal" -> terminalReturnPage
+        "usage" -> usageReturnPage
+        "providers" -> providersReturnPage
+        "skills" -> skillsReturnPage
+        "offline-speech" -> offlineSpeechReturnPage
+        "pet-model-settings" -> "pet-settings"
+        "assistant-edit" -> assistantEditReturnPage
+        "conversation-search", "message-search", "history-search" -> null
+        else -> "chat"
+    }
+
     private fun returnToChat() {
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"

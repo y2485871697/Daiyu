@@ -61,7 +61,7 @@ internal fun rememberLinuxRootfsPanel(root: File?): LinuxFilePanel {
         onDispose { visit.set(false); request?.set(true); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(root) { load(null) }
-    BackHandler(enabled = listing?.directory?.relative?.isNotEmpty() == true) { load(parent = true) }
+    BackHandler(enabled = listing?.directory?.relative?.isNotEmpty() == true, previewEnabled = false) { load(parent = true) }
     return LinuxFilePanel(actions = {
         if (root != null) IconButton(onClick = { load() }, enabled = request == null,
             modifier = Modifier.size(48.dp).testTag("linux-rootfs-refresh")) {

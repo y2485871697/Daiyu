@@ -165,7 +165,7 @@ internal fun DaiyuSettingsScreen(
                 localPage = if (openedPage == SettingsLocalPage.SHIZUKU_ACCESS) SettingsLocalPage.ENHANCEMENTS else null
             }
         }
-        BackHandler(onBack = localBack)
+        BackHandler(previewEnabled = false, onBack = localBack)
         if (openedPage == SettingsLocalPage.TASK_SURFACE) {
             TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
         } else {

@@ -256,7 +256,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             permit.revoke(); onBack()
         }
     }
-    BackHandler { back() }
+    BackHandler(previewEnabled = creating == null && !authentication &&
+        ((detail == null && !loading) || initialSlot == ProviderRegistry.PRIMARY)) { back() }
     val p = permit
     val enabled = version.let { current(p) && controller.ready && controller.active == null &&
         !controller.dataBusy && !controller.hasLiveChildTasks() && busy == null && !loading && !checkingRegistry }

@@ -67,6 +67,7 @@ internal fun <T> LocalCatalogModelsScreen(
     listState: LazyListState = rememberLazyListState(),
     queryState: MutableState<String> = remember { mutableStateOf("") },
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
+    backPreviewEnabled: Boolean = true,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -159,7 +160,7 @@ internal fun <T> LocalCatalogModelsScreen(
     }
     LaunchedEffect(visit) { reload() }
     val back = { if (current()) { visit.set(false); cancel(); onBack() } }
-    BackHandler { back() }
+    BackHandler(previewEnabled = backPreviewEnabled) { back() }
     val addVisit = adding
     if (addVisit != null) CatalogModelEditorDialog(CatalogModelEdit("", "自定义模型"), isNew = true,
         enabled = enabled && request == null, errorText = notice,

@@ -61,7 +61,7 @@ internal fun SubAgentSettingsScreen(
             }
             DisposableEffect(editor) { onDispose { editor.dispose() } }
             val detailBack = { editor.dispose(); selectedId = null }
-            BackHandler(enabled = isCurrentRoute, onBack = detailBack)
+            BackHandler(enabled = isCurrentRoute, previewEnabled = false, onBack = detailBack)
             CompositionLocalProvider(LocalConversationSubAgentEditor provides editor) {
                 SubAgentPresetDetail(editor, group.name, detailBack, isCurrentRoute, modelSource)
             }

@@ -68,7 +68,7 @@ import kotlinx.coroutines.withContext
             else -> { owner.revoke(); onBack() }
         }
     }
-    app.daiyu.android.ui.navigation.PageBackHandler { back() }
+    app.daiyu.android.ui.navigation.PageBackHandler(previewEnabled = !editing && selectedId == null) { back() }
     fun save(remove: Boolean) {
         val before = snapshot ?: return
         if (busy || !current()) return

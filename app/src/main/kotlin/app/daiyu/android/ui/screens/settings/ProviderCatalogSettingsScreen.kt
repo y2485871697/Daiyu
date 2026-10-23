@@ -105,7 +105,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
     if (managingLocal && localModelActions != null) {
         LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false },
-            listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior)
+            listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior, backPreviewEnabled = false)
         return
     }
     if (twoTabs && modelTab && localModelActions != null) {

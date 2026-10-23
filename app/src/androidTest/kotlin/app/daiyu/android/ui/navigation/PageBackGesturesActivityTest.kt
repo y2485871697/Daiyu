@@ -97,8 +97,9 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         dismissIme()
         ui.waitForIdle()
         if (capturePreviousPage) {
-            // Submit the source page's recorded drawing before leaving its route.
-            captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+            val sourcePixels = captureScreenNode(ui.onNodeWithTag("page-back-surface")).toPixelMap()
+            val source = sourcePixels[2, sourcePixels.height / 2]
+            assertTrue("source previous page must be red, actual=$source", source.red > 0.9f && source.blue < 0.1f)
         }
         mainThread { route = "test-page" }
         ui.waitForIdle()
@@ -296,10 +297,13 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     @OptIn(ExperimentalActivityApi::class)
     fun testPreviousPagePreviewCancelAndCommittedDeparture() {
         if (Build.VERSION.SDK_INT < 34) return
-        navigateOnBack = true
-        mount(capturePreviousPage = true)
-        ui.mainClock.autoAdvance = false
+        val drawingEnabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
         try {
+            // Keep the recorded source alive across the route change and both previews.
+            if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+            navigateOnBack = true
+            mount(capturePreviousPage = true)
+            ui.mainClock.autoAdvance = false
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT)) }
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_LEFT)) }
             ui.mainClock.advanceTimeBy(32)
@@ -323,7 +327,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             assertEquals(1, backCount)
             ui.mainClock.advanceTimeBy(240)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
-        } finally { ui.mainClock.autoAdvance = true }
+        } finally {
+            ui.mainClock.autoAdvance = true
+            if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+        }
     }
 
     @OptIn(ExperimentalActivityApi::class)

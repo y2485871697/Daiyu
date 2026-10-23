@@ -12,7 +12,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -72,15 +71,16 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun assertPrimaryFooterWithoutCross(dark: Boolean, label: String) {
         ui.onNodeWithContentDescription("关闭子代理设置", useUnmergedTree = true).assertDoesNotExist()
-        val button = node("subagent-collaboration-done").assertIsEnabled().assertHeightIsEqualTo(44.dp)
+        val button = node("subagent-collaboration-done").assertIsEnabled().assertHeightIsEqualTo(48.dp)
         awaitNodeWindowFocus(button)
         instrumentation.uiAutomation.waitForIdle(100, 5_000)
         val pixels = captureScreenNode(button).toPixelMap()
-        val expected = AssistantPreviewPalette(dark)
+        val expectedPrimary = Color(if (dark) 0xFFC6B7D5 else 0xFF756980)
+        val expectedOnPrimary = Color(if (dark) 0xFF211735 else 0xFFFFFFFF)
         val background = pixels[(12 * density).toInt(), pixels.height / 2]
-        val mismatch = kotlin.math.abs(expected.primary.red - background.red) > .01f ||
-            kotlin.math.abs(expected.primary.green - background.green) > .01f ||
-            kotlin.math.abs(expected.primary.blue - background.blue) > .01f
+        val mismatch = kotlin.math.abs(expectedPrimary.red - background.red) > .01f ||
+            kotlin.math.abs(expectedPrimary.green - background.green) > .01f ||
+            kotlin.math.abs(expectedPrimary.blue - background.blue) > .01f
         val captureDiagnostic = if (mismatch) runCatching {
             val roots = windowRoots()
             val semantics = button.fetchSemanticsNode()
@@ -100,15 +100,15 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 " sample=${(12 * density).toInt()},${pixels.height / 2} bounds=$bounds root=$rootIdentity" +
                 " rootsBeforeShow=[$rootsBeforeShow] rootsAtCapture=[$roots]"
         }.fold({ it }, { " diagnostic failed: $it" }) else ""
-        val colorDiagnostic = "dark=$dark expected=${expected.primary} screen=$background$captureDiagnostic"
-        assertEquals(colorDiagnostic, expected.primary.red, background.red, .01f)
-        assertEquals(colorDiagnostic, expected.primary.green, background.green, .01f)
-        assertEquals(colorDiagnostic, expected.primary.blue, background.blue, .01f)
+        val colorDiagnostic = "dark=$dark expected=${expectedPrimary} screen=$background$captureDiagnostic"
+        assertEquals(colorDiagnostic, expectedPrimary.red, background.red, .01f)
+        assertEquals(colorDiagnostic, expectedPrimary.green, background.green, .01f)
+        assertEquals(colorDiagnostic, expectedPrimary.blue, background.blue, .01f)
         val layouts = mutableListOf<TextLayoutResult>()
         ui.onNodeWithText(label, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
             assertTrue(it(layouts))
         }
-        assertEquals(expected.onPrimary, layouts.single().layoutInput.style.color)
+        assertEquals(expectedOnPrimary, layouts.single().layoutInput.style.color)
     }
 
     fun testNoConversationKeepsWhitespaceAndBottomFooterWithoutWritingConfiguration() {
@@ -122,7 +122,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 ui.onNodeWithText("尚未选择会话").assertIsDisplayed()
                 ui.onNodeWithText("使用当前配置").assertDoesNotExist()
                 assertPrimaryFooterWithoutCross(dark, "关闭")
-                ui.onNodeWithText("关闭").performClick()
+                node("subagent-collaboration-done").performTouchInput { click(Offset(centerX, 2f * density)) }
                 node("subagent-collaboration-card").assertDoesNotExist()
                 assertEquals(before, prefs.all)
             } finally { prefs.edit().clear().commit() }
@@ -204,7 +204,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 ui.onNodeWithText("还没有子代理组").assertIsDisplayed()
                 ui.onNodeWithText("使用当前配置").assertIsEnabled()
                 assertPrimaryFooterWithoutCross(dark, "完成")
-                ui.onNodeWithText("完成").performClick()
+                node("subagent-collaboration-done").performTouchInput { click(Offset(centerX, height - 2f * density)) }
                 node("subagent-collaboration-card").assertDoesNotExist()
                 assertEquals(before, prefs.all)
             } finally { prefs.edit().clear().commit() }

@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -31,7 +33,7 @@ import kotlin.math.abs
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
-    private fun differentPixels(before: ImageBitmap, after: ImageBitmap, diagnostic: String = "busy-appearance"): Int {
+    private fun differentPixels(before: ImageBitmap, after: ImageBitmap, diagnostic: String = "busy-appearance", beforePhase: String = "before", afterPhase: String = "pending", expectedChange: Boolean = false): Int {
         assertEquals(before.width, after.width)
         assertEquals(before.height, after.height)
         val left = before.toPixelMap()
@@ -53,10 +55,11 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
             }
         }
         if (different != 0) {
-            android.util.Log.e("DaiyuSwitchPixels", "$diagnostic different=$different bbox=$minX,$minY,$maxX,$maxY image=${left.width}x${left.height}")
+            val message = "$diagnostic different=$different bbox=$minX,$minY,$maxX,$maxY image=${left.width}x${left.height}"
+            if (expectedChange) android.util.Log.i("DaiyuSwitchPixels", message) else android.util.Log.e("DaiyuSwitchPixels", message)
             val directory = File(checkNotNull(activity.getExternalFilesDir(null)), "settings-ui")
             check(directory.isDirectory || directory.mkdirs())
-            listOf("before" to before, "pending" to after).forEach { (phase, image) ->
+            listOf(beforePhase to before, afterPhase to after).forEach { (phase, image) ->
                 File(directory, "$diagnostic-$phase.png").outputStream().use {
                     check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
                 }
@@ -71,10 +74,12 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
             var calls = 0
             mainThread {
                 activity.setContent {
-                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), false) {
-                        Box(Modifier.requiredWidth(320.dp).background(MiuixTheme.colorScheme.background)) {
-                            SettingsCard {
-                                SettingsSwitchRow("保存中的设置", checked, busy = busy.value, tag = "busy-switch") { calls++ }
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), false) {
+                            Box(Modifier.requiredWidth(320.dp).background(MiuixTheme.colorScheme.background)) {
+                                SettingsCard {
+                                    SettingsSwitchRow("保存中的设置", checked, busy = busy.value, tag = "busy-switch") { calls++ }
+                                }
                             }
                         }
                     }
@@ -100,11 +105,13 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
             var calls = 0
             mainThread {
                 activity.setContent {
-                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), false) {
-                        Box(Modifier.requiredWidth(320.dp).background(MiuixTheme.colorScheme.background)) {
-                            SettingsCard {
-                                SettingsSwitchRow("不可用的设置", checked, enabled = enabled.value,
-                                    busy = busy.value, tag = "unavailable-switch") { calls++ }
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), false) {
+                            Box(Modifier.requiredWidth(320.dp).background(MiuixTheme.colorScheme.background)) {
+                                SettingsCard {
+                                    SettingsSwitchRow("不可用的设置", checked, enabled = enabled.value,
+                                        busy = busy.value, tag = "unavailable-switch") { calls++ }
+                                }
                             }
                         }
                     }
@@ -113,10 +120,12 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
             val available = captureScreenNode(node("unavailable-switch"))
             mainThread { enabled.value = false }
             val disabled = captureScreenNode(node("unavailable-switch").assertIsNotEnabled())
-            assertTrue(differentPixels(available, disabled) > 0)
+            assertTrue(differentPixels(available, disabled, "unavailable-control-dark-$dark-checked-$checked",
+                "available", "disabled", expectedChange = true) > 0)
             mainThread { busy.value = true }
             val pending = node("unavailable-switch").assertIsNotEnabled()
-            assertEquals(0, differentPixels(disabled, captureScreenNode(pending)))
+            assertEquals(0, differentPixels(disabled, captureScreenNode(pending),
+                "unavailable-busy-dark-$dark-checked-$checked", "disabled", "disabled-busy"))
             pending.performTouchInput { click() }
             ui.runOnIdle { assertEquals(0, calls) }
         }

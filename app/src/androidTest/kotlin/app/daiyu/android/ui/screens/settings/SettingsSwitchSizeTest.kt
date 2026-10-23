@@ -2,7 +2,10 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.CompositionLocalProvider
@@ -60,16 +63,18 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
                 var calls = 0
                 mainThread {
                     activity.setContent {
-                        val platform = LocalDensity.current
-                        CompositionLocalProvider(LocalDensity provides Density(platform.density, 1.3f),
-                            LocalLayoutDirection provides direction) {
-                            AgentAppTheme(AppearanceSettings(interfaceScale = scale,
-                                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), true) {
-                                pixelsPerDp = LocalDensity.current.density
-                                SettingsSwitch(checked.value, onCheckedChange = { checked.value = it; calls++ },
-                                    enabled = enabled.value, modifier = Modifier.testTag("compact-interactive-switch"),
-                                    colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                                        checkedBorderColor = DaiyuPalette.switchTrack, checkedThumbColor = Color.White))
+                        Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                            val platform = LocalDensity.current
+                            CompositionLocalProvider(LocalDensity provides Density(platform.density, 1.3f),
+                                LocalLayoutDirection provides direction) {
+                                AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), true) {
+                                    pixelsPerDp = LocalDensity.current.density
+                                    SettingsSwitch(checked.value, onCheckedChange = { checked.value = it; calls++ },
+                                        enabled = enabled.value, modifier = Modifier.testTag("compact-interactive-switch"),
+                                        colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                            checkedBorderColor = DaiyuPalette.switchTrack, checkedThumbColor = Color.White))
+                                }
                             }
                         }
                     }
@@ -100,17 +105,19 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
             var calls = 0
             mainThread {
                 activity.setContent {
-                    val platform = LocalDensity.current
-                    CompositionLocalProvider(LocalDensity provides Density(platform.density, 1.3f)) {
-                        AgentAppTheme(AppearanceSettings(interfaceScale = scale,
-                            themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), true) {
-                            pixelsPerDp = LocalDensity.current.density
-                            Column(Modifier.requiredWidth(280.dp).background(MiuixTheme.colorScheme.background)) {
-                                SettingsCard {
-                                    SettingsSwitchRow("开关", true, tag = "compact-row") { calls++ }
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        val platform = LocalDensity.current
+                        CompositionLocalProvider(LocalDensity provides Density(platform.density, 1.3f)) {
+                            AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), true) {
+                                pixelsPerDp = LocalDensity.current.density
+                                Column(Modifier.requiredWidth(280.dp).background(MiuixTheme.colorScheme.background)) {
+                                    SettingsCard {
+                                        SettingsSwitchRow("开关", true, tag = "compact-row") { calls++ }
+                                    }
+                                    SettingsSwitch(true, onCheckedChange = null,
+                                        modifier = Modifier.testTag("compact-passive-switch"))
                                 }
-                                SettingsSwitch(true, onCheckedChange = null,
-                                    modifier = Modifier.testTag("compact-passive-switch"))
                             }
                         }
                     }

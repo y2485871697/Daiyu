@@ -1,8 +1,13 @@
 package app.daiyu.android
 
+import android.content.res.Configuration
+import android.os.LocaleList
+import java.util.Locale
 import android.view.ViewGroup
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import app.daiyu.android.browser.ported.ui.browser.BrowserSheet
@@ -24,9 +29,17 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
     fun testEmptySheetShowsOriginalStructureWithoutCreatingBrowser() {
         var closed = 0
         mainThread {
+            val configuration = Configuration(activity.resources.configuration).apply {
+                setLocales(LocaleList(Locale.forLanguageTag("zh-Hans-CN")))
+            }
+            val context = activity.createConfigurationContext(configuration)
+            assertEquals("没有打开的标签页", context.getString(R.string.om_browser_no_tab_open))
             activity.setContent {
-                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    BrowserVisualScreen(null, { false }, { closed++ })
+                CompositionLocalProvider(LocalContext provides context,
+                    LocalConfiguration provides context.resources.configuration) {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        BrowserVisualScreen(null, { false }, { closed++ })
+                    }
                 }
             }
         }

@@ -55,9 +55,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    PageBackGestureHost(route, canBack, swipe, predictive,
+                    val renderedRoute = route
+                    PageBackGestureHost(renderedRoute, canBack, swipe, predictive,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
-                        backTargetKey = if (route == "test-page") "previous-page" else null) {
+                        backTargetKey = if (renderedRoute == "test-page") "previous-page" else null) {
                         PageBackHandler(enabled = canBack, previewEnabled = previewAllowed) {
                             backCount++
                             if (navigateOnBack) route = "previous-page"
@@ -86,8 +87,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                                 .horizontalScroll(horizontal)) {
                                 Box(Modifier.width(900.dp).height(120.dp)) { Text("scroll child") }
                             }
-                        } else Box(Modifier.fillMaxSize().background(if (route == "previous-page") Color.Red else Color.Blue)) {
-                            Text(route)
+                        } else Box(Modifier.fillMaxSize().background(if (renderedRoute == "previous-page") Color.Red else Color.Blue)) {
+                            Text(renderedRoute)
                         }
                     }
                 }
@@ -266,6 +267,23 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         val disabled = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
         assertTrue(abs(initial.width - disabled.width) <= 1f)
         assertTrue(abs(initial.left - disabled.left) <= 1f)
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        assertEquals(1, backCount)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    @OptIn(ExperimentalActivityApi::class)
+    fun testStateChangeRejectsAnInFlightPredictionAndNextGestureStillCommits() {
+        if (Build.VERSION.SDK_INT < 34) return
+        mount()
+        mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT)) }
+        mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_LEFT)) }
+        mainThread { swipe = false }
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        assertEquals(0, backCount)
+        ui.onNodeWithTag("page-back-target").assertDoesNotExist()
+        mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT)) }
+        mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_LEFT)) }
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         assertEquals(1, backCount)
         assertEquals(0, fixture.opens.get())

@@ -44,18 +44,49 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_prediction_runs_only_on_supported_resumed_pages(self):
         self.assertIn('predictiveBackEnabled && Build.VERSION.SDK_INT >= 34', self.host)
-        self.assertIn('enabled && state.resumed && !predictive', self.host)
-        self.assertIn('enabled && state.resumed && predictive', self.host)
+        self.assertIn('callback.isEnabled = enabled && state.resumed', self.host)
+        self.assertIn('if (!activeState.predictiveEnabled) return', self.host)
         self.assertIn('BackHandler(enabled, onBack)', self.host)
+        self.assertIn('val currentEnabled by rememberUpdatedState(enabled && state.resumed)', self.host)
 
-    def test_predictive_completion_is_after_flow_collection_and_cancellation_resets(self):
-        flow = self.host.index('events.collect { event ->')
-        complete = self.host.index('if (state.alive && currentEnabled) state.commitBack(scope) { currentBack() }', flow)
-        cleanup = self.host.index('finally {', complete)
-        self.assertLess(flow, complete)
-        self.assertIn('state.reset(owner)', self.host[cleanup:cleanup + 100])
-        self.assertIn('if (!state.alive || !currentEnabled || state.transitionBlocked || state.committing) throw CancellationException()', self.host)
-        self.assertIn('BackEventCompat.EDGE_RIGHT', self.host)
+    def test_predictive_completion_is_synchronous_and_cancellation_resets(self):
+        handler = self.host.split('internal fun PageBackHandler(', 1)[1].split('internal fun PageBackGestureHost(', 1)[0]
+        started = handler.split('override fun handleOnBackStarted(', 1)[1].split('override fun handleOnBackProgressed(', 1)[0]
+        progressed = handler.split('override fun handleOnBackProgressed(', 1)[1].split('override fun handleOnBackCancelled(', 1)[0]
+        cancelled = handler.split('override fun handleOnBackCancelled()', 1)[1].split('override fun handleOnBackPressed()', 1)[0]
+        pressed = handler.split('override fun handleOnBackPressed()', 1)[1].split('    SideEffect {', 1)[0]
+        for part in (started, progressed, cancelled, pressed):
+            self.assertNotIn('launch', part)
+            self.assertNotIn('events.collect', part)
+        for part in (started, progressed):
+            self.assertIn('activeState.alive', part)
+            self.assertIn('!currentEnabled', part)
+            self.assertIn('activeState.transitionBlocked', part)
+            self.assertIn('activeState.committing', part)
+            self.assertIn('session.rejected = true', part)
+            self.assertIn('BackEventCompat.EDGE_RIGHT', part)
+            self.assertNotIn('commitBack', part)
+        self.assertIn('activeState !== currentState', progressed)
+        self.assertIn('activeState.reset(owner)', progressed)
+        self.assertIn('if (currentPreview) backEvent.progress else 0f', progressed)
+        self.assertIn('session.clear()', cancelled)
+        self.assertIn('gesture = null', self.host)
+        self.assertNotIn('commitBack', cancelled)
+        self.assertIn('if (!session.rejected && activeState.alive && currentEnabled)', pressed)
+        self.assertEqual(1, pressed.count('activeState.commitBack(scope) { currentBack() }'))
+        self.assertIn('finally {\n                    handleOnBackCancelled()', pressed)
+        self.assertIn('val callback = remember(dispatcher)', handler)
+        self.assertIn('val currentState by rememberUpdatedState(state)', handler)
+        self.assertIn('val currentBack by rememberUpdatedState(onBack)', handler)
+        registration = handler.split('DisposableEffect(dispatcher, lifecycleOwner, callback)', 1)[1]
+        self.assertIn('dispatcher.addCallback(lifecycleOwner, callback)', registration)
+        self.assertIn('onDispose { callback.handleOnBackCancelled(); callback.remove() }', registration)
+        self.assertIn('DisposableEffect(state, callback)', handler)
+        self.assertIn('onDispose { session.invalidate() }', handler)
+        self.assertIn('if (!callback.isEnabled) session.invalidate()', handler)
+        self.assertIn('val rejectCompletion = started || rejected', self.host)
+        self.assertIn('rejected = rejectCompletion', self.host)
+        self.assertNotIn('PredictiveBackHandler(', handler)
 
     def test_route_preferences_and_lifecycle_revoke_the_old_gesture_not_page_state(self):
         self.assertIn('remember(routeKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, backTargetKey)', self.host)
@@ -113,7 +144,11 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertLess(down, width)
         self.assertIn('maxOf(72.dp.toPx(), gestureWidth * 0.30f)', self.host)
         self.assertIn('if (dx >= threshold && state.alive) {', self.host)
-        self.assertIn('state.dispatchBack(scope) { currentBack() }', self.host)
+        self.assertIn('state.dispatchBack { currentBack() }', self.host)
+        handoff = self.host.split('fun dispatchBack(back:', 1)[1].split('private var owner:', 1)[0]
+        self.assertIn('try { back() }', handoff)
+        self.assertIn('finally { swipeCommit = null; dispatching = false }', handoff)
+        self.assertNotIn('withFrameNanos', handoff)
         self.assertIn('if (claimed && change.changedToUp()) {\n                                    change.consume()', self.host)
         self.assertNotIn('retainedPage =', self.host)
 
@@ -128,6 +163,11 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('context.releaseGraphicsLayer(frame.layer)', layers)
         self.assertIn('onDispose { layers.close() }', self.host)
         self.assertEqual(1, self.host.count('{ content() }'))
+        surface = self.host.split('key(routeKey) {', 1)[1].split('if (departure != null && departing)', 1)[0]
+        self.assertIn('testTag("page-back-surface")', surface)
+        self.assertIn('frame.layer.record { this@drawWithContent.drawContent() }', surface)
+        self.assertEqual(1, surface.count('{ content() }'))
+        self.assertNotIn('drawLayer(target.layer)', surface)
         for tag in ('page-back-target', 'page-back-departure'):
             self.assertIn('testTag("' + tag + '")', self.host)
 

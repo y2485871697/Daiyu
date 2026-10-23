@@ -18,7 +18,7 @@ APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
 test -n "$APK"
 mkdir -p smoke
 rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/logcat-before.txt smoke/properties-before.txt smoke/hwui-renderer.txt smoke/logcat-first-boot.txt smoke/ime-default-restored.txt smoke/readiness.txt smoke/ime-enabled-before.txt smoke/ime-enabled-selected.txt smoke/ime-enabled-after.txt smoke/ime-fixture-{path,enable,set,selected,package,after}.txt
-rm -rf smoke/settings-ui
+rm -rf smoke/settings-ui smoke/visual-diagnostics
 # Explicitly name every source test class: legacy default discovery scans all dependency DEX.
 target_spec=$(python3 - <<'PYCOUNT'
 from pathlib import Path
@@ -122,6 +122,7 @@ collect_diagnostics() {
   timeout --kill-after=5 10 adb shell dumpsys input > smoke/input-exit.txt 2>&1 || true
   timeout --kill-after=5 10 adb shell dumpsys package com.google.android.inputmethod.latin > smoke/ime-package.txt 2>&1 || true
   timeout --kill-after=5 10 adb shell 'getprop vendor.qemu.vport.uwb; ls -l /dev/hvc2 /dev/uwb0; for p in /sys/class/virtio-ports/*; do printf "%s " "$p"; cat "$p/name"; done' > smoke/uwb-transport.txt 2>&1 || true
+  timeout --kill-after=5 20 adb pull /sdcard/Android/data/app.daiyu.android/files/visual-diagnostics smoke/visual-diagnostics > smoke/visual-diagnostics-pull.txt 2>&1 || true
   ps axww -o args= | grep '[q]emu-system-' > smoke/qemu-command.txt || true
 }
 trap collect_diagnostics EXIT

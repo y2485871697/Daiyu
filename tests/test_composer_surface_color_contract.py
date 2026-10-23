@@ -8,19 +8,21 @@ ANDROID_TEST = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
 
 
 class ComposerSurfaceColorContractTest(unittest.TestCase):
-    def test_light_card_has_a_stronger_local_tint_while_dark_is_unchanged(self):
+    def test_light_card_adds_only_a_trace_of_color_to_the_original_white_glass(self):
         surface = (CHAT / 'ChatComposerSurface.kt').read_text()
-        self.assertIn('val tint = if (dark) Color(0xFF1F1C29) else Color(0xFFE8E3F0)', surface)
-        self.assertIn('background(tint.copy(alpha = if (dark) .36f else .60f))', surface)
+        self.assertIn('val tint = if (dark) Color(0xFF1F1C29) else Color(0xFFF1EFF5)', surface)
+        self.assertIn('background(tint.copy(alpha = if (dark) .36f else .32f))', surface)
         self.assertIn('background.luminance() < 0.3f', surface)
         self.assertIn('RoundedCornerShape(22.dp)', surface)
         self.assertIn('blurRadius = 24f', surface)
         self.assertIn('saturation = 1.35f', surface)
         self.assertIn('if (backdrop == null) Modifier else Modifier.textureBlur', surface)
         old = [round(channel * .32 + 255 * .68) for channel in (250, 247, 255)]
-        new = [round(channel * .60 + 255 * .40) for channel in (232, 227, 240)]
-        self.assertEqual([241, 238, 246], new)
-        self.assertTrue(all(before - after >= 9 for before, after in zip(old, new)))
+        new = [round(channel * .32 + 255 * .68) for channel in (241, 239, 245)]
+        self.assertEqual([251, 250, 252], new)
+        self.assertTrue(all(0 < before - after <= 3 for before, after in zip(old, new)))
+        self.assertTrue(all(255 - channel <= 5 for channel in new))
+        self.assertLessEqual(max(new) - min(new), 2)
 
     def test_send_uses_a_neutral_chat_only_fill_and_keeps_append_colors(self):
         appearance = (CHAT / 'ChatAppearance.kt').read_text()

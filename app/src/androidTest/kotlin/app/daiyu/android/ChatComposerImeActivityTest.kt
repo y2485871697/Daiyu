@@ -1,5 +1,11 @@
 package app.daiyu.android
 
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import app.daiyu.android.ui.components.hideChatInputIme
+import app.daiyu.android.ui.components.manageInput
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
@@ -216,6 +222,106 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         assertHostSelection(1, 4)
         assertEquals(database, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    fun testDismissDoesNotHideImeWhenBlurListenerTransfersToAnotherEditor() {
+        dismissIme()
+        lateinit var first: android.widget.EditText
+        lateinit var second: android.widget.EditText
+        var transfers = 0
+        var clearCalls = 0
+        var keyboardHideCalls = 0
+        val database = fixture.database.exportBackup()
+        val imm = checkNotNull(activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java))
+        mainThread {
+            first = android.widget.EditText(activity).apply {
+                setText("保留第一个编辑器")
+                setSingleLine(true)
+                manageInput(activity.window)
+            }
+            second = android.widget.EditText(activity).apply {
+                setText("继续编辑第二项")
+                setSingleLine(true)
+                manageInput(activity.window)
+            }
+            activity.setContent {
+                androidx.compose.ui.viewinterop.AndroidView(
+                    modifier = Modifier.fillMaxSize().testTag("ime-focus-transfer-fixture"),
+                    factory = {
+                        android.widget.LinearLayout(activity).apply {
+                            orientation = android.widget.LinearLayout.VERTICAL
+                            val padding = (24 * resources.displayMetrics.density).toInt()
+                            setPadding(padding, padding, padding, padding)
+                            addView(first)
+                            addView(second)
+                        }
+                    })
+            }
+        }
+        awaitNodeWindowFocus(node("ime-focus-transfer-fixture"))
+        mainThread {
+            assertTrue(first.requestFocus())
+            imm.showSoftInput(first, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+        awaitImeFrame(node("ime-focus-transfer-fixture"), visible = true)
+        mainThread {
+            assertSame(first, activity.window.currentFocus)
+            first.setSelection(5, 1)
+            first.onFocusChangeListener = android.view.View.OnFocusChangeListener { _, focused ->
+                if (!focused) {
+                    transfers++
+                    assertTrue(second.requestFocus())
+                }
+            }
+        }
+        val focus = object : androidx.compose.ui.focus.FocusManager {
+            override fun clearFocus(force: Boolean) {
+                clearCalls++
+                assertTrue(force)
+                first.clearFocus()
+            }
+            override fun moveFocus(focusDirection: androidx.compose.ui.focus.FocusDirection): Boolean =
+                error("Dismissal must not use moveFocus")
+        }
+        val keyboard = object : androidx.compose.ui.platform.SoftwareKeyboardController {
+            override fun show() = error("Dismissal must not request IME")
+            override fun hide() {
+                keyboardHideCalls++
+                imm.hideSoftInputFromWindow(first.windowToken, 0)
+            }
+        }
+        try {
+            mainThread {
+                hideChatInputIme(focus, keyboard, first)
+                assertEquals(1, clearCalls)
+                assertEquals(1, transfers)
+                assertEquals("Outer hide must respect the managed focus-transfer veto", 0, keyboardHideCalls)
+                assertFalse(first.hasFocus())
+                assertTrue(second.hasFocus())
+                assertSame(second, activity.window.currentFocus)
+            }
+            awaitStableWindowFrame(second) {
+                val insets = ViewCompat.getRootWindowInsets(second)
+                val bottom = insets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom
+                if (second.isFocused && activity.window.currentFocus === second &&
+                    insets?.isVisible(WindowInsetsCompat.Type.ime()) == true && bottom != null && bottom > 0)
+                    bottom else null
+            }
+            awaitImeFrame(node("ime-focus-transfer-fixture"), visible = true)
+            mainThread {
+                assertEquals(0, keyboardHideCalls)
+                assertSame(second, activity.window.currentFocus)
+                assertEquals("保留第一个编辑器", first.text.toString())
+                assertEquals(5, first.selectionStart)
+                assertEquals(1, first.selectionEnd)
+                assertEquals("继续编辑第二项", second.text.toString())
+            }
+            assertEquals(database, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            mainThread { first.onFocusChangeListener = null }
+        }
     }
 
     fun testOutsideBlankAndTitleTapsReleaseDraftAndImeWithoutChangingDraft() {

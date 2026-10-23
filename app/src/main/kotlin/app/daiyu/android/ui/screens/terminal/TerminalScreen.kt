@@ -182,8 +182,8 @@ fun TerminalScreenContent(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                                 field()
                             } },
-                cursorBrush = imeCursorBrush(androidx.compose.ui.graphics.Color.Black),
-            )
+                            cursorBrush = imeCursorBrush(androidx.compose.ui.graphics.Color.Black),
+                        )
                         PlainToolButton(DaiyuIcons.JumpUp, "发送", "terminal-send", sendable && input.isNotBlank()) { send() }
                     }
                 }

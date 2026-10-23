@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
@@ -76,7 +77,6 @@ internal fun DaiyuTextInputDialog(
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.managedInput().testTag("prompt-input").fillMaxWidth(),
-
                 cursorBrush = imeCursorBrush(top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.primary),
             )
             MiuixDialogActions(

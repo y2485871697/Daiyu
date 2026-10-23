@@ -1,7 +1,7 @@
 package app.daiyu.android.ui
 
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -101,21 +101,21 @@ internal fun GenerationApprovalHost(
         }
         OutlinedTextField(form.prompt, { edit(form.copy(prompt = it)) }, label = { Text("原始 prompt（不改写）") },
             modifier = Modifier.managedInput().fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+        )
         OutlinedTextField(form.size, { edit(form.copy(size = it)) }, label = { Text("size（原值；当前客户端不支持，非空将阻止确认）") },
             modifier = Modifier.managedInput().fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+        )
         OutlinedTextField(form.duration, { edit(form.copy(duration = it)) }, label = { Text("视频 duration（原值；当前不支持）") },
             modifier = Modifier.managedInput().fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+        )
         OutlinedTextField(form.maxPolls, { edit(form.copy(maxPolls = it)) }, label = { Text("maxPolls：0–32，仅轮询原任务，不重发 POST") },
             singleLine = true,
-                modifier = Modifier.managedInput(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+            modifier = Modifier.managedInput(),
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onPickReference) { Text("选择原图 / 视频参考图") }
             OutlinedButton(onClick = onPickMask) { Text("选择 mask") }

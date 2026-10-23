@@ -96,7 +96,6 @@ internal fun resolveSubAgentProfileConfig(profile: SubAgentProfile, providers: L
     return runCatching { buildSubAgentModelConfig(provider, model) }.getOrNull()
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, currentEditor: ConversationSubAgentEditor?,

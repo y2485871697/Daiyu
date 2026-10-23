@@ -49,7 +49,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
             textStyle = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = colors.text),
             modifier = Modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp).background(colors.field, RoundedCornerShape(10.dp))
                 .border(1.dp, colors.line, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 12.dp),
-                cursorBrush = imeCursorBrush(androidx.compose.ui.graphics.Color.Black),
-            )
+            cursorBrush = imeCursorBrush(androidx.compose.ui.graphics.Color.Black),
+        )
     }
 }

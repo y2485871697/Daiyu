@@ -1,7 +1,7 @@
 package app.daiyu.android.ui
 
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
 
 import androidx.compose.ui.platform.LocalView
 import app.daiyu.android.ui.haptics.TouchHaptics
@@ -77,37 +77,37 @@ import org.json.JSONObject
             when (selected) {
                 PlatformActionKind.ALARM -> {
                     OutlinedTextField(first, { first = it }, enabled = editable, label = { Text("小时 0–23（本地时间）") },
-                modifier = Modifier.managedInput(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                        modifier = Modifier.managedInput(),
+                    )
                     OutlinedTextField(second, { second = it }, enabled = editable, label = { Text("分钟 0–59") },
-                modifier = Modifier.managedInput(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                        modifier = Modifier.managedInput(),
+                    )
                     OutlinedTextField(label, { label = it }, enabled = editable, label = { Text("闹钟标签") },
-                modifier = Modifier.managedInput(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                        modifier = Modifier.managedInput(),
+                    )
                     Text("交给系统默认时钟处理；下一次该时间，无重复日期。提交不等于已设定。")
                 }
                 PlatformActionKind.TIMER -> {
                     OutlinedTextField(first, { first = it }, enabled = editable, label = { Text("计时秒数 1–86400") },
-                modifier = Modifier.managedInput(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                        modifier = Modifier.managedInput(),
+                    )
                     OutlinedTextField(label, { label = it }, enabled = editable, label = { Text("计时器标签") },
-                modifier = Modifier.managedInput(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                        modifier = Modifier.managedInput(),
+                    )
                 }
                 PlatformActionKind.VOLUME -> {
                     Row { listOf("music" to "媒体", "alarm" to "闹钟").forEach { (value, title) ->
                         TextButton(enabled = editable, onClick = { stream = value }) { Text(if (stream == value) "已选$title" else title) }
                     } }
                     OutlinedTextField(first, { first = it }, enabled = editable, label = { Text("绝对音量级数（非百分比；须在设备实际范围内）") },
-                modifier = Modifier.managedInput(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                        modifier = Modifier.managedInput(),
+                    )
                     Text("只有读回实际级数与批准值相同才确认；不申请勿扰访问，不调整铃声策略。")
                 }
                 PlatformActionKind.MEDIA -> {

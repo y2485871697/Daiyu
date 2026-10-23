@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
@@ -598,8 +599,7 @@ private fun PaneSearchRow(
                     .focusProperties { canFocus = searchFocusEnabled && searchActive },
                 singleLine = true,
                 textStyle = textStyle,
-                cursorBrush = imeCursorBrush(conversationPanePreviewPalette().accent),
-            )
+                cursorBrush = imeCursorBrush(conversationPanePreviewPalette().accent))
         }
     }
 }

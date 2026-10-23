@@ -102,13 +102,13 @@ private fun CatalogModelField(label: String, value: String, enabled: Boolean,
     keyboardType: KeyboardType = KeyboardType.Text, imeAction: ImeAction = ImeAction.Next,
     onValueChange: (String) -> Unit,
 ) {
-    TextField(value = value, onValueChange = onValueChange, label = label, singleLine = true,
+    TextField( value = value, onValueChange = onValueChange, label = label, singleLine = true,
         enabled = enabled, useLabelAsPlaceholder = false,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
         colors = TextFieldDefaults.textFieldColors(backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh),
         modifier = Modifier.managedInput().fillMaxWidth().testTag("settings-field:$label").semantics { contentDescription = label },
-                cursorBrush = imeCursorBrush((TextFieldDefaults.textFieldColors(backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh)).borderColor),
-            )
+        cursorBrush = imeCursorBrush((TextFieldDefaults.textFieldColors(backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh)).borderColor),
+    )
 }
 
 @Composable

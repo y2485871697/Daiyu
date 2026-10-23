@@ -263,8 +263,7 @@ internal fun SettingsTextField(
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                         editor()
                     }
-                },
-            )
+                })
         }
     }
     if (compact) {

@@ -1,7 +1,7 @@
 package app.daiyu.android.ui
 
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -51,14 +51,14 @@ internal fun ChildBrowserApprovalHost(
             )
             OutlinedTextField(reads, { reads = it }, enabled = editable,
                 label = { Text("明确选择子读取动作（如 list_tabs；英文逗号分隔）") },
-                modifier = Modifier.managedInput(),
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                modifier = Modifier.managedInput(),
             )
             OutlinedTextField(writes, { writes = it }, enabled = editable,
                 label = { Text("子写操作完整 JSON（每行一个；无默认写授权）") },
                 supportingText = { Text("fetch 必须给完整 URL 和 tab_id；不允许 headers／cookie／destination。") },
-                modifier = Modifier.managedInput(),
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                modifier = Modifier.managedInput(),
             )
             TextButton(enabled = editable && prompt.isNotBlank(), modifier = Modifier.testTag("child-browser-preview"), onClick = {
                 try {

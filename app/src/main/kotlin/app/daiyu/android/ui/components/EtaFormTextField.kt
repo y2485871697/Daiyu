@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,8 +77,7 @@ internal fun EtaFormTextField(
                     focusedLabelColor = colors.primary,
                     unfocusedLabelColor = colors.onSurfaceVariantSummary,
                     disabledLabelColor = colors.onSurfaceVariantSummary.copy(alpha = 0.38f),
-                ),
-            )
+                ))
         }
     }
 }

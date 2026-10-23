@@ -1,8 +1,8 @@
 package app.daiyu.android.balance.ui
 
 import app.daiyu.android.ui.components.imeCursorBrush
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
 
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -124,17 +124,17 @@ fun BalanceSettingsScreen(runtime: BalanceRuntime, onBack: () -> Unit, modifier:
         }
         OutlinedTextField(draft.accountId, { edit(draft.copy(accountId = it)) }, label = { Text("独立余额账户标识") },
             singleLine = true, enabled = enabled, modifier = Modifier.managedInput().fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+        )
         OutlinedTextField(draft.endpoint, { edit(draft.copy(endpoint = it)) }, label = { Text("独立余额服务 Base URL（HTTPS）") },
             singleLine = true, enabled = enabled, modifier = Modifier.managedInput().fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+        )
         BalanceSecretField(draft.apiKey, { edit(draft.copy(apiKey = it)) }, "独立余额 API Key（可空；不读取聊天密钥）", enabled)
         OutlinedTextField(draft.currency, { edit(draft.copy(currency = it)) }, label = { Text("接口金额币种（CNY / USD 等，不做换算）") },
             singleLine = true, enabled = enabled, modifier = Modifier.managedInput().fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+        )
         val option = draft.option
         if (option == null) {
             Text("已恢复原型的精确 URL / RFC6901 路径；不会自动改写为点路径。")
@@ -155,8 +155,8 @@ fun BalanceSettingsScreen(runtime: BalanceRuntime, onBack: () -> Unit, modifier:
                     edit(draft.copy(customHeaders = headers.toMap()))
                 }, label = { Text("New-Api-User 请求头（仅服务要求时填写）") },
                     singleLine = true, enabled = enabled, modifier = Modifier.managedInput().fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -240,13 +240,13 @@ internal fun ProviderBalanceOptionFields(option: BalanceOption, onChange: (Balan
                     MiuixTextField(value = option.apiPath,
                         onValueChange = { if (enabled) onChange(option.copy(apiPath = it)) },
                         label = "余额 API 路径 / 完整 HTTPS URL", singleLine = true, modifier = Modifier.managedInput().fillMaxWidth(),
-                cursorBrush = imeCursorBrush(top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.primary),
-            )
+                        cursorBrush = imeCursorBrush(top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.primary),
+                    )
                     MiuixTextField(value = option.resultPath,
                         onValueChange = { if (enabled) onChange(option.copy(resultPath = it)) },
                         label = "结果路径 / 表达式", singleLine = true, modifier = Modifier.managedInput().fillMaxWidth(),
-                cursorBrush = imeCursorBrush(top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.primary),
-            )
+                        cursorBrush = imeCursorBrush(top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.primary),
+                    )
                     Text("支持 balance_infos[0].total_balance、点号索引与带空格的 + - * /。Sub2API / DeepSeek 路径留空回到模板。",
                         style = MaterialTheme.typography.bodySmall)
                 }
@@ -266,6 +266,6 @@ private fun BalanceSecretField(value: String, onChange: (String) -> Unit, label:
                     contentDescription = if (visible) "隐藏密钥" else "显示密钥")
             }
         }, modifier = Modifier.managedInput().fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+    )
 }

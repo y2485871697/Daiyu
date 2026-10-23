@@ -68,6 +68,7 @@ def approved_original_ui_source(path, source):
                           'SimpleDateFormat("HH:mm", Locale.getDefault())')
 
 
+
 def approved_input_behavior_source(source):
     """Match code only: strings and comments must remain part of the frozen UI contract."""
     protected = []
@@ -289,7 +290,7 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
 
     def test_input_policy_keeps_visible_cursor_and_layout_frozen(self):
         for path in ('ui/browser/BrowserHistorySheet.kt', 'ui/browser/BrowserSettingsSheet.kt', 'ui/browser/BrowserSheet.kt'):
-            source = (PORT / path).read_text()
+            source = approved_original_ui_source(path, (PORT / path).read_text())
             contract = body_contract if self.baseline['files'][path]['mode'] == 'body' else render_contract
             expected = contract(source)
             self.assertIn('.managedInput()', source)

@@ -60,7 +60,6 @@ internal fun ProviderModelSelectionDialog(
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.managedInput().fillMaxWidth().testTag("provider-model-search"),
-
                 cursorBrush = imeCursorBrush(top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.primary),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

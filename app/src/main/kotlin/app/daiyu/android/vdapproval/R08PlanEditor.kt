@@ -1,7 +1,7 @@
 package app.daiyu.android.vdapproval
 
-import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
@@ -64,8 +64,8 @@ internal fun R08PlanEditor(
                             error = null
                         }, enabled = !answered, label = { Text(name) }, singleLine = true,
                             modifier = Modifier.managedInput().fillMaxWidth().padding(horizontal = 8.dp).testTag("r08-plan-$index-$name"),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                        )
                     }
                 }
                 item {

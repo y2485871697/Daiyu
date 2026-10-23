@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -49,8 +50,8 @@ internal fun SubAgentParallelLimitRow(profile: SubAgentProfile, config: SubAgent
                     OutlinedTextField(value, { if (currentUsable) value = it }, label = { Text("0 为不限，或输入正整数") },
                         modifier = Modifier.managedInput().fillMaxWidth(), singleLine = true, isError = number == null, enabled = usable,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
+                    )
                     Text("本配置内相同提供商/API 模型共用此上限；0 表示不限。调低不会取消正在执行的任务。")
                 } }, dismissButton = { TextButton(onClick = { open = false }) { Text("取消") } },
                 confirmButton = { TextButton(enabled = usable && number != null, onClick = {

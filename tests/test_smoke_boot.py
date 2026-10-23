@@ -399,7 +399,7 @@ case "$*" in
    printf ':jp.co.omronsoft.openwnn/.OpenWnnJAJP'
   fi
   printf '\n' ;;
- 'shell pm path jp.co.omronsoft.openwnn')
+ 'shell cmd package path jp.co.omronsoft.openwnn')
   [ "$CASE" != fixture-package-missing ] || exit 7
   printf 'package:/system/app/OpenWnn/OpenWnn.apk\n' ;;
  'shell ime enable jp.co.omronsoft.openwnn/.OpenWnnJAJP')
@@ -410,7 +410,7 @@ case "$*" in
  'reboot') [ "$CASE" != reboot-fail ] || exit 7; touch smoke/rebooted ;;
 
  *pidof*) fake_boot_id; printf '123\n456\n' ;;
- 'shell pm path android') printf 'package:/system/framework/framework-res.apk\n' ;;
+ 'shell cmd package path android') printf 'package:/system/framework/framework-res.apk\n' ;;
  'shell getprop debug.hwui.renderer') printf '\n' ;;
  'shell dumpsys webviewupdate')
   [ "$CASE" != webview-command-fail ] || exit 8
@@ -420,7 +420,7 @@ case "$*" in
   dirty=false; [ "$CASE" != webview-dirty ] || dirty=true
   finished=2; [ "$CASE" != webview-relro ] || finished=1
   printf 'Any WebView package installed: true\nWebView package dirty: %s\nNumber of relros started: 2\nNumber of relros finished: %s\n' "$dirty" "$finished" ;;
- 'shell pm path com.android.chrome')
+ 'shell cmd package path com.android.chrome')
   [ "$CASE" = webview-no-path ] || printf 'package:/system/app/Chrome/Chrome.apk\n' ;;
 
  'shell cat /proc/meminfo') printf 'MemTotal: 5000000 kB\n' ;;
@@ -478,7 +478,7 @@ case "$*" in
    *) printf 'Status: ok\n' ;;
   esac
   case "$CASE" in launch-timeout) exit 124 ;; launch-fail) exit 9 ;; esac ;;
- 'shell pm list '*)
+ 'shell cmd package list '*)
   if [ "$CASE" = old-package ]; then printf 'package:io.github.mangi.eta\n'
   else printf 'package:app.daiyu.android\n'; fi ;;
  'shell uiautomator dump '*) [ "$CASE" != dump-fail ] || exit 8 ;;
@@ -489,7 +489,7 @@ case "$*" in
    reboot-crash) [ ! -f smoke/rebooted ] || printf 'Fatal signal 6 (SIGABRT)\n' ;;
 
    pre-native-crash) printf 'Fatal signal 6 (SIGABRT)\n' ;;
-   late-pre-native-crash) grep -q 'shell pm path android' smoke/adb-calls.txt && printf 'Fatal signal 6 (SIGABRT)\n'; true ;;
+   late-pre-native-crash) grep -q 'shell cmd package path android' smoke/adb-calls.txt && printf 'Fatal signal 6 (SIGABRT)\n'; true ;;
    pre-gl-crash) printf 'GL errors! frameworks/base/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp:110\n' ;;
    crash) [ ! -f smoke/launch-args.txt ] || printf 'FATAL EXCEPTION\n' ;;
    native-crash) [ ! -f smoke/launch-args.txt ] || printf 'Fatal signal 6 (SIGABRT)\n' ;;
@@ -553,7 +553,7 @@ exit 0
             probe = calls.index('shell dumpsys webviewupdate')
             install = next(i for i, value in enumerate(calls) if value.startswith('install '))
             self.assertLess(probe, install)
-            self.assertIn('shell pm path com.android.chrome', calls)
+            self.assertIn('shell cmd package path com.android.chrome', calls)
             self.assertNotIn('root', calls)
             self.assertFalse(any('setprop debug.hwui.renderer' in value or 'stop &&' in value for value in calls))
             self.assertLess(calls.index('shell getprop debug.hwui.renderer'), probe)
@@ -636,6 +636,22 @@ exit 0
                 self.assertFalse(any(c.startswith('install ') or 'am instrument' in c for c in calls))
                 self.assertTrue((self.root / 'smoke/logcat-first-boot.txt').exists())
                 self.assertFalse(any('logcat -c' in c for c in calls))
+
+    def test_package_probes_use_cmd_without_spawning_legacy_pm_runtime(self):
+        for api in (26, 37):
+            with self.subTest(api=api):
+                result = self.smoke(api=api)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+                self.assertIn('shell cmd package path com.android.chrome', calls)
+                if api == 26:
+                    self.assertIn('shell cmd package path android', calls)
+                    self.assertIn('shell cmd package path jp.co.omronsoft.openwnn', calls)
+                else:
+                    self.assertNotIn('shell cmd package path jp.co.omronsoft.openwnn', calls)
+                self.assertTrue(any(call.startswith('shell cmd package list packages') for call in calls))
+                self.assertFalse(any(call.startswith('shell pm ') for call in calls))
+                self.assertFalse(any('logcat -c' in call for call in calls))
 
     def test_startup_java_and_native_crashes_cannot_start_tests(self):
         for case in ('pre-crash', 'pre-native-crash', 'pre-gl-crash', 'late-pre-native-crash'):

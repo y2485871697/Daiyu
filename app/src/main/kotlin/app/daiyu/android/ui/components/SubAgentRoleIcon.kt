@@ -25,7 +25,7 @@ internal fun SubAgentRoleIcon(profile: SubAgentProfile) {
         "video_generation" -> Icons.Rounded.Videocam
         else -> return
     }
-    Box(Modifier.size(40.dp).testTag("subagent-role-${profile.id}"), contentAlignment = Alignment.Center) {
-        Icon(icon, "${profile.name}职责：${profile.roleLabel}", Modifier.size(22.dp), tint = conversationAgentColors().accent)
+    Box(Modifier.size(24.dp).testTag("subagent-role-${profile.id}"), contentAlignment = Alignment.Center) {
+        Icon(icon, "${profile.name}职责：${profile.roleLabel}", Modifier.size(16.dp).testTag("subagent-role-glyph-${profile.id}"), tint = conversationAgentColors().accent)
     }
 }

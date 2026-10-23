@@ -116,8 +116,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
         WithoutPressRipple {
             ConversationAgentTypography {
-                ConversationAgentSheet(onDismiss, bottomSheetMotion = false,
-                    modifier = Modifier.heightIn(max = maximumHeight).testTag("subagent-collaboration-card")) {
+                ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight).testTag("subagent-collaboration-card")) {
                     Column(Modifier.then(if (emptyState) Modifier.height(360.dp) else Modifier.heightIn(min = 360.dp))
                         .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
                         ConversationAgentHandle()

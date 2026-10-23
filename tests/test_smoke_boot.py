@@ -433,6 +433,13 @@ case "$*" in
  'shell cmd package list packages -f com.android.chrome')
   [ "$CASE" != webview-query-fail ] || exit 8
   if [ "$CASE" = webview-near-package ]; then printf 'package:/system/app/Chrome/Chrome.apk=com.android.chrome.beta\n'
+  elif [ "$CASE" = webview-data-path ]; then printf 'package:/data/app/~~token==/com.android.chrome-token==/base.apk=com.android.chrome\n'
+  elif [ "$CASE" = webview-data-path-near ]; then printf 'package:/data/app/~~token==/com.android.chrome-token==/base.apk=com.android.chrome.beta\n'
+  elif [ "$CASE" = webview-data-path-mixed ]; then printf 'package:/system/app/Other/Other.apk=com.android.chrome.beta\npackage:/data/app/~~token==/com.android.chrome-token==/base.apk=com.android.chrome\npackage:/system/app/Other2/Other.apk=another.package\n'
+  elif [ "$CASE" = webview-data-path-relative ]; then printf 'package:data/app/~~token==/base.apk=com.android.chrome\n'
+  elif [ "$CASE" = webview-data-path-space ]; then printf 'package:/data/app/has space==/base.apk=com.android.chrome\n'
+  elif [ "$CASE" = webview-data-path-wrong-extension ]; then printf 'package:/data/app/~~token==/base.apks=com.android.chrome\n'
+  elif [ "$CASE" = webview-data-path-empty-name ]; then printf 'package:/data/app/~~token==/base.apk=\n'
   elif [ "$CASE" != webview-no-path ]; then printf 'package:/system/app/Chrome/Chrome.apk=com.android.chrome\n'; fi ;;
 
  'shell cat /proc/meminfo') printf 'MemTotal: 5000000 kB\n' ;;
@@ -669,6 +676,27 @@ exit 0
                 if api == 26:
                     self.assertIn('stable=15 boot_changed=1', (self.root / 'smoke/readiness.txt').read_text())
                 self.assertFalse(any('logcat -c' in call for call in calls))
+
+    def test_webview_randomized_data_apk_paths_reach_instrumentation(self):
+        for api in (26, 37):
+            for case in ('webview-data-path', 'webview-data-path-mixed'):
+                with self.subTest(api=api, case=case):
+                    result = self.smoke(case=case, api=api)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertTrue((self.root / 'smoke/instrumentation-args.txt').exists())
+                    self.assertIn('/~~token==/', (self.root / 'smoke/webview-package.txt').read_text())
+
+    def test_webview_randomized_path_keeps_exact_name_and_apk_shape_gates(self):
+        for api in (26, 37):
+            for case in ('webview-data-path-near', 'webview-data-path-relative',
+                         'webview-data-path-space', 'webview-data-path-wrong-extension',
+                         'webview-data-path-empty-name'):
+                with self.subTest(api=api, case=case):
+                    result = self.smoke(case=case, api=api)
+                    self.assertNotEqual(result.returncode, 0)
+                    calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
+                    self.assertFalse(any(call.startswith('install ') for call in calls))
+                    self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
 
     def test_package_filter_cannot_substitute_another_framework_package(self):
         result = self.smoke(case='framework-package-missing')

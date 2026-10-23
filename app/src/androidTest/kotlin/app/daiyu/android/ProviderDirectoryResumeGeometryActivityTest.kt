@@ -5,8 +5,6 @@ import android.view.Choreographer
 import android.view.ViewTreeObserver
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
-import androidx.compose.ui.focus.FocusManager
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.positionInRoot
@@ -156,37 +154,51 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
     }
     private data class Frame(val geometry: Map<String, Rect>, val summary: Rect,
         val actionable: Boolean, val gateReleased: Boolean, val windowHeight: Int, val imeBottom: Int,
-        val focusState: String)
+        val searchFocused: Boolean?, val focusState: String)
+
+    private fun realTap(target: SemanticsNodeInteraction) {
+        val interaction = target.scrollToVisible()
+        awaitNodeWindowFocus(interaction)
+        val node = interaction.fetchSemanticsNode()
+        val view = (node.root as ViewRootForTest).view
+        val point = awaitStableWindowFrame(view) {
+            if (!node.layoutInfo.coordinates.isAttached) null else
+                node.boundsInRoot.translate(node.positionOnScreen - node.positionInRoot).center
+        }
+        val down = android.os.SystemClock.uptimeMillis()
+        for (elapsed in listOf(0L, 40L)) {
+            if (elapsed > 0) ui.waitUntil(5_000) { android.os.SystemClock.uptimeMillis() >= down + elapsed }
+            val event = android.view.MotionEvent.obtain(down, down + elapsed,
+                if (elapsed == 0L) android.view.MotionEvent.ACTION_DOWN else android.view.MotionEvent.ACTION_UP,
+                point.x, point.y, 0).apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) }
+            finally { event.recycle() }
+        }
+        awaitVisualIdle()
+    }
 
     fun testRealBackgroundResumeKeepsGeometryAcrossBlockedRegistryRefresh() {
         val registry = fixture.controller.providers.snapshot()
         val saved = fixture.settings.load()
         val slot = registry.providers.single().slotId
         val tags = listOf("provider-add", "provider-add-anthropic", "provider-add-speech", "provider-open-$slot")
-        lateinit var directoryFocusManager: FocusManager
-        show(false, .9f) {
-            val focusManager = LocalFocusManager.current
-            SideEffect { directoryFocusManager = focusManager }
-            ProviderManagementRoute(fixture.controller, { true }, {})
-        }
+        show(false, .9f) { ProviderManagementRoute(fixture.controller, { true }, {}) }
         awaitUniqueTag("provider-add")
         ui.waitUntil(5_000) { row("provider-add").fetchSemanticsNode().config.contains(SemanticsActions.OnClick) }
-        // Normalize editing before recording; every return frame remains in scope.
-        mainThread {
-            val root = activity.window.decorView as android.view.ViewGroup
-            root.isFocusableInTouchMode = true
-            val previous = root.descendantFocusability
-            try {
-                root.descendantFocusability = android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS
-                assertTrue(root.requestFocus())
-            } finally { root.descendantFocusability = previous }
-            assertTrue("Non-editing native focus must be retained before background", root.isFocused)
-            directoryFocusManager.clearFocus(force = true)
+        // Exercise production dismissal before recording; every return frame remains in scope.
+        realTap(row("provider-search"))
+        ui.waitUntil(5_000) {
+            row("provider-search").fetchSemanticsNode().config.getOrNull(SemanticsProperties.Focused) == true
         }
-        dismissIme()
+        awaitImeFrame(row("provider-search"), visible = true)
+        realTap(ui.onNodeWithText("新增提供商"))
+        ui.waitUntil(5_000) {
+            row("provider-search").fetchSemanticsNode().config.getOrNull(SemanticsProperties.Focused) == false
+        }
         row("provider-search").assertIsNotFocused()
         awaitImeFrame(row("provider-add"), visible = false)
         row("provider-search").assertIsNotFocused()
+        mainThread { assertTrue(activity.window.decorView.isFocused) }
         val before = bounds(tags)
         val textBefore = textGeometry("provider-add", summary)
         val testRoot = row("provider-add").fetchSemanticsNode().root as ViewRootForTest
@@ -226,6 +238,7 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
                     frames += Frame(tags.associateWith { rect(checkNotNull(tagged[it])) }, rect(summaryNode),
                         add.config.contains(SemanticsActions.OnClick), gateReleased.get(), view.rootView.height,
                         ViewCompat.getRootWindowInsets(view)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0,
+                        tagged["provider-search"]?.config?.getOrNull(SemanticsProperties.Focused),
                         "search=${tagged["provider-search"]?.config?.getOrNull(SemanticsProperties.Focused)} " +
                             "view=${view.hasFocus()} window=${view.hasWindowFocus()} " +
                             "native=${view.rootView.findFocus()?.javaClass?.simpleName} " +
@@ -274,6 +287,7 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
             assertTrue(recorded.map { it.windowHeight }.distinct().size == 1)
             recorded.forEach { frame ->
                 assertEquals("return frame=$frame", 0, frame.imeBottom)
+                assertEquals("return frame=$frame search focus", false, frame.searchFocused)
                 assertBounds(before, frame.geometry)
                 assertRect("return-frame summary", textBefore.bounds, frame.summary)
             }

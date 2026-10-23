@@ -192,27 +192,43 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
 
     fun testHomeReturnDoesNotRestoreOrdinaryFieldKeyboard() {
         showFields()
-        tapField("managed-first")
         val original = activity
-        val stopped = java.util.concurrent.CountDownLatch(1)
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
+        val root = original.window.decorView as android.view.ViewGroup
+        var focusOrder = 0
+        mainThread { focusOrder = root.descendantFocusability }
+        repeat(2) {
+            tapField("managed-first")
+            mainThread { assertEquals(focusOrder, root.descendantFocusability) }
+            val stopped = java.util.concurrent.CountDownLatch(1)
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
+            }
+            mainThread { original.lifecycle.addObserver(observer) }
+            try {
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+                assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            } finally {
+                instrumentation.runOnMainSync { original.lifecycle.removeObserver(observer) }
+                restoreOriginalHost(original)
+            }
+            awaitHostWindowFocus(original)
+            awaitFieldFocus("managed-first", false)
+            node("managed-first").assertIsNotFocused()
+            awaitFieldIme("managed-first", visible = false)
+            mainThread {
+                assertTrue(root.isFocused)
+                assertEquals(android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS, root.descendantFocusability)
+            }
+            node("managed-first").assertTextEquals(" 保留草稿😀 ")
         }
-        mainThread { original.lifecycle.addObserver(observer) }
-        try {
-            assertTrue(instrumentation.uiAutomation.performGlobalAction(
-                android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
-            assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
-        } finally {
-            instrumentation.runOnMainSync { original.lifecycle.removeObserver(observer) }
-            restoreOriginalHost(original)
-        }
-        awaitHostWindowFocus(original)
-        awaitFieldFocus("managed-first", false)
-        node("managed-first").assertIsNotFocused()
-        awaitFieldIme("managed-first", visible = false)
-        node("managed-first").assertTextEquals(" 保留草稿😀 ")
         tapField("managed-first")
+        mainThread { assertEquals(focusOrder, root.descendantFocusability) }
+        realTap("managed-outside")
+        awaitFieldFocus("managed-first", false)
+        mainThread { assertEquals(android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS, root.descendantFocusability) }
+        mainThread { original.setContent {} }
+        mainThread { assertEquals(focusOrder, root.descendantFocusability) }
         assertEquals(0, fixture.opens.get())
     }
 

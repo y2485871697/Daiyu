@@ -12,10 +12,12 @@ class R48BatchContract(unittest.TestCase):
         source = (MAIN / 'ui/components/ManagedInput.kt').read_text()
         clear = source.split('InputEntry(view, { state.focused }', 1)[1].split('DisposableEffect(entry)', 1)[0]
         for token in ['val root = view.rootView', 'root.isFocusableInTouchMode = true',
-                      'ViewGroup.FOCUS_BEFORE_DESCENDANTS', 'finally { root.descendantFocusability = previous }']:
+                      'root.requestFocus()']:
             self.assertIn(token, clear)
         self.assertLess(clear.index('root.requestFocus()'), clear.index('focus.clearFocus(force = true)'))
         self.assertNotIn('view.requestFocus()', clear)
+        self.assertIn('root.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS', source)
+        self.assertIn('root.descendantFocusability = previous', source)
         self.assertIn('if (state.focused) focus.clearFocus(force = true)', clear)
         self.assertIn('InputDismissal.run { entry.clear() }', source)
         test = (TEST / 'ManagedInputActivityTest.kt').read_text()
@@ -47,7 +49,7 @@ class R48BatchContract(unittest.TestCase):
     def test_return_recorder_keeps_every_frame_and_only_prepares_focus_before_background(self):
         source = (TEST / 'ProviderDirectoryResumeGeometryActivityTest.kt').read_text()
         body = source.split('fun testRealBackgroundResume', 1)[1]
-        self.assertLess(body.index('root.requestFocus()'), body.index('val preDraw'))
+        self.assertLess(body.index('realTap(row("provider-search"))'), body.index('val preDraw'))
         returned = body.split('val preDraw', 1)[1]
         for forbidden in ['dismissIme(', 'clearFocus(', 'requestFocus(']:
             self.assertNotIn(forbidden, returned)

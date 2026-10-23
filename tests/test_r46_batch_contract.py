@@ -58,7 +58,7 @@ class R46BatchContract(unittest.TestCase):
                       'host.performTouchInput { click(topPoint - hostBounds.topLeft) }',
                       'host.performTouchInput { click(bottomPoint - hostBounds.topLeft) }',
                       'bounds.height, paintedRows.size.toFloat(), 2f',
-                      'assertTrue("large font grows the fill", bounds.height > 48f * density)',
+                      'assertTrue("large font grows the fill: $fontDiagnostic", bounds.height > 48f * density)',
                       'touch targets do not overlap', 'clicks.all { it == 3 }']:
             self.assertIn(token, text)
 

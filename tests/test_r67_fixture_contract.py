@@ -19,6 +19,11 @@ class R67FixtureContract(unittest.TestCase):
         self.assertIn('if (expectedChange) android.util.Log.i', busy)
         self.assertIn('else android.util.Log.e', busy)
         self.assertIn('> .01f', busy)
+        for token in ('closestDistance', 'closest=$closest', 'DaiyuSwitchSize', 'switch-size-$diagnostic.png',
+                      'distance < .015f', '2f)', 'interactive-dark-$dark-scale-$scale-$direction',
+                      'row-dark-$dark-scale-$scale'):
+            self.assertIn(token, size)
+
 
     def test_collaboration_footer_uses_its_own_exact_contract_and_real_edge_touches(self):
         source = (TEST / 'CollaborationEmptyStateTest.kt').read_text()
@@ -44,6 +49,11 @@ class R67FixtureContract(unittest.TestCase):
         self.assertIn('semanticsLayout.copy(size = IntSize(1, semanticsLayout.size.height))).hasVisualOverflow', source)
         self.assertIn('layout.hasVisualOverflow,', source)
         self.assertIn('semanticsParagraph=${semanticsLayout.multiParagraph.width}', source)
+        for token in ('requestedFontScale=$fontScale', 'layoutDensity=${layout.layoutInput.density}',
+                      'heightDeltaPx=${bounds.height - 48f * density}', 'DaiyuProviderLayout',
+                      'bounds.height > 48f * density'):
+            self.assertIn(token, source)
+
 
     def test_settings_popup_requires_new_window_nonzero_geometry_and_hidden_ime(self):
         source = (TEST / 'BrowserVisualLayoutTest.kt').read_text()
@@ -66,6 +76,10 @@ class R67FixtureContract(unittest.TestCase):
         enabled = method.index('setDrawingEnabled(true)')
         self.assertLess(enabled, method.index('mount(capturePreviousPage = true)'))
         self.assertLess(method.index('finally'), method.index('setDrawingEnabled(false)'))
+        for token in ('logPreviewPixels("source", sourceImage)', 'logPreviewPixels("target", previewImage)',
+                      'page-back-$phase.png', 'DaiyuBackPreview'):
+            self.assertIn(token, source)
+
         for token in ('source previous page must be red', 'source.red > 0.9f && source.blue < 0.1f',
                       'recorded previous page must be red', 'backdrop.red > 0.9f && backdrop.blue < 0.1f',
                       'dispatchOnBackCancelled()', 'page-back-departure'):

@@ -191,7 +191,19 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                     layout.hasVisualOverflow,
                 )
                 assertEquals(bounds.center.y, label.fetchSemanticsNode().boundsInRoot.center.y, 1f)
-                if (fontScale > 1f) assertTrue("large font grows the fill", bounds.height > 48f * density)
+                val fontDiagnostic = "dark=$dark requestedFontScale=$fontScale index=$index title=$title " +
+                    "platformDensity=$density layoutDensity=${layout.layoutInput.density} " +
+                    "semanticsDensity=${semanticsLayout.layoutInput.density} button=$bounds touch=$touch host=$hostBounds " +
+                    "heightDp=${bounds.height / density} heightDeltaPx=${bounds.height - 48f * density} " +
+                    "label=${label.fetchSemanticsNode().boundsInRoot} style=${layout.layoutInput.style} " +
+                    "size=${layout.size} constraints=${layout.layoutInput.constraints} " +
+                    "paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height} " +
+                    "firstBaseline=${layout.firstBaseline} lastBaseline=${layout.lastBaseline} " +
+                    "lineCount=${layout.lineCount} line0=${layout.getLineTop(0)}..${layout.getLineBottom(0)} " +
+                    "semanticsSize=${semanticsLayout.size} " +
+                    "semanticsParagraph=${semanticsLayout.multiParagraph.width}x${semanticsLayout.multiParagraph.height}"
+                android.util.Log.i("DaiyuProviderLayout", fontDiagnostic)
+                if (fontScale > 1f) assertTrue("large font grows the fill: $fontDiagnostic", bounds.height > 48f * density)
                 val left = (touch.left - hostBounds.left).toInt()
                 val top = (touch.top - hostBounds.top).toInt()
                 val bitmap = captureScreenNode(host)

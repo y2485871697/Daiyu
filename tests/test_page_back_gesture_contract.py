@@ -132,10 +132,15 @@ class PageBackGestureContractTest(unittest.TestCase):
             self.assertIn('testTag("' + tag + '")', self.host)
 
     def test_preview_matches_root_return_target_and_invalidates_sensitive_context(self):
-        for wiring in ('backTargetKey = pageBackPreviewTarget()', 'previewScopeKey = selected?.id',
-                       '"terminal" -> terminalReturnPage', '"providers" -> providersReturnPage',
-                       '"usage" -> usageReturnPage', '"assistant-edit" -> assistantEditReturnPage'):
+        for wiring in ('backTargetKey = pageBackPreviewTarget()', 'previewScopeKey = selected?.id'):
             self.assertIn(wiring, self.main)
+        target = self.main.split('private fun pageBackPreviewTarget(): String? = when (retainedPage) {', 1)[1]
+        target = target.split('\n    }', 1)[0]
+        for wiring in ('"terminal" -> terminalReturnPage', '"providers" -> providersReturnPage',
+                       '"usage" -> usageReturnPage', '"assistant-edit" -> assistantEditReturnPage',
+                       '"generation-settings" -> if (generationSettingsVisit != null) "settings" else "chat"',
+                       '"legacy-library" -> if (legacyPage != null) "backup" else "chat"'):
+            self.assertIn(wiring, target)
         self.assertIn('themeKey, configuration, insetsKey, density, layoutDirection, resumed, previewScopeKey', self.host)
         self.assertIn('exit.animateTo(1f, tween(180))', self.host)
         self.assertIn('if (layers.currentKey == routeKey) layers.abandon(request)', self.host)

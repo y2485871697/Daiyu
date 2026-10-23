@@ -57,6 +57,127 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
 
+    fun testColdCompletedTurnsShowLoadingInsteadOfEmptyBodiesAndActions() {
+        val sources = listOf("你好！我是代鱼，有什么可以帮你？", "我可以帮你：\n\n- **解答问题**\n- **查看设备情况**", "当前电量 **34%**，未在充电。")
+        val turns = sources.mapIndexed { index, text ->
+            ChatTurnUi.Assistant("cold-$index", finalText = text, status = RunStatus.COMPLETED)
+        }
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val confirmed = CopyOnWriteArrayList<Set<String>>()
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            assertNotSame(android.os.Looper.getMainLooper().thread, Thread.currentThread())
+            entered.countDown(); release.await(); MarkdownParser.parse(text)
+        }
+        try {
+            show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                ChatMessageList(turns, ChatScreenActions(onVisibleCompleted = { confirmed += it }))
+            } }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.mainClock.advanceTimeBy(100)
+            ui.waitForIdle()
+            val pending = ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true)
+            pending.assertCountEquals(3)
+            repeat(3) { pending[it].assertHeightIsAtLeast(52.dp) }
+            ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).assertCountEquals(0)
+            ui.onAllNodesWithContentDescription("重新生成", useUnmergedTree = true).assertCountEquals(0)
+            assertTrue(confirmed.flatten().isEmpty())
+            release.countDown()
+            awaitNodes(hasText("你好！我是代鱼，有什么可以帮你？"))
+            awaitNodes(hasText("解答问题"))
+            awaitNodes(hasText("当前电量 34%，未在充电。"))
+            ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+            ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).assertCountEquals(3)
+            assertTrue(opened.isEmpty())
+        } finally { release.countDown() }
+    }
+
+    fun testColdMixedBodyShowsLoadingWithoutPublishingReadOrRawMarkdown() {
+        val source = "Cold mixed **answer**."
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val ready = AtomicBoolean()
+        val settled = AtomicBoolean()
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            entered.countDown(); release.await(); MarkdownParser.parse(text)
+        }
+        try {
+            show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                Column(Modifier.testTag("cold-mixed")) {
+                    AssistantTurn(ChatTurnUi.Assistant("cold-mixed", status = RunStatus.COMPLETED,
+                        content = listOf(MessageContentUi.Text("mixed", source))), ChatScreenActions(),
+                        onContentReady = { ready.set(it) }, onRevealSettled = { settled.set(it) })
+                }
+            } }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.waitForIdle()
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed().assertHeightIsAtLeast(52.dp)
+            ui.onNodeWithText(source, useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
+            assertFalse(ready.get()); assertFalse(settled.get())
+            release.countDown()
+            body("cold-mixed", "Cold mixed answer.").assertIsDisplayed()
+            ui.waitUntil(5_000) { ready.get() && settled.get() }
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertIsDisplayed()
+        } finally { release.countDown() }
+    }
+
+    fun testEmptyProjectionDoesNotCountAsPreviouslyDisplayedBody() {
+        val source = "First **body**."
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val ready = AtomicBoolean()
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == source) { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
+        markdownProjectionCache.put(MarkdownProjection(listOf(""), mapOf("" to emptyList()), parser))
+        var turn by mutableStateOf(ChatTurnUi.Assistant("empty-to-body", status = RunStatus.RUNNING))
+        try {
+            show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                Column(Modifier.testTag("empty-to-body")) {
+                    AssistantTurn(turn, ChatScreenActions(), onContentReady = { ready.set(it) })
+                }
+            } }
+            ui.waitUntil(5_000) { ready.get() }
+            mainThread { turn = turn.copy(finalText = source, status = RunStatus.COMPLETED) }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.waitForIdle()
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
+            release.countDown()
+            body("empty-to-body", "First body.").assertIsDisplayed()
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertIsDisplayed()
+        } finally { release.countDown() }
+    }
+
+    fun testColdPendingTurnReplacementCannotBorrowAnotherAnswersBodyOrActions() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == "**pending**") { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
+        markdownProjectionCache.put(MarkdownProjection(listOf("**old**"), mapOf("**old**" to MarkdownParser.parse("**old**")), parser))
+        var turn by mutableStateOf(ChatTurnUi.Assistant("old-turn", finalText = "**old**", status = RunStatus.COMPLETED))
+        try {
+            show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                Column(Modifier.testTag("cold-replacement")) { AssistantTurn(turn, ChatScreenActions()) }
+            } }
+            body("cold-replacement", "old").assertIsDisplayed()
+            mainThread { turn = ChatTurnUi.Assistant("pending-turn", finalText = "**pending**", status = RunStatus.COMPLETED) }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            ui.waitForIdle()
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithText("old", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
+            release.countDown()
+            body("cold-replacement", "pending").assertIsDisplayed()
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertIsDisplayed()
+        } finally { release.countDown() }
+    }
+
     fun testRemountUsesCachedProjectionInFirstCompositionWhileParserWorkerIsBlocked() {
         val source = "First **answer**.\n\nSecond paragraph."
         val busy = "Unrelated blocked parse for return visit"
@@ -234,6 +355,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.waitForIdle()
             ui.onNodeWithText("**answer**", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithText("answer", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertIsDisplayed().assertHeightIsAtLeast(52.dp)
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             assertTrue(confirmed.none { turn.listKey in it })
             release.countDown()
             awaitNodes(hasText("answer"))
@@ -263,7 +386,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 show {
                     CompositionLocalProvider(LocalMarkdownParser provides parser) {
                         Column(Modifier.width(320.dp).testTag("stable-body")) {
-                            AssistantTurn(ChatTurnUi.Assistant("stable-$mixed", status = status,
+                            AssistantTurn(ChatTurnUi.Assistant("stable-$mixed", status = status, isStreaming = status == RunStatus.RUNNING,
                                 finalText = if (mixed) "" else current,
                                 content = if (mixed) listOf(MessageContentUi.Text("body", current)) else emptyList()),
                                 ChatScreenActions(), onContentReady = { ready.set(it) })
@@ -280,6 +403,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 ui.waitUntil(5_000) { entered.count == 0L }
                 ui.waitForIdle()
                 assertFalse(ready.get())
+                ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertDoesNotExist()
                 assertEquals(firstBounds, body("stable-body", first).fetchSemanticsNode().boundsInRoot)
                 assertEquals(secondBounds, body("stable-body", second).fetchSemanticsNode().boundsInRoot)
                 ui.onNodeWithText(appended, useUnmergedTree = true).assertDoesNotExist()
@@ -287,6 +411,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 mainThread { status = RunStatus.COMPLETED }
                 ui.waitForIdle()
                 assertFalse(ready.get())
+                ui.onNodeWithTag("markdown-pending", useUnmergedTree = true).assertDoesNotExist()
                 assertEquals(firstBounds, body("stable-body", first).fetchSemanticsNode().boundsInRoot)
                 assertEquals(secondBounds, body("stable-body", second).fetchSemanticsNode().boundsInRoot)
                 release.countDown()

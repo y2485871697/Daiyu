@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -33,6 +34,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -62,6 +65,7 @@ import app.daiyu.android.MarkdownBlock
 import app.daiyu.android.MarkdownInline
 import app.daiyu.android.MarkdownText
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 
 /** Shared selectable body; Markdown never loads images, executes HTML or opens a URI on render. */
 @Composable
@@ -95,8 +99,19 @@ internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?
     // Keep the displayed source and AST together while an appended chunk parses off-thread.
     val body = markdownBodySnapshot(text, blocks, published)
     SideEffect { published = body }
-    if (body == null) Box(modifier)
+    if (body == null) MarkdownBodyLoading(modifier, text.isNotBlank())
     else ParsedMessageMarkdown(body.text, body.blocks, modifier, visibleCharacters)
+}
+
+@Composable
+private fun MarkdownBodyLoading(modifier: Modifier, hasText: Boolean) {
+    if (!hasText) { Box(modifier); return }
+    Box(modifier) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("markdown-pending"), contentAlignment = Alignment.CenterStart) {
+            Text("正在加载消息…", color = conversationColors().muted,
+                style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp))
+        }
+    }
 }
 
 @Composable

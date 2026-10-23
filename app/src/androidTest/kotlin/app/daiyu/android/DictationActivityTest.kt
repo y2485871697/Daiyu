@@ -3,36 +3,111 @@ package app.daiyu.android
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.SpeechRecognizer
 import androidx.compose.ui.test.*
 import app.daiyu.android.voice.*
+import app.daiyu.android.voice.offline.*
+import java.util.concurrent.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 
 /**
- * Real MainActivity/actions/editor/ActivityResultRegistry, fake recognizer/player only.
+ * Real MainActivity/offline host/session/audio gate/ActivityResultRegistry; fake device/player only.
  * Permission results enter Activity.onRequestPermissionsResult, not the host callback directly.
- * No OS permission dialog, recognition service, microphone, network or speaker is used.
+ * No OS permission dialog, JNI model, microphone, network or speaker is used.
  */
 @Suppress("DEPRECATION")
 class DictationActivityTest : WiredActivityTestCase() {
-    private class Platform : SystemDictationPlatform {
-        var permission = true
-        var failDestroy = false
-        var creates = 0
-        var cancels = 0
-        var destroys = 0
-        val listeners = mutableListOf<RecognitionListener>()
-        override fun permitted() = permission
-        override fun available() = true
-        override fun create(): SystemDictationRecognizer {
-            creates++
-            return object : SystemDictationRecognizer {
-                override fun listen(listener: RecognitionListener, language: String) { listeners += listener }
-                override fun cancel() { cancels++ }
-                override fun destroy() { destroys++; check(!failDestroy) { "synthetic release failure" } }
+    private class Platform {
+        @Volatile var permission = true
+        @Volatile var failDestroy = false
+        @Volatile var creates = 0
+        @Volatile var cancels = 0
+        @Volatile var destroys = 0
+        val listeners = mutableListOf<Attempt>()
+    }
+    private inner class Attempt(private val gate: AudioOwnerGate, private val owner: VoiceOwner,
+        private val allowed: () -> Boolean, events: OfflineSpeechSession.Events) : OfflineSpeechAttempt {
+        private val commands = ConcurrentLinkedQueue<Pair<String, CountDownLatch>>()
+        private val wake = Semaphore(0)
+        private val started = CountDownLatch(1)
+        private val released = CountDownLatch(1)
+        private val finished = CountDownLatch(1)
+        private val finalReady = CountDownLatch(1)
+        private val listening = java.util.concurrent.atomic.AtomicReference<(() -> Unit)?>()
+        @Volatile private var text = ""
+        @Volatile private var endpoint = false
+        private val device = object : OfflineSpeechDevice {
+            override fun load() = object : OfflineSpeechDevice.Decoder {
+                override fun accept(samples: FloatArray) = Unit
+                override fun ready() = false
+                override fun decode() = Unit
+                override fun text() = text
+                override fun endpoint() = endpoint
+                override fun finish() { check(finalReady.await(5, TimeUnit.SECONDS)) { "final not supplied" } }
+                override fun close() = Unit
             }
+            override fun microphone(): OfflineSpeechDevice.Microphone {
+                platform.creates++
+                return object : OfflineSpeechDevice.Microphone {
+                    override fun start() { started.countDown() }
+                    override fun read(samples: ShortArray): Int {
+                        val command = commands.poll() ?: return 0
+                        text = command.first
+                        command.second.countDown()
+                        return 1
+                    }
+                    override fun release() {
+                        platform.cancels++; platform.destroys++
+                        released.countDown(); wake.release()
+                        check(!platform.failDestroy) { "synthetic release failure" }
+                    }
+                }
+            }
+            override fun now() = android.os.SystemClock.elapsedRealtime()
+            override fun idle() { wake.acquire() }
+        }
+        private var firstPost = true
+        private val session = OfflineSpeechSession(gate, owner, allowed, device, events,
+            execute = Executor { task ->
+                Thread({ try { task.run() } finally { finished.countDown() } }, "test-offline-device").start()
+            },
+            post = { callback ->
+                if (firstPost) { firstPost = false; listening.set(callback) }
+                else android.os.Handler(android.os.Looper.getMainLooper()).post { callback() }
+            })
+        override fun start() { session.start() }
+        override fun close() {
+            try { session.close() } finally { finalReady.countDown(); wake.release() }
+        }
+        fun awaitStarted() {
+            assertTrue("offline device opened", started.await(5, TimeUnit.SECONDS))
+            awaitControl("offline listening callback published") { listening.get() != null }
+        }
+        fun onReadyForSpeech(ignored: Bundle) {
+            awaitStarted()
+            mainThread { listening.get()?.invoke() }
+        }
+        fun onEndOfSpeech() {
+            endpoint = true
+            commands += "" to CountDownLatch(1)
+            wake.release()
+            assertTrue("capture stopped before final", released.await(5, TimeUnit.SECONDS))
+            instrumentation.waitForIdleSync()
+        }
+        fun onPartialResults(value: String) {
+            if (finished.count == 0L || host.state.value.target == null) return
+            val consumed = CountDownLatch(1)
+            commands += value to consumed; wake.release()
+            assertTrue("partial consumed", consumed.await(5, TimeUnit.SECONDS))
+            awaitControl("owned partial published or retired") {
+                host.state.value.preview == value || host.state.value.target == null
+            }
+        }
+        fun onResults(value: String) {
+            text = value; endpoint = true; finalReady.countDown()
+            commands += value to CountDownLatch(1); wake.release()
+            assertTrue("offline attempt terminated", finished.await(5, TimeUnit.SECONDS))
+            instrumentation.waitForIdleSync()
         }
     }
     private class Player : VoiceHostPlayer {
@@ -48,7 +123,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         override fun closeStrict() { closes++ }
     }
     private lateinit var platform: Platform
-    private lateinit var host: ComposerDictationHost
+    private lateinit var host: OfflineComposerHost
     private lateinit var speech: VoiceHost
     private val players = mutableListOf<Player>()
     private var permissionRequests = 0
@@ -70,47 +145,49 @@ class DictationActivityTest : WiredActivityTestCase() {
         awaitControl("SYSTEM dictation profile ready") {
             fixture.controller.voiceRuntime.configuration.value?.dictation == "SYSTEM"
         }
-        mainThread {
-            assertFalse("System dictation fixture requires offline dictation disabled",
-                app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.enabled)
-        }
         platform = Platform()
         mainThread {
-            host = call("getDictationHost") as ComposerDictationHost
-            speech = call("getSpeechHost") as VoiceHost
-            // Isolate intentionally poisoned gates per test, never reset the production singleton.
             val gate = AudioOwnerGate()
+            speech = call("getSpeechHost") as VoiceHost
             field(speech, "gate", gate)
             val playerFactory: () -> VoiceHostPlayer = { Player().also { players += it } }
             field(speech, "factory", playerFactory)
-            val factory: (DictationDraftTarget, DraftDictationHost, (DictationDraftTarget) -> Boolean) -> DraftDictationSession =
-                { target, callbacks, current -> DraftDictationSession(AndroidDictation(platform, gate), target, callbacks, current) }
-            field(host, "factory", factory)
-            val launcher: (DictationDraftTarget) -> Unit = { permissionRequests++ }
+            val ready: () -> Boolean = { true }
+            field(activity, "offlineSpeechReady", ready)
+            val factory: (VoiceOwner, () -> Boolean, OfflineSpeechSession.Events) -> OfflineSpeechAttempt =
+                { owner, allowed, events -> Attempt(gate, owner, allowed, events).also { platform.listeners += it } }
+            field(activity, "offlineSpeechSessionFactory", factory)
+            host = call("getOfflineHost") as OfflineComposerHost
+            val permission: () -> Boolean = { platform.permission }
+            field(host, "permission", permission)
+            val launcher: () -> Unit = {
+                field(activity, "offlineMicrophonePermissionOwner", host)
+                permissionRequests++
+            }
             field(host, "requestPermission", launcher)
         }
     }
 
-    private fun result(text: String) = Bundle().apply {
-        putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(text))
-    }
+    private fun result(text: String) = text
+
     private fun voice() {
         ui.onNode(hasContentDescription("语音输入") or hasContentDescription("停止语音输入"))
             .assertIsDisplayed().assertIsEnabled().performClick()
         ui.waitForIdle()
+        if (host.state.value.target != null && platform.listeners.isNotEmpty()) platform.listeners.last().awaitStarted()
     }
     private fun permissionResult(granted: Boolean) {
         mainThread {
-            // Resolve the SYSTEM dictation launcher's actual
+            // Resolve the offline dictation launcher's actual
             // randomized request code from the real registry; exercise RequestPermission parsing.
             val registry = activity.activityResultRegistry
             val map = registry.javaClass.superclass?.declaredFields.orEmpty().asSequence()
                 .plus(registry.javaClass.declaredFields.asSequence())
                 .mapNotNull { f ->
                     f.isAccessible = true
-                    (f.get(registry) as? Map<*, *>)?.takeIf { it["activity_rq#3"] is Int }
+                    (f.get(registry) as? Map<*, *>)?.takeIf { it["activity_rq#4"] is Int }
                 }.first()
-            val code = map["activity_rq#3"] as Int
+            val code = map["activity_rq#4"] as Int
             // Substitute only the platform permission request, marking that same registered
             // launcher as in-flight just as ActivityResultRegistry.launch normally does.
             val launchedField = registry.javaClass.superclass!!.declaredFields.single {
@@ -118,7 +195,7 @@ class DictationActivityTest : WiredActivityTestCase() {
             }.apply { isAccessible = true }
             @Suppress("UNCHECKED_CAST")
             val launched = launchedField.get(registry) as MutableCollection<String>
-            launched.add("activity_rq#3")
+            launched.add("activity_rq#4")
             activity.onRequestPermissionsResult(code, arrayOf(Manifest.permission.RECORD_AUDIO),
                 intArrayOf(if (granted) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED))
         }
@@ -131,7 +208,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("语音输入").assertExists() // A click/PREPARING is not listening.
         assertFalse(host.state.value.listening)
         val firstTarget = checkNotNull(host.state.value.target)
-        mainThread { first.onReadyForSpeech(Bundle()) }
+        first.onReadyForSpeech(Bundle())
         awaitControl("same owned recognizer listening") {
             host.state.value.let { it.target == firstTarget && it.listening }
         }
@@ -141,7 +218,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         }
         ui.onNodeWithContentDescription("停止语音输入").assertExists()
         assertTrue(host.state.value.listening)
-        mainThread { first.onEndOfSpeech() }
+        first.onEndOfSpeech()
         awaitControl("same recognizer waiting for final, not capturing") {
             host.state.value.let { it.target == firstTarget && !it.listening }
         }

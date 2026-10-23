@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -126,7 +127,19 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
             }
         }
         fun openThinking(title: String) {
-            awaitNodeWindowFocus(ui.onNodeWithText(title))
+            val titleNode = ui.onNodeWithText(title)
+            awaitNodeWindowFocus(titleNode)
+            awaitDialogEnter(titleNode)
+            val semantic = titleNode.fetchSemanticsNode()
+            val view = (semantic.root as androidx.compose.ui.platform.ViewRootForTest).view
+            awaitStableWindowFrame(view) {
+                val coordinates = semantic.layoutInfo.coordinates
+                if (coordinates.isAttached && coordinates.size.width > 0 && coordinates.size.height > 0) {
+                    val position = coordinates.positionInRoot()
+                    listOf(view.width.toFloat(), view.height.toFloat(), position.x, position.y,
+                        coordinates.size.width.toFloat(), coordinates.size.height.toFloat())
+                } else null
+            }
             ui.onNodeWithContentDescription("草稿思考深度").scrollToVisible().assertIsDisplayed().assertIsEnabled().performClick()
             awaitUniqueTag("thinking-depth-slider")
             awaitNodeWindowFocus(node("thinking-depth-slider"))

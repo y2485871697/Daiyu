@@ -149,15 +149,26 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
 
     fun testEditorKeepsOriginalPageComposed() {
         val profile = fixture.controller.assistantStore.assistants.value.first()
+        val before = fixture.database.exportBackup()
         for (fromSettings in listOf(false, true)) {
             openPicker(fromSettings)
             val tag = if (fromSettings) "page:设置" else "chat-draft"
             val original = node(tag).fetchSemanticsNode().id
-            actions(profile.id)
-            edit()
-            assertEquals(original, node(tag).fetchSemanticsNode().id)
+            for (system in listOf(false, true)) {
+                actions(profile.id)
+                edit()
+                assertEquals(original, node(tag).fetchSemanticsNode().id)
+                back(system)
+                awaitUniqueTag("assistant-action-edit")
+                assertEquals(original, node(tag).fetchSemanticsNode().id)
+                back(system)
+                awaitUniqueTag("assistant-list")
+                assertEquals(original, node(tag).fetchSemanticsNode().id)
+            }
             dismissOutside()
         }
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
     }
 
 }

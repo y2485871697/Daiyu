@@ -27,11 +27,13 @@ internal class OfflineComposerHost(
         currentText: () -> String,
         applyDraft: (DictationDraftTarget, String, Int) -> Unit,
         inputEnabled: () -> Boolean = { OfflineSpeechPack.state.value.enabled },
+        ready: () -> Boolean = { OfflineSpeechPack.state.value.ready },
+        sessionFactory: (VoiceOwner, () -> Boolean, OfflineSpeechSession.Events) -> OfflineSpeechAttempt =
+            { owner, allowed, events -> OfflineSpeechSession(ActivityVoiceAudio.gate, owner, allowed,
+                AndroidOfflineSpeechDevice(context.applicationContext), events) },
     ) : this(
-        factory = { owner, events -> OfflineSpeechSession(ActivityVoiceAudio.gate, owner,
-            { inputEnabled() && OfflineSpeechPack.state.value.ready },
-            AndroidOfflineSpeechDevice(context.applicationContext), events) },
-        enabled = { inputEnabled() && OfflineSpeechPack.state.value.ready },
+        factory = { owner, events -> sessionFactory(owner, { inputEnabled() && ready() }, events) },
+        enabled = { inputEnabled() && ready() },
         permission = { context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED },
         requestPermission = requestPermission, current = current, currentText = currentText, applyDraft = applyDraft,
     )
@@ -44,18 +46,31 @@ internal class OfflineComposerHost(
     private var attempt: OfflineSpeechAttempt? = null
     private var closed = false
     private var attemptSerial = 0L
+    private data class PermissionRequest(val target: DictationDraftTarget, val serial: Long)
+    private var pendingPermission: PermissionRequest? = null
     private fun owns(target: DictationDraftTarget, serial: Long) = !closed && active == target && attemptSerial == serial
     private fun accepts(target: DictationDraftTarget, serial: Long) = owns(target, serial) && current(target) && enabled()
 
     fun start(target: DictationDraftTarget, text: String, selectionStart: Int, selectionEnd: Int) {
         if (closed) return
+        if (pendingPermission != null) {
+            invalidate() // Retire editor authority, keeping the outstanding request until its result.
+            return
+        }
         if (active != null) { invalidate(); return }
         if (!current(target) || !enabled()) return
         invalidate()
         if (!permission()) {
+            val pending = PermissionRequest(target, attemptSerial)
+            pendingPermission = pending
             mutable.value = State(status = "离线听写需要麦克风权限；授权后请再次点击，不会自动开始")
             try { requestPermission() } catch (_: Exception) {
-                mutable.value = State(status = "无法请求麦克风权限，请在系统设置中检查权限")
+                if (pendingPermission === pending) {
+                    pendingPermission = null
+                    if (!closed && attemptSerial == pending.serial && current(target) && enabled()) {
+                        mutable.value = State(status = "无法请求麦克风权限，请在系统设置中检查权限")
+                    }
+                }
             }
             return
         }
@@ -113,6 +128,14 @@ internal class OfflineComposerHost(
             invalidate()
             mutable.value = State(status = "无法启动离线语音；请检查权限、模型和音频占用")
         }
+    }
+
+    fun permissionResult(granted: Boolean) {
+        val pending = pendingPermission ?: return
+        pendingPermission = null
+        if (closed || pending.serial != attemptSerial || !current(pending.target) || !enabled()) return
+        mutable.value = State(status = if (granted) "麦克风权限已授予，请再次点击离线语音"
+            else "麦克风权限被拒绝；草稿未更改")
     }
 
     fun invalidate() {

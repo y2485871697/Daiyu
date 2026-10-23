@@ -59,6 +59,9 @@ object ChatTurnMapper {
             turn is ChatTurnUi.Assistant && turn.ownerMessageId == live.id.value &&
                 turn.listKey == TurnOwner(live.conversationId.value, live.runId.value, turn.id).listKey(turn.segmentIndex)
         }
+        if (turns.withIndex().none { (index, turn) ->
+                turn is ChatTurnUi.Assistant && turn.isStreaming != (index == last)
+            }) return turns
         return turns.mapIndexed { index, turn ->
             if (turn is ChatTurnUi.Assistant && turn.isStreaming != (index == last)) {
                 turn.copy(isStreaming = index == last)

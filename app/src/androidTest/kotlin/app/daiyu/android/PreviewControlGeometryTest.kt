@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -54,7 +55,7 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
             }
         }
         node("assistant-button").assertHeightIsEqualTo(44.dp)
-        node("agent-button").assertHeightIsEqualTo(44.dp)
+        node("agent-button").assertHeightIsEqualTo(48.dp)
         node("usage-button").assertHeightIsEqualTo(44.dp)
     }
     fun testNormalButtonCornersMatchMiuixInBothThemesAndInterfaceScales() {
@@ -69,14 +70,14 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
                         AgentAppTheme(AppearanceSettings(interfaceScale = scale,
                             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                             applyInterfaceScale = true) {
-                            Column(Modifier.background(backdrop).padding(16.dp)) {
+                            Column(Modifier.safeDrawingPadding().background(backdrop).padding(16.dp)) {
                                 MiuixButton(onClick = {}, modifier = Modifier.size(160.dp, 44.dp)
                                     .testTag("assistant-corner-reference"),
                                     insideMargin = PaddingValues(0.dp),
                                     colors = ButtonDefaults.buttonColors(color = assistantFill)) {}
                                 AssistantPreviewButton("", {}, Modifier.width(160.dp)
                                     .testTag("assistant-corner-actual"), primary = true)
-                                MiuixButton(onClick = {}, modifier = Modifier.size(160.dp, 44.dp)
+                                MiuixButton(onClick = {}, modifier = Modifier.size(160.dp, 48.dp)
                                     .testTag("agent-corner-reference"),
                                     insideMargin = PaddingValues(0.dp),
                                     colors = ButtonDefaults.buttonColors(color = agentFill)) {}
@@ -114,7 +115,7 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                     applyInterfaceScale = false) {
-                    Column(Modifier.background(backdrop).padding(16.dp)) {
+                    Column(Modifier.safeDrawingPadding().background(backdrop).padding(16.dp)) {
                         ConversationAgentButton("确认", primary = true, modifier = Modifier.width(160.dp)
                             .testTag("agent-default-primary"), onClick = { clicks++ })
                         AssistantPreviewButton("完成", {}, Modifier.width(160.dp).testTag("collaboration-primary"), primary = true)

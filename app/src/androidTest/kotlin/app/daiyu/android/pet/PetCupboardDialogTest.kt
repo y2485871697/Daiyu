@@ -39,6 +39,18 @@ class PetCupboardDialogTest : WiredActivityTestCase() {
         }
     }
     private fun open() {
+        lateinit var sprite: View
+        mainThread { sprite = checkNotNull(layer).findViewById(R.id.pet_sprite) }
+        val bounds = awaitStableWindowFrame(sprite.rootView) {
+            if (!sprite.isAttachedToWindow || !sprite.isShown || sprite.isLayoutRequested ||
+                sprite.width <= 0 || sprite.height <= 0) null
+            else {
+                val location = IntArray(2)
+                sprite.getLocationOnScreen(location)
+                listOf(location[0], location[1], sprite.width, sprite.height)
+            }
+        }
+        android.util.Log.i("DaiyuPetTap", "stableSprite=$bounds")
         onView(withId(R.id.pet_sprite)).perform(click())
         awaitUniqueTag("pet-cupboard")
     }

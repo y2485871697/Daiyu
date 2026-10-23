@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.icons
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +28,7 @@ class ModelBrandIconTest : WiredActivityTestCase() {
             mainThread {
                 activity.setContent {
                     AgentAppTheme(AppearanceSettings(themeMode = mode), applyInterfaceScale = false) {
-                        Row {
+                        Row(Modifier.safeDrawingPadding()) {
                             ModelBrand.entries.forEach { brand ->
                                 ModelBrandIcon(brand.name, Modifier.size(24.dp).testTag("brand:${brand.name}"), tint = Color.Magenta)
                             }

@@ -287,17 +287,33 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             show(scale = scale, dark = dark)
             val fill = if (dark) Color(0x17AC93C2) else Color(0x1A81738E)
             fun assertFill(tag: String) {
+                node(tag).assertIsDisplayed()
                 val drawer = bounds("conversation-drawer")
                 val control = bounds(tag)
                 val pixels = node("conversation-drawer").captureToImage().toPixelMap()
+                val d = density.get().density
                 val x = (control.center.x - drawer.left).toInt()
-                val top = control.top - drawer.top
-                val background = pixels[x, (top - 3 * density.get().density).toInt()]
-                val actual = pixels[x, (top + 4 * density.get().density).toInt()]
+                val y = (control.top - drawer.top + 4f * d).toInt()
+                val leftX = (control.left - drawer.left - 3f * d).toInt()
+                val rightX = (control.right - drawer.left + 3f * d).toInt()
+                assertTrue("$tag background samples stay inside drawer",
+                    leftX > 0 && rightX < pixels.width - 1 && leftX < x && x < rightX)
+                assertTrue("$tag sample row stays inside control",
+                    y >= 0 && y < pixels.height && drawer.top + y > control.top && drawer.top + y < control.bottom)
+                val left = pixels[leftX, y]
+                val right = pixels[rightX, y]
+                val t = (x - leftX).toFloat() / (rightX - leftX).toFloat()
+                // Compare the translucent fill against the same row of the drawer's diagonal gradient.
+                val background = Color(left.red + (right.red - left.red) * t,
+                    left.green + (right.green - left.green) * t,
+                    left.blue + (right.blue - left.blue) * t,
+                    left.alpha + (right.alpha - left.alpha) * t)
                 val expected = fill.compositeOver(background)
-                assertEquals(expected.red, actual.red, .015f)
-                assertEquals(expected.green, actual.green, .015f)
-                assertEquals(expected.blue, actual.blue, .015f)
+                val actual = pixels[x, y]
+                val label = "dark=$dark scale=$scale tag=$tag sample=($x,$y) backgroundX=[$leftX,$rightX]"
+                assertEquals("$label red", expected.red, actual.red, .015f)
+                assertEquals("$label green", expected.green, actual.green, .015f)
+                assertEquals("$label blue", expected.blue, actual.blue, .015f)
             }
             node("drawer-search").assertHeightIsAtLeast(44.dp)
             assertEquals(bounds("drawer-new").width, bounds("drawer-search").width, 1f)

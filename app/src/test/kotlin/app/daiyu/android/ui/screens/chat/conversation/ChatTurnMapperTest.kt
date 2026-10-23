@@ -260,4 +260,27 @@ class ChatTurnMapperTest {
         }
     }
 
+    @Test fun streamingProjectionRetainsUnchangedListAndElementIdentity() {
+        val user = message(text("question", "question")).copy(id = MessageId("user"), role = Message.USER_ROLE)
+        val active = message(text("answer", "answer"), status = RunStatus.RUNNING)
+        val turns = ChatTurnMapper.map(listOf(user, active))
+        assertSame(turns, ChatTurnMapper.withStreamingOwner(turns, null))
+        val live = ChatTurnMapper.withStreamingOwner(turns, active)
+        assertNotSame(turns, live)
+        assertSame(turns.first(), live.first())
+        assertTrue((live.last() as ChatTurnUi.Assistant).isStreaming)
+        assertSame(live, ChatTurnMapper.withStreamingOwner(live, active))
+        val paused = ChatTurnMapper.withStreamingOwner(live, null)
+        assertNotSame(live, paused)
+        assertSame(live.first(), paused.first())
+        assertFalse((paused.last() as ChatTurnUi.Assistant).isStreaming)
+        assertSame(paused, ChatTurnMapper.withStreamingOwner(paused, null))
+        val next = active.copy(id = MessageId("next"))
+        val pair = ChatTurnMapper.map(listOf(active, next))
+        val first = ChatTurnMapper.withStreamingOwner(pair, active)
+        val switched = ChatTurnMapper.withStreamingOwner(first, next)
+        assertEquals(listOf(false, true), switched.filterIsInstance<ChatTurnUi.Assistant>().map { it.isStreaming })
+        assertSame(switched, ChatTurnMapper.withStreamingOwner(switched, next))
+    }
+
 }

@@ -60,7 +60,7 @@ class ChatAttachmentSizingContract(unittest.TestCase):
                       "TextLayoutResult", "it.hasVisualOverflow", "rowBounds.height >= 56f * density - 1f",
                       "assertEquals(fontScale, text.layoutInput.density.fontScale", '"chat-attachment-icon" to 24f',
                       '"chat-attachment-chevron" to 18f', "assertEquals(1, dismissals)",
-                      "assertEquals(listOf(action), actions)", "performTouchInput { click(Offset(4f, center.y)) }", "performScrollTo()",
+                      "assertEquals(listOf(action), actions)", "performTouchInput { click(Offset(4f, center.y)) }", "scrollToVisible()",
                       "testOtherSelectionSheetsKeepTheirDefaultHeaderTypography", "fixture.opens.get()"]:
             self.assertIn(token, test)
 

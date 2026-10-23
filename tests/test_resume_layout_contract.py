@@ -21,7 +21,7 @@ class ResumeLayoutContractTest(unittest.TestCase):
             self.assertNotIn(workaround, row)
 
     def test_all_audited_temporary_actions_keep_their_existing_chevron_slot(self):
-        expected = {'ui/screens/settings/BackupScreen.kt': 2, 'ui/screens/settings/CompressionSettingsForm.kt': 1, 'ui/screens/settings/LinuxSettingsScreen.kt': 2, 'ui/screens/settings/PetSettingsScreen.kt': 5, 'ui/screens/settings/BrowserSettingsScreen.kt': 1, 'ui/screens/settings/IndependentModelScreen.kt': 1, 'ui/screens/settings/OfflineSpeechSettingsScreen.kt': 1, 'ui/screens/settings/ModelSettingsScreen.kt': 1, 'ui/screens/settings/GuiSettingsPanel.kt': 4, 'ui/screens/settings/McpSettingsScreen.kt': 2, 'ui/screens/settings/SettingsHomeScreen.kt': 1, 'ui/screens/settings/SettingsDiagnosticsHost.kt': 2, 'ui/screens/settings/RequestBodyFieldsEditor.kt': 1, 'ui/screens/settings/ProviderDirectoryPage.kt': 3, 'title/TitleModelSettingsPanel.kt': 1, 'VoiceAccountPanel.kt': 15, 'VoiceSettingsPanel.kt': 18, 'VoiceSettingsPreview.kt': 1}
+        expected = {'ui/screens/settings/BackupScreen.kt': 2, 'ui/screens/settings/CompressionSettingsForm.kt': 1, 'ui/screens/settings/LinuxSettingsScreen.kt': 2, 'ui/screens/settings/PetSettingsScreen.kt': 5, 'ui/screens/settings/BrowserSettingsScreen.kt': 1, 'ui/screens/settings/IndependentModelScreen.kt': 1, 'ui/screens/settings/OfflineSpeechSettingsScreen.kt': 1, 'ui/screens/settings/ModelSettingsScreen.kt': 1, 'ui/screens/settings/GuiSettingsPanel.kt': 4, 'ui/screens/settings/McpSettingsScreen.kt': 2, 'ui/screens/settings/SettingsHomeScreen.kt': 1, 'ui/screens/settings/SettingsDiagnosticsHost.kt': 2, 'ui/screens/settings/RequestBodyFieldsEditor.kt': 1, 'ui/screens/settings/ProviderDirectoryPage.kt': 3, 'title/TitleModelSettingsPanel.kt': 1, 'VoiceAccountPanel.kt': 15, 'VoiceSettingsPanel.kt': 17, 'VoiceSettingsPreview.kt': 1}
         for path, count in expected.items():
             with self.subTest(path=path):
                 text = (SRC / path).read_text()
@@ -29,6 +29,9 @@ class ResumeLayoutContractTest(unittest.TestCase):
                 if path.endswith("OfflineSpeechSettingsScreen.kt"):
                     actual += text.count("showChevron = !pack.ready, onClick = if")
                 self.assertEqual(count, actual)
+        voice = (SRC / "VoiceSettingsPanel.kt").read_text()
+        self.assertIn('TextButton("保存连接设置"', voice)
+        self.assertNotIn('SettingsRow("保存连接设置"', voice)
 
     def test_provider_revalidation_and_callback_revocation_are_preserved(self):
         route = (SRC / "ui/screens/settings/ProviderManagementRoute.kt").read_text()

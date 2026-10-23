@@ -4,12 +4,9 @@ import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.background
 import app.daiyu.android.ui.haptics.clickable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -27,6 +24,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
+import app.daiyu.android.ui.haptics.miuix.TextButton
+import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import app.daiyu.android.ui.screens.settings.SettingsScaffold
 import app.daiyu.android.ui.screens.settings.*
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -68,7 +69,6 @@ internal fun VoiceSettingsPanel(
     var draft by remember { mutableStateOf(saved ?: VoiceConfiguration()) }
     var cloud by remember { mutableStateOf(preferences.cloudEnabled(profile, draft.engine != "SYSTEM")) }
     val draftBases = remember { mutableMapOf<VoiceProfile, VoiceConfiguration>() }
-    var asrAdvanced by rememberSaveable { mutableStateOf(false) }
     var conversationAsrDirty by remember { mutableStateOf(false) }
     var realtimeDirty by remember { mutableStateOf(false) }
     var realtimeCatalog by remember { mutableStateOf(realtimeSpeechVoices) }
@@ -251,8 +251,7 @@ internal fun VoiceSettingsPanel(
     }, modifier = Modifier.testTag("voice-settings")) { padding, scrollBehavior, sidePadding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
             .padding(horizontal = sidePadding).nestedScroll(scrollBehavior.nestedScrollConnection)) {
-            if (child == null) Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-                .clip(RoundedCornerShape(14.dp)).background(MiuixTheme.colorScheme.surfaceContainerHigh)) {
+            if (child == null) Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Row(Modifier.fillMaxWidth().testTag("voice-section-select").clickable {
                     if (current() && !busy) choosingSection = !choosingSection
                 }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -277,7 +276,7 @@ internal fun VoiceSettingsPanel(
             LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("page:语音设置"),
                 contentPadding = PaddingValues(bottom = 24.dp)) {
                 if (child == "ASR") {
-                    item { VoiceSettingsCard {
+                    item { SettingsCard(Modifier.testTag("voice-asr-method-card")) {
                         Row(Modifier.fillMaxWidth()) {
                             Box(Modifier.weight(1f)) { SettingsRadioRow("本机识别", draft.dictation != "DOUBAO", !busy) {
                                 if (current() && !busy) {
@@ -294,28 +293,21 @@ internal fun VoiceSettingsPanel(
                         }
                     } }
                     if (draft.dictation == "DOUBAO") {
-                        item { VoiceSettingsCard {
+                        item { SettingsCard(Modifier.testTag("voice-asr-account-card")) {
                             SettingsSectionTitle("连接豆包账户")
                             SettingsNote("识别音频会发送到豆包；与朗读、实时对话分别配置。")
-                            SettingsTextField("ASR API Key", draft.asrKey, { if (!busy) changeDraft(draft.copy(asrKey = it)) }, password = true, enabled = !busy)
-                            SettingsRow(if (asrAdvanced) "收起高级设置" else "高级：更换识别服务",
-                                showChevron = true, onClick = if (busy) null else ({ asrAdvanced = !asrAdvanced }))
-                            if (asrAdvanced) {
-                                SettingsNote("仅在控制台开通了不同服务时更改。")
-                                DoubaoAsrProtocol.resources.forEachIndexed { index, resource ->
-                                    SettingsRadioRow(listOf("识别 2.0 · 按时长", "识别 2.0 · 按并发", "识别 1.0 · 按时长", "识别 1.0 · 按并发")[index],
-                                        draft.asrResource == resource, !busy) {
-                                        if (current()) {
-                                            changeDraft(draft.copy(asrResource = resource))
-                                            save((saved ?: VoiceConfiguration()).copy(asrResource = resource))
-                                        }
-                                    }
-                                }
-                            }
-                            SettingsRow("保存连接设置", tag = "voice-save", showChevron = true, onClick = if (busy || draft.asrKey.isBlank()) null else ({
-                                if (current()) save(recognitionConfiguration().copy(asrKey = draft.asrKey.trim()))
-                            }))
-                            SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
+                            SettingsTextField("ASR API Key", draft.asrKey, { if (!busy) changeDraft(draft.copy(asrKey = it)) },
+                                password = true, enabled = !busy, compact = true)
+                            TextButton("保存连接设置", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                .fillMaxWidth().testTag("voice-save"),
+                                minHeight = 48.dp, cornerRadius = 24.dp,
+                                colors = ButtonDefaults.textButtonColorsPrimary(),
+                                enabled = !busy && draft.asrKey.isNotBlank(),
+                                onClick = { if (current()) save(recognitionConfiguration().copy(asrKey = draft.asrKey.trim())) })
+                            SettingsRow("高级：更换识别服务", tag = "voice-asr-advanced",
+                                showChevron = true, onClick = if (busy) null else ({ if (current()) dialog = "ASR_ADVANCED" }))
+                            SettingsRow("打开豆包控制台", tag = "voice-asr-console", showChevron = true,
+                                onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
                         } }
                     } else item { SettingsNote("无需账户。上一页下载语音包后，即可离线识别。") }
                 } else if (child == "MIMO") {
@@ -365,7 +357,7 @@ internal fun VoiceSettingsPanel(
                     }
                 } else when (section) {
                     "RECOGNITION" -> {
-                        item { VoiceSettingsCard {
+                        item { SettingsCard(Modifier.testTag("voice-recognition-input-card")) {
                             SettingsSwitchRow("启用语音转文字", inputEnabled, busy = busy, tag = "voice-input-enable",
                                 summary = "点击聊天输入框的语音按钮，把说话变成文字。") { switchFeature("input", it) { inputEnabled = it } }
                             SettingsRow("离线语音", tag = "voice-offline-settings", showChevron = true, onClick = if (busy) null else ({
@@ -373,7 +365,7 @@ internal fun VoiceSettingsPanel(
                             }))
                         } }
                         item { OfflineSpeechPackCard(context, ::current) }
-                        item { VoiceSettingsCard { SettingsRow("识别方式", tag = "voice-recognition-method",
+                        item { SettingsCard(Modifier.testTag("voice-recognition-method-card")) { SettingsRow("识别方式", tag = "voice-recognition-method",
                             summary = if (saved?.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
                             showChevron = true, onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "ASR" } })) } }
                         if (pack.ready && draft.dictation != "DOUBAO") item { VoiceSettingsCard { SettingsSwitchRow("离线听写", pack.enabled,
@@ -522,6 +514,20 @@ internal fun VoiceSettingsPanel(
                 accountVoices.filter { it.account == identity && it.tts && it.accepted }.forEach { add(it.id to it.name) }
             }
         }, onSelect = { if (current()) { dialog = null; save(draft.copy(voice = it), speechOnly = true) } }, onDismiss = { dialog = null })
+        "ASR_ADVANCED" -> ChatSelectionSheet("识别服务", onDismiss = { dialog = null },
+            subtitle = "仅在控制台开通了不同服务时更改。", titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("voice-asr-service-sheet")) {
+                DoubaoAsrProtocol.resources.forEachIndexed { index, resource ->
+                    SettingsRadioRow(listOf("识别 2.0 · 按时长", "识别 2.0 · 按并发", "识别 1.0 · 按时长", "识别 1.0 · 按并发")[index],
+                        draft.asrResource == resource, !busy) {
+                        if (current() && !busy) {
+                            changeDraft(draft.copy(asrResource = resource)); dialog = null
+                            save((saved ?: VoiceConfiguration()).copy(asrResource = resource))
+                        }
+                    }
+                }
+            }
+        }
         "ASR_RESOURCE" -> VoiceChoiceDialog("识别资源", DoubaoAsrProtocol.resources.map { it to it }, draft.asrResource,
             onSelect = { if (current()) { changeDraft(draft.copy(asrResource = it)); dialog = null; save((saved ?: VoiceConfiguration()).copy(asrResource = it)) } }, onDismiss = { dialog = null })
         "DUPLEX_VOICE" -> VoiceToneDialog("选择音色", draft.duplexVoice,

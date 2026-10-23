@@ -63,7 +63,7 @@ class ChatGlassBackdropActivityTest : WiredActivityTestCase() {
             val pixels = host.captureToImage().toPixelMap()
             val actual = pixels[(surface.center.x - bounds.left).toInt(), (surface.center.y - bounds.top).toInt()]
             val expected = (if (dark) Color(0xFF1F1C29).copy(alpha = .36f)
-                else Color(0xFFE8E3F0).copy(alpha = .60f)).compositeOver(background)
+                else Color(0xFFF1EFF5).copy(alpha = .32f)).compositeOver(background)
             assertEquals("composer red dark=$dark", expected.red, actual.red, .015f)
             assertEquals("composer green dark=$dark", expected.green, actual.green, .015f)
             assertEquals("composer blue dark=$dark", expected.blue, actual.blue, .015f)

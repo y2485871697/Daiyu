@@ -29,7 +29,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun ChatComposerSurface(backdrop: LayerBackdrop? = null, content: @Composable ColumnScope.() -> Unit) {
     val dark = MiuixTheme.colorScheme.background.luminance() < 0.3f
     val shape = RoundedCornerShape(22.dp)
-    val tint = if (dark) Color(0xFF1F1C29) else Color(0xFFE8E3F0)
+    val tint = if (dark) Color(0xFF1F1C29) else Color(0xFFF1EFF5)
     val blur = if (backdrop == null) Modifier else Modifier.textureBlur(
         backdrop = backdrop, shape = shape, blurRadius = 24f,
         colors = BlurColors(blendColors = emptyList(), saturation = 1.35f),
@@ -37,7 +37,7 @@ internal fun ChatComposerSurface(backdrop: LayerBackdrop? = null, content: @Comp
     Box(Modifier.fillMaxWidth()) {
         Box(Modifier.matchParentSize().clip(shape).pointerInput(Unit) {
             awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
-        }.then(blur).background(tint.copy(alpha = if (dark) .36f else .60f)))
+        }.then(blur).background(tint.copy(alpha = if (dark) .36f else .32f)))
         Column(Modifier.fillMaxWidth().testTag("chat-composer-surface").clip(shape), content = content)
     }
 }

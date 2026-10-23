@@ -133,15 +133,17 @@ internal fun Modifier.managedInput(): Modifier = composed {
     }
 }
 
-internal fun clearManagedInputFocus(view: View, clear: () -> Unit) {
-    val action = {
+internal fun clearManagedInputFocus(view: View, clear: () -> Unit): Boolean {
+    val action: () -> Unit = {
         val root = view.rootView
         root.isFocusableInTouchMode = true
         root.requestFocus()
         clear()
     }
     val host = view.inputWindow()?.let { InputWindows.windows[it] }
-    if (host != null) host.dismiss(view, action) else InputDismissal.run(action)
+    if (host != null) return host.dismiss(view, action)
+    InputDismissal.run(action)
+    return true
 }
 
 private class ComposeInputRegion {
@@ -325,7 +327,7 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         if (!entry.focused() || entry !in entries) return
         dismiss(entry.view, entry.clear)
     }
-    fun dismiss(view: View, clear: () -> Unit) {
+    fun dismiss(view: View, clear: () -> Unit): Boolean {
         val nativeBefore = window.currentFocus
         holdRestingFocus()
         clearing++
@@ -338,10 +340,11 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         inputTrace("cleared focused=${entries.count { it.focused() }} nativeSame=${window.currentFocus === nativeBefore}")
         // A focus listener may have explicitly moved editing to a different field/view.
         if (entries.any { it.focused() } ||
-            (window.currentFocus !== nativeBefore && window.currentFocus?.onCheckIsTextEditor() == true)) return
+            (window.currentFocus !== nativeBefore && window.currentFocus?.onCheckIsTextEditor() == true)) return false
         ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
         (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
             ?.hideSoftInputFromWindow(view.windowToken, 0)
+        return true
     }
     fun remove(entry: InputEntry) {
         entries.remove(entry)

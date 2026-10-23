@@ -41,7 +41,14 @@ class ImeFrameContractTest(unittest.TestCase):
         self.assertIn('before.headerBottom, shown.headerBottom, 2f', text)
         self.assertIn('before.composerBottom, restored.composerBottom, 2f', text)
         self.assertIn('assertEquals(database, fixture.database.exportBackup())', text)
-        self.assertNotIn('showSoftInput(', text)
+        before_transfer, transfer_and_rest = text.split(
+            '    fun testDismissDoesNotHideImeWhenBlurListenerTransfersToAnotherEditor()', 1)
+        transfer, after_transfer = transfer_and_rest.split(
+            '    fun testOutsideBlankAndTitleTapsReleaseDraftAndImeWithoutChangingDraft()', 1)
+        self.assertNotIn('showSoftInput(', before_transfer + after_transfer)
+        self.assertEqual(1, transfer.count('showSoftInput('))
+        self.assertLess(transfer.index('showSoftInput('), transfer.index('hideChatInputIme(focus, keyboard, first)'))
+        self.assertNotIn('showSoftInput(', transfer.split('hideChatInputIme(focus, keyboard, first)', 1)[1])
         pointer = text.split('repeat(2)', 1)[1].split('assertRealApi26ImeBinding()', 1)[0]
         self.assertIn('performTouchInput {', pointer)
         self.assertLess(pointer.index('advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)'),

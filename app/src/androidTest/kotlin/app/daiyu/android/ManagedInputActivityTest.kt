@@ -165,6 +165,9 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         realTap("managed-outside")
         awaitFieldFocus("managed-first", false)
         node("managed-first").assertIsNotFocused()
+        @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+        val inputView = (node("managed-first").fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+        mainThread { assertTrue("Dismissal must focus the non-editing window root", inputView.rootView.isFocused) }
         awaitFieldIme("managed-first", visible = false)
         node("managed-first").assertTextEquals(" 保留草稿😀 ")
         val selection = node("managed-first").fetchSemanticsNode().config[

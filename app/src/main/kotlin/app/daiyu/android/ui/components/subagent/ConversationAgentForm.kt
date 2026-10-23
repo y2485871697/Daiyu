@@ -3,16 +3,26 @@ package app.daiyu.android.ui.components.subagent
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.*
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.layout.appWindowSize
@@ -31,9 +41,9 @@ import top.yukonga.miuix.kmp.window.WindowDialog
         ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight)) {
             Column(Modifier.fillMaxWidth().testTag("subagent-config-window").padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
                 ConversationAgentHandle()
-                Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp, lineHeight = 26.sp), modifier = Modifier.weight(1f))
-                }
+                Text(title, style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp, lineHeight = 26.sp),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 40.dp))
                 content()
             }
         }
@@ -43,13 +53,32 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 @Composable internal fun ConversationAgentField(label: String, value: String, onValueChange: (String) -> Unit,
     enabled: Boolean, keyboardOptions: KeyboardOptions = KeyboardOptions.Default) {
     val colors = conversationAgentColors()
-    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-        Text(label, fontSize = 13.sp, lineHeight = 20.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
+    val density = LocalDensity.current
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    var labelSize by remember(label) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val halfLabelHeight = with(density) { if (labelSize.height == 0) 10.sp.toDp() else (labelSize.height / 2f).toDp() }
+    Box(Modifier.fillMaxWidth().padding(top = halfLabelHeight, bottom = 8.dp)) {
         BasicTextField(value, onValueChange, enabled = enabled, singleLine = true, keyboardOptions = keyboardOptions,
             textStyle = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = colors.text),
-            modifier = Modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp).background(colors.field, RoundedCornerShape(10.dp))
-                .border(1.dp, colors.line, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 12.dp),
-            cursorBrush = imeCursorBrush(androidx.compose.ui.graphics.Color.Black),
+            modifier = Modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp)
+                .drawBehind {
+                    val stroke = 1.dp.toPx()
+                    val notchWidth = labelSize.width + 8.dp.toPx()
+                    val notchStart = if (rtl) size.width - 8.dp.toPx() - notchWidth else 8.dp.toPx()
+                    // Exclude both fill and outline: the label reveals the sheet, not a white mask.
+                    clipRect(left = notchStart, top = -halfLabelHeight.toPx() - stroke,
+                        right = notchStart + notchWidth, bottom = halfLabelHeight.toPx(), clipOp = ClipOp.Difference) {
+                        drawRoundRect(colors.field, cornerRadius = CornerRadius(10.dp.toPx()))
+                        drawRoundRect(colors.line, topLeft = Offset(stroke / 2, stroke / 2),
+                            size = Size(size.width - stroke, size.height - stroke),
+                            cornerRadius = CornerRadius(10.dp.toPx()), style = Stroke(stroke))
+                    }
+                }.padding(horizontal = 12.dp, vertical = 10.dp),
+            cursorBrush = imeCursorBrush(colors.accent),
         )
+        Text(label, fontSize = 13.sp, lineHeight = 20.sp, color = colors.text,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 12.dp).offset(y = -halfLabelHeight)
+                .onSizeChanged { labelSize = it })
     }
 }

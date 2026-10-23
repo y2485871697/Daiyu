@@ -42,12 +42,49 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertNotIn('onAuthorizeSavedModel', dialog)
         self.assertNotIn('subagent-authorize-', dialog)
 
-    def test_role_and_tier_use_neutral_fields_not_thinking_fill(self):
+    def test_new_form_rows_are_compact_and_use_the_model_icon_accent(self):
         row = (UI / 'SubAgentSettingRow.kt').read_text()
-        self.assertIn('if (thinking) colors.soft else colors.field', row)
-        self.assertIn('.heightIn(min = 48.dp)', row)
-        self.assertIn('fontSize = 14.sp, lineHeight = 22.sp', row)
-        self.assertIn('if (divider) HorizontalDivider', row)
+        chat, legacy = row.split('        return\n    }', 1)
+        self.assertIn('.heightIn(min = 48.dp)', chat)
+        self.assertIn('Icon(icon, null, Modifier.size(20.dp), tint = colors.accent)', chat)
+        self.assertIn('Text(label, Modifier.widthIn(min = 72.dp, max = 100.dp)', chat)
+        self.assertIn('Column(Modifier.weight(1f), horizontalAlignment = Alignment.End)', chat)
+        self.assertIn('textAlign = TextAlign.End', chat)
+        self.assertIn('Icons.AutoMirrored.Rounded.KeyboardArrowRight', chat)
+        self.assertIn('if (label != "模型" && !badge.isNullOrBlank()) Text(badge', chat)
+        self.assertIn('badge: String? = null', row)
+        self.assertIn('if (!badge.isNullOrBlank()) Surface', legacy)
+        self.assertIn('trailing?.invoke()', chat)
+        self.assertIn('enabled = enabled, role = Role.Button, onClick = onClick, onLongClick = onLongClick', chat)
+        self.assertIn('indication = null', chat)
+        self.assertIn('if (divider) HorizontalDivider', chat)
+        for removed in ('background(', '.border(', 'daiyuIconColor(', 'val thinking', 'if (!speed)'):
+            self.assertNotIn(removed, chat)
+        self.assertIn('daiyuIconColor(icon)', legacy)
+
+    def test_new_form_keeps_sheet_centered_title_and_transparent_floating_labels(self):
+        form = (UI / 'subagent/ConversationAgentForm.kt').read_text()
+        self.assertIn('ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight))', form)
+        self.assertIn('ConversationAgentHandle()', form)
+        self.assertIn('textAlign = TextAlign.Center', form)
+        field = form.split('@Composable internal fun ConversationAgentField', 1)[1]
+        self.assertIn('Box(Modifier.fillMaxWidth().padding(top = halfLabelHeight, bottom = 8.dp))', field)
+        self.assertIn('.offset(y = -halfLabelHeight)', field)
+        self.assertIn('.onSizeChanged { labelSize = it }', field)
+        self.assertIn('clipOp = ClipOp.Difference', field)
+        self.assertIn('LocalLayoutDirection.current == LayoutDirection.Rtl', field)
+        self.assertIn('cursorBrush = imeCursorBrush(colors.accent)', field)
+        self.assertIn('enabled = enabled, singleLine = true, keyboardOptions = keyboardOptions', field)
+        self.assertNotIn('.background(', field)
+        self.assertNotIn('Color.White', field)
+        shared = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
+        self.assertIn('ConversationAgentSwitch(draft.enabled, usable)', shared)
+        for label in ('模型', 'GPT 速度', '职责', '任务分工', '思考深度', '默认分辨率'):
+            self.assertIn(f'SubAgentSettingRow("{label}"', shared)
+        self.assertIn('choices = "role"', shared)
+        self.assertIn('choices = "tier"', shared)
+        self.assertIn('if (canEditSpeed)', shared)
+        self.assertIn('if (draft.supportsTaskTier)', shared)
 
     def test_form_and_footer_use_available_space_not_fixed_footer_budget(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
@@ -58,7 +95,9 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('defaultMinSize(minHeight = 48.dp)', style)
         self.assertIn('Box(Modifier.size(48.dp).then', style)
         field = (UI / 'subagent/ConversationAgentForm.kt').read_text()
-        self.assertIn('.heightIn(min = 48.dp).background(colors.field', field)
+        self.assertIn('.heightIn(min = 48.dp)', field)
+        self.assertIn('drawRoundRect(colors.field', field)
+        self.assertIn('clipOp = ClipOp.Difference', field)
 
     def test_chat_speed_is_a_compact_tag_without_shrinking_settings_controls(self):
         speed = (UI / 'SubAgentGptSpeedButton.kt').read_text()

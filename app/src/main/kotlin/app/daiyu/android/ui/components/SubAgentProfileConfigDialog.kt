@@ -142,7 +142,9 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     val interact: (() -> Unit) -> Unit = { action -> if (session.canCommit(latestEditor, latestEnabled) && !session.submitting) { action() } }
     val dismiss = { session.dismiss(); latestDismiss() }
     val userDismiss = { if (!session.submitting) dismiss() }
-    CompositionLocalProvider(LocalRippleConfiguration provides null) {
+    // Settings and conversation drafts share the same sheet, compact form and themed controls.
+    // Keep the style scope around child pickers too; changing only the window leaves old dialogs behind.
+    CompositionLocalProvider(LocalRippleConfiguration provides null, LocalConversationAgentStyle provides true) {
         WithoutPressRipple {
             SubAgentConfigurationWindow(title = if (session.expectedProfile == null) "添加子代理" else "子代理配置", onDismiss = userDismiss) {
                 Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 520.dp).testTag("subagent-config-body").verticalScroll(rememberScrollState())) {

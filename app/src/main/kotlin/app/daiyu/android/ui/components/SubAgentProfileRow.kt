@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -139,8 +140,18 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                         app.daiyu.android.ui.icons.ModelBrandIcon(config?.model.orEmpty(), Modifier.size(20.dp),
                             displayName = config?.modelDisplayName.orEmpty(), tint = colors.accent)
                         Text(config?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (profile.modelId.isBlank()) "无" else "模型不可用",
-                            Modifier.weight(1f), fontSize = 14.sp, color = if (config == null) colors.muted else colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Rounded.ExpandMore, null, Modifier.size(20.dp), tint = colors.accent)
+                            Modifier.weight(1f).testTag("subagent-model-name-${profile.id}"), fontSize = 14.sp,
+                            color = if (config == null) colors.muted else colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        config?.providerName?.takeIf { it.isNotBlank() }?.let { providerName ->
+                            Text(providerName, Modifier.widthIn(max = 96.dp)
+                                .testTag("subagent-model-provider-${profile.id}")
+                                .background(colors.soft, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontSize = 11.sp, lineHeight = 16.sp, color = colors.accent,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Icon(Icons.Rounded.ExpandMore, null,
+                            Modifier.size(20.dp).testTag("subagent-model-arrow-${profile.id}"), tint = colors.accent)
                     }
                     if (showGptSpeed) {
                         HorizontalDivider(Modifier.testTag("subagent-gpt-divider-${profile.id}"), color = colors.line)

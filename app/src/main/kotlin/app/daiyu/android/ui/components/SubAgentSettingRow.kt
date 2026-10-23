@@ -1,8 +1,8 @@
 package app.daiyu.android.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,30 +32,28 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
     onLongClick: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier, divider: Boolean = false) {
     if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
         val colors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
-        val model = label == "模型"
-        val speed = label == "GPT 速度"
-        val thinking = label == "思考深度"
-        val plain = model || speed
-        Column(modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-            if (!speed) Text(label, fontSize = 13.sp, lineHeight = 20.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
-            Row(Modifier.fillMaxWidth().semantics { contentDescription = description }
-                .heightIn(min = 48.dp)
-                .then(if (plain) Modifier else Modifier.background(if (thinking) colors.soft else colors.field, RoundedCornerShape(10.dp)).border(1.dp, colors.line, RoundedCornerShape(10.dp)))
+        Column(modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .semantics { contentDescription = description }
+                .alpha(if (enabled) 1f else .4f)
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     enabled = enabled, role = Role.Button, onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = if (plain) 0.dp else 10.dp, vertical = if (model || thinking) 7.dp else if (speed) 10.dp else 9.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                if (model || label == "思考深度") Icon(icon, null, Modifier.size(20.dp), tint = colors.accent)
-                if (speed) Text(label, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 22.sp, color = colors.text)
-                Text(value, if (speed) Modifier else Modifier.weight(1f),
-                    fontSize = 14.sp, lineHeight = 22.sp,
-                    color = (if (speed || thinking) colors.accent else colors.text).copy(alpha = if (enabled) 1f else .4f),
-                    maxLines = if (model || thinking || speed) 1 else 2, overflow = TextOverflow.Ellipsis)
+                .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Match the new model-name icon tint, not the legacy per-glyph palette.
+                Icon(icon, null, Modifier.size(20.dp), tint = colors.accent)
+                Text(label, Modifier.widthIn(min = 72.dp, max = 100.dp),
+                    fontSize = 14.sp, lineHeight = 22.sp, color = colors.text)
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                    Text(value, fontSize = 14.sp, lineHeight = 22.sp, color = colors.text,
+                        textAlign = TextAlign.End, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (label != "模型" && !badge.isNullOrBlank()) Text(badge, fontSize = 11.sp, lineHeight = 16.sp,
+                        color = colors.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 trailing?.invoke()
-                Icon(Icons.Rounded.ExpandMore, null, Modifier.size(18.dp), tint = colors.muted)
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, Modifier.size(18.dp), tint = colors.accent)
             }
             if (divider) HorizontalDivider(color = colors.line)
-            if (!badge.isNullOrBlank()) Text(badge, fontSize = 12.sp, lineHeight = 18.sp, color = colors.muted, modifier = Modifier.padding(top = 4.dp))
         }
         return
     }

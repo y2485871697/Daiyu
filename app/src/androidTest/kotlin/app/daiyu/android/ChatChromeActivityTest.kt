@@ -404,8 +404,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 assertGraphic(label, iconDp)
                 val avatar = ui.onNodeWithTag("chat-assistant-avatar", useUnmergedTree = true)
                     .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-                assertEquals(18f, avatar.width / density, .75f)
-                assertEquals(18f, avatar.height / density, .75f)
+                assertEquals(19f, avatar.width / density, .75f)
+                assertEquals(19f, avatar.height / density, .75f)
                 val assistantSlot = node("chat-assistant").assertIsDisplayed()
                     .assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp)
                     .fetchSemanticsNode().boundsInRoot

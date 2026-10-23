@@ -47,7 +47,7 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertIn('Modifier.size(32.dp).testTag("chat-reasoning")', thought)
         self.assertIn('iconSize = 24.dp', thought)
         self.assertIn('actions.onOpenReasoning', thought)
-        self.assertIn('AssistantAvatar(assistant, 18.dp,', assistant)
+        self.assertIn('AssistantAvatar(assistant, 19.dp,', assistant)
         self.assertIn('onClick = actions.onOpenAssistant', assistant)
 
     def test_balance_moves_left_by_layout_spacing_not_a_visual_offset(self):

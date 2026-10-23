@@ -4,6 +4,9 @@ import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -36,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,7 +49,10 @@ import app.daiyu.android.ui.components.*
 import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.haptics.combinedClickable
 import app.daiyu.android.ui.icons.DaiyuIcons
-import top.yukonga.miuix.kmp.window.WindowDialog
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewDialog
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
+import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 
 @Composable
 fun TerminalScreen(
@@ -235,15 +243,17 @@ private fun TerminalBlock(block: TerminalCommandBlock, onReinput: (String) -> Un
             color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
     }
-    if (menu) WindowDialog(show = true, title = "", onDismissRequest = { menu = false }) {
-        Column {
-            TerminalAction("复制命令", "terminal-copy-command", true, Modifier.fillMaxWidth()) {
+    if (menu) ChatSelectionSheet(title = "命令操作", onDismiss = { menu = false }) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AssistantPreviewButton("复制命令", {
                 clipboard.setText(AnnotatedString(block.command)); menu = false
-            }
-            TerminalAction("复制输出", "terminal-copy-output", block.output.isNotEmpty(), Modifier.fillMaxWidth()) {
+            }, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("terminal-copy-command"))
+            AssistantPreviewButton("复制输出", {
                 clipboard.setText(AnnotatedString(terminalPlainOutput(block.output))); menu = false
-            }
-            TerminalAction("重新填入", "terminal-reinput", true, Modifier.fillMaxWidth()) { onReinput(block.command); menu = false }
+            }, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("terminal-copy-output"), enabled = block.output.isNotEmpty())
+            AssistantPreviewButton("重新填入", { onReinput(block.command); menu = false },
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("terminal-reinput"))
         }
     }
 }
@@ -251,36 +261,47 @@ private fun TerminalBlock(block: TerminalCommandBlock, onReinput: (String) -> Un
 @Composable
 private fun TerminalSessionsDialog(entries: List<TerminalSessionEntry>, active: String?, canCreate: Boolean,
     onDismiss: () -> Unit, onSelect: (String) -> Unit, onRestart: (String) -> Unit, onClose: (String) -> Unit, onNew: () -> Unit) {
-    WindowDialog(show = true, title = "会话", onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().testTag("terminal-sessions-dialog")) {
-            if (entries.isEmpty()) Text("暂无会话", Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            else LazyColumn(Modifier.heightIn(max = 360.dp)) {
+    val colors = assistantPreviewPalette()
+    AssistantPreviewDialog(show = true, title = "会话", onDismiss = onDismiss, footer = {
+        AssistantPreviewButton("新建会话", onNew,
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("terminal-create-session"), primary = true, enabled = canCreate)
+    }) {
+        Column(Modifier.fillMaxWidth().weight(1f).testTag("terminal-sessions-dialog")) {
+            if (entries.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无会话", color = colors.muted, fontSize = 14.sp, lineHeight = 22.sp)
+            }
+            else LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("terminal-session-list"),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(entries, key = { it.id }) { entry ->
                     Column(Modifier.fillMaxWidth().testTag("terminal-session:${entry.id}")
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(if (entry.id == active) colors.fieldBackground else colors.soft)
+                        .border(1.dp, colors.line, RoundedCornerShape(13.dp))
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                            role = Role.Button, onClick = { onSelect(entry.id) }).padding(vertical = 6.dp)) {
+                            role = Role.Button, onClick = { onSelect(entry.id) }).padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(entry.label, style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (entry.id == active) FontWeight.SemiBold else null,
-                                color = if (entry.id == active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                            if (entry.id == active) Text("当前", Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary)
+                            Text(entry.label, Modifier.weight(1f), fontSize = 15.sp, lineHeight = 22.sp,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                fontWeight = if (entry.id == active) FontWeight.SemiBold else null, color = colors.text)
+                            if (entry.id == active) Text("当前", Modifier.padding(start = 8.dp),
+                                fontSize = 12.sp, lineHeight = 18.sp, color = colors.accent)
                         }
                         if (entry.simple && entry.cwd.isNotEmpty()) Text(entry.cwd, fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall,
+                            color = colors.muted, fontSize = 12.sp, lineHeight = 18.sp,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(when { !entry.state.ownsResources -> "已退出"; entry.running -> "运行中"; else -> "空闲" },
-                                Modifier.weight(1f), color = if (entry.running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelSmall)
-                            TerminalAction("重启", "terminal-restart:${entry.id}", !entry.restarting) { onRestart(entry.id) }
-                            TerminalAction("关闭", "terminal-close:${entry.id}", true, destructive = true) { onClose(entry.id) }
+                                Modifier.weight(1f), color = if (entry.running) colors.accent else colors.muted,
+                                fontSize = 12.sp, lineHeight = 18.sp)
+                            AssistantPreviewButton("重启", { onRestart(entry.id) },
+                                Modifier.heightIn(min = 48.dp).testTag("terminal-restart:${entry.id}"), enabled = !entry.restarting)
+                            AssistantPreviewButton("关闭", { onClose(entry.id) },
+                                Modifier.heightIn(min = 48.dp).testTag("terminal-close:${entry.id}"), danger = true)
                         }
                     }
                 }
             }
-            TerminalAction("新建会话", "terminal-create-session", canCreate, Modifier.fillMaxWidth().padding(top = 4.dp), onClick = onNew)
         }
     }
 }

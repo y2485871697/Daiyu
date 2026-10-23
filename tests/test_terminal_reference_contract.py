@@ -25,7 +25,8 @@ class TerminalReferenceContractTest(unittest.TestCase):
         self.assertIn('onSelect = { onSelectSession(it); sessions = false }', screen)
         self.assertIn('onNew = { onCreateSession(); sessions = false }', screen)
         self.assertIn('onRestart = onRestart, onClose = onClose', screen)
-        self.assertIn('heightIn(max = 360.dp)', screen)
+        self.assertIn('testTag("terminal-session-list")', screen)
+        self.assertIn('AssistantPreviewDialog(show = true, title = "会话"', screen)
 
     def test_console_keeps_hidden_input_and_shortcuts(self):
         console = source('ui/screens/terminal/TerminalConsole.kt')
@@ -41,7 +42,8 @@ class TerminalReferenceContractTest(unittest.TestCase):
         dialog = source('ui/screens/terminal/TerminalTasksDialog.kt')
         self.assertIn('mutableStateMapOf<String, String>()', dialog)
         self.assertIn('itemsIndexed(rows, key = { _, row -> row.id })', dialog)
-        self.assertIn('heightIn(max = 360.dp)', dialog)
+        self.assertIn('testTag("terminal-task-list")', dialog)
+        self.assertIn('AssistantPreviewDialog(show = true, title = "后台任务"', dialog)
         self.assertIn('heightIn(max = 160.dp)', dialog)
         self.assertNotIn('terminal-tasks-refresh', dialog)
         self.assertNotIn('terminal-tasks-next', dialog)

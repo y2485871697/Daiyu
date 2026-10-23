@@ -29,11 +29,19 @@ class R48BatchContract(unittest.TestCase):
 
     def test_compact_fill_is_system_bar_safe_and_projects_each_background_row(self):
         source = (TEST / 'ProviderSettingsLayoutActivityTest.kt').read_text()
-        source = source.split('fun testCompactProviderActions', 1)[1].split('fun testConfirmedFooter', 1)[0]
-        self.assertIn('Box(Modifier.fillMaxSize().systemBarsPadding())', source)
-        self.assertIn('(0 until pixels.width).any { x -> sameColor(pixels[x, y]) }', source)
-        for token in ['40f * density', '48.dp', '4f * density', '44f * density',
-                      'paintedRows.last() - paintedRows.first() + 1', 'clicks.all { it == 2 }']:
+        source = source.split('fun testProviderActionsHaveFullHeightAccentFillAndScalableLabels()', 1)[1].split('fun testConfirmedFooter', 1)[0]
+        for token in ['Box(Modifier.fillMaxSize().systemBarsPadding())',
+                      '(0 until pixels.width).any { x -> sameColor(pixels[x, y]) }',
+                      'bounds.height, paintedRows.size.toFloat(), 2f', '.assertHeightIsAtLeast(48.dp)',
+                      'paintedRows.last() - paintedRows.first() + 1',
+                      '"no transparent top inset"', '"no transparent bottom inset"',
+                      'touch.top + 2f * density', 'touch.bottom - 2f * density',
+                      '"top tap is inside fill"', '"bottom tap is inside fill"',
+                      'button.performTouchInput { click() }',
+                      'host.performTouchInput { click(topPoint - hostBounds.topLeft) }',
+                      'host.performTouchInput { click(bottomPoint - hostBounds.topLeft) }',
+                      'assertEquals(3, clicks[index])', 'clicks.all { it == 3 }',
+                      'val button = node("provider-action:$index").assertIsNotEnabled()']:
             self.assertIn(token, source)
 
     def test_sheet_precondition_finishes_before_opening_and_clock_freeze(self):

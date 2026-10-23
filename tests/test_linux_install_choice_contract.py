@@ -65,7 +65,12 @@ class LinuxInstallChoiceContract(unittest.TestCase):
     def test_linux_scoped_theme_matches_actual_switch_and_covers_dialogs(self):
         theme = (SETTINGS / 'LinuxSettingsTheme.kt').read_text()
         switch = (SOURCE / 'ui/components/subagent/ConversationAgentStyle.kt').read_text()
-        self.assertIn('Color(0xff82728f)', switch)
+        palette = (SOURCE / 'ui/app/DaiyuPalette.kt').read_text()
+        self.assertIn('val switchTrack = Color(0xFF82728F)', palette)
+        self.assertIn('import app.daiyu.android.ui.app.DaiyuPalette', switch)
+        actual_switch = switch.split('@Composable internal fun ConversationAgentSwitch(', 1)[1].split('@Composable internal fun ConversationAgentButton(', 1)[0]
+        self.assertIn('.background(if (checked) DaiyuPalette.switchTrack else Color(0x28b4aabb))', actual_switch)
+        self.assertIn('.border(1.dp, if (checked) DaiyuPalette.switchTrack else colors.line, shape)', actual_switch)
         self.assertIn('val primary = Color(0xff82728f)', theme)
         for token in ['val onPrimary = Color.White', 'MiuixTheme(colors = MiuixTheme.colorScheme.copy(',
                       'MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(',

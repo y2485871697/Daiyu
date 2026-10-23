@@ -4,6 +4,13 @@ import android.os.Build
 import androidx.activity.BackEventCompat
 import androidx.activity.ExperimentalActivityApi
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -32,9 +39,12 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var nested by mutableStateOf(false)
     private var backCount = 0
     private var nestedCount = 0
+    private var rowClicks = 0
+    private var sliderValue by mutableStateOf(0.2f)
+    private var inputText by mutableStateOf("a text field with selectable content")
     private lateinit var horizontal: ScrollState
 
-    private fun mount(horizontalChild: Boolean = false) {
+    private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -45,7 +55,21 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                             nestedCount++
                             nested = false
                         }
-                        if (horizontalChild) {
+                        if (clickableRows) {
+                            LazyColumn(Modifier.fillMaxSize().testTag("clickable-list")) {
+                                items((0 until 24).toList()) { index ->
+                                    Box(Modifier.fillMaxWidth().height(64.dp).testTag("clickable-row:$index")
+                                        .clickable { rowClicks++ }.padding(16.dp)) { Text("设置行 $index") }
+                                }
+                            }
+                        } else if (sliderChild) {
+                            app.daiyu.android.ui.haptics.material.Slider(value = sliderValue,
+                                onValueChange = { sliderValue = it },
+                                modifier = Modifier.width(320.dp).testTag("gesture-slider"))
+                        } else if (textChild) {
+                            BasicTextField(value = inputText, onValueChange = { inputText = it },
+                                modifier = Modifier.width(320.dp).height(120.dp).testTag("gesture-text"))
+                        } else if (horizontalChild) {
                             horizontal = rememberScrollState(100)
                             Box(Modifier.width(320.dp).height(120.dp).testTag("horizontal-child")
                                 .horizontalScroll(horizontal)) {
@@ -84,15 +108,99 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testShortAndNonEdgeSwipesDoNotNavigateAndRestoreThePage() {
+    fun testShortAndReverseSwipesDoNotNavigateAndRestoreThePage() {
         mount()
         val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
         swipeBack(endFraction = 0.12f)
-        swipeBack(startFraction = 0.40f)
+        swipeBack(startFraction = 0.80f, endFraction = 0.20f)
         assertEquals(0, backCount)
         val restored = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
         assertTrue(abs(initial.left - restored.left) <= 1f)
         assertTrue(abs(initial.width - restored.width) <= 1f)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testMiddleOfPageSwipeNavigatesWithPredictionDisabled() {
+        predictive = false
+        mount()
+        swipeBack(startFraction = 0.40f, endFraction = 0.95f)
+        assertEquals(1, backCount)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testClickableSettingRowYieldsItsPressToPageSwipeWithoutFiringClick() {
+        mount(clickableRows = true)
+        ui.onNodeWithTag("clickable-row:2").performTouchInput {
+            swipe(Offset(width * 0.40f, height / 2f), Offset(width * 0.95f, height / 2f), 400)
+        }
+        ui.waitForIdle()
+        assertEquals(1, backCount)
+        assertEquals(0, rowClicks)
+        ui.onNodeWithTag("clickable-row:3").performClick()
+        assertEquals(1, rowClicks)
+        assertEquals(1, backCount)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testVerticalSettingListScrollStaysWithTheList() {
+        mount(clickableRows = true)
+        ui.onNodeWithTag("clickable-list").performTouchInput { swipeUp() }
+        ui.waitForIdle()
+        assertEquals(0, backCount)
+        assertEquals(0, rowClicks)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSliderMovementStaysWithTheControl() {
+        mount(sliderChild = true)
+        ui.onNodeWithTag("gesture-slider").performTouchInput {
+            swipe(Offset(width * 0.20f, height / 2f), Offset(width * 0.90f, height / 2f), 400)
+        }
+        ui.waitForIdle()
+        assertTrue(sliderValue > 0.2f)
+        assertEquals(0, backCount)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testLongPressTextSelectionDoesNotBecomePageBack() {
+        mount(textChild = true)
+        ui.onNodeWithTag("gesture-text").performTouchInput {
+            down(Offset(width * 0.15f, height * 0.25f))
+            advanceEventTime(700)
+            moveTo(Offset(width * 0.90f, height * 0.25f), 200)
+            up()
+        }
+        ui.waitForIdle()
+        assertEquals("a text field with selectable content", inputText)
+        assertEquals(0, backCount)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPointerCancellationBeyondThresholdDoesNotNavigate() {
+        mount()
+        val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+        ui.onNodeWithTag("page-back-surface").performTouchInput {
+            down(Offset(width * 0.35f, height * 0.6f))
+            moveTo(Offset(width * 0.80f, height * 0.6f), 200)
+            cancel()
+        }
+        ui.waitForIdle()
+        val restored = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+        assertTrue(abs(initial.left - restored.left) <= 1f)
+        assertEquals(0, backCount)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDisablingSwipeCancelsAnInFlightDrag() {
+        mount()
+        ui.onNodeWithTag("page-back-surface").performTouchInput {
+            down(Offset(width * 0.35f, height * 0.6f))
+            moveTo(Offset(width * 0.80f, height * 0.6f), 200)
+        }
+        mainThread { swipe = false }
+        ui.onNodeWithTag("page-back-surface").performTouchInput { up() }
+        ui.waitForIdle()
+        assertEquals(0, backCount)
         assertEquals(0, fixture.opens.get())
     }
 

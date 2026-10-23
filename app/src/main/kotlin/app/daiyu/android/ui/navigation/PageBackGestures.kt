@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -125,36 +126,46 @@ internal fun PageBackGestureHost(
     CompositionLocalProvider(LocalPageBackGesture provides state) {
         Box(modifier.fillMaxSize().background(background).then(
             if (canNavigateBack && swipeDismissEnabled && resumed && !imeVisible) Modifier.pointerInput(state, layoutDirection) {
-                val edgeWidth = 32.dp.toPx()
                 val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val gestureWidth = size.width
                     val threshold = maxOf(72.dp.toPx(), gestureWidth * 0.30f)
-                    val fromEdge = if (direction > 0f) down.position.x else gestureWidth - down.position.x
-                    if (fromEdge > edgeWidth || down.isConsumed || state.active) return@awaitEachGesture
+                    if (state.active) return@awaitEachGesture
                     val owner = Any()
                     var claimed = false
-                    var distance = 0f
+                    var consumedMovement = false
                     try {
                         while (true) {
-                            // Main travels from children to parents: consumed control gestures stay with the child.
-                            val event = awaitPointerEvent(PointerEventPass.Main)
-                            if (event.changes.size != 1) break
+                            // Let children arbitrate first; after claiming, consume before their Main pass.
+                            val event = awaitPointerEvent(if (claimed) PointerEventPass.Initial else PointerEventPass.Final)
+                            if (event.changes.size != 1 || !state.alive || (state.active && state.predictive)) break
                             val change = event.changes.single()
-                            if (change.id != down.id || change.isConsumed) break
+                            if (change.id != down.id) break
                             val dx = (change.position.x - down.position.x) * direction
                             val dy = abs(change.position.y - down.position.y)
                             if (!change.pressed) {
-                                if (claimed && distance >= threshold && state.alive) currentBack()
+                                if (claimed && change.changedToUp()) {
+                                    change.consume()
+                                    if (dx >= threshold && state.alive) currentBack()
+                                }
                                 break
                             }
                             if (!claimed) {
+                                if (change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) break
+                                if (change.position == change.previousPosition) continue
+                                // A clickable may consume one move while cancelling its press, not a drag.
+                                if (change.isConsumed) {
+                                    if (consumedMovement) break
+                                    consumedMovement = true
+                                    continue
+                                }
+                                consumedMovement = false
                                 if (dy > viewConfiguration.touchSlop || dx < -viewConfiguration.touchSlop) break
                                 if (dx <= viewConfiguration.touchSlop || dx <= dy * 1.5f) continue
                                 claimed = true
                             }
-                            distance = dx.coerceAtLeast(0f)
+                            val distance = dx.coerceAtLeast(0f)
                             state.update(owner, distance / gestureWidth, predictive = false, direction = direction)
                             change.consume()
                         }

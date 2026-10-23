@@ -241,7 +241,11 @@ print(current[0])
 PYWEBVIEW
 )
 adb_stage webview-package 15 shell cmd package list packages -f "$provider" | tr -d '\r' > smoke/webview-package.txt
-awk -F= -v package="$provider" '$0 ~ /^package:\/[^[:space:]=]+\.apk=/ && $NF == package { found=1 } END { exit !found }' smoke/webview-package.txt
+awk -F= -v package="$provider" '
+  { path=$0; sub(/=[^=]*$/, "", path) }
+  path ~ /^package:\/[^[:space:]]+\.apk$/ && $NF == package { found=1 }
+  END { exit !found }
+' smoke/webview-package.txt
 adb_stage logcat-restored 20 logcat -d -b all > smoke/logcat-before.txt
 if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat-before.txt; then exit 1; fi
 adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt

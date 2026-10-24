@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.getOrNull
@@ -84,17 +85,23 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         val target = interaction.fetchSemanticsNode()
         val view = (target.root as androidx.compose.ui.platform.ViewRootForTest).view
         val token = view.windowToken
-        return awaitStableWindowFrame(view) {
+        val stable = awaitStableWindowFrame(view) {
+            val coordinates = target.layoutInfo.coordinates
             if (view.windowToken != token || !target.layoutInfo.isPlaced ||
-                !target.layoutInfo.coordinates.isAttached) null else {
-                val origin = IntArray(2)
-                view.getLocationOnScreen(origin)
-                val bounds = target.boundsInRoot.translate(
-                    androidx.compose.ui.geometry.Offset(origin[0].toFloat(), origin[1].toFloat()))
+                !coordinates.isAttached) null else {
+                val screen = IntArray(2)
+                val window = IntArray(2)
+                view.getLocationOnScreen(screen)
+                view.getLocationInWindow(window)
+                val bounds = coordinates.boundsInWindow().translate(
+                    androidx.compose.ui.geometry.Offset((screen[0] - window[0]).toFloat(),
+                        (screen[1] - window[1]).toFloat()))
                 bounds.takeIf { it.width > 0f && it.height > 0f &&
                     listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() } }
             }
         }
+        android.util.Log.d("ManagedInputTest", "screen-bounds tag=$tag bounds=$stable token=$token")
+        return stable
     }
 
     private fun injectGesture(points: List<Pair<Long, androidx.compose.ui.geometry.Offset>>) {
@@ -140,9 +147,15 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     }
 
     private fun awaitFieldFocus(tag: String, focused: Boolean) {
-        ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false)
-                .singleOrNull()?.config?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Focused) == focused
+        var observed: Boolean? = null
+        try {
+            ui.waitUntil(5_000) {
+                observed = ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false)
+                    .singleOrNull()?.config?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Focused)
+                observed == focused
+            }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("Field focus did not settle: tag=$tag expected=$focused observed=$observed", timeout)
         }
     }
 

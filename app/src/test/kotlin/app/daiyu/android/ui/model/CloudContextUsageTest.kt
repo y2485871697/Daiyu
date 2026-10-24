@@ -40,7 +40,7 @@ class CloudContextUsageTest {
         assertEquals(1f, value.fraction!!, 0f)
         assertEquals("120.0% 上下文", value.label(Locale.US))
         assertNull(acceptedContextInput(ModelEvent.Usage(130_001, 0), 100_000))
-        assertNull(acceptedContextInput(ModelEvent.Usage(90, 0, 91), 100))
+        assertThrows(IllegalArgumentException::class.java) { ModelEvent.Usage(90, 0, 91) }
         assertNull(acceptedContextInput(ModelEvent.Usage(120, 0, 101), 100))
         assertEquals(130L, acceptedContextInput(ModelEvent.Usage(130, 0), 100))
     }

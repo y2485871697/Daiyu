@@ -1617,6 +1617,18 @@ class ChatController internal constructor(private val application:Application,
             synchronized(this) {rememberQuestions(history)}
             false
         } catch (_:Exception) {true}
+        if (!failed) {
+            try {
+                preferences.getString("selected", null)?.let { selected ->
+                    val messages = database.messages(ConversationId(selected)).map { it.second }
+                    app.daiyu.android.ui.screens.chat.conversation.prepareRestoredMarkdown(messages) {
+                        if (synchronized(this) { closed }) throw kotlinx.coroutines.CancellationException("Controller closed")
+                    }
+                }
+            } catch (_: Exception) {
+                // Optional formatting must not turn intact history into a recovery failure.
+            }
+        }
         synchronized(this) {
             if(!closed) {
                 recoveryFailed=failed

@@ -78,6 +78,29 @@ class MarkdownProjectionTest {
         } finally { release.countDown(); old.cancelAndJoin() }
     }
 
+    @Test fun shortColdProjectionCompletesWhileUnrelatedBulkParseIsBlocked() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val bulk = "x".repeat(INTERACTIVE_MARKDOWN_CHARS.toInt() + 1)
+        val source = "Cold **answer**."
+        val parser = { text: String ->
+            if (text == bulk) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            MarkdownParser.parse(text)
+        }
+        val cache = MarkdownProjectionCache()
+        val old = async(start = CoroutineStart.UNDISPATCHED) { projectMarkdown(listOf(bulk), parser, cache) }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val latest = kotlinx.coroutines.withTimeout(2_000) { projectMarkdown(listOf(source), parser, cache) }
+            assertEquals(1L, release.count)
+            assertEquals(listOf(source), latest.sources)
+            assertEquals(MarkdownParser.parse(source), latest.blocks[source])
+        } finally { release.countDown(); old.cancelAndJoin() }
+    }
+
     @Test fun emptyMixedBodyDoesNotInvokeParser() = runBlocking {
         val result = projectMarkdown(emptyList(), parser = { error("no text") })
         assertTrue(result.blocks.isEmpty())

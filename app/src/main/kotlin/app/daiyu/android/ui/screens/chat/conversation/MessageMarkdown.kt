@@ -82,7 +82,9 @@ internal val LocalMarkdownParser = staticCompositionLocalOf<(String) -> List<Mar
 internal fun rememberMarkdownProjection(sources: List<String>): MarkdownProjection? {
     val parser = LocalMarkdownParser.current
     val parserIdentity = MarkdownParserIdentity(parser)
-    val cached = remember(sources, parserIdentity) { markdownProjectionCache.get(sources, parser) }
+    val cached = remember(sources, parserIdentity) {
+        markdownProjectionCache.get(sources, parser) ?: markdownProjectionCache.getPrepared(sources, parser)
+    }
     val completed by produceState<MarkdownProjection?>(cached, sources, parserIdentity) {
         value = cached ?: projectMarkdown(sources, parser)
     }

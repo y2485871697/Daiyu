@@ -22,6 +22,7 @@ internal class RunControlFixture(base:Context,
     beforeOpen: (List<Message>) -> Unit = {},
     filesRoot: java.io.File? = null,
     providerBalanceHost: ProviderBalanceRuntimeHost? = null,
+    beforeController: (ConversationDatabase, android.content.SharedPreferences) -> Unit = { _, _ -> },
     beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {
         init {attachBaseContext(base)}
@@ -64,6 +65,7 @@ internal class RunControlFixture(base:Context,
                 synchronized(queued) {histories.add(history);checkNotNull(queued.pollFirst())}
             }
         }
+        beforeController(database, application.getSharedPreferences("conversation-ui", 0))
         controller=ChatController(application,database,settings,application.getSharedPreferences("conversation-ui",0),factory,
             virtualDisplayFactory = virtualDisplayFactory, mcpTransport = mcpTransport, taskSurfaceStore = taskSurfaces,
             sessionModel = if (onSession == null) null else { provider, assistant, session ->

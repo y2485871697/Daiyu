@@ -57,6 +57,40 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
 
+    fun testPreparedMixedHistoryHasExactProjectionInItsFirstComposition() {
+        val first = "Prepared **mixed** ${java.util.UUID.randomUUID()}."
+        val second = "Second `code` segment."
+        val sources = listOf(first, second)
+        val calls = AtomicInteger()
+        val parser: (String) -> List<MarkdownBlock> = {
+            assertNotSame(android.os.Looper.getMainLooper().thread, Thread.currentThread())
+            calls.incrementAndGet(); MarkdownParser.parse(it)
+        }
+        val message = app.daiyu.android.domain.Message(
+            app.daiyu.android.domain.MessageId("prepared"), app.daiyu.android.domain.ConversationId("prepared-chat"),
+            app.daiyu.android.domain.RunId("prepared-run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
+            listOf(app.daiyu.android.domain.MessageBlock.Text("first", first),
+                app.daiyu.android.domain.MessageBlock.Text("second", second)), RunStatus.COMPLETED)
+        prepareRestoredMarkdown(listOf(message), parser = parser)
+        val preparedCalls = calls.get()
+        val compositions = CopyOnWriteArrayList<MarkdownProjection?>()
+        show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
+            val projection = rememberMarkdownProjection(sources)
+            SideEffect { compositions += projection }
+            AssistantTurn(ChatTurnUi.Assistant("prepared-mixed", status = RunStatus.COMPLETED,
+                content = listOf(MessageContentUi.Text("first", first), MessageContentUi.Text("second", second))),
+                ChatScreenActions())
+        } }
+        assertTrue(compositions.isNotEmpty())
+        assertTrue(compositions.all { it?.sources == sources && it.parser === parser })
+        val firstBody = ui.onNode(hasTestTag("message-content-text:0") and hasText(first.replace("**", "")), useUnmergedTree = true)
+        firstBody.assertIsDisplayed()
+        assertTrue(annotation(firstBody).spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+        ui.onNode(hasTestTag("message-content-text:1") and hasText("Second code segment."), useUnmergedTree = true).assertIsDisplayed()
+        ui.onAllNodesWithTag("markdown-pending", useUnmergedTree = true).assertCountEquals(0)
+        assertEquals(preparedCalls, calls.get())
+    }
+
     fun testColdCompletedTurnsShowLoadingInsteadOfEmptyBodiesAndActions() {
         val sources = listOf("你好！我是代鱼，有什么可以帮你？", "我可以帮你：\n\n- **解答问题**\n- **查看设备情况**", "当前电量 **34%**，未在充电。")
         val turns = sources.mapIndexed { index, text ->

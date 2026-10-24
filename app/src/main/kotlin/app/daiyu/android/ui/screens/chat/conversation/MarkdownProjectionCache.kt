@@ -31,6 +31,25 @@ internal class MarkdownProjectionCache(
     }
 
     @Synchronized
+    fun getPrepared(sources: List<String>, parser: (String) -> List<MarkdownBlock>): MarkdownProjection? {
+        val blocks = linkedMapOf<String, List<MarkdownBlock>>()
+        for (source in sources.distinct()) blocks[source] = getBlocks(source, parser) ?: return null
+        return MarkdownProjection(sources.toList(), blocks, parser)
+    }
+
+    fun preparationSources(sources: List<String>): List<String> {
+        val selected = mutableListOf<String>()
+        var chars = 0L
+        for (source in sources.asReversed().distinct()) {
+            if (selected.size >= maxEntries) break
+            if (source.length.toLong() + chars > maxSourceChars) continue
+            selected += source
+            chars += source.length
+        }
+        return selected.asReversed()
+    }
+
+    @Synchronized
     fun put(projection: MarkdownProjection) {
         val chars = projection.sources.sumOf { it.length.toLong() }
         if (chars > maxSourceChars) return

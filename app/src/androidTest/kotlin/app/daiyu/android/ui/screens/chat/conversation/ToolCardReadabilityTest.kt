@@ -105,23 +105,23 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
     private val output = "first line\nsecond line\nthird line\nfourth line"
     private var actionCount = 0
 
-    private fun show(dark: Boolean, scale: Float, fontScale: Float, narrow: Boolean = false) {
-        val step = WorkStepUi("readability", title, "", WorkStepState.UNKNOWN,
+    private fun show(dark: Boolean, scale: Float, fontScale: Float, narrow: Boolean = false, compact: Boolean = false) {
+        val step = WorkStepUi("readability", if (compact) "查询电池" else title, "", if (compact) WorkStepState.OK else WorkStepState.UNKNOWN,
             owner = WorkStepOwnerUi("fixture", "run", "message"), category = "device_read",
-            activity = ToolActivityUi.INTERRUPTED,
+            activity = if (compact) ToolActivityUi.SUCCESS else ToolActivityUi.INTERRUPTED,
             categoryDetails = ToolCategoryDetailsUi("设备", notice = "", rich = ToolRichDetailsUi(
                 prose = ToolDisclosureUi("", prose),
                 technical = listOf(ToolDisclosureUi("调用参数", "{}", true)))))
         mainThread { activity.setContent {
             CompositionLocalProvider(LocalDensity provides Density(phoneDensity, fontScale)) {
-                key(dark, scale, fontScale, narrow) {
+                key(dark, scale, fontScale, narrow, compact) {
                     AgentAppTheme(AppearanceSettings(
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
                         interfaceScale = scale), applyInterfaceScale = true) {
                         Box(Modifier.fillMaxSize()) {
                             Column(Modifier.width(((if (narrow) 320f else 1216f / phoneDensity) / scale - 28f).dp)
                                 .verticalScroll(rememberScrollState()).testTag("readability-list")) {
-                                WorkProcessCard(WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "已中断"),
+                                WorkProcessCard(WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), if (compact) "已完成" else "已中断"),
                                     ownerKey = "readability")
                                 ToolDocument(ToolDisclosureUi("标准输出", output, true))
                                 ToolMiniAction("保存原件", Modifier.testTag("readability-action")) { actionCount++ }
@@ -162,21 +162,21 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) for (large in listOf(false, true)) for (narrow in listOf(false, true)) {
             val fontScale = if (large) 1.3f else .9f
             show(dark, scale, fontScale, narrow = narrow)
-            assertTarget("work-process-header", scale)
+            assertTarget("work-process-header", scale, minimumHeight = 44f)
             val heading = layout(ui.onNodeWithText("设备查询", useUnmergedTree = true))
-            assertEquals(14.sp, heading.layoutInput.style.fontSize)
+            assertEquals(13.sp, heading.layoutInput.style.fontSize)
             assertEquals(phoneDensity * scale, heading.layoutInput.density.density, .001f)
             assertEquals(fontScale, heading.layoutInput.density.fontScale, .001f)
             val icon = ui.onNodeWithTag("work-process-icon", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            assertEquals(22f * phoneDensity * scale, icon.width, 1f)
+            assertEquals(18f * phoneDensity * scale, icon.width, 1f)
             ui.onNodeWithTag("work-process-header").performClick()
-            assertTarget("tool-step-header:readability", scale)
+            assertTarget("tool-step-header:readability", scale, minimumHeight = 44f)
             val titleNode = ui.onNodeWithText(title, useUnmergedTree = true).assertIsDisplayed()
-            assertEquals(14.sp, layout(titleNode).layoutInput.style.fontSize)
+            assertEquals(13.sp, layout(titleNode).layoutInput.style.fontSize)
             val stateNode = ui.onNodeWithText("所属运行已中断", useUnmergedTree = true).assertIsDisplayed()
             val titleBounds = titleNode.fetchSemanticsNode().boundsInRoot
             val stateBounds = stateNode.fetchSemanticsNode().boundsInRoot
-            assertTrue("Long title must not overlap state", titleBounds.right <= stateBounds.left)
+            assertTrue("Long title must not overlap state", titleBounds.right <= stateBounds.left || titleBounds.bottom <= stateBounds.top)
             val stateLayout = layout(stateNode)
             assertFalse("dark=$dark scale=$scale large=$large narrow=$narrow " +
                 "constraints=${stateLayout.layoutInput.constraints} size=${stateLayout.size} " +
@@ -210,6 +210,27 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertTarget("readability-action", scale, minimumWidth = true)
         }
         assertEquals("Disclosure must not copy or run an action", 0, actionCount)
+    }
+
+
+    fun testCompactHeadersKeepPhoneAndNarrowCardsWithinHeightBudget() {
+        for (dark in listOf(false, true)) for (narrow in listOf(false, true)) {
+            show(dark = dark, scale = 1f, fontScale = .9f, narrow = narrow, compact = true)
+            val header = node("work-process-header").fetchSemanticsNode().boundsInRoot
+            assertEquals("Short collapsed header must stay compact", 44f * phoneDensity, header.height, 1f)
+            node("work-process-header").performClick()
+            val step = node("tool-step-header:readability").fetchSemanticsNode().boundsInRoot
+            assertEquals("Short tool row must stay compact", 44f * phoneDensity, step.height, 1f)
+            val surface = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("One disclosed step must not restore the old padding", surface.height <= 98f * phoneDensity + 1f)
+            assertTrue(step.left >= surface.left && step.right <= surface.right)
+            node("tool-step-header:readability").performClick()
+            node("tool-step-header:readability").assert(SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "成功 · 已展开"))
+            node("tool-step-header:readability").performClick()
+            ui.onNodeWithText(prose, useUnmergedTree = true).assertDoesNotExist()
+        }
+        assertEquals("Disclosures must never dispatch an action", 0, actionCount)
     }
 
     fun testMiniActionIsClickableAndDispatchesOnce() {

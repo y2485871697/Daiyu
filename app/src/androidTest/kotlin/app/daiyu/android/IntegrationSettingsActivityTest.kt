@@ -283,7 +283,15 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         seedChatPickerCatalog()
         val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
-        node("chat-model").performClick(); awaitChatPickerReady()
+        val modelButton = node("chat-model")
+        awaitNodeWindowFocus(modelButton)
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("chat-model").fetchSemanticsNodes().singleOrNull()?.config?.let {
+                it.getOrNull(SemanticsProperties.Disabled) == null
+            } == true
+        }
+        modelButton.assertIsDisplayed().assertIsEnabled().performClick()
+        awaitChatPickerReady()
         lateinit var stale: () -> Unit
         mainThread { stale = retainedChatPickerSelection() }
         realPauseResume(activity)

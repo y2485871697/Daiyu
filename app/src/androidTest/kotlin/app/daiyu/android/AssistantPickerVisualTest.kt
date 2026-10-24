@@ -146,6 +146,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertNull(selected)
             ui.onNodeWithTag("assistant-item-visual-a").performTouchInput { longClick() }
             ui.onNodeWithTag("assistant-action-edit").performClick()
+            awaitVisualIdle()
             assertEquals("visual-a", edited)
         }
     }

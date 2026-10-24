@@ -228,8 +228,23 @@ class ChatRunnerReasoningObserverTest {
             observed.add(it)
             throw IllegalStateException("observer unavailable")
         }
+        fun Message.withComparableReasoningTime(): Message {
+            fun comparable(items: List<ReportedReasoning>) = items.map { item ->
+                assertNotNull("accepted reasoning has measured time", item.elapsedMillis)
+                assertTrue("measured time is nonnegative", checkNotNull(item.elapsedMillis) >= 0L)
+                assertNull("persisted reasoning is frozen", item.activeSinceNanos)
+                item.copy(elapsedMillis = 0L)
+            }
+            return copy(reportedReasoning = comparable(reportedReasoning), historySegments = historySegments.map {
+                it.copy(reportedReasoning = comparable(it.reportedReasoning))
+            })
+        }
+        fun Evidence.withComparableReasoningTime() = copy(result = result.withComparableReasoningTime(),
+            writes = writes.map { it.withComparableReasoningTime() },
+            checkpoints = checkpoints.map { (phase, message) -> phase to message.withComparableReasoningTime() })
         assertEquals(RunStatus.COMPLETED, baseline.result.status)
-        assertEquals(baseline, throwing)
+        // Separate executions may take different real time; every other persisted field must match.
+        assertEquals(baseline.withComparableReasoningTime(), throwing.withComparableReasoningTime())
         assertEquals(listOf(delta, final, final), observed)
         assertEquals(listOf(ModelEvent.Usage(3, 4)), throwing.usages)
     }

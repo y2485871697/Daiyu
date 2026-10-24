@@ -113,8 +113,11 @@ class SidebarShortcutNavigationTest : WiredActivityTestCase() {
             val initial = node("page-back-surface").fetchSemanticsNode().boundsInRoot
             node("page-back-host").performTouchInput {
                 down(Offset(width * .05f, height * .6f))
-                moveTo(Offset(width * .40f, height * .6f), 400)
+                moveTo(Offset(width * .12f, height * .6f), 16)
+                moveTo(Offset(width * .18f, height * .6f), 16)
+                moveTo(Offset(width * .40f, height * .6f), 80)
             }
+            ui.mainClock.advanceTimeByFrame()
             ui.mainClock.advanceTimeByFrame()
             node("page-back-target").assertExists()
             node("page-back-scrim").assertExists()
@@ -168,8 +171,11 @@ class SidebarShortcutNavigationTest : WiredActivityTestCase() {
             }
             node("page-back-host").performTouchInput {
                 down(Offset(width * .05f, height * .6f))
-                moveTo(Offset(width * .70f, height * .6f), 500)
+                moveTo(Offset(width * .12f, height * .6f), 16)
+                moveTo(Offset(width * .18f, height * .6f), 16)
+                moveTo(Offset(width * .70f, height * .6f), 80)
             }
+            ui.mainClock.advanceTimeByFrame()
             ui.mainClock.advanceTimeByFrame()
             node("page-back-target").assertExists()
             node("page-back-host").performTouchInput { up() }

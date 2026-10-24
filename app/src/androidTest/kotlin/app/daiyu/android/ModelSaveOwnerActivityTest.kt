@@ -63,8 +63,10 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         modelField("API Key").assertEditableText("resumed-explicit-model")
         reveal("model-save").performClick()
         awaitControl("explicit save completed") { !fixture.controller.dataBusy }
-        awaitUniqueTag("chat-draft"); assertDraft("paused model save draft")
         assertEquals(saved.copy(apiKey = "resumed-explicit-model"), fixture.settings.load())
+        awaitModelEditor()
+        backToChat(activity)
+        awaitUniqueTag("chat-draft"); assertDraft("paused model save draft")
         assertEquals(0, fixture.opens.get())
     }
     fun testRepeatedPauseWhileQueuedSaveDrainsRetainsDraftWithoutReauthorizingOldSave() {
@@ -87,8 +89,10 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         modelField("API Key").assertEditableText("twice-paused-model")
         reveal("model-save").performClick()
         awaitControl("explicit save after two pauses") { !fixture.controller.dataBusy }
-        awaitUniqueTag("chat-draft")
         assertEquals(saved.copy(apiKey = "twice-paused-model"), fixture.settings.load())
+        awaitModelEditor()
+        backToChat(activity)
+        awaitUniqueTag("chat-draft")
         assertEquals(0, fixture.opens.get())
     }
     fun testPauseDuringRestoreReadKeepsDraftForNextResumedEditor() {

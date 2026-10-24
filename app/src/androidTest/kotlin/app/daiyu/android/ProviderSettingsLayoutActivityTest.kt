@@ -250,7 +250,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToChat() {
+    fun testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToDirectory() {
         openModels()
         reveal("provider-delete", lazyKey = "provider_delete").performClick()
         awaitUniqueTag("dialog-confirm")
@@ -259,6 +259,9 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         node("dialog-confirm").assertIsDisplayed().assertIsEnabled()
         node("dialog-confirm").performClick()
         awaitControl("provider deleted") { fixture.controller.providers.snapshot().providers.isEmpty() }
+        awaitUniqueTag("provider-management")
+        assertNull(fixture.controller.providers.snapshot().activeSlotId)
+        backToChat(activity)
         awaitUniqueTag("chat-top-bar")
         assertNull(fixture.controller.providers.snapshot().activeSlotId)
         assertEquals(0, fixture.opens.get())

@@ -410,15 +410,26 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPrimaryProviderSuccessfulSaveStillReturnsDirectlyToChat() {
+    fun testPrimaryProviderDirectorySavePreservesDetailAndSettingsPredecessor() {
         setDraft("primary save remains unsent")
+        val before = fixture.settings.load()
+        val endpoint = before.endpoint.trimEnd('/') + "/directory-save"
         openModels()
         reveal("settings-radio:配置").assertIsSelected()
+        editModel("Base URL", endpoint)
         saveModel()
-        awaitUniqueTag("chat-draft")
-        node("chat-draft").assertIsDisplayed()
+        awaitModelEditor()
+        assertEquals(before.copy(endpoint = endpoint), fixture.settings.load())
+        mainThread { assertEquals("providers", invokeHost(activity, "getRetainedPage")) }
+        node("chat-draft").assertDoesNotExist()
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        awaitUniqueTag("provider-management")
         node("page:主模型服务商").assertDoesNotExist()
-        node("page:模型提供商").assertDoesNotExist()
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        awaitUniqueTag("page:设置")
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        awaitUniqueTag("chat-draft")
         assertDraft("primary save remains unsent")
+        assertEquals(0, fixture.opens.get())
     }
 }

@@ -28,7 +28,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn("val summaryWidth = maxWidth * .38f", shell)
         self.assertIn("maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f", shell)
         self.assertIn("maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.2f", shell)
-        self.assertIn('if (stacked) Text(stateLabel, color = tint,', shell)
+        self.assertIn('if (stacked) Text(stateLabel, Modifier.fillMaxWidth(), color = tint,', shell)
         self.assertIn('Modifier.size(18.dp).testTag("work-process-icon")', shell)
         self.assertIn('Modifier.size(18.dp).testTag("tool-operation-icon:', shell)
         self.assertIn("fontSize = 13.sp, lineHeight = 18.sp", shell)

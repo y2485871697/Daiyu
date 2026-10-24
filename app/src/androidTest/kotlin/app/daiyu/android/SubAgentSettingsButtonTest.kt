@@ -117,6 +117,9 @@ class SubAgentSettingsButtonTest : WiredActivityTestCase() {
         name.performTextReplacement("取消的组")
         assertTrue(repository.presets().isEmpty())
         ui.onNodeWithText("取消").performClick()
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isEmpty()
+        }
         name.assertDoesNotExist()
         assertTrue(repository.presets().isEmpty())
         awaitNodeWindowFocus(addGroupButton())
@@ -131,6 +134,9 @@ class SubAgentSettingsButtonTest : WiredActivityTestCase() {
         name.performTextReplacement("新子代理组")
         assertTrue(repository.presets().isEmpty())
         ui.onNodeWithText("保存").assertIsEnabled().performClick()
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isEmpty()
+        }
         name.assertDoesNotExist()
         assertEquals(listOf("新子代理组"), repository.presets().map { it.name })
         ui.onNodeWithContentDescription("编辑子代理组新子代理组").assertIsDisplayed()

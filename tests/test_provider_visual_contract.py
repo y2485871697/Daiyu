@@ -107,7 +107,7 @@ class ProviderVisualContractTest(unittest.TestCase):
                          'deleteText else onPrimary, layout.layoutInput.style.color)',
                          'layout.hasVisualOverflow', 'large font grows the fill',
                          'listOf("测试连接", "测试余额查询", "保存配置", "删除提供商")',
-                         'testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToChat',
+                         'testConfirmedFooterDeletionClearsCurrentProviderAndReturnsToDirectory',
                          'testNameIsSavedInsideConfigurationWithoutChangingModelOrCredentials'):
             self.assertIn(fragment, actions)
         directory = (ANDROID / 'ProviderAuthenticationChoiceActivityTest.kt').read_text()

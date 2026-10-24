@@ -20,37 +20,49 @@ internal fun dismissDesktopEducationTooltip(
         automation.serviceInfo = automation.serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
-        val titlePattern = Regex("Desktop Windowing Education Tooltip of Task=[0-9]+")
-        fun educationWindows() = automation.windows.filter {
-            it.title?.toString()?.matches(titlePattern) == true
+        val educationText = "Tap handle to access menu and display options"
+        var lastWindows = ""
+        fun educationWindows(): List<android.view.accessibility.AccessibilityWindowInfo> {
+            val diagnostics = mutableListOf<String>()
+            val result = automation.windows.filter { window ->
+                if (window.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM) false else {
+                    val root = window.root
+                    val owner = root?.packageName?.toString()
+                    val matches = if (owner == "com.android.systemui" && root != null)
+                        root.findAccessibilityNodeInfosByText(educationText).count {
+                            it.text?.toString() == educationText && it.isVisibleToUser
+                        } else 0
+                    diagnostics += "id=${window.id} title=${window.title} owner=$owner matches=$matches"
+                    check(matches <= 1) { "Ambiguous desktop education text: ${window.id}" }
+                    matches == 1
+                }
+            }
+            val summary = diagnostics.joinToString("; ")
+            if (summary != lastWindows) {
+                android.util.Log.i("DaiyuDesktopEducation", "System window discovery: $summary")
+                lastWindows = summary
+            }
+            return result
         }
-        var observed = false
         var ready: android.view.accessibility.AccessibilityWindowInfo? = null
         try {
             ui.waitUntil(5_000) {
                 val windows = educationWindows()
                 if (windows.isEmpty()) false else {
-                    observed = true
                     check(windows.size == 1) { "Multiple desktop education windows: ${windows.map { it.title }}" }
-                    val candidate = windows.single()
-                    val root = candidate.root
-                    if (root == null) false else {
-                        check(root.packageName?.toString() == "com.android.systemui") { "Unexpected desktop education owner" }
-                        val verified = root.findAccessibilityNodeInfosByText("Tap handle to access menu and display options").any {
-                            it.text?.toString() == "Tap handle to access menu and display options"
-                        }
-                        if (verified) ready = candidate
-                        verified
-                    }
+                    ready = windows.single()
+                    true
                 }
             }
         } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
-            if (observed) throw AssertionError("Observed desktop education window did not publish its verified content", timeout)
-            android.util.Log.i("DaiyuDesktopEducation", "No tooltip observed within discovery deadline")
+            android.util.Log.i("DaiyuDesktopEducation", "No accessibility-verified education target within discovery deadline")
             return
         }
         val window = checkNotNull(ready)
+        val windowId = window.id
+        android.util.Log.i("DaiyuDesktopEducation", "Verified SystemUI education window id=$windowId title=${window.title}")
         val bounds = Rect().also(window::getBoundsInScreen)
+        check(bounds.width() > 0 && bounds.height() > 0) { "Desktop education bounds missing" }
         val node = blank.assertIsDisplayed().fetchSemanticsNode()
         val center = node.positionOnScreen + androidx.compose.ui.geometry.Offset(node.size.width / 2f, node.size.height / 2f)
         check(node.size.width > 0 && node.size.height > 0 && center.x.isFinite() && center.y.isFinite())
@@ -67,7 +79,9 @@ internal fun dismissDesktopEducationTooltip(
         }
         try { inject(android.view.MotionEvent.ACTION_DOWN) }
         finally { inject(android.view.MotionEvent.ACTION_UP) }
-        ui.waitUntil(5_000) { educationWindows().isEmpty() }
+        ui.waitUntil(5_000) {
+            automation.windows.none { it.id == windowId } && educationWindows().isEmpty()
+        }
         android.util.Log.i("DaiyuDesktopEducation", "Observed SystemUI tooltip dismissed once; window removed")
     } finally {
         automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }

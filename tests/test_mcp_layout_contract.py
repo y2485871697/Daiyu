@@ -69,7 +69,7 @@ class McpLayoutContractTest(unittest.TestCase):
         text = ANDROID.read_text()
         for value in ('for (dark in listOf(false, true))', 'listOf("mcp-settings-empty-add", "mcp-settings-add")',
                       'left.right <= right.left', 'left.width - right.width', 'left.height - right.height',
-                      'captureScreenNode(save).toPixelMap()', 'ConversationAgentColors(dark).accent',
+                      'captureScreenNode(save).toPixelMap()', 'Color(if (dark) 0xFFB6A4C7 else 0xFF8E7C9E)',
                       'assertTrue(store.snapshot().servers.isEmpty())', 'activity.onBackPressedDispatcher.onBackPressed()',
                       'assertTrue(McpSettingsStore(context) { key }.snapshot().servers.isEmpty())',
                       'node("mcp-server-endpoint").performTextReplacement("https://fixture.invalid/mcp")',

@@ -78,7 +78,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         awaitNodeWindowFocus(button)
         instrumentation.uiAutomation.waitForIdle(100, 5_000)
         val pixels = captureScreenNode(button).toPixelMap()
-        val expectedPrimary = Color(if (dark) 0xFFC6B7D5 else 0xFF756980)
+        val expectedPrimary = Color(if (dark) 0xFFB6A4C7 else 0xFF8E7C9E)
         val expectedOnPrimary = Color(if (dark) 0xFF211735 else 0xFFFFFFFF)
         val background = pixels[(12 * density).toInt(), pixels.height / 2]
         val mismatch = kotlin.math.abs(expectedPrimary.red - background.red) > .01f ||

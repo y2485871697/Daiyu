@@ -48,7 +48,7 @@ class ChatAttachmentSizingActivityTest : WiredActivityTestCase() {
 
     private fun textLayout(text: String): TextLayoutResult {
         val results = mutableListOf<TextLayoutResult>()
-        ui.onNodeWithText(text, useUnmergedTree = true)
+        ui.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }
         assertEquals(1, results.size)
         return results.single().also {

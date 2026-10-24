@@ -59,7 +59,9 @@ class R76ReleaseRepairsContractTest(unittest.TestCase):
 
     def test_device_dictation_uses_real_offline_session_and_preserves_business_oracles(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/DictationActivityTest.kt').read_text()
-        for token in ('OfflineSpeechSession(gate, owner, allowed, device, events,',
+        for token in ('OfflineSpeechSession(gate, owner, allowed, device,',
+                      'object : OfflineSpeechSession.Events by events',
+                      'events.captureStopped()', 'stoppedDelivered.countDown()',
                       'field(activity, "offlineSpeechSessionFactory", factory)',
                       'field(activity, "offlineSpeechReady", ready)',
                       'field(activity, "offlineMicrophonePermissionOwner", host)',

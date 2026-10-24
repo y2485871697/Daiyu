@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import android.Manifest
 import android.content.pm.PackageManager
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import android.os.Bundle
 import androidx.compose.ui.test.*
 import app.daiyu.android.voice.*
@@ -31,9 +32,11 @@ class DictationActivityTest : WiredActivityTestCase() {
         private val wake = Semaphore(0)
         private val started = CountDownLatch(1)
         private val released = CountDownLatch(1)
+        private val stoppedDelivered = CountDownLatch(1)
         private val finished = CountDownLatch(1)
         private val finalReady = CountDownLatch(1)
         private val listening = java.util.concurrent.atomic.AtomicReference<(() -> Unit)?>()
+        private val listeningPublished = CountDownLatch(1)
         @Volatile private var text = ""
         @Volatile private var endpoint = false
         private val device = object : OfflineSpeechDevice {
@@ -67,12 +70,18 @@ class DictationActivityTest : WiredActivityTestCase() {
             override fun idle() { wake.acquire() }
         }
         private var firstPost = true
-        private val session = OfflineSpeechSession(gate, owner, allowed, device, events,
+        private val session = OfflineSpeechSession(gate, owner, allowed, device,
+            object : OfflineSpeechSession.Events by events {
+                override fun captureStopped() {
+                    events.captureStopped()
+                    stoppedDelivered.countDown()
+                }
+            },
             execute = Executor { task ->
                 Thread({ try { task.run() } finally { finished.countDown() } }, "test-offline-device").start()
             },
             post = { callback ->
-                if (firstPost) { firstPost = false; listening.set(callback) }
+                if (firstPost) { firstPost = false; listening.set(callback); listeningPublished.countDown() }
                 else android.os.Handler(android.os.Looper.getMainLooper()).post { callback() }
             })
         override fun start() { session.start() }
@@ -81,7 +90,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         }
         fun awaitStarted() {
             assertTrue("offline device opened", started.await(5, TimeUnit.SECONDS))
-            awaitControl("offline listening callback published") { listening.get() != null }
+            assertTrue("offline listening callback published", listeningPublished.await(5, TimeUnit.SECONDS))
         }
         fun onReadyForSpeech(ignored: Bundle) {
             awaitStarted()
@@ -91,8 +100,8 @@ class DictationActivityTest : WiredActivityTestCase() {
             endpoint = true
             commands += "" to CountDownLatch(1)
             wake.release()
-            assertTrue("capture stopped before final", released.await(5, TimeUnit.SECONDS))
-            instrumentation.waitForIdleSync()
+            assertTrue("capture stop delivered", stoppedDelivered.await(5, TimeUnit.SECONDS))
+            assertEquals("capture stopped before final", 0L, released.count)
         }
         fun onPartialResults(value: String) {
             if (finished.count == 0L || host.state.value.target == null) return
@@ -127,6 +136,34 @@ class DictationActivityTest : WiredActivityTestCase() {
     private lateinit var speech: VoiceHost
     private val players = mutableListOf<Player>()
     private var permissionRequests = 0
+    private var uiVoicePreferences: Pair<Boolean?, String?>? = null
+
+    private fun configureUiVoicePreferences() {
+        val context = instrumentation.targetContext
+        val settings = context.getSharedPreferences("voice-settings", 0)
+        val entry = context.getSharedPreferences("chat-voice-entry", 0)
+        uiVoicePreferences = (if (settings.contains("input")) settings.getBoolean("input", false) else null) to
+            entry.getString("mode", null)
+        check(settings.edit().putBoolean("input", true).commit())
+        check(entry.edit().putString("mode", ChatMenuAction.VOICE_INPUT.name).commit())
+    }
+
+    override fun cleanupAfterLegacy() {
+        try {
+            super.cleanupAfterLegacy()
+        } finally {
+            uiVoicePreferences?.let { (input, mode) ->
+                val context = instrumentation.targetContext
+                val settings = context.getSharedPreferences("voice-settings", 0).edit()
+                if (input == null) settings.remove("input") else settings.putBoolean("input", input)
+                check(settings.commit())
+                val entry = context.getSharedPreferences("chat-voice-entry", 0).edit()
+                if (mode == null) entry.remove("mode") else entry.putString("mode", mode)
+                check(entry.commit())
+                uiVoicePreferences = null
+            }
+        }
+    }
 
     private fun field(target: Any, name: String, value: Any) {
         target.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(target, value)
@@ -135,9 +172,12 @@ class DictationActivityTest : WiredActivityTestCase() {
         .single { it.name == name && it.parameterCount == args.size }
         .apply { isAccessible = true }.invoke(activity, *args)
 
-    override fun createFixture() = super.createFixture().also { fixture ->
-        runBlocking {
-            fixture.controller.voiceRuntime.save(VoiceConfiguration(engine = "SYSTEM", dictation = "SYSTEM"))
+    override fun createFixture(): RunControlFixture {
+        configureUiVoicePreferences()
+        return super.createFixture().also { fixture ->
+            runBlocking {
+                fixture.controller.voiceRuntime.save(VoiceConfiguration(engine = "SYSTEM", dictation = "SYSTEM"))
+            }
         }
     }
     override fun setUp() {

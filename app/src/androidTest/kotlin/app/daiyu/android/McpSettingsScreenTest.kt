@@ -12,7 +12,6 @@ import okio.Buffer
 import org.json.JSONObject
 import androidx.compose.ui.graphics.toPixelMap
 import app.daiyu.android.data.model.AppearanceThemeMode
-import app.daiyu.android.ui.components.subagent.ConversationAgentColors
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.mcp.*
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -56,7 +55,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
                     assertTrue(kotlin.math.abs(left.width - right.width) <= 1f)
                     assertTrue(kotlin.math.abs(left.height - right.height) <= 1f)
                     val pixels = captureScreenNode(save).toPixelMap()
-                    val expected = ConversationAgentColors(dark).accent
+                    val expected = androidx.compose.ui.graphics.Color(if (dark) 0xFFB6A4C7 else 0xFF8E7C9E)
                     for (x in listOf(1f / 3f, .5f, 2f / 3f)) for (y in listOf(.15f, .85f)) {
                         val fill = pixels[(pixels.width * x).toInt(), (pixels.height * y).toInt()]
                         assertTrue(kotlin.math.abs(fill.red - expected.red) < .025f)

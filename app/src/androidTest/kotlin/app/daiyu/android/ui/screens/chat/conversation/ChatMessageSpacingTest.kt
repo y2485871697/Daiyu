@@ -54,16 +54,26 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     }
 
     private fun assertCompactTail(marker: String) {
-        ui.waitUntil(5_000) {
-            if (ui.onAllNodesWithText(marker, substring = true).fetchSemanticsNodes().isEmpty()) {
-                false
-            } else {
-                val tail = ui.onNodeWithTag("chat-turn:tail").fetchSemanticsNode().layoutInfo.coordinates
-                val surface = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
-                val fullTailBottom = tail.positionInRoot().y + tail.size.height
-                val gap = (surface.top - fullTailBottom) / density
-                ui.onNodeWithText(marker, substring = true).isDisplayed() && gap in 8f..28f
+        var lastGeometry = "marker not sampled"
+        try {
+            ui.waitUntil(5_000) {
+                if (ui.onAllNodesWithText(marker, substring = true).fetchSemanticsNodes().isEmpty()) {
+                    lastGeometry = "marker absent"
+                    false
+                } else {
+                    val tail = ui.onNodeWithTag("chat-turn:tail").fetchSemanticsNode().layoutInfo.coordinates
+                    val surface = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+                    val viewport = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot
+                    val fullTailBottom = tail.positionInRoot().y + tail.size.height
+                    val gap = (surface.top - fullTailBottom) / density
+                    val displayed = ui.onNodeWithText(marker, substring = true).isDisplayed()
+                    lastGeometry = "tailTop=${tail.positionInRoot().y} tailHeight=${tail.size.height} " +
+                        "surface=$surface viewport=$viewport density=$density gapDp=$gap markerDisplayed=$displayed"
+                    displayed && gap in 8f..28f
+                }
             }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("Compact tail after composer growth: $lastGeometry", timeout)
         }
         awaitVisualIdle()
         awaitVisualIdle()

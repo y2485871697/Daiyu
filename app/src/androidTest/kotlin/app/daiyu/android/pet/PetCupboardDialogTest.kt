@@ -4,6 +4,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
@@ -33,9 +35,10 @@ class PetCupboardDialogTest : WiredActivityTestCase() {
             controller = PetController(checkNotNull(store), PetModelPort { _, _ -> requests++; PetCancel {} },
                 AndroidPetScheduler(), PetClock { 0 })
             val root = FrameLayout(activity)
-            root.addView(PetViewFactory.createPet(activity, checkNotNull(controller), WhaleMaidResources(activity)))
+            root.addView(PetViewFactory.createPet(activity, checkNotNull(controller), WhaleMaidResources(activity)),
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             layer = root
-            activity.setContent { AndroidView(factory = { root }) }
+            activity.setContent { AndroidView(modifier = Modifier.fillMaxSize(), factory = { root }) }
         }
     }
     private fun open() {
@@ -47,7 +50,12 @@ class PetCupboardDialogTest : WiredActivityTestCase() {
             else {
                 val location = IntArray(2)
                 sprite.getLocationOnScreen(location)
-                listOf(location[0], location[1], sprite.width, sprite.height)
+                val visible = android.graphics.Rect()
+                if (!sprite.getGlobalVisibleRect(visible) ||
+                    visible.width().toLong() * visible.height() * 100L <
+                    sprite.width.toLong() * sprite.height * 90L) null
+                else listOf(location[0], location[1], sprite.width, sprite.height,
+                    visible.left, visible.top, visible.right, visible.bottom)
             }
         }
         android.util.Log.i("DaiyuPetTap", "stableSprite=$bounds")

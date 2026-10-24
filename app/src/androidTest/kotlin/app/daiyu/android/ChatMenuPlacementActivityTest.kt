@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.composed
@@ -31,21 +32,24 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.chat.conversation.ChatAnchoredMenu
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
+import app.daiyu.android.ui.screens.chat.conversation.LocalChatMenuPlacementDiagnostic
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicReference
 
 class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
-    private data class MenuDraw(val bounds: Rect, val fraction: Float, val padding: Float)
+    private data class MenuDraw(val bounds: Rect, val fraction: Float, val padding: Float, val diagnostic: String)
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testMenuFirstDrawUsesMeasuredSizeAndDoesNotJumpAfterOpeningOrReopening() {
         for (direction in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
             for (bottom in listOf(false, true)) {
                 val draws = CopyOnWriteArrayList<MenuDraw>()
                 val coordinates = AtomicReference<LayoutCoordinates?>()
+                val diagnostic = AtomicReference<(() -> String)?>(null)
                 var expanded by mutableStateOf(false)
                 mainThread {
                     activity.setContent {
-                        CompositionLocalProvider(LocalLayoutDirection provides direction) {
+                        CompositionLocalProvider(LocalLayoutDirection provides direction,
+                            LocalChatMenuPlacementDiagnostic provides { diagnostic.set(it) }) {
                             AgentAppTheme(AppearanceSettings(blurEnabled = false), applyInterfaceScale = false) {
                                 Box(Modifier.width(320.dp).height(480.dp).padding(17.dp, 23.dp, 11.dp, 7.dp)) {
                                     ChatMenuLayer(Modifier.fillMaxSize().testTag("menu-position-host")) {
@@ -63,7 +67,8 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                                                                     val origin = it.positionInRoot()
                                                                     draws += MenuDraw(Rect(origin.x, origin.y,
                                                                         origin.x + size.width, origin.y + size.height),
-                                                                        motion.fraction.value, padding)
+                                                                        motion.fraction.value, padding,
+                                                                        (diagnostic.get()?.invoke() ?: "no placement") + "; contentOrigin=$origin contentSize=${it.size} contentClipped=${it.boundsInRoot()}")
                                                                 }
                                                                 drawContent()
                                                             }
@@ -99,21 +104,25 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                     val anchor = ui.onNodeWithTag("menu-position-anchor").fetchSemanticsNode().boundsInRoot
                     val host = ui.onNodeWithTag("menu-position-host").fetchSemanticsNode().boundsInRoot
                     assertTrue("No drawn menu bounds: $direction bottom=$bottom", draws.isNotEmpty())
+                    val evidence = draws.lastOrNull()?.let {
+                        "lastDraw=${it.bounds} fraction=${it.fraction} padding=${it.padding}; ${it.diagnostic}"
+                    } ?: diagnostic.get()?.invoke().orEmpty()
                     for (draw in draws) {
+                        val drawEvidence = "direction=$direction bottom=$bottom fraction=${draw.fraction}; ${draw.diagnostic}"
                         val scale = 0.15f + 0.85f * draw.fraction
                         val pivotX = stable.right + draw.padding
                         val pivotY = stable.top - draw.padding
-                        assertEquals(pivotX + (stable.left - pivotX) * scale, draw.bounds.left, 1f)
-                        assertEquals(pivotY + (stable.top - pivotY) * scale, draw.bounds.top, 1f)
-                        assertEquals(stable.width, draw.bounds.width, 1f)
-                        assertEquals(stable.height, draw.bounds.height, 1f)
+                        assertEquals(drawEvidence, pivotX + (stable.left - pivotX) * scale, draw.bounds.left, 1f)
+                        assertEquals(drawEvidence, pivotY + (stable.top - pivotY) * scale, draw.bounds.top, 1f)
+                        assertEquals(drawEvidence, stable.width, draw.bounds.width, 1f)
+                        assertEquals(drawEvidence, stable.height, draw.bounds.height, 1f)
                     }
-                    assertTrue("direction=$direction bottom=$bottom stable=$stable host=$host anchor=$anchor",
+                    assertTrue("direction=$direction bottom=$bottom stable=$stable host=$host anchor=$anchor; $evidence",
                         stable.left >= host.left && stable.right <= host.right)
-                    assertTrue("direction=$direction bottom=$bottom stable=$stable host=$host anchor=$anchor",
+                    assertTrue("direction=$direction bottom=$bottom stable=$stable host=$host anchor=$anchor; $evidence",
                         stable.top >= host.top && stable.bottom <= host.bottom)
-                    if (bottom) assertTrue("direction=$direction stable=$stable anchor=$anchor", stable.bottom <= anchor.top)
-                    else assertTrue("direction=$direction stable=$stable anchor=$anchor", stable.top >= anchor.bottom)
+                    if (bottom) assertTrue("direction=$direction stable=$stable anchor=$anchor; $evidence", stable.bottom <= anchor.top)
+                    else assertTrue("direction=$direction stable=$stable anchor=$anchor; $evidence", stable.top >= anchor.bottom)
                     if (it == 0) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
                     else ui.onNodeWithTag("menu-position-host").performTouchInput {
                         click(Offset(5f, center.y))

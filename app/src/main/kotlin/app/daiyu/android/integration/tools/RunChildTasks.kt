@@ -99,6 +99,10 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
         }
     }
 
+    fun pauseGroup() = supervisor.pauseGroup(binding)
+    fun resumeGroup(group: ChildTaskPauseGroup) = supervisor.resumeGroup(group)
+    fun hasCaptured(group: ChildTaskPauseGroup) = supervisor.hasCaptured(group)
+    fun finishGroup(group: ChildTaskPauseGroup, stop: Boolean) = supervisor.finishGroup(group, stop)
     fun snapshots() = supervisor.snapshots(binding)
     /** Safe host-map eviction boundary; neither a stop request nor a terminal journal row is enough. */
     fun isReleased(): Boolean = supervisor.isReleased(binding)

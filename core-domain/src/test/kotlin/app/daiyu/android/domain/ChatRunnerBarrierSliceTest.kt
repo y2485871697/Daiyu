@@ -6,7 +6,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChatRunnerBarrierSliceTest {
-    private class MemoryRuntime : AtomicRuntimeStore {
+    private class MemoryRuntime : AtomicSupplementRuntimeStore {
+        val admissions = mutableListOf<Message>()
+        override fun commitSupplement(checkpoint: RunCheckpoint, supplement: Message) {
+            commitCheckpoint(checkpoint)
+            admissions.add(supplement)
+        }
         val attempts = mutableListOf<RunCheckpoint>()
         val commits = mutableListOf<RunCheckpoint>()
         var before: (RunCheckpoint) -> Unit = {}
@@ -62,8 +67,14 @@ class ChatRunnerBarrierSliceTest {
         }
         private val model = ModelPort {
             opens++
+            val supplemented = MessageHistory.expand(it).any { message -> message.id == MessageId("added") }
             object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    if (supplemented) {
+                        assertTrue(outputs.isEmpty())
+                        sink(ModelEvent.TextFinal("done", "after supplement"))
+                        return
+                    }
                     val index = nexts++
                     if (index > 0) {
                         assertEquals(ToolCallId("q${index - 1}"), outputs.single().callId)
@@ -109,6 +120,39 @@ class ChatRunnerBarrierSliceTest {
         expectFailure<IllegalStateException> { f.runner.resumeSlice(offer, ExecutionReceipt.Confirmed("answer")) }
         assertEquals(1, f.finishes)
     }
+    @Test fun waitingSupplementDoesNotReplaceAnswerOrInvalidateOfferAndCommitsAfterAnswer() {
+        val f = Fixture(); val offer = f.start()
+        val waiting = f.runtime.commits.last()
+        val user = f.initial.copy(id = MessageId("added"), role = Message.USER_ROLE,
+            blocks = listOf(MessageBlock.Text("user", "new instruction")), status = RunStatus.COMPLETED)
+        val receipts = mutableListOf<SupplementAdmission>()
+        assertTrue(f.runner.admitSupplement(user, receipts::add))
+        assertTrue(receipts.isEmpty()); assertTrue(f.runtime.admissions.isEmpty())
+        assertEquals(waiting, f.runtime.commits.last()); assertEquals(0, f.finishes)
+        val result = f.runner.resumeSlice(offer, ExecutionReceipt.Confirmed("answer")) as RunSlice.Completed
+        assertEquals(RunStatus.COMPLETED, result.message.status)
+        assertEquals(listOf(SupplementAdmission.Accepted(user.id)), receipts)
+        assertEquals(listOf(user), f.runtime.admissions)
+        assertEquals(1, f.finishes); assertEquals(1, f.starts); assertEquals(2, f.opens)
+    }
+
+    @Test fun waitingSupplementIsRejectedOnStopOrUnknownAnswerWithoutReopening() {
+        for (stop in listOf(false, true)) {
+            val f = Fixture(); val offer = f.start()
+            val user = f.initial.copy(id = MessageId("added"), role = Message.USER_ROLE,
+                blocks = listOf(MessageBlock.Text("user", "new instruction")), status = RunStatus.COMPLETED)
+            val receipts = mutableListOf<SupplementAdmission>()
+            assertTrue(f.runner.admitSupplement(user, receipts::add))
+            val result = if (stop) {
+                f.runner.stop(); f.runner.drainStoppedSlice()
+            } else f.runner.resumeSlice(offer, ExecutionReceipt.Unknown())
+            assertTrue(result is RunSlice.Completed)
+            assertEquals(listOf(SupplementAdmission.Rejected(user.id)), receipts)
+            assertTrue(f.runtime.admissions.isEmpty()); assertEquals(1, f.opens)
+            assertEquals(if (stop) 0 else 1, f.finishes)
+        }
+    }
+
     @Test fun failedWaitingCommitDoesNotMarkOfferOrAttemptAnotherWrite() {
         val f = Fixture()
         f.runtime.before = { if (it.phase == ExecutionPhase.WAITING_USER) error("write failed") }

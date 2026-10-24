@@ -118,9 +118,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes) { mutableStateOf(false) }
     val voiceMenuEnabled = state.enabled && state.voiceModes.isNotEmpty()
     val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
-    val textAction = hasText && state.phase != ComposerPhase.RUNNING
+    val textAction = hasText
     val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
-        val primaryIcon = when {
+    val primaryIcon = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> ChatPreviewIcons.Play
         textAction && state.phase != ComposerPhase.IDLE -> ChatPreviewIcons.Append
         textAction -> ChatPreviewIcons.Send
@@ -129,7 +129,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     }
     val primaryLabel = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
-        state.supplementPending -> "正在追加"
+        textAction && state.supplementPending -> "正在追加"
         textAction && state.phase != ComposerPhase.IDLE -> "追加消息"
         textAction -> "发送"
         state.phase == ComposerPhase.RUNNING -> "暂停"
@@ -257,12 +257,12 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 else actions.onSupplement(state.text)
                             }, Modifier.size(32.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
-                                containerColor = (if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
+                                containerColor = (if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                     .copy(alpha = if (primaryEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
                                 enabled = primaryEnabled, containerSize = 28.dp,
-                                tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
-                                iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 14.dp else 16.dp,
-                                onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
+                                tint = if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
+                                iconSize = if (!textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
+                                onLongClick = if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }
                         }
                     }

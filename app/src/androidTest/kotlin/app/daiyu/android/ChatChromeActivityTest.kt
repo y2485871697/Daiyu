@@ -118,7 +118,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
     }
 
     fun testRunningComposerAt320DpKeepsActionsSeparateAndContextReadable() {
-        val state = composer()
+        val state = composer().copy(text = "")
         show(state)
         val host = node("chrome-host").assertWidthIsEqualTo(320.dp).fetchSemanticsNode().boundsInRoot
         val controls = listOf(button("附件"), button("推理强度，当前为 高"),
@@ -402,7 +402,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             if (canSend) send.assertIsEnabled() else send.assertIsNotEnabled()
             val pixels = send.captureToImage().toPixelMap()
             val behind = pixels[0, pixels.height / 2]
-            val fill = requireNotNull(actionColors).sendContainer
+            val fill = (if (canSend) requireNotNull(actionColors).appendContainer else requireNotNull(actionColors).sendContainer)
                 .copy(alpha = if (canSend || !dark) 1f else .4f).compositeOver(behind)
             val actual = pixels[pixels.width / 2, pixels.height / 5]
             assertEquals("send red dark=$dark enabled=$canSend", fill.red, actual.red, .015f)
@@ -419,6 +419,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             Triple(composer().copy(text = "", phase = ComposerPhase.RUNNING), "暂停", 14f),
             Triple(composer().copy(text = "", phase = ComposerPhase.PAUSED), "继续", 14f),
             Triple(composer().copy(text = "补充", phase = ComposerPhase.PAUSED,
+                supplementAvailable = true), "追加消息", 16f),
+            Triple(composer().copy(text = "补充", phase = ComposerPhase.RUNNING,
                 supplementAvailable = true), "追加消息", 16f),
         )
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
@@ -455,7 +457,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 assertEquals(((assistantSlot.height - avatar.height) / 2f).roundToInt().toFloat(),
                     avatar.top - assistantSlot.top, 0f)
                 val colors = requireNotNull(actionColors)
-                val expected = if (label == "追加消息") colors.appendContainer else colors.sendContainer
+                val expected = colors.appendContainer
                 val tag = if (label == "发送" || label == "追加消息") "chat-send" else "chat-control"
                 val pixels = node(tag).assertIsEnabled().captureToImage().toPixelMap()
                 fun distance(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Float {
@@ -654,16 +656,21 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(listOf(state.text), sent) }
     }
 
-    fun testRunningTextCannotSendOrSupplementEvenWithStaleAvailability() {
-        var callbacks = 0
-        var primaryTaps = 0
-        show(composer().copy(supplementAvailable = true), ChatScreenActions(
-            onSend = { callbacks++ }, onSupplement = { callbacks++ }, onPrimaryTap = { primaryTaps++ },
-        ))
-        node("chat-send").assertDoesNotExist()
-        node("chat-control").assertIsEnabled().assertContentDescriptionEquals("暂停")
-        touch(node("chat-control"))
-        ui.runOnIdle { assertEquals(0, callbacks); assertEquals(1, primaryTaps) }
+    fun testRunningTextAppendsOnceAndLongPressNeverStopsOrPauses() {
+        val supplements = mutableListOf<String>()
+        var sends = 0; var primaryTaps = 0; var stops = 0
+        val state = composer().copy(supplementAvailable = true)
+        show(state, ChatScreenActions(onSend = { sends++ }, onSupplement = { supplements.add(it) },
+            onPrimaryTap = { primaryTaps++ }, onPrimaryLongPress = { stops++ }))
+        node("chat-control").assertDoesNotExist()
+        node("chat-send").assertIsEnabled().assertContentDescriptionEquals("追加消息")
+        touch(node("chat-send"))
+        ui.runOnIdle { assertEquals(listOf(state.text), supplements); assertEquals(0, sends); assertEquals(0, primaryTaps) }
+        node("chat-send").performTouchInput { longClick() }
+        ui.runOnIdle {
+            assertEquals(listOf(state.text), supplements)
+            assertEquals(0, sends); assertEquals(0, stops); assertEquals(0, primaryTaps)
+        }
     }
 
     fun testOverflowHasOnlyOriginalEntriesAndNoInventedSectionHeadings() {
@@ -707,7 +714,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
 
     fun testDisabledComposerDoesNotAcquireControlGestureOrDispatchActions() {
         var callbacks = 0
-        show(composer().copy(enabled = false), ChatScreenActions(
+        show(composer().copy(text = "", enabled = false), ChatScreenActions(
             onControlPress = { callbacks++ }, onControlRelease = { callbacks++ },
             onPrimaryTap = { callbacks++ }, onPrimaryLongPress = { callbacks++ },
             onSend = { callbacks++ }, onSupplement = { callbacks++ }, onOpenReasoning = { callbacks++ }, onOpenAssistant = { callbacks++ },

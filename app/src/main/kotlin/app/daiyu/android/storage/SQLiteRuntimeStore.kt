@@ -116,7 +116,7 @@ internal class SQLiteRuntimeStore private constructor(
     }
     @Synchronized override fun commitCheckpoint(checkpoint: RunCheckpoint) = commit(checkpoint, null)
     @Synchronized override fun commitSupplement(checkpoint: RunCheckpoint, supplement: Message) {
-        require(checkpoint.phase == ExecutionPhase.PAUSED)
+        require(checkpoint.phase == ExecutionPhase.PAUSED || checkpoint.phase == ExecutionPhase.BOUNDARY)
         require(checkpoint.supplements.count { it.id == supplement.id } == 1 &&
             checkpoint.supplements.single { it.id == supplement.id } == supplement)
         commit(checkpoint, supplement)

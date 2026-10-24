@@ -100,6 +100,60 @@ class RetainedChildTasksPauseTest {
         assertTrue("real worker and transport drain", done.await(5, TimeUnit.SECONDS))
     }
 
+    @Test fun parentPauseGroupIncludesLateAdmissionsButExcludesManualPauses() {
+        val supervisor = RetainedChildTasks(Journal()); val parent = Parent("group"); val model = Model()
+        val binding = parent.bind(supervisor, model)
+        try {
+            val manual = owner(supervisor, binding, parent)
+            assertTrue(model.entered.await(5, TimeUnit.SECONDS))
+            assertEquals(ChildTaskControlReceipt.PENDING, supervisor.pause(binding, manual))
+            val group = supervisor.pauseGroup(binding)
+            assertFalse(supervisor.hasCaptured(group))
+            val late = (submit(supervisor, binding, parent, "late") as ChildTaskAdmission.Accepted).tasks.single().owner
+            assertTrue(supervisor.hasCaptured(group))
+            await { supervisor.snapshots(binding).first { it.record.owner == late }.pauseState != ChildTaskPauseState.ACTIVE }
+            assertSame(group, supervisor.pauseGroup(binding))
+            assertTrue(supervisor.resumeGroup(group)); assertFalse(supervisor.resumeGroup(group))
+            assertEquals(ChildTaskPauseState.PENDING, supervisor.snapshots(binding).first { it.record.owner == manual }.pauseState)
+            assertEquals(ChildTaskPauseState.ACTIVE, supervisor.snapshots(binding).first { it.record.owner == late }.pauseState)
+            assertEquals(1, model.opens.get())
+        } finally { drain(supervisor, model) }
+    }
+
+    @Test fun stoppedParentChoicePreservesPauseByDefaultAndIsSingleUse() {
+        val supervisor = RetainedChildTasks(Journal()); val parent = Parent("choice"); val model = Model()
+        val binding = parent.bind(supervisor, model)
+        try {
+            val child = owner(supervisor, binding, parent)
+            assertTrue(model.entered.await(5, TimeUnit.SECONDS))
+            val group = supervisor.pauseGroup(binding)
+            supervisor.finishParent(binding)
+            assertTrue(supervisor.finishGroup(group, stop = false))
+            assertFalse(supervisor.finishGroup(group, stop = true))
+            assertEquals(ChildTaskPauseState.PENDING, snapshot(supervisor, binding).pauseState)
+            assertFalse(snapshot(supervisor, binding).stopRequested)
+            assertEquals(ChildTaskControlReceipt.RESUMED, supervisor.resume(binding, child))
+            assertEquals(1, model.opens.get())
+        } finally { drain(supervisor, model) }
+    }
+
+    @Test fun manualControlDetachesFromParentAutoResumeAndStopChoice() {
+        val supervisor = RetainedChildTasks(Journal()); val parent = Parent("manual"); val model = Model()
+        val binding = parent.bind(supervisor, model)
+        try {
+            val child = owner(supervisor, binding, parent)
+            assertTrue(model.entered.await(5, TimeUnit.SECONDS))
+            val group = supervisor.pauseGroup(binding)
+            supervisor.pause(binding, child)
+            assertSame(group, supervisor.pauseGroup(binding))
+            assertFalse(supervisor.hasCaptured(group))
+            supervisor.finishParent(binding)
+            assertTrue(supervisor.finishGroup(group, stop = true))
+            assertFalse(snapshot(supervisor, binding).stopRequested)
+            assertEquals(ChildTaskPauseState.PENDING, snapshot(supervisor, binding).pauseState)
+        } finally { drain(supervisor, model) }
+    }
+
     @Test fun unconfirmedJournalCannotResumeAStillRetainedChild() {
         val journal = Journal().apply { failFinished = true }
         val model = Model(fail = false, holdCancel = true)

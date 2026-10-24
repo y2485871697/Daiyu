@@ -50,6 +50,13 @@ internal class ChildTaskCommandRequest(val fingerprint: String) {
     var receipt: ChildTaskCommandReceipt? = null
 }
 
+/** One process-local pause epoch; never a durable restart permission. */
+class ChildTaskPauseGroup internal constructor(internal val binding: ChildTaskBinding) {
+    internal val members = linkedSetOf<ChildRunOwner>()
+    internal val manual = mutableSetOf<ChildRunOwner>()
+    internal var consumed = false
+}
+
 /** Host-owned capability. Finishing its parent does not revoke accepted child work. */
 class ChildTaskBinding internal constructor(
     internal val supervisor: RetainedChildTasks,
@@ -60,6 +67,7 @@ class ChildTaskBinding internal constructor(
     // only this lightweight handle/history stays with its host, never with the supervisor.
     internal val authorization = WeakReference(checkNotNull(resources).authorization)
     internal var accepting = true
+    internal var pauseGroup: ChildTaskPauseGroup? = null
     internal var outstanding = 0
     internal val requests = mutableMapOf<String, ChildTaskRequest>()
     internal val commandRequests = mutableMapOf<String, ChildTaskCommandRequest>()
@@ -174,7 +182,10 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                     owner.assistantMessageId.value, owner.ownerId, index, inputTask.profileId, inputTask.prompt,
                     display = resources.models.getValue(inputTask.profileId).display)
                 Task(binding, request, record, context.invocation, deadline,
-                    ChildTaskPauseControl { notifyChanged(binding) }).also { tasks[record.owner.childRunId] = it }
+                    ChildTaskPauseControl { notifyChanged(binding) }).also {
+                        tasks[record.owner.childRunId] = it
+                        inheritPauseGroup(it)
+                    }
             }
             outstanding += reserved.size
             binding.outstanding += reserved.size
@@ -288,6 +299,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                     it.admitting = true
                     reserved = it
                     tasks[record.owner.childRunId] = it
+                    inheritPauseGroup(it)
                     outstanding++; binding.outstanding++
                     // From here on even an exception/null future lookup must never retry this write.
                     request.attempted = true
@@ -358,6 +370,68 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         return synchronized(gate) { binding.resources == null }
     }
 
+    // Called under gate before a reserved child can enter its first provider boundary.
+    private fun inheritPauseGroup(task: Task) {
+        val group = task.binding.pauseGroup ?: return
+        if (!group.consumed && task.initial.owner !in group.manual && task.pause.snapshot() == ChildTaskPauseState.ACTIVE &&
+            !task.stopRequested && !task.journalUnconfirmed && !task.settled &&
+            task.record.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING)) {
+            if (task.pause.pause() != ChildTaskControlReceipt.STALE) group.members.add(task.initial.owner)
+        }
+    }
+
+    fun pauseGroup(binding: ChildTaskBinding): ChildTaskPauseGroup {
+        requireBinding(binding)
+        val group = synchronized(gate) {
+            val group = binding.pauseGroup ?: ChildTaskPauseGroup(binding).also { binding.pauseGroup = it }
+            tasks.values.filter { it.binding === binding }.forEach(::inheritPauseGroup)
+            group
+        }
+        notifyChanged(binding)
+        return group
+    }
+
+    fun hasCaptured(group: ChildTaskPauseGroup): Boolean {
+        requireBinding(group.binding)
+        return synchronized(gate) { !group.consumed && group.members.isNotEmpty() }
+    }
+
+    fun resumeGroup(group: ChildTaskPauseGroup): Boolean {
+        val binding = group.binding
+        requireBinding(binding)
+        synchronized(gate) {
+            if (group.consumed || binding.pauseGroup !== group) return false
+            group.consumed = true; binding.pauseGroup = null
+            group.members.forEach { owner ->
+                tasks[owner.childRunId]?.takeIf { it.binding === binding && it.initial.owner == owner &&
+                    !it.stopRequested && !it.journalUnconfirmed && !it.settled &&
+                    it.record.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING) }?.pause?.resume()
+            }
+        }
+        notifyChanged(binding)
+        return true
+    }
+
+    /** Consumes the captured choice once; dismissing it preserves all pause intents. */
+    fun finishGroup(group: ChildTaskPauseGroup, stop: Boolean): Boolean {
+        val binding = group.binding
+        requireBinding(binding)
+        val batches = synchronized(gate) {
+            if (group.consumed || binding.pauseGroup !== group) return false
+            group.consumed = true; binding.pauseGroup = null
+            if (!stop) emptyList() else group.members.mapNotNull { owner ->
+                tasks[owner.childRunId]?.takeIf { it.binding === binding && it.initial.owner == owner &&
+                    !it.settled && !it.journalUnconfirmed &&
+                    it.record.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING) }?.let {
+                    it.stopRequested = true; it.pause.terminate(); it.batch
+                }
+            }
+        }
+        batches.forEach { it.close() }
+        notifyChanged(binding)
+        return true
+    }
+
     /** The binding is the trusted host capability; every field of the child identity must match.
      * Parent admission may be sealed without revoking control of its accepted children. */
     fun pause(binding: ChildTaskBinding, owner: ChildRunOwner): ChildTaskControlReceipt =
@@ -374,6 +448,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 ?: return ChildTaskControlReceipt.STALE
             if (closed || task.admitting || task.stopRequested || task.journalUnconfirmed || task.record.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
                 return ChildTaskControlReceipt.STALE
+            binding.pauseGroup?.let { it.members.remove(owner); it.manual.add(owner) }
             if (resume) task.pause.resume() else task.pause.pause()
         }
         notifyChanged(binding)
@@ -387,6 +462,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             val task = tasks[owner.childRunId]?.takeIf { it.binding === binding && it.initial.owner == owner }
             if (task == null) return if (binding.recent[owner.childRunId]?.record?.owner == owner)
                 ChildTaskStop.ALREADY_SETTLED else ChildTaskStop.NOT_FOUND
+            binding.pauseGroup?.let { it.members.remove(owner); it.manual.add(owner) }
             task.stopRequested = true
             task.pause.terminate()
             batch = task.batch

@@ -113,7 +113,7 @@ internal object ChatPreviewIcons {
 
     val Append: ImageVector by lazy {
         previewIcon("Append") {
-            outline("m21 3-6 18-4-8-8-4 18-6ZM11 13 21 3", 1.7f)
+            outline("m19 5-6 18-4-8-8-4 18-6ZM9 15 19 5", 1.7f)
         }
     }
 

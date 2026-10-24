@@ -45,6 +45,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     private val sourceMessageIds = mutableSetOf<MessageId>()
     private data class PendingSupplement(val message: Message, val complete: (SupplementAdmission) -> Unit)
     private val pendingSupplements = java.util.ArrayDeque<PendingSupplement>()
+    private var admittingSupplement: Message? = null
+    private fun queuedSupplementMessages(): List<Message> = supplements + pendingSupplements.map { it.message } +
+        listOfNotNull(admittingSupplement)
     @Volatile private var execution = ExecutionState()
     @Volatile private var session: ModelSession? = null
     @Volatile private var reconnectBudget: TransportReconnectBudget? = null
@@ -168,7 +171,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         options.contextRuntime?.cancel()
         return true
     }
-    /** Only explicit resume releases a paused boundary; supplements alone never do. */
+    /** Releases the user pause without changing the running owner. */
     fun resume(): Boolean {
         val waiter = synchronized(terminalLock) {
             if (terminal || terminalReserved || stopped.get() || !pauseRequested) return false
@@ -202,33 +205,51 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         cancelSession(captured.first)
         return true
     }
-    /** Proposes a text supplement at a confirmed PAUSED boundary. True only means queued;
-     * the callback confirms durable admission. Does not resume or consume a draft. */
+    /** Queues on the live owner; durable admission precedes the next model request.
+     * A paused run resumes, while an executing tool batch keeps its receipt boundary. */
     fun admitSupplement(message: Message, complete: (SupplementAdmission) -> Unit): Boolean {
         val frozen = message.copy(blocks = message.blocks.toList(), protocolItems = message.protocolItems.toList(),
             historySegments = message.historySegments.toList())
         val pending = PendingSupplement(frozen, complete)
-        val accepted = synchronized(terminalLock) {
+        val captured = synchronized(terminalLock) {
             val owner = identity
-            if (owner == null || terminal || terminalReserved || stopped.get() || !pauseRequested ||
-                execution.phase != ExecutionPhase.PAUSED || options.runtimeStore !is AtomicSupplementRuntimeStore ||
-                !options.runtimeStore.durable || frozen.role != Message.USER_ROLE || frozen.status != RunStatus.COMPLETED ||
+            val rawText = frozen.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
+            val text = rawText.trim()
+            val queued = queuedSupplementMessages()
+            if (owner == null || terminal || terminalReserved || stopped.get() ||
+                options.runtimeStore !is AtomicSupplementRuntimeStore || !options.runtimeStore.durable ||
+                frozen.role != Message.USER_ROLE || frozen.status != RunStatus.COMPLETED ||
                 frozen.conversationId != owner.conversationId || frozen.runId != owner.runId || frozen.id == owner.id ||
                 frozen.error != null || frozen.historySegments.isNotEmpty() || frozen.protocolItems.isNotEmpty() ||
-                frozen.blocks.isEmpty() || frozen.blocks.any { it !is MessageBlock.Text } ||
-                frozen.blocks.filterIsInstance<MessageBlock.Text>().all { it.text.isBlank() } ||
-                frozen.id in supplementIds || frozen.id in sourceMessageIds) false
+                frozen.blocks.isEmpty() || frozen.blocks.any { it !is MessageBlock.Text } || text.isBlank() ||
+                rawText.length > 64_000 || queued.size >= 16 ||
+                queued.sumOf { it.blocks.filterIsInstance<MessageBlock.Text>().sumOf { block -> block.text.length } } + rawText.length > 192_000 ||
+                queued.any { it.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { block -> block.text }.trim() == text } ||
+                frozen.id in supplementIds || frozen.id in sourceMessageIds) null
             else {
                 supplementIds.add(frozen.id)
                 pendingSupplements.addLast(pending)
-                true
+                breakStream = true
+                if (pauseRequested) { pauseRequested = false; pauseRevision++ }
+                execution = execution.copy(pauseRequested = false)
+                val interrupt = requestOpening || execution.phase == ExecutionPhase.STREAMING ||
+                    execution.phase == ExecutionPhase.RECONNECTING
+                if (interrupt) {
+                    if (reasoningInterruptedAtNanos == null) reasoningInterruptedAtNanos = System.nanoTime()
+                    attemptDelivery?.expire()
+                    generation++
+                }
+                Pair(if (interrupt) session else null, boundaryWaiter)
             }
         }
-        if (!accepted) {
+        if (captured == null) {
             completeAdmission(pending, SupplementAdmission.Rejected(message.id))
             return false
         }
-        synchronized(terminalLock) { boundaryWaiter }?.let { LockSupport.unpark(it) }
+        syncReconnectPause()
+        captured.second?.let { LockSupport.unpark(it) }
+        cancelSession(captured.first)
+        options.contextRuntime?.cancel()
         return true
     }
     private fun completeAdmission(pending: PendingSupplement, result: SupplementAdmission) {
@@ -354,7 +375,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 val needsCheckpoint = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved) { boundaryWaiter = null; return }
                     pending = pendingSupplements.pollFirst()
-                    if (pending != null) false
+                    admittingSupplement = pending?.message
+                    if (pending != null) { setPhase(ExecutionPhase.BOUNDARY); false }
                     else {
                         if (!pauseRequested) { boundaryWaiter = null; return }
                         boundaryWaiter = Thread.currentThread()
@@ -369,11 +391,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     try {
                         (options.runtimeStore as AtomicSupplementRuntimeStore).commitSupplement(expected, admission.message)
                     } catch (failure: Exception) {
+                        synchronized(terminalLock) { admittingSupplement = null }
                         completeAdmission(admission, SupplementAdmission.Unconfirmed(admission.message.id))
                         throw PersistenceException(failure)
                     }
                     revision = expected.revision
                     synchronized(terminalLock) {
+                        admittingSupplement = null
                         supplements.add(admission.message)
                         execution = execution.copy(queuedSupplements = supplements.size)
                     }
@@ -415,7 +439,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         fun compactAtBoundary(): Boolean {
             val runtime = contextRuntime ?: return false
             val pressure = contextState?.pressure ?: return false
-            if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty()) return false
+            if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) return false
             val before = effectiveHistory()
             val historyLocal = runtime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
             val anchor = contextState?.calibration
@@ -424,7 +448,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             val summary = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
             var admitted = false
             val compactEpoch = pauseEpoch
-            val cancelled = { compactEpoch != pauseEpoch || stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() }
+            val cancelled = { compactEpoch != pauseEpoch || stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() }
             try {
                 val candidate = runtime.compact(before, billed, local, summary, observe = { event ->
                     check(admitted)
@@ -481,7 +505,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
-                    if (pauseRequested || supplements.isNotEmpty() || breakStream) null
+                    if (pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream) null
                     else { requestOpening = true; generation to pauseEpoch }
                 } ?: continue
                 // A supplement starts a new provider session, never a resume of the old cursor.
@@ -492,7 +516,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     checkpoint() // open may itself send a request; persist uncertainty first.
                     val admitted = synchronized(terminalLock) {
                         if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
-                        token.first == generation && token.second == pauseEpoch && !pauseRequested && supplements.isEmpty() && !breakStream
+                        token.first == generation && token.second == pauseEpoch && !pauseRequested && supplements.isEmpty() && pendingSupplements.isEmpty() && !breakStream
                     }
                     if (!admitted) continue
                     val opened = try {
@@ -500,14 +524,14 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     } catch (failure: Exception) {
                         val invalidated = synchronized(terminalLock) {
                             if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
-                            token.first != generation || token.second != pauseEpoch || pauseRequested || supplements.isNotEmpty() || breakStream
+                            token.first != generation || token.second != pauseEpoch || pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream
                         }
                         if (invalidated) continue
                         throw failure
                     }
                     val accept = synchronized(terminalLock) {
                         if (stopped.get() || terminalReserved || terminal || token.first != generation || token.second != pauseEpoch ||
-                            pauseRequested || supplements.isNotEmpty() || breakStream) false
+                            pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream) false
                         else { session = opened; true }
                     }
                     if (accept) { reopenAfterCompaction = false; return opened }
@@ -595,7 +619,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
-                    if (pauseRequested || supplements.isNotEmpty() || breakStream) null
+                    if (pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream) null
                     else { reasoningInterruptedAtNanos = null; attemptFence = pauseEpoch; setPhase(ExecutionPhase.STREAMING); ++generation }
                 }
                 if (token == null) {
@@ -939,12 +963,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (pending.isEmpty()) {
                     if (boundary()) { cancelSession(active); active = open(); continue }
                     compactAtBoundary()
-                    if (pauseRequested || breakStream || supplements.isNotEmpty()) continue
+                    if (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) continue
                     // Reserve normal completion before leaving the control section. stop() then
                     // cannot race this terminal outcome, while the actual transaction stays outside.
                     val completed = synchronized(terminalLock) {
                         if (stopped.get() || terminalReserved) throw InterruptedException()
-                        if (pauseRequested || supplements.isNotEmpty() || breakStream) false
+                        if (pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream) false
                         else { terminalReserved = true; true }
                     }
                     if (completed) {

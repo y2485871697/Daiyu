@@ -37,6 +37,19 @@ class ConversationActionStateTest {
         assertTrue(state.finish(ticket, SupplementAdmission.Accepted(message), editor))
         assertNull(state.pending)
     }
+    @Test fun retainedReceiptSurvivesUiDetachAndIsConsumedOnlyOnce() {
+        val state = PausedSupplementDraft()
+        val ticket = state.begin(message, editor)!!
+        state.receive(SupplementAdmission.Accepted(MessageId("other")))
+        assertNull(state.receipt)
+        state.receive(SupplementAdmission.Accepted(message))
+        assertSame(ticket, state.receipt!!.first)
+        assertNull(state.begin(MessageId("duplicate"), editor))
+        state.receive(SupplementAdmission.Rejected(message))
+        assertEquals(SupplementAdmission.Accepted(message), state.receipt!!.second)
+        assertTrue(state.finish(ticket, state.receipt!!.second, editor))
+        assertNull(state.receipt); assertNull(state.pending)
+    }
     @Test fun rejectionAndUnknownReleasePendingWithoutConsumingDraft() {
         for (result in listOf(SupplementAdmission.Rejected(message), SupplementAdmission.Unconfirmed(message))) {
             val state = PausedSupplementDraft()

@@ -1,6 +1,6 @@
 package app.daiyu.android.ui.model
 
-/** Provider input includes cache reads and writes; missing observations remain unknown. */
+/** Provider input includes cache reads and writes. The conversation projection normalizes missing fields. */
 data class ConversationTokenUsageUi(
     val inputTokens: Long? = null,
     val outputTokens: Long? = null,
@@ -17,13 +17,13 @@ data class ConversationTokenUsageUi(
         val input = inputTokens ?: return null
         val cached = cachedTokens ?: return null
         val creation = cacheCreationTokens ?: return null
-        if (input < 0 || cached < 0 || creation < 0 || cached > input || creation > input - cached) return null
-        return input - cached - creation
+        if (input < 0 || cached < 0 || creation < 0) return null
+        return (input - cached).coerceAtLeast(0).let { (it - creation).coerceAtLeast(0) }
     }
-    val hasUsage: Boolean get() = requestCount > 0 ||
-        listOf(inputTokens, outputTokens, cachedTokens, cacheCreationTokens).any { it != null }
+    val hasUsage: Boolean get() =
+        listOf(inputTokens, outputTokens, cachedTokens, cacheCreationTokens).any { it != null && it > 0 }
     val cachePercent: Double?
         get() = inputTokens?.takeIf { it > 0 }?.let { input ->
-            cachedTokens?.takeIf { it >= 0 && it <= input }?.let { it.toDouble() / input.toDouble() * 100.0 }
+            cachedTokens?.takeIf { it >= 0 }?.let { it.toDouble() / input.toDouble() * 100.0 }
         }
 }

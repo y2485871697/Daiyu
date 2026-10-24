@@ -39,17 +39,16 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun ChatUsageDialog(
     controller: ChatController,
     conversationId: ConversationId?,
-    readUsage: (ConversationId) -> RecordedUsageProjection = { owner ->
-        RecordedUsageProjection(controller.recordedRequestUsage(owner))
-    },
+    readUsage: ((ConversationId) -> RecordedUsageProjection)? = null,
     onDismiss: () -> Unit,
+    usageRevision: Long = 0L,
 ) {
-    var projection by remember(controller, conversationId) { mutableStateOf<RecordedUsageProjection?>(null) }
+    var projection by remember(controller, conversationId) { mutableStateOf<app.daiyu.android.ui.model.ConversationTokenUsageUi?>(null) }
     var loading by remember(controller, conversationId) { mutableStateOf(conversationId != null) }
-    LaunchedEffect(controller, conversationId) {
+    LaunchedEffect(controller, conversationId, usageRevision) {
         val owner = conversationId ?: return@LaunchedEffect
         projection = withContext(Dispatchers.IO) {
-            try { readUsage(owner) }
+            try { if (readUsage != null) readUsage(owner).conversationUsage else controller.conversationTokenUsage(owner) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
         }
@@ -66,14 +65,14 @@ internal fun ChatUsageDialog(
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val usage = projection
             when {
-                conversationId == null || usage?.combined?.requestSnapshotCount == 0L -> {
+                conversationId == null || usage?.hasUsage == false -> {
                     Box(Modifier.fillMaxWidth().heightIn(min = 100.dp).testTag("chat-usage-empty"),
                         contentAlignment = Alignment.Center) {
                         Text("暂无用量", fontSize = 13.sp, color = colors.muted, textAlign = TextAlign.Center)
                     }
                 }
                 usage == null -> Text("用量读取失败", fontSize = 10.sp, color = MiuixTheme.colorScheme.error)
-                else -> key(controller, conversationId) { ConversationTokenUsageContent(usage.conversationUsage) }
+                else -> key(controller, conversationId) { ConversationTokenUsageContent(usage) }
             }
         }
     }

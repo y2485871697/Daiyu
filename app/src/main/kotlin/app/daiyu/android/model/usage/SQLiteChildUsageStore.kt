@@ -56,6 +56,8 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                     check(db.update(TABLE, values, "task_id=? AND request_id=?",
                         arrayOf(task.owner.childRunId, record.request.requestId)) == 1)
                 } else db.insertOrThrow(TABLE, null, values)
+                app.daiyu.android.storage.ConversationUsageStore.record(db, task.owner.conversationId,
+                    record.request.owner, record.request.requestId, record.snapshot)
             }
         }
     }

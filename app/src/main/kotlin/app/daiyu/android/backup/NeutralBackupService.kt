@@ -369,6 +369,9 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             BackupGenerationCodec.restore(db, parsed.generation)
             BackupChildTaskCodec.restore(db, parsed.children)
             BackupRuntimeUsageCodec.restore(db, parsed.runtimeUsage)
+            val importedConversations = uniqueIds(objectOf(objectOf(parsed.payload.getString("text_backup"))
+                .getString("payload")).getJSONArray("conversations"), "id")
+            app.daiyu.android.storage.ConversationUsageStore.backfill(db, importedConversations)
             if (parsed.static.isNotEmpty()) BackupHistoryRows.install(db)
             val importedMessages = objectOf(objectOf(parsed.payload.getString("text_backup")).getString("payload")).getJSONArray("messages")
             parsed.static.forEach { StaticGenerationCodec.saveInTransaction(db, it, importedMessages) }

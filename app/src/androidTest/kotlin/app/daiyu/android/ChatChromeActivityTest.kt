@@ -182,7 +182,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         node("chat-menu:AUTO_COMPRESS").scrollToVisible().assertIsDisplayed()
         touch(ui.onNodeWithText("Token 用量").scrollToVisible())
         ui.onNodeWithText("Token 用量").assertDoesNotExist()
-        node("chat-context").assertHasNoClickAction()
+        node("chat-context").assertHasClickAction()
         touch(node("chat-model")); touch(node("chat-context"))
         node("chat-context").performTouchInput { longClick() }
         touch(button("语音输入"))
@@ -288,7 +288,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 val state = composer().copy(contextFraction = 1f, enabled = enabled)
                 show(state, dark = dark, interfaceScale = scale, fontScale = font)
                 val density = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f
-                val badge = node("chat-context").assertIsDisplayed().assertHasNoClickAction().fetchSemanticsNode().boundsInRoot
+                val badge = node("chat-context").assertIsDisplayed().assertHasClickAction().fetchSemanticsNode().boundsInRoot
                 val iconNode = ui.onNodeWithTag("chat-context-icon", useUnmergedTree = true).assertIsDisplayed()
                 val icon = iconNode.fetchSemanticsNode().boundsInRoot
                 val label = ui.onNodeWithTag("chat-context-label", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
@@ -337,7 +337,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val text = layout(expected)
             assertEquals(1, text.lineCount)
             assertNoTextOverflow(text)
-            node("chat-context").assertHasNoClickAction()
+            node("chat-context").assertHasClickAction()
         }
         show(composer().copy(contextFraction = 1f, contextLabel = "上下文使用情况".repeat(20)), fontScale = 1.3f)
         val density = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f
@@ -349,6 +349,45 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         assertTrue(label.right <= badge.right + 1f)
         assertTrue(layout("100% " + "上下文使用情况".repeat(20)).isLineEllipsized(0))
         assertTrue(node("chat-model").fetchSemanticsNode().boundsInRoot.width > 0f)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testContextPercentageAndActualToggleAnimateInsideTheSameCompactBadge() {
+        val events = mutableListOf<String>()
+        for (input in listOf(4_000L, 0L)) {
+            val value = app.daiyu.android.ui.model.CloudContextUsageUi(input, 272_000)
+            val percent = value.label(java.util.Locale.US)
+            val tokens = value.tokensLabel(java.util.Locale.US)
+            show(composer().copy(contextFraction = value.fraction, contextUsageText = percent, contextTokensText = tokens),
+                ChatScreenActions(onModelClick = { events.add("model") }, onMenuAction = { events.add("menu") }))
+            val before = node("chat-context").assertHasClickAction().fetchSemanticsNode().boundsInRoot
+            ui.onNodeWithText(percent, useUnmergedTree = true).assertIsDisplayed()
+            val automatic = ui.mainClock.autoAdvance
+            try {
+                ui.mainClock.autoAdvance = false
+                node("chat-context").performClick()
+                ui.mainClock.advanceTimeByFrame()
+                ui.mainClock.advanceTimeBy(80)
+                ui.onNodeWithText(percent, useUnmergedTree = true).assertExists()
+                ui.onNodeWithText(tokens, useUnmergedTree = true).assertExists()
+                val middle = node("chat-context").fetchSemanticsNode().boundsInRoot
+                ui.mainClock.advanceTimeBy(320)
+                ui.onNodeWithText(tokens, useUnmergedTree = true).assertIsDisplayed()
+                ui.onNodeWithText(percent, useUnmergedTree = true).assertDoesNotExist()
+                val after = node("chat-context").fetchSemanticsNode().boundsInRoot
+                assertEquals(before.height, middle.height, 1f)
+                assertEquals(before.height, after.height, 1f)
+                assertTrue("badge width interpolates rather than jumping",
+                    middle.width > minOf(before.width, after.width) + .5f &&
+                        middle.width < maxOf(before.width, after.width) - .5f)
+                assertNoTextOverflow(layout(tokens))
+                node("chat-context").performClick()
+                ui.mainClock.advanceTimeBy(400)
+                ui.onNodeWithText(percent, useUnmergedTree = true).assertIsDisplayed()
+                ui.onNodeWithText(tokens, useUnmergedTree = true).assertDoesNotExist()
+            } finally { ui.mainClock.autoAdvance = automatic }
+            assertTrue("display toggles do not navigate or launch model requests", events.isEmpty())
+        }
         assertEquals(0, fixture.opens.get())
     }
 

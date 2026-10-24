@@ -12,16 +12,11 @@ internal data class RecordedUsageProjection(val attributed: AttributedUsageStats
     val combined: RecordedUsageSummary get() = attributed.summary.combined
     val manualSummary: RecordedUsageSummary get() = attributed.summary.conversationPreparation
     val conversationUsage: app.daiyu.android.ui.model.ConversationTokenUsageUi get() {
-        val p = attributed.parentCoverage
-        val c = attributed.childCoverage
-        val complete = attributed.scanComplete && p.messagesWithoutCheckpoint == 0 &&
-            p.messagesWithoutUsage == 0 && p.preparationsWithoutUsage == 0 && p.mainRequestsWithoutUsage == 0 &&
-            p.auxiliaryRequestsWithoutUsage == 0 && p.titleRequestsWithoutUsage == 0 &&
-            p.manualSummaryWithoutUsage == 0 && c.tasksWithoutReportedUsage == 0
-        fun known(value: app.daiyu.android.domain.usage.ReportedTokenSubtotal): Long? =
-            value.reportedTokens.takeIf { complete && value.unknownRequestCount == 0L }
-        return app.daiyu.android.ui.model.ConversationTokenUsageUi(known(combined.input), known(combined.output),
-            known(combined.cached), known(combined.creation), combined.requestSnapshotCount)
+        // Match the original conversation menu: report recorded fields independently;
+        // missing fields contribute zero here, without changing the underlying observations.
+        return app.daiyu.android.ui.model.ConversationTokenUsageUi(
+            combined.input.reportedTokens ?: 0, combined.output.reportedTokens ?: 0,
+            combined.cached.reportedTokens ?: 0, combined.creation.reportedTokens ?: 0, combined.requestSnapshotCount)
     }
     val tokens: UsageTokenMetrics get() = UsageTokenMetrics(
         input = combined.input.reportedTokens, output = combined.output.reportedTokens,

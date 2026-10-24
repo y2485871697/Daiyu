@@ -115,6 +115,8 @@ internal object SQLiteAdditionalUsageStore {
                 if (terminal) { put("usage_state", "TERMINAL"); put("terminal_reason", terminalReason) }
             }, "request_id=? AND request_owner=? AND attempt_id=? AND usage_revision=? AND usage_state='ADMITTED'",
                 arrayOf(request.requestId, request.owner, request.attemptId, revision.toString())) == 1)
+            if (usage != null) app.daiyu.android.storage.ConversationUsageStore.record(db,
+                conversation, request.owner, request.requestId, usage)
         }
     }
 

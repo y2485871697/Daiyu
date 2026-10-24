@@ -75,6 +75,9 @@ internal class SQLitePreparationRuntime(
                             put("cached_tokens", usage.snapshot.cachedTokens); put("cache_creation_tokens", usage.snapshot.cacheCreationTokens)
                         })
                         row.revision + 1
+                    }.also {
+                        app.daiyu.android.storage.ConversationUsageStore.record(db, conversation.value,
+                            request.owner, request.requestId, usage.snapshot)
                     }
                 }
                 revision = committedRevision // no optimistic receipt on failed write

@@ -1,6 +1,8 @@
 package app.daiyu.android
 
 import android.os.Build
+import android.content.Context
+import app.daiyu.android.data.model.AppearanceSettingsStore
 import androidx.activity.BackEventCompat
 import androidx.activity.ExperimentalActivityApi
 import androidx.compose.ui.geometry.Offset
@@ -145,8 +147,14 @@ class SidebarShortcutNavigationTest : WiredActivityTestCase() {
     @OptIn(ExperimentalActivityApi::class)
     fun testAgentTaskPreferenceUsesItsSettingsPredecessorAndNeverSkipsToChat() {
         val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
+        val appearancePreferences = activity.getSharedPreferences(AppearanceSettingsStore.FILE_NAME, Context.MODE_PRIVATE)
+        val originalPreferences = appearancePreferences.all.toMap()
+        val appearanceStore = AppearanceSettingsStore(appearancePreferences)
+        val originalAppearance = appearanceStore.load()
         try {
             if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
+            mainThread { invokeHost(activity, "saveAppearance", originalAppearance.copy(predictiveBackEnabled = true)) }
+            assertTrue(appearanceStore.load().predictiveBackEnabled)
             openSettings()
             val row = reveal("settings-row:Agent任务偏好", "设置")
             val before = row.fetchSemanticsNode().boundsInRoot
@@ -190,7 +198,26 @@ class SidebarShortcutNavigationTest : WiredActivityTestCase() {
             assertEquals(0, fixture.opens.get())
         } finally {
             ui.mainClock.autoAdvance = true
-            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
+            try {
+                mainThread { invokeHost(activity, "saveAppearance", originalAppearance) }
+            } finally {
+                try {
+                    val editor = appearancePreferences.edit().clear()
+                    originalPreferences.forEach { (key, value) -> when (value) {
+                        is String -> editor.putString(key, value)
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Float -> editor.putFloat(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                        is Set<*> -> editor.putStringSet(key, value.map { it as String }.toSet())
+                        null -> editor.remove(key)
+                        else -> error("Unsupported appearance preference type: $key")
+                    } }
+                    check(editor.commit())
+                } finally {
+                    if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
+                }
+            }
         }
     }
 }

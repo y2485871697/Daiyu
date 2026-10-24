@@ -101,7 +101,23 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             "paragraph=${text.multiParagraph.width}x${text.multiParagraph.height} " +
             "intrinsic=${text.multiParagraph.intrinsics.maxIntrinsicWidth} " +
             "line=${text.getLineLeft(0)},${text.getLineTop(0)},${text.getLineRight(0)},${text.getLineBottom(0)} " +
-            "ellipsized=${text.isLineEllipsized(0)}", text.hasVisualOverflow)
+            "ellipsized=${text.isLineEllipsized(0)}",
+            text.didOverflowHeight || (0 until text.lineCount).any { line ->
+                text.isLineEllipsized(line) ||
+                    text.getLineLeft(line) < -1f ||
+                    text.getLineRight(line) > text.size.width + 1f ||
+                    text.getLineTop(line) < -1f ||
+                    text.getLineBottom(line) > text.size.height + 1f
+            })
+        assertTrue("complete text has a measured line", text.lineCount > 0)
+        assertEquals(0, text.getLineStart(0))
+        assertEquals(text.layoutInput.text.length, text.getLineEnd(text.lineCount - 1, visibleEnd = true))
+    }
+
+    private fun assertTextOverflowRejected(text: TextLayoutResult) {
+        val rejected = try { assertNoTextOverflow(text); false }
+            catch (_: junit.framework.AssertionFailedError) { true }
+        assertTrue("overflow oracle must reject clipped or ellipsized text", rejected)
     }
 
     private fun contextHeightPx(text: TextLayoutResult): Float {
@@ -337,6 +353,10 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val text = layout(expected)
             assertEquals(1, text.lineCount)
             assertNoTextOverflow(text)
+            if (fraction == null) {
+                assertTextOverflowRejected(text.copy(size = androidx.compose.ui.unit.IntSize(text.size.width - 2, text.size.height)))
+                assertTextOverflowRejected(text.copy(size = androidx.compose.ui.unit.IntSize(text.size.width, text.size.height - 1)))
+            }
             node("chat-context").assertHasClickAction()
         }
         show(composer().copy(contextFraction = 1f, contextLabel = "上下文使用情况".repeat(20)), fontScale = 1.3f)
@@ -347,7 +367,9 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         assertEquals(120f, badge.width / density, 1f)
         assertEquals(15f, icon.width / density, .75f)
         assertTrue(label.right <= badge.right + 1f)
-        assertTrue(layout("100% " + "上下文使用情况".repeat(20)).isLineEllipsized(0))
+        val truncated = layout("100% " + "上下文使用情况".repeat(20))
+        assertTrue(truncated.isLineEllipsized(0))
+        assertTextOverflowRejected(truncated)
         assertTrue(node("chat-model").fetchSemanticsNode().boundsInRoot.width > 0f)
         assertEquals(0, fixture.opens.get())
     }

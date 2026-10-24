@@ -69,6 +69,20 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertIn('color.alpha * .5f', icon)
         self.assertIn('progress?.let { drawPath(it, color, style = stroke) }', icon)
 
+    def test_context_readability_checks_real_lines_and_rejects_clipping(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatChromeActivityTest.kt').read_text()
+        helper = source.split('private fun assertNoTextOverflow(', 1)[1].split('private fun assertTextOverflowRejected(', 1)[0]
+        for token in ('text.didOverflowHeight', 'text.isLineEllipsized(line)',
+                      'text.getLineLeft(line) < -1f', 'text.getLineRight(line) > text.size.width + 1f',
+                      'text.getLineTop(line) < -1f', 'text.getLineBottom(line) > text.size.height + 1f',
+                      'text.getLineStart(0)', 'visibleEnd = true', 'text.layoutInput.text.length'):
+            self.assertIn(token, helper)
+        self.assertNotIn('text.hasVisualOverflow', helper)
+        for token in ('IntSize(text.size.width - 2, text.size.height)',
+                      'IntSize(text.size.width, text.size.height - 1)', 'assertTextOverflowRejected(truncated)',
+                      'catch (_: junit.framework.AssertionFailedError)', 'assertTrue("overflow oracle must reject'):
+            self.assertIn(token, source)
+
     def test_context_toggles_locally_with_animated_text_and_width(self):
         self.assertIn('var showContextTokens by rememberSaveable { mutableStateOf(false) }', self.text)
         self.assertIn('onClick = { showContextTokens = !showContextTokens }', self.badge)

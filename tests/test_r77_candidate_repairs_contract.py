@@ -74,20 +74,28 @@ class R77CandidateRepairsContract(unittest.TestCase):
             self.assertLess(back.index(earlier), back.index(later))
         self.assertEqual(1, back.count('sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)'))
         source = (TEST / 'DesktopEducationTooltip.kt').read_text()
-        for token in ('Desktop Windowing Education Tooltip of Task=', 'com.android.systemui',
+        for token in ('AccessibilityWindowInfo.TYPE_SYSTEM', 'com.android.systemui',
                       'Tap handle to access menu and display options', 'windows.size == 1',
                       'getBoundsInScreen', 'node.positionOnScreen', 'center.x < bounds.left - 1f',
-                      'ui.waitUntil(5_000) { educationWindows().isEmpty() }',
+                      'automation.windows.none { it.id == windowId } && educationWindows().isEmpty()',
                       'finally', 'flags = originalFlags'):
             self.assertIn(token, source)
         self.assertIn('automation.injectInputEvent(event, true)', source)
         self.assertNotIn('if (windows.isEmpty()) return', source)
-        discovery = source.split('var observed = false', 1)[1].split('val window = checkNotNull(ready)', 1)[0]
-        for token in ('ui.waitUntil(5_000)', 'val windows = educationWindows()', 'observed = true',
-                      'if (root == null) false', 'if (verified) ready = candidate',
-                      'if (observed) throw AssertionError', 'No tooltip observed within discovery deadline'):
+        discovery = source.split('val educationText =', 1)[1].split('val window = checkNotNull(ready)', 1)[0]
+        for token in ('ui.waitUntil(5_000)', 'val windows = educationWindows()', 'ready = windows.single()',
+                      'owner == "com.android.systemui" && root != null',
+                      'it.text?.toString() == educationText && it.isVisibleToUser',
+                      'No accessibility-verified education target within discovery deadline'):
             self.assertIn(token, discovery)
+        self.assertNotIn('matches(titlePattern)', discovery)
+        self.assertNotIn('titlePattern', source)
+        self.assertIn('check(matches <= 1)', discovery)
+        self.assertIn('matches == 1', discovery)
+        self.assertIn('bounds.width() > 0 && bounds.height() > 0', source)
+        self.assertLess(discovery.index('AccessibilityWindowInfo.TYPE_SYSTEM'), discovery.index('val root = window.root'))
         self.assertLess(source.index('val window = checkNotNull(ready)'), source.index('blank.assertIsDisplayed()'))
+        self.assertIn('val windowId = window.id', source)
         self.assertEqual(1, source.count('inject(android.view.MotionEvent.ACTION_DOWN)'))
         self.assertEqual(1, source.count('inject(android.view.MotionEvent.ACTION_UP)'))
         self.assertNotIn('performTouchInput', source)

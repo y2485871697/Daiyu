@@ -235,6 +235,18 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY)', route)
         self.assertIn('BackHandler(previewEnabled = !loading || initialSlot == ProviderRegistry.PRIMARY)', route)
 
+    def test_provider_detail_reserves_visual_route_before_async_loading(self):
+        route = (APP / 'ui/screens/settings/ProviderManagementRoute.kt').read_text()
+        opening = route[route.index('    fun open(slot:'):route.index('    fun mutate(')]
+        self.assertLess(opening.index('openingSlot = slot'), opening.index('scope.launch'))
+        self.assertIn('(detail != null || openingSlot != null) && initialSlot != ProviderRegistry.PRIMARY', route)
+        self.assertIn('"provider:${detail?.editor?.slotId ?: openingSlot}"', route)
+        self.assertIn('openingSlot = null', route[route.index('fun closeDetail()'):route.index('    fun refresh()')])
+        self.assertIn('onFailure = { openingSlot = null;', opening)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        self.assertIn('testLoadingAndReadyDetailShareOneRouteAndPreserveDirectoryPredecessor', test)
+        self.assertIn('localLoading = true; localPage = 1', test)
+
     def test_nested_preview_owners_unregister_and_commit_is_guarded(self):
         for guard in ('state.previewOwners.add(previewOwner)', 'state.previewOwners.remove(previewOwner)',
                       'previewOwners.none { it.enabled && !it.previewEnabled }',

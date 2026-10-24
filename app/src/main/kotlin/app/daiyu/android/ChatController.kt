@@ -1290,10 +1290,37 @@ class ChatController internal constructor(private val application:Application,
     private var questionStore:PrivateQuestionStore?=null
     private val closeDone=CountDownLatch(1)
     private var closingStorage=false
+    internal class ChildPauseCapture(val tasks: RunChildTasks,
+        val group: app.daiyu.android.domain.delegation.ChildTaskPauseGroup)
+    internal class ChildStopChoice internal constructor(val owner: Message, internal val capture: ChildPauseCapture)
+    private val childStopChoices = java.util.ArrayDeque<ChildStopChoice>()
+    @Synchronized internal fun childStopChoice(): ChildStopChoice? = childStopChoices.peekFirst()
+    internal fun finishChildStopChoice(choice: ChildStopChoice, stop: Boolean): Boolean {
+        synchronized(this) { if (!childStopChoices.remove(choice)) return false }
+        return choice.capture.tasks.finishGroup(choice.capture.group, stop)
+    }
+    private fun capturePausedChildren(lifetime: RunResources): ChildPauseCapture? {
+        if (!lifetime.childrenPauseRequested) lifetime.childPauseEpoch++
+        lifetime.childrenPauseRequested = true
+        lifetime.pausedChildren?.let { return it }
+        return backgroundRuns[lifetime.initial.runId]?.let { tasks ->
+            ChildPauseCapture(tasks, tasks.pauseGroup()).also { lifetime.pausedChildren = it }
+        }
+    }
+    private fun resumePausedChildren(lifetime: RunResources, expectedEpoch: Long) {
+        if (lifetime.childPauseEpoch != expectedEpoch || lifetime.runner.state().pauseRequested || lifetime.fenced) return
+        val capture = lifetime.pausedChildren
+        lifetime.childrenPauseRequested = false; lifetime.pausedChildren = null
+        capture?.tasks?.resumeGroup(capture.group)
+    }
+
     private class RunResources(val initial:Message,val runner:ChatRunner,val tools:RunCatalogTools,
         val auxiliary: ControllerAuxiliaryVision? = null,
         val summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null) {
         var browserVisual: ControllerBrowserVisual? = null
+        var childrenPauseRequested = false
+        var childPauseEpoch = 0L
+        var pausedChildren: ChildPauseCapture? = null
         val writer=Executors.newSingleThreadExecutor()
         val waiter=Executors.newSingleThreadExecutor()
         var question:QuestionRunSession?=null
@@ -3371,7 +3398,12 @@ class ChatController internal constructor(private val application:Application,
                         check(!closed)
                         val supervisor=checkNotNull(childSupervisor)
                         val binding=supervisor.bind(owner,grants,authorization,childModels,::backgroundTasksChanged)
-                        RunChildTasks(supervisor,binding,childModels.keys).also { backgroundRuns[run]=it }
+                        RunChildTasks(supervisor,binding,childModels.keys).also { tasks ->
+                            backgroundRuns[run] = tasks
+                            resources?.takeIf { it.initial.runId == run && it.childrenPauseRequested }?.let { lifetime ->
+                                lifetime.pausedChildren = ChildPauseCapture(tasks, tasks.pauseGroup())
+                            }
+                        }
                     }
                 }
             // Only the consumed, controller-owned approval may open the real Android transport.
@@ -4446,9 +4478,12 @@ class ChatController internal constructor(private val application:Application,
             throw failure
         }
     }
+    internal val supplementDraft = app.daiyu.android.ui.actions.PausedSupplementDraft()
+
     private fun ownedRunner(owner:Message):ChatRunner? {
         val current=active ?: return null
-        return if(!closed && ready && !dataBusy && current.status==RunStatus.RUNNING &&
+        return if(!closed && ready && !dataBusy && resources?.let { !it.fenced && it.runner === runner } == true &&
+            current.status==RunStatus.RUNNING &&
             owner.id==current.id && owner.runId==current.runId && owner.conversationId==current.conversationId &&
             owner.role==Message.ASSISTANT_ROLE) runner else null
     }
@@ -4458,15 +4493,24 @@ class ChatController internal constructor(private val application:Application,
             it.initial.conversationId == owner.conversationId && owner.role == Message.ASSISTANT_ROLE
     } == true
 
-    /** Backend-only paused text admission. The Boolean is queueing, never a durable receipt.
+    @Synchronized internal fun canSupplement(owner: Message): Boolean = resources?.let {
+        !it.fenced && it.runner === ownedRunner(owner) && it.browserVisual?.automationHeld != true &&
+            videoSession?.assistant?.runId != owner.runId
+    } == true
+
+    /** Live-run text admission. The Boolean is queueing, never a durable receipt.
      * Callers retain the messageId and draft until Accepted for the matching editor owner. */
     internal fun admitSupplement(owner:Message, messageId:MessageId, text:String,
         complete:(SupplementAdmission)->Unit):Boolean {
-        val owned=synchronized(this) {
-            resources?.takeIf {!it.fenced && it.runner===ownedRunner(owner)}?.runner
-        }
+        val lifetime = synchronized(this) { resources?.takeIf { canSupplement(owner) } }
+        val owned = lifetime?.runner
+        val pausedChildrenEpoch = synchronized(this) { lifetime?.childPauseEpoch }
         fun deliver(result:SupplementAdmission) {
             handler.post {
+                if (result is SupplementAdmission.Accepted && lifetime != null && pausedChildrenEpoch != null) synchronized(this) {
+                    resumePausedChildren(lifetime, pausedChildrenEpoch)
+                }
+                supplementDraft.receive(result)
                 try {complete(result)} catch (_:Exception) { }
                 synchronized(this) {if(owned!=null && ownedRunner(owner)===owned) notifyChanged()}
             }
@@ -4482,17 +4526,40 @@ class ChatController internal constructor(private val application:Application,
     internal fun pause(owner:Message):Boolean {
         val owned=synchronized(this) {ownedRunner(owner)} ?: return false
         val accepted=owned.pause()
-        if(accepted) synchronized(this) {if(ownedRunner(owner)===owned) notifyChanged()}
+        if(accepted) synchronized(this) {if(ownedRunner(owner)===owned) {
+            resources?.let(::capturePausedChildren)
+            notifyChanged()
+        }}
         return accepted
     }
-    internal fun resume(owner:Message):Boolean {
-        val owned=synchronized(this) {
-            val original = ownedRunner(owner) ?: return@synchronized null
-            if (resources?.takeIf { it.runner === original }?.browserVisual?.automationHeld == true) null else original
+    internal fun resume(owner:Message):Boolean = synchronized(this) {
+        val lifetime = resources?.takeIf { it.runner === ownedRunner(owner) &&
+            it.browserVisual?.automationHeld != true } ?: return false
+        val accepted = lifetime.runner.resume()
+        if (accepted) {
+            resumePausedChildren(lifetime, lifetime.childPauseEpoch)
+            notifyChanged()
+        }
+        accepted
+    }
+    internal fun stopMain(owner: Message): Boolean {
+        val lifetime = synchronized(this) {
+            resources?.takeIf { ownedRunner(owner) === it.runner }?.also { lifetime ->
+                val capture = capturePausedChildren(lifetime)
+                capture?.tasks?.close()
+                if (capture != null && capture.tasks.hasCaptured(capture.group))
+                    childStopChoices.addLast(ChildStopChoice(lifetime.initial, capture))
+                fenceRun(lifetime)
+            }
         } ?: return false
-        val accepted=owned.resume()
-        if(accepted) synchronized(this) {if(ownedRunner(owner)===owned) notifyChanged()}
-        return accepted
+        lifetime.runner.stop()
+        lifetime.auxiliary?.cancel()
+        synchronized(this) { browserChildren.filter { it.parent.identity.runId == owner.runId }.toList() }
+            .forEach { it.close() }
+        browserChildrenChanged()
+        lifetime.tools.close()
+        handler.post { synchronized(this) { cleanupRun(lifetime); notifyChanged() } }
+        return true
     }
     // True acknowledges the matching control target, not a persisted terminal outcome.
     internal fun stop(owner:Message):Boolean {

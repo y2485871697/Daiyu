@@ -24,12 +24,18 @@ class ComposerSurfaceColorContractTest(unittest.TestCase):
         self.assertTrue(all(255 - channel <= 5 for channel in new))
         self.assertLessEqual(max(new) - min(new), 2)
 
-    def test_send_uses_a_neutral_chat_only_fill_and_keeps_append_colors(self):
+    def test_idle_empty_is_neutral_and_all_active_actions_share_append_colors(self):
         appearance = (CHAT / 'ChatAppearance.kt').read_text()
         self.assertIn('sendContainer = if (dark) buttons.primary else Color(0xFFE8E7EE)', appearance)
         self.assertIn('sendContent = if (dark) buttons.onPrimary else buttons.accent', appearance)
         self.assertIn('appendContainer = buttons.primary', appearance)
         self.assertIn('appendContent = buttons.onPrimary', appearance)
+        composer = (CHAT / 'ChatComposer.kt').read_text()
+        self.assertIn('if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer', composer)
+        self.assertIn('if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent', composer)
+        self.assertIn('onLongClick = if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE)', composer)
+        self.assertIn('iconSize = if (!textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp', composer)
+
 
     def test_disabled_light_idle_send_does_not_fade_its_background_again(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()

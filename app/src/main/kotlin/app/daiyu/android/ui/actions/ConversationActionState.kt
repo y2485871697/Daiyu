@@ -29,6 +29,14 @@ internal class PausedSupplementDraft {
     var pending: Ticket? = null
         private set
 
+    var receipt: Pair<Ticket, SupplementAdmission>? = null
+        private set
+
+    fun receive(result: SupplementAdmission) {
+        val ticket = pending ?: return
+        if (result.messageId == ticket.messageId && receipt == null) receipt = ticket to result
+    }
+
     fun begin(messageId: MessageId, editor: SupplementEditor): Ticket? {
         if (pending != null || editor.conversationId == null || editor.text.isBlank()) return null
         return Ticket(messageId, editor).also { pending = it }
@@ -37,6 +45,7 @@ internal class PausedSupplementDraft {
     fun finish(ticket: Ticket, result: SupplementAdmission, current: SupplementEditor): Boolean {
         if (pending !== ticket || result.messageId != ticket.messageId) return false
         pending = null
+        receipt = null
         return result is SupplementAdmission.Accepted && ticket.editor == current
     }
 }

@@ -83,7 +83,6 @@ import app.daiyu.android.domain.appearance.IconSyncResult
 import app.daiyu.android.domain.runtime.ExecutionPhase
 import app.daiyu.android.domain.runtime.SupplementAdmission
 import app.daiyu.android.ui.actions.ConversationExportSelection
-import app.daiyu.android.ui.actions.PausedSupplementDraft
 import app.daiyu.android.ui.actions.SupplementEditor
 import app.daiyu.android.ui.screens.conversation.ChildTaskRecordsScreen
 import app.daiyu.android.ui.screens.conversation.ConversationExportScreen
@@ -1277,7 +1276,9 @@ class MainActivity : ComponentActivity() {
 
     private var generationOutputsRequest: Any? = null
     private var generationReceiptNotice by mutableStateOf<ChatController.GenerationReceiptNotice?>(null)
-    private val supplementDraft = PausedSupplementDraft()
+    private val supplementDraft get() = controller.supplementDraft
+    private var restoredSupplementEditor: SupplementEditor? = null
+    private var supplementMountEditor: SupplementEditor? = null
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
     private data class ReplyOwner(val conversation: String, val run: String, val message: String)
@@ -1462,6 +1463,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        restoredSupplementEditor = state?.getString("supplement-editor-conversation")?.let { conversation ->
+            SupplementEditor(conversation, state.getLong("supplement-editor-generation"),
+                state.getLong("supplement-editor-revision"), state.getString("supplement-editor-text") ?: "")
+        }
         enableEdgeToEdge()
         voiceEntryMode = when (voiceEntryPreferences.getString("mode", null)) {
             ChatMenuAction.VOICE_CHAT.name -> ChatMenuAction.VOICE_CHAT
@@ -2106,6 +2111,7 @@ class MainActivity : ComponentActivity() {
                 TerminalTasksSurface()
                 PromptSurface()
                 UnknownBranchSurface()
+                ChildStopChoiceSurface()
                 VirtualDisplayR08Surfaces()
                 taskLocationVisit?.let { visit -> key(visit) { visit.questionUi?.invoke() } }
                 val vdEntry = virtualDisplayEditor
@@ -2238,7 +2244,7 @@ class MainActivity : ComponentActivity() {
         fun editorMatches() = activityUsable() && selectionReady && pendingTextSend == null && controller.textSendState() == null &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
         fun gestureOwner() = currentControlOwner()?.takeIf {
-            renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
+            editorMatches() && currentChatControlAvailable() && renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
         }
         fun actionUnavailable() { toast("操作未完成，请稍后再试") }
         val actionSnapshot = messageActionSnapshot?.takeIf {
@@ -2408,7 +2414,7 @@ class MainActivity : ComponentActivity() {
         } },
         onSupplement = { text -> if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
             offlineHost.invalidate()
-            gestureOwner()?.let { submitPausedText(it, text) }
+            gestureOwner()?.let { submitSupplement(it, text) }
         } },
         onPrimaryTap = { guard {
             gestureOwner()?.let { owner -> controller.runState(owner)?.let { state ->
@@ -2416,7 +2422,7 @@ class MainActivity : ComponentActivity() {
                 if (accepted) refresh()
             } }
         } },
-        onPrimaryLongPress = { guard { gestureOwner()?.let { owner -> controller.stop(owner); refresh() } } },
+        onPrimaryLongPress = { guard { gestureOwner()?.let { owner -> controller.stopMain(owner); refresh() } } },
         onControlPress = {
             controlTouchGeneration++; controlTouchActive = true; controlTouchOwner = controlOwner
         },
@@ -3234,6 +3240,26 @@ class MainActivity : ComponentActivity() {
 
     // Mount outside chat/composer surfaces: a replacement foreground can inspect the exact
     // locator without returning to the original conversation, draft or approval editor.
+    @Composable private fun ChildStopChoiceSurface() {
+        val choice = controller.childStopChoice() ?: return
+        if (!voiceForeground) return
+        fun finish(stop: Boolean) {
+            if (activityUsable() && controller.finishChildStopChoice(choice, stop)) refresh()
+        }
+        app.daiyu.android.ui.components.DaiyuAlertDialog(
+            onDismissRequest = { finish(false) },
+            title = { androidx.compose.material3.Text("主回复已停止") },
+            text = { androidx.compose.material3.Text("已向本次捕获的后台子任务请求暂停。保留暂停，还是停止这些子任务？正在读取中的任务会在可暂停边界停下。") },
+            confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(
+                modifier = Modifier.testTag("main-stop-keep-children"), onClick = { finish(false) }) {
+                androidx.compose.material3.Text("保留暂停")
+            } },
+            dismissButton = { app.daiyu.android.ui.haptics.material.TextButton(
+                modifier = Modifier.testTag("main-stop-cancel-children"), onClick = { finish(true) }) {
+                androidx.compose.material3.Text("停止这些子任务")
+            } })
+    }
+
     @Composable private fun UnknownBranchSurface() {
         unknownBranchOutcome?.takeIf { voiceForeground }?.let { receipt ->
             val locator = checkNotNull(receipt.locator)
@@ -4551,6 +4577,13 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(state: Bundle) {
         cancelDeferredOpenedBackup() // A recreated visit must require a fresh external open.
         state.putInt("browser-save-next", nextBrowserSaveRequestCode)
+        val supplementEditor = receiptSupplementEditor()
+        if (supplementDraft.pending?.editor == supplementEditor) {
+            state.putString("supplement-editor-conversation", supplementEditor.conversationId)
+            state.putLong("supplement-editor-generation", supplementEditor.generation)
+            state.putLong("supplement-editor-revision", supplementEditor.revision)
+            state.putString("supplement-editor-text", supplementEditor.text)
+        }
 
         state.putBoolean("terminal-page", retainedPage == "terminal")
         state.putString("terminal-return-page", terminalReturnPage)
@@ -5187,7 +5220,14 @@ class MainActivity : ComponentActivity() {
         imageHost.enter(conversation?.id?.value)
         videoHost.enter(conversation?.id?.value)
         draftRevision = maxOf(draftRevision + 1, imageHost.session.attachments.state.value.draft.revision)
+        val restoringSupplement = !selectionReady
         selected = conversation; selectionReady = true; draft = targetDraft
+        if (restoringSupplement) {
+            restoredSupplementEditor = restoredSupplementEditor?.takeIf {
+                it.conversationId == conversation?.id?.value && it.text == draft
+            }
+            supplementMountEditor = restoredSupplementEditor?.let { supplementEditor() }
+        }
         val range = selections[conversation?.id]
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
@@ -5303,30 +5343,60 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun currentChatControlAvailable() = voiceForeground && retainedPage == "chat" && !sidebarVisible
     private fun supplementEditor() = SupplementEditor(selected?.id?.value, editorGeneration, draftRevision, draft)
-    private fun submitPausedText(owner: Message, text: String) {
-        if (text != draft || controller.runState(owner)?.phase != ExecutionPhase.PAUSED) return
+    private fun receiptSupplementEditor(): SupplementEditor {
+        val current = supplementEditor()
+        return restoredSupplementEditor?.takeIf { supplementMountEditor == current } ?: current
+    }
+    private fun settleSupplementReceipt() {
+        if (!selectionReady || !activityUsable()) return
+        val (ticket, result) = supplementDraft.receipt ?: return
+        val current = receiptSupplementEditor()
+        if (ticket.editor == current && (sidebarVisible || controller.dataBusy || !controller.ready ||
+                controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked)) return
+        if (result is SupplementAdmission.Accepted && ticket.editor == current) {
+            updateDraft("")
+            if (draft.isNotEmpty()) return
+        }
+        val clear = supplementDraft.finish(ticket, result, current)
+        restoredSupplementEditor = null; supplementMountEditor = null
+        if (clear) {
+            selectionStart = 0; selectionEnd = 0; editorGeneration++
+        }
+        when (result) {
+            is SupplementAdmission.Accepted -> toast("追加内容已保存，将在当前任务的安全边界继续")
+            is SupplementAdmission.Rejected -> toast("未接受追加，草稿已保留")
+            is SupplementAdmission.Unconfirmed -> toast("追加结果未确认，草稿已保留；不会自动重试")
+        }
+    }
+    private fun supplementMediaBlocked() = imageHost.hasAttachments || imageHost.busy ||
+        videoHost.state.items.isNotEmpty() || videoSending || videoComposerControls?.blocked == true
+    private fun submitSupplement(owner: Message, text: String) {
+        if (text != draft) return
+        if (supplementMediaBlocked()) {
+            toast("当前任务暂不支持追加图片或原视频；文字与附件已保留，请任务结束后发送")
+            return
+        }
+        if (!controller.canSupplement(owner)) {
+            toast("当前任务暂不能追加；草稿已保留")
+            return
+        }
         val ticket = supplementDraft.begin(MessageId(java.util.UUID.randomUUID().toString()), supplementEditor()) ?: return
         publishChat()
         try {
-            controller.admitSupplement(owner, ticket.messageId, text) { result ->
-                if (activityUsable() && supplementDraft.pending === ticket) {
-                    val clear = supplementDraft.finish(ticket, result, supplementEditor())
-                    if (clear) {
-                        updateDraft("")
-                        selectionStart = 0; selectionEnd = 0; editorGeneration++
-                    }
-                    when (result) {
-                        is SupplementAdmission.Accepted -> toast("追加内容已保存，点击继续后发送")
-                        is SupplementAdmission.Rejected -> toast("未接受追加，草稿已保留")
-                        is SupplementAdmission.Unconfirmed -> toast("追加结果未确认，草稿已保留；不会自动重试")
-                    }
-                    refresh()
-                }
+            val queued = controller.admitSupplement(owner, ticket.messageId, text) {
+                if (activityUsable()) refresh()
             }
+            if (queued && controller.runState(owner)?.phase == ExecutionPhase.WAITING_USER)
+                toast("追加已排队，等待当前提问处理；草稿在受理确认前保留")
+            if (queued) window.decorView.postDelayed({
+                if (activityUsable() && supplementDraft.pending === ticket && supplementDraft.receipt == null)
+                    toast("尚未收到追加确认，请先检查会话，草稿保留；不会自动重试")
+            }, 15_000L)
         } catch (_: Exception) {
-            supplementDraft.finish(ticket, SupplementAdmission.Unconfirmed(ticket.messageId), supplementEditor())
-            toast("追加结果未确认，草稿已保留；不会自动重试")
+            supplementDraft.receive(SupplementAdmission.Unconfirmed(ticket.messageId))
+            settleSupplementReceipt()
             publishChat()
         }
     }
@@ -5372,6 +5442,7 @@ class MainActivity : ComponentActivity() {
                 select(controller.database.conversations().firstOrNull { it.id.value == id }); return@guard
             }
             if (dataRevision != controller.dataRevision) {
+                val initialSupplementRestore = dataRevision == -1L && supplementMountEditor == supplementEditor()
                 dataRevision = controller.dataRevision
                 cancelShizukuEditor()
                 cancelBrowserEditor()
@@ -5382,6 +5453,9 @@ class MainActivity : ComponentActivity() {
                 editorGeneration++
                 selected = latest
                 draft = latest?.draft ?: controller.database.draft()
+                if (initialSupplementRestore && restoredSupplementEditor?.let {
+                        it.conversationId == selected?.id?.value && it.text == draft } == true)
+                    supplementMountEditor = supplementEditor()
                 selectionStart = selectionStart.coerceIn(0, draft.length); selectionEnd = selectionEnd.coerceIn(0, draft.length)
             }
             if (titleRevision != controller.titleRevision) {
@@ -5394,6 +5468,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            settleSupplementReceipt()
             val beforeVideoReceipt = editorGeneration
             settleRetainedVideoReceipt()
             if (editorGeneration != beforeVideoReceipt) return@guard
@@ -5500,11 +5575,13 @@ class MainActivity : ComponentActivity() {
                 phase = phase, controlOwnerKey = controlOwner?.id?.value,
                 imageSendAvailable = imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&
                     videoHost.state.items.isEmpty() && !videoSending && controller.active == null,
-                imageSendBlocked = imageHost.busy || imageHost.hasAttachments && !imageHost.session.attachments.state.value.canSubmit,
+                imageSendBlocked = imageHost.busy || imageHost.hasAttachments &&
+                    (!imageHost.session.attachments.state.value.canSubmit || state != null),
                 modelLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
                 assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null,
-                supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
+                supplementAvailable = controlOwner?.let(controller::canSupplement) == true &&
+                    supplementDraft.pending == null && !supplementMediaBlocked(),
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                     supplementDraft.pending != null,
                 executionPhase = state?.phase,

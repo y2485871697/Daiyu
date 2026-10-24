@@ -150,6 +150,5 @@ data class ComposerUi(
 
 internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
     ComposerPhase.IDLE -> text.isNotBlank() || imageSendAvailable || videoSendAvailable
-    ComposerPhase.PAUSED -> text.isNotBlank() && supplementAvailable
-    ComposerPhase.RUNNING -> false
+    ComposerPhase.PAUSED, ComposerPhase.RUNNING -> text.isNotBlank() && supplementAvailable
 }

@@ -21,7 +21,10 @@ class RunnerSupplementAdmissionTest {
         override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint = error("no recovery")
         override fun readCommittedCheckpoint(checkpoint: RunCheckpoint) = latest
     }
-    private inner class Fixture(val runtime: Runtime = Runtime(), val answer: Message = initial) : AutoCloseable {
+    private inner class Fixture(val runtime: Runtime = Runtime(), val answer: Message = initial,
+        val pauseOnFirst: Boolean = true) : AutoCloseable {
+        val firstStarted = CountDownLatch(1)
+        val releaseFirst = CountDownLatch(1)
         val opens = AtomicInteger()
         val results = LinkedBlockingQueue<SupplementAdmission>()
         val histories = CopyOnWriteArrayList<List<Message>>()
@@ -32,28 +35,50 @@ class RunnerSupplementAdmissionTest {
                 histories.add(MessageHistory.expand(history)); val first = opens.incrementAndGet() == 1
                 object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                        if (first) runner.pause() else sink(ModelEvent.TextFinal("body", "done"))
+                        if (first) {
+                            if (pauseOnFirst) runner.pause()
+                            else {
+                                firstStarted.countDown()
+                                check(releaseFirst.await(5, TimeUnit.SECONDS))
+                                sink(ModelEvent.TextFinal("body", "stale"))
+                            }
+                        } else sink(ModelEvent.TextFinal("body", "done"))
                     }
-                    override fun cancel() {}
+                    override fun cancel() { releaseFirst.countDown() }
                 }
             }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { "ok" }, RunnerOptions(runtimeStore = runtime)) {}
             task = FutureTask { runner.run(answer, listOf(user("original"))) }
             Thread(task).apply { isDaemon = true; start() }
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-            while ((runtime.latest?.phase != ExecutionPhase.PAUSED || runner.state().phase != ExecutionPhase.PAUSED) && System.nanoTime() < deadline) Thread.yield()
-            assertEquals(ExecutionPhase.PAUSED, runtime.latest?.phase)
+            if (pauseOnFirst) {
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while ((runtime.latest?.phase != ExecutionPhase.PAUSED || runner.state().phase != ExecutionPhase.PAUSED) && System.nanoTime() < deadline) Thread.yield()
+                assertEquals(ExecutionPhase.PAUSED, runtime.latest?.phase)
+            } else assertTrue(firstStarted.await(5, TimeUnit.SECONDS))
         }
         fun offer(id: String) = runner.admitSupplement(user(id), results::add)
         fun result() = checkNotNull(results.poll(5, TimeUnit.SECONDS))
         override fun close() { runner.stop(); task.get(5, TimeUnit.SECONDS) }
     }
-    @Test fun pausedCommitPrecedesAcceptanceAndExplicitResumeConsumesOnce() {
+    @Test fun pausedCommitPrecedesAcceptanceAndAutomaticResumeConsumesOnce() {
         Fixture().use { f ->
             assertTrue(f.offer("added")); assertEquals(SupplementAdmission.Accepted(MessageId("added")), f.result())
             assertEquals(listOf(user("added")), f.runtime.admissions.single().supplements)
-            assertEquals(ExecutionPhase.PAUSED, f.runner.state().phase); assertEquals(1, f.opens.get())
-            assertTrue(f.runner.resume()); assertEquals(RunStatus.COMPLETED, f.task.get(5, TimeUnit.SECONDS).status)
+            assertEquals(RunStatus.COMPLETED, f.task.get(5, TimeUnit.SECONDS).status)
+            assertFalse(f.runner.resume()); assertEquals(2, f.opens.get())
             assertEquals(listOf("original", "added"), f.histories.last().filter { it.role == Message.USER_ROLE }.map { it.id.value })
+        }
+    }
+    @Test fun streamingAdmissionInterruptsOnlyOldAttemptAndKeepsOriginalRun() {
+        Fixture(pauseOnFirst = false).use { f ->
+            assertEquals(ExecutionPhase.STREAMING, f.runner.state().phase)
+            assertTrue(f.offer("added"))
+            assertEquals(SupplementAdmission.Accepted(MessageId("added")), f.result())
+            val completed = f.task.get(5, TimeUnit.SECONDS)
+            assertEquals(initial.id, completed.id); assertEquals(initial.runId, completed.runId)
+            assertEquals(RunStatus.COMPLETED, completed.status); assertEquals(2, f.opens.get())
+            assertEquals("done", completed.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text })
+            assertEquals(listOf("original", "added"), f.histories.last().filter { it.role == Message.USER_ROLE }.map { it.id.value })
+            assertEquals(1, f.runtime.admissions.size); assertTrue(f.results.isEmpty())
         }
     }
     @Test fun blockedCommitDoesNotAcceptEarlyOrBlockStop() {
@@ -119,7 +144,7 @@ class RunnerSupplementAdmissionTest {
             val delivered = CountDownLatch(1)
             assertTrue(f.runner.admitSupplement(user("added")) { delivered.countDown(); throw IllegalStateException("observer") })
             assertTrue(delivered.await(5, TimeUnit.SECONDS)); assertEquals(1, f.runtime.admissions.size)
-            assertTrue(f.runner.resume()); assertEquals(RunStatus.COMPLETED, f.task.get(5, TimeUnit.SECONDS).status)
+            assertEquals(RunStatus.COMPLETED, f.task.get(5, TimeUnit.SECONDS).status)
         }
     }
 
@@ -131,13 +156,13 @@ class RunnerSupplementAdmissionTest {
             assertTrue(f.runtime.admissions.isEmpty())
         }
     }
-    @Test fun resumeCannotOvertakeAlreadyQueuedProposals() {
+    @Test fun automaticResumeCannotOvertakeAlreadyQueuedProposals() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val writes = AtomicInteger()
         val runtime = Runtime().apply { before = { if (writes.incrementAndGet() == 1) { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) } } }
         Fixture(runtime).use { f ->
             try {
                 assertTrue(f.offer("one")); assertTrue(entered.await(5, TimeUnit.SECONDS)); assertTrue(f.offer("two"))
-                assertTrue(f.runner.resume()); release.countDown()
+                assertFalse(f.runner.resume()); release.countDown()
                 assertEquals(SupplementAdmission.Accepted(MessageId("one")), f.result())
                 assertEquals(SupplementAdmission.Accepted(MessageId("two")), f.result())
                 assertEquals(RunStatus.COMPLETED, f.task.get(5, TimeUnit.SECONDS).status)

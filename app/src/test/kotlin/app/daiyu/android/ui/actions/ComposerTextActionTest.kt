@@ -32,17 +32,22 @@ class ComposerTextActionTest {
     @Test fun idleTextCanSendWithoutSupplementCapability() {
         assertTrue(composer.textActionEnabled())
     }
-    @Test fun streamingTextCannotSendOrAppendEvenWithStaleCapability() {
-        assertFalse(composer.copy(phase = ComposerPhase.RUNNING, supplementAvailable = true).textActionEnabled())
+    @Test fun streamingTextCanAppendOnlyWithLiveAdmissionCapability() {
+        assertFalse(composer.copy(phase = ComposerPhase.RUNNING).textActionEnabled())
+        assertTrue(composer.copy(phase = ComposerPhase.RUNNING, supplementAvailable = true).textActionEnabled())
     }
     @Test fun pausedTextRequiresExplicitAdmissionAvailability() {
         assertFalse(composer.copy(phase = ComposerPhase.PAUSED).textActionEnabled())
         assertTrue(composer.copy(phase = ComposerPhase.PAUSED, supplementAvailable = true).textActionEnabled())
     }
     @Test fun pendingOrDisabledOrBlankCannotSubmit() {
-        val ready = composer.copy(phase = ComposerPhase.PAUSED, supplementAvailable = true)
-        assertFalse(ready.copy(supplementPending = true).textActionEnabled())
-        assertFalse(ready.copy(enabled = false).textActionEnabled())
-        assertFalse(ready.copy(text = " \n").textActionEnabled())
+        for (phase in listOf(ComposerPhase.PAUSED, ComposerPhase.RUNNING)) {
+            val ready = composer.copy(phase = phase, supplementAvailable = true)
+            assertFalse(ready.copy(supplementPending = true).textActionEnabled())
+            assertFalse(ready.copy(enabled = false).textActionEnabled())
+            assertFalse(ready.copy(imageSendBlocked = true).textActionEnabled())
+            assertFalse(ready.copy(videoSendBlocked = true).textActionEnabled())
+            assertFalse(ready.copy(text = " \n").textActionEnabled())
+        }
     }
 }

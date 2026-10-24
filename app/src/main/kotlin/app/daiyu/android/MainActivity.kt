@@ -1159,6 +1159,7 @@ class MainActivity : ComponentActivity() {
         val active: java.util.concurrent.atomic.AtomicBoolean, var pickerHopPending: Boolean = true)
     private var pendingStaticOriginal: StaticSaveSelection? = null
     private var unknownBranchOutcome by mutableStateOf<MessageActionResult.Unknown?>(null)
+    private var childStopChoice by mutableStateOf<ChatController.ChildStopChoice?>(null)
     private fun refreshUnknownBranchOutcome() {
         if (activityUsable() && voiceForeground) unknownBranchOutcome = controller.pendingBranchOutcome()
     }
@@ -3241,10 +3242,12 @@ class MainActivity : ComponentActivity() {
     // Mount outside chat/composer surfaces: a replacement foreground can inspect the exact
     // locator without returning to the original conversation, draft or approval editor.
     @Composable private fun ChildStopChoiceSurface() {
-        val choice = controller.childStopChoice() ?: return
+        val choice = childStopChoice ?: return
         if (!voiceForeground) return
         fun finish(stop: Boolean) {
-            if (activityUsable() && controller.finishChildStopChoice(choice, stop)) refresh()
+            if (!activityUsable()) return
+            controller.finishChildStopChoice(choice, stop)
+            refresh()
         }
         app.daiyu.android.ui.components.DaiyuAlertDialog(
             onDismissRequest = { finish(false) },
@@ -5404,6 +5407,7 @@ class MainActivity : ComponentActivity() {
         (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
     private fun refresh() {
         if (!activityUsable()) return
+        childStopChoice = controller.childStopChoice()
         refreshUnknownBranchOutcome()
         offerDeferredOpenedBackup()
         settleGenerationReceipt()

@@ -124,6 +124,8 @@ data class ComposerUi(
     val assistantLabel: String = "助手",
     val contextFraction: Float? = null,
     val contextLabel: String = "上下文",
+    val contextUsageText: String? = null,
+    val contextTokensText: String? = null,
     val listening: Boolean = false,
     val enabled: Boolean = true,
     val controlOwnerKey: String? = null,

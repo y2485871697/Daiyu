@@ -1440,6 +1440,9 @@ class MainActivity : ComponentActivity() {
     private var automaticCompression by mutableStateOf<Boolean?>(null)
     private var automaticCompressionPending by mutableStateOf(false)
     private var confirmedModelLabel by mutableStateOf("模型")
+    private var contextModelRevision by mutableStateOf(0L)
+    private var contextReceiptRevision by mutableStateOf(0L)
+    private var conversationUsageRevision by mutableStateOf(0L)
     private var modelLabelRead: Any? = null
     private val voiceEntryPreferences by lazy { getSharedPreferences("chat-voice-entry", MODE_PRIVATE) }
     private var voiceEntryMode by mutableStateOf(ChatMenuAction.VOICE_INPUT)
@@ -1995,12 +1998,17 @@ class MainActivity : ComponentActivity() {
                         onOpenPermissions = { dismissSidebar(); retainedPage = "permission-check" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
+                            val contextUsage = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage(
+                                controller, selected?.id, contextReceiptRevision, controller.dataRevision,
+                                contextModelRevision, chatState.composer.phase)
                             BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
                                 val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
                                 Column(Modifier.fillMaxSize()) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
                                         automaticCompression = automaticCompression, automaticCompressionPending = automaticCompressionPending,
                                         composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
+                                            contextFraction = contextUsage.fraction, contextUsageText = contextUsage.label(),
+                                            contextTokensText = contextUsage.tokensLabel(),
                                             voiceModes = buildSet {
                                                 val voiceSettings = VoiceSettingsPreferences(applicationContext)
                                                 if (voiceSettings.enabled("input")) add(ChatMenuAction.VOICE_INPUT)
@@ -2172,7 +2180,8 @@ class MainActivity : ComponentActivity() {
                 usageVisit?.let { visit ->
                     if (retainedPage == "chat" && !sidebarVisible && selected?.id == visit.conversation) {
                         key(visit.token) { ChatUsageDialog(controller, visit.conversation,
-                            onDismiss = { if (usageVisit === visit) usageVisit = null }) }
+                            onDismiss = { if (usageVisit === visit) usageVisit = null },
+                            usageRevision = conversationUsageRevision) }
                     } else LaunchedEffect(visit) { if (usageVisit === visit) usageVisit = null }
                 }
                 childStatusVisit?.let { visit ->
@@ -5444,6 +5453,8 @@ class MainActivity : ComponentActivity() {
     private fun publishChat() = publishChat(rowsChanged = true)
 
     private fun publishChat(rowsChanged: Boolean) {
+        contextReceiptRevision = controller.contextUsageRevision
+        conversationUsageRevision = controller.usageRevision
         taskLocationVisit?.takeIf { !taskLocationCurrent(it) }?.let(::cancelTaskLocation)
         guiEditor?.let { entry ->
             if (controller.guiEntry() !== entry) guiEditor = null
@@ -5544,6 +5555,7 @@ class MainActivity : ComponentActivity() {
             }.getOrNull() }
             if (activityUsable() && modelLabelRead === request) {
                 confirmedModelLabel = saved?.second?.ifBlank { "模型" } ?: "模型"
+                contextModelRevision++
                 balanceRuntime = saved?.third
                 balanceLifecycle = saved?.third?.let { runtime ->
                     app.daiyu.android.balance.BalanceLifecycleBinding(lifecycle, lifecycleScope, runtime, poll = true)
@@ -5623,6 +5635,7 @@ class MainActivity : ComponentActivity() {
             val saved = active?.settings
             chatModelSettings = saved
             confirmedModelLabel = saved?.model?.ifBlank { "模型" } ?: "模型"
+            contextModelRevision++
             val session = result?.let {
                 LocalCatalogChatModelPickerSession(active?.catalog, saved?.model.orEmpty(),
                     providerId = it.activeEditor?.slotId.orEmpty(), providers = it.groups,

@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 24), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 25), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -58,7 +58,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..23 && newVersion == 24) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..24 && newVersion == 25) { "不支持此数据库版本，保留原数据" }
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
         app.daiyu.android.platform.NotificationHistoryStore.installSchema(db)
@@ -103,6 +103,9 @@ class ConversationDatabase internal constructor(context: Context, private val af
         if (oldVersion < 14) SQLiteChildTaskStore.installCommandSchema(db)
         SQLiteChildTaskStore.installDisplaySchema(db)
         installUsageCreationColumns(db)
+        CloudContextUsageStore.installSchema(db)
+        ConversationUsageStore.installSchema(db)
+        ConversationUsageStore.backfill(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)

@@ -5,6 +5,15 @@ import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.icons.ChatContextMark
 import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.layout.height
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.isImeVisible
@@ -28,7 +37,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -48,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
@@ -104,6 +113,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         actions.onSelectionChange(start, end)
         return true
     }
+    var showContextTokens by rememberSaveable { mutableStateOf(false) }
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes) { mutableStateOf(false) }
     val voiceMenuEnabled = state.enabled && state.voiceModes.isNotEmpty()
@@ -135,17 +145,30 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
             Row(Modifier.widthIn(max = 120.dp).heightIn(min = 22.dp).testTag("chat-context").clip(RoundedCornerShape(11.dp))
                 .border(1.dp, chrome.line, RoundedCornerShape(11.dp))
+                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                    role = Role.Button,
+                    onClickLabel = if (showContextTokens) "显示上下文百分比" else "显示上下文实际用量",
+                    onClick = { showContextTokens = !showContextTokens })
                 .padding(1.dp).padding(horizontal = 3.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
                 ChatContextMark(fraction, contextColor, Modifier.size(15.dp).testTag("chat-context-icon"))
-                Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
-                    modifier = Modifier.weight(1f, fill = false).width(IntrinsicSize.Max).testTag("chat-context-label"),
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 14.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
-                        platformStyle = PlatformTextStyle(includeFontPadding = false),
-                        lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)),
-                    color = contextColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                AnimatedContent(targetState = showContextTokens,
+                    modifier = Modifier.weight(1f, fill = false), contentAlignment = Alignment.CenterEnd,
+                    transitionSpec = {
+                        ((fadeIn(tween(180)) + slideInVertically(tween(220, easing = FastOutSlowInEasing)) { it / 3 })
+                            togetherWith (fadeOut(tween(120)) + slideOutVertically(tween(180)) { -it / 3 }))
+                            .using(SizeTransform { _, _ -> tween(220, easing = FastOutSlowInEasing) })
+                    }, label = "context-usage-mode") { showTokens ->
+                    Text(if (showTokens) state.contextTokensText ?: "—/—" else state.contextUsageText
+                            ?: if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
+                        modifier = Modifier.testTag("chat-context-label"),
+                        style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 14.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                            lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)),
+                        color = contextColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)

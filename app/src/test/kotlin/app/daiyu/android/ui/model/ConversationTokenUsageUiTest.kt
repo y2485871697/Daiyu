@@ -16,12 +16,12 @@ class ConversationTokenUsageUiTest {
         assertNull(unknown.freshInputTokens)
         assertNull(unknown.cacheCreationTokens)
         val zero = ConversationTokenUsageUi(0, 0, 0, 0, 1)
-        assertTrue(zero.hasUsage); assertEquals(0L, zero.totalTokens)
+        assertFalse(zero.hasUsage); assertEquals(0L, zero.totalTokens)
         assertEquals(0L, zero.freshInputTokens); assertNull(zero.cachePercent)
         assertFalse(ConversationTokenUsageUi().hasUsage)
         assertNull(ConversationTokenUsageUi(Long.MAX_VALUE, 1).totalTokens)
     }
-    @Test fun invalidSubsetsDoNotInventFreshInput() {
-        assertNull(ConversationTokenUsageUi(10, 0, 8, 3, 1).freshInputTokens)
+    @Test fun freshInputClampsInconsistentCacheSubsetsToZero() {
+        assertEquals(0L, ConversationTokenUsageUi(10, 0, 8, 3, 1).freshInputTokens)
     }
 }

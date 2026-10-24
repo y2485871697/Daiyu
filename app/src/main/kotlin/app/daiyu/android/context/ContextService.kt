@@ -178,6 +178,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 put("summary", summary); put("blob_hash", hash); put("created", System.currentTimeMillis()); put("active", 1)
             })
             check(inserted != -1L) { "压缩档案未持久化；保留原上下文" }
+            app.daiyu.android.storage.CloudContextUsageStore.invalidate(db, id)
             checkCancellation(cancelled) // Throwing here rolls back both insert and deactivation.
         }
         return archive
@@ -418,6 +419,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         }
         db.execSQL("UPDATE context_archives SET active=0 WHERE conversation_id=?", arrayOf(id.value))
         db.execSQL("UPDATE conversations SET updated=? WHERE id=?", arrayOf<Any>(System.currentTimeMillis(), id.value))
+        app.daiyu.android.storage.CloudContextUsageStore.invalidate(db, id)
     }
     private fun verifyArchives(db: SQLiteDatabase, id: ConversationId) {
         db.rawQuery("SELECT blob_hash,revision FROM context_archives WHERE conversation_id=?", arrayOf(id.value)).use { c -> while (c.moveToNext()) {

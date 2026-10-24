@@ -153,6 +153,18 @@ internal class ProviderRepository(
             block(store, revision)
         }
     }
+    /** UI metadata only; never decrypts keys/headers, validates credentials or creates a request. */
+    internal fun contextUsageModel(): app.daiyu.android.ui.model.ContextUsageModel = registry.access { state ->
+        val id = checkNotNull(state.activeSlotId)
+        check(requireProvider(state, id).enabled)
+        val store = resolveStore(id)
+        store.modelCatalog.readConfiguration { revision ->
+            val metadata = store.summaryRequestMetadata()
+            check(metadata.model.isNotBlank())
+            val window = store.modelCatalog.readRegisteredModel(metadata.model)?.settings?.contextWindowOverride
+            app.daiyu.android.ui.model.ContextUsageModel(id, metadata.model, revision, window?.toLong(), state.revision)
+        }
+    }
     fun freezeActive(): ProviderRunConfiguration = registry.access { state ->
         val id = checkNotNull(state.activeSlotId) { "未选择活动提供商" }
         check(requireProvider(state, id).enabled) { "提供商未启用" }

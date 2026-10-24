@@ -22,6 +22,14 @@ internal class SQLiteRuntimeStore private constructor(
     private val contextService: app.daiyu.android.context.ContextService?
 ) : AtomicSupplementRuntimeStore, PreparationRuntimeStore, AutoCloseable {
     private val processOwner = UUID.randomUUID().toString()
+    private var contextUsageBinding: Pair<Message, app.daiyu.android.ui.model.ContextUsageModel>? = null
+    @Volatile internal var contextUsageRevision = 0L; private set
+    @Synchronized internal fun bindContextUsage(initial: Message, model: app.daiyu.android.ui.model.ContextUsageModel) {
+        available(); check(recovered)
+        contextUsageBinding = initial to model
+    }
+    @Synchronized internal fun contextUsageModel(conversation: ConversationId): app.daiyu.android.ui.model.ContextUsageModel? =
+        contextUsageBinding?.takeIf { it.first.conversationId == conversation }?.second
     private val transactions = DatabaseTransactions { database.writableDatabase }
     private val preparations = app.daiyu.android.context.SQLitePreparationRuntime(transactions, processOwner)
 
@@ -119,6 +127,7 @@ internal class SQLiteRuntimeStore private constructor(
             "additional_usage_must_not_modify_parent_checkpoint"
         }
         val encoded = RunCheckpointCodec.encode(checkpoint)
+        var contextChanged = false
         transactions.run { db ->
             val m = checkpoint.message
             val prior = db.rawQuery("SELECT owner,revision,phase,process_owner,conversation_id,run_id FROM runtime_checkpoints WHERE message_id=?",
@@ -141,8 +150,15 @@ internal class SQLiteRuntimeStore private constructor(
                 "message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?",
                 arrayOf(m.id.value, checkpoint.owner, prior.toString(), processOwner)) == 1)
             database.writeRuntimeMessage(db, m)
+            val boundContext = contextUsageBinding?.takeIf { it.first.id == m.id && it.first.runId == m.runId &&
+                it.first.conversationId == m.conversationId }
+            ConversationUsageStore.record(db, checkpoint, boundContext?.second?.windowTokens)
+            boundContext?.let { (_, model) ->
+                contextChanged = CloudContextUsageStore.record(db, checkpoint, model)
+            }
             if (checkpoint.phase == ExecutionPhase.TERMINAL) contextService?.publishRunArchive(db, checkpoint)
         }
+        if (contextChanged) contextUsageRevision++
     }
     @Synchronized override fun readCommittedCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint? {
         available(); check(recovered)
@@ -266,6 +282,8 @@ internal class SQLiteRuntimeStore private constructor(
             }
         }
         fun installSchema(db: SQLiteDatabase) {
+            CloudContextUsageStore.installSchema(db)
+            ConversationUsageStore.installSchema(db)
             db.execSQL("CREATE TABLE IF NOT EXISTS runtime_checkpoints(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,process_owner TEXT NOT NULL,owner TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),phase TEXT NOT NULL,payload TEXT NOT NULL)")
         }
     }

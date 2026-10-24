@@ -97,7 +97,7 @@ class ConversationCompletionMarkersTest : android.test.AndroidTestCase() {
                 this.version = version
             }
             database.close(); database = ConversationDatabase(scoped)
-            assertEquals(24, database.readableDatabase.version)
+            assertEquals(25, database.readableDatabase.version)
             assertEquals(RunStatus.COMPLETED, database.messages(conversation.id).last().second.status)
             assertNull(receipt(conversation))
             val next = turn(conversation, "after-migration-$version")

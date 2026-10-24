@@ -128,6 +128,7 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         }
         retained.forEach { SQLiteMessageVideoStore.readVerified(db, it) }
         SQLiteMessageVideoStore.assertNoOrphans(db)
+        CloudContextUsageStore.invalidate(db, target.conversationId)
     }
 
     data class Regeneration(val conversation: Conversation, val text: String)

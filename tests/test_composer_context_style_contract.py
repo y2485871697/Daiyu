@@ -16,7 +16,8 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertIn('heightIn(min = 22.dp).testTag("chat-context")', self.badge)
         self.assertIn('.padding(1.dp).padding(horizontal = 3.dp, vertical = 2.dp)', self.badge)
         self.assertIn('Arrangement.spacedBy(4.dp)', self.badge)
-        self.assertIn('Modifier.weight(1f, fill = false).width(IntrinsicSize.Max).testTag("chat-context-label")', self.badge)
+        self.assertIn('modifier = Modifier.weight(1f, fill = false)', self.badge)
+        self.assertIn('modifier = Modifier.testTag("chat-context-label")', self.badge)
         self.assertNotIn('fillMaxWidth', self.badge)
         self.assertIn('maxLines = 1, overflow = TextOverflow.Ellipsis', self.badge)
 
@@ -59,14 +60,25 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertIn('Modifier.size(32.dp).testTag(if (textAction', controls)
         self.assertNotIn('.offset(', controls)
 
-    def test_fraction_and_read_only_contracts_are_unchanged(self):
+    def test_fraction_and_icon_contracts_are_unchanged(self):
         self.assertIn('state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)', self.badge)
         self.assertIn('if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}"', self.badge)
-        self.assertNotIn('clickable', self.badge)
+        self.assertNotIn('onMenuAction', self.badge)
         icon = (SRC / 'ui/icons/ChatPreviewIcons.kt').read_text().split('internal fun ChatContextMark(', 1)[1]
         self.assertIn('color.alpha * .24f', icon)
         self.assertIn('color.alpha * .5f', icon)
         self.assertIn('progress?.let { drawPath(it, color, style = stroke) }', icon)
+
+    def test_context_toggles_locally_with_animated_text_and_width(self):
+        self.assertIn('var showContextTokens by rememberSaveable { mutableStateOf(false) }', self.text)
+        self.assertIn('onClick = { showContextTokens = !showContextTokens }', self.badge)
+        self.assertIn('role = Role.Button', self.badge)
+        self.assertIn('AnimatedContent(targetState = showContextTokens', self.badge)
+        for animation in ('fadeIn(', 'fadeOut(', 'slideInVertically(', 'slideOutVertically(', 'SizeTransform'):
+            self.assertIn(animation, self.badge)
+        self.assertIn('state.contextTokensText ?: "—/—"', self.badge)
+        self.assertNotIn('onOpenContext', self.badge)
+        self.assertEqual(1, self.badge.count('ChatContextMark('))
 
 
 if __name__ == '__main__':

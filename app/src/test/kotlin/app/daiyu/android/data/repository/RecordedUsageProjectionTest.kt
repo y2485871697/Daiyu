@@ -54,7 +54,7 @@ class RecordedUsageProjectionTest {
         assertNull(value.tokens.total)
     }
 
-    @Test fun compactConversationProjectionUsesCompleteFieldsAndNeverSyntheticZeros() {
+    @Test fun compactConversationProjectionKeepsKnownFieldsWhenOtherRequestsAreMissing() {
         val records = listOf(row(false, ModelEvent.Usage(17, 8, 5, 2)))
         val summary = aggregateAttributedUsage(records)
         val value = RecordedUsageProjection(AttributedUsageStats(summary, records,
@@ -64,8 +64,8 @@ class RecordedUsageProjectionTest {
         assertEquals(2L, value.conversationUsage.cacheCreationTokens)
         val partial = value.copy(attributed = value.attributed.copy(parentCoverage = value.attributed.parentCoverage.copy(mainRequestsWithoutUsage = 1)))
         assertTrue(partial.conversationUsage.hasUsage)
-        assertNull(partial.conversationUsage.totalTokens)
-        assertNull(partial.conversationUsage.cachedTokens)
+        assertEquals(25L, partial.conversationUsage.totalTokens)
+        assertEquals(5L, partial.conversationUsage.cachedTokens)
     }
     @Test fun consumesExistingAttributionWithoutDoubleCountingCacheOrGuessingHistoricalModels() {
         val value = projection(listOf(row(false, ModelEvent.Usage(100, 20, 40)), row(true, ModelEvent.Usage(10, 3, 2))))

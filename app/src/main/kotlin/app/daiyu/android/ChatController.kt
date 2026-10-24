@@ -1575,6 +1575,30 @@ class ChatController internal constructor(private val application:Application,
             RecordedUsageReader.readAttributed(it, conversationId)
         }
     }
+    internal fun conversationTokenUsage(conversation: ConversationId): app.daiyu.android.ui.model.ConversationTokenUsageUi {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        synchronized(this) { check(!closed && ready && !recoveryFailed) }
+        return app.daiyu.android.context.DatabaseTransactions { database.readableDatabase }.run { db ->
+            ConversationUsageStore.read(db, conversation.value)
+                ?: app.daiyu.android.data.repository.RecordedUsageProjection(
+                    RecordedUsageReader.readAttributed(db, conversation)).conversationUsage
+        }
+    }
+    internal val usageRevision: Long get() = ConversationUsageStore.revision.get()
+    internal val contextUsageRevision: Long get() = runtimeStore?.contextUsageRevision ?: 0L
+    /** A persisted actual-input receipt, never checkpoint billing totals or local afterTokens. */
+    internal fun cloudContextUsage(conversation: ConversationId?): app.daiyu.android.ui.model.CloudContextUsageUi {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "context_usage_requires_worker" }
+        val runningModel = synchronized(this) {
+            check(!closed && ready && !recoveryFailed)
+            if (conversation != null && active?.conversationId == conversation) runtimeStore?.contextUsageModel(conversation) else null
+        }
+        val model = runningModel ?: providers.contextUsageModel()
+        if (conversation == null) return app.daiyu.android.ui.model.CloudContextUsageUi(0, model.windowTokens)
+        return app.daiyu.android.context.DatabaseTransactions { database.readableDatabase }.run {
+            CloudContextUsageStore.read(it, conversation, model)
+        }
+    }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
         resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && pendingPlatformAction==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
@@ -3414,6 +3438,9 @@ class ChatController internal constructor(private val application:Application,
             synchronized(this) { virtualDisplay?.catalog = tools; gui?.catalog = tools }
             generation?.catalog = tools
             // GUI evidence is already frozen in preparedContext.messages; do not append it again.
+            checkNotNull(runtimeStore).bindContextUsage(assistant, app.daiyu.android.ui.model.ContextUsageModel(
+                frozenProvider.editor.slotId, provider.model, frozenProvider.configurationRevision,
+                provider.contextWindowOverride?.toLong(), frozenProvider.editor.registryRevision))
             val owned = ChatRunner(observedModel, database, tools,
                 RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics { event ->
                     if (event.status == "succeeded") {
@@ -3432,6 +3459,10 @@ class ChatController internal constructor(private val application:Application,
                     contextRuntime = if (video == null && auxiliaryFrozen == null &&
                         preparedContext.frozen.policy.enabled && preparedContext.frozen.runtimeModel != null)
                         app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) else null,
+                    onUsage = { synchronized(this) {
+                        if (!closed && active?.id == assistant.id && active?.runId == run &&
+                            active?.conversationId == conversationId) notifyChanged()
+                    } },
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
                 afterTitleParentPersisted(it, user, assistant, pendingTitle)
                 synchronized(this) {

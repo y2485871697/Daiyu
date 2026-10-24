@@ -69,5 +69,25 @@ class ModelNameAlignmentContract(unittest.TestCase):
             self.assertIn('modelNameOpticalAlignment()', source(path), path)
 
 
+    def test_picker_geometry_is_sampled_in_one_ui_turn_after_entry_and_scroll(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/icons/ModelNameAlignmentTest.kt').read_text()
+        helper = test.split('private fun pickerGeometry(', 1)[1].split('fun testSharedCorrection', 1)[0]
+        lookup, sample = helper.split('return ui.runOnIdle {', 1)
+        self.assertIn('.assertIsDisplayed().fetchSemanticsNode()', lookup)
+        self.assertNotIn('fetchSemanticsNode()', sample)
+        self.assertIn('assertSame(rowNode.root, node.root)', sample)
+        self.assertIn('val position = node.positionInRoot', sample)
+        self.assertIn('val size = node.size', sample)
+        self.assertNotIn('boundsInRoot', helper)
+        actual = test.split('fun testActualPickerKeepsSingleAndTwoLineNameBlocksAtSameOpticalOffset()', 1)[1].split('fun testSettingsCorrection', 1)[0]
+        self.assertLess(actual.index('awaitDialogEnter('), actual.index('performScrollToKey('))
+        self.assertLess(actual.index('performScrollToKey('), actual.index('awaitVisualIdle()'))
+        self.assertLess(actual.index('awaitVisualIdle()'), actual.index('pickerGeometry(id, hasApiId)'))
+        for oracle in ('icon.center.y - density.roundToInt(), (name.top + contentBottom) / 2f, 1f',
+                       'row.center.y, icon.center.y, 1f', '22f, icon.width / density, .5f',
+                       'row.height / density >= 55.5f', 'name.bottom <= checkNotNull(apiId).top'):
+            self.assertIn(oracle, actual)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -42,7 +42,12 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
 
     private fun preview(seedDraft: Boolean = true): ControllerShizukuPreparation {
         openEditor(seedDraft)
-        panelNode(hasText("预览命令及本次运行") and hasClickAction()).performClick()
+        val panel = node("shizuku-text-panel")
+        awaitNodeWindowFocus(panel)
+        dismissIme()
+        val previewButton = panelNode(hasText("预览命令及本次运行") and hasClickAction())
+        awaitImeFrame(previewButton, visible = false)
+        previewButton.performClick()
         ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() != null }
         val preparation = checkNotNull(fixture.controller.shizukuPreparation())
         ui.waitUntil(5_000) {

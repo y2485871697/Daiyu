@@ -652,9 +652,12 @@ class BackupActivityTest:ComposeActivityTestCase() {
         seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
         restorePreview();fixtureApp.failNextRestoreCommit=true
         restorePress(DialogInterface.BUTTON_POSITIVE)
+        awaitState { !controller.dataBusy }
+        assertFalse("restore failure injection was not consumed",fixtureApp.failNextRestoreCommit)
         main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
         recreate();main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
         restorePreview();restorePress(DialogInterface.BUTTON_POSITIVE)
+        awaitState { !controller.dataBusy }
         assertEquals("imported-model",modelPreferences().getString("model",null))
         assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get());assertEquals(0L,controller.dataRevision)
     }

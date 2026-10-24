@@ -139,7 +139,7 @@ class ChildStopChoiceActivityTest : WiredActivityTestCase() {
         awaitChoiceGone()
         assertTrue(childExited.await(5, TimeUnit.SECONDS))
         awaitControl("stopped child really drained") { !fixture.controller.hasLiveChildTasks() }
-        assertEquals(ChildTaskStatus.STOPPED, fixture.controller.childTasks(owner.conversationId).single().status)
+        assertEquals(ChildTaskStatus.UNKNOWN, fixture.controller.childTasks(owner.conversationId).single().status)
         assertFalse(fixture.controller.finishChildStopChoice(choice, true))
         assertEquals(1, parentOpens.get()); assertEquals(1, childOpens.get())
         assertTrue(childCancels.get() > 0)

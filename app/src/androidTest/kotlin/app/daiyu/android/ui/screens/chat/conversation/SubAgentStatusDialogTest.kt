@@ -5,6 +5,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
@@ -32,14 +35,28 @@ class SubAgentStatusDialogTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
+    private fun rawBounds(node: SemanticsNode): Rect =
+        Rect(node.positionInRoot, Size(node.size.width.toFloat(), node.size.height.toFloat()))
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testEmptyAndFailedStatesCanCloseWithoutCreatingTasks() {
         for (mode in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
             var closes = 0
             show(emptyList(), mode, onClose = { closes++ })
-            val emptyText = ui.onNodeWithText("本会话暂无子代理任务").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-            val body = ui.onNodeWithTag("subagent-status-empty").fetchSemanticsNode().boundsInRoot
-            assertEquals(body.center.x, emptyText.center.x, 1f)
-            assertEquals(body.center.y, emptyText.center.y, 1f)
+            val bodyNode = ui.onNodeWithTag("subagent-status-empty", useUnmergedTree = true).fetchSemanticsNode()
+            val textNode = ui.onNode(hasText("本会话暂无子代理任务") and
+                hasAnyAncestor(hasTestTag("subagent-status-empty")), useUnmergedTree = true)
+                .assertIsDisplayed().fetchSemanticsNode()
+            assertSame(bodyNode.root, textNode.root)
+            val view = (bodyNode.root as androidx.compose.ui.platform.ViewRootForTest).view
+            val (layout, visible) = awaitStableWindowFrame(view) {
+                (rawBounds(bodyNode) to rawBounds(textNode)) to
+                    (bodyNode.boundsInRoot to textNode.boundsInRoot)
+            }
+            val (body, emptyText) = layout
+            val diagnostic = "body=$body text=$emptyText visible=$visible"
+            assertEquals(diagnostic, body.center.x, emptyText.center.x, 1f)
+            assertEquals(diagnostic, body.center.y, emptyText.center.y, 1f)
             ui.onNodeWithText("当前会话").assertDoesNotExist()
             ui.onNodeWithText("关闭").assertDoesNotExist()
             ui.onNodeWithTag("subagent-status-close").assertDoesNotExist()

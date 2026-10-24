@@ -1,6 +1,9 @@
 package app.daiyu.android
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.graphics.Color
 
 import androidx.activity.compose.setContent
@@ -60,15 +63,30 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         } }
     }
 
+    private fun rawBounds(node: SemanticsNode): Rect =
+        Rect(node.positionInRoot, Size(node.size.width.toFloat(), node.size.height.toFloat()))
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun assertSpaciousWithBottomFooter(tag: String) {
-        node(tag).assertIsDisplayed()
-        val card = node("subagent-collaboration-card").fetchSemanticsNode().boundsInRoot
-        val footer = node("subagent-collaboration-footer").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue("Empty sheet retains its intended height: ${card.height / density}", card.height / density in 350f..385f)
-        val message = node(tag).fetchSemanticsNode().boundsInRoot
-        assertTrue("Whitespace belongs between message and footer", (footer.top - message.bottom) / density > 60f)
-        assertTrue("Footer stays within sheet", footer.bottom <= card.bottom + 1f)
-        assertTrue("No unused area after footer", (card.bottom - footer.bottom) / density < 32f)
+        awaitDialogEnter(node("subagent-collaboration-card"))
+        val messageNode = node(tag).assertIsDisplayed().fetchSemanticsNode()
+        val cardNode = node("subagent-collaboration-card").fetchSemanticsNode()
+        val footerNode = node("subagent-collaboration-footer").assertIsDisplayed().fetchSemanticsNode()
+        assertSame(cardNode.root, footerNode.root)
+        assertSame(cardNode.root, messageNode.root)
+        val view = (cardNode.root as androidx.compose.ui.platform.ViewRootForTest).view
+        val (layout, visible) = awaitStableWindowFrame(view) {
+            Triple(rawBounds(cardNode), rawBounds(footerNode), rawBounds(messageNode)) to
+                (cardNode.boundsInRoot to footerNode.boundsInRoot)
+        }
+        val (card, footer, message) = layout
+        val (visibleCard, visibleFooter) = visible
+        val diagnostic = "card=$card footer=$footer message=$message visible=$visible density=$density"
+        assertTrue("Empty sheet retains its intended height: $diagnostic", card.height / density in 350f..385f)
+        assertTrue("Whitespace belongs between message and footer: $diagnostic", (footer.top - message.bottom) / density > 60f)
+        assertTrue("Footer stays within sheet: $diagnostic", footer.bottom <= card.bottom + 1f)
+        assertTrue("Visible footer stays within sheet: $diagnostic", visibleFooter.bottom <= visibleCard.bottom + 1f)
+        assertTrue("No unused area after footer: $diagnostic", (card.bottom - footer.bottom) / density < 32f)
     }
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)

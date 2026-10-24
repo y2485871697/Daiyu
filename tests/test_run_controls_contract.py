@@ -99,6 +99,16 @@ class RunControlsContractTest(unittest.TestCase):
         self.assertIn('main-stop-keep-children', activity)
         self.assertIn('main-stop-cancel-children', activity)
 
+    def test_child_stop_choice_has_observable_projection_before_refresh_early_returns(self):
+        activity = (APP / 'MainActivity.kt').read_text()
+        self.assertIn('private var childStopChoice by mutableStateOf<ChatController.ChildStopChoice?>(null)', activity)
+        refresh = activity.split('private fun refresh() {', 1)[1]
+        self.assertLess(refresh.index('childStopChoice = controller.childStopChoice()'), refresh.index('if (controller.dataBusy)'))
+        surface = activity.split('@Composable private fun ChildStopChoiceSurface()', 1)[1].split('@Composable private fun UnknownBranchSurface()', 1)[0]
+        self.assertIn('val choice = childStopChoice ?: return', surface)
+        self.assertNotIn('val choice = controller.childStopChoice()', surface)
+        self.assertLess(surface.index('controller.finishChildStopChoice(choice, stop)'), surface.index('refresh()'))
+
     def test_explicit_resume_releases_same_group_before_completion_can_publish(self):
         controller = (APP / 'ChatController.kt').read_text()
         resume = controller.split('internal fun resume(owner:Message)', 1)[1].split('internal fun stopMain(', 1)[0]

@@ -23,6 +23,7 @@ internal class RunControlFixture(base:Context,
     filesRoot: java.io.File? = null,
     providerBalanceHost: ProviderBalanceRuntimeHost? = null,
     beforeController: (ConversationDatabase, android.content.SharedPreferences) -> Unit = { _, _ -> },
+    modelFactory: ((ModelSettings) -> ModelPort)? = null,
     beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {
         init {attachBaseContext(base)}
@@ -59,7 +60,7 @@ internal class RunControlFixture(base:Context,
         val factory: (ModelSettings) -> ModelPort = {
             // Test-only gate in real preparation, before the SQLite receipt or model open.
             beforeModel()
-            ModelPort {history ->
+            modelFactory?.invoke(it) ?: ModelPort {history ->
                 beforeOpen(history)
                 opens.incrementAndGet()
                 synchronized(queued) {histories.add(history);checkNotNull(queued.pollFirst())}

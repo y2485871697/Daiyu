@@ -4,7 +4,6 @@ import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.MessageHistory
 import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.MessageHistorySegment
-import app.daiyu.android.domain.ReportedReasoning
 import app.daiyu.android.domain.MessageId
 import app.daiyu.android.domain.ToolCallId
 import app.daiyu.android.domain.ToolInvocation
@@ -30,7 +29,7 @@ object MessageHistoryCodec {
                         MessageTimeCodec.write(it, segment.createdAt)
                         if (segment.reportedReasoning.isNotEmpty()) it.put("reported_reasoning", JSONArray().apply {
                             segment.reportedReasoning.forEach { reported ->
-                                put(JSONObject().put("item_id", reported.itemId).put("text", reported.text))
+                                put(ReportedReasoningCodec.encode(reported))
                             }
                         })
                     })
@@ -55,9 +54,7 @@ object MessageHistoryCodec {
                     val reported = value.getJSONArray("reported_reasoning")
                     require(reported.length() in 1..1024)
                     (0 until reported.length()).map { index ->
-                        val part = reported.getJSONObject(index)
-                        require(part.keys().asSequence().toSet() == setOf("item_id", "text"))
-                        ReportedReasoning(text(part, "item_id"), text(part, "text"))
+                        ReportedReasoningCodec.decode(reported.getJSONObject(index))
                     }
                 })
         }

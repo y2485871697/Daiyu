@@ -25,7 +25,7 @@ internal object RunCheckpointCodec {
                 if (row.reportedReasoning.isNotEmpty()) {
                     validateReportedReasoning(row)
                     item.put("reported_reasoning", JSONArray().apply { row.reportedReasoning.forEach {
-                        put(JSONObject().put("item_id", it.itemId).put("text", it.text))
+                        put(ReportedReasoningCodec.encode(it))
                     } })
                 }
                 put(item)
@@ -136,9 +136,7 @@ internal object RunCheckpointCodec {
                     val parts = item.getJSONArray("reported_reasoning")
                     require(parts.length() in 1..1024)
                     (0 until parts.length()).map { i ->
-                        val part = parts.getJSONObject(i)
-                        fields(part, "item_id", "text")
-                        ReportedReasoning(string(part, "item_id"), string(part, "text"))
+                        ReportedReasoningCodec.decode(parts.getJSONObject(i))
                     }
                 }
                 item.remove("reported_reasoning")

@@ -35,6 +35,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     @Volatile private var terminalReserved = false
     private var started = false
     @Volatile private var pauseRequested = false
+    @Volatile private var reasoningInterruptedAtNanos: Long? = null
     @Volatile private var breakStream = false
     @Volatile private var generation = 0L
     @Volatile private var boundaryWaiter: Thread? = null
@@ -133,6 +134,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             if (terminal || terminalReserved) return
             terminalReserved = true
             stopped.set(true)
+            if (reasoningInterruptedAtNanos == null) reasoningInterruptedAtNanos = System.nanoTime()
             generation++
             Pair(session, boundaryWaiter)
         }
@@ -146,6 +148,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val captured = synchronized(terminalLock) {
             if (terminal || terminalReserved || stopped.get()) return false
             pauseRequested = true
+            if (reasoningInterruptedAtNanos == null) reasoningInterruptedAtNanos = System.nanoTime()
             pauseRevision++
             pauseEpoch++
             // Control-only invalidation is synchronous: a quick resume cannot revive this gate.
@@ -252,7 +255,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var current = initial
         var sourceHistory = history.toList()
         var modelHistory = sourceHistory
-        var segmentHistory = RunnerHistorySegments(initial)
+        var segmentHistory = RunnerHistorySegments(initial) { reasoningInterruptedAtNanos ?: System.nanoTime() }
         val contextRuntime = options.contextRuntime
         var contextState = contextRuntime?.let { RunContextCheckpoint() }
         var acceptedContextSegments = 0
@@ -260,15 +263,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         fun effectiveHistory(message: Message = current): List<Message> = if (contextRuntime == null) modelHistory else modelHistory +
             MessageHistory.expand(listOf(segmentHistory.project(message).copy(status = RunStatus.COMPLETED, error = null)))
                 .drop(acceptedContextSegments)
-        // The active session's small replayable history state lets a batch use a private
-        // projection without mutating the accepted segment accumulator.
-        var historyBase = initial
-        val historyReasoning = linkedMapOf<String, String>()
-        var historyProtocol: Pair<Message, List<String>>? = null
-        fun forkHistory(): RunnerHistorySegments = RunnerHistorySegments(historyBase).also { fork ->
-            historyReasoning.forEach { (id, text) -> fork.acceptReasoning(id, text, final = true) }
-            historyProtocol?.let { (message, items) -> fork.replaceSessionProtocol(message, items) }
-        }
         var outputs = emptyList<ToolOutput>()
         var round = 0
         var requestUnconfirmed = false
@@ -285,7 +279,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var pendingCheckpoint: PendingToolCheckpoint? = null
         val records = linkedMapOf<ToolCallId, ToolRecord>()
         fun snapshot(message: Message = current, usageSnapshot: List<RequestUsageCheckpoint> = usage): RunCheckpoint = synchronized(terminalLock) {
-            RunCheckpoint(message, effectiveHistory(message),
+            val now = reasoningInterruptedAtNanos ?: System.nanoTime()
+            RunCheckpoint(message.frozenReasoning(now), effectiveHistory(message).map { it.frozenReasoning(now) },
                 if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
                 records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
                 owner = owner, revision = revision + 1,
@@ -331,6 +326,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             }
         }
         fun apply(candidate: Message) {
+            if (candidate.status != RunStatus.RUNNING) segmentHistory.finishReasoning()
             val next = segmentHistory.project(candidate)
             if (stagingTransportBatch) { current = next; return }
             val runtime = options.runtimeStore
@@ -339,7 +335,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     val nextCheckpoint = snapshot(next)
                     runtime.commitCheckpoint(nextCheckpoint)
                     revision = nextCheckpoint.revision
-                } else store.save(next)
+                } else store.save(next.frozenReasoning(reasoningInterruptedAtNanos ?: System.nanoTime()))
             } catch (failure: Exception) { throw PersistenceException(failure) }
             current = next
             if (next.status != RunStatus.RUNNING) {
@@ -389,6 +385,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             }
         }
         fun boundary(): Boolean {
+            segmentHistory.finishReasoning()
+            current = segmentHistory.project(current)
             setPhase(if (pauseRequested) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY)
             checkpoint()
             awaitPause()
@@ -403,10 +401,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             }
             if (acceptedUsers != null) {
                 val sealed = segmentHistory.sealSession(current, acceptedUsers)
-                historyBase = sealed
-                historyReasoning.clear()
-                historyProtocol = null
-                segmentHistory = RunnerHistorySegments(sealed)
+                segmentHistory = RunnerHistorySegments(sealed) { reasoningInterruptedAtNanos ?: System.nanoTime() }
                 outputs = emptyList()
                 modelHistory = if (contextRuntime == null) sourceHistory + sealed.copy(status = RunStatus.COMPLETED, error = null)
                     else effectiveHistory()
@@ -445,8 +440,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (candidate == null || cancelled()) return false
                 require(candidate.all { it.conversationId == initial.conversationId })
                 val sealed = segmentHistory.sealSession(current, emptyList())
-                historyBase = sealed; historyReasoning.clear(); historyProtocol = null
-                segmentHistory = RunnerHistorySegments(sealed)
+                segmentHistory = RunnerHistorySegments(sealed) { reasoningInterruptedAtNanos ?: System.nanoTime() }
                 current = sealed
                 acceptedContextSegments = sealed.historySegments.size
                 sourceHistory = candidate.toList(); modelHistory = sourceHistory
@@ -602,7 +596,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
                     if (pauseRequested || supplements.isNotEmpty() || breakStream) null
-                    else { attemptFence = pauseEpoch; setPhase(ExecutionPhase.STREAMING); ++generation }
+                    else { reasoningInterruptedAtNanos = null; attemptFence = pauseEpoch; setPhase(ExecutionPhase.STREAMING); ++generation }
                 }
                 if (token == null) {
                     if (boundary()) { cancelSession(active); active = open() }
@@ -656,23 +650,21 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         is ModelEvent.ReasoningDelta -> {
                             checkText(event.itemId, event.text, final = false, reasoning = true)
                             segmentHistory.acceptReasoning(event.itemId, event.text, final = false)
-                            historyReasoning[event.itemId] = historyReasoning[event.itemId].orEmpty() + event.text
                             apply(current)
                             try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ReasoningFinal -> {
                             checkText(event.itemId, event.text, final = true, reasoning = true)
                             segmentHistory.acceptReasoning(event.itemId, event.text, final = true)
-                            historyReasoning[event.itemId] = event.text
                             apply(current)
                             try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ProtocolOutput -> {
                             segmentHistory.replaceSessionProtocol(current, event.items)
-                            historyProtocol = current to event.items.toList()
                             apply(current.copy(protocolItems = event.items))
                         }
                         is ModelEvent.TextDelta -> {
+                            segmentHistory.finishReasoning()
                             bodyProgress(checkText(event.itemId, event.text, final = false))
                             val blocks = current.blocks.toMutableList()
                             val at = blocks.indices.firstOrNull { it >= textFloor && blocks[it] is MessageBlock.Text && (blocks[it] as MessageBlock.Text).itemId == event.itemId } ?: -1
@@ -684,6 +676,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             apply(current.copy(blocks = blocks))
                         }
                         is ModelEvent.TextFinal -> {
+                            segmentHistory.finishReasoning()
                             bodyProgress(checkText(event.itemId, event.text, final = true))
                             val blocks = current.blocks.toMutableList()
                             val at = blocks.indices.firstOrNull { it >= textFloor && blocks[it] is MessageBlock.Text && (blocks[it] as MessageBlock.Text).itemId == event.itemId } ?: -1
@@ -692,6 +685,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             apply(current.copy(blocks = blocks))
                         }
                         is ModelEvent.ToolReady -> {
+                            segmentHistory.finishReasoning()
                             val call = event.invocation
                             val prior = calls[call.id]
                             require(prior == null || prior == call) { "重复调用标识的内容不一致" }
@@ -716,8 +710,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         else {
                             val beforeCurrent = current
                             val beforeHistory = segmentHistory
-                            val beforeReasoning = historyReasoning.toMap()
-                            val beforeProtocol = historyProtocol
                             val beforeUsage = usage
                             val beforeContext = contextState
                             val beforeTransport = transportCheckpoint
@@ -736,7 +728,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     "Background resume requires an atomic durable checkpoint store"
                                 }
                                 reconnectBudget?.check()
-                                segmentHistory = forkHistory()
+                                segmentHistory = segmentHistory.fork()
                                 stagingTransportBatch = true
                                 try { batch.events.forEach(sink) } finally { stagingTransportBatch = false }
                                 if (!currentAttempt()) throw ModelDeliveryRejectedException()
@@ -758,8 +750,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 if (!committed) {
                                     current = beforeCurrent
                                     segmentHistory = beforeHistory
-                                    historyReasoning.clear(); historyReasoning.putAll(beforeReasoning)
-                                    historyProtocol = beforeProtocol
                                     usage = beforeUsage
                                     contextState = beforeContext
                                     transportCheckpoint = beforeTransport
@@ -849,6 +839,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val canResume = try { resumable?.canResume == true } catch (_: Exception) { false }
                             if ((factory == null && attempt >= options.reconnect.maxAttempts) ||
                                 classified !in options.reconnect.failures || !canResume) throw failure
+                            segmentHistory.finishReasoning()
+                            apply(current)
                             if (factory != null) {
                                 if (reconnectBudget == null) reconnectBudget = factory.create(round, checkNotNull(classified))
                                 val budget = checkNotNull(reconnectBudget)
@@ -887,6 +879,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             if (reconnectBudget != null && pauseRequested) awaitPause()
                             synchronized(terminalLock) {
                                 if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
+                                reasoningInterruptedAtNanos = null
                                 setPhase(ExecutionPhase.STREAMING, attempt)
                                 attemptFence = pauseEpoch
                             }
@@ -916,6 +909,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     // transport returns. Late callbacks then observe accepting=false/token mismatch.
                     synchronized(eventLock) {
                         accepting = false
+                        segmentHistory.finishReasoning()
+                        current = segmentHistory.project(current)
                         synchronized(terminalLock) { generation++ }
                     }
                 }

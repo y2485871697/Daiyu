@@ -66,4 +66,70 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.onNodeWithText("ordinary answer").assertIsDisplayed()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").assertDoesNotExist()
     }
+    fun testRealElapsedTimerUsesOneDecimalFreezesAndSurvivesRemount() {
+        ui.mainClock.autoAdvance = false
+        var now = 0L
+        val clock = { now }
+        var reported by mutableStateOf(listOf(ReportedReasoning("r", "live summary", 0L, 0L)))
+        var live by mutableStateOf(true)
+        var mounted by mutableStateOf(true)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                if (mounted) ReportedReasoningCard("timer", reported, live, clock)
+            }
+        } }
+        ui.mainClock.advanceTimeBy(32)
+        ui.onNodeWithText("正在思考…").assertExists()
+        ui.onNodeWithText("live summary").assertExists()
+        ui.onNodeWithText("0.0 秒").assertExists()
+        mainThread { now = 1_200_000_000L }
+        ui.mainClock.advanceTimeBy(200)
+        ui.onNodeWithText("1.2 秒").assertExists()
+        ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
+        ui.mainClock.advanceTimeBy(32)
+        ui.onNodeWithText("live summary").assertDoesNotExist()
+        mainThread { mounted = false; now = 2_000_000_000L }
+        ui.mainClock.advanceTimeBy(32)
+        mainThread { mounted = true }
+        ui.mainClock.advanceTimeBy(200)
+        ui.onNodeWithText("2.0 秒").assertExists()
+        mainThread {
+            reported = listOf(ReportedReasoning("r", "final summary", 2_300L))
+            live = false
+            now = 9_000_000_000L
+        }
+        ui.mainClock.advanceTimeBy(200)
+        ui.onNodeWithText("已思考").assertExists()
+        ui.onNodeWithText("2.3 秒").assertExists()
+        mainThread { now = 12_000_000_000L }
+        ui.mainClock.advanceTimeBy(1_000)
+        ui.onNodeWithText("2.3 秒").assertExists()
+        ui.onNodeWithText("模型已报告").assertDoesNotExist()
+        ui.onNodeWithText("仅包含供应商实际公开返回的内容；不代表隐藏内部推理。流中断时可能不完整。").assertDoesNotExist()
+        ui.mainClock.autoAdvance = true
+    }
+
+    fun testUnknownHistoricalTimeIsNotInventedAndManualExpansionSurvivesCompletion() {
+        ui.mainClock.autoAdvance = false
+        var reported by mutableStateOf(listOf(ReportedReasoning("r", "summary", 1_000L, 0L)))
+        var live by mutableStateOf(true)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ReportedReasoningCard("manual", reported, live, { 0L })
+            }
+        } }
+        ui.mainClock.advanceTimeBy(32)
+        ui.onNodeWithText("1.0 秒").assertExists()
+        // Explicitly collapse, then expand: this is user intent, not the live default.
+        ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
+        ui.mainClock.advanceTimeBy(32)
+        ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
+        ui.mainClock.advanceTimeBy(32)
+        mainThread { reported = listOf(ReportedReasoning("r", "summary")); live = false }
+        ui.mainClock.autoAdvance = true
+        ui.waitForIdle()
+        ui.onNodeWithText("summary").assertIsDisplayed()
+        ui.onNodeWithTag("reported-reasoning-duration:manual").assertDoesNotExist()
+    }
+
 }

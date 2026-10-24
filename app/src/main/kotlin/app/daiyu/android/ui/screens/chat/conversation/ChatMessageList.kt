@@ -290,7 +290,8 @@ internal fun AssistantTurn(
             Text(identity?.name ?: "助手", color = conversationColors().text,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }
-        ReportedReasoningCard(turn.listKey, turn.reportedReasoning)
+        ReportedReasoningCard(turn.listKey, turn.reportedReasoning,
+            allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent) { text, modifier ->

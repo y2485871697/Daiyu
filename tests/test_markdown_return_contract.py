@@ -40,7 +40,7 @@ class MarkdownReturnContract(unittest.TestCase):
         self.assertNotIn("data class MarkdownProjection(", self.projection)
         self.assertIn("Dispatchers.Default.limitedParallelism(1)", self.projection)
         self.assertIn("cache.get(sources, parser)?.let { return it }", self.projection)
-        self.assertIn("withContext(markdownDispatcher)", self.projection)
+        self.assertIn("withContext(dispatcher)", self.projection)
         self.assertIn("parser(source)", self.projection)
         self.assertIn("currentCoroutineContext().ensureActive()\n    cache.put(projection)", self.projection)
         self.assertLess(self.projection.index("parser(source)"), self.projection.index("cache.put(projection)"))

@@ -24,8 +24,10 @@ internal fun markdownBodySnapshot(
 
 internal val defaultMarkdownParser: (String) -> List<MarkdownBlock> = MarkdownParser::parse
 
-// One running CPU parse; cancelled snapshots do not accumulate runnable parse work.
+// Each lane has one running parse; short replies cannot queue behind bulk Markdown.
+internal const val INTERACTIVE_MARKDOWN_CHARS = 4_096L
 private val markdownDispatcher = Dispatchers.Default.limitedParallelism(1)
+private val interactiveMarkdownDispatcher = Dispatchers.Default.limitedParallelism(1)
 
 internal suspend fun projectMarkdown(
     sources: List<String>,
@@ -34,7 +36,10 @@ internal suspend fun projectMarkdown(
 ): MarkdownProjection {
     currentCoroutineContext().ensureActive()
     cache.get(sources, parser)?.let { return it }
-    val projection = withContext(markdownDispatcher) {
+    cache.getPrepared(sources, parser)?.let { return it }
+    val dispatcher = if (sources.sumOf { it.length.toLong() } <= INTERACTIVE_MARKDOWN_CHARS)
+        interactiveMarkdownDispatcher else markdownDispatcher
+    val projection = withContext(dispatcher) {
         val context = currentCoroutineContext()
         val blocks = sources.distinct().associateWith { source ->
             currentCoroutineContext().ensureActive()

@@ -1545,7 +1545,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 app.daiyu.android.ui.navigation.PageBackGestureHost(
-                    routeKey = retainedPage,
+                    routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,
                     contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,
                     canNavigateBack = retainedPage != "chat",
                     swipeDismissEnabled = appearance.swipeDismissEnabled,
@@ -1557,6 +1557,8 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
                         "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "generation-settings" -> retainedPage = "settings"
+                        "legacy-library" -> retainedPage = "backup"
                         "terminal" -> closeTerminalPage()
                         "usage" -> closeUsagePage()
                         "providers" -> closeProvidersPage()
@@ -4787,20 +4789,22 @@ class MainActivity : ComponentActivity() {
         "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings",
         "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings",
         "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> "settings"
-        "generation-settings" -> if (generationSettingsVisit != null) "settings" else "chat"
-        "legacy-library" -> if (legacyPage != null) "backup" else "chat"
+        "generation-settings" -> "settings"
+        "legacy-library" -> "backup"
         "terminal" -> terminalReturnPage
         "usage" -> usageReturnPage
         "providers" -> providersReturnPage
         "skills" -> skillsReturnPage
         "offline-speech" -> offlineSpeechReturnPage
         "pet-model-settings" -> "pet-settings"
-        "assistant-edit" -> assistantEditReturnPage
+        "assistant-edit" -> if (assistantEditReturnPage == "chat" && assistantEditReturnToSidebar)
+            "chat-sidebar" else assistantEditReturnPage
         "conversation-search", "message-search", "history-search" -> null
         else -> "chat"
     }
 
     private fun returnToChat() {
+        dismissSidebar()
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
         exportConversationId = null; exportConversationTitle = ""; taskRecordsConversationId = null

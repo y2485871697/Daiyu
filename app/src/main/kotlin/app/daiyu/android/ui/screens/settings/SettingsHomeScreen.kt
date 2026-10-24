@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.navigation.PageBackStack
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -158,75 +159,77 @@ internal fun DaiyuSettingsScreen(
     val catalogGroups = remember(engineeringUi) { SettingsCatalog.visibleGroups(engineeringUi) }
     val groups = catalogGroups
     val listState = rememberLazyListState()
-    val openedPage = localPage
-    if (openedPage != null) {
-        val localBack: () -> Unit = {
-            if (visit.active && localPage == openedPage) {
-                localPage = if (openedPage == SettingsLocalPage.SHIZUKU_ACCESS) SettingsLocalPage.ENHANCEMENTS else null
+    PageBackStack(localPage, if (localPage == SettingsLocalPage.SHIZUKU_ACCESS) SettingsLocalPage.ENHANCEMENTS else null) {
+        val openedPage = localPage
+        if (openedPage != null) {
+            val localBack: () -> Unit = {
+                if (visit.active && localPage == openedPage) {
+                    localPage = if (openedPage == SettingsLocalPage.SHIZUKU_ACCESS) SettingsLocalPage.ENHANCEMENTS else null
+                }
+            }
+            BackHandler(onBack = localBack)
+            if (openedPage == SettingsLocalPage.TASK_SURFACE) {
+                TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
+            } else {
+                SettingsSystemAccessPage(openedPage, onBack = localBack,
+                    onOpenShizuku = {
+                        if (visit.active && localPage == openedPage) localPage = SettingsLocalPage.SHIZUKU_ACCESS
+                    },
+                    onRoute = { route -> if (visit.active && localPage == openedPage) onRoute(route) },
+                    modifier = modifier)
+            }
+            return@PageBackStack
+        }
+        val open: (SettingsEntry) -> Unit = open@ { entry ->
+            if (!visit.active || localPage != null || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@open
+            focus.clearFocus()
+            if (entry.localPage != null) {
+                diagnosticsUi.retirePicker()
+                localPage = entry.localPage
+                return@open
+            }
+            when (entry.id) {
+                "updates" -> release.check()
+                "assistants" -> onOpenAssistants?.invoke()
+                "subagents" -> onOpenSubAgents?.invoke()
+                "appearance" -> onOpenAppearance?.invoke()
+                "haptics" -> onOpenHaptics?.invoke()
+                "voice" -> onOpenVoice?.invoke()
+                "platform_tools" -> onOpenPlatformTools?.invoke()
+                "source" -> openProjectSource(context)
+                "telegram", "qq", "relay_st", "relay_moyu" -> openRetainedSettingsLink(context, entry.id)
+                "relay" -> {
+                    relayExpanded = !relayExpanded
+                }
+                else -> entry.route?.let(onRoute)
             }
         }
-        BackHandler(previewEnabled = false, onBack = localBack)
-        if (openedPage == SettingsLocalPage.TASK_SURFACE) {
-            TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
-        } else {
-            SettingsSystemAccessPage(openedPage, onBack = localBack,
-                onOpenShizuku = {
-                    if (visit.active && localPage == openedPage) localPage = SettingsLocalPage.SHIZUKU_ACCESS
-                },
-                onRoute = { route -> if (visit.active && localPage == openedPage) onRoute(route) },
-                modifier = modifier)
-        }
-        return
-    }
-    val open: (SettingsEntry) -> Unit = open@ { entry ->
-        if (!visit.active || localPage != null || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@open
-        focus.clearFocus()
-        if (entry.localPage != null) {
-            diagnosticsUi.retirePicker()
-            localPage = entry.localPage
-            return@open
-        }
-        when (entry.id) {
-            "updates" -> release.check()
-            "assistants" -> onOpenAssistants?.invoke()
-            "subagents" -> onOpenSubAgents?.invoke()
-            "appearance" -> onOpenAppearance?.invoke()
-            "haptics" -> onOpenHaptics?.invoke()
-            "voice" -> onOpenVoice?.invoke()
-            "platform_tools" -> onOpenPlatformTools?.invoke()
-            "source" -> openProjectSource(context)
-            "telegram", "qq", "relay_st", "relay_moyu" -> openRetainedSettingsLink(context, entry.id)
-            "relay" -> {
-                relayExpanded = !relayExpanded
-            }
-            else -> entry.route?.let(onRoute)
-        }
-    }
-    MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier, listState = listState,
-        scrollBehavior = scrollBehavior, containerColor = settingsPageBackground(),
-        listModifier = Modifier.background(settingsPageBackground())
-            .then(if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier),
-    ) {
-        groups.forEach { group ->
-            item(key = "settings_group_${group.id}") { SettingsHomeSection(group.title, "settings-section:${group.id}") }
-            item(key = "settings_entries_${group.id}") {
-                SettingsHomeCard(group.id) {
-                    group.entries.forEach { entry ->
-                        when {
-                            entry.id in setOf("relay_st", "relay_moyu") -> Unit
-                            entry.id == "relay" -> {
-                                SettingsRow(entry.title, summary = entry.summary, leading = { SettingsIcon(entry.icon) }, onClick = { open(entry) },
-                                    trailing = {
-                                        DaiyuIcon(if (relayExpanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
-                                            if (relayExpanded) "收起" else "展开", size = 20.dp)
-                                    })
-                                if (relayExpanded) Column(Modifier.padding(start = 66.dp)) {
-                                    group.entries.filter { it.id in setOf("relay_st", "relay_moyu") }.forEach { child ->
-                                        SettingsRow(child.title, onClick = { open(child) })
+        MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier, listState = listState,
+            scrollBehavior = scrollBehavior, containerColor = settingsPageBackground(),
+            listModifier = Modifier.background(settingsPageBackground())
+                .then(if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier),
+        ) {
+            groups.forEach { group ->
+                item(key = "settings_group_${group.id}") { SettingsHomeSection(group.title, "settings-section:${group.id}") }
+                item(key = "settings_entries_${group.id}") {
+                    SettingsHomeCard(group.id) {
+                        group.entries.forEach { entry ->
+                            when {
+                                entry.id in setOf("relay_st", "relay_moyu") -> Unit
+                                entry.id == "relay" -> {
+                                    SettingsRow(entry.title, summary = entry.summary, leading = { SettingsIcon(entry.icon) }, onClick = { open(entry) },
+                                        trailing = {
+                                            DaiyuIcon(if (relayExpanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
+                                                if (relayExpanded) "收起" else "展开", size = 20.dp)
+                                        })
+                                    if (relayExpanded) Column(Modifier.padding(start = 66.dp)) {
+                                        group.entries.filter { it.id in setOf("relay_st", "relay_moyu") }.forEach { child ->
+                                            SettingsRow(child.title, onClick = { open(child) })
+                                        }
                                     }
                                 }
+                                else -> SettingsHomeRow(entry, diagnosticsUi, release) { open(entry) }
                             }
-                            else -> SettingsHomeRow(entry, diagnosticsUi, release) { open(entry) }
                         }
                     }
                 }

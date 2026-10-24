@@ -45,7 +45,7 @@ internal fun RunningModeSettingsScreen(onBack: () -> Unit, modifier: Modifier = 
     }
     LaunchedEffect(editor) { editor.refreshShizuku() }
     val back = { editor.close(); onBack() }
-    BackHandler(previewEnabled = false, onBack = back)
+    BackHandler(onBack = back)
     SettingsScaffoldPage("运行模式", back, modifier) {
         item("running-modes") {
             SettingsCard(Modifier.padding(top = 12.dp).selectableGroup()) {

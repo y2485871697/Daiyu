@@ -37,8 +37,10 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         return departure?.takeIf { it.target == key && it.frame.key != key }
     }
 
+    fun freezeCurrent() { frames[currentKey]?.let { freeze(it) } }
+
     private fun freeze(frame: Frame) {
-        if (frame.size == IntSize.Zero || frame.capture?.isActive == true) return
+        if (frame.image != null || frame.size == IntSize.Zero || frame.capture?.isActive == true) return
         frame.capture = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 // API28+ completes here; API26 submits its hardware Surface before suspending.
@@ -79,11 +81,11 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         if (pending === departure) pending = null
     }
 
-    fun trim(current: Frame, target: Frame?, departure: Departure?) {
+    fun trim(current: Frame, target: Frame?, departure: Departure?, ancestors: Set<Any>) {
         val iterator = frames.entries.iterator()
         while (frames.size > 8 && iterator.hasNext()) {
             val frame = iterator.next().value
-            if (frame === current || frame === target || frame === departure?.frame || frame.capture?.isActive == true) continue
+            if (frame.key in ancestors || frame === current || frame === target || frame === departure?.frame || frame.capture?.isActive == true) continue
             iterator.remove()
             frame.image = null
             release(frame)

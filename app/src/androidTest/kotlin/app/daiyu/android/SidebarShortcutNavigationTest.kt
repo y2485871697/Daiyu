@@ -1,6 +1,11 @@
 package app.daiyu.android
 
+import android.os.Build
+import androidx.activity.BackEventCompat
+import androidx.activity.ExperimentalActivityApi
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
+import androidx.test.platform.graphics.HardwareRendererCompat
 
 class SidebarShortcutNavigationTest : WiredActivityTestCase() {
     private fun openDock(id: String, page: String) {
@@ -94,5 +99,92 @@ class SidebarShortcutNavigationTest : WiredActivityTestCase() {
             assertDraft("提供商详情返回草稿")
         }
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSettingsDockSwipeCancelAndCommitReturnToClosedConversation() {
+        val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
+        try {
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
+            setDraft("侧栏手势保持的会话草稿")
+            val before = fixture.database.exportBackup()
+            captureScreenNode(node("page-back-surface"))
+            openDock("settings", "page:设置")
+            ui.mainClock.autoAdvance = false
+            val initial = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+            node("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .40f, height * .6f), 400)
+            }
+            ui.mainClock.advanceTimeByFrame()
+            node("page-back-target").assertExists()
+            node("page-back-scrim").assertExists()
+            assertTrue(node("page-back-surface").fetchSemanticsNode().boundsInRoot.left > initial.left + .25f * initial.width)
+            mainThread { assertEquals("settings", invokeHost(activity, "getRetainedPage")) }
+            node("page-back-host").performTouchInput { cancel() }
+            ui.mainClock.advanceTimeBy(1000)
+            node("page:设置").assertIsDisplayed()
+            node("page-back-target").assertDoesNotExist()
+            node("page-back-host").performTouchInput {
+                swipe(Offset(width * .05f, height * .6f), Offset(width * .90f, height * .6f), 500)
+            }
+            ui.mainClock.advanceTimeBy(1000)
+            ui.mainClock.autoAdvance = true
+            assertChat()
+            assertDraft("侧栏手势保持的会话草稿")
+            assertEquals(before, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = true
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
+        }
+    }
+
+    @OptIn(ExperimentalActivityApi::class)
+    fun testAgentTaskPreferenceUsesItsSettingsPredecessorAndNeverSkipsToChat() {
+        val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
+        try {
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
+            openSettings()
+            val row = reveal("settings-row:Agent任务偏好", "设置")
+            val before = row.fetchSemanticsNode().boundsInRoot
+            captureScreenNode(node("page-back-surface"))
+            row.performClick()
+            awaitUniqueTag("page:Agent任务偏好")
+            ui.mainClock.autoAdvance = false
+            if (Build.VERSION.SDK_INT >= 34) {
+                val initial = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+                for (edge in listOf(BackEventCompat.EDGE_LEFT, BackEventCompat.EDGE_RIGHT)) {
+                    mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, edge)) }
+                    mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .5f, edge)) }
+                    ui.mainClock.advanceTimeByFrame()
+                    node("page-back-target").assertExists()
+                    assertEquals(initial.left + .5f * initial.width,
+                        node("page-back-surface").fetchSemanticsNode().boundsInRoot.left, 2f)
+                    mainThread { assertEquals("settings", invokeHost(activity, "getRetainedPage")) }
+                    mainThread { activity.onBackPressedDispatcher.dispatchOnBackCancelled() }
+                    ui.mainClock.advanceTimeBy(1000)
+                    node("page:Agent任务偏好").assertIsDisplayed()
+                }
+            }
+            node("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .70f, height * .6f), 500)
+            }
+            ui.mainClock.advanceTimeByFrame()
+            node("page-back-target").assertExists()
+            node("page-back-host").performTouchInput { up() }
+            ui.mainClock.advanceTimeBy(1000)
+            ui.mainClock.autoAdvance = true
+            node("page:Agent任务偏好").assertDoesNotExist()
+            node("page:设置").assertIsDisplayed()
+            assertEquals(before.top, node("settings-row:Agent任务偏好").fetchSemanticsNode().boundsInRoot.top, 2f)
+            mainThread { assertEquals("settings", invokeHost(activity, "getRetainedPage")) }
+            backOnce(system = true)
+            assertChat()
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = true
+            if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false)
+        }
     }
 }

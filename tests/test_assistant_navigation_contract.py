@@ -17,7 +17,7 @@ class AssistantNavigationContractTest(unittest.TestCase):
         cls.editor = (ASSISTANTS / "AssistantEditScreen.kt").read_text()
 
     def test_editor_overlays_original_content_inside_page_back_host(self):
-        self.assertIn('routeKey = retainedPage,', self.main)
+        self.assertIn('routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,', self.main)
         self.assertIn('contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,', self.main)
         route = self.main.index('when (if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage)')
         overlay = self.main.index('if (retainedPage == "assistant-edit") assistantEditingId?.let')

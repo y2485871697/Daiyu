@@ -64,7 +64,7 @@ class PageBackGestureContractTest(unittest.TestCase):
             self.assertIn('activeState.transitionBlocked', part)
             self.assertIn('activeState.committing', part)
             self.assertIn('session.rejected = true', part)
-            self.assertIn('BackEventCompat.EDGE_RIGHT', part)
+            self.assertIn('direction = activeState.returnDirection', part)
             self.assertNotIn('commitBack', part)
         self.assertIn('activeState !== currentState', progressed)
         self.assertIn('activeState.reset(owner)', progressed)
@@ -89,7 +89,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertNotIn('PredictiveBackHandler(', handler)
 
     def test_route_preferences_and_lifecycle_revoke_the_old_gesture_not_page_state(self):
-        self.assertIn('remember(routeKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, backTargetKey)', self.host)
+        self.assertIn('remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey)', self.host)
         self.assertIn('onDispose { state.alive = false; state.reset() }', self.host)
         self.assertIn('if (owner != null && this.owner !== owner) return', self.host)
         self.assertIn('val progress by key(state)', self.host)
@@ -142,8 +142,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         width = self.host.index('val gestureWidth = size.width', gesture)
         down = self.host.index('val down = awaitFirstDown', gesture)
         self.assertLess(down, width)
-        self.assertIn('maxOf(72.dp.toPx(), gestureWidth * 0.30f)', self.host)
-        self.assertIn('if (dx >= threshold && state.alive) {', self.host)
+        self.assertIn('gestureWidth * 0.5f + viewConfiguration.touchSlop', self.host)
+        self.assertIn('screensPerSecond >= 1f -> true', self.host)
+        self.assertIn('screensPerSecond <= -1f -> false', self.host)
+        self.assertIn('if (commit && state.alive) state.dispatchBack { currentBack() }', self.host)
         self.assertIn('state.dispatchBack { currentBack() }', self.host)
         handoff = self.host.split('fun dispatchBack(back:', 1)[1].split('private var owner:', 1)[0]
         self.assertIn('try { back() }', handoff)
@@ -156,10 +158,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('contentKey: Any = routeKey,', self.host)
         self.assertIn('key(contentKey) {', self.host)
         self.assertNotIn('key(routeKey) {', self.host)
-        self.assertIn('val departure = remember(layers, routeKey) { layers.enter(routeKey) }', self.host)
-        self.assertIn('val frame = remember(layers, routeKey) { layers.frame(routeKey) }', self.host)
-        self.assertIn('remember(routeKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, backTargetKey)', self.host)
-        self.assertIn('routeKey = retainedPage,', self.main)
+        self.assertIn('val departure = remember(layers, visualRouteKey) { layers.enter(visualRouteKey) }', self.host)
+        self.assertIn('val frame = remember(layers, visualRouteKey) { layers.frame(visualRouteKey) }', self.host)
+        self.assertIn('remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey)', self.host)
+        self.assertIn('routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,', self.main)
         self.assertIn('contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,', self.main)
         regressions = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
         for method in ('testExplicitContentKeyKeepsLiveCompositionUntilContentActuallyChanges',
@@ -185,7 +187,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('context.releaseGraphicsLayer(frame.layer)', layers)
         self.assertIn('onDispose { layers.close() }', self.host)
         self.assertEqual(1, self.host.count('{ content() }'))
-        surface = self.host.split('key(contentKey) {', 1)[1].split('if (departure != null && departing)', 1)[0]
+        surface = self.host.split('key(contentKey) {', 1)[1].split('testTag("page-back-departure-scrim")', 1)[0]
         self.assertIn('testTag("page-back-surface")', surface)
         self.assertIn('frame.size = IntSize(placeable.width, placeable.height)', surface)
         self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', surface)
@@ -202,13 +204,36 @@ class PageBackGestureContractTest(unittest.TestCase):
         target = self.main.split('private fun pageBackPreviewTarget(): String? = when (retainedPage) {', 1)[1]
         target = target.split('\n    }', 1)[0]
         for wiring in ('"terminal" -> terminalReturnPage', '"providers" -> providersReturnPage',
-                       '"usage" -> usageReturnPage', '"assistant-edit" -> assistantEditReturnPage',
-                       '"generation-settings" -> if (generationSettingsVisit != null) "settings" else "chat"',
-                       '"legacy-library" -> if (legacyPage != null) "backup" else "chat"'):
+                       '"usage" -> usageReturnPage',
+                       '"assistant-edit" -> if (assistantEditReturnPage == "chat" && assistantEditReturnToSidebar)',
+                       '"chat-sidebar" else assistantEditReturnPage',
+                       '"generation-settings" -> "settings"',
+                       '"legacy-library" -> "backup"'):
             self.assertIn(wiring, target)
         self.assertIn('themeKey, configuration, insetsKey, density, layoutDirection, resumed, previewScopeKey', self.host)
-        self.assertIn('exit.animateTo(1f, tween(180))', self.host)
-        self.assertIn('if (layers.currentKey == routeKey) layers.abandon(request)', self.host)
+        self.assertIn('exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))', self.host)
+        self.assertIn('if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)', self.host)
+
+    def test_local_visual_routes_keep_ancestors_and_cancel_never_adds_a_pop(self):
+        stack = (APP / 'ui/navigation/PageBackStack.kt').read_text()
+        for wiring in ('fun attached(', 'parentPath', 'freezeCurrent()',
+                       'entry.child = routeKey != null', 'entry.path = path', 'entry.target = target'):
+            self.assertIn(wiring, stack)
+        self.assertIn('stack.ancestorKeys(routeKey, backTargetKey)', self.host)
+        self.assertIn('predictiveGeneration', self.host)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        for wiring in ('testBothPredictionEdgesRevealClosedChatAtOriginalQuarterHalfAndThreeQuarterProgress',
+                       'testLocalTwoLevelStackFreezesRealPredecessorsWithoutRemountingController',
+                       'testHorizontalIntermediateFramesUseOriginalDimmingAndCancelWithoutPop',
+                       'progress in (fraction - .1f)..(fraction - .02f + .005f)',
+                       'assertEquals(1, localPage)', 'assertEquals(1, backCount)'):
+            self.assertIn(wiring, test)
+
+    def test_provider_directory_primary_visit_keeps_its_own_return_chain(self):
+        route = (APP / 'ui/screens/settings/ProviderManagementRoute.kt').read_text()
+        self.assertIn('if (success && initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY)', route)
+        self.assertIn('if (initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY)', route)
+        self.assertIn('BackHandler(previewEnabled = !loading || initialSlot == ProviderRegistry.PRIMARY)', route)
 
     def test_nested_preview_owners_unregister_and_commit_is_guarded(self):
         for guard in ('state.previewOwners.add(previewOwner)', 'state.previewOwners.remove(previewOwner)',
@@ -216,17 +241,33 @@ class PageBackGestureContractTest(unittest.TestCase):
                       'if (!alive || (transitionBlocked && swipeCommit == null) || committing) return', 'committing = true',
                       'departing || (state.previewAllowed && !state.active && progress > 0f)'):
             self.assertIn(guard, self.host)
-        for file, guard in (
-            ('VoiceSettingsPanel.kt', 'previewEnabled = child == null && !choosingSection'),
-            ('ProductionVoiceAccountPage.kt', 'previewEnabled = false'),
-            ('VoiceAccountPanel.kt', 'previewEnabled = false'),
-            ('ui/SubAgentSettingsScreen.kt', 'previewEnabled = false'),
-            ('ui/screens/settings/SettingsHomeScreen.kt', 'previewEnabled = false'),
-            ('ui/screens/settings/PetSettingsScreen.kt', 'previewEnabled = false'),
-            ('ui/screens/settings/LinuxRootfsPanel.kt', 'previewEnabled = false'),
-            ('ui/screens/settings/McpSettingsScreen.kt', 'previewEnabled = !editing && selectedId == null'),
-            ('ui/screens/settings/ProviderCatalogSettingsScreen.kt', 'backPreviewEnabled = false')):
-            self.assertIn(guard, (APP / file).read_text())
+        for file in ('VoiceSettingsPanel.kt', 'VoiceAccountPanel.kt', 'ui/SubAgentSettingsScreen.kt',
+                     'ui/screens/settings/SettingsHomeScreen.kt', 'ui/screens/settings/PetSettingsScreen.kt',
+                     'ui/screens/settings/McpSettingsScreen.kt', 'ui/screens/settings/ProviderManagementRoute.kt',
+                     'ui/screens/settings/ProviderCatalogSettingsScreen.kt'):
+            self.assertIn('PageBackStack(', (APP / file).read_text())
+        self.assertIn('previewEnabled = !choosingSection', (APP / 'VoiceSettingsPanel.kt').read_text())
+        self.assertIn('previewEnabled = !editing', (APP / 'ui/screens/settings/McpSettingsScreen.kt').read_text())
+        self.assertIn('previewEnabled = false', (APP / 'ui/screens/settings/LinuxRootfsPanel.kt').read_text())
+
+    def test_local_stack_freezes_before_replacing_content_and_validates_ancestors(self):
+        stack = (APP / 'ui/navigation/PageBackStack.kt').read_text()
+        self.assertLess(stack.index('parent.registry.freezeCurrent()'), stack.index('    CompositionLocalProvider'))
+        for token in ('attached(it) && it.path == entry.parentPath', 'entries.remove(entry)',
+                      'entry.child = routeKey != null', 'PageBackRouteKey(root, path)', 'ancestorKeys'):
+            self.assertIn(token, stack)
+        self.assertNotIn('key(routeKey)', stack)
+        self.assertIn('stack.freezeCurrent = { layers.freezeCurrent() }', self.host)
+
+    def test_original_miuix_motion_is_full_width_with_parallax_and_independent_dimming(self):
+        for token in ('kotlin.math.round(state.direction * size.width * visibleProgress)',
+                      'size.width * 0.25f * (1f - progress)', 'alpha = 1f - 0.1f * (1f - progress)',
+                      'drawRect(Color.Black, alpha = 0.5f * (1f - progress))', 'absoluteSquircleClip',
+                      'POSITION_BOTTOM_LEFT', 'page-back-scrim', 'page-back-departure-scrim',
+                      'state.predictiveGeneration != predictiveGeneration'):
+            self.assertIn(token, self.host)
+        for obsolete in ('0.12f', '0.06f', 'scaleX =', 'scaleY =', 'tween(180)'):
+            self.assertNotIn(obsolete, self.host)
 
     def test_existing_persistent_keys_are_unchanged(self):
         store = (APP / 'data/model/AppearanceSettingsStore.kt').read_text(encoding='utf-8')

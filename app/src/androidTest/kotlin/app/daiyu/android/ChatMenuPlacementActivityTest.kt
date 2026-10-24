@@ -83,6 +83,10 @@ class ChatMenuPlacementActivityTest : WiredActivityTestCase() {
                         }
                     }
                 }
+                val hostNode = ui.onNodeWithTag("menu-position-host")
+                awaitNodeWindowFocus(hostNode)
+                dismissIme()
+                awaitImeFrame(hostNode, visible = false)
                 repeat(2) {
                     draws.clear()
                     mainThread { expanded = true }

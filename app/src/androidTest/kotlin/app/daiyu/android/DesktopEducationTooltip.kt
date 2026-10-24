@@ -24,15 +24,32 @@ internal fun dismissDesktopEducationTooltip(
         fun educationWindows() = automation.windows.filter {
             it.title?.toString()?.matches(titlePattern) == true
         }
-        val windows = educationWindows()
-        if (windows.isEmpty()) return
-        check(windows.size == 1) { "Multiple desktop education windows: ${windows.map { it.title }}" }
-        val window = windows.single()
-        val root = checkNotNull(window.root) { "Desktop education accessibility root missing" }
-        check(root.packageName?.toString() == "com.android.systemui") { "Unexpected desktop education owner" }
-        check(root.findAccessibilityNodeInfosByText("Tap handle to access menu and display options").any {
-            it.text?.toString() == "Tap handle to access menu and display options"
-        }) { "Unexpected desktop education content" }
+        var observed = false
+        var ready: android.view.accessibility.AccessibilityWindowInfo? = null
+        try {
+            ui.waitUntil(5_000) {
+                val windows = educationWindows()
+                if (windows.isEmpty()) false else {
+                    observed = true
+                    check(windows.size == 1) { "Multiple desktop education windows: ${windows.map { it.title }}" }
+                    val candidate = windows.single()
+                    val root = candidate.root
+                    if (root == null) false else {
+                        check(root.packageName?.toString() == "com.android.systemui") { "Unexpected desktop education owner" }
+                        val verified = root.findAccessibilityNodeInfosByText("Tap handle to access menu and display options").any {
+                            it.text?.toString() == "Tap handle to access menu and display options"
+                        }
+                        if (verified) ready = candidate
+                        verified
+                    }
+                }
+            }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            if (observed) throw AssertionError("Observed desktop education window did not publish its verified content", timeout)
+            android.util.Log.i("DaiyuDesktopEducation", "No tooltip observed within discovery deadline")
+            return
+        }
+        val window = checkNotNull(ready)
         val bounds = Rect().also(window::getBoundsInScreen)
         val node = blank.assertIsDisplayed().fetchSemanticsNode()
         val center = node.positionOnScreen + androidx.compose.ui.geometry.Offset(node.size.width / 2f, node.size.height / 2f)

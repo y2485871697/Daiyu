@@ -40,6 +40,9 @@ class R77CandidateRepairsContract(unittest.TestCase):
         self.assertIn('stable.top >= anchor.bottom', test)
         self.assertIn('stable.bottom <= anchor.top', test)
         self.assertNotIn('roundToInt()', source)
+        self.assertLess(test.index('awaitNodeWindowFocus(hostNode)'), test.index('dismissIme()'))
+        self.assertLess(test.index('dismissIme()'), test.index('awaitImeFrame(hostNode, visible = false)'))
+        self.assertLess(test.index('awaitImeFrame(hostNode, visible = false)'), test.index('repeat(2)'))
 
     def test_spacing_keeps_original_wait_and_geometry_oracle_with_last_sample_diagnostics(self):
         source = (TEST / 'ui/screens/chat/conversation/ChatMessageSpacingTest.kt').read_text()
@@ -50,8 +53,26 @@ class R77CandidateRepairsContract(unittest.TestCase):
         self.assertNotIn('autoAdvance = false', source)
         production = (UI / 'ChatMessageList.kt').read_text()
         self.assertNotIn('LaunchedEffect(listState, occlusionPx)', production)
+        show = source.split('private fun show(', 1)[1].split('private fun assertCompactTail(', 1)[0]
+        self.assertLess(show.index('awaitNodeWindowFocus(host)'), show.index('dismissIme()'))
+        self.assertLess(show.index('dismissIme()'), show.index('awaitImeFrame(host, visible = false)'))
+        self.assertLess(show.index('awaitImeFrame(host, visible = false)'), show.index('assertCompactTail("初始末尾")'))
+        oracle = source.split('private fun assertCompactTail(', 1)[1].split('fun testCompleted', 1)[0]
+        self.assertIn('awaitImeFrame(ui.onNodeWithTag("spacing-host"), visible = false)', oracle)
+        self.assertNotIn('dismissIme()', oracle)
+        for token in ('"多行草稿\\n".repeat(5)', 'attachmentHeight = 48.dp',
+                      'surface().height > before.height + 24f * density',
+                      'surface().height > multiline.height + 40f * density'):
+            self.assertIn(token, source)
 
     def test_system_education_dismissal_is_exact_and_single_shot(self):
+        navigation = (TEST / 'AssistantNavigationActivityTest.kt').read_text()
+        back = navigation.split('private fun back(system: Boolean) {', 1)[1].split('fun testHeader', 1)[0]
+        for earlier, later in (('awaitNodeWindowFocus(current)', 'dismissIme()'),
+                               ('dismissIme()', 'awaitImeFrame(current, visible = false)'),
+                               ('awaitImeFrame(current, visible = false)', 'if (system)')):
+            self.assertLess(back.index(earlier), back.index(later))
+        self.assertEqual(1, back.count('sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)'))
         source = (TEST / 'DesktopEducationTooltip.kt').read_text()
         for token in ('Desktop Windowing Education Tooltip of Task=', 'com.android.systemui',
                       'Tap handle to access menu and display options', 'windows.size == 1',
@@ -60,6 +81,13 @@ class R77CandidateRepairsContract(unittest.TestCase):
                       'finally', 'flags = originalFlags'):
             self.assertIn(token, source)
         self.assertIn('automation.injectInputEvent(event, true)', source)
+        self.assertNotIn('if (windows.isEmpty()) return', source)
+        discovery = source.split('var observed = false', 1)[1].split('val window = checkNotNull(ready)', 1)[0]
+        for token in ('ui.waitUntil(5_000)', 'val windows = educationWindows()', 'observed = true',
+                      'if (root == null) false', 'if (verified) ready = candidate',
+                      'if (observed) throw AssertionError', 'No tooltip observed within discovery deadline'):
+            self.assertIn(token, discovery)
+        self.assertLess(source.index('val window = checkNotNull(ready)'), source.index('blank.assertIsDisplayed()'))
         self.assertEqual(1, source.count('inject(android.view.MotionEvent.ACTION_DOWN)'))
         self.assertEqual(1, source.count('inject(android.view.MotionEvent.ACTION_UP)'))
         self.assertNotIn('performTouchInput', source)
@@ -75,7 +103,7 @@ class R77CandidateRepairsContract(unittest.TestCase):
 
     def test_focus_and_pet_keep_real_input_and_visible_geometry(self):
         assistant = (TEST / 'AssistantNavigationActivityTest.kt').read_text()
-        self.assertLess(assistant.index('awaitNodeWindowFocus(node(foreground))'),
+        self.assertLess(assistant.index('awaitNodeWindowFocus(current)'),
                         assistant.index('instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)'))
         pet = (TEST / 'pet/PetCupboardDialogTest.kt').read_text()
         for token in ('Modifier.fillMaxSize()', 'FrameLayout.LayoutParams.WRAP_CONTENT',

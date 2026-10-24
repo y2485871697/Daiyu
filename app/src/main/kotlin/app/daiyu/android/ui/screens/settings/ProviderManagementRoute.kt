@@ -261,9 +261,9 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     }
     PageBackStack(when {
         creating != null -> "create-provider"
-        authentication -> "provider-authentication"
         (detail != null || openingSlot != null) && initialSlot != ProviderRegistry.PRIMARY ->
             "provider:${detail?.editor?.slotId ?: openingSlot}"
+        authentication -> "provider-authentication"
         else -> null
     }, if (creating != null && authentication) "provider-authentication" else null) {
         BackHandler(previewEnabled = !loading || initialSlot == ProviderRegistry.PRIMARY) { back() }

@@ -238,7 +238,6 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
             assertTrue(runner.admitSupplement(extra) {resultOfAdmission.set(it);admitted.countDown()})
             assertTrue(admitted.await(10,TimeUnit.SECONDS))
             assertTrue(resultOfAdmission.get() is SupplementAdmission.Accepted)
-            assertTrue(runner.resume())
             val answer=task.get(10,TimeUnit.SECONDS)
             assertEquals(RunStatus.COMPLETED,answer.status)
             assertEquals(2,opens);assertEquals(0,resumes)

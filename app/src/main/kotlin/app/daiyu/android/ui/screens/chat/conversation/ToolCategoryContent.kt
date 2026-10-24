@@ -41,7 +41,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsUi) {
     val rich = details.rich
     val body = toolBodyLayout(category, details)
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         if (rich.bodyRestricted) {
             body.prose?.let { Document(it) }
             return@Column
@@ -139,7 +139,7 @@ private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
     val style = MiuixTheme.textStyles.footnote1.copy(fontSize = if (code) 13.sp else 14.sp,
         lineHeight = if (code) 20.sp else 21.sp,
         fontFamily = if (code) FontFamily.Monospace else FontFamily.Default)
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         if (showTitle && document.title.isNotBlank()) SectionTitle(toolDocumentTitle(document.title))
         val shape = RoundedCornerShape(8.dp)
         // A prose return is a paragraph, not another nested card.
@@ -160,7 +160,7 @@ private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
                     textAlign = androidx.compose.ui.text.style.TextAlign.End), color = colors.muted)
         } else SelectionContainer {
             if (code) Box(surface.testTag("tool-document-frame:${document.title}")) {
-                Text(document.text, Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp)
+                Text(document.text, Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)
                     .testTag("tool-document:${document.title}"), style = style, color = colors.text)
             } else Text(document.text, surface.padding(vertical = 2.dp)
                 .testTag("tool-document:${document.title}"), style = style, color = colors.text)

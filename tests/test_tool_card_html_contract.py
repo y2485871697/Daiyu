@@ -22,6 +22,28 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertNotIn('Disclosure("运行环境"', content)
         self.assertIn("if (rich.bodyRestricted)", content)
 
+    def test_compact_headers_adapt_locally_and_preserve_disclosure_ownership(self):
+        shell = (CHAT / "WorkProcessCard.kt").read_text()
+        self.assertEqual(2, shell.count("heightIn(min = 44.dp)"))
+        self.assertIn("val summaryWidth = maxWidth * .38f", shell)
+        self.assertIn("maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f", shell)
+        self.assertIn("maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.2f", shell)
+        self.assertIn('if (stacked) Text(stateLabel, color = tint,', shell)
+        self.assertIn('Modifier.size(18.dp).testTag("work-process-icon")', shell)
+        self.assertIn('Modifier.size(18.dp).testTag("tool-operation-icon:', shell)
+        self.assertIn("fontSize = 13.sp, lineHeight = 18.sp", shell)
+        self.assertIn("fontSize = 12.sp, lineHeight = 17.sp", shell)
+        self.assertIn("rememberSaveable(ownerKey)", shell)
+        self.assertEqual(2, shell.count("rememberSaveable(step.owner, step.toolCallId)"))
+        self.assertIn("key(ownerKey, step.owner, step.toolCallId)", shell)
+        self.assertIn('Text("工具回执未确认 · 不重放"', shell)
+        self.assertNotIn("graphicsLayer", shell)
+        self.assertNotIn("CompositionLocalProvider(LocalDensity", shell)
+        geometry = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt").read_text()
+        self.assertIn("fun testCompactHeadersKeepPhoneAndNarrowCardsWithinHeightBudget", geometry)
+        self.assertIn('surface.height <= 98f * phoneDensity + 1f', geometry)
+        self.assertIn('titleBounds.bottom <= stateBounds.top', geometry)
+
     def test_technical_header_uses_arrow_not_alternate_label(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertIn('ToolDisclosureHeader("技术详情", technical,', shell)

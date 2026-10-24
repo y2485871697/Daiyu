@@ -25,6 +25,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 class PageBackStackActivityTest : WiredActivityTestCase() {
     private var screen by mutableStateOf("chat")
     private var localPage by mutableStateOf<Int?>(null)
+    private var localLoading by mutableStateOf(false)
     private var backCount = 0
     private var controllers = 0
     private var disposed = 0
@@ -61,6 +62,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                             }
                             val color = when {
                                 local && localPage == 2 -> Color.Green
+                                local && localPage == 1 && localLoading -> Color.Yellow
                                 local && localPage == 1 -> Color.Blue
                                 local -> Color.Red
                                 rendered == "chat" -> Color.Red
@@ -173,6 +175,36 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             assertEquals(1, backCount)
             assertEquals(1, controllers)
             assertEquals(0, disposed)
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    @OptIn(ExperimentalActivityApi::class)
+    fun testLoadingAndReadyDetailShareOneRouteAndPreserveDirectoryPredecessor() {
+        if (Build.VERSION.SDK_INT < 34) return
+        screen = "settings"
+        mount(local = true)
+        mainThread { localLoading = true; localPage = 1 }
+        ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        mainThread { localLoading = false }
+        ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT)) }
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .5f, BackEventCompat.EDGE_LEFT)) }
+            ui.mainClock.advanceTimeByFrame()
+            assertTarget(Color.Red, .5f)
+            assertEquals(1, localPage)
+            assertEquals(0, backCount)
+            mainThread { activity.onBackPressedDispatcher.dispatchOnBackCancelled() }
+            ui.mainClock.advanceTimeBy(1000)
+            assertEquals(1, localPage)
+            assertEquals(0, backCount)
+            assertEquals(1, controllers)
+            assertEquals(0, disposed)
+            ui.onNodeWithTag("page-back-target").assertDoesNotExist()
         } finally { ui.mainClock.autoAdvance = true }
         assertEquals(0, fixture.opens.get())
     }

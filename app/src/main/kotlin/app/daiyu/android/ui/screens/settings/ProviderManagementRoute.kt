@@ -97,6 +97,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var authentication by remember { mutableStateOf(false) }
     var managing by remember { mutableStateOf<RegisteredProvider?>(null) }
     var detail by remember { mutableStateOf<ProviderDetail?>(null) }
+    var openingSlot by remember { mutableStateOf<String?>(null) }
     var pausedDraft by remember { mutableStateOf<PausedProviderDraft?>(null) }
     var pendingOpen by remember { mutableStateOf(true) }
     var serial by remember { mutableStateOf(0L) }
@@ -110,7 +111,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     fun current(p: ProviderPagePermit) = visit.get() && p.live.get() && permit === p && resumed &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()
     fun clearPrompts() { creating?.revoke(); creating = null; confirmation = null; managing = null }
-    fun closeDetail() { serial++; loading = false; detail?.revoke(); detail = null; clearPrompts() }
+    fun closeDetail() { serial++; loading = false; openingSlot = null; detail?.revoke(); detail = null; clearPrompts() }
     fun refresh() {
         val p = permit
         if (!current(p)) return
@@ -154,7 +155,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val p = permit
         if (!current(p) || busy != null) return
         if (restore == null) pausedDraft = null
-        closeDetail(); checkingRegistry = false; loading = true; notice = null
+        closeDetail(); openingSlot = slot; checkingRegistry = false; loading = true; notice = null
         val request = ++serial
         scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching {
@@ -184,7 +185,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 pausedDraft = null
                 registry = loaded.registry
                 detail = loaded
-            }, onFailure = { pausedDraft = null; notice = "详情读取失败或已变化，请刷新后重新打开。" })
+                openingSlot = null
+            }, onFailure = { openingSlot = null; pausedDraft = null; notice = "详情读取失败或已变化，请刷新后重新打开。" })
         }
     }
     fun mutate(expected: ProviderRegistrySnapshot, p: ProviderPagePermit,
@@ -260,7 +262,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     PageBackStack(when {
         creating != null -> "create-provider"
         authentication -> "provider-authentication"
-        detail != null && initialSlot != ProviderRegistry.PRIMARY -> "provider:${detail!!.editor.slotId}"
+        (detail != null || openingSlot != null) && initialSlot != ProviderRegistry.PRIMARY ->
+            "provider:${detail?.editor?.slotId ?: openingSlot}"
         else -> null
     }, if (creating != null && authentication) "provider-authentication" else null) {
         BackHandler(previewEnabled = !loading || initialSlot == ProviderRegistry.PRIMARY) { back() }

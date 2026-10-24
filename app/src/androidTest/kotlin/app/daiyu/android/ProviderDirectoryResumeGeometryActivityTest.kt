@@ -25,6 +25,10 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.settings.*
+import app.daiyu.android.ui.navigation.LocalPageBackStackPath
+import app.daiyu.android.ui.navigation.PageBackGestureHost
+import app.daiyu.android.ui.navigation.PageBackRouteKey
+import app.daiyu.android.ui.navigation.PageBackStackRegistry
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -175,6 +179,63 @@ class ProviderDirectoryResumeGeometryActivityTest : WiredActivityTestCase() {
             finally { event.recycle() }
         }
         awaitVisualIdle()
+    }
+
+    fun testBlockedDetailLoadReservesDirectoryPredecessorBeforeLoadingFrame() {
+        val saved = fixture.settings.load()
+        val before = fixture.controller.providers.snapshot()
+        val slot = before.providers.single().slotId
+        lateinit var stack: PageBackStackRegistry
+        var outerBacks = 0
+        show(false, 1f) {
+            PageBackGestureHost(routeKey = "providers", canNavigateBack = true,
+                swipeDismissEnabled = true, predictiveBackEnabled = true,
+                dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() }, backTargetKey = null) {
+                stack = checkNotNull(LocalPageBackStackPath.current).registry
+                ProviderManagementRoute(fixture.controller, { true }, { outerBacks++ })
+            }
+        }
+        awaitUniqueTag("provider-open-$slot")
+        ui.waitUntil(5_000) { !row("provider-open-$slot").fetchSemanticsNode().config.contains(SemanticsProperties.Disabled) }
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        assertEquals("providers", ui.runOnIdle { stack.routeKey("providers") })
+        val held = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        val blocked = executor.submit<Unit> {
+            fixture.settings.modelCatalog.readConfiguration {
+                held.countDown()
+                check(release.await(30, TimeUnit.SECONDS)) { "detail load gate was not released" }
+            }
+        }
+        try {
+            assertTrue(held.await(5, TimeUnit.SECONDS))
+            row("provider-open-$slot").scrollToVisible().performClick()
+            ui.onNodeWithText("正在读取提供商详情").assertExists()
+            captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+            val expected = PageBackRouteKey("providers", listOf("provider:$slot"))
+            assertEquals("loading already owns the detail visit", expected,
+                ui.runOnIdle { stack.routeKey("providers") })
+            assertEquals("providers", ui.runOnIdle { stack.targetKey("providers", null) })
+            release.countDown()
+            blocked.get(5, TimeUnit.SECONDS)
+            awaitModelEditor()
+            captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+            assertEquals("ready retains the loading visit", expected,
+                ui.runOnIdle { stack.routeKey("providers") })
+            assertEquals("providers", ui.runOnIdle { stack.targetKey("providers", null) })
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            awaitUniqueTag("provider-management")
+            assertEquals("providers", ui.runOnIdle { stack.routeKey("providers") })
+            assertEquals(0, outerBacks)
+        } finally {
+            release.countDown()
+            blocked.get(5, TimeUnit.SECONDS)
+            executor.shutdownNow()
+        }
+        assertEquals(saved, fixture.settings.load())
+        assertEquals(before, fixture.controller.providers.snapshot())
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testRealBackgroundResumeKeepsGeometryAcrossBlockedRegistryRefresh() {

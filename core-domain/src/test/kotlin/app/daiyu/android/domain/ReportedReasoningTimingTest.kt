@@ -2,6 +2,9 @@ package app.daiyu.android.domain
 
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 class ReportedReasoningTimingTest {
     private fun initial() = Message(MessageId("a"), ConversationId("c"), RunId("r"),
@@ -84,14 +87,19 @@ class ReportedReasoningTimingTest {
     @Test fun stopCutoffExcludesSlowTransportCancellation() {
         lateinit var runner: ChatRunner
         var anchor = 0L
-        var cancellationStarted = 0L
+        val firstCancellation = AtomicLong(Long.MIN_VALUE)
+        val cancellationStarted = CountDownLatch(1)
+        val cancellationFinished = CountDownLatch(1)
         val model = ModelPort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                 sink(ModelEvent.ReasoningDelta("r", "partial"))
+                check(cancellationFinished.await(5, TimeUnit.SECONDS)) { "slow transport did not exit" }
             }
             override fun cancel() {
-                cancellationStarted = System.nanoTime()
-                Thread.sleep(120)
+                if (firstCancellation.compareAndSet(Long.MIN_VALUE, System.nanoTime())) {
+                    cancellationStarted.countDown()
+                    try { Thread.sleep(120) } finally { cancellationFinished.countDown() }
+                }
             }
         } }
         runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
@@ -103,10 +111,12 @@ class ReportedReasoningTimingTest {
             }
         }
         val result = runner.run(initial(), emptyList())
+        assertTrue("transport cancellation started", cancellationStarted.await(5, TimeUnit.SECONDS))
+        assertTrue("slow cancellation completed", cancellationFinished.await(5, TimeUnit.SECONDS))
         assertEquals(RunStatus.STOPPED, result.status)
         val item = result.historySegments.flatMap { it.reportedReasoning }.single()
         assertNull(item.activeSinceNanos)
-        assertTrue(checkNotNull(item.elapsedMillis) <= (cancellationStarted - anchor) / 1_000_000)
+        assertTrue(checkNotNull(item.elapsedMillis) <= (firstCancellation.get() - anchor) / 1_000_000)
     }
 
 }

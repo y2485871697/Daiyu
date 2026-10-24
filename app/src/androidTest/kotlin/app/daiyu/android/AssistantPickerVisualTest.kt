@@ -3,7 +3,9 @@ package app.daiyu.android
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -60,6 +62,20 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
     private fun text(id: Int, vararg args: Any) = instrumentation.targetContext.getString(id, *args)
     private fun bounds(tag: String) = ui.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun dp(px: Float) = px / density.get().density
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun actionGeometry(): List<Rect> {
+        awaitVisualIdle()
+        awaitDialogEnter(ui.onNodeWithTag("assistant-action-edit"))
+        val rows = listOf("assistant-action-copy", "assistant-action-edit", "assistant-action-delete")
+            .map { ui.onNodeWithTag(it, useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode() }
+        val root = rows.first().root
+        val view = (root as ViewRootForTest).view
+        return awaitStableWindowFrame(view) {
+            rows.forEach { assertSame(root, it.root) }
+            if (rows.any { !it.layoutInfo.isPlaced }) return@awaitStableWindowFrame null
+            rows.map { it.boundsInRoot }.takeIf { bounds -> bounds.none { it.isEmpty } }
+        }
+    }
     private fun layout(text: String): TextLayoutResult {
         val results = mutableListOf<TextLayoutResult>()
         ui.onNodeWithText(text, useUnmergedTree = true)
@@ -127,9 +143,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             ui.onNodeWithTag("assistant-item-visual-a").performTouchInput { longClick() }
             ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
             ui.onNodeWithContentDescription("返回").assertHasClickAction()
-            val copy = bounds("assistant-action-copy")
-            val edit = bounds("assistant-action-edit")
-            val delete = bounds("assistant-action-delete")
+            val (copy, edit, delete) = actionGeometry()
             for (row in listOf(copy, edit, delete)) assertEquals(48f, dp(row.height), .6f)
             assertEquals(6f, dp(edit.top - copy.bottom), .6f)
             assertEquals(6f, dp(delete.top - edit.bottom), .6f)

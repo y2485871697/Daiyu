@@ -21,6 +21,24 @@ class AssistantPickerClickCompletionContractTest(unittest.TestCase):
         for forbidden in ['Thread.sleep', 'SystemClock.sleep', 'performSemanticsAction', 'awaitDialogEnter', 'awaitNodeWindowFocus', 'ui.waitUntil', 'mainThread {']:
             self.assertNotIn(forbidden, body)
 
+    def test_action_rows_are_sampled_in_one_stable_native_frame(self):
+        source = SOURCE.read_text(encoding='utf-8')
+        helper = source.split('private fun actionGeometry(): List<Rect>', 1)[1].split('private fun layout(', 1)[0]
+        self.assertIn('awaitDialogEnter(ui.onNodeWithTag("assistant-action-edit"))', helper)
+        self.assertLess(helper.index('awaitDialogEnter('), helper.index('fetchSemanticsNode()'))
+        self.assertLess(helper.index('fetchSemanticsNode()'), helper.index('awaitStableWindowFrame(view)'))
+        self.assertIn('rows.forEach { assertSame(root, it.root) }', helper)
+        self.assertIn('rows.any { !it.layoutInfo.isPlaced }', helper)
+        self.assertIn('rows.map { it.boundsInRoot }.takeIf { bounds -> bounds.none { it.isEmpty } }', helper)
+        self.assertIn('val (copy, edit, delete) = actionGeometry()', self.body())
+        self.assertNotIn('bounds("assistant-action-', self.body())
+
+    def test_geometry_wait_does_not_filter_on_the_expected_oracle(self):
+        source = SOURCE.read_text(encoding='utf-8')
+        helper = source.split('private fun actionGeometry(): List<Rect>', 1)[1].split('private fun layout(', 1)[0]
+        for forbidden in ['48f', '6f', '.6f', 'positionInRoot', 'Thread.sleep', 'SystemClock.sleep', 'performSemanticsAction', 'repeat(', 'ui.waitUntil']:
+            self.assertNotIn(forbidden, helper)
+
     def test_theme_scale_geometry_and_original_selection_oracles_remain(self):
         body = self.body()
         for oracle in [

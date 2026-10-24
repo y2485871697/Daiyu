@@ -187,7 +187,13 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 ui.onNodeWithText("取消").performClick()
                 node("subagent-config-window").assertDoesNotExist()
                 assertEquals(before, prefs.all)
-                ui.onNodeWithText("完成").performClick()
+                val done = node("subagent-collaboration-done")
+                awaitNodeWindowFocus(done)
+                done.assertIsDisplayed().assertIsEnabled().performClick()
+                ui.waitUntil(5_000) {
+                    ui.onAllNodesWithTag("subagent-collaboration-card")
+                        .fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+                }
                 node("subagent-collaboration-card").assertDoesNotExist()
                 assertEquals(0, fixture.opens.get())
             } finally { prefs.edit().clear().commit() }

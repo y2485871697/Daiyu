@@ -183,6 +183,13 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
                 "paragraph=${stateLayout.multiParagraph.width}x${stateLayout.multiParagraph.height} " +
                 "lines=${stateLayout.lineCount} overflowWidth=${stateLayout.didOverflowWidth} " +
                 "overflowHeight=${stateLayout.didOverflowHeight}", stateLayout.hasVisualOverflow)
+            for (line in 0 until stateLayout.lineCount) {
+                assertFalse("State must not be ellipsized", stateLayout.isLineEllipsized(line))
+                assertTrue("State line must fit the measured text width",
+                    stateLayout.getLineLeft(line) >= -1f && stateLayout.getLineRight(line) <= stateLayout.size.width + 1f)
+            }
+            assertEquals("State must render the whole string", stateLayout.layoutInput.text.length,
+                stateLayout.getLineEnd(stateLayout.lineCount - 1, visibleEnd = true))
             val headerBounds = ui.onNodeWithTag("tool-step-header:readability").fetchSemanticsNode().boundsInRoot
             assertTrue(titleBounds.left >= headerBounds.left && stateBounds.right <= headerBounds.right)
             ui.onNodeWithTag("tool-step-header:readability").performClick()

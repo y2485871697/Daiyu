@@ -123,6 +123,8 @@ class ActivityTest : WiredActivityTestCase() {
         modelField("API Key").assertEditableText("")
         editModel("API Key", "replacement-key"); saveModel()
         assertEquals(config.copy(apiKey = "replacement-key"), fixture.settings.load())
+        awaitModelEditor()
+        backToChat(activity)
         assertDraft(text); assertEquals(text, fixture.database.draft()); assertEquals(0, fixture.opens.get())
     }
 
@@ -261,6 +263,8 @@ class ActivityTest : WiredActivityTestCase() {
         editModel("Anthropic 版本", "2023-06-02"); saveModel()
         val saved = initial.copy(requestOptions = initial.requestOptions.copy(anthropicVersion = "2023-06-02"))
         assertEquals(saved, fixture.settings.load())
+        awaitModelEditor()
+        backToChat(activity)
         openModels(); modelField("Anthropic 版本").assertEditableText("2023-06-02")
         for (invalid in listOf(" ", " 2023-06-02 ")) {
             editModel("Anthropic 版本", invalid); saveModel()
@@ -269,6 +273,8 @@ class ActivityTest : WiredActivityTestCase() {
         }
         editModel("Anthropic 版本", ""); saveModel()
         assertEquals(saved.copy(requestOptions = saved.requestOptions.copy(anthropicVersion = null)), fixture.settings.load())
+        awaitModelEditor()
+        backToChat(activity)
         openModels(); modelField("Anthropic 版本").assertEditableText("")
         assertEquals(0, fixture.opens.get())
     }
@@ -289,6 +295,8 @@ class ActivityTest : WiredActivityTestCase() {
         assertEquals(ProviderProtocol.CHAT_COMPLETIONS, chat.protocol)
         assertEquals("synthetic-chat-key", chat.apiKey)
         assertEquals("", chat.responsesPath)
+        awaitModelEditor()
+        backToChat(activity)
         openModels(); assertProviderProtocol("OpenAI Chat Completions")
         chooseProviderProtocol("OpenAI Responses")
         assertProviderProtocol("OpenAI Responses")
@@ -298,6 +306,8 @@ class ActivityTest : WiredActivityTestCase() {
         node("settings-switch:重输密钥并绑定").assertDoesNotExist(); saveModel()
         assertEquals(config.copy(apiKey = "explicit-responses-key", responsesPath = ""), fixture.settings.load())
         assertFalse(fixture.application.getSharedPreferences("model-settings", 0).contains("protocol"))
+        awaitModelEditor()
+        backToChat(activity)
         assertDraft("协议切换保留草稿"); assertTrue(fixture.database.conversations().isEmpty()); assertEquals(0, fixture.opens.get())
     }
 }

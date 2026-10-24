@@ -358,10 +358,18 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertTrue(eye.right <= container.right + 1f && eye.top >= container.top - 1f && eye.bottom <= container.bottom + 1f)
         node("settings-secret-visibility:声音复刻 API Key").performClick()
         node(fieldTag).assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Password))
+        awaitImeFrame(node(fieldTag), visible = true)
+        dismissIme()
+        awaitImeFrame(node(fieldTag), visible = false)
         node("settings-secret-visibility:声音复刻 API Key").assertContentDescriptionEquals("隐藏密钥").performClick()
         node(fieldTag).assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        awaitImeFrame(node(fieldTag), visible = true)
+        dismissIme()
+        awaitImeFrame(node(fieldTag), visible = false)
+        val savedContainer = ui.onNodeWithTag("$fieldTag-container", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
         val save = node("voice-account-save").assertIsEnabled().fetchSemanticsNode().boundsInRoot
-        assertTrue(save.top >= container.bottom - 1f)
+        assertTrue(save.top >= savedContainer.bottom - 1f)
         assertEquals(accountsBefore, fixture.controller.voiceRuntime.accountConfigurations.value)
         node("voice-account-save").performClick()
         ui.waitUntil(timeoutMillis = 5000) {

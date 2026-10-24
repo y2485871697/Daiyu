@@ -109,7 +109,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
     fun testTokenMenuShowsUsageWithoutSending() {
         selectDraft()
         val before = fixture.database.exportBackup()
-        node("chat-context").assertIsDisplayed().assertHasNoClickAction()
+        node("chat-context").assertIsDisplayed().assertHasClickAction()
         node("chat-context").performTouchInput { click() }
         node("chat-usage-dialog").assertDoesNotExist()
         node("chat-context").performTouchInput { longClick() }

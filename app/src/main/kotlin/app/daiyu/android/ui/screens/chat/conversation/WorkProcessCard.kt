@@ -157,7 +157,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                         Text(step.name, color = colors.text,
                             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (stacked) Text(stateLabel, color = tint,
+                        if (stacked) Text(stateLabel, Modifier.fillMaxWidth(), color = tint,
                             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp))
                     }
                     if (!stacked) Text(stateLabel, Modifier.widthIn(max = 88.dp).width(IntrinsicSize.Max), color = tint,

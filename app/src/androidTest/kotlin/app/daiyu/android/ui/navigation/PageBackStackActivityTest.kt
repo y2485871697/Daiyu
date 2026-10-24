@@ -215,9 +215,14 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
         ui.mainClock.autoAdvance = false
         try {
-            ui.onNodeWithTag("page-back-host").performTouchInput { down(Offset(width * .02f, height * .6f)) }
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .02f, height * .6f))
+                moveTo(Offset(width * .08f, height * .6f), 16)
+                moveTo(Offset(width * .12f, height * .6f), 16)
+            }
             for (fraction in listOf(.30f, .55f, .80f)) {
-                ui.onNodeWithTag("page-back-host").performTouchInput { moveTo(Offset(initial.width * fraction, initial.height * .6f), 300) }
+                ui.onNodeWithTag("page-back-host").performTouchInput { moveTo(Offset(initial.width * fraction, initial.height * .6f), 80) }
+                ui.mainClock.advanceTimeByFrame()
                 ui.mainClock.advanceTimeByFrame()
                 val moving = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
                 val progress = (moving.left - initial.left) / initial.width

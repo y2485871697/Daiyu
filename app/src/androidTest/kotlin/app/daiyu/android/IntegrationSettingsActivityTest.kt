@@ -497,6 +497,8 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val expected = before.copy(customBody = body)
         assertEquals(expected, fixture.settings.load().requestOptions)
         val saved = fixture.settings.load()
+        awaitModelEditor()
+        backToChat(activity)
         openModels(); openInlineBodyFields()
         inlineBodyControl("model-body-field-name:0").assertEditableText("temperature")
         inlineBodyControl("model-body-field-value:0").assertEditableText("0.25")
@@ -586,6 +588,8 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         saveModel()
         assertEquals(ProviderRequestOptions("""{"temperature":0.5}"""), fixture.settings.load().requestOptions)
         assertEquals("replacement-key", fixture.settings.load().apiKey)
+        awaitModelEditor()
+        backToChat(activity)
         openModels(); reveal("model-save"); node("settings-switch:授权替换策略").assertDoesNotExist(); backToChat(activity)
         assertEquals(0, fixture.opens.get())
     }

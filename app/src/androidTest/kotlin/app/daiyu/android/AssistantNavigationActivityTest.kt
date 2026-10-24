@@ -45,11 +45,14 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
     }
 
     private fun back(system: Boolean) {
+        val foreground = listOf("assistant-editor", "assistant-action-edit", "assistant-list").first { tag ->
+            ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        val current = node(foreground)
+        awaitNodeWindowFocus(current)
+        dismissIme()
+        awaitImeFrame(current, visible = false)
         if (system) {
-            val foreground = listOf("assistant-editor", "assistant-action-edit", "assistant-list").first { tag ->
-                ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
-            }
-            awaitNodeWindowFocus(node(foreground))
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         } else ui.onNodeWithContentDescription("返回").performClick()
         ui.waitForIdle()

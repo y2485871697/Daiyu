@@ -50,10 +50,15 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 }
             }
         }
+        val host = ui.onNodeWithTag("spacing-host")
+        awaitNodeWindowFocus(host)
+        dismissIme()
+        awaitImeFrame(host, visible = false)
         assertCompactTail("初始末尾")
     }
 
     private fun assertCompactTail(marker: String) {
+        awaitImeFrame(ui.onNodeWithTag("spacing-host"), visible = false)
         var lastGeometry = "marker not sampled"
         try {
             ui.waitUntil(5_000) {

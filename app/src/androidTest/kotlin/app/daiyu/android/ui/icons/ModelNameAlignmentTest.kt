@@ -40,6 +40,26 @@ class ModelNameAlignmentTest : WiredActivityTestCase() {
         )
     }
 
+    private data class PickerGeometry(val row: Rect, val icon: Rect, val name: Rect, val apiId: Rect?)
+
+    private fun pickerGeometry(id: String, hasApiId: Boolean): PickerGeometry {
+        fun find(tag: String) = ui.onNodeWithTag(tag, useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode()
+        val rowNode = find("chat-model-option:$id")
+        val iconNode = find("chat-model-brand:current:$id")
+        val nameNode = find("chat-model-name:current:$id")
+        val apiIdNode = if (hasApiId) find("chat-model-id:current:$id") else null
+        return ui.runOnIdle {
+            for (node in listOfNotNull(iconNode, nameNode, apiIdNode)) assertSame(rowNode.root, node.root)
+            fun fullBounds(node: androidx.compose.ui.semantics.SemanticsNode): Rect {
+                val position = node.positionInRoot
+                val size = node.size
+                return Rect(position.x, position.y, position.x + size.width, position.y + size.height)
+            }
+            PickerGeometry(fullBounds(rowNode), fullBounds(iconNode), fullBounds(nameNode), apiIdNode?.let { fullBounds(it) })
+        }
+    }
+
     fun testSharedCorrectionSupportsBothTextLibrariesWithoutMovingTouchRowOrIcon() {
         for (dark in listOf(false, true)) for (font in listOf(1f, 1.3f)) {
             mainThread {
@@ -91,17 +111,17 @@ class ModelNameAlignmentTest : WiredActivityTestCase() {
                     }
                 }
             }
+            awaitDialogEnter(node("chat-model-picker"))
             for ((id, hasApiId) in listOf("gpt-6.1-sol" to false, "gpt-6-astra" to true)) {
                 node("chat-model-list").performScrollToKey("model:current:$id")
-                val row = bounds("chat-model-option:$id")
-                val icon = bounds("chat-model-brand:current:$id")
-                val name = bounds("chat-model-name:current:$id")
-                val contentBottom = if (hasApiId) bounds("chat-model-id:current:$id").bottom else name.bottom
+                awaitVisualIdle()
+                val (row, icon, name, apiId) = pickerGeometry(id, hasApiId)
+                val contentBottom = if (hasApiId) checkNotNull(apiId).bottom else name.bottom
                 assertEquals(icon.center.y - density.roundToInt(), (name.top + contentBottom) / 2f, 1f)
                 assertEquals(row.center.y, icon.center.y, 1f)
                 assertEquals(22f, icon.width / density, .5f)
                 assertTrue(row.height / density >= 55.5f)
-                if (hasApiId) assertTrue(name.bottom <= bounds("chat-model-id:current:$id").top)
+                if (hasApiId) assertTrue(name.bottom <= checkNotNull(apiId).top)
             }
         }
         assertEquals(0, fixture.opens.get())

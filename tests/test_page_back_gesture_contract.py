@@ -243,6 +243,9 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('"provider:${detail?.editor?.slotId ?: openingSlot}"', route)
         self.assertIn('openingSlot = null', route[route.index('fun closeDetail()'):route.index('    fun refresh()')])
         self.assertIn('onFailure = { openingSlot = null;', opening)
+        visual = route[route.index('    PageBackStack(when {'):route.index('        BackHandler(previewEnabled')]
+        self.assertLess(visual.index('creating != null'), visual.index('(detail != null || openingSlot != null)'))
+        self.assertLess(visual.index('(detail != null || openingSlot != null)'), visual.index('authentication ->'))
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
         self.assertIn('testLoadingAndReadyDetailShareOneRouteAndPreserveDirectoryPredecessor', test)
         self.assertIn('localLoading = true; localPage = 1', test)

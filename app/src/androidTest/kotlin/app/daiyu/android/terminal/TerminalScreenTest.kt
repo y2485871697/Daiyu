@@ -2,6 +2,9 @@ package app.daiyu.android.terminal
 
 import androidx.activity.compose.setContent
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
@@ -110,15 +113,15 @@ class TerminalScreenTest : WiredActivityTestCase() {
         state = TerminalEnvironmentState(phase = "RUNNING", ownsResources = true, acceptsInput = true, output = "retained output")
         show()
         node("terminal-input").performTextReplacement("draft not sent")
-        val output = node("terminal-output-region").fetchSemanticsNode().boundsInRoot
-        assertTrue(node("terminal-toolbar").fetchSemanticsNode().boundsInRoot.top >= output.bottom)
+        val (output, toolbar) = toolbarGeometry()
+        assertTrue("Simple toolbar must be below output: output=$output toolbar=$toolbar", toolbar.top >= output.bottom)
         node("terminal-mode").performClick()
         ui.onNodeWithText("简洁模式").assertIsDisplayed()
         node("terminal-controls").assertDoesNotExist()
         node("terminal-input").assertDoesNotExist()
         node("terminal-shortcuts").assertIsDisplayed()
-        val raw = node("terminal-output-region").fetchSemanticsNode().boundsInRoot
-        assertTrue(node("terminal-toolbar").fetchSemanticsNode().boundsInRoot.bottom <= raw.top)
+        val (raw, rawToolbar) = toolbarGeometry()
+        assertTrue("Console toolbar must be above output: output=$raw toolbar=$rawToolbar", rawToolbar.bottom <= raw.top)
         ui.onNodeWithTag("terminal-grid-line:0", useUnmergedTree = true).assertTextContains("retained output", substring = true)
         node("terminal-mode").performClick()
         node("terminal-input").assertTextEquals("draft not sent")
@@ -216,6 +219,24 @@ class TerminalScreenTest : WiredActivityTestCase() {
         show()
         node("terminal-tasks").performClick()
         ui.runOnIdle { assertEquals(1, tasks); assertTrue(created.isEmpty()); assertTrue(sent.isEmpty()) }
+    }
+    private fun toolbarGeometry(): Pair<Rect, Rect> {
+        awaitVisualIdle()
+        val output = node("terminal-output-region").assertIsDisplayed().fetchSemanticsNode()
+        val toolbar = node("terminal-toolbar").assertIsDisplayed().fetchSemanticsNode()
+        val view = (output.root as ViewRootForTest).view
+        return awaitStableWindowFrame(view) {
+            assertSame(output.root, toolbar.root)
+            if (!output.layoutInfo.isPlaced || !toolbar.layoutInfo.isPlaced) return@awaitStableWindowFrame null
+            fun fullBounds(node: SemanticsNode): Rect {
+                val position = node.positionInRoot
+                val size = node.size
+                return Rect(position.x, position.y, position.x + size.width, position.y + size.height)
+            }
+            val outputBounds = fullBounds(output)
+            val toolbarBounds = fullBounds(toolbar)
+            if (outputBounds.isEmpty || toolbarBounds.isEmpty) null else outputBounds to toolbarBounds
+        }
     }
     private fun pressBackAndWait() { instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle() }
 }

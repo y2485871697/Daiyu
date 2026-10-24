@@ -1,6 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
+import app.daiyu.android.dismissDesktopEducationTooltip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.Color
@@ -138,23 +142,32 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                     applyInterfaceScale = false) {
                     val soft = conversationColors().soft
                     androidx.compose.runtime.SideEffect { observedSoft = soft }
-                    Column(Modifier.background(backdrop).systemBarsPadding().verticalScroll(rememberScrollState())) {
-                        ToolCategoryContent("terminal", ToolCategoryDetails.project("terminal",
-                            """{"command":"printf hello"}""", """{"stdout":"hello","exit_code":0}"""))
-                        Row {
-                            Box(Modifier.size(40.dp, 24.dp).background(backdrop).testTag("tool-swatch:backdrop"))
-                            Box(Modifier.size(40.dp, 24.dp).background(soft).testTag("tool-swatch:soft"))
-                            Box(Modifier.size(40.dp, 24.dp).drawBehind {
-                                drawRect(Color(if (dark) 0xFFBEA8D7 else 0xFF8A779A), alpha = (if (dark) 19f else 16f) / 255f)
-                            }.testTag("tool-swatch:alpha"))
-                            Box(Modifier.size(40.dp, 24.dp).background(
-                                Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
-                            ).testTag("tool-swatch:opaque"))
+                    Box(Modifier.fillMaxSize().background(backdrop)) {
+                        Column(Modifier.background(backdrop).systemBarsPadding().verticalScroll(rememberScrollState())) {
+                            ToolCategoryContent("terminal", ToolCategoryDetails.project("terminal",
+                                """{"command":"printf hello"}""", """{"stdout":"hello","exit_code":0}"""))
+                            Row {
+                                Box(Modifier.size(40.dp, 24.dp).background(backdrop).testTag("tool-swatch:backdrop"))
+                                Box(Modifier.size(40.dp, 24.dp).background(soft).testTag("tool-swatch:soft"))
+                                Box(Modifier.size(40.dp, 24.dp).drawBehind {
+                                    drawRect(Color(if (dark) 0xFFBEA8D7 else 0xFF8A779A), alpha = (if (dark) 19f else 16f) / 255f)
+                                }.testTag("tool-swatch:alpha"))
+                                Box(Modifier.size(40.dp, 24.dp).background(
+                                    Color(if (dark) 0x13BEA8D7 else 0x108A779A).compositeOver(backdrop)
+                                ).testTag("tool-swatch:opaque"))
+                            }
                         }
+                        Box(Modifier.align(Alignment.CenterEnd).size(8.dp, 24.dp)
+                            .testTag("tool-education-blank").pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                                }
+                            })
                     }
                 }
             } }
             ui.waitForIdle()
+            dismissDesktopEducationTooltip(instrumentation, ui, ui.onNodeWithTag("tool-education-blank"))
             val layoutsByTitle = mutableMapOf<String, androidx.compose.ui.text.TextLayoutResult>()
             for (tag in listOf("tool-document:命令", "tool-document:标准输出")) {
                 val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()

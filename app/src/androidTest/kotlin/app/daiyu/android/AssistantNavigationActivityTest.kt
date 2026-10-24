@@ -45,8 +45,13 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
     }
 
     private fun back(system: Boolean) {
-        if (system) instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        else ui.onNodeWithContentDescription("返回").performClick()
+        if (system) {
+            val foreground = listOf("assistant-editor", "assistant-action-edit", "assistant-list").first { tag ->
+                ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+            }
+            awaitNodeWindowFocus(node(foreground))
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        } else ui.onNodeWithContentDescription("返回").performClick()
         ui.waitForIdle()
     }
 

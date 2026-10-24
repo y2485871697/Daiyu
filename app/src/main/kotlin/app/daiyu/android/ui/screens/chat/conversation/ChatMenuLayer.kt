@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.key
 import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.TransformOrigin
@@ -61,6 +62,8 @@ import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -90,25 +93,50 @@ private class MenuLayerState {
 }
 
 private val LocalMenuLayer = staticCompositionLocalOf<MenuLayerState?> { null }
+internal val LocalChatMenuPlacementDiagnostic = staticCompositionLocalOf<((() -> String) -> Unit)?> { null }
+
+private class MenuPlacementDiagnostic {
+    var host: LayoutCoordinates? = null
+    var layout: LayoutCoordinates? = null
+    var surface: LayoutCoordinates? = null
+    var sequence = 0
+    var placement = "not placed"
+
+    private fun describe(coordinates: LayoutCoordinates?): String {
+        if (coordinates == null || !coordinates.isAttached) return "unattached"
+        return "origin=${coordinates.positionInRoot()} size=${coordinates.size} clipped=${coordinates.boundsInRoot()}"
+    }
+
+    fun snapshot() = "$placement; hostNow={${describe(host)}}; " +
+        "layoutNow={${describe(layout)}}; surfaceNow={${describe(surface)}}"
+}
 
 /** Menus share the captured page's coordinates, rather than sampling across Popup windows. */
 @Composable
 internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val backdrop = rememberTopBarBackdrop()
     val state = remember { MenuLayerState() }
+    val diagnostic = LocalChatMenuPlacementDiagnostic.current
+    val probe = remember { MenuPlacementDiagnostic() }
+    SideEffect { diagnostic?.invoke(probe::snapshot) }
     Box(modifier) {
         CompositionLocalProvider(LocalMenuLayer provides state) {
             Box(Modifier.fillMaxSize().captureForTopBar(backdrop)) { content() }
         }
         var host by remember { mutableStateOf(Rect.Zero) }
         Box(Modifier.matchParentSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime))
-            .onGloballyPositioned { host = it.boundsInRoot() }) {
+            .onGloballyPositioned {
+                if (diagnostic != null) probe.host = it
+                host = it.boundsInRoot()
+            }) {
             state.active?.let { menu ->
                 key(menu) {
                     val motion = rememberPopupMotion(menu.expanded())
                     BackHandler(enabled = menu.expanded(), onBack = menu.onDismiss)
                     Layout(
-                        modifier = Modifier.fillMaxSize().pointerInput(menu) {
+                        modifier = Modifier.fillMaxSize()
+                            .onGloballyPositioned { if (diagnostic != null) probe.layout = it }
+                            .pointerInput(menu) {
                             awaitPointerEventScope {
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -125,6 +153,7 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
                                     scaleY = scale
                                     transformOrigin = TransformOrigin(1f, 0f)
                                 }
+                                .onGloballyPositioned { if (diagnostic != null) probe.surface = it }
                                 .then(if (menu.expanded()) Modifier.semantics { paneTitle = "会话菜单" }
                                 else Modifier.clearAndSetSemantics {}), motion = motion) {
                                 CompositionLocalProvider(LocalPopupMotion provides motion) { menu.content() }
@@ -148,12 +177,23 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
                         val offsetY = menu.offset.y.roundToPx()
                         layout(width, height) {
                             dismiss.place(0, 0)
-                            val anchor = menu.anchor().translate(-host.left, -host.top)
-                            val y = (if (anchor.bottom + offsetY + surface.height + margin <= height) anchor.bottom.toInt() + offsetY
-                                else anchor.top.toInt() - offsetY - surface.height).coerceIn(margin,
+                            val usedHost = host
+                            val rootAnchor = menu.anchor()
+                            val anchor = rootAnchor.translate(-usedHost.left, -usedHost.top)
+                            val fitsBelow = anchor.bottom + offsetY + surface.height + margin <= height
+                            val wantedY = if (fitsBelow) anchor.bottom.toInt() + offsetY
+                                else anchor.top.toInt() - offsetY - surface.height
+                            val y = wantedY.coerceIn(margin,
                                     (height - surface.height - margin).coerceAtLeast(margin))
                             val x = (anchor.right.toInt() + offsetX - surface.width).coerceIn(margin,
                                 (width - surface.width - margin).coerceAtLeast(margin))
+                            if (diagnostic != null) {
+                                probe.sequence++
+                                probe.placement = "place#${probe.sequence} hostUsed=$usedHost anchorUsed=$rootAnchor " +
+                                    "localAnchor=$anchor layoutSize=${width}x$height " +
+                                    "surfaceMeasured=${surface.width}x${surface.height} margin=$margin " +
+                                    "fitsBelow=$fitsBelow wantedY=$wantedY placed=$x,$y"
+                            }
                             surface.place(x, y)
                         }
                     }

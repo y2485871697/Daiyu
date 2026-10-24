@@ -57,9 +57,9 @@ internal fun ChatSelectionSheet(
                 .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))
             Row(Modifier.fillMaxWidth().padding(bottom = 13.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text(title, color = colors.text, fontSize = titleFontSize, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
+                    Text(title, modifier = Modifier.fillMaxWidth(), color = colors.text, fontSize = titleFontSize, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
                     subtitle?.let { Text(it, color = colors.muted, fontSize = subtitleFontSize, lineHeight = 18.sp,
-                        modifier = Modifier.padding(top = 4.dp)) }
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) }
                 }
                 if (showCloseButton) Box(Modifier.size(40.dp).clip(RoundedCornerShape(9.dp))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),

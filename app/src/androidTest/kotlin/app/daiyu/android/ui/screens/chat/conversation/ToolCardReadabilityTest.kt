@@ -1,6 +1,11 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.Alignment
+import app.daiyu.android.dismissDesktopEducationTooltip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -8,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
@@ -112,18 +118,27 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
                     AgentAppTheme(AppearanceSettings(
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
                         interfaceScale = scale), applyInterfaceScale = true) {
-                        Column(Modifier.width(((if (narrow) 320f else 1216f / phoneDensity) / scale - 28f).dp)
-                            .verticalScroll(rememberScrollState()).testTag("readability-list")) {
-                            WorkProcessCard(WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "已中断"),
-                                ownerKey = "readability")
-                            ToolDocument(ToolDisclosureUi("标准输出", output, true))
-                            ToolMiniAction("保存原件", Modifier.testTag("readability-action")) { actionCount++ }
+                        Box(Modifier.fillMaxSize()) {
+                            Column(Modifier.width(((if (narrow) 320f else 1216f / phoneDensity) / scale - 28f).dp)
+                                .verticalScroll(rememberScrollState()).testTag("readability-list")) {
+                                WorkProcessCard(WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "已中断"),
+                                    ownerKey = "readability")
+                                ToolDocument(ToolDisclosureUi("标准输出", output, true))
+                                ToolMiniAction("保存原件", Modifier.testTag("readability-action")) { actionCount++ }
+                            }
+                            Box(Modifier.align(Alignment.CenterEnd).width(8.dp).fillMaxHeight()
+                                .testTag("readability-education-blank").pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                                }
+                            })
                         }
                     }
                 }
             }
         } }
         ui.waitForIdle()
+        dismissDesktopEducationTooltip(instrumentation, ui, node("readability-education-blank"))
         val expectedWidth = ((if (narrow) 320f else 1216f / phoneDensity) / scale - 28f) * phoneDensity * scale
         val actual = node("readability-list").fetchSemanticsNode().boundsInRoot
         assertEquals("Fixture must provide the requested phone-density canvas", expectedWidth, actual.width, 1f)

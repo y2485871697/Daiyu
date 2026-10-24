@@ -26,7 +26,11 @@ class ReportedReasoningPersistenceTest {
         assertEquals(2, observed)
         assertEquals(listOf(MessageBlock.Text("body", "answer")), result.blocks)
         assertTrue(result.protocolItems.isEmpty())
-        assertEquals(listOf(ReportedReasoning("r", "reported final")), MessageHistory.expand(listOf(result)).single().reportedReasoning)
+        val reasoning = MessageHistory.expand(listOf(result)).single().reportedReasoning.single()
+        assertEquals("r", reasoning.itemId)
+        assertEquals("reported final", reasoning.text)
+        assertNotNull(reasoning.elapsedMillis)
+        assertNull(reasoning.activeSinceNanos)
     }
 
     @Test fun acceptedPartialReasoningSurvivesFailureAndLateTerminalEventsCannotOverwriteIt() {

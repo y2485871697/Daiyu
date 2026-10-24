@@ -12,8 +12,26 @@ sealed interface MessageBlock {
 
 /** Public text actually reported by a provider (summary or native thinking), not hidden reasoning.
  * Signatures/encrypted/redacted data belong only to authoritative protocolItems. */
-data class ReportedReasoning(val itemId: String, val text: String) {
-    init { require(itemId.isNotBlank() && itemId.length <= 512 && text.length <= 2_000_000) }
+data class ReportedReasoning(
+    val itemId: String,
+    val text: String,
+    val elapsedMillis: Long? = null,
+    /** Process-local monotonic anchor; codecs persist only the sampled elapsed duration. */
+    val activeSinceNanos: Long? = null
+) {
+    init {
+        require(itemId.isNotBlank() && itemId.length <= 512 && text.length <= 2_000_000)
+        require(elapsedMillis == null || elapsedMillis >= 0)
+        require(activeSinceNanos == null || elapsedMillis != null)
+    }
+
+    fun elapsedAt(nowNanos: Long = System.nanoTime()): Long? = elapsedMillis?.let { elapsed ->
+        val active = activeSinceNanos?.let { ((nowNanos - it).coerceAtLeast(0) / 1_000_000) } ?: 0
+        elapsed + active.coerceAtMost(Long.MAX_VALUE - elapsed)
+    }
+
+    fun frozen(nowNanos: Long = System.nanoTime()): ReportedReasoning =
+        if (activeSinceNanos == null) this else copy(elapsedMillis = elapsedAt(nowNanos), activeSinceNanos = null)
 }
 
 /** One ordered item in an assistant owner's persisted history. */
@@ -55,6 +73,19 @@ data class Message(
         const val ASSISTANT_ROLE = "assistant"
         const val USER_ROLE = "user"
     }
+}
+
+/** Checkpoints carry stable durations, never a process-local live clock. */
+internal fun Message.frozenReasoning(nowNanos: Long = System.nanoTime()): Message {
+    if (reportedReasoning.none { it.activeSinceNanos != null } &&
+        historySegments.all { segment -> segment.reportedReasoning.none { it.activeSinceNanos != null } }) return this
+    return copy(
+        reportedReasoning = reportedReasoning.map { it.frozen(nowNanos) },
+        historySegments = historySegments.map { segment ->
+            if (segment.reportedReasoning.none { it.activeSinceNanos != null }) segment else
+                segment.copy(reportedReasoning = segment.reportedReasoning.map { it.frozen(nowNanos) })
+        }
+    )
 }
 
 /** Expands persisted owner segments while retaining the original history order. */

@@ -115,6 +115,23 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertIn('testNativeFieldsKeepDraftAndSelectionWhenOutsideTapClearsFocus', text)
         self.assertNotIn('performTouchInput', text)
 
+    def test_real_touches_map_layout_window_bounds_to_screen_before_injection(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()
+        bounds = text.split('private fun screenBounds(', 1)[1].split('private fun injectGesture(', 1)[0]
+        for token in ('awaitNodeWindowFocus(interaction)', 'awaitStableWindowFrame(view)',
+                      'val coordinates = target.layoutInfo.coordinates', 'coordinates.boundsInWindow()',
+                      'view.getLocationOnScreen(screen)', 'view.getLocationInWindow(window)',
+                      '(screen[0] - window[0]).toFloat()', '(screen[1] - window[1]).toFloat()',
+                      'view.windowToken != token', '!coordinates.isAttached', 'screen-bounds tag=$tag'):
+            self.assertIn(token, bounds)
+        self.assertNotIn('target.boundsInRoot', bounds)
+        self.assertIn('ui.waitUntil(5_000)', text.split('private fun awaitFieldFocus(', 1)[1].split('private fun awaitFieldIme(', 1)[0])
+        self.assertIn('tag=$tag expected=$focused observed=$observed', text)
+        tap = text.split('private fun tapField(', 1)[1].split('private fun exerciseFields(', 1)[0]
+        self.assertEqual(1, tap.count('realTap(tag)'))
+        self.assertNotIn('requestFocus', tap)
+        self.assertNotIn('awaitDialogEnter', bounds)
+
 
 if __name__ == '__main__':
     unittest.main()

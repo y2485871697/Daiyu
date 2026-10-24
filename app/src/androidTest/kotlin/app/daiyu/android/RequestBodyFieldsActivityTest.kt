@@ -111,6 +111,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         assertTrue(body.getJSONObject("metadata").getBoolean("marker"))
         assertEquals("123", body.getJSONObject("metadata").get("numeric"))
         assertEquals(before.copy(requestOptions = before.requestOptions.copy(customBody = body.toString())), fixture.settings.load())
+        backToChat(activity)
         openModels(); openInlineBodyFields()
         inlineBodyControl("model-body-field-name:0").assertEditableText("metadata")
         inlineBodyControl("model-body-field-value:0").assertEditableText(metadata)
@@ -118,6 +119,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         assertTrue(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
         saveModel()
         assertFalse(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
+        backToChat(activity)
         assertDraft("JSON editor unsent draft")
         assertEquals(0, fixture.opens.get())
     }

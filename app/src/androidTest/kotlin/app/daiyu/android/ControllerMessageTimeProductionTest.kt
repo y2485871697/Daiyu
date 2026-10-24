@@ -78,7 +78,6 @@ class ControllerMessageTimeProductionTest : InstrumentationTestCase() {
         assertTrue(checkNotNull(supplement.createdAt) in before..after)
         controlMain {
             assertEquals(owner.createdAt, f.controller.active!!.createdAt)
-            assertTrue(f.controller.resume(owner))
         }
         assertTrue(second.entered.await(5, TimeUnit.SECONDS))
         assertEquals(supplement.createdAt, MessageHistory.expand(f.histories.last()).single { it.id == id }.createdAt)

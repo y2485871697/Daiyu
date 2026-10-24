@@ -7,7 +7,7 @@ class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
         setDraft("search settings unsent"); openModels()
         editModel("Base URL", "https://api.openai.com/v1")
         reveal("settings-switch:Provider 托管网页搜索").assertIsOff().performClick().assertIsOn()
-        saveModel(); awaitUniqueTag("chat-draft")
+        saveModel(); backToChat(activity); awaitUniqueTag("chat-draft")
         assertTrue(fixture.settings.load().requestOptions.openAiWebSearchEnabled)
         assertDraft("search settings unsent")
         openModels(); reveal("settings-switch:Provider 托管网页搜索").assertIsOn()

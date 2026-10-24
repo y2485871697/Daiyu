@@ -24,6 +24,7 @@ class SubAgentStatusDialogTest : WiredActivityTestCase() {
             }
         } }
         ui.waitForIdle()
+        awaitDialogEnter(ui.onNodeWithTag("subagent-status", useUnmergedTree = true))
     }
 
     private fun dismissWithBack() {

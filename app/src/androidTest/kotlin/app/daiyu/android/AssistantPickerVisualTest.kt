@@ -57,6 +57,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         dismissIme()
+        awaitDialogEnter(ui.onNodeWithTag("assistant-sheet", useUnmergedTree = true))
     }
 
     private fun text(id: Int, vararg args: Any) = instrumentation.targetContext.getString(id, *args)

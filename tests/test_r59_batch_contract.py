@@ -37,7 +37,10 @@ class R59BatchContract(unittest.TestCase):
         for token in ('val renderedRoute = route', 'PageBackGestureHost(renderedRoute,',
                       'backTargetKey = if (renderedRoute == "test-page")',
                       'if (renderedRoute == "previous-page") Color.Red else Color.Blue',
-                      'Text(renderedRoute)', 'backdrop.red > 0.9f && backdrop.blue < 0.1f',
+                      'Text(renderedRoute)',
+                      'assertDimmedPreviousPage(backdrop, .6f, "recorded previous page must be red and dimmed")',
+                      '(alpha + previewBackground.red * (1f - alpha)) * light',
+                      'actual.red, .025f', 'actual.green, .025f', 'actual.blue, .025f',
                       'assertEquals(1, nestedCount)', 'assertEquals(1, backCount)',
                       'fun testStateChangeRejectsAnInFlightPredictionAndNextGestureStillCommits()',
                       'mainThread { swipe = false }'):

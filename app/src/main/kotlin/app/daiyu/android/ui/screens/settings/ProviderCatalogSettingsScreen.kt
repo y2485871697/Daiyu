@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.navigation.PageBackStack
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import androidx.compose.foundation.lazy.LazyListScope
@@ -103,66 +104,68 @@ internal fun <T> ProviderCatalogSettingsScreen(
         }
     }
     var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
-    if (managingLocal && localModelActions != null) {
-        LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false },
-            listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior, backPreviewEnabled = false)
-        return
-    }
-    if (twoTabs && modelTab && localModelActions != null) {
-        key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled && !state.saving,
-            onBack = onBack, pageTitle = pageTitle, managementEndpoint = draft.endpoint,
-            listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior,
-            fetchingModels = state.loading, onFetchModels = if (enabled && !state.loading && !state.saving) ({ fetch(draft) }) else null, headerContent = {
-                tabs()
-                item {
-                    state.status?.let { SettingsNote(it) }
-                    errorText?.let { SettingsNote(it, error = true) }
-                }
-            }) }
-    } else ModelSettingsScreen(
-        pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs, providerName = providerName,
-        listState = configurationListState,
-        onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
-        engineeringUi = engineeringUi,
-        testConnection = testConnection?.let { test -> { value, cancelled, deliver ->
-            session.invalidate(); test(value, cancelled, deliver)
-        } },
-        testBalance = testBalance,
-        onDelete = onDelete?.let { delete -> { session.invalidate(); delete() } },
-        draft = draft,
-        onDraftChange = { session.invalidate(); onDraftChange(it) },
-        onSave = { session.invalidate(); onSave(it) },
-        onBack = { session.invalidate(); onBack() },
-        onFetchCatalog = fetch,
-        modifier = modifier,
-        errorText = errorText,
-        credentialUnavailable = credentialUnavailable,
-        requestOptionsUnavailable = requestOptionsUnavailable,
-        headersUnavailable = headersUnavailable,
-        isFetchingCatalog = state.loading,
-        catalogStatusText = state.status,
-        catalogForDraft = draft,
-        catalogEnabled = enabled && !state.saving,
-        enabled = enabled && !state.saving,
-        // Deliberately no legacy clickable remote result list: that list changes the active draft.
-    )
-    state.selection?.let { selection ->
-        ProviderModelSelectionDialog(
-            selection = selection,
-            onSelectionChange = session::select,
-            onConfirm = { checked ->
-                if (enabled) session.prepareCommit(checked)?.let { commit ->
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) { session.performCommit(commit) }
-                        session.completed(commit, result)
-                        localRevision++
+    PageBackStack(if (managingLocal && localModelActions != null) "local-models" else null) {
+        if (managingLocal && localModelActions != null) {
+            LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false },
+                listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior)
+            return@PageBackStack
+        }
+        if (twoTabs && modelTab && localModelActions != null) {
+            key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled && !state.saving,
+                onBack = onBack, pageTitle = pageTitle, managementEndpoint = draft.endpoint,
+                listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior,
+                fetchingModels = state.loading, onFetchModels = if (enabled && !state.loading && !state.saving) ({ fetch(draft) }) else null, headerContent = {
+                    tabs()
+                    item {
+                        state.status?.let { SettingsNote(it) }
+                        errorText?.let { SettingsNote(it, error = true) }
                     }
-                }
-            },
-            onDismiss = session::dismiss,
-            enabled = enabled,
-            isSaving = state.saving,
-            errorText = state.error,
+                }) }
+        } else ModelSettingsScreen(
+            pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs, providerName = providerName,
+            listState = configurationListState,
+            onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
+            engineeringUi = engineeringUi,
+            testConnection = testConnection?.let { test -> { value, cancelled, deliver ->
+                session.invalidate(); test(value, cancelled, deliver)
+            } },
+            testBalance = testBalance,
+            onDelete = onDelete?.let { delete -> { session.invalidate(); delete() } },
+            draft = draft,
+            onDraftChange = { session.invalidate(); onDraftChange(it) },
+            onSave = { session.invalidate(); onSave(it) },
+            onBack = { session.invalidate(); onBack() },
+            onFetchCatalog = fetch,
+            modifier = modifier,
+            errorText = errorText,
+            credentialUnavailable = credentialUnavailable,
+            requestOptionsUnavailable = requestOptionsUnavailable,
+            headersUnavailable = headersUnavailable,
+            isFetchingCatalog = state.loading,
+            catalogStatusText = state.status,
+            catalogForDraft = draft,
+            catalogEnabled = enabled && !state.saving,
+            enabled = enabled && !state.saving,
+            // Deliberately no legacy clickable remote result list: that list changes the active draft.
         )
+        state.selection?.let { selection ->
+            ProviderModelSelectionDialog(
+                selection = selection,
+                onSelectionChange = session::select,
+                onConfirm = { checked ->
+                    if (enabled) session.prepareCommit(checked)?.let { commit ->
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) { session.performCommit(commit) }
+                            session.completed(commit, result)
+                            localRevision++
+                        }
+                    }
+                },
+                onDismiss = session::dismiss,
+                enabled = enabled,
+                isSaving = state.saving,
+                errorText = state.error,
+            )
+        }
     }
 }

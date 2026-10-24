@@ -1,5 +1,6 @@
 package app.daiyu.android.ui
 
+import app.daiyu.android.ui.navigation.PageBackStack
 import app.daiyu.android.ui.app.DaiyuPalette
 
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
@@ -53,89 +54,91 @@ internal fun SubAgentSettingsScreen(
     LaunchedEffect(directory.entries, directory.loading, directory.error) {
         if (!directory.loading && directory.error == null && selectedId != null && group == null) selectedId = null
     }
-    if (group != null) {
-        key(group.id) {
-            val owner = remember(group.id) { SubAgentConfigKey.Preset(group.id) }
-            val editor = remember(owner, modelSource) {
-                ConversationSubAgentEditor(owner, repository, modelSource) {
-                    selectedId == owner.value && try { repository.presetExists(owner.value) } catch (_: Exception) { false }
+    PageBackStack(group?.id) {
+        if (group != null) {
+            key(group.id) {
+                val owner = remember(group.id) { SubAgentConfigKey.Preset(group.id) }
+                val editor = remember(owner, modelSource) {
+                    ConversationSubAgentEditor(owner, repository, modelSource) {
+                        selectedId == owner.value && try { repository.presetExists(owner.value) } catch (_: Exception) { false }
+                    }
+                }
+                DisposableEffect(editor) { onDispose { editor.dispose() } }
+                val detailBack = { editor.dispose(); selectedId = null }
+                BackHandler(enabled = isCurrentRoute, onBack = detailBack)
+                CompositionLocalProvider(LocalConversationSubAgentEditor provides editor) {
+                    SubAgentPresetDetail(editor, group.name, detailBack, isCurrentRoute, modelSource)
                 }
             }
-            DisposableEffect(editor) { onDispose { editor.dispose() } }
-            val detailBack = { editor.dispose(); selectedId = null }
-            BackHandler(enabled = isCurrentRoute, previewEnabled = false, onBack = detailBack)
-            CompositionLocalProvider(LocalConversationSubAgentEditor provides editor) {
-                SubAgentPresetDetail(editor, group.name, detailBack, isCurrentRoute, modelSource)
-            }
+            return@PageBackStack
         }
-        return
-    }
-    var add by remember { mutableStateOf(false) }
-    var rename by remember { mutableStateOf<SubAgentPreset?>(null) }
-    var delete by remember { mutableStateOf<SubAgentPreset?>(null) }
-    var actionsPreset by remember { mutableStateOf<SubAgentPreset?>(null) }
-    var name by remember { mutableStateOf("") }
-    val view = LocalView.current
-    val editable = !directory.loading && directory.error == null
-    CompositionLocalProvider(LocalRippleConfiguration provides null) {
-        WithoutPressRipple {
-            Scaffold(containerColor = settingsPageBackground(),
-                topBar = { TopAppBar(title = { Text("子代理组") }, navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
-                }, colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())) },
-                floatingActionButtonPosition = FabPosition.Center,
-                floatingActionButton = {
-                    FilledTonalButton(enabled = editable, onClick = {
-                        name = ""; add = true
-                    }, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 168.dp), shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
-                        elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 3.dp)) {
-                        Text("添加子代理组", style = MaterialTheme.typography.bodyLarge)
-                    }
-                }) { padding ->
-                LazyColumn(Modifier.fillMaxSize().padding(padding).horizontalCutoutPadding(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item {
-                        Text("预设组可供不同会话复制使用；修改预设不会改变已应用的会话。", style = MaterialTheme.typography.bodyMedium)
-                        SubAgentPresetDirectoryStatus(directory)
-                    }
-                    items(directory.entries, key = { it.id }) { preset ->
-                        SubAgentPresetCard(preset, editable, "编辑子代理组${preset.name}", settingsStyle = true,
-                            onClick = { if (editable) directory.change {
-                                check(repository.presetExists(preset.id)) { "子代理组不存在，请重试" }
-                                selectedId = preset.id
-                            } },
-                            trailing = {
-                                IconButton(modifier = Modifier.padding(end = 8.dp).size(48.dp), enabled = editable, onClick = {
-                                    if (editable) { actionsPreset = preset }
-                                }) { Icon(Icons.Rounded.MoreVert, "${preset.name}组更多操作") }
-                            })
+        var add by remember { mutableStateOf(false) }
+        var rename by remember { mutableStateOf<SubAgentPreset?>(null) }
+        var delete by remember { mutableStateOf<SubAgentPreset?>(null) }
+        var actionsPreset by remember { mutableStateOf<SubAgentPreset?>(null) }
+        var name by remember { mutableStateOf("") }
+        val view = LocalView.current
+        val editable = !directory.loading && directory.error == null
+        CompositionLocalProvider(LocalRippleConfiguration provides null) {
+            WithoutPressRipple {
+                Scaffold(containerColor = settingsPageBackground(),
+                    topBar = { TopAppBar(title = { Text("子代理组") }, navigationIcon = {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
+                    }, colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())) },
+                    floatingActionButtonPosition = FabPosition.Center,
+                    floatingActionButton = {
+                        FilledTonalButton(enabled = editable, onClick = {
+                            name = ""; add = true
+                        }, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 168.dp), shape = RoundedCornerShape(50),
+                            colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                            elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 3.dp)) {
+                            Text("添加子代理组", style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }) { padding ->
+                    LazyColumn(Modifier.fillMaxSize().padding(padding).horizontalCutoutPadding(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        item {
+                            Text("预设组可供不同会话复制使用；修改预设不会改变已应用的会话。", style = MaterialTheme.typography.bodyMedium)
+                            SubAgentPresetDirectoryStatus(directory)
+                        }
+                        items(directory.entries, key = { it.id }) { preset ->
+                            SubAgentPresetCard(preset, editable, "编辑子代理组${preset.name}", settingsStyle = true,
+                                onClick = { if (editable) directory.change {
+                                    check(repository.presetExists(preset.id)) { "子代理组不存在，请重试" }
+                                    selectedId = preset.id
+                                } },
+                                trailing = {
+                                    IconButton(modifier = Modifier.padding(end = 8.dp).size(48.dp), enabled = editable, onClick = {
+                                        if (editable) { actionsPreset = preset }
+                                    }) { Icon(Icons.Rounded.MoreVert, "${preset.name}组更多操作") }
+                                })
+                        }
                     }
                 }
-            }
-            actionsPreset?.takeIf { editable }?.let { preset ->
-                SubAgentPresetActionsSheet(preset, onDismiss = { actionsPreset = null },
-                    onRename = { if (editable) { name = preset.name; rename = preset }; actionsPreset = null },
-                    onDelete = { if (editable) delete = preset; actionsPreset = null })
-            }
-            if (add || rename != null) SubAgentPresetNameDialog(
-                title = if (add) "添加子代理组" else "重命名子代理组", name = name,
-                onNameChange = { name = it }, saveEnabled = editable && name.trim().isNotBlank(),
-                onDismiss = { add = false; rename = null }, onSave = {
-                    if (directory.change {
-                        if (add) repository.addPreset(name.trim())
-                        else check(repository.renamePreset(requireNotNull(rename).id, name.trim())) { "子代理组不存在，请重试" }
-                    }) { add = false; rename = null }
-                })
-            delete?.let { preset ->
-                AlertDialog(onDismissRequest = { delete = null }, title = { Text("删除子代理组？") },
-                    text = { Text("删除“${preset.name}”不会改变已应用此组的会话配置。") },
-                    dismissButton = { TextButton(onClick = { delete = null }) { Text("取消") } },
-                    confirmButton = { TextButton(enabled = editable, onClick = {
-                        if (directory.change { check(repository.removePreset(preset.id)) { "子代理组不存在，请重试" } }) delete = null
-                    }) { Text("删除", color = MaterialTheme.colorScheme.error) } })
+                actionsPreset?.takeIf { editable }?.let { preset ->
+                    SubAgentPresetActionsSheet(preset, onDismiss = { actionsPreset = null },
+                        onRename = { if (editable) { name = preset.name; rename = preset }; actionsPreset = null },
+                        onDelete = { if (editable) delete = preset; actionsPreset = null })
+                }
+                if (add || rename != null) SubAgentPresetNameDialog(
+                    title = if (add) "添加子代理组" else "重命名子代理组", name = name,
+                    onNameChange = { name = it }, saveEnabled = editable && name.trim().isNotBlank(),
+                    onDismiss = { add = false; rename = null }, onSave = {
+                        if (directory.change {
+                            if (add) repository.addPreset(name.trim())
+                            else check(repository.renamePreset(requireNotNull(rename).id, name.trim())) { "子代理组不存在，请重试" }
+                        }) { add = false; rename = null }
+                    })
+                delete?.let { preset ->
+                    AlertDialog(onDismissRequest = { delete = null }, title = { Text("删除子代理组？") },
+                        text = { Text("删除“${preset.name}”不会改变已应用此组的会话配置。") },
+                        dismissButton = { TextButton(onClick = { delete = null }) { Text("取消") } },
+                        confirmButton = { TextButton(enabled = editable, onClick = {
+                            if (directory.change { check(repository.removePreset(preset.id)) { "子代理组不存在，请重试" } }) delete = null
+                        }) { Text("删除", color = MaterialTheme.colorScheme.error) } })
+                }
             }
         }
     }

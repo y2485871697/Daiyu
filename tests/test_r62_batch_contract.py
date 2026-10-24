@@ -16,7 +16,7 @@ class R62BatchContract(unittest.TestCase):
         self.assertNotIn('rememberCoroutineScope()', handler)
         self.assertIn('activeState.commitBack { currentBack() }', handler)
         self.assertIn('val scope = rememberCoroutineScope()', host)
-        self.assertIn('PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, scope)', host)
+        self.assertIn('PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, if (layoutDirection == LayoutDirection.Ltr) 1f else -1f, scope)', host)
         method = (TEST / 'ui/navigation/PageBackGesturesActivityTest.kt').read_text().split('fun testSwipeCommitsOnceThroughTheInnermostHandlerAndTheSwitchAppliesImmediately()', 1)[1].split('fun testShort', 1)[0]
         self.assertIn('assertEquals(1, nestedCount)', method)
         self.assertEqual(3, method.count('assertEquals(1, backCount)'))

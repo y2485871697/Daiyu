@@ -39,6 +39,28 @@ import kotlin.math.abs
 import top.yukonga.miuix.kmp.basic.Text
 
 class PageBackGesturesActivityTest : WiredActivityTestCase() {
+    private var drawingWasEnabled = false
+    private var previewBackground = Color.Black
+
+    override fun setUp() {
+        super.setUp()
+        drawingWasEnabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
+        if (!drawingWasEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+    }
+
+    override fun tearDown() {
+        try { super.tearDown() }
+        finally { if (!drawingWasEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false) }
+    }
+
+    private fun assertDimmedPreviousPage(actual: Color, progress: Float, label: String) {
+        val alpha = 0.9f + 0.1f * progress
+        val light = 0.5f + 0.5f * progress
+        assertEquals("$label red", (alpha + previewBackground.red * (1f - alpha)) * light, actual.red, .025f)
+        assertEquals("$label green", previewBackground.green * (1f - alpha) * light, actual.green, .025f)
+        assertEquals("$label blue", previewBackground.blue * (1f - alpha) * light, actual.blue, .025f)
+    }
+
     private var swipe by mutableStateOf(true)
     private var predictive by mutableStateOf(true)
     private var canBack by mutableStateOf(true)
@@ -58,6 +80,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    previewBackground = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.background
                     val renderedRoute = route
                     PageBackGestureHost(renderedRoute, canBack, swipe, predictive,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
@@ -328,8 +351,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         progress(BackEventCompat.EDGE_LEFT)
         val moving = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
         if (Build.VERSION.SDK_INT >= 34) {
-            assertTrue("predictive initial=$initial moving=$moving", moving.width < initial.width)
-            assertTrue(moving.center.x > initial.center.x)
+            assertEquals("predictive exposes 60% of the page", initial.left + initial.width * .6f, moving.left, 2f)
+            assertEquals(initial.height, moving.height, 1f)
         } else {
             assertTrue(abs(moving.width - initial.width) <= 1f)
             assertTrue(abs(moving.left - initial.left) <= 1f)
@@ -342,7 +365,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         assertEquals(0, nestedCount)
         progress(BackEventCompat.EDGE_RIGHT)
         val fromRight = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
-        if (Build.VERSION.SDK_INT >= 34) assertTrue(fromRight.center.x < initial.center.x)
+        if (Build.VERSION.SDK_INT >= 34) assertEquals("both system edges use the LTR page transition", initial.left + initial.width * .6f, fromRight.left, 2f)
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         assertEquals(1, nestedCount)
         assertEquals(0, backCount)
@@ -394,7 +417,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                 "surface=${ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot}")
             val previewPixels = previewImage.toPixelMap()
             val backdrop = previewPixels[2, previewPixels.height / 2]
-            assertTrue("recorded previous page must be red, actual=$backdrop", backdrop.red > 0.9f && backdrop.blue < 0.1f)
+            assertDimmedPreviousPage(backdrop, .6f, "recorded previous page must be red and dimmed")
             assertEquals("test-page", route)
             assertEquals(0, backCount)
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackCancelled() }
@@ -409,8 +432,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.onNodeWithTag("page-back-departure").assertExists()
             assertEquals("previous-page", route)
             assertEquals(1, backCount)
-            ui.mainClock.advanceTimeBy(240)
+            ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            assertEquals("previous-page", route)
+            assertEquals(1, backCount)
         } finally {
             ui.mainClock.autoAdvance = true
             if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
@@ -449,6 +474,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
             mount(capturePreviousPage = true)
             ui.mainClock.autoAdvance = false
+            val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
             ui.onNodeWithTag("page-back-surface").performTouchInput {
                 down(Offset(width * 0.35f, height * 0.6f))
                 moveTo(Offset(width * 0.90f, height * 0.6f), 200)
@@ -457,7 +483,9 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             val target = ui.onNodeWithTag("page-back-target").assertExists()
             val targetPixels = captureScreenNode(target).toPixelMap()
             val backdrop = targetPixels[2, targetPixels.height / 2]
-            assertTrue("swipe previous page must be red, actual=$backdrop", backdrop.red > 0.9f && backdrop.blue < 0.1f)
+            val moving = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            assertDimmedPreviousPage(backdrop, (moving.left - initial.left) / initial.width,
+                "swipe previous page must be red and dimmed")
             ui.onNodeWithTag("page-back-surface").performTouchInput { up() }
             ui.mainClock.advanceTimeByFrame()
             assertEquals("previous-page", route)
@@ -466,8 +494,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             val departurePixels = captureScreenNode(departure).toPixelMap()
             val outgoing = departurePixels[departurePixels.width / 2, departurePixels.height / 2]
             assertTrue("swipe departure must be blue, actual=$outgoing", outgoing.blue > 0.9f && outgoing.red < 0.1f)
-            ui.mainClock.advanceTimeBy(240)
+            ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            assertEquals("previous-page", route)
+            assertEquals(1, backCount)
         } finally {
             ui.mainClock.autoAdvance = true
             if (!drawingEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
@@ -491,8 +521,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             assertEquals("previous-page", route)
             assertEquals(1, backCount)
             ui.onNodeWithTag("page-back-departure").assertExists()
-            ui.mainClock.advanceTimeBy(240)
+            ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            assertEquals("previous-page", route)
+            assertEquals(1, backCount)
         } finally { ui.mainClock.autoAdvance = true }
     }
 

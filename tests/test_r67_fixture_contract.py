@@ -99,7 +99,7 @@ class R67FixtureContract(unittest.TestCase):
 
         horizontal = source.split('fun testHorizontalSwipeCommitsTheRecordedDepartureWithPredictionDisabled()', 1)[1].split('fun testHorizontalSwipeWithPredictionEnabled', 1)[0]
         for token in ('mount(capturePreviousPage = true)', 'swipe previous page must be red',
-                      'backdrop.red > 0.9f && backdrop.blue < 0.1f', 'swipe departure must be blue',
+                      'assertDimmedPreviousPage(backdrop,', 'swipe departure must be blue',
                       'outgoing.blue > 0.9f && outgoing.red < 0.1f'):
             self.assertIn(token, horizontal)
         self.assertNotIn('Build.VERSION.SDK_INT', horizontal)
@@ -110,7 +110,7 @@ class R67FixtureContract(unittest.TestCase):
             self.assertIn(token, source)
 
         for token in ('source previous page must be red', 'source.red > 0.9f && source.blue < 0.1f',
-                      'recorded previous page must be red', 'backdrop.red > 0.9f && backdrop.blue < 0.1f',
+                      'recorded previous page must be red', 'assertDimmedPreviousPage(backdrop,',
                       'dispatchOnBackCancelled()', 'page-back-departure'):
             self.assertIn(token, source)
 

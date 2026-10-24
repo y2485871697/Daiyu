@@ -50,7 +50,7 @@ internal fun TaskSurfaceSettingsPanel(
         }
     }
     val back = { if (visit.active) onBack() }
-    BackHandler(previewEnabled = false) { back() }
+    BackHandler { back() }
     SettingsScaffoldPage(title = "Agent任务偏好", onBack = back, modifier = modifier) {
         item { SettingsNote("仅影响之后开始的任务，当前任务不变。选择执行位置不等于授权；具体操作仍需相应权限和确认。") }
         item {

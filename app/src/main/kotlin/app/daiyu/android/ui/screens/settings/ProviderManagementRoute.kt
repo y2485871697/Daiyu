@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.navigation.PageBackStack
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.lazy.LazyListScope
@@ -256,278 +257,284 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             permit.revoke(); onBack()
         }
     }
-    BackHandler(previewEnabled = creating == null && !authentication &&
-        ((detail == null && !loading) || initialSlot == ProviderRegistry.PRIMARY)) { back() }
-    val p = permit
-    val enabled = version.let { current(p) && controller.ready && controller.active == null &&
-        !controller.dataBusy && !controller.hasLiveChildTasks() && busy == null && !loading && !checkingRegistry }
-    val modelScrollOwner = detail?.pageUi ?: pausedDraft?.pageUi
-    val modelScrollBehavior = key(modelScrollOwner) { MiuixScrollBehavior() }
-    val d = detail
-    val newProvider = creating
-    if (newProvider != null) key(newProvider) {
-        val draft = newProvider.draft
-        var modelTab by remember { mutableStateOf(false) }
-        val tabs: LazyListScope.() -> Unit = {
-            item("provider-tabs") { ProviderSettingsTabs(modelTab, enabled) { modelTab = it } }
-        }
-        if (modelTab) ProviderEmptyModelsPage("添加提供商", { back() }, tabs,
-            "请先在配置页保存名称、Base URL 和 API Key，再添加或拉取模型。")
-        else ModelSettingsScreen(draft, { if (enabled && creating === newProvider) {
-            newProvider.revoke(); newProvider.draft = it
-        } },
-            onSave = { submitted ->
-                val expected = registry
-                if (enabled && creating === newProvider && newProvider.draft === submitted && expected != null) {
+    PageBackStack(when {
+        creating != null -> "create-provider"
+        authentication -> "provider-authentication"
+        detail != null && initialSlot != ProviderRegistry.PRIMARY -> "provider:${detail!!.editor.slotId}"
+        else -> null
+    }, if (creating != null && authentication) "provider-authentication" else null) {
+        BackHandler(previewEnabled = !loading || initialSlot == ProviderRegistry.PRIMARY) { back() }
+        val p = permit
+        val enabled = version.let { current(p) && controller.ready && controller.active == null &&
+            !controller.dataBusy && !controller.hasLiveChildTasks() && busy == null && !loading && !checkingRegistry }
+        val modelScrollOwner = detail?.pageUi ?: pausedDraft?.pageUi
+        val modelScrollBehavior = key(modelScrollOwner) { MiuixScrollBehavior() }
+        val d = detail
+        val newProvider = creating
+        if (newProvider != null) key(newProvider) {
+            val draft = newProvider.draft
+            var modelTab by remember { mutableStateOf(false) }
+            val tabs: LazyListScope.() -> Unit = {
+                item("provider-tabs") { ProviderSettingsTabs(modelTab, enabled) { modelTab = it } }
+            }
+            if (modelTab) ProviderEmptyModelsPage("添加提供商", { back() }, tabs,
+                "请先在配置页保存名称、Base URL 和 API Key，再添加或拉取模型。")
+            else ModelSettingsScreen(draft, { if (enabled && creating === newProvider) {
+                newProvider.revoke(); newProvider.draft = it
+            } },
+                onSave = { submitted ->
+                    val expected = registry
+                    if (enabled && creating === newProvider && newProvider.draft === submitted && expected != null) {
+                        val value = runCatching {
+                            ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
+                            submitted.providerBalanceConfiguration()?.validateProviderBinding()
+                            require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null)
+                            require(submitted.headerFieldsValid && submitted.bodyFieldsValid)
+                            require(submitted.protocol == submitted.savedProtocol || submitted.protocolChangeAuthorized)
+                            submitted.providerSettings(ModelSettings("", "", "", false)).also { it.validateConnection() }
+                        }
+                        if (value.isFailure) notice = "未保存，请检查名称、连接配置及密钥。"
+                        else mutate(expected, p, completed = { result ->
+                            val added = result.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
+                            open(added.slotId)
+                        }) { repo, revision, admit ->
+                            val created = repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
+                                submitted.protocolChangeAuthorized, enabled = submitted.providerEnabled, admit = admit)
+                            submitted.providerBalanceConfiguration()?.let {
+                                val added = created.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
+                                val runtime = kotlinx.coroutines.runBlocking { controller.providerBalances.get(added.slotId) }
+                                repo.withEditor(repo.editor(added.slotId)) { admit(); kotlinx.coroutines.runBlocking { runtime.save(checkNotNull(submitted.providerBalanceConfiguration(added.slotId))) } }
+                            }
+                            created
+                        }
+                    }
+                }, onFetchCatalog = {}, onBack = { back() }, pageTitle = "添加提供商", providerName = "",
+                headerContent = tabs, showCatalog = false, enabled = enabled, errorText = notice,
+                testBalance = { value, requestCancelled, deliver ->
+                    val configuration = value.providerBalanceConfiguration()
+                    if (!current(p) || !enabled || creating !== newProvider || newProvider.draft !== value ||
+                        requestCancelled() || configuration == null || !configuration.queryEnabled ||
+                        runCatching { configuration.validateProviderBinding() }.isFailure) false
+                    else {
+                        newProvider.revoke()
+                        newProvider.balanceTestJob = scope.launch {
+                            val result = try { controller.providerBalances.queryDraft(configuration) }
+                            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (_: Exception) { app.daiyu.android.balance.BalanceResult.Failed(app.daiyu.android.balance.BalanceFailure.NETWORK) }
+                            if (current(p) && creating === newProvider && newProvider.draft === value && !requestCancelled()) deliver(result)
+                        }
+                        true
+                    }
+                }, testConnection = { value, cancelled, deliver ->
+                    if (!enabled || creating !== newProvider || newProvider.draft !== value || cancelled()) false
+                    else runCatching { value.providerSettings(ModelSettings("", "", "", false)) }.getOrNull()?.let { settings ->
+                        controller.testModelConnection(settings,
+                            { !current(p) || creating !== newProvider || newProvider.draft !== value || cancelled() }, deliver)
+                    } ?: false
+                })
+        } else if (d != null) key(d) {
+            val live = { current(p) && detail === d && d.live.get() }
+            val cancelled = { !p.live.get() || !d.live.get() }
+            val draft = d.draft
+            val saved = d.editing.settings
+            val detailTitle = pageTitleOverride ?: d.name
+            val save: (ModelSettingsDraftUi) -> Unit = { submitted ->
+                if (live() && enabled && d.draft === submitted) {
                     val value = runCatching {
+                        require(submitted.headerFieldsValid && submitted.bodyFieldsValid) { "请先修正请求头或请求体字段。" }
+                        require(submitted.savedProtocol == saved.protocol) { "编辑基线已变化，请重新打开详情。" }
+                        require(submitted.protocol == saved.protocol || submitted.protocolChangeAuthorized) {
+                            "切换协议须重新输入密钥并明确确认"
+                        }
+                        require(!d.editing.requestOptionsUnavailable || submitted.requestOptionsReplacementAuthorized) {
+                            "请求策略已损坏；替换或重置需要明确确认"
+                        }
+                        require(!d.editing.headersUnavailable || submitted.headersReplacementAuthorized) {
+                            "原请求头不可用；替换或清除需要明确确认"
+                        }
                         ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
                         submitted.providerBalanceConfiguration()?.validateProviderBinding()
-                        require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null)
-                        require(submitted.headerFieldsValid && submitted.bodyFieldsValid)
-                        require(submitted.protocol == submitted.savedProtocol || submitted.protocolChangeAuthorized)
-                        submitted.providerSettings(ModelSettings("", "", "", false)).also { it.validateConnection() }
+                        require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null) { "请完善余额查询设置" }
+                        submitted.providerSettings(saved).also { it.validateConnection() }
                     }
-                    if (value.isFailure) notice = "未保存，请检查名称、连接配置及密钥。"
-                    else mutate(expected, p, completed = { result ->
-                        val added = result.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
-                        open(added.slotId)
-                    }) { repo, revision, admit ->
-                        val created = repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
-                            submitted.protocolChangeAuthorized, enabled = submitted.providerEnabled, admit = admit)
-                        submitted.providerBalanceConfiguration()?.let {
-                            val added = created.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
-                            val runtime = kotlinx.coroutines.runBlocking { controller.providerBalances.get(added.slotId) }
-                            repo.withEditor(repo.editor(added.slotId)) { admit(); kotlinx.coroutines.runBlocking { runtime.save(checkNotNull(submitted.providerBalanceConfiguration(added.slotId))) } }
-                        }
-                        created
+                    if (value.isFailure) {
+                        notice = "未保存，请检查输入和必要确认。"
+                    } else {
+                        val ticket = Any(); busy = ticket
+                        try {
+                            controller.saveProviderSettings(d.editor, value.getOrThrow(), d.editing,
+                                submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, d.saveOwner,
+                                headersReplacementAuthorized = submitted.headersReplacementAuthorized,
+                                providerName = submitted.providerName.orEmpty().trim(),
+                                providerEnabled = submitted.providerEnabled,
+                                replaceBalanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId) != d.balanceConfiguration,
+                                balanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId), expectedBalanceConfiguration = d.balanceConfiguration) { success ->
+                                if (busy === ticket) busy = null
+                                if (live()) {
+                                    if (success && initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY) {
+                                        d.revoke(); p.revoke(); onDetailBack()
+                                    } else if (success) open(d.editor.slotId)
+                                    else { closeDetail(); notice = "保存未完整确认，请重新打开详情核对名称与配置。"; refresh() }
+                                }
+                            }
+                        } catch (_: Exception) { if (busy === ticket) busy = null; if (live()) notice = "当前不可保存；未重试。" }
                     }
                 }
-            }, onFetchCatalog = {}, onBack = { back() }, pageTitle = "添加提供商", providerName = "",
-            headerContent = tabs, showCatalog = false, enabled = enabled, errorText = notice,
-            testBalance = { value, requestCancelled, deliver ->
-                val configuration = value.providerBalanceConfiguration()
-                if (!current(p) || !enabled || creating !== newProvider || newProvider.draft !== value ||
-                    requestCancelled() || configuration == null || !configuration.queryEnabled ||
-                    runCatching { configuration.validateProviderBinding() }.isFailure) false
+            }
+            val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled && d.draft === draft) {
+                d.balanceTestJob?.cancel(); d.balanceTestJob = null; d.draft = it
+            } }
+            val balanceTest: ProviderBalanceTester = { value, requestCancelled, deliver ->
+                val configuration = value.providerBalanceConfiguration(d.editor.slotId)?.takeIf { runCatching { it.validateProviderBinding(); it.queryEnabled }.getOrDefault(false) }
+                if (!live() || !enabled || d.draft !== value || requestCancelled() || configuration == null) false
                 else {
-                    newProvider.revoke()
-                    newProvider.balanceTestJob = scope.launch {
-                        val result = try { controller.providerBalances.queryDraft(configuration) }
-                        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    d.balanceTestJob?.cancel()
+                    d.balanceTestJob = scope.launch {
+                        val result = try {
+                            withContext(Dispatchers.IO) {
+                                repo.withEditor(d.editor) { store -> store.modelCatalog.readConfiguration { revision ->
+                                    check(revision == d.configurationRevision && !cancelled() && !requestCancelled())
+                                } }
+                            }
+                            controller.providerBalances.queryDraft(configuration)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                         catch (_: Exception) { app.daiyu.android.balance.BalanceResult.Failed(app.daiyu.android.balance.BalanceFailure.NETWORK) }
-                        if (current(p) && creating === newProvider && newProvider.draft === value && !requestCancelled()) deliver(result)
+                        val stillCurrent = withContext(Dispatchers.IO) { runCatching {
+                            repo.withEditor(d.editor) { store -> store.modelCatalog.readConfiguration { it == d.configurationRevision } }
+                        }.getOrDefault(false) }
+                        if (live() && !requestCancelled() && d.draft === value) {
+                            if (stillCurrent) deliver(result)
+                            else { closeDetail(); notice = "提供商配置已变化，请重新打开详情。"; refresh() }
+                        }
                     }
                     true
                 }
-            }, testConnection = { value, cancelled, deliver ->
-                if (!enabled || creating !== newProvider || newProvider.draft !== value || cancelled()) false
-                else runCatching { value.providerSettings(ModelSettings("", "", "", false)) }.getOrNull()?.let { settings ->
-                    controller.testModelConnection(settings,
-                        { !current(p) || creating !== newProvider || newProvider.draft !== value || cancelled() }, deliver)
-                } ?: false
-            })
-    } else if (d != null) key(d) {
-        val live = { current(p) && detail === d && d.live.get() }
-        val cancelled = { !p.live.get() || !d.live.get() }
-        val draft = d.draft
-        val saved = d.editing.settings
-        val detailTitle = pageTitleOverride ?: d.name
-        val save: (ModelSettingsDraftUi) -> Unit = { submitted ->
-            if (live() && enabled && d.draft === submitted) {
-                val value = runCatching {
-                    require(submitted.headerFieldsValid && submitted.bodyFieldsValid) { "请先修正请求头或请求体字段。" }
-                    require(submitted.savedProtocol == saved.protocol) { "编辑基线已变化，请重新打开详情。" }
-                    require(submitted.protocol == saved.protocol || submitted.protocolChangeAuthorized) {
-                        "切换协议须重新输入密钥并明确确认"
-                    }
-                    require(!d.editing.requestOptionsUnavailable || submitted.requestOptionsReplacementAuthorized) {
-                        "请求策略已损坏；替换或重置需要明确确认"
-                    }
-                    require(!d.editing.headersUnavailable || submitted.headersReplacementAuthorized) {
-                        "原请求头不可用；替换或清除需要明确确认"
-                    }
-                    ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
-                    submitted.providerBalanceConfiguration()?.validateProviderBinding()
-                    require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null) { "请完善余额查询设置" }
-                    submitted.providerSettings(saved).also { it.validateConnection() }
-                }
-                if (value.isFailure) {
-                    notice = "未保存，请检查输入和必要确认。"
-                } else {
-                    val ticket = Any(); busy = ticket
-                    try {
-                        controller.saveProviderSettings(d.editor, value.getOrThrow(), d.editing,
-                            submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, d.saveOwner,
-                            headersReplacementAuthorized = submitted.headersReplacementAuthorized,
-                            providerName = submitted.providerName.orEmpty().trim(),
-                            providerEnabled = submitted.providerEnabled,
-                            replaceBalanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId) != d.balanceConfiguration,
-                            balanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId), expectedBalanceConfiguration = d.balanceConfiguration) { success ->
-                            if (busy === ticket) busy = null
-                            if (live()) {
-                                if (success && d.editor.slotId == ProviderRegistry.PRIMARY) {
-                                    d.revoke(); p.revoke(); onDetailBack()
-                                } else if (success) open(d.editor.slotId)
-                                else { closeDetail(); notice = "保存未完整确认，请重新打开详情核对名称与配置。"; refresh() }
-                            }
-                        }
-                    } catch (_: Exception) { if (busy === ticket) busy = null; if (live()) notice = "当前不可保存；未重试。" }
-                }
             }
-        }
-        val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled && d.draft === draft) {
-            d.balanceTestJob?.cancel(); d.balanceTestJob = null; d.draft = it
-        } }
-        val balanceTest: ProviderBalanceTester = { value, requestCancelled, deliver ->
-            val configuration = value.providerBalanceConfiguration(d.editor.slotId)?.takeIf { runCatching { it.validateProviderBinding(); it.queryEnabled }.getOrDefault(false) }
-            if (!live() || !enabled || d.draft !== value || requestCancelled() || configuration == null) false
-            else {
-                d.balanceTestJob?.cancel()
-                d.balanceTestJob = scope.launch {
-                    val result = try {
-                        withContext(Dispatchers.IO) {
-                            repo.withEditor(d.editor) { store -> store.modelCatalog.readConfiguration { revision ->
-                                check(revision == d.configurationRevision && !cancelled() && !requestCancelled())
-                            } }
-                        }
-                        controller.providerBalances.queryDraft(configuration)
-                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                    catch (_: Exception) { app.daiyu.android.balance.BalanceResult.Failed(app.daiyu.android.balance.BalanceFailure.NETWORK) }
-                    val stillCurrent = withContext(Dispatchers.IO) { runCatching {
-                        repo.withEditor(d.editor) { store -> store.modelCatalog.readConfiguration { it == d.configurationRevision } }
-                    }.getOrDefault(false) }
-                    if (live() && !requestCancelled() && d.draft === value) {
-                        if (stillCurrent) deliver(result)
-                        else { closeDetail(); notice = "提供商配置已变化，请重新打开详情。"; refresh() }
-                    }
-                }
-                true
-            }
-        }
-        fun connectionSettings(value: ModelSettingsDraftUi): ModelSettings? = try { value.providerSettings(saved) }
-            catch (_: IllegalArgumentException) { notice = "自定义请求头无效，请检查后重试。"; null }
-        val connection: ModelConnectionTester = { value, requestCancelled, deliver ->
-            if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
-            else connectionSettings(value)?.let { settings ->
-                controller.testModelConnection(settings,
-                    { cancelled() || requestCancelled() || d.draft !== value }) {
-                    if (live() && !requestCancelled() && d.draft === value) deliver(it)
-                }
-            } ?: false
-        }
-        val connectionModifier = if (engineeringUi) Modifier.semantics {
-            this[RetainedProviderConnectionTest] = draft to connection
-        } else Modifier
-        val actions = LocalCatalogModelActions<CatalogModelParameters>(saved.model,
-            rename = { selection, name, requestCancelled, complete ->
-                if (live() && !requestCancelled()) controller.renameProviderCatalogModel(d.editor, selection, name,
-                    { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
-                else complete(CatalogLocalEditResult.CANCELLED)
-            }, delete = { selection, requestCancelled, complete ->
-                if (live() && !requestCancelled()) controller.deleteProviderCatalogModel(d.editor, selection,
-                    { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
-                else complete(CatalogLocalEditResult.CANCELLED)
-            }, form = { app.daiyu.android.model.catalog.CatalogModelEdit.from(it) },
-            update = { selection, value, requestCancelled, complete ->
-                if (live() && enabled && !requestCancelled()) controller.updateProviderCatalogModel(d.editor, selection, value,
-                    { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
-                else complete(CatalogLocalEditResult.CANCELLED)
-            }, add = { snapshot, value, requestCancelled, complete ->
-                if (live() && enabled && !requestCancelled()) controller.addProviderCatalogModel(d.editor,
-                    snapshot.providerIdentity, snapshot.revision, value, { cancelled() || requestCancelled() }) {
-                    if (live() && !requestCancelled()) complete(it)
-                } else complete(CatalogLocalEditResult.CANCELLED)
-            })
-        val delete: () -> Unit = {
-            if (live() && enabled && registry === d.registry) {
-                confirmation = ProviderConfirm("删除提供商", "确定删除“${d.name}”？若为当前提供商，将清空当前选择，不会自动切换。", true) {
-                    if (live() && enabled && registry === d.registry) {
-                        closeDetail()
-                        mutate(d.registry, p, completed = {
-                            if (d.editor.slotId == ProviderRegistry.PRIMARY) { p.revoke(); onDetailBack() }
-                            else refresh()
-                        }) { repo, revision, admit -> repo.delete(revision, d.editor.slotId, admit) }
-                    }
-                }
-            }
-        }
-        if (d.catalogIdentity == null) {
-            var modelTab by d.pageUi.modelTab
-            val tabs: LazyListScope.() -> Unit = {
-                item(key = "provider-tabs") {
-                    ProviderSettingsTabs(modelTab, enabled) { selected ->
-                        if (live()) modelTab = selected
-                    }
-                }
-            }
-            if (modelTab) {
-                ProviderEmptyModelsPage(detailTitle, { back() }, tabs,
-                    "请先在配置页保存 Base URL 和 API Key，再添加或拉取模型。",
-                    listState = d.pageUi.modelListState, queryState = d.pageUi.modelQuery)
-            } else ModelSettingsScreen(draft, change, save, {}, { back() },
-                modifier = connectionModifier, headerContent = tabs, showCatalog = false,
-                pageTitle = detailTitle, providerName = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
-                credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
-                headersUnavailable = d.editing.headersUnavailable,
-                catalogEnabled = false, errorText = notice, testBalance = balanceTest, onDelete = delete,
-                listState = d.pageUi.configurationListState)
-        } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
-            createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
+            fun connectionSettings(value: ModelSettingsDraftUi): ModelSettings? = try { value.providerSettings(saved) }
+                catch (_: IllegalArgumentException) { notice = "自定义请求头无效，请检查后重试。"; null }
+            val connection: ModelConnectionTester = { value, requestCancelled, deliver ->
                 if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
                 else connectionSettings(value)?.let { settings ->
-                    controller.fetchModelCatalog(settings,
+                    controller.testModelConnection(settings,
                         { cancelled() || requestCancelled() || d.draft !== value }) {
                         if (live() && !requestCancelled() && d.draft === value) deliver(it)
                     }
                 } ?: false
-            }, modifier = connectionModifier, pageTitle = detailTitle, providerName = d.name,
-            // A normal list visit uses the configuration/model split for every provider.
-            twoTabs = true, ownerCurrent = live,
-            enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
-            credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
-            headersUnavailable = d.editing.headersUnavailable,
-            testConnection = connection, localModelActions = actions, testBalance = balanceTest,
-            onDelete = delete, pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior)
-    } else if (loading) {
-        SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
-    } else if (authentication) {
-        ProviderAuthenticationPage(enabled, notice, onBack = { back() }, onApiKey = {
-            if (enabled) creating = NewProviderDraft(ProviderProtocol.RESPONSES)
-        })
-    } else {
-        ProviderDirectoryPage(registry, summaries, query, { query = it }, enabled && registry != null,
-            notice, onBack = { back() },
-            onAddOpenAi = { if (enabled) authentication = true },
-            onAddAnthropic = { if (enabled) creating = NewProviderDraft(ProviderProtocol.MESSAGES) },
-            onOpen = { if (enabled) open(it.slotId) },
-            onManage = { if (enabled) managing = it }, modifier = Modifier.testTag("provider-management"),
-            listState = directoryListState)
-    }
-    val managed = managing
-    val managedRegistry = registry
-    if (managed != null && managedRegistry != null) DaiyuChoiceSheet(managed.name,
-        listOf("配置与模型", if (managed.enabled) "禁用" else "启用", "设为当前提供商", "删除提供商"),
-        onSelect = { index ->
-            if (current(p) && enabled && managing === managed) {
-                managing = null
-                when (index) {
-                    0 -> open(managed.slotId)
-                    1 -> mutate(managedRegistry, p) { repo, revision, admit ->
-                        repo.setEnabled(revision, managed.slotId, !managed.enabled, admit)
-                    }
-                    2 -> if (managed.enabled && managedRegistry.activeSlotId != managed.slotId) {
-                        confirmation = ProviderConfirm("切换提供商", "后续新运行将使用此提供商的已保存配置。", false) {
-                            mutate(managedRegistry, p) { repo, revision, admit -> repo.activate(revision, managed.slotId, admit) }
+            }
+            val connectionModifier = if (engineeringUi) Modifier.semantics {
+                this[RetainedProviderConnectionTest] = draft to connection
+            } else Modifier
+            val actions = LocalCatalogModelActions<CatalogModelParameters>(saved.model,
+                rename = { selection, name, requestCancelled, complete ->
+                    if (live() && !requestCancelled()) controller.renameProviderCatalogModel(d.editor, selection, name,
+                        { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
+                    else complete(CatalogLocalEditResult.CANCELLED)
+                }, delete = { selection, requestCancelled, complete ->
+                    if (live() && !requestCancelled()) controller.deleteProviderCatalogModel(d.editor, selection,
+                        { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
+                    else complete(CatalogLocalEditResult.CANCELLED)
+                }, form = { app.daiyu.android.model.catalog.CatalogModelEdit.from(it) },
+                update = { selection, value, requestCancelled, complete ->
+                    if (live() && enabled && !requestCancelled()) controller.updateProviderCatalogModel(d.editor, selection, value,
+                        { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
+                    else complete(CatalogLocalEditResult.CANCELLED)
+                }, add = { snapshot, value, requestCancelled, complete ->
+                    if (live() && enabled && !requestCancelled()) controller.addProviderCatalogModel(d.editor,
+                        snapshot.providerIdentity, snapshot.revision, value, { cancelled() || requestCancelled() }) {
+                        if (live() && !requestCancelled()) complete(it)
+                    } else complete(CatalogLocalEditResult.CANCELLED)
+                })
+            val delete: () -> Unit = {
+                if (live() && enabled && registry === d.registry) {
+                    confirmation = ProviderConfirm("删除提供商", "确定删除“${d.name}”？若为当前提供商，将清空当前选择，不会自动切换。", true) {
+                        if (live() && enabled && registry === d.registry) {
+                            closeDetail()
+                            mutate(d.registry, p, completed = {
+                                if (initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY) { p.revoke(); onDetailBack() }
+                                else refresh()
+                            }) { repo, revision, admit -> repo.delete(revision, d.editor.slotId, admit) }
                         }
-                    }
-                    3 -> confirmation = ProviderConfirm("删除提供商", "将移除注册并撤销旧编辑入口；若为当前提供商则清空选择，不自动切换。不会安全擦除原加密配置。", true) {
-                        mutate(managedRegistry, p) { repo, revision, admit -> repo.delete(revision, managed.slotId, admit) }
                     }
                 }
             }
-        }, onDismiss = { managing = null })
-    val confirm = confirmation
-    if (confirm != null) DaiyuConfirmDialog(confirm.title, confirm.message, "确认", confirm.destructive,
-        onConfirm = { if (confirmation === confirm && current(p) && enabled) { confirmation = null; confirm.action() } },
-        onDismiss = { if (confirmation === confirm) confirmation = null })
+            if (d.catalogIdentity == null) {
+                var modelTab by d.pageUi.modelTab
+                val tabs: LazyListScope.() -> Unit = {
+                    item(key = "provider-tabs") {
+                        ProviderSettingsTabs(modelTab, enabled) { selected ->
+                            if (live()) modelTab = selected
+                        }
+                    }
+                }
+                if (modelTab) {
+                    ProviderEmptyModelsPage(detailTitle, { back() }, tabs,
+                        "请先在配置页保存 Base URL 和 API Key，再添加或拉取模型。",
+                        listState = d.pageUi.modelListState, queryState = d.pageUi.modelQuery)
+                } else ModelSettingsScreen(draft, change, save, {}, { back() },
+                    modifier = connectionModifier, headerContent = tabs, showCatalog = false,
+                    pageTitle = detailTitle, providerName = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
+                    credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
+                    headersUnavailable = d.editing.headersUnavailable,
+                    catalogEnabled = false, errorText = notice, testBalance = balanceTest, onDelete = delete,
+                    listState = d.pageUi.configurationListState)
+            } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
+                createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
+                    if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
+                    else connectionSettings(value)?.let { settings ->
+                        controller.fetchModelCatalog(settings,
+                            { cancelled() || requestCancelled() || d.draft !== value }) {
+                            if (live() && !requestCancelled() && d.draft === value) deliver(it)
+                        }
+                    } ?: false
+                }, modifier = connectionModifier, pageTitle = detailTitle, providerName = d.name,
+                // A normal list visit uses the configuration/model split for every provider.
+                twoTabs = true, ownerCurrent = live,
+                enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
+                credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
+                headersUnavailable = d.editing.headersUnavailable,
+                testConnection = connection, localModelActions = actions, testBalance = balanceTest,
+                onDelete = delete, pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior)
+        } else if (loading) {
+            SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
+        } else if (authentication) {
+            ProviderAuthenticationPage(enabled, notice, onBack = { back() }, onApiKey = {
+                if (enabled) creating = NewProviderDraft(ProviderProtocol.RESPONSES)
+            })
+        } else {
+            ProviderDirectoryPage(registry, summaries, query, { query = it }, enabled && registry != null,
+                notice, onBack = { back() },
+                onAddOpenAi = { if (enabled) authentication = true },
+                onAddAnthropic = { if (enabled) creating = NewProviderDraft(ProviderProtocol.MESSAGES) },
+                onOpen = { if (enabled) open(it.slotId) },
+                onManage = { if (enabled) managing = it }, modifier = Modifier.testTag("provider-management"),
+                listState = directoryListState)
+        }
+        val managed = managing
+        val managedRegistry = registry
+        if (managed != null && managedRegistry != null) DaiyuChoiceSheet(managed.name,
+            listOf("配置与模型", if (managed.enabled) "禁用" else "启用", "设为当前提供商", "删除提供商"),
+            onSelect = { index ->
+                if (current(p) && enabled && managing === managed) {
+                    managing = null
+                    when (index) {
+                        0 -> open(managed.slotId)
+                        1 -> mutate(managedRegistry, p) { repo, revision, admit ->
+                            repo.setEnabled(revision, managed.slotId, !managed.enabled, admit)
+                        }
+                        2 -> if (managed.enabled && managedRegistry.activeSlotId != managed.slotId) {
+                            confirmation = ProviderConfirm("切换提供商", "后续新运行将使用此提供商的已保存配置。", false) {
+                                mutate(managedRegistry, p) { repo, revision, admit -> repo.activate(revision, managed.slotId, admit) }
+                            }
+                        }
+                        3 -> confirmation = ProviderConfirm("删除提供商", "将移除注册并撤销旧编辑入口；若为当前提供商则清空选择，不自动切换。不会安全擦除原加密配置。", true) {
+                            mutate(managedRegistry, p) { repo, revision, admit -> repo.delete(revision, managed.slotId, admit) }
+                        }
+                    }
+                }
+            }, onDismiss = { managing = null })
+        val confirm = confirmation
+        if (confirm != null) DaiyuConfirmDialog(confirm.title, confirm.message, "确认", confirm.destructive,
+            onConfirm = { if (confirmation === confirm && current(p) && enabled) { confirmation = null; confirm.action() } },
+            onDismiss = { if (confirmation === confirm) confirmation = null })
+    }
 }

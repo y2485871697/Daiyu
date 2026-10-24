@@ -54,7 +54,7 @@ internal fun SettingsSystemAccessPage(
         onDispose { visit.active = false; lifecycle.removeObserver(observer) }
     }
     val back: () -> Unit = { if (current()) onBack() }
-    BackHandler(previewEnabled = false) { back() }
+    BackHandler { back() }
     if (page == SettingsLocalPage.SHIZUKU_ACCESS) {
         ShizukuScreen(application.shizuku, session = null, onBack = back,
             onReady = { run, _ -> run.close() })

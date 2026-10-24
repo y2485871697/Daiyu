@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.navigation.PageBackStack
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -68,158 +69,160 @@ import kotlinx.coroutines.withContext
             else -> { owner.revoke(); onBack() }
         }
     }
-    app.daiyu.android.ui.navigation.PageBackHandler(previewEnabled = !editing && selectedId == null) { back() }
-    fun save(remove: Boolean) {
-        val before = snapshot ?: return
-        if (busy || !current()) return
-        val value = try {
-            val old = before.servers.singleOrNull { it.id == id }
-            val list = before.servers.filterNot { it.id == id }
-            if (remove) { require(old != null); list }
-            else {
-                val secret = if (bearer.isEmpty()) old?.bearer.orEmpty() else bearer
-                val sameConnection = old != null && old.endpoint == endpoint && old.bearer == secret
-                list + McpServer(id, label, endpoint, secret, sameConnection && old!!.enabled,
-                    if (sameConnection) old!!.catalog else emptyList(), if (sameConnection) old!!.allowedTools else emptySet())
-            }
-        } catch (_: Exception) { status = "配置无效，请检查名称和 HTTPS 地址。"; return }
-        busy = true
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { check(owner.current()); store.save(value, owner, before) }
-            }
-            if (current()) {
-                busy = false; bearer = ""
-                if (result.isSuccess) {
-                    snapshot = result.getOrThrow(); editing = false; deleting = false
-                    selectedId = if (remove) null else id
-                    status = "已保存；旧的本轮批准已失效，尚未连接服务器。"
+    PageBackStack(selectedId?.let { "detail:$it" }) {
+        app.daiyu.android.ui.navigation.PageBackHandler(previewEnabled = !editing) { back() }
+        fun save(remove: Boolean) {
+            val before = snapshot ?: return
+            if (busy || !current()) return
+            val value = try {
+                val old = before.servers.singleOrNull { it.id == id }
+                val list = before.servers.filterNot { it.id == id }
+                if (remove) { require(old != null); list }
+                else {
+                    val secret = if (bearer.isEmpty()) old?.bearer.orEmpty() else bearer
+                    val sameConnection = old != null && old.endpoint == endpoint && old.bearer == secret
+                    list + McpServer(id, label, endpoint, secret, sameConnection && old!!.enabled,
+                        if (sameConnection) old!!.catalog else emptyList(), if (sameConnection) old!!.allowedTools else emptySet())
                 }
-                else status = "保存失败或页面/配置已过期；请重新打开设置。"
+            } catch (_: Exception) { status = "配置无效，请检查名称和 HTTPS 地址。"; return }
+            busy = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { check(owner.current()); store.save(value, owner, before) }
+                }
+                if (current()) {
+                    busy = false; bearer = ""
+                    if (result.isSuccess) {
+                        snapshot = result.getOrThrow(); editing = false; deleting = false
+                        selectedId = if (remove) null else id
+                        status = "已保存；旧的本轮批准已失效，尚未连接服务器。"
+                    }
+                    else status = "保存失败或页面/配置已过期；请重新打开设置。"
+                }
             }
         }
-    }
-    fun refresh(before: McpSettings, server: McpServer) {
-        if (busy || !current() || snapshot !== before) return
-        busy = true
-        scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { managementFactory(store).refresh(before, server.id, owner) } }
-            if (current()) {
-                busy = false
-                if (result.isSuccess) { snapshot = result.getOrThrow(); status = "工具目录已刷新；未授予任何工具权限。" }
-                else status = "目录刷新失败或已过期；保留上次目录，未授予权限。"
+        fun refresh(before: McpSettings, server: McpServer) {
+            if (busy || !current() || snapshot !== before) return
+            busy = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { runCatching { managementFactory(store).refresh(before, server.id, owner) } }
+                if (current()) {
+                    busy = false
+                    if (result.isSuccess) { snapshot = result.getOrThrow(); status = "工具目录已刷新；未授予任何工具权限。" }
+                    else status = "目录刷新失败或已过期；保留上次目录，未授予权限。"
+                }
             }
         }
-    }
-    val selected = snapshot?.servers?.singleOrNull { it.id == selectedId }
-    fun edit(server: McpServer?) {
-        if (busy || !current()) return
-        id = server?.id ?: "server-${java.util.UUID.randomUUID().toString().take(24)}"
-        label = server?.label.orEmpty(); endpoint = server?.endpoint.orEmpty(); bearer = ""
-        editing = true
-    }
-    SettingsScaffoldPage(title = selected?.label ?: "MCP 服务器", onBack = { back() },
-        modifier = Modifier.testTag("mcp-settings").semantics { stateDescription = status }, actions = {
+        val selected = snapshot?.servers?.singleOrNull { it.id == selectedId }
+        fun edit(server: McpServer?) {
+            if (busy || !current()) return
+            id = server?.id ?: "server-${java.util.UUID.randomUUID().toString().take(24)}"
+            label = server?.label.orEmpty(); endpoint = server?.endpoint.orEmpty(); bearer = ""
+            editing = true
+        }
+        SettingsScaffoldPage(title = selected?.label ?: "MCP 服务器", onBack = { back() },
+            modifier = Modifier.testTag("mcp-settings").semantics { stateDescription = status }, actions = {
+                if (selected == null) {
+                    IconButton(onClick = { edit(null) }, enabled = !busy && snapshot != null,
+                        modifier = Modifier.size(48.dp).testTag("mcp-settings-add")) {
+                        DaiyuIcon(DaiyuIcons.Add, contentDescription = "添加服务器",
+                            tint = MiuixTheme.colorScheme.onSurface, size = 24.dp)
+                    }
+                } else {
+                    app.daiyu.android.ui.haptics.miuix.TextButton(text = "刷新",
+                        enabled = !busy && snapshot != null,
+                        modifier = Modifier.testTag("mcp-refresh:${selected.id}"),
+                        onClick = { snapshot?.let { refresh(it, selected) } })
+                }
+            }) {
+            if (busy || status != "保存只配置服务器，不授予工具权限。") item(key = "status") {
+                top.yukonga.miuix.kmp.basic.Text(status,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp).testTag("mcp-settings-status"),
+                    style = MiuixTheme.textStyles.body2)
+            }
             if (selected == null) {
-                IconButton(onClick = { edit(null) }, enabled = !busy && snapshot != null,
-                    modifier = Modifier.size(48.dp).testTag("mcp-settings-add")) {
-                    DaiyuIcon(DaiyuIcons.Add, contentDescription = "添加服务器",
-                        tint = MiuixTheme.colorScheme.onSurface, size = 24.dp)
+                item(key = "servers-heading") {
+                    top.yukonga.miuix.kmp.basic.Text("服务器 · ${snapshot?.servers?.size ?: 0}",
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).testTag("mcp-settings-count"),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                }
+                if (snapshot?.servers?.isEmpty() == true) item(key = "empty") {
+                    Column(Modifier.padding(horizontal = 12.dp).fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp)).background(conversationAgentColors().soft)
+                        .testTag("mcp-settings-empty").padding(horizontal = 20.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        top.yukonga.miuix.kmp.basic.Text("还没有 MCP 服务器", style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        top.yukonga.miuix.kmp.basic.Text("点击添加服务器", style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        ConversationAgentButton("添加服务器", enabled = !busy, modifier = Modifier.testTag("mcp-settings-empty-add")) { edit(null) }
+                    }
+                }
+                snapshot?.servers?.forEach { server ->
+                    item(key = server.id) {
+                        SettingsCard {
+                            SettingsRow(server.label, summary = server.endpoint,
+                                tag = "mcp-server:${server.id}",
+                                onClick = { if (!busy && current()) selectedId = server.id })
+                        }
+                    }
                 }
             } else {
-                app.daiyu.android.ui.haptics.miuix.TextButton(text = "刷新",
-                    enabled = !busy && snapshot != null,
-                    modifier = Modifier.testTag("mcp-refresh:${selected.id}"),
-                    onClick = { snapshot?.let { refresh(it, selected) } })
-            }
-        }) {
-        if (busy || status != "保存只配置服务器，不授予工具权限。") item(key = "status") {
-            top.yukonga.miuix.kmp.basic.Text(status,
-                modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp).testTag("mcp-settings-status"),
-                style = MiuixTheme.textStyles.body2)
-        }
-        if (selected == null) {
-            item(key = "servers-heading") {
-                top.yukonga.miuix.kmp.basic.Text("服务器 · ${snapshot?.servers?.size ?: 0}",
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).testTag("mcp-settings-count"),
-                    style = MiuixTheme.textStyles.body2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            }
-            if (snapshot?.servers?.isEmpty() == true) item(key = "empty") {
-                Column(Modifier.padding(horizontal = 12.dp).fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp)).background(conversationAgentColors().soft)
-                    .testTag("mcp-settings-empty").padding(horizontal = 20.dp, vertical = 28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    top.yukonga.miuix.kmp.basic.Text("还没有 MCP 服务器", style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    top.yukonga.miuix.kmp.basic.Text("点击添加服务器", style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    ConversationAgentButton("添加服务器", enabled = !busy, modifier = Modifier.testTag("mcp-settings-empty-add")) { edit(null) }
-                }
-            }
-            snapshot?.servers?.forEach { server ->
-                item(key = server.id) {
+                item(key = "server-settings") {
+                    SettingsSectionTitle("服务器设置")
                     SettingsCard {
-                        SettingsRow(server.label, summary = server.endpoint,
-                            tag = "mcp-server:${server.id}",
-                            onClick = { if (!busy && current()) selectedId = server.id })
+                        SettingsRow("连接设置", summary = selected.endpoint,
+                            showChevron = true, onClick = if (busy) null else ({ edit(selected) }), tag = "mcp-settings-edit")
+                    }
+                }
+                item(key = "tools-heading") { SettingsSectionTitle("工具（${selected.catalog.size}）") }
+                if (selected.catalog.isEmpty()) item(key = "tools-empty") { SettingsNote("尚无工具，请刷新工具目录。") }
+                selected.catalog.forEach { tool ->
+                    item(key = "tool:${tool.name}") {
+                        SettingsCard { SettingsRow(tool.name, summary = tool.description) }
+                    }
+                }
+                item(key = "delete") {
+                    SettingsSectionTitle("服务器管理")
+                    SettingsCard {
+                        SettingsRow("删除服务器", tag = "mcp-settings-delete",
+                            showChevron = true, onClick = if (busy) null else ({ deleting = true }))
                     }
                 }
             }
-        } else {
-            item(key = "server-settings") {
-                SettingsSectionTitle("服务器设置")
-                SettingsCard {
-                    SettingsRow("连接设置", summary = selected.endpoint,
-                        showChevron = true, onClick = if (busy) null else ({ edit(selected) }), tag = "mcp-settings-edit")
-                }
-            }
-            item(key = "tools-heading") { SettingsSectionTitle("工具（${selected.catalog.size}）") }
-            if (selected.catalog.isEmpty()) item(key = "tools-empty") { SettingsNote("尚无工具，请刷新工具目录。") }
-            selected.catalog.forEach { tool ->
-                item(key = "tool:${tool.name}") {
-                    SettingsCard { SettingsRow(tool.name, summary = tool.description) }
-                }
-            }
-            item(key = "delete") {
-                SettingsSectionTitle("服务器管理")
-                SettingsCard {
-                    SettingsRow("删除服务器", tag = "mcp-settings-delete",
-                        showChevron = true, onClick = if (busy) null else ({ deleting = true }))
+        }
+        if (editing) WindowDialog(show = true, title = if (selected == null) "添加服务器" else "连接设置",
+            onDismissRequest = { editing = false; bearer = "" }) {
+            val colors = conversationAgentColors()
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("mcp-settings-form"),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                McpConnectionField(label, { label = it }, "名称", enabled = !busy,
+                    modifier = Modifier.managedInput().testTag("mcp-server-label"), cursorBrush = imeCursorBrush(colors.accent))
+                McpConnectionField(endpoint, { endpoint = it }, "服务器地址", enabled = !busy,
+                    modifier = Modifier.managedInput().testTag("mcp-server-endpoint"), cursorBrush = imeCursorBrush(colors.accent))
+                McpConnectionField(bearer, { bearer = it }, if (selected == null) "Bearer Token（可选）" else "Bearer Token（留空保留）",
+                    enabled = !busy, visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.managedInput().testTag("mcp-server-bearer"), cursorBrush = imeCursorBrush(colors.accent))
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).testTag("mcp-settings-actions"),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ConversationAgentButton("取消", modifier = Modifier.weight(1f).fillMaxHeight().testTag("mcp-settings-cancel")) {
+                        editing = false; bearer = ""
+                    }
+                    ConversationAgentButton(if (selected == null) "添加服务器" else "保存", primary = true,
+                        enabled = !busy && snapshot != null,
+                        modifier = Modifier.weight(1f).fillMaxHeight().testTag("mcp-settings-save")) { save(false) }
                 }
             }
         }
+        if (deleting && selected != null) DaiyuConfirmDialog(title = "删除服务器", confirmText = "删除",
+            message = "删除 ${selected.label} 及其凭据？", destructive = true,
+            onDismiss = { deleting = false }, onConfirm = {
+                id = selected.id
+                save(true)
+            })
     }
-    if (editing) WindowDialog(show = true, title = if (selected == null) "添加服务器" else "连接设置",
-        onDismissRequest = { editing = false; bearer = "" }) {
-        val colors = conversationAgentColors()
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("mcp-settings-form"),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            McpConnectionField(label, { label = it }, "名称", enabled = !busy,
-                modifier = Modifier.managedInput().testTag("mcp-server-label"), cursorBrush = imeCursorBrush(colors.accent))
-            McpConnectionField(endpoint, { endpoint = it }, "服务器地址", enabled = !busy,
-                modifier = Modifier.managedInput().testTag("mcp-server-endpoint"), cursorBrush = imeCursorBrush(colors.accent))
-            McpConnectionField(bearer, { bearer = it }, if (selected == null) "Bearer Token（可选）" else "Bearer Token（留空保留）",
-                enabled = !busy, visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.managedInput().testTag("mcp-server-bearer"), cursorBrush = imeCursorBrush(colors.accent))
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).testTag("mcp-settings-actions"),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ConversationAgentButton("取消", modifier = Modifier.weight(1f).fillMaxHeight().testTag("mcp-settings-cancel")) {
-                    editing = false; bearer = ""
-                }
-                ConversationAgentButton(if (selected == null) "添加服务器" else "保存", primary = true,
-                    enabled = !busy && snapshot != null,
-                    modifier = Modifier.weight(1f).fillMaxHeight().testTag("mcp-settings-save")) { save(false) }
-            }
-        }
-    }
-    if (deleting && selected != null) DaiyuConfirmDialog(title = "删除服务器", confirmText = "删除",
-        message = "删除 ${selected.label} 及其凭据？", destructive = true,
-        onDismiss = { deleting = false }, onConfirm = {
-            id = selected.id
-            save(true)
-        })
 }
 
 @Composable

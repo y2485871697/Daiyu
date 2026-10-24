@@ -6,7 +6,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -18,7 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.shape.RoundedCornerShape
+import top.yukonga.miuix.kmp.squircle.absoluteSquircleClip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -39,16 +38,20 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
@@ -59,9 +62,10 @@ import kotlin.math.abs
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: Boolean,
+private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: Boolean, val returnDirection: Float,
     private val scope: kotlinx.coroutines.CoroutineScope,
     val commit: (Float, Boolean, Float, () -> Unit) -> Unit) {
+    var predictiveGeneration = 0L
     var alive = true
     var transitionBlocked = false
     class PreviewOwner(enabled: Boolean, previewEnabled: Boolean) {
@@ -107,7 +111,7 @@ private class PageBackGestureState(val predictiveEnabled: Boolean, val resumed: 
         this.predictive = predictive
         this.direction = direction
         active = true
-        progress = if (previewAllowed) value.coerceIn(0f, 1f) else 0f
+        progress = if (previewAllowed) value.coerceIn(0f, 0.999f) else 0f
     }
 
     fun reset(owner: Any? = null) {
@@ -173,6 +177,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
                 session.started = true
                 val activeState = currentState
                 if (!activeState.predictiveEnabled) return
+                activeState.predictiveGeneration++
                 if (!activeState.alive || !currentEnabled || activeState.transitionBlocked || activeState.committing) {
                     session.rejected = true
                     return
@@ -180,7 +185,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
                 val owner = Any()
                 session.gesture = activeState to owner
                 activeState.update(owner, 0f, predictive = true,
-                    direction = if (backEvent.swipeEdge == BackEventCompat.EDGE_RIGHT) -1f else 1f)
+                    direction = activeState.returnDirection)
             }
 
             override fun handleOnBackProgressed(backEvent: BackEventCompat) {
@@ -193,7 +198,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
                     return
                 }
                 activeState.update(owner, if (currentPreview) backEvent.progress else 0f, predictive = true,
-                    direction = if (backEvent.swipeEdge == BackEventCompat.EDGE_RIGHT) -1f else 1f)
+                    direction = activeState.returnDirection)
             }
 
             override fun handleOnBackCancelled() {
@@ -243,6 +248,14 @@ internal fun PageBackGestureHost(
     val background = MiuixTheme.colorScheme.background
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
+    val view = LocalView.current
+    val context = LocalContext.current
+    val windowInsets = view.rootWindowInsets
+    val cornerRadius = remember(context, windowInsets, density) {
+        val radius = if (Build.VERSION.SDK_INT >= 31) windowInsets?.getRoundedCorner(android.view.RoundedCorner.POSITION_BOTTOM_LEFT)?.radius?.takeIf { it > 0 } else null
+        val resource = context.resources.getIdentifier("rounded_corner_radius_bottom", "dimen", "android")
+        with(density) { (radius ?: if (resource > 0) context.resources.getDimensionPixelSize(resource) else 0).toDp() }
+    }
     val graphics = LocalGraphicsContext.current
     val configuration = LocalConfiguration.current
     val colors = MiuixTheme.colorScheme
@@ -254,31 +267,36 @@ internal fun PageBackGestureHost(
         PageBackPreviewLayers(graphics, scope)
     }
     DisposableEffect(layers) { onDispose { layers.close() } }
-    val departure = remember(layers, routeKey) { layers.enter(routeKey) }
-    val frame = remember(layers, routeKey) { layers.frame(routeKey) }
+    val stack = remember(routeKey) { PageBackStackRegistry() }
+    val stackPath = remember(stack) { PageBackStackPath(stack) }
+    stack.freezeCurrent = { layers.freezeCurrent() }
+    val visualRouteKey = stack.routeKey(routeKey)
+    val visualBackTargetKey = stack.targetKey(routeKey, backTargetKey)
+    val departure = remember(layers, visualRouteKey) { layers.enter(visualRouteKey) }
+    val frame = remember(layers, visualRouteKey) { layers.frame(visualRouteKey) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    val target = layers.find(backTargetKey, viewport)
+    val target = layers.find(visualBackTargetKey, viewport)
     var departing by remember(departure) { mutableStateOf(departure != null) }
     val exit = remember(departure) { Animatable(0f) }
     LaunchedEffect(departure) {
         if (departure != null) {
             departure.frame.capture?.join()
-            exit.animateTo(1f, tween(180))
+            exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))
             departing = false
         }
     }
-    SideEffect { layers.trim(frame, target, departure.takeIf { departing }) }
+    SideEffect { layers.trim(frame, target, departure.takeIf { departing }, stack.ancestorKeys(routeKey, backTargetKey)) }
     val currentTarget by rememberUpdatedState(target)
-    val state = remember(routeKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, backTargetKey) {
-        PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, scope) { value, predictive, direction, back ->
-            val request = if (value > 0f && currentTarget != null && backTargetKey != null) {
-                layers.prepare(frame, backTargetKey, value, predictive, direction)
+    val state = remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey) {
+        PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, if (layoutDirection == LayoutDirection.Ltr) 1f else -1f, scope) { value, predictive, direction, back ->
+            val request = if (value > 0f && currentTarget != null && visualBackTargetKey != null) {
+                layers.prepare(frame, visualBackTargetKey, value, predictive, direction)
             } else null
             try { back() } finally {
                 if (request != null) scope.launch {
                     withFrameNanos { }
                     // A veto or an asynchronous save must not be treated as a completed pop.
-                    if (layers.currentKey == routeKey) layers.abandon(request)
+                    if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)
                 }
             }
         }
@@ -290,36 +308,43 @@ internal fun PageBackGestureHost(
     val currentBack by rememberUpdatedState(dispatchBack)
     val progress by key(state) {
         animateFloatAsState(state.progress,
-            animationSpec = if (state.active) snap() else spring(), label = "page-back-reset")
+            animationSpec = if (state.active) snap() else spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f), label = "page-back-reset")
     }
     state.transitionBlocked = departing || (state.previewAllowed && !state.active && progress > 0f)
-    CompositionLocalProvider(LocalPageBackGesture provides state) {
-        Box(modifier.fillMaxSize().clipToBounds().background(background).onSizeChanged { viewport = it }.then(
+    CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackStackPath provides stackPath) {
+        Box(modifier.fillMaxSize().testTag("page-back-host").clipToBounds().background(background).onSizeChanged { viewport = it }.then(
             if (canNavigateBack && swipeDismissEnabled && resumed && !imeVisible && !departing) Modifier.pointerInput(state, layoutDirection) {
                 val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val gestureWidth = size.width
-                    val threshold = maxOf(72.dp.toPx(), gestureWidth * 0.30f)
+                    val threshold = gestureWidth * 0.5f + viewConfiguration.touchSlop
                     if (state.active || state.transitionBlocked || state.committing || state.dispatching) return@awaitEachGesture
                     val owner = Any()
+                    val predictiveGeneration = state.predictiveGeneration
+                    val velocity = VelocityTracker().also { it.addPosition(down.uptimeMillis, down.position) }
                     var claimed = false
                     var consumedMovement = false
                     try {
                         while (true) {
                             // Let children arbitrate first; after claiming, consume before their Main pass.
                             val event = awaitPointerEvent(if (claimed) PointerEventPass.Initial else PointerEventPass.Final)
-                            if (event.changes.size != 1 || !state.alive || (state.active && state.predictive)) break
+                            if (event.changes.size != 1 || !state.alive || state.predictiveGeneration != predictiveGeneration || (state.active && state.predictive)) break
                             val change = event.changes.single()
                             if (change.id != down.id) break
+                            velocity.addPosition(change.uptimeMillis, change.position)
                             val dx = (change.position.x - down.position.x) * direction
                             val dy = abs(change.position.y - down.position.y)
                             if (!change.pressed) {
                                 if (claimed && change.changedToUp()) {
                                     change.consume()
-                                    if (dx >= threshold && state.alive) {
-                                        state.dispatchBack { currentBack() }
+                                    val screensPerSecond = velocity.calculateVelocity().x * direction / gestureWidth
+                                    val commit = when {
+                                        screensPerSecond >= 1f -> true
+                                        screensPerSecond <= -1f -> false
+                                        else -> dx >= threshold
                                     }
+                                    if (commit && state.alive) state.dispatchBack { currentBack() }
                                 }
                                 break
                             }
@@ -337,7 +362,7 @@ internal fun PageBackGestureHost(
                                 if (dx <= viewConfiguration.touchSlop || dx <= dy * 1.5f) continue
                                 claimed = true
                             }
-                            val distance = dx.coerceAtLeast(0f)
+                            val distance = (dx - viewConfiguration.touchSlop).coerceAtLeast(0f)
                             state.update(owner, distance / gestureWidth, predictive = false, direction = direction)
                             change.consume()
                         }
@@ -347,20 +372,29 @@ internal fun PageBackGestureHost(
                 }
             } else Modifier,
         )) {
-            if (target != null && state.previewAllowed && progress > 0f) Box(Modifier.fillMaxSize().drawBehind {
-                target.image?.let { drawImage(it) }
-            }.testTag("page-back-target"))
+            if (target != null && state.previewAllowed && progress > 0f) {
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    translationX = -state.direction * size.width * 0.25f * (1f - progress)
+                    alpha = 1f - 0.1f * (1f - progress)
+                }.drawBehind {
+                    target.image?.let { drawImage(it) }
+                }.testTag("page-back-target"))
+                Box(Modifier.fillMaxSize().drawBehind {
+                    drawRect(Color.Black, alpha = 0.5f * (1f - progress))
+                }.testTag("page-back-scrim"))
+            }
             key(contentKey) {
                 Box(Modifier.fillMaxSize().graphicsLayer {
                     val visibleProgress = if (target != null && state.previewAllowed) progress else 0f
-                    translationX = state.direction * size.width * visibleProgress * if (state.predictive) 0.12f else 1f
-                    val scale = if (state.predictive) 1f - 0.06f * visibleProgress else 1f
-                    scaleX = scale
-                    scaleY = scale
-                    shape = RoundedCornerShape(20.dp)
-                    clip = visibleProgress > 0f
-                    shadowElevation = 8.dp.toPx() * visibleProgress
-                }.testTag("page-back-surface").layout { measurable, constraints ->
+                    if (departure != null && departing) {
+                        val value = departure.progress + (1f - departure.progress) * exit.value
+                        translationX = -departure.direction * size.width * 0.25f * (1f - value)
+                        alpha = 1f - 0.1f * (1f - value)
+                    } else translationX = kotlin.math.round(state.direction * size.width * visibleProgress)
+                }.then(if (target != null && state.previewAllowed && progress > 0f) {
+                    if (state.direction > 0f) Modifier.absoluteSquircleClip(topLeft = cornerRadius, topRight = 0.dp, bottomRight = 0.dp, bottomLeft = cornerRadius)
+                    else Modifier.absoluteSquircleClip(topLeft = 0.dp, topRight = cornerRadius, bottomRight = cornerRadius, bottomLeft = 0.dp)
+                } else Modifier).testTag("page-back-surface").layout { measurable, constraints ->
                     val placeable = measurable.measure(constraints)
                     layout(placeable.width, placeable.height) {
                         frame.size = IntSize(placeable.width, placeable.height)
@@ -368,16 +402,15 @@ internal fun PageBackGestureHost(
                     }
                 }.background(background)) { content() }
             }
+            if (departure != null && departing) Box(Modifier.fillMaxSize().drawBehind {
+                val value = departure.progress + (1f - departure.progress) * exit.value
+                drawRect(Color.Black, alpha = 0.5f * (1f - value))
+            }.testTag("page-back-departure-scrim"))
             if (departure != null && departing) Box(Modifier.fillMaxSize().graphicsLayer {
-                val fromX = departure.direction * size.width * departure.progress * if (departure.predictive) 0.12f else 1f
-                translationX = fromX + (departure.direction * size.width - fromX) * exit.value
-                val initialScale = if (departure.predictive) 1f - 0.06f * departure.progress else 1f
-                scaleX = initialScale + (1f - initialScale) * exit.value
-                scaleY = scaleX
-                shape = RoundedCornerShape(20.dp)
-                clip = true
-                shadowElevation = 8.dp.toPx() * departure.progress * (1f - exit.value)
-            }.drawBehind {
+                val value = departure.progress + (1f - departure.progress) * exit.value
+                translationX = kotlin.math.round(departure.direction * size.width * value)
+            }.then(if (departure.direction > 0f) Modifier.absoluteSquircleClip(topLeft = cornerRadius, topRight = 0.dp, bottomRight = 0.dp, bottomLeft = cornerRadius)
+                else Modifier.absoluteSquircleClip(topLeft = 0.dp, topRight = cornerRadius, bottomRight = cornerRadius, bottomLeft = 0.dp)).drawBehind {
                 departure.frame.image?.let { drawImage(it) }
             }.testTag("page-back-departure").pointerInput(departure) {
                 awaitEachGesture {

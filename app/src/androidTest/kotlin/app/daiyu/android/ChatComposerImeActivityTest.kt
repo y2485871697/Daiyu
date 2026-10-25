@@ -5,6 +5,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.components.hideChatInputIme
+import app.daiyu.android.ui.components.clearManagedInputFocus
+import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+import app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+import app.daiyu.android.ui.screens.chat.conversation.ComposerPhase
+import app.daiyu.android.ui.screens.chat.conversation.ComposerUi
+import app.daiyu.android.ui.screens.chat.conversation.DaiyuChatScreen
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.manageInput
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -492,4 +500,96 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         assertEquals(database, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }
+
+    fun testManagedAndFallbackDismissDispatchHideExactlyOnceAfterClear() {
+        val events = mutableListOf<String>()
+        lateinit var field: android.widget.EditText
+        mainThread {
+            field = android.widget.EditText(activity).apply {
+                setText("恰一次隐藏")
+                manageInput(activity.window)
+            }
+            activity.setContent {
+                androidx.compose.ui.viewinterop.AndroidView(modifier = Modifier.fillMaxSize().testTag("single-hide-field"),
+                    factory = { field })
+            }
+        }
+        awaitNodeWindowFocus(node("single-hide-field"))
+        awaitStableWindowFrame(field) { field.windowToken?.takeIf { field.isAttachedToWindow } }
+        mainThread {
+            assertTrue(field.requestFocus())
+            assertTrue(clearManagedInputFocus(field, hideIme = { events += "hide" }) {
+                events += "clear"
+                field.clearFocus()
+            })
+            assertFalse(field.hasFocus())
+            assertEquals(listOf("clear", "hide"), events)
+            events.clear()
+            val unattached = android.view.View(activity)
+            assertTrue(clearManagedInputFocus(unattached, hideIme = { events += "hide" }) { events += "clear" })
+            assertEquals(listOf("clear", "hide"), events)
+        }
+    }
+
+    fun testSendAndAppendReleaseImeBeforeDispatchAndPreserveDraft() {
+        val database = fixture.database.exportBackup()
+        val draft = (1..6).joinToString("\n") { "保留消息 $it" }
+        for (phase in listOf(ComposerPhase.IDLE, ComposerPhase.RUNNING)) {
+            dismissIme()
+            val dismissEvents = mutableListOf<String>()
+            var sends = 0
+            var appends = 0
+            var observedDraft = ""
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        val realFocus = androidx.compose.ui.platform.LocalFocusManager.current
+                        val realKeyboard = checkNotNull(androidx.compose.ui.platform.LocalSoftwareKeyboardController.current)
+                        val focus = androidx.compose.runtime.remember(realFocus, phase) {
+                            object : androidx.compose.ui.focus.FocusManager by realFocus {
+                                override fun clearFocus(force: Boolean) {
+                                    realFocus.clearFocus(force)
+                                    dismissEvents += "clear"
+                                }
+                            }
+                        }
+                        val keyboard = androidx.compose.runtime.remember(realKeyboard, phase) {
+                            object : androidx.compose.ui.platform.SoftwareKeyboardController by realKeyboard {
+                                override fun hide() { dismissEvents += "hide"; realKeyboard.hide() }
+                            }
+                        }
+                        val actions = ChatScreenActions(
+                            onSend = { assertEquals(listOf("clear", "hide"), dismissEvents); observedDraft = it; sends++ },
+                            onSupplement = { assertEquals(listOf("clear", "hide"), dismissEvents); observedDraft = it; appends++ })
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.ui.platform.LocalFocusManager provides focus,
+                            androidx.compose.ui.platform.LocalSoftwareKeyboardController provides keyboard) {
+                            DaiyuChatScreen(ChatScreenState("IME动作回归", composer = ComposerUi(
+                                text = draft, phase = phase, supplementAvailable = true)), actions)
+                        }
+                    }
+                }
+            }
+            ui.waitForIdle()
+            val before = settledFrame(visible = false)
+            node("chat-draft").performTouchInput {
+                advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+                click()
+            }
+            awaitImeFrame(node("chat-draft"), visible = true)
+            node("chat-draft").assertIsFocused()
+            settledFrame(visible = true, before = before)
+            mainThread { dismissEvents.clear() }
+            node("chat-send").performTouchInput { click() }
+            node("chat-draft").assertIsNotFocused()
+            settledFrame(visible = false, before = before)
+            assertEquals(draft, observedDraft)
+            assertEquals(if (phase == ComposerPhase.IDLE) 1 else 0, sends)
+            assertEquals(if (phase == ComposerPhase.RUNNING) 1 else 0, appends)
+            node("chat-draft").assertTextEquals(draft)
+        }
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

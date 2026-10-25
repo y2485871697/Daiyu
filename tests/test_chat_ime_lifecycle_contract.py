@@ -20,8 +20,10 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
 
     def test_ime_padding_is_local_to_conversation_not_header(self):
         screen = self.read(CHAT / 'ChatScreen.kt')
-        self.assertEqual(1, screen.count('.imePadding()'))
-        self.assertIn('ChatConversationLayers(Modifier.weight(1f).imePadding()', screen)
+        self.assertEqual(1, screen.count('.windowInsetsPadding('))
+        self.assertIn('WindowInsets.navigationBars.union(WindowInsets.ime)', screen)
+        self.assertNotIn('.navigationBarsPadding()', screen)
+        self.assertNotIn('.imePadding()', screen)
         header = screen.split('Column(', 1)[1].split('ChatTopBar(', 1)[0]
         self.assertNotIn('imePadding()', header)
         for forbidden in ('animateDpAsState', 'translationY', 'WindowInsets.ime.getBottom'):

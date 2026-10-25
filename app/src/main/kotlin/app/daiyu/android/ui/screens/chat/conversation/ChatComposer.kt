@@ -5,6 +5,12 @@ import app.daiyu.android.ui.components.managedInput
 import app.daiyu.android.ui.icons.ChatContextMark
 import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.layout.height
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import app.daiyu.android.ui.components.hideChatInputIme
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
@@ -92,6 +98,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         lifecycleDismissInProgress = true
         try { dismiss() } finally { lifecycleDismissInProgress = false }
     }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val view = LocalView.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
@@ -173,61 +182,66 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)
                     .testTag("chat-composer-divider").background(dividerColor))
-                ComposerReferenceChips(references.references, state.enabled) { reference ->
-                    if (state.editorGeneration == currentEditorGeneration && references.source == currentDraft) {
-                        val next = references.remove(reference)
-                        val projected = ComposerReferences(next)
-                        editReferenceDraft(next, projected.toSource(references.toVisible(state.selectionStart)),
-                            projected.toSource(references.toVisible(state.selectionEnd)))
+                Column(Modifier.fillMaxWidth().animateContentSize(
+                    animationSpec = spring(dampingRatio = 1f, stiffness = 500f),
+                    alignment = Alignment.BottomCenter,
+                )) {
+                    ComposerReferenceChips(references.references, state.enabled) { reference ->
+                        if (state.editorGeneration == currentEditorGeneration && references.source == currentDraft) {
+                            val next = references.remove(reference)
+                            val projected = ComposerReferences(next)
+                            editReferenceDraft(next, projected.toSource(references.toVisible(state.selectionStart)),
+                                projected.toSource(references.toVisible(state.selectionEnd)))
+                        }
                     }
-                }
-                attachmentContent()
-                key(state.editorGeneration) {
-                    val mountedGeneration = state.editorGeneration
-                    var editingValue by remember {
-                        mutableStateOf(TextFieldValue(references.text).forComposer(references.text, references.toVisible(state.selectionStart), references.toVisible(state.selectionEnd)))
-                    }
-                    val renderedValue = editingValue.forComposer(references.text, references.toVisible(state.selectionStart), references.toVisible(state.selectionEnd))
-                    SideEffect { if (editingValue != renderedValue) editingValue = renderedValue }
-                    BasicTextField(
-                        value = renderedValue,
-                        onValueChange = { value ->
-                            // Explicit dismissal and ON_STOP must not write back a collapsed selection.
-                            if (((!lifecycleDismissInProgress && !isInputDismissInProgress() && !app.daiyu.android.ui.components.InputDismissal.inProgress) || value.text != references.text) &&
-                                lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
-                                mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
-                                val bodyChanged = value.text != references.text
-                                val next = references.edit(value.text)
-                                fun rawOffset(offset: Int) = if (bodyChanged) offset.coerceIn(0, value.text.length) else references.toSource(offset)
-                                val rawComposition = value.composition?.let { TextRange(rawOffset(it.start), rawOffset(it.end)) }
-                                val projected = ComposerReferences(next, rawComposition?.let { it.min until it.max })
-                                val selection = TextRange(projected.toVisible(rawOffset(value.selection.start)),
-                                    projected.toVisible(rawOffset(value.selection.end)))
-                                val composition = rawComposition?.let { TextRange(projected.toVisible(it.start), projected.toVisible(it.end)) }
-                                val accepted = if (references.references.isEmpty() && projected.references.isEmpty()) {
-                                    if (next != state.text) actions.onTextChange(next)
-                                    actions.onSelectionChange(rawOffset(value.selection.start), rawOffset(value.selection.end))
-                                    true
-                                } else editReferenceDraft(next, projected.toSource(selection.start), projected.toSource(selection.end))
-                                if (accepted) {
-                                    composingSource = rawComposition?.let { next to it }
-                                    editingValue = TextFieldValue(projected.text, selection, composition)
+                    attachmentContent()
+                    key(state.editorGeneration) {
+                        val mountedGeneration = state.editorGeneration
+                        var editingValue by remember {
+                            mutableStateOf(TextFieldValue(references.text).forComposer(references.text, references.toVisible(state.selectionStart), references.toVisible(state.selectionEnd)))
+                        }
+                        val renderedValue = editingValue.forComposer(references.text, references.toVisible(state.selectionStart), references.toVisible(state.selectionEnd))
+                        SideEffect { if (editingValue != renderedValue) editingValue = renderedValue }
+                        BasicTextField(
+                            value = renderedValue,
+                            onValueChange = { value ->
+                                // Explicit dismissal and ON_STOP must not write back a collapsed selection.
+                                if (((!lifecycleDismissInProgress && !isInputDismissInProgress() && !app.daiyu.android.ui.components.InputDismissal.inProgress) || value.text != references.text) &&
+                                    lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
+                                    mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled) {
+                                    val bodyChanged = value.text != references.text
+                                    val next = references.edit(value.text)
+                                    fun rawOffset(offset: Int) = if (bodyChanged) offset.coerceIn(0, value.text.length) else references.toSource(offset)
+                                    val rawComposition = value.composition?.let { TextRange(rawOffset(it.start), rawOffset(it.end)) }
+                                    val projected = ComposerReferences(next, rawComposition?.let { it.min until it.max })
+                                    val selection = TextRange(projected.toVisible(rawOffset(value.selection.start)),
+                                        projected.toVisible(rawOffset(value.selection.end)))
+                                    val composition = rawComposition?.let { TextRange(projected.toVisible(it.start), projected.toVisible(it.end)) }
+                                    val accepted = if (references.references.isEmpty() && projected.references.isEmpty()) {
+                                        if (next != state.text) actions.onTextChange(next)
+                                        actions.onSelectionChange(rawOffset(value.selection.start), rawOffset(value.selection.end))
+                                        true
+                                    } else editReferenceDraft(next, projected.toSource(selection.start), projected.toSource(selection.end))
+                                    if (accepted) {
+                                        composingSource = rawComposition?.let { next to it }
+                                        editingValue = TextFieldValue(projected.text, selection, composition)
+                                    }
                                 }
-                            }
-                        },
-                        enabled = state.enabled,
-                        modifier = Modifier.testTag("chat-draft").onFocusChanged { onInputFocusChanged(it.isFocused) }.fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
-                            .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
-                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 16.sp, lineHeight = 24.sp),
-                        cursorBrush = SolidColor(if (WindowInsets.isImeVisible) chrome.accent else Color.Unspecified),
-                        decorationBox = { inner ->
-                            Box {
-                                if (references.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
-                                    style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 24.sp))
-                                inner()
-                            }
-                        },
-                    )
+                            },
+                            enabled = state.enabled,
+                            modifier = Modifier.testTag("chat-draft").onFocusChanged { onInputFocusChanged(it.isFocused) }.fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
+                                .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
+                            maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 16.sp, lineHeight = 24.sp),
+                            cursorBrush = SolidColor(if (WindowInsets.isImeVisible) chrome.accent else Color.Unspecified),
+                            decorationBox = { inner ->
+                                Box {
+                                    if (references.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
+                                        style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 24.sp))
+                                    inner()
+                                }
+                            },
+                        )
+                    }
                 }
                 Box(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 12.dp).heightIn(min = 36.dp).testTag("chat-composer-bottom"), contentAlignment = Alignment.Center) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
@@ -253,8 +267,13 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 28.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (!textAction) actions.onPrimaryTap()
-                                else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
-                                else actions.onSupplement(state.text)
+                                else {
+                                    lifecycleDismissInProgress = true
+                                    try { hideChatInputIme(focus, keyboard, view) }
+                                    finally { lifecycleDismissInProgress = false }
+                                    if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
+                                    else actions.onSupplement(state.text)
+                                }
                             }, Modifier.size(32.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = (if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)

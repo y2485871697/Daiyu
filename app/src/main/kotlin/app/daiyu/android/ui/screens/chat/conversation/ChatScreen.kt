@@ -10,8 +10,11 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -90,7 +93,7 @@ internal fun DaiyuChatScreen(
     ChatMenuLayer(modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
-            .statusBarsPadding().navigationBarsPadding(),
+            .statusBarsPadding(),
     ) {
         ChatTopBar(state.title, actions, modifier = dismissInputOnTap, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,
@@ -104,7 +107,8 @@ internal fun DaiyuChatScreen(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1)
         }
-        ChatConversationLayers(Modifier.weight(1f).imePadding(), messages = { bottomInset ->
+        ChatConversationLayers(Modifier.weight(1f)
+            .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)), messages = { bottomInset ->
             androidx.compose.runtime.key(state.conversationKey) {
                 ChatMessageList(state.turns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity)

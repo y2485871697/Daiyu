@@ -121,10 +121,15 @@ internal fun Modifier.managedInput(): Modifier = composed {
     }
 }
 
-internal fun clearManagedInputFocus(view: View, clear: () -> Unit): Boolean {
+/** True means one hide request was dispatched; a blur transfer vetoes it, not IME completion. */
+internal fun clearManagedInputFocus(
+    view: View,
+    hideIme: () -> Unit = { hideManagedInputIme(view) },
+    clear: () -> Unit,
+): Boolean {
     val action: () -> Unit = { clearWithoutNativeFocusFallback(view, clear) }
     val host = view.inputWindow()?.let { InputWindows.windows[it] }
-    if (host != null) return host.dismiss(view, action)
+    if (host != null) return host.dismiss(view, action, hideIme)
     val before = view.rootView.findFocus()
     InputDismissal.run {
         if (before !is EditText) {
@@ -139,7 +144,15 @@ internal fun clearManagedInputFocus(view: View, clear: () -> Unit): Boolean {
         view.rootView.isFocusableInTouchMode = true
         view.rootView.requestFocus()
     }
+    hideIme()
     return true
+}
+
+internal fun hideManagedInputIme(view: View) {
+    val controller = ViewCompat.getWindowInsetsController(view)
+    if (controller != null) controller.hide(WindowInsetsCompat.Type.ime())
+    else (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+        ?.hideSoftInputFromWindow(view.windowToken, 0)
 }
 
 /** Let blur listeners transfer focus before suppressing Android's automatic root fallback. */
@@ -367,7 +380,7 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         if (!entry.focused() || entry !in entries) return
         dismiss(entry.view, entry.clear)
     }
-    fun dismiss(view: View, clear: () -> Unit): Boolean {
+    fun dismiss(view: View, clear: () -> Unit, hideIme: () -> Unit = { hideManagedInputIme(view) }): Boolean {
         val nativeBefore = window.currentFocus
         clearing++
         try {
@@ -397,9 +410,7 @@ private class InputWindow(private val window: Window, private val lifecycle: Lif
         // A focus listener may have explicitly moved editing to a different field/view.
         if (entries.any { it.focused() } ||
             (window.currentFocus !== nativeBefore && window.currentFocus?.onCheckIsTextEditor() == true)) return false
-        ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
-        (view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-            ?.hideSoftInputFromWindow(view.windowToken, 0)
+        hideIme()
         return true
     }
     fun remove(entry: InputEntry) {

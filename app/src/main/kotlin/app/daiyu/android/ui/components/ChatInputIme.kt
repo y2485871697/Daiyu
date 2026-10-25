@@ -36,11 +36,9 @@ internal fun hideChatInputIme(
     keyboard: SoftwareKeyboardController?,
     view: View,
 ) {
-    if (!clearManagedInputFocus(view) { focusManager.clearFocus(force = true) }) return
-    keyboard?.hide()
-    (view.context as? Activity)?.window?.let { window ->
-        WindowCompat.getInsetsController(window, view).hide(WindowInsetsCompat.Type.ime())
-    }
+    clearManagedInputFocus(view, hideIme = {
+        if (keyboard != null) keyboard.hide() else hideManagedInputIme(view)
+    }) { focusManager.clearFocus(force = true) }
 }
 
 internal suspend fun showChatInputIme(

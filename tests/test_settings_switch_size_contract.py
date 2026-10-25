@@ -80,6 +80,21 @@ class SettingsSwitchSizeContractTest(unittest.TestCase):
                 self.assertLess(width, px(48, d))
                 self.assertLess(height, px(48, d))
 
+    def test_system_education_fixture_is_dismissed_before_uncropped_capture(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/SettingsSwitchSizeTest.kt').read_text()
+        helper = text.split('private fun assertTrackWithControl(', 1)[1].split('private fun assertCompactTrack(', 1)[0]
+        dismissal = 'dismissDesktopEducationTooltip(instrumentation, ui, node("switch-education-blank"))'
+        self.assertEqual(1, helper.count(dismissal))
+        self.assertLess(helper.index(dismissal), helper.index('captureScreenNode(canvas)'))
+        self.assertEqual(2, text.count('size(32.dp).educationDismissalBlank()'))
+        blank = text.split('private fun Modifier.educationDismissalBlank()', 1)[1].split('@OptIn', 1)[0]
+        self.assertIn('testTag("switch-education-blank")', blank)
+        self.assertIn('awaitPointerEvent().changes.forEach { it.consume() }', blank)
+        self.assertNotIn('onCheckedChange', blank)
+        self.assertNotIn('performClick', blank)
+        self.assertNotIn('captureToImage', text)
+        self.assertIn('if (distance < .015f)', text)
+
     def test_android_regressions_check_pixels_targets_semantics_rtl_and_callbacks(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/SettingsSwitchSizeTest.kt').read_text()
         for anchor in ('36.4f * pixelsPerDp', '22.4f * pixelsPerDp', '48f * pixelsPerDp', '64f * pixelsPerDp',

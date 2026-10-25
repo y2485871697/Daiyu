@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
@@ -20,6 +22,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
@@ -28,6 +31,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
+import app.daiyu.android.dismissDesktopEducationTooltip
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -46,8 +50,15 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
         drawRect(reference, Offset(size.width - 24f, size.height - 24f), Size(16f, 16f))
     }
 
+    private fun Modifier.educationDismissalBlank() = testTag("switch-education-blank").pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) awaitPointerEvent().changes.forEach { it.consume() }
+        }
+    }
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun assertTrackWithControl(target: SemanticsNodeInteraction, diagnostic: String, bounds: String) {
+        dismissDesktopEducationTooltip(instrumentation, ui, node("switch-education-blank"))
         val canvas = node("switch-diagnostic-canvas").assertIsDisplayed()
         fun screenRect(part: SemanticsNodeInteraction): Rect {
             val node = part.fetchSemanticsNode()
@@ -143,6 +154,7 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
                                             checkedBorderColor = DaiyuPalette.switchTrack, checkedThumbColor = Color.White))
                                 }
                             }
+                            Box(Modifier.align(Alignment.BottomStart).size(32.dp).educationDismissalBlank())
                         }
                     }
                 }
@@ -188,6 +200,7 @@ class SettingsSwitchSizeTest : WiredActivityTestCase() {
                                 }
                             }
                         }
+                        Box(Modifier.align(Alignment.BottomStart).size(32.dp).educationDismissalBlank())
                     }
                 }
             }

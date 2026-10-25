@@ -160,8 +160,10 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             ui.onNodeWithTag("assistant-item-visual-a").assertIsDisplayed()
             assertNull(selected)
             ui.onNodeWithTag("assistant-item-visual-a").performTouchInput { longClick() }
+            actionGeometry()
             ui.onNodeWithTag("assistant-action-edit").performClick()
             awaitVisualIdle()
+            ui.waitUntil(5_000) { ui.runOnIdle { edited != null } }
             assertEquals("visual-a", edited)
         }
     }
@@ -177,6 +179,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
         ui.onNodeWithTag("assistant-item-visual-a").assertDoesNotExist()
         ui.onNodeWithText(text(R.string.assistant_count, 1)).assertIsDisplayed()
         ui.onNodeWithTag("assistant-item-visual-b").performClick()
+        ui.waitUntil(5_000) { ui.runOnIdle { selected != null && dismissed } }
         assertEquals("visual-b", selected)
         assertTrue(dismissed)
     }

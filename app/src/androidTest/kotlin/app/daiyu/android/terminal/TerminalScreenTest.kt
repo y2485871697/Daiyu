@@ -94,7 +94,20 @@ class TerminalScreenTest : WiredActivityTestCase() {
         show()
         ui.onNodeWithTag("terminal-output", useUnmergedTree = true).assertTextEquals("real-pty-output")
         node("terminal-input").performTextReplacement("printf user-input")
-        node("terminal-send").performClick()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            val inputReady = ui.onAllNodes(hasTestTag("terminal-input") and hasText("printf user-input"))
+                .fetchSemanticsNodes().size == 1
+            val sendReady = ui.onAllNodes(hasTestTag("terminal-send") and isEnabled())
+                .fetchSemanticsNodes().size == 1
+            inputReady && sendReady
+        }
+        toolbarGeometry()
+        node("terminal-send").assertIsDisplayed().assertIsEnabled().performClick()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.runOnIdle { sent.toList() } == listOf("printf user-input\n")
+        }
         node("terminal-sessions").performClick()
         node("terminal-create-session").assertIsEnabled()
         node("terminal-close:test-session").performClick()

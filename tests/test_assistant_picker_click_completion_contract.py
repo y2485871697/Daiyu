@@ -16,9 +16,28 @@ class AssistantPickerClickCompletionContractTest(unittest.TestCase):
         click = 'ui.onNodeWithTag("assistant-action-edit").performClick()'
         self.assertEqual(1, body.count(click))
         self.assertEqual(1, body.count('awaitVisualIdle()'))
-        self.assertIn(click + '\n            awaitVisualIdle()\n            assertEquals("visual-a", edited)', body)
+        completion = 'ui.waitUntil(5_000) { ui.runOnIdle { edited != null } }'
+        self.assertEqual(1, body.count(completion))
+        self.assertEqual(1, body.count('ui.waitUntil'))
+        self.assertIn(click + '\n            awaitVisualIdle()\n            ' + completion +
+                      '\n            assertEquals("visual-a", edited)', body)
+        self.assertIn('performTouchInput { longClick() }\n            actionGeometry()\n            ' + click, body)
+        self.assertEqual(2, body.count('actionGeometry()'))
         self.assertEqual(2, body.count('performTouchInput { longClick() }'))
-        for forbidden in ['Thread.sleep', 'SystemClock.sleep', 'performSemanticsAction', 'awaitDialogEnter', 'awaitNodeWindowFocus', 'ui.waitUntil', 'mainThread {']:
+        for forbidden in ['Thread.sleep', 'SystemClock.sleep', 'performSemanticsAction', 'awaitDialogEnter', 'awaitNodeWindowFocus', 'mainThread {']:
+            self.assertNotIn(forbidden, body)
+
+    def test_real_single_selection_click_completes_before_original_oracles(self):
+        body = SOURCE.read_text(encoding='utf-8').split(
+            'fun testSearchStillFiltersRealProfilesAndSelectionUsesOriginalId()', 1)[1]
+        click = 'ui.onNodeWithTag("assistant-item-visual-b").performClick()'
+        completion = 'ui.waitUntil(5_000) { ui.runOnIdle { selected != null && dismissed } }'
+        self.assertEqual(1, body.count(click))
+        self.assertEqual(1, body.count(completion))
+        self.assertEqual(1, body.count('ui.waitUntil'))
+        self.assertIn(click + '\n        ' + completion +
+                      '\n        assertEquals("visual-b", selected)\n        assertTrue(dismissed)', body)
+        for forbidden in ['Thread.sleep', 'SystemClock.sleep']:
             self.assertNotIn(forbidden, body)
 
     def test_action_rows_are_sampled_in_one_stable_native_frame(self):

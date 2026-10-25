@@ -16,15 +16,16 @@ import androidx.compose.ui.window.DialogWindowProvider
 /** Shared window coordinates for preview overlays; design insets are applied by each surface. */
 @Composable
 internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scrimBlurRadius: Float = 0f,
-    bottomSheet: Boolean = false, onOutsideDismiss: () -> Unit = onDismiss,
+    bottomSheet: Boolean = false, onOutsideDismiss: () -> Unit = onDismiss, dismissEnabled: Boolean = true,
     content: @Composable BoxWithConstraintsScope.() -> Unit) {
     val colors = usagePalette()
     val density = LocalDensity.current
     val motion = remember(bottomSheet) { if (bottomSheet) BottomSheetMotion() else null }
     Dialog(onDismissRequest = {
-        motion?.requestDismiss(BottomSheetDismissSource.System) ?: onDismiss()
+        if (dismissEnabled) motion?.requestDismiss(BottomSheetDismissSource.System) ?: onDismiss()
     },
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
+            dismissOnBackPress = dismissEnabled, dismissOnClickOutside = dismissEnabled)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect {
             window?.setDimAmount(0f)
@@ -35,8 +36,8 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
                 Box(Modifier.matchParentSize().testTag("preview-dialog-scrim")
                     .then(if (scrimBlurRadius > 0f) Modifier.previewGlassBlur(androidx.compose.ui.graphics.RectangleShape, radius = scrimBlurRadius, saturation = 1f) else Modifier)
                     .dialogDimBackground(scrimColor ?: Color(if (colors.dark) 0x55000000 else 0x2620172d), animate = bottomSheet)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {
-                        motion?.requestDismiss(BottomSheetDismissSource.Outside) ?: onOutsideDismiss()
+                    .clickable(enabled = dismissEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {
+                        if (dismissEnabled) motion?.requestDismiss(BottomSheetDismissSource.Outside) ?: onOutsideDismiss()
                     }))
                 CompositionLocalProvider(LocalDensity provides density) {
                     val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier

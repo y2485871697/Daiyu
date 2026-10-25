@@ -40,10 +40,11 @@ internal fun ChatSelectionSheet(
     titleFontSize: TextUnit = 18.sp,
     subtitleFontSize: TextUnit = 12.sp,
     footer: @Composable RowScope.() -> Unit = {},
+    dismissEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
-    PreviewDialog(onDismiss, bottomSheet = true) {
+    PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled) {
         val available = (maxHeight - if (height == null) 70.dp else 88.dp).coerceAtLeast(0.dp)
         val shape = RoundedCornerShape(25.dp)
         Column(Modifier.align(Alignment.BottomCenter).padding(10.dp).fillMaxWidth()
@@ -62,7 +63,7 @@ internal fun ChatSelectionSheet(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) }
                 }
                 if (showCloseButton) Box(Modifier.size(40.dp).clip(RoundedCornerShape(9.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                    .clickable(enabled = dismissEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
                     contentAlignment = Alignment.Center) {
                     Icon(DaiyuIcons.Close, "关闭", Modifier.size(20.dp), tint = colors.muted)
                 }

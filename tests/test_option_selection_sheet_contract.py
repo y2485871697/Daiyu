@@ -18,7 +18,7 @@ class OptionSelectionSheetContractTest(unittest.TestCase):
         self.assertNotIn('height =', text)
         self.assertNotIn('fillMaxHeight', text)
         shell = source('ui/screens/chat/conversation/ChatSelectionSheet.kt')
-        self.assertIn('PreviewDialog(onDismiss, bottomSheet = true)', shell)
+        self.assertIn('PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled)', shell)
         self.assertIn('RoundedCornerShape(25.dp)', shell)
         self.assertIn('.size(29.dp, 3.dp)', shell)
         self.assertIn('weight(1f, fill = height != null)', shell)

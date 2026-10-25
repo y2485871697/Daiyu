@@ -31,12 +31,18 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     private val entries get() = SettingsCatalog.visibleGroups().flatMap { it.entries }
     private fun openHub() { openSettings() }
     private fun entry(id: String): SemanticsNodeInteraction {
-        val item = entries.single { it.id == id }
+        val item = SettingsCatalog.entry(id)
+        val about = id in SettingsCatalog.appInfoEntries.map { it.id }
+        val page = if (about) "App 信息与更新" else "设置"
+        if (about && ui.onAllNodesWithTag("page:App 信息与更新").fetchSemanticsNodes().isEmpty()) {
+            reveal("settings-row:App 信息与更新", "设置").performClick()
+            awaitUniqueTag("page:App 信息与更新")
+        }
         if (id in setOf("relay_st", "relay_moyu")) {
-            val parent = reveal("settings-row:自用中转站", "设置")
+            val parent = reveal("settings-row:自用中转站", page)
             if (ui.onAllNodesWithTag("settings-row:${item.title}").fetchSemanticsNodes().isEmpty()) parent.performClick()
         }
-        return reveal("settings-row:${item.title}", "设置")
+        return reveal("settings-row:${item.title}", page)
     }
     private fun settingsScrollPosition(): Float = node("page:设置").fetchSemanticsNode()
         .config[SemanticsProperties.VerticalScrollAxisRange].value()
@@ -73,6 +79,43 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         }
         backToChat(activity)
         assertDraft("设置滚动保留草稿")
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(settings, fixture.settings.loadForEditing().settings)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testAppInfoContainsOriginalAboutActionsAndBackRestoresSettingsViewport() {
+        setDraft("关于二级页保留草稿")
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.loadForEditing().settings
+        openHub()
+        val tag = "settings-row:App 信息与更新"
+        reveal(tag, "设置").assertHasClickAction()
+        for (title in listOf("检查更新", "Telegram 频道", "QQ 群", "源代码", "自用中转站", "给煮波恰饭🍚")) {
+            node("settings-row:$title").assertDoesNotExist()
+        }
+        val position = settingsScrollPosition()
+        val bounds = node(tag).fetchSemanticsNode().boundsInRoot
+        for (systemBack in listOf(false, true)) {
+            node(tag).performClick()
+            awaitUniqueTag("page:App 信息与更新")
+            node("page:设置").assertDoesNotExist()
+            for (item in SettingsCatalog.appInfoEntries.filterNot { it.id in setOf("relay_st", "relay_moyu") }) {
+                val row = reveal("settings-row:${item.title}", "App 信息与更新").assertExists()
+                if (item.id == "donate") row.assertHasNoClickAction() else row.assertHasClickAction()
+            }
+            if (systemBack) backToPage(activity, "page:设置") else {
+                ui.onNodeWithContentDescription(activity.getString(R.string.action_back)).performClick()
+                awaitUniqueTag("page:设置")
+            }
+            node("page:App 信息与更新").assertDoesNotExist()
+            node(tag).assertIsDisplayed()
+            assertEquals(position, settingsScrollPosition(), .00002f)
+            assertEquals(bounds.top, node(tag).fetchSemanticsNode().boundsInRoot.top, 2f)
+            assertEquals(bounds.bottom, node(tag).fetchSemanticsNode().boundsInRoot.bottom, 2f)
+        }
+        backToChat(activity)
+        assertDraft("关于二级页保留草稿")
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(settings, fixture.settings.loadForEditing().settings)
         assertEquals(0, fixture.opens.get())
@@ -141,9 +184,9 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             "pet", "skills", "mcp",
             "linux", "task_surface",
             "usage", "backup", "logging", "export_logs", "clear_logs",
-            "updates", "telegram", "qq", "source", "relay", "relay_st", "relay_moyu", "donate",
+            "app_info",
         )
-        assertEquals(28, entries.size)
+        assertEquals(21, entries.size)
         for (engineering in listOf(false, true)) {
             assertEquals(expectedIds, SettingsCatalog.visibleGroups(engineering).flatMap { it.entries }.map { it.id })
         }
@@ -163,7 +206,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         val settings = fixture.settings.loadForEditing().settings
         openHub()
         val implemented = setOf("updates", "assistants", "subagents", "appearance", "haptics", "voice", "source", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs")
-        val placeholder = entries.single { it.id == "donate" }
+        val placeholder = SettingsCatalog.entry("donate")
         val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented && it != placeholder }
         assertEquals(0, unwired.size)
         fun assertUnchanged() {
@@ -171,13 +214,13 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
         }
         (unwired + placeholder).forEach { item ->
-            entry(item.id).assertHasNoClickAction(); node("page:设置").assertExists()
+            entry(item.id).assertHasNoClickAction(); node("page:App 信息与更新").assertExists()
             assertUnchanged()
         }
-        entry("relay").performClick(); node("page:设置").assertExists(); assertUnchanged()
+        entry("relay").performClick(); node("page:App 信息与更新").assertExists(); assertUnchanged()
         for (title in listOf("ST API", "摸鱼")) {
 
-            reveal("settings-row:$title", "设置").assertExists(); node("page:设置").assertExists()
+            reveal("settings-row:$title", "App 信息与更新").assertExists(); node("page:App 信息与更新").assertExists()
             assertUnchanged()
         }
         backToChat(activity); assertDraft("Gemini UI 草稿")

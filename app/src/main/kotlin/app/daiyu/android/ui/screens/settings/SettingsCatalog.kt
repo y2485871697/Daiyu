@@ -9,7 +9,7 @@ internal val RetainedSettingsEntryAction =
 
 internal enum class SettingControl { PAGE, TOGGLE, CHOICE, ACTION }
 /** Pages hosted by the retained settings home, not an Activity-level FeatureRoute. */
-internal enum class SettingsLocalPage { TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY }
+internal enum class SettingsLocalPage { APP_INFO, TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY }
 internal data class SettingsEntry(
     val id: String, val title: String, val icon: ImageVector,
     val control: SettingControl = SettingControl.PAGE, val route: FeatureRoute? = null,
@@ -62,6 +62,8 @@ internal object SettingsCatalog {
             SettingsEntry("accessibility", "无障碍与 GUI 设置", DaiyuIcons.Accessibility, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
         )),
         SettingsGroup("about", "关于", "版本、社区与项目入口", listOf(
+            SettingsEntry("app_info", "App 信息与更新", DaiyuIcons.Info, SettingControl.PAGE,
+                localPage = SettingsLocalPage.APP_INFO, summary = "版本、社区与项目入口"),
             SettingsEntry("updates", "检查更新", DaiyuIcons.Refresh, SettingControl.ACTION),
             SettingsEntry("telegram", "Telegram 频道", DaiyuIcons.Browser, SettingControl.ACTION, summary = "公告与项目动态"),
             SettingsEntry("qq", "QQ 群", DaiyuIcons.Browser, SettingControl.ACTION, summary = "交流与使用反馈"),
@@ -79,9 +81,11 @@ internal object SettingsCatalog {
     // Retain underlying routes; remove only product entry points.
     @Suppress("UNUSED_PARAMETER")
     fun visibleGroups(engineeringUi: Boolean = false): List<SettingsGroup> = groups.mapNotNull { group ->
-        val entries = group.entries.filterNot { it.id in hiddenEntryIds }
+        val entries = if (group.id == "about") group.entries.filter { it.id == "app_info" }
+            else group.entries.filterNot { it.id in hiddenEntryIds }
         group.copy(entries = entries).takeIf { entries.isNotEmpty() }
     }
+    val appInfoEntries: List<SettingsEntry> = groups.single { it.id == "about" }.entries.filterNot { it.id == "app_info" }
     val entries: List<SettingsEntry> = groups.flatMap { it.entries }
     fun entry(id: String): SettingsEntry = entries.single { it.id == id }
 }

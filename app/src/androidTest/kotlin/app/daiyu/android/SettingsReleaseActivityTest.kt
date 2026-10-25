@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class SettingsReleaseActivityTest : WiredActivityTestCase() {
     private val notices = CopyOnWriteArrayList<String>()
-    private val page = "page:设置"
+    private val page = "page:App 信息与更新"
     private val entry = "settings-row:检查更新"
     private fun showChecker(checker: ReleaseCheck) {
         mainThread {
@@ -33,7 +33,13 @@ class SettingsReleaseActivityTest : WiredActivityTestCase() {
     }
     private fun release(comparison: Int?) = ReleaseCheckResult.Available("v0.2.0",
         "https://github.com/y2485871697/Daiyu/releases/tag/v0.2.0", comparison)
-    private fun checkEntry() = reveal(entry, "设置")
+    private fun checkEntry(): SemanticsNodeInteraction {
+        if (ui.onAllNodesWithTag(page).fetchSemanticsNodes().isEmpty()) {
+            reveal("settings-row:App 信息与更新", "设置").performClick()
+            awaitUniqueTag(page)
+        }
+        return reveal(entry, "App 信息与更新")
+    }
     private fun awaitNotice(text: String) {
         ui.waitUntil(5_000) { notices.lastOrNull() == text }
         ui.waitForIdle()
@@ -70,7 +76,6 @@ class SettingsReleaseActivityTest : WiredActivityTestCase() {
         checkEntry()
         val before = node(entry).fetchSemanticsNode().boundsInRoot
         val position = node(page).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
-        assertTrue(position > 0f)
         repeat(2) { attempt ->
             node(entry).performClick()
             ui.waitUntil(5_000) { notices.size == attempt + 1 }
@@ -128,6 +133,30 @@ class SettingsReleaseActivityTest : WiredActivityTestCase() {
         node("release-dismiss").performClick()
         node(page).assertIsDisplayed()
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testReturningToSettingsCancelsAppInfoCheckAndRejectsLateResultAndOldClick() {
+        val pending = CompletableDeferred<ReleaseCheckResult>()
+        val calls = AtomicInteger()
+        showChecker(ReleaseCheck {
+            calls.incrementAndGet()
+            withContext(NonCancellable) { pending.await() }
+        })
+        val oldClick = checkNotNull(checkEntry().fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        try {
+            mainThread { assertTrue(oldClick()) }
+            ui.waitUntil(5_000) { calls.get() == 1 }
+            ui.onNodeWithContentDescription(activity.getString(R.string.action_back)).performClick()
+            awaitUniqueTag("page:设置")
+            mainThread { oldClick() }
+            pending.complete(release(1))
+            ui.waitForIdle()
+            node("page:设置").assertIsDisplayed()
+            node(page).assertDoesNotExist()
+            node("release-result").assertDoesNotExist()
+            assertTrue(notices.isEmpty())
+            assertEquals(1, calls.get()); assertEquals(0, fixture.opens.get())
+        } finally { pending.complete(release(0)) }
     }
 
     fun testLeavingSettingsCancelsRequestAndLateResultOrOldClickCannotReopenIt() {

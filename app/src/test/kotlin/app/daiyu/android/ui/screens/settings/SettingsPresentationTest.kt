@@ -11,7 +11,7 @@ class SettingsPresentationTest {
     fun retainedSettingsKeepInventoryAndSixVisibleGroups() {
         val entries = SettingsCatalog.entries
         // Current inventory includes independent generation/vision, P05 and platform tools.
-        assertEquals(35, entries.size)
+        assertEquals(36, entries.size)
         assertTrue(entries.none { it.id in setOf("permission_check", "accessibility_keep", "default_reasoning") })
         assertTrue(entries.map { it.id }.containsAll(setOf("platform_tools", "accessibility", "voice", "donate")))
         assertEquals(app.daiyu.android.ui.FeatureRoute.BALANCE_SETTINGS, SettingsCatalog.entry("balance").route)
@@ -52,7 +52,7 @@ class SettingsPresentationTest {
         for (engineeringUi in listOf(false, true)) {
             val groups = SettingsCatalog.visibleGroups(engineeringUi = engineeringUi)
             val entries = groups.flatMap { it.entries }
-            assertEquals(28, entries.size)
+            assertEquals(21, entries.size)
             assertTrue(entries.none { it.id in hiddenIds })
             assertTrue(groups.none { it.id == "permissions" })
             assertEquals(listOf("appearance", "assistants", "voice", "haptics"),
@@ -62,7 +62,7 @@ class SettingsPresentationTest {
             assertEquals(listOf("usage", "backup", "logging", "export_logs", "clear_logs"),
                 groups.single { it.id == "data" }.entries.map { it.id })
             assertTrue(entries.map { it.id }.containsAll(setOf(
-                "task_surface", "linux", "voice", "donate",
+                "task_surface", "linux", "voice", "app_info",
             )))
             for (title in hiddenTitles) {
                 assertTrue(filterSettingsGroups(title, groups).isEmpty())
@@ -72,6 +72,20 @@ class SettingsPresentationTest {
             assertTrue(filterSettingsGroups(title).isEmpty())
         }
         assertEquals(SettingsCatalog.visibleGroups(), SettingsCatalog.visibleGroups(engineeringUi = true))
+    }
+
+    @Test
+    fun aboutHomeContainsOnlyAppInfoWhileOriginalActionsStayInItsSubpage() {
+        assertEquals(SettingsLocalPage.APP_INFO, SettingsCatalog.entry("app_info").localPage)
+        assertEquals(SettingControl.PAGE, SettingsCatalog.entry("app_info").control)
+        for (engineeringUi in listOf(false, true)) {
+            assertEquals(listOf("app_info"), SettingsCatalog.visibleGroups(engineeringUi)
+                .single { it.id == "about" }.entries.map { it.id })
+        }
+        assertEquals(listOf("updates", "telegram", "qq", "source", "relay", "relay_st", "relay_moyu", "donate"),
+            SettingsCatalog.appInfoEntries.map { it.id })
+        assertTrue(SettingsCatalog.appInfoEntries.all { SettingsCatalog.entry(it.id) == it })
+        assertTrue(SettingsCatalog.appInfoEntries.none { it.id == "app_info" })
     }
 
     @Test

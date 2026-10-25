@@ -25,7 +25,7 @@ class CollaborationDoneCompletionContractTest(unittest.TestCase):
         body = self.body()
         self.assertIn('for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (count in listOf(0, 3))', body)
         self.assertEqual(2, body.count('assertEquals(before, prefs.all)'))
-        for oracle in ['Hint and add centers:', 'Add glyph centers:', 'No extra top inset:', 'No extra bottom inset:', 'Hint does not overflow:', 'Text line box centers:', 'Last card gap stays 8dp:', 'Body has no stacked bottom inset:', 'Footer gap stays 8dp:', 'assertEquals(0, fixture.opens.get())', 'add.performTouchInput { click(']:
+        for oracle in ['Hint and add centers:', 'Add glyph centers:', 'No extra top inset:', 'No extra bottom inset:', 'Hint does not overflow:', 'Text line box centers:', 'Last card gap stays 8dp:', 'Add row remains inside the scroll body:', 'Long content scrolls to the body bottom:', 'Short content leaves space inside the body, not below the footer:', 'Footer gap stays 8dp:', 'assertEquals(0, fixture.opens.get())', 'add.performTouchInput { click(']:
             self.assertIn(oracle, body)
 
 

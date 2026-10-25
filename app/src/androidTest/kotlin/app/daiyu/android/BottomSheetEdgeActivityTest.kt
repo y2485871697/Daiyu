@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.positionInRoot
@@ -23,6 +26,11 @@ import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.model.catalog.CatalogModelEdit
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
+import app.daiyu.android.ui.components.ConversationCollaborationDialog
+import app.daiyu.android.delegation.ConversationSubAgentPreferences
+import app.daiyu.android.delegation.SubAgentConfigKey
+import app.daiyu.android.delegation.SubAgentProfile
+import java.util.UUID
 import app.daiyu.android.ui.components.UsageGlassDialog
 import app.daiyu.android.ui.components.subagent.ConversationThinkingPicker
 import app.daiyu.android.ui.screens.assistants.AssistantPickerDialog
@@ -37,15 +45,18 @@ import app.daiyu.android.ui.screens.settings.CatalogModelEditorDialog
 class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
     private var dismissals = 0
 
-    private fun show(dark: Boolean = false, scale: Float = 1f, content: @Composable (() -> Unit) -> Unit) {
+    private fun show(dark: Boolean = false, scale: Float = 1f, fontScale: Float? = null, content: @Composable (() -> Unit) -> Unit) {
         dismissals = 0
         mainThread {
             val open = mutableStateOf(true)
             activity.setContent {
-                AgentAppTheme(AppearanceSettings(interfaceScale = scale,
-                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = true) {
-                    Box(Modifier.fillMaxSize()) {
-                        if (open.value) content { dismissals++; open.value = false }
+                val density = LocalDensity.current
+                CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale ?: density.fontScale)) {
+                    AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                        themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = true) {
+                        Box(Modifier.fillMaxSize()) {
+                            if (open.value) content { dismissals++; open.value = false }
+                        }
                     }
                 }
             }
@@ -207,6 +218,67 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                     assertEquals(expectedHeight, rawBounds(node("conversation-agent-sheet").fetchSemanticsNode()).height, 2f)
                 }
                 close("conversation-agent-sheet")
+            }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testCollaborationSheetMatchesAssistantHeightAndPinsFooterAcrossContentStates() {
+        val assets = FileAssistantAssets(instrumentation.targetContext)
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            show(dark, scale, fontScale = 1.3f) { dismiss ->
+                AssistantPickerDialog(true, emptyList(), null, {}, {}, dismiss, onCopy = {}, onDelete = {}, assets = assets)
+            }
+            assertFloating("assistant-sheet", "assistant-done")
+            val expectedHeight = rawBounds(node("assistant-sheet").fetchSemanticsNode()).height
+            close("assistant-sheet")
+            for (state in listOf(0, 1, 2, 3, 4, 5)) {
+                val prefs = instrumentation.targetContext.getSharedPreferences("collaboration-height-${UUID.randomUUID()}", 0)
+                try {
+                    val repository = ConversationSubAgentPreferences(prefs)
+                    val owner = SubAgentConfigKey.Conversation("height-${UUID.randomUUID()}")
+                    if (state != 0) repository.createConversation(owner)
+                    val count = when (state) { 2, 4, 5 -> 1; 3 -> 20; else -> 0 }
+                    val presets = List(count) { repository.addPreset("Group $it") }
+                    if (state >= 4) {
+                        repository.update(SubAgentConfigKey.Preset(presets.single().id)) {
+                            it.copy(profiles = List(if (state == 5) 8 else 0) { index -> SubAgentProfile("worker-$index", "代理 $index") })
+                        }
+                        assertTrue(repository.applyPreset(owner, presets.single().id) is ConversationSubAgentPreferences.WriteResult.Saved)
+                    }
+                    val before = prefs.all.toMap()
+                    show(dark, scale, fontScale = 1.3f) { dismiss ->
+                        ConversationCollaborationDialog(true, if (state == 0) null else owner.value, dismiss,
+                            repositoryFactory = { repository })
+                    }
+                    when (state) {
+                        0 -> awaitUniqueTag("subagent-no-conversation")
+                        1 -> awaitUniqueTag("subagent-no-presets")
+                        2, 3 -> ui.waitUntil(5_000) { ui.onAllNodesWithText("Group ${count - 1}").fetchSemanticsNodes().size == 1 }
+                        else -> awaitUniqueTag("subagent-collaboration-add-row")
+                    }
+                    assertFloating("conversation-agent-sheet", "subagent-collaboration-done")
+                    val surface = node("conversation-agent-sheet").fetchSemanticsNode()
+                    val footer = node("subagent-collaboration-footer").fetchSemanticsNode()
+                    val body = node("subagent-collaboration-body").fetchSemanticsNode()
+                    assertSame(surface.root, footer.root)
+                    assertSame(surface.root, body.root)
+                    val initialFooter = rawBounds(footer)
+                    assertEquals("Collaboration and assistant surfaces share a default height", expectedHeight, rawBounds(surface).height, 2f)
+                    assertEquals("Footer has only the original bottom padding", with(surface.layoutInfo.density) { 16.dp.toPx() },
+                        rawBounds(surface).bottom - initialFooter.bottom, 1.5f)
+                    assertTrue("Only the body occupies space above the footer", rawBounds(body).bottom <= initialFooter.top)
+                    if (state == 3) ui.onNodeWithText("Group 19").performScrollTo().assertIsDisplayed()
+                    if (state == 5) node("subagent-card-worker-7").scrollToVisible().assertIsDisplayed()
+                    assertEquals("Scrolling never moves the footer", initialFooter.bottom,
+                        rawBounds(node("subagent-collaboration-footer").fetchSemanticsNode()).bottom, 1f)
+                    assertEquals("Scrolling never resizes the surface", expectedHeight,
+                        rawBounds(node("conversation-agent-sheet").fetchSemanticsNode()).height, 2f)
+                    node("subagent-collaboration-done").assertIsDisplayed().assertIsEnabled()
+                    assertEquals(before, prefs.all)
+                    close("conversation-agent-sheet")
+                    assertEquals(before, prefs.all)
+                } finally { prefs.edit().clear().commit() }
             }
         }
         assertEquals(0, fixture.opens.get())

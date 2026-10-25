@@ -25,6 +25,7 @@ import app.daiyu.android.delegation.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.ConversationCollaborationDialog
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewDialog
 import java.util.UUID
 
 class CollaborationEmptyStateTest : WiredActivityTestCase() {
@@ -63,26 +64,39 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         } }
     }
 
+    private fun assistantHeight(dark: Boolean): Float {
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                AssistantPreviewDialog(true, "高度参考", {}) {}
+            }
+        } }
+        awaitDialogEnter(node("assistant-sheet"))
+        return rawBounds(node("assistant-sheet").fetchSemanticsNode()).height
+    }
+
     private fun rawBounds(node: SemanticsNode): Rect =
         Rect(node.positionInRoot, Size(node.size.width.toFloat(), node.size.height.toFloat()))
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    private fun assertSpaciousWithBottomFooter(tag: String) {
+    private fun assertSpaciousWithBottomFooter(tag: String, expectedHeight: Float) {
         awaitDialogEnter(node("subagent-collaboration-card"))
         val messageNode = node(tag).assertIsDisplayed().fetchSemanticsNode()
         val cardNode = node("subagent-collaboration-card").fetchSemanticsNode()
         val footerNode = node("subagent-collaboration-footer").assertIsDisplayed().fetchSemanticsNode()
+        val surfaceNode = node("conversation-agent-sheet").assertIsDisplayed().fetchSemanticsNode()
         assertSame(cardNode.root, footerNode.root)
         assertSame(cardNode.root, messageNode.root)
+        assertSame(cardNode.root, surfaceNode.root)
         val view = (cardNode.root as androidx.compose.ui.platform.ViewRootForTest).view
         val (layout, visible) = awaitStableWindowFrame(view) {
-            Triple(rawBounds(cardNode), rawBounds(footerNode), rawBounds(messageNode)) to
+            listOf(rawBounds(cardNode), rawBounds(footerNode), rawBounds(messageNode), rawBounds(surfaceNode)) to
                 (cardNode.boundsInRoot to footerNode.boundsInRoot)
         }
-        val (card, footer, message) = layout
+        val (card, footer, message, surface) = layout
         val (visibleCard, visibleFooter) = visible
         val diagnostic = "card=$card footer=$footer message=$message visible=$visible density=$density"
-        assertTrue("Empty sheet retains its intended height: $diagnostic", card.height / density in 350f..385f)
+        assertEquals("Empty sheet matches the assistant surface: $diagnostic", expectedHeight, surface.height, 2f)
+        assertEquals("Footer keeps only the 16dp bottom inset: $diagnostic", 16f * density, surface.bottom - footer.bottom, 1.5f)
         assertTrue("Whitespace belongs between message and footer: $diagnostic", (footer.top - message.bottom) / density > 60f)
         assertTrue("Footer stays within sheet: $diagnostic", footer.bottom <= card.bottom + 1f)
         assertTrue("Visible footer stays within sheet: $diagnostic", visibleFooter.bottom <= visibleCard.bottom + 1f)
@@ -138,8 +152,9 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
             try {
                 val repository = ConversationSubAgentPreferences(prefs)
                 val before = prefs.all.toMap()
+                val expectedHeight = assistantHeight(dark)
                 show(null, repository, dark)
-                assertSpaciousWithBottomFooter("subagent-no-conversation")
+                assertSpaciousWithBottomFooter("subagent-no-conversation", expectedHeight)
                 ui.onNodeWithText("尚未选择会话").assertIsDisplayed()
                 ui.onNodeWithText("使用当前配置").assertDoesNotExist()
                 assertPrimaryFooterWithoutCross(dark, "关闭")
@@ -197,7 +212,9 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 }
                 val divider = node("subagent-collaboration-footer-divider").fetchSemanticsNode().boundsInRoot
                 val body = node("subagent-collaboration-body").fetchSemanticsNode().boundsInRoot
-                assertEquals("Body has no stacked bottom inset: $geometry", body.bottom, rowBounds.bottom, 1.5f)
+                assertTrue("Add row remains inside the scroll body: $geometry", rowBounds.bottom <= body.bottom + 1.5f)
+                if (count == 3) assertEquals("Long content scrolls to the body bottom: $geometry", body.bottom, rowBounds.bottom, 1.5f)
+                else assertTrue("Short content leaves space inside the body, not below the footer: $geometry", (body.bottom - rowBounds.bottom) / density > 60f)
                 assertEquals("Footer gap stays 8dp: $geometry", 8f * density, divider.top - body.bottom, 1.5f)
                 assertEquals(before, prefs.all)
                 add.performTouchInput { click(androidx.compose.ui.geometry.Offset(2f * density, height / 2f)) }
@@ -225,9 +242,10 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 val repository = ConversationSubAgentPreferences(prefs)
                 repository.createConversation(SubAgentConfigKey.Conversation("empty-state"))
                 val before = prefs.all.toMap()
+                val expectedHeight = assistantHeight(dark)
                 show("empty-state", repository, dark)
                 ui.waitUntil(5_000) { ui.onAllNodesWithTag("subagent-no-presets").fetchSemanticsNodes().size == 1 }
-                assertSpaciousWithBottomFooter("subagent-no-presets")
+                assertSpaciousWithBottomFooter("subagent-no-presets", expectedHeight)
                 ui.onNodeWithText("还没有子代理组").assertIsDisplayed()
                 ui.onNodeWithText("使用当前配置").assertIsEnabled()
                 assertPrimaryFooterWithoutCross(dark, "完成")

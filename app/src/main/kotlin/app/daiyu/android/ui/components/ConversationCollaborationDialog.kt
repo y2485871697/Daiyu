@@ -13,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -95,9 +94,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     val latestChoosing by rememberUpdatedState(choosing)
     val latestCanChange by rememberUpdatedState(canChange)
     val directory = editor?.let { rememberSubAgentPresetDirectory(it.repository) }
-    val emptyState = editor == null || (choosing && directory?.entries.isNullOrEmpty())
     val providers by modelSource.providers.collectAsState()
-    val maximumHeight = (appWindowSize().height - 48.dp).coerceAtLeast(0.dp)
     val chooserPopup = if (choosing && directory != null && editor != null) {
         val popup = remember(editor) { OwnerBoundPopup(editor.owner) }
         val ticket = remember(popup) { popup.open() }
@@ -118,14 +115,14 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
         WithoutPressRipple {
             ConversationAgentTypography {
-                ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight).testTag("subagent-collaboration-card")) {
-                    Column(Modifier.then(if (emptyState) Modifier.height(360.dp) else Modifier.heightIn(min = 360.dp))
+                ConversationAgentSheet(onDismiss, useDefaultHeight = true, modifier = Modifier.testTag("subagent-collaboration-card")) {
+                    Column(Modifier.fillMaxSize()
                         .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
                         ConversationAgentHandle()
                         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 29.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                         }
-                        Column(Modifier.fillMaxWidth().weight(1f, fill = emptyState).testTag("subagent-collaboration-body")
+                        Column(Modifier.fillMaxWidth().weight(1f).testTag("subagent-collaboration-body")
                             .verticalScroll(key(editor, choosing, current?.presetApplicationToken) { rememberScrollState() })
                             .padding(bottom = if (panelEditor != null) 0.dp else 8.dp)) {
                             when (state) {

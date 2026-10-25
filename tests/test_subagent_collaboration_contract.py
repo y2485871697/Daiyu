@@ -45,7 +45,27 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('.heightIn(min = 48.dp).testTag("subagent-collaboration-add-row")', dialog)
         self.assertIn('.padding(bottom = if (panelEditor != null) 0.dp else 8.dp)', dialog)
         self.assertIn('padding(top = if (panelEditor != null) 8.dp else 10.dp)', dialog)
-        self.assertIn('if (emptyState) Modifier.height(360.dp) else Modifier.heightIn(min = 360.dp)', dialog)
+        self.assertIn('ConversationAgentSheet(onDismiss, useDefaultHeight = true,', dialog)
+        self.assertIn('Column(Modifier.fillMaxSize()', dialog)
+        self.assertIn('Column(Modifier.fillMaxWidth().weight(1f).testTag("subagent-collaboration-body")', dialog)
+        for old in ('360.dp', 'fill = emptyState', 'val emptyState', 'appWindowSize'):
+            self.assertNotIn(old, dialog)
+        body, footer = dialog.split('HorizontalDivider(Modifier.padding(top = if (panelEditor != null)', 1)
+        self.assertIn('.verticalScroll(', body)
+        self.assertIn('testTag("subagent-collaboration-footer")', footer)
+        self.assertNotIn('verticalScroll(', footer)
+
+    def test_android_height_and_footer_regression_covers_short_and_long_content(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/BottomSheetEdgeActivityTest.kt').read_text()
+        test = test.split('fun testCollaborationSheetMatchesAssistantHeightAndPinsFooterAcrossContentStates()', 1)[1]
+        test = test.split('fun testAssistantUsageChoiceAndModelEditorShareFloatingInsets()', 1)[0]
+        for required in ('rawBounds(node("assistant-sheet").fetchSemanticsNode()).height',
+                         'listOf(0, 1, 2, 3, 4, 5)', 'listOf(1f, .8f)', 'fontScale = 1.3f',
+                         'expectedHeight, rawBounds(surface).height, 2f)',
+                         '16.dp.toPx()', '"Scrolling never moves the footer"',
+                         '"Group 19"', '"subagent-card-worker-7"', 'assertEquals(before, prefs.all)',
+                         'assertEquals(0, fixture.opens.get())'):
+            self.assertIn(required, test)
 
     def test_speed_cycles_inline_and_draft_remains_uncommitted(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()

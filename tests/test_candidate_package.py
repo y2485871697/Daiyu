@@ -81,7 +81,7 @@ class CandidatePackageTests(unittest.TestCase):
         self.assertNotIn('record_tool_tests.py', body)
         smoke = workflow.split('  smoke:\n', 1)[1]
         arrays = [json.loads(x) for x in re.findall(r"'(\[[^']*\])'", smoke)]
-        self.assertEqual([len(v) for v in arrays], [4, 4, 8])
+        self.assertEqual([len(v) for v in arrays], [2, 4, 4, 8])
         self.assertEqual({(v['api'], v['shard']) for v in arrays[-1]},
                          {(api, shard) for api in ('26', '37.2') for shard in range(4)})
         self.assertNotIn('gradlew', smoke)

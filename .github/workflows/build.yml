@@ -1,10 +1,10 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'candidate' && format('代鱼定向候选 {0}-filtered', inputs.check_id) || inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
+run-name: ${{ inputs.mode == 'daily' && format('代鱼日常Release {0}-targeted', inputs.check_id) || inputs.mode == 'candidate' && format('代鱼定向候选 {0}-filtered', inputs.check_id) || inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 执行完整构建或仅跨平台检查
+        description: daily日常Release快速验证；release稳定版全量；或其它检查
         type: choice
         options:
           - build
@@ -13,6 +13,7 @@ on:
           - smoke
           - synthetic
           - performance
+          - daily
           - release
         default: build
         required: true
@@ -22,7 +23,11 @@ on:
         options: [all, '26', '37.2']
         default: all
       smoke_classes:
-        description: smoke/candidate完整测试类名（candidate必填；定向不计正式验收）
+        description: smoke/candidate定向类；daily受影响回归类（自动加核心冒烟）
+        type: string
+        default: ''
+      daily_base_sha:
+        description: daily相对上次已验证交付的完整基线SHA（高风险改动须用release）
         type: string
         default: ''
       check_scope:
@@ -49,13 +54,14 @@ on:
       source_variant:
         description: 仅smoke补检使用的源包变体（不重新打包）
         type: choice
-        options: [debug, release, candidate]
+        options: [debug, release, candidate, daily]
         default: debug
 env:
   SKIP_JDK_VERSION_CHECK: "true"
   PYTHONUTF8: "1"
   SMOKE_MODE: ${{ inputs.mode }}
   SMOKE_TEST_CLASSES: ${{ inputs.smoke_classes }}
+  DAILY_BASE_SHA: ${{ inputs.daily_base_sha }}
 permissions:
   contents: read
   actions: read
@@ -216,20 +222,24 @@ jobs:
           if-no-files-found: error
   release:
     name: 单测、检查与生产Release
-    if: inputs.mode == 'release' && github.ref == 'refs/heads/main'
+    if: (inputs.mode == 'release' || inputs.mode == 'daily') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - name: 限定定向过滤仅用于smoke补检
         shell: bash
-        run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
+        run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke || test "$SMOKE_MODE" = daily
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: 核对完整构建源码身份
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - name: 规划日常Release并拦截核心或未知变更
+        if: inputs.mode == 'daily'
+        run: python3 scripts/daily_release.py plan
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin
@@ -288,6 +298,10 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "delivery/代鱼-0.1.0-${short}.apk"
           python3 scripts/verify_release_package.py --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner" --delivery delivery
           python3 scripts/verify_license_bundle.py --apk "delivery/代鱼-0.1.0-${short}.apk"
+          if test "$SMOKE_MODE" = daily; then
+            cp daily-plan.json delivery/daily-plan.json
+            python3 scripts/daily_release.py bind --directory delivery
+          fi
           (cd delivery && sha256sum *.apk tests/*.apk > SHA256SUMS)
       - name: 上传测试报告
         if: always()
@@ -306,7 +320,7 @@ jobs:
       - name: 上传生产Release候选包
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: 代鱼正式候选包
+          name: ${{ inputs.mode == 'daily' && '代鱼日常Release包-daily' || '代鱼正式候选包' }}
           path: delivery/
           if-no-files-found: error
   synthetic:
@@ -484,20 +498,22 @@ jobs:
           path: candidate-delivery/
           if-no-files-found: error
   smoke:
-    name: ${{ inputs.mode == 'candidate' && '定向候选验证' || '启动验证' }} API ${{ matrix.api }} 分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
+    name: ${{ inputs.mode == 'daily' && '日常Release验证' || inputs.mode == 'candidate' && '定向候选验证' || '启动验证' }} API ${{ matrix.api }} 分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
     needs: [build, release, candidate]
-    if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || (inputs.mode == 'release' && needs.release.result == 'success') || (inputs.mode == 'candidate' && needs.candidate.result == 'success') || inputs.mode == 'smoke')
+    if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || ((inputs.mode == 'release' || inputs.mode == 'daily') && needs.release.result == 'success') || (inputs.mode == 'candidate' && needs.candidate.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
     timeout-minutes: 185
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3}]' || (inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
+        include: ${{ fromJSON(inputs.mode == 'daily' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]' || (inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3}]' || (inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
     steps:
       - name: 限定定向过滤仅用于smoke或candidate
         shell: bash
         run: |
-          if test "$SMOKE_MODE" = candidate; then
+          if test "$SMOKE_MODE" = daily; then
+            test -n "$DAILY_BASE_SHA"
+          elif test "$SMOKE_MODE" = candidate; then
             test -n "$SMOKE_TEST_CLASSES"
           else
             test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
@@ -522,7 +538,7 @@ jobs:
           if-no-files-found: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: ${{ (inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && '代鱼定向候选包-filtered' || (inputs.mode == 'release' || (inputs.mode == 'smoke' && inputs.source_variant == 'release')) && '代鱼正式候选包' || '代鱼开发包' }}
+          name: ${{ (inputs.mode == 'daily' || (inputs.mode == 'smoke' && inputs.source_variant == 'daily')) && '代鱼日常Release包-daily' || (inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate')) && '代鱼定向候选包-filtered' || (inputs.mode == 'release' || (inputs.mode == 'smoke' && inputs.source_variant == 'release')) && '代鱼正式候选包' || '代鱼开发包' }}
           path: delivery
           run-id: ${{ inputs.mode == 'smoke' && inputs.source_run_id || github.run_id }}
           github-token: ${{ github.token }}
@@ -537,6 +553,9 @@ jobs:
       - name: 核对同run定向候选身份
         if: inputs.mode == 'candidate'
         run: python3 scripts/candidate_package.py verify --directory delivery
+      - name: 核对日常Release基线和包身份
+        if: inputs.mode == 'daily'
+        run: python3 scripts/daily_release.py verify --directory delivery
       - name: 校验 APK 摘要
         run: cd delivery && sha256sum -c SHA256SUMS
       - name: 启用模拟器加速
@@ -571,7 +590,8 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
-          SMOKE_SHARD_COUNT: '4'
+          SMOKE_SHARD_COUNT: ${{ inputs.mode == 'daily' && '1' || '4' }}
+          DAILY_API: ${{ matrix.api }}
           SMOKE_SHARD_INDEX: ${{ matrix.shard }}
         with:
           api-level: ${{ matrix.api }}
@@ -590,6 +610,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: ${{ inputs.mode == 'candidate' && '代鱼定向候选证据' || '代鱼启动证据' }}-API${{ matrix.api }}-分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
+          name: ${{ inputs.mode == 'daily' && '代鱼日常Release证据' || inputs.mode == 'candidate' && '代鱼定向候选证据' || '代鱼启动证据' }}-API${{ matrix.api }}-分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
           path: smoke/
           if-no-files-found: ignore

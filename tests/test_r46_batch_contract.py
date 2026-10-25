@@ -45,7 +45,7 @@ class R46BatchContract(unittest.TestCase):
         self.assertIn('signals.isNotEmpty()', helper)
         self.assertIn('signals.all { it }', helper)
         footer = (TEST / 'SubAgentCollaborationLayoutTest.kt').read_text().split('fun testProfileFormKeepsEqualFooter', 1)[1]
-        self.assertLess(footer.index('awaitDialogEnter(actions)'), footer.index('val cancelNode'))
+        self.assertLess(footer.index('awaitDialogEnter(actions)'), footer.index('val deleteNode'))
         self.assertIn('assertEquals(geometry, actionsBefore.top, after.top, 1f)', footer)
 
     def test_touch_bounds_are_distinct_from_compact_fill(self):

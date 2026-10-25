@@ -1,6 +1,26 @@
 # 最终交付统一入口（离线、保守、不代替最终审计）
 
-## 结论边界与本次主路径
+## 分级发布（2026-10-26 用户授权，覆盖“每次正式包都全量”的旧约定）
+
+生产 Release 构建与全量稳定验收拆分。常规、明确展示层的小修版优先 `mode=daily`；阶段稳定版、高风险改动或影响无法判断时使用原 `mode=release`。原 `production_release` 离线入口仍专用于全量稳定验收，不把日常快速通过升级成旧全量通过。`mode=build` 的开发包含义不变。
+
+### 日常 Release：双 API 核心冒烟＋受影响回归
+
+- `mode=daily` 复用生产签名、Release 单测/Lint、边界/许可及真实 APK 身份检查，不使用 debug、candidate、synthetic 或 performance 包替代。API **26、37.2 各 1 片**，不是只跑旧四片中的第0片。
+- 调度方先核对上次已验证交付的真实 run/attempt/SHA 证据，再传入 `daily_base_sha`；不能随意选择中间未验收提交掩盖累计变更。`scripts/daily_release.py` 只负责完整 SHA、祖先与完整 `baseline..target` 差异检查，不自称认证该基线的历史测试结果，不回退到 `HEAD~1`。
+- 快速路径限脚本明确列出的展示层目录、视觉资源、文档及普通测试变更。权限/manifest、迁移/持久化、工具执行、公共会话状态、构建/工作流输入、未知源码、删除/重命名旧路径及 Android 公共测试 fixture 变化均拒绝 daily，提示改走全量；不自动另起 full。展示层路径初筛不代替调用链审阅，展示文件中如实质修改共享执行或状态链仍须 full。
+- 最终类集合为固定核心 `ActivityTest`、`RunControlActivityTest`、`ConversationPaneStartupActivityTest`、`SettingsProductActivityTest`，并上 `smoke_classes` 中经审阅的受影响回归类，以及 diff 中新增/修改的真实 Android 测试类。生产展示层变化须有受影响测试；未知类/缺失核心类/无法解析的测试变更不能只跑 core 蒙混通过。计数从目标 SHA 源码生成，17 个核心方法只是当前静态数量，不是执行通过。
+- 两 API 消费随工件传递、绑定完整 SHA/基线/差异/方法集合的同一 `daily-plan.json`。`smoke_boot.sh` 保留原文与真实外层退出码；在启动、UI、logcat 检查成功之后，`daily_release.py result` 再逐方法核对实际成功回执，生成 `daily-result.json`。只有同一 run/attempt/SHA 的生产构建和两个 API job 均成功、各方法集合完整，才可交付“日常快速验证 Release”。单独上传 APK、计划或 selection.completed 不算通过。
+- 独立工件名为 `代鱼日常Release包-daily`、`代鱼日常Release证据-API…`。包内构建记录始终为真实 `variant=release`，另记 `validation_profile=daily`、`validation_status=pending`、`full_regression_passed=false` 与计划摘要；构建时的 pending 记录不被测试后补写，执行结果保留在两个 API 的独立证据中。最终 APK 目录、文件名、签名/摘要核验及不擅自安装约定不变。
+- 补缺失验证优先复用该源包：`mode=smoke source_variant=daily` 指定准确源 run/SHA，不重新编包；仍遵守既有应用输入差异白名单。补检不能改变源包的 daily 身份，也不自动认证稳定版全量。
+
+### 稳定版与高风险：保留完整门禁
+
+`mode=release` 保持 API26/37.2 各4片、共8片未过滤全量，以及原生产单测/Lint、签名、许可、准确 SHA/run/attempt 和完整方法证据要求。旧 SHA 的通过只是历史基线，不覆盖新增源码；同一 SHA 已核验的有效证据直接复用，不为每个中间提交补跑全量。
+
+本次仅修改发布流程并运行 Python/静态契约检查；用户原“集中修正，明确允许后再编译”的暂停仍有效，不因引入 daily 自动 dispatch、构建或安装。
+
+## 稳定版全量入口的结论边界与主路径
 
 入口：`scripts/acceptance/final_delivery.py`。它只调用既有 `source_gate.py`、`cloud_report.py`、`evidence.py`、`recovery_suite.py`、`verify_license_bundle.py` 的读取/解析能力和既有签名/旧包复用策略；不执行 ledger 中的命令，不下载、调度 CI、运行测试、安装、编译或隐式补构建 APK。除源码门禁和旧包差异核对所需的只读 Git 外，不启动外部命令。
 

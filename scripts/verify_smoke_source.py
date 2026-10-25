@@ -14,7 +14,7 @@ def verify(env, record, source_run, jobs, changed):
     sha = env['SOURCE_SHA']
     run_id = env['SOURCE_RUN_ID']
     variant = env.get('SOURCE_VARIANT', 'debug')
-    if variant not in ('debug', 'release'):
+    if variant not in ('debug', 'release', 'daily'):
         raise ValueError('补检应用包变体无效')
     if not re.fullmatch(r'[0-9a-f]{40}', sha) or not run_id.isdecimal():
         raise ValueError('补检必须指定完整源码SHA与run ID')
@@ -24,24 +24,29 @@ def verify(env, record, source_run, jobs, changed):
             or source_run['workflow_id'] != 383377276 or source_run['status'] != 'completed'
             or source_run.get('conclusion') not in ('success', 'failure')):
         raise ValueError('源run身份或终态不符')
-    job_name = '单测、检查与生产Release' if variant == 'release' else '单测、检查与开发包'
+    job_name = '单测、检查与生产Release' if variant in ('release', 'daily') else '单测、检查与开发包'
     if not any(j['name'] == job_name and j['conclusion'] == 'success' for j in jobs):
         raise ValueError('源应用包构建没有成功')
     if (record['source_sha'] != sha or str(record['run_id']) != run_id
             or str(record['attempt']) != '1' or record['application_id'] != 'app.daiyu.android'
-            or record.get('variant') != variant or record.get('debuggable') is not (variant == 'debug')):
+            or record.get('variant') != ('release' if variant == 'daily' else variant) or record.get('debuggable') is not (variant == 'debug')):
         raise ValueError('应用包记录与源run或变体不符')
-    if variant == 'release' and (record.get('production_delivery') is not True
+    if variant in ('release', 'daily') and (record.get('production_delivery') is not True
             or record.get('profileable') is not False
             or record.get('test_application_id') != 'app.daiyu.android.test'):
         raise ValueError('源应用包不是生产Release')
+    if variant == 'daily' and (record.get('validation_profile') != 'daily'
+            or record.get('full_regression_passed') is not False):
+        raise ValueError('日常Release验证范围不符')
+    if variant == 'release' and record.get('validation_profile') == 'daily':
+        raise ValueError('日常Release不能冒充稳定版源包')
     # Fail closed: scripts/ is NOT a validation-only directory. In particular,
     # app/build.gradle.kts consumes prepare-speech-runtime.py when producing APKs.
     # New tooling must be reviewed here before it can authorize old-APK reuse.
     validation_files = {
         'scripts/smoke_boot.sh', 'scripts/verify_smoke_source.py',
         'scripts/adb_bounded.sh', 'scripts/install_bounded_adb.sh',
-        'scripts/verify_boundaries.py',
+        'scripts/verify_boundaries.py', 'scripts/daily_release.py',
     }
     validation_dirs = ('scripts/acceptance/', 'tests/', 'docs/acceptance/')
     if any(not isinstance(path, str) or '\\' in path
@@ -180,7 +185,7 @@ def main():
     Path('smoke/source.json').write_text(json.dumps(dict(build_sha=env['SOURCE_SHA'], build_run=run_id,
         build_attempt=1, build_variant=env.get('SOURCE_VARIANT', 'debug'), check_sha=env['GITHUB_SHA'], check_run=env['GITHUB_RUN_ID'], check_attempt=env['GITHUB_RUN_ATTEMPT'],
         changed_validation_files=changed, source_artifact=source_artifact,
-        formal_acceptance=False if env.get('SOURCE_VARIANT') == 'candidate' else None), ensure_ascii=False) + '\n')
+        formal_acceptance=False if env.get('SOURCE_VARIANT') in ('candidate', 'daily') else None), ensure_ascii=False) + '\n')
     print('既有应用包身份、变体及应用源码一致性核对通过')
 
 

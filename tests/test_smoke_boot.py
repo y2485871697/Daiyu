@@ -100,12 +100,12 @@ class SourceTests(unittest.TestCase):
                                             env=dict(os.environ, SMOKE_MODE=mode, SMOKE_TEST_CLASSES=value))
                     self.assertEqual(result.returncode == 0, not value or mode == 'smoke')
         suffix = "${{ inputs.smoke_classes != '' && '-filtered' || '' }}"
-        for name in ("    name: ${{ inputs.mode == 'candidate' && '定向候选验证' || '启动验证' }} API ${{ matrix.api }} 分片${{ matrix.shard }}",
-                     "          name: ${{ inputs.mode == 'candidate' && '代鱼定向候选证据' || '代鱼启动证据' }}-API${{ matrix.api }}-分片${{ matrix.shard }}",
+        for name in ("    name: ${{ inputs.mode == 'daily' && '日常Release验证' || inputs.mode == 'candidate' && '定向候选验证' || '启动验证' }} API ${{ matrix.api }} 分片${{ matrix.shard }}",
+                     "          name: ${{ inputs.mode == 'daily' && '代鱼日常Release证据' || inputs.mode == 'candidate' && '代鱼定向候选证据' || '代鱼启动证据' }}-API${{ matrix.api }}-分片${{ matrix.shard }}",
                      '          name: 代鱼工具证据-smoke-API${{ matrix.api }}-分片${{ matrix.shard }}'):
             self.assertIn(name + suffix, workflow)
         smoke = workflow.split('  smoke:\n', 1)[1]
-        self.assertIn("SMOKE_SHARD_COUNT: '4'", smoke)
+        self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'daily' && '1' || '4' }}", smoke)
         matrix = re.search(r"\|\| '(\[[^']*\])'\) }}", smoke).group(1)
         self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
                          {(api, index) for api in ('26', '37.2') for index in range(4)})
@@ -113,7 +113,7 @@ class SourceTests(unittest.TestCase):
     def test_api26_has_pinned_emulator_without_changing_image_or_formal_matrix(self):
         smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
         matrices = [json.loads(value) for value in re.findall(r"'(\[[^']*\])'", smoke)]
-        self.assertEqual(len(matrices), 3)
+        self.assertEqual(len(matrices), 4)
         for matrix in matrices:
             for item in matrix:
                 self.assertEqual(item['target'], 'google_apis' if item['api'] == '26' else 'google_apis_ps16k')
@@ -237,6 +237,23 @@ class SourceTests(unittest.TestCase):
             source.verify(env, record, run, [], [])
         with self.assertRaises(ValueError):
             source.verify(env, dict(record, attempt='2'), run, jobs, [])
+
+    def test_daily_source_is_release_but_cannot_be_relabelled_full(self):
+        env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123', SOURCE_VARIANT='daily')
+        record = dict(source_sha='a' * 40, run_id='123', attempt='1',
+                      application_id='app.daiyu.android', test_application_id='app.daiyu.android.test',
+                      variant='release', debuggable=False, production_delivery=True, profileable=False,
+                      validation_profile='daily', full_regression_passed=False)
+        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main',
+                   workflow_id=383377276, status='completed', conclusion='success')
+        jobs = [dict(name='单测、检查与生产Release', conclusion='success')]
+        source.verify(env, record, run, jobs, [])
+        for wrong in (dict(env, SOURCE_VARIANT='release'), dict(env, SOURCE_VARIANT='debug')):
+            with self.assertRaises(ValueError):
+                source.verify(wrong, record, run, jobs, [])
+        for key, value in (('validation_profile', 'full'), ('full_regression_passed', True)):
+            with self.assertRaises(ValueError):
+                source.verify(env, dict(record, **{key: value}), run, jobs, [])
 
     def test_reuse_requires_explicit_matching_release_variant(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123', SOURCE_VARIANT='release')

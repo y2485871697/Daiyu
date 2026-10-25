@@ -29,8 +29,19 @@ class AssistantNavigationContractTest(unittest.TestCase):
 
     def test_outside_dismiss_is_separate_from_system_back(self):
         self.assertIn('onOutsideDismiss: () -> Unit = onDismiss', self.preview)
-        self.assertIn('Dialog(onDismissRequest = onDismiss,', self.preview)
-        self.assertIn('onClick = onOutsideDismiss', self.preview)
+        self.assertRegex(self.preview,
+            r'Dialog\(onDismissRequest = \{\s*'
+            r'motion\?\.requestDismiss\(BottomSheetDismissSource\.System\) \?: onDismiss\(\)')
+        self.assertRegex(self.preview,
+            r'onClick = \{\s*'
+            r'motion\?\.requestDismiss\(BottomSheetDismissSource\.Outside\) \?: onOutsideDismiss\(\)')
+        self.assertIn('DialogMotionProvider(motion, onDismiss, onOutsideDismiss = onOutsideDismiss)', self.preview)
+        motion = (SRC / "ui/components/DialogMotion.kt").read_text()
+        for token in ('val latestDismiss by rememberUpdatedState(onDismiss)',
+                      'val latestOutsideDismiss by rememberUpdatedState(onOutsideDismiss)',
+                      'BottomSheetDismissSource.System -> latestDismiss()',
+                      'BottomSheetDismissSource.Outside -> latestOutsideDismiss()'):
+            self.assertIn(token, motion)
         self.assertIn('testTag("preview-dialog-scrim")', self.preview)
         self.assertIn('onOutsideDismiss = onOutsideDismiss', self.shell)
 

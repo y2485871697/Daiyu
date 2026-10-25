@@ -66,7 +66,7 @@ class CandidateWindowPublicationContract(unittest.TestCase):
     def test_footer_baseline_is_stable_without_hiding_after_scroll(self):
         source = (TEST / 'SubAgentCollaborationLayoutTest.kt').read_text().split('fun testProfileFormKeepsEqualFooter', 1)[1]
         self.assertIn('dismissIme(view.rootView)', source)
-        self.assertLess(source.index('dismissIme(view.rootView)'), source.index('val (cancelBounds, confirmBounds, actionsBefore)'))
+        self.assertLess(source.index('dismissIme(view.rootView)'), source.index('val (deleteBounds, confirmBounds, actionsBefore)'))
         after_scroll = source.split('val speed =', 1)[1]
         self.assertNotIn('dismissIme', after_scroll)
         self.assertIn('assertEquals("Pure scrolling must keep window and IME unchanged: $geometry", windowBefore, windowAfter)', source)

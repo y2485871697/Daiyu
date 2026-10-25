@@ -254,20 +254,30 @@ class CandidateSourceTests(unittest.TestCase):
                   f"inputs.mode == 'smoke' && inputs.smoke_api == '26' && '{c}' || "
                   f"inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '{d}' || '{c[:-1]},{d[1:]}'")
         current_matrix = re.search(r"include: \$\{\{ fromJSON\((.*?)\) \}\}", self.current).group(0)
+        # Removing the new daily matrix is no longer an approved candidate migration.
         previous = self.current.replace(current_matrix, 'include: ${{ fromJSON(' + legacy + ') }}')
+        with self.assertRaises(ValueError):
+            self.verify(source_workflow=previous)
+        # Preserve the historical one-to-four migration test in an explicit pre-daily fixture.
+        parallel = (f"(inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '26' && '{c}' || "
+                    f"(inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '37.2' && '{d}' || '{c[:-1]},{d[1:]}'")
+        historical = self.current.replace(current_matrix, 'include: ${{ fromJSON(' + parallel + ') }}')
+        historical = historical.replace("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'daily' && '1' || '4' }}", "SMOKE_SHARD_COUNT: '4'")
+        previous = historical.replace('include: ${{ fromJSON(' + parallel + ') }}',
+                                      'include: ${{ fromJSON(' + legacy + ') }}')
         previous = previous.replace("SMOKE_SHARD_COUNT: '4'",
                                     "SMOKE_SHARD_COUNT: ${{ inputs.mode == 'candidate' && 1 || 4 }}")
-        self.verify(source_workflow=previous)
+        self.verify(source_workflow=previous, current_workflow=historical)
         for old, new in [('"ram":4096', '"ram":8192'), ('"shard":0', '"shard":9'),
                          ('timeout-minutes: 175', 'timeout-minutes: 176')]:
             with self.subTest(old=old), self.assertRaises(ValueError):
-                self.verify(source_workflow=previous.replace(old, new))
+                self.verify(source_workflow=previous.replace(old, new), current_workflow=historical)
 
     def test_actual_matrix_selection_for_all_modes_and_requested_apis(self):
         smoke = self.current.split('  smoke:\n', 1)[1]
         expression = re.search(r'include: \$\{\{ fromJSON\((.*?)\) \}\}', smoke).group(1)
-        for mode in ['build', 'release', 'candidate', 'smoke']:
-            for variant in ['debug', 'release', 'candidate']:
+        for mode in ['build', 'release', 'daily', 'candidate', 'smoke']:
+            for variant in ['debug', 'release', 'candidate', 'daily']:
                 for api in ['all', '26', '37.2']:
                     value = expression
                     for key, item in [('mode', mode), ('source_variant', variant), ('smoke_api', api)]:
@@ -275,7 +285,7 @@ class CandidateSourceTests(unittest.TestCase):
                     matrix = json.loads(eval(value.replace('&&', ' and ').replace('||', ' or '),
                                              {'__builtins__': {}}, {}))
                     apis = [api] if api != 'all' and mode in ['candidate', 'smoke'] else ['26', '37.2']
-                    shards = range(4)
+                    shards = range(1 if mode == 'daily' else 4)
                     self.assertEqual({(item['api'], item['shard']) for item in matrix},
                                      {(a, shard) for a in apis for shard in shards}, (mode, variant, api))
                     for item in matrix:
@@ -286,10 +296,10 @@ class CandidateSourceTests(unittest.TestCase):
         smoke = self.current.split('  smoke:\n', 1)[1]
         condition = "(inputs.mode == 'candidate' || (inputs.mode == 'smoke' && inputs.source_variant == 'candidate'))"
         self.assertIn(condition + " && '代鱼定向候选包-filtered'", smoke)
-        self.assertIn("SMOKE_SHARD_COUNT: '4'", smoke)
+        self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'daily' && '1' || '4' }}", smoke)
         self.assertNotIn('gradlew', smoke)
         self.assertIn('target: ${{ matrix.target }}', smoke)
-        self.assertIn('options: [debug, release, candidate]', self.current)
+        self.assertIn('options: [debug, release, candidate, daily]', self.current)
         with self.assertRaises(ValueError):
             source.verify(self.env, {}, self.run, self.jobs, [])
 

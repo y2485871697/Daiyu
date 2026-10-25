@@ -25,9 +25,17 @@ from pathlib import Path
 import re, os, json, hashlib
 raw_filter = os.environ.get("SMOKE_TEST_CLASSES", "")
 mode = os.environ.get("SMOKE_MODE", "")
+if mode == "daily":
+    import sys
+    sys.path.insert(0, os.environ["SMOKE_SCRIPT_DIR"])
+    from daily_release import make_plan, verify
+    plan = make_plan(Path("."), os.environ)
+    verify(Path("delivery"), plan, os.environ)
+    raw_filter = ",".join(plan["classes"])
+    Path("smoke/daily-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n")
 if mode == "candidate" and not raw_filter:
     raise ValueError("Candidate mode requires explicit test classes")
-if raw_filter and mode not in ("smoke", "candidate"):
+if raw_filter and mode not in ("smoke", "candidate", "daily"):
     raise ValueError("Class filtering is only allowed in smoke or candidate mode")
 requested = set(raw_filter.split(",")) if raw_filter else None
 if requested is not None and any(not re.fullmatch(
@@ -61,6 +69,8 @@ if requested is not None and not requested <= classes.keys():
     raise ValueError("Unknown instrumentation test class")
 shards = int(os.environ.get("SMOKE_SHARD_COUNT", "1"))
 shard = int(os.environ.get("SMOKE_SHARD_INDEX", "0"))
+if mode == "daily" and (shards != 1 or shard != 0):
+    raise ValueError("Daily Release requires one complete targeted shard per API")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
 if not 1 <= shards <= 16 or not 0 <= shard < shards or len(classes) < shards:
@@ -95,8 +105,8 @@ selection = dict(schema_version=1, scope="targeted" if requested is not None els
                  expected_tests=sum(selected.values()), shard_index=shard, shard_count=shards,
                  status="planned" if selected else "filtered-empty-shard",
                  inventory=dict(path=inventory.name, sha256=hashlib.sha256(inventory.read_bytes()).hexdigest()))
-if mode == "candidate":
-    selection.update(mode="candidate", formal_acceptance=False)
+if mode in ("candidate", "daily"):
+    selection.update(mode=mode, formal_acceptance=False, full_regression_passed=False)
 Path("smoke/selection.json").write_text(json.dumps(selection, sort_keys=True) + "\n")
 print(sum(selected.values()))
 print(",".join(sorted(selected)))
@@ -337,3 +347,7 @@ python3 - <<'PYPNG'
 from pathlib import Path
 assert Path('smoke/启动.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n'), 'Invalid screenshot evidence'
 PYPNG
+
+if test "${SMOKE_MODE:-}" = daily; then
+  python3 "$SCRIPT_DIR/daily_release.py" result --directory delivery
+fi

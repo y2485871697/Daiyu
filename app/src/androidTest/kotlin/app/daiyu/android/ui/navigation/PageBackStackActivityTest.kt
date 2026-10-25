@@ -5,9 +5,12 @@ import androidx.activity.BackEventCompat
 import androidx.activity.ExperimentalActivityApi
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -16,6 +19,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.test.platform.graphics.HardwareRendererCompat
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
@@ -44,18 +50,22 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         finally { if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false) }
     }
 
-    private fun mount(local: Boolean = false, drawerPreviewSource: Boolean = false) {
+    private fun mount(local: Boolean = false, drawerPreviewSource: Boolean = false,
+        gesturesEnabled: Boolean = true, rtl: Boolean = false, previewEnabled: Boolean = true,
+        animateBackEnabled: Boolean = true) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     background = MiuixTheme.colorScheme.background
+                    CompositionLocalProvider(LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                     val rendered = screen
                     PageBackGestureHost(routeKey = rendered, contentKey = if (rendered == "chat-sidebar") "chat" else rendered,
-                        canNavigateBack = rendered == "settings", swipeDismissEnabled = true, predictiveBackEnabled = true,
+                        canNavigateBack = rendered == "settings", swipeDismissEnabled = gesturesEnabled, predictiveBackEnabled = gesturesEnabled,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                         captureFromContent = drawerPreviewSource && rendered == "chat",
+                        animateBackEnabled = animateBackEnabled,
                         backTargetKey = if (rendered == "settings") "chat" else null) {
-                        PageBackHandler(enabled = rendered == "settings") { backCount++; drawerPainted = false; screen = "chat" }
+                        PageBackHandler(enabled = rendered == "settings", previewEnabled = previewEnabled) { backCount++; drawerPainted = false; screen = "chat" }
                         if (drawerPreviewSource && rendered != "settings") {
                             Box(Modifier.fillMaxSize()) {
                                 Box(Modifier.fillMaxSize().pageBackPreviewSource().background(Color.Red))
@@ -63,7 +73,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                             }
                         } else PageBackStack(if (local) localPage else null, if (localPage == 2) 1 else null) {
                             DisposableEffect(Unit) { controllers++; onDispose { disposed++ } }
-                            PageBackHandler(enabled = local && localPage != null) {
+                            PageBackHandler(enabled = local && localPage != null, previewEnabled = previewEnabled) {
                                 backCount++
                                 localPage = if (localPage == 2) 1 else null
                             }
@@ -76,8 +86,15 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                                 rendered == "chat-sidebar" -> Color.Green
                                 else -> Color.Blue
                             }
-                            Box(Modifier.fillMaxSize().background(color))
+                            Box(Modifier.fillMaxSize().background(color)) {
+                                Box(Modifier.size(48.dp).testTag("page-return-button").clickable {
+                                    backCount++
+                                    if (local && localPage != null) localPage = if (localPage == 2) 1 else null
+                                    else { drawerPainted = false; screen = "chat" }
+                                })
+                            }
                         }
+                    }
                     }
                 }
             }
@@ -102,6 +119,116 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         assertEquals("target red at p=$progress", expected(source.red, background.red), actual.red, .025f)
         assertEquals("target green at p=$progress", expected(source.green, background.green), actual.green, .025f)
         assertEquals("target blue at p=$progress", expected(source.blue, background.blue), actual.blue, .025f)
+    }
+
+    private fun awaitDepartureCapture() {
+        ui.waitUntil(timeoutMillis = 5000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun assertOrdinaryReturnMotion(rtl: Boolean = false, dispatchSystemBack: Boolean = false) {
+        mount(gesturesEnabled = false, rtl = rtl)
+        changeScreen("settings")
+        val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+        ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+        ui.mainClock.autoAdvance = false
+        try {
+            if (dispatchSystemBack) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            else ui.onNodeWithTag("page-return-button").performClick()
+            assertEquals("the business callback runs without waiting for animation", "chat", screen)
+            assertEquals(1, backCount)
+            awaitDepartureCapture()
+            ui.mainClock.advanceTimeBy(64)
+            val outgoing = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+            val live = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            val progress = if (rtl) (initial.right - outgoing.right) / initial.width
+                else (outgoing.left - initial.left) / initial.width
+            assertTrue("ordinary return has an intermediate horizontal frame: $progress", progress > 0f && progress < 1f)
+            val parallax = initial.width * .25f * (1f - progress)
+            if (rtl) assertEquals(initial.left + parallax, live.left, 1.1f)
+            else assertEquals(initial.right - parallax, live.right, 1.1f)
+            ui.onNodeWithTag("page-back-departure-scrim").assertExists()
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            ui.onNodeWithTag("page-back-departure-scrim").assertDoesNotExist()
+            assertEquals(initial, ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot)
+            assertEquals(1, backCount)
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testReturnButtonAnimatesWithBothGesturePreferencesDisabled() = assertOrdinaryReturnMotion()
+
+    fun testOrdinarySystemBackAnimatesWithoutPredictiveProgress() = assertOrdinaryReturnMotion(dispatchSystemBack = true)
+
+    fun testReturnButtonUsesRtlDirection() = assertOrdinaryReturnMotion(rtl = true)
+
+    fun testNestedReturnButtonsAnimateOneLevelWithoutRemountingController() {
+        screen = "settings"
+        mount(local = true, gesturesEnabled = false)
+        mainThread { localPage = 1 }
+        ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        mainThread { localPage = 2 }
+        ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        ui.mainClock.autoAdvance = false
+        try {
+            for (expectedPage in listOf<Int?>(1, null)) {
+                val previousCount = backCount
+                ui.onNodeWithTag("page-return-button").performClick()
+                assertEquals(expectedPage, localPage)
+                assertEquals(previousCount + 1, backCount)
+                awaitDepartureCapture()
+                ui.mainClock.advanceTimeBy(64)
+                ui.onNodeWithTag("page-back-departure").assertExists()
+                mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                assertEquals("a second system return during the departure must not pop again", previousCount + 1, backCount)
+                assertEquals(expectedPage, localPage)
+                ui.mainClock.advanceTimeBy(1000)
+                ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+                assertEquals("settings", screen)
+                assertEquals(1, controllers)
+                assertEquals(0, disposed)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPreviewSuppressionAlsoSuppressesOrdinaryReturnDeparture() {
+        mount(gesturesEnabled = false, previewEnabled = false)
+        changeScreen("settings")
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag("page-return-button").performClick()
+            ui.mainClock.advanceTimeBy(64)
+            assertEquals("chat", screen)
+            assertEquals(1, backCount)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            ui.onNodeWithTag("page-back-departure-scrim").assertDoesNotExist()
+            ui.mainClock.advanceTimeBy(1000)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            ui.onNodeWithTag("page-back-departure-scrim").assertDoesNotExist()
+            assertEquals(1, backCount)
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testNonPageRouteDoesNotAnimateUnderlyingContent() {
+        mount(gesturesEnabled = false, animateBackEnabled = false)
+        changeScreen("settings")
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag("page-return-button").performClick()
+            ui.mainClock.advanceTimeBy(1000)
+            assertEquals("chat", screen)
+            assertEquals(1, backCount)
+            ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+            ui.onNodeWithTag("page-back-departure-scrim").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
     }
 
     @OptIn(ExperimentalActivityApi::class)

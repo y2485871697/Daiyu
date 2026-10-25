@@ -159,6 +159,7 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4-rc01")
+    implementation("top.yukonga.miuix.kmp:miuix-nav-android:0.9.4-rc01")
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4-rc01")
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.4-rc01")
     implementation("androidx.compose.material3:material3:1.4.0")

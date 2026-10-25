@@ -238,6 +238,55 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))', self.host)
         self.assertIn('if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)', self.host)
 
+    def test_zero_progress_returns_follow_the_departing_visits_exact_predecessor(self):
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        for wiring in ('frame.backTargetKey = visualBackTargetKey',
+                       'frame.returnDirection = state.returnDirection',
+                       'frame.animateReturn = animateBackEnabled && resumed && state.previewAllowed'):
+            self.assertIn(wiring, self.host)
+        for wiring in ('val previous = frames[currentKey]?.takeIf { currentKey != key }',
+                       'it.animateReturn && it.backTargetKey == key && it.size != IntSize.Zero',
+                       'Departure(it, key, 0f, predictive = false, direction = it.returnDirection)'):
+            self.assertIn(wiring, layers)
+        enter = layers.split('fun enter(key: Any): Departure?', 1)[1].split('fun freezeCurrent()', 1)[0]
+        self.assertLess(enter.index('departure?.takeIf'), enter.index('previous?.takeIf'))
+        for forbidden in ('back()', 'dispatchBack', 'launch', 'predictiveBackEnabled', 'swipeDismissEnabled'):
+            self.assertNotIn(forbidden, enter)
+
+    def test_button_returns_use_original_500ms_curve_and_keep_gesture_spring(self):
+        self.assertIn('import top.yukonga.miuix.kmp.nav.runtime.NavProgrammaticEasing', self.host)
+        self.assertIn('if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))', self.host)
+        self.assertIn('else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))', self.host)
+        gradle = (ROOT / 'app/build.gradle.kts').read_text()
+        self.assertIn('implementation("top.yukonga.miuix.kmp:miuix-nav-android:0.9.4-rc01")', gradle)
+
+    def test_overlay_routes_and_failed_capture_do_not_animate_a_blank_parent(self):
+        self.assertIn('animateBackEnabled = retainedPage != "assistant-edit" && retainedPage != "history-search"', self.main)
+        self.assertIn('"conversation-search", "message-search" -> searchPage?.returnPage', self.main)
+        self.assertIn('"history-search" -> null', self.main)
+        self.assertIn('val showDeparture = departure != null && departing && departure.frame.image != null', self.host)
+        effect = self.host.split('LaunchedEffect(departure)', 1)[1].split('SideEffect { layers.trim', 1)[0]
+        self.assertLess(effect.index('departure.frame.capture?.join()'), effect.index('if (departure.frame.image != null)'))
+        self.assertIn('if (departure != null && showDeparture)', self.host)
+        layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
+        self.assertIn('it.target == key && it.frame === previous', layers)
+
+    def test_button_return_motion_has_deferred_root_nested_system_rtl_and_suppression_regressions(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        for method in ('testReturnButtonAnimatesWithBothGesturePreferencesDisabled',
+                       'testOrdinarySystemBackAnimatesWithoutPredictiveProgress',
+                       'testReturnButtonUsesRtlDirection',
+                       'testNestedReturnButtonsAnimateOneLevelWithoutRemountingController',
+                       'testPreviewSuppressionAlsoSuppressesOrdinaryReturnDeparture',
+                       'testNonPageRouteDoesNotAnimateUnderlyingContent'):
+            self.assertIn('fun ' + method + '(', test)
+        self.assertIn('val parallax = initial.width * .25f * (1f - progress)', test)
+        self.assertIn('progress > 0f && progress < 1f', test)
+        self.assertIn('private fun awaitDepartureCapture()', test)
+        self.assertIn('ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty()', test)
+        self.assertIn('ui.onNodeWithTag("page-return-button").performClick()', test)
+        self.assertIn('assertEquals(0, disposed)', test)
+
     def test_local_visual_routes_keep_ancestors_and_cancel_never_adds_a_pop(self):
         stack = (APP / 'ui/navigation/PageBackStack.kt').read_text()
         for wiring in ('fun attached(', 'parentPath', 'freezeCurrent()',

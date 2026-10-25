@@ -134,8 +134,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/source-index.md",
-      "bytes": 15569,
-      "sha256": "36f958e571650dc2ff2e00da8e115a12f90291984d8545dd42fd39c18b0e0776"
+      "bytes": 15602,
+      "sha256": "35827e3bfc72faa176b6c47aa392a05da53de16ea722a2b8eeb009542b5c75a9"
     },
     {
       "path": "app/src/main/assets/licenses/talloc-2.4.3.txt",

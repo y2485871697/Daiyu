@@ -1595,6 +1595,7 @@ class MainActivity : ComponentActivity() {
                     routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,
                     contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,
                     captureFromContent = retainedPage == "chat" && !sidebarVisible,
+                    animateBackEnabled = retainedPage != "assistant-edit" && retainedPage != "history-search",
                     canNavigateBack = retainedPage != "chat",
                     swipeDismissEnabled = appearance.swipeDismissEnabled,
                     predictiveBackEnabled = appearance.predictiveBackEnabled,
@@ -4900,7 +4901,8 @@ class MainActivity : ComponentActivity() {
         "pet-model-settings" -> "pet-settings"
         "assistant-edit" -> if (assistantEditReturnPage == "chat" && assistantEditReturnToSidebar)
             "chat-sidebar" else assistantEditReturnPage
-        "conversation-search", "message-search", "history-search" -> null
+        "conversation-search", "message-search" -> searchPage?.returnPage
+        "history-search" -> null
         else -> "chat"
     }
 

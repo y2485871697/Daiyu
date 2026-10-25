@@ -9,6 +9,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import top.yukonga.miuix.kmp.nav.runtime.NavProgrammaticEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -257,6 +259,7 @@ internal fun PageBackGestureHost(
     previewScopeKey: Any? = null,
     contentKey: Any = routeKey,
     captureFromContent: Boolean = false,
+    animateBackEnabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
@@ -297,7 +300,10 @@ internal fun PageBackGestureHost(
     LaunchedEffect(departure) {
         if (departure != null) {
             departure.frame.capture?.join()
-            exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))
+            if (departure.frame.image != null) {
+                if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
+                else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))
+            }
             departing = false
         }
     }
@@ -320,6 +326,11 @@ internal fun PageBackGestureHost(
     DisposableEffect(state) {
         onDispose { state.alive = false; state.reset() }
     }
+    SideEffect {
+        frame.backTargetKey = visualBackTargetKey
+        frame.returnDirection = state.returnDirection
+        frame.animateReturn = animateBackEnabled && resumed && state.previewAllowed
+    }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val currentBack by rememberUpdatedState(dispatchBack)
     val progress by key(state) {
@@ -327,6 +338,7 @@ internal fun PageBackGestureHost(
             animationSpec = if (state.active) snap() else spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f), label = "page-back-reset")
     }
     state.transitionBlocked = departing || (state.previewAllowed && !state.active && progress > 0f)
+    val showDeparture = departure != null && departing && departure.frame.image != null
     CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackStackPath provides stackPath,
         LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }) {
         Box(modifier.fillMaxSize().testTag("page-back-host").clipToBounds().background(background).onSizeChanged { viewport = it }.then(
@@ -404,7 +416,7 @@ internal fun PageBackGestureHost(
             key(contentKey) {
                 Box(Modifier.fillMaxSize().graphicsLayer {
                     val visibleProgress = if (target != null && state.previewAllowed) progress else 0f
-                    if (departure != null && departing) {
+                    if (departure != null && showDeparture) {
                         val value = departure.progress + (1f - departure.progress) * exit.value
                         translationX = -departure.direction * size.width * 0.25f * (1f - value)
                         alpha = 1f - 0.1f * (1f - value)
@@ -423,11 +435,11 @@ internal fun PageBackGestureHost(
                     }
                 }.background(background)) { content() }
             }
-            if (departure != null && departing) Box(Modifier.fillMaxSize().drawBehind {
+            if (departure != null && showDeparture) Box(Modifier.fillMaxSize().drawBehind {
                 val value = departure.progress + (1f - departure.progress) * exit.value
                 drawRect(Color.Black, alpha = 0.5f * (1f - value))
             }.testTag("page-back-departure-scrim"))
-            if (departure != null && departing) Box(Modifier.fillMaxSize().graphicsLayer {
+            if (departure != null && showDeparture) Box(Modifier.fillMaxSize().graphicsLayer {
                 val value = departure.progress + (1f - departure.progress) * exit.value
                 translationX = kotlin.math.round(departure.direction * size.width * value)
             }.then(if (departure.direction > 0f) Modifier.absoluteSquircleClip(topLeft = cornerRadius, topRight = 0.dp, bottomRight = 0.dp, bottomLeft = cornerRadius)

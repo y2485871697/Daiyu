@@ -17,6 +17,9 @@ import kotlinx.coroutines.launch
 internal class PageBackPreviewLayers(private val context: GraphicsContext, private val scope: CoroutineScope) {
     internal class Frame(val key: Any, val layer: GraphicsLayer) {
         var size = IntSize.Zero
+        var backTargetKey: Any? = null
+        var returnDirection = 1f
+        var animateReturn = false
         var image by mutableStateOf<ImageBitmap?>(null)
         var capture: Job? = null
     }
@@ -30,11 +33,14 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         private set
 
     fun enter(key: Any): Departure? {
+        val previous = frames[currentKey]?.takeIf { currentKey != key }
         if (currentKey != key) frames[currentKey]?.let { freeze(it) }
         currentKey = key
         val departure = pending
         pending = null
-        return departure?.takeIf { it.target == key && it.frame.key != key }
+        return departure?.takeIf { it.target == key && it.frame === previous }
+            ?: previous?.takeIf { it.animateReturn && it.backTargetKey == key && it.size != IntSize.Zero }
+                ?.let { Departure(it, key, 0f, predictive = false, direction = it.returnDirection) }
     }
 
     fun freezeCurrent() { frames[currentKey]?.let { freeze(it) } }

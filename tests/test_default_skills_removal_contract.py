@@ -37,6 +37,8 @@ class DefaultSkillsRemovalContractTest(unittest.TestCase):
         self.assertIn('installedSkills.isEmpty()', empty)
         self.assertIn('R.string.assistant_skills_none', empty)
         self.assertIn('maxLines = 1', empty)
+        self.assertIn('textAlign = TextAlign.Center', empty)
+        self.assertIn('Modifier.fillMaxWidth().testTag("assistant-skills-empty")', empty)
         self.assertEqual(1, empty.count('Text('))
         self.assertNotIn('assistant_skills_caption', empty)
         self.assertNotIn('assistant_independent_switches', empty)

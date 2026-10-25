@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
@@ -134,7 +135,12 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                 useUnmergedTree = true).assertCountEquals(2) // The title and the one empty-state line.
             val layouts = mutableListOf<TextLayoutResult>()
             empty.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
-            assertEquals(1, layouts.single().lineCount)
+            val layout = layouts.single()
+            assertEquals(1, layout.lineCount)
+            assertEquals(TextAlign.Center, layout.layoutInput.style.textAlign)
+            assertEquals(layout.size.width / 2f, (layout.getLineLeft(0) + layout.getLineRight(0)) / 2f, 1f)
+            assertEquals(tagged("assistant-skills").fetchSemanticsNode().boundsInRoot.center.x,
+                empty.fetchSemanticsNode().boundsInRoot.center.x, 1f)
             tagged("assistant-edit-save").assertIsNotEnabled()
             assertEquals(previousSelection, store.assistants.value.single().enabledSkillIds)
             assertEquals(0, writes.get())

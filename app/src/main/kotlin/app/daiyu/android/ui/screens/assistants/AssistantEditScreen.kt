@@ -9,6 +9,7 @@ import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -180,7 +181,8 @@ fun AssistantEditScreen(
                 if (installedSkills.isEmpty()) {
                     Text(stringResource(R.string.assistant_skills_none), color = colors.muted,
                         fontSize = (13f * s).sp, lineHeight = (20f * s).sp, maxLines = 1,
-                        modifier = Modifier.testTag("assistant-skills-empty"))
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().testTag("assistant-skills-empty"))
                 } else {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {

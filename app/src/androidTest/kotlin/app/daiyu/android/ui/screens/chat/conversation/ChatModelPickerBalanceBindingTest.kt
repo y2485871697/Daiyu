@@ -47,7 +47,7 @@ class ChatModelPickerBalanceBindingTest : WiredActivityTestCase() {
             mainThread {
                 app.providerBalanceHost = host
                 activity.setContent {
-                    AgentAppTheme(AppearanceSettings()) {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
                         ChatModelPicker(ChatModelPickerState("model", models, providerId = primary,
                             providers = listOf(ChatModelProviderUi(primary, "Alpha", models),
                                 ChatModelProviderUi(secondary, "Beta", models))), {}, {})

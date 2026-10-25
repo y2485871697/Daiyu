@@ -30,6 +30,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.MarkdownBlock
 import app.daiyu.android.MarkdownParser

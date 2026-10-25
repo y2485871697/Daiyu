@@ -124,7 +124,14 @@ internal fun ModelSettingsScreen(
     val latestEnabled by rememberUpdatedState(enabled)
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
     val balance = rememberProviderBalanceTest(draft, enabled, testBalance)
-    val submit: () -> Unit = { if (latestEnabled && latestDraft === draft && draft.headerFieldsValid && draft.bodyFieldsValid) { connection.cancel(); balance.cancel(); onSave(draft) } }
+    var fieldsSaveError by remember(draft) { mutableStateOf<String?>(null) }
+    val submit: () -> Unit = {
+        if (latestEnabled && latestDraft === draft) {
+            connection.cancel(); balance.cancel()
+            fieldsSaveError = draft.inlineFieldsSaveError()
+            if (fieldsSaveError == null) onSave(draft)
+        }
+    }
     val changeDraft: (ModelSettingsDraftUi) -> Unit = { if (latestEnabled && latestDraft === draft) { connection.cancel(); balance.cancel(); onDraftChange(it) } }
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
@@ -262,7 +269,10 @@ internal fun ModelSettingsScreen(
         }
         }
         item(key = "model_save") {
-            if (!errorText.isNullOrBlank()) {
+            val fieldError = fieldsSaveError
+            if (fieldError != null) {
+                if (providerName == null) SettingsNote(fieldError, error = true) else ProviderFormError(fieldError)
+            } else if (!errorText.isNullOrBlank()) {
                 if (providerName == null) SettingsNote(errorText, error = true) else ProviderFormError(errorText)
             }
             val saveModifier = Modifier.testTag("model-save")
@@ -271,7 +281,7 @@ internal fun ModelSettingsScreen(
                 ProviderActionButton(
                     text = "保存配置",
                     onClick = submit,
-                    enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid,
+                    enabled = enabled,
                     modifier = saveModifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 )
             } else {
@@ -279,7 +289,7 @@ internal fun ModelSettingsScreen(
                     text = "保存",
                     onClick = submit,
                     colors = ButtonDefaults.textButtonColorsPrimary(),
-                    enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid,
+                    enabled = enabled,
                     modifier = saveModifier.padding(horizontal = 20.dp, vertical = 8.dp)
                         .fillMaxWidth().heightIn(min = 48.dp),
                 )

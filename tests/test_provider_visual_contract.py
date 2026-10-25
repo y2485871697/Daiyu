@@ -58,11 +58,11 @@ class ProviderVisualContractTest(unittest.TestCase):
         self.assertIn('ProviderActionButton(', provider)
         self.assertIn('text = "保存配置"', provider)
         self.assertIn('onClick = submit', provider)
-        self.assertIn('enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid', provider)
+        self.assertIn('enabled = enabled', provider)
         self.assertIn('padding(horizontal = 20.dp, vertical = 4.dp)', provider)
         for fragment in ('TextButton(', 'text = "保存"', 'onClick = submit',
                          'colors = ButtonDefaults.textButtonColorsPrimary()',
-                         'enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid',
+                         'enabled = enabled',
                          'padding(horizontal = 20.dp, vertical = 8.dp)', '.fillMaxWidth().heightIn(min = 48.dp)'):
             self.assertIn(fragment, normal)
 

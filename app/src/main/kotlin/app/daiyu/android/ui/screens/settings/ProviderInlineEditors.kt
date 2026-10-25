@@ -46,6 +46,16 @@ internal data class ProviderFieldRow(val id: Long, val name: String, val value: 
     override fun toString() = "ProviderFieldRow(<redacted>)"
 }
 
+internal fun ModelSettingsDraftUi.inlineFieldsSaveError(): String? = listOfNotNull(
+    if (!headerFieldsValid) headerFieldsError ?: "请修正自定义请求头。"
+    else if (runCatching { ProviderHeaders.parse(customHeaders) }.isFailure)
+        "自定义请求头配置无效，请修正或清除后保存。" else null,
+    if (!bodyFieldsValid) bodyFieldsError ?: "请修正自定义请求体。"
+    else if (runCatching { ProviderRequestOptions(customBody = customBody).validate(protocol) }.isFailure)
+        "自定义请求体配置无效，请修正或清除后保存。" else null,
+    if (runCatching { sessionGateway.validate() }.isFailure) "请检查网关字段。" else null,
+).joinToString("\n").takeIf { it.isNotBlank() }
+
 @Composable
 internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean, headers: Boolean,
     onDraftChange: (ModelSettingsDraftUi) -> Unit,
@@ -68,8 +78,6 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     val rows = (if (headers) draft.headerFieldRows else draft.bodyFieldRows) ?: parsed.getOrDefault(emptyList())
     val nextId = (rows.maxOfOrNull { it.id } ?: -1L) + 1L
     var expanded by rememberSaveable(headers, draft.protocol) { mutableStateOf(false) }
-    val notice = (if (headers) draft.headerFieldsError else draft.bodyFieldsError)
-        ?: if (parsed.isFailure) "原配置无效，请修正或清除后保存。" else null
     val latestDraft by rememberUpdatedState(draft)
     val latestEnabled by rememberUpdatedState(enabled)
     val latestChange by rememberUpdatedState(onDraftChange)
@@ -131,7 +139,6 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
                 }
             }
         } }
-        notice?.let { SettingsNote(it, error = true) }
         if (parsed.isFailure) TextButton("清除无效配置", enabled = enabled, onClick = { update(emptyList()) })
         val add: () -> Unit = {
             if (current() && rows.size < 32) update(rows + ProviderFieldRow(nextId, "", ""))
@@ -178,5 +185,4 @@ internal fun SessionGatewayFields(draft: SessionGatewayRule, enabled: Boolean,
             SettingsTextField("字段", draft.keyField, { onDraftChange(draft.copy(keyField = it)) }, enabled = enabled)
         }
     }
-    if (runCatching { draft.validate() }.isFailure) SettingsNote("请检查网关字段。", error = true)
 }

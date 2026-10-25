@@ -625,8 +625,10 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         inlineBodyControl("model-body-field-value:$index").performTextReplacement(jsonValue)
     }
     protected fun attemptBlockedInlineBodySave() {
-        val submit = reveal("model-save").assertIsNotEnabled().fetchSemanticsNode()
+        val button = reveal("model-save").assertIsEnabled()
+        val submit = button.fetchSemanticsNode()
             .config[app.daiyu.android.ui.screens.settings.RetainedModelSaveAction]
+        button.performClick()
         mainThread { submit() }
         ui.waitForIdle()
     }

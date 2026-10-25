@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.CatalogFixturePort
+
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
@@ -20,7 +22,7 @@ internal fun runnerOwner(message: Message): RunExecutionOwner {
         override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) =
             error("no tools expected")
     }
-    val runner = ChatRunner(ModelPort { object : ModelSession {
+    val runner = ChatRunner(CatalogFixturePort { object : ModelSession {
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
         override fun cancel() {}
     } }, object : ConversationStore { override fun save(message: Message) {} },
@@ -167,7 +169,7 @@ class RunCatalogToolsTest {
         val tools = RunCatalogTools(registry, capabilities, ToolLedger(InMemoryToolLedgerStore()),
             owner.conversationId, owner.runId) { _, task -> authorization = task; scope(task) }
         var rounds = 0
-        val model = object : ModelPort {
+        val model = object : CatalogFixturePort {
             override fun open(history: List<Message>): ModelSession = error("catalog route required")
             override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
                 assertTrue(definitions.any { it.name == "owned_read" })
@@ -269,6 +271,111 @@ class RunCatalogToolsTest {
         }
         assertTrue((dispatcher.dispatchOwned(exact, listOf(call), token).single().outcome as DispatchOutcome.Confirmed).replayed)
         assertEquals(1, executions)
+    }
+
+    @Test fun ordinaryCommandIsAdvertisedDispatchedAndReturnedThroughRealRunner() {
+        var approvals = 0; var commands = 0; var requests = 0
+        val caps = SessionCapabilities(owner.runId.value, setOf(RunCommandTools.CAPABILITY))
+        val tools = RunCatalogTools(ToolRegistry(), caps, ToolLedger(InMemoryToolLedgerStore()),
+            owner.conversationId, owner.runId,
+            commandFactory = { token, task ->
+                RunCommandTools(app.daiyu.android.terminal.TerminalConfiguration(workingDirectory = File("/fixed")),
+                    token, task, null, approve = { _, _, _ -> approvals++; true }, create = { _, _ ->
+                        object : CommandTransport {
+                            override fun execute(name: String, arguments: JSONObject): JSONObject =
+                                if (name == "terminal_open") JSONObject().put("ok", true).put("session_id", "fixed")
+                                else {
+                                    assertEquals("echo exact", arguments.getString("command")); commands++
+                                    JSONObject().put("ok", true).put("execution", "executed").put("stdout", "exact\n")
+                                }
+                            override fun read(id: String, offset: Long, limit: Int) = error("read not requested")
+                            override fun close() {}
+                            override fun awaitTermination(timeoutMillis: Long) = true
+                        }
+                    })
+            }, capture = { capabilities, task -> SkillRunSession.create(task, capabilities.enabled, emptyList()) })
+        val model = object : ModelPort {
+            override fun open(history: List<Message>): ModelSession = error("catalog overload required")
+            override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
+                assertEquals(setOf("terminal_exec", "terminal_read"), definitions.map { it.name }.toSet())
+                assertTrue(JSONObject(definitions.single { it.name == "terminal_exec" }.parameters)
+                    .getJSONObject("properties").has("command"))
+                return object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        if (requests++ == 0) {
+                            assertTrue(outputs.isEmpty())
+                            sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("command"), "terminal_exec",
+                                "{\"command\":\"echo exact\",\"environment\":\"android\"}")))
+                        } else {
+                            assertEquals("exact\n", JSONObject(outputs.single().output).getString("stdout"))
+                            sink(ModelEvent.TextDelta("reply", "done"))
+                        }
+                    }
+                    override fun cancel() {}
+                }
+            }
+        }
+        val runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            tools, RunnerOptions(receiptBatchExecutor = tools)) {}
+        assertEquals(RunStatus.COMPLETED, runner.run(owner, emptyList()).status)
+        assertEquals(1, approvals); assertEquals(1, commands); assertEquals(2, requests)
+        tools.close()
+        val drained = java.util.concurrent.CompletableFuture<RunCatalogCloseResult>()
+        tools.observeClose { drained.complete(it) }
+        assertEquals(RunCatalogCloseResult.Drained, drained.get(3, TimeUnit.SECONDS))
+    }
+
+    @Test fun commandReceiptFailureFencesConcurrentDifferentEffectBeforeNextApproval() {
+        val finishing = CountDownLatch(1); val release = CountDownLatch(1)
+        var saved = emptyList<LedgerEntry>()
+        val store = object : ToolLedgerStore {
+            @Synchronized override fun <T> transaction(block: (MutableList<LedgerEntry>) -> T): T {
+                val copy = saved.toMutableList()
+                val value = block(copy)
+                if (copy.any { it.state == LedgerState.CONFIRMED }) {
+                    finishing.countDown(); check(release.await(3, TimeUnit.SECONDS))
+                    throw java.io.IOException("receipt not durable")
+                }
+                saved = copy.toList()
+                return value
+            }
+        }
+        val approvals = AtomicInteger(); val commands = AtomicInteger()
+        val caps = SessionCapabilities("run", setOf(RunCommandTools.CAPABILITY))
+        val tools = RunCatalogTools(ToolRegistry(), caps, ToolLedger(store), owner.conversationId, owner.runId,
+            commandFactory = { token, task ->
+                RunCommandTools(app.daiyu.android.terminal.TerminalConfiguration(workingDirectory = File("/fixed")),
+                    token, task, null, approve = { _, _, _ -> approvals.incrementAndGet(); true }, create = { _, _ ->
+                        object : CommandTransport {
+                            override fun execute(name: String, arguments: JSONObject): JSONObject =
+                                if (name == "terminal_open") JSONObject().put("ok", true).put("session_id", "fixed")
+                                else { commands.incrementAndGet(); JSONObject().put("execution", "executed") }
+                            override fun read(id: String, offset: Long, limit: Int) = error("unused")
+                            override fun close() {}
+                            override fun awaitTermination(timeoutMillis: Long) = true
+                        }
+                    })
+            }, capture = { capabilities, task -> SkillRunSession.create(task, capabilities.enabled, emptyList()) })
+        tools.bindOwner(runnerOwner(owner)); tools.definitions
+        fun command(id: String, timeout: Int) = ToolInvocation(ToolCallId(id), "terminal_exec",
+            JSONObject().put("command", "echo exact").put("environment", "android").put("timeout_ms", timeout).toString())
+        val first = java.util.concurrent.FutureTask { tools.execute(owner, listOf(command("first", 30000))) { false } }
+        val second = java.util.concurrent.FutureTask { tools.start(owner, listOf(command("second", 60000))) { false } }
+        val firstThread = Thread(first); val secondThread = Thread(second)
+        firstThread.start()
+        try {
+            assertTrue(finishing.await(3, TimeUnit.SECONDS)); secondThread.start()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+            while (secondThread.state != Thread.State.BLOCKED && !second.isDone && System.nanoTime() < deadline) Thread.yield()
+            assertEquals(Thread.State.BLOCKED, secondThread.state)
+            assertTrue(secondThread.stackTrace.none { it.className == ToolLedger::class.java.name })
+            assertEquals(1, approvals.get()); assertEquals(1, commands.get())
+        } finally { release.countDown() }
+        assertTrue(first.get(3, TimeUnit.SECONDS).single().outcome is DispatchOutcome.Unknown)
+        val outcome = (second.get(3, TimeUnit.SECONDS) as ReceiptBatchStart.Completed).receipts.single().outcome
+        assertTrue(outcome is DispatchOutcome.NotExecuted)
+        assertEquals(1, approvals.get()); assertEquals(1, commands.get())
+        tools.close()
     }
 
 }

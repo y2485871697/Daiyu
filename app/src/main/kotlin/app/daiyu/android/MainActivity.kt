@@ -591,6 +591,41 @@ class MainActivity : ComponentActivity() {
                 }, decision)
         }
     }
+    private var commandDialog: android.app.AlertDialog? = null
+    private var commandRequest: app.daiyu.android.integration.tools.CommandApprovalRequest? = null
+    private val commandApprovalUi = object : app.daiyu.android.integration.tools.CommandApprovalUi {
+        override fun show(request: app.daiyu.android.integration.tools.CommandApprovalRequest, answer: (Boolean) -> Unit) {
+            fun available() = activityUsable() && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) &&
+                retainedPage == "chat" && !sidebarVisible && selectionReady &&
+                selected?.id == request.owner.conversationId
+            if (!available()) { answer(false); return }
+            commandDialog?.dismiss()
+            commandRequest = request
+            val decided = AtomicBoolean(false)
+            fun decide(value: Boolean) {
+                if (decided.compareAndSet(false, true)) answer(value && available() && commandRequest === request)
+            }
+            commandDialog = android.app.AlertDialog.Builder(this@MainActivity)
+                .setTitle("批准本次终端命令").setMessage(request.disclosure)
+                .setHapticPositiveButton("仅允许本次") { _, _ -> decide(true) }
+                .setHapticNegativeButton("拒绝") { _, _ -> decide(false) }
+                .setOnCancelListener { decide(false) }.create().also { dialog ->
+                    dialog.setOnDismissListener {
+                        decide(false)
+                        if (commandDialog === dialog) { commandDialog = null; commandRequest = null }
+                    }
+                    dialog.show()
+                }
+        }
+        override fun dismiss(request: app.daiyu.android.integration.tools.CommandApprovalRequest) {
+            if (commandRequest === request) { commandDialog?.dismiss(); commandDialog = null; commandRequest = null }
+        }
+    }
+    private fun revokeCommandApproval() {
+        controller.revokeCommandApproval()
+        commandDialog?.dismiss(); commandDialog = null; commandRequest = null
+    }
+
     private fun showVideoPermission(title: String, message: String, decision: (Boolean) -> Unit) {
         videoDialog?.dismiss()
         val decided = AtomicBoolean(false)
@@ -767,6 +802,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
+            if (value && !sidebarVisibleState) revokeCommandApproval()
             if (value && !sidebarVisibleState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
         }
@@ -873,6 +909,7 @@ class MainActivity : ComponentActivity() {
         get() = retainedPageState
         set(value) {
             if (value != retainedPageState) {
+                revokeCommandApproval()
                 revokeTerminalJobsVisit()
                 childStatusVisit = null
                 usageVisit = null
@@ -1069,6 +1106,7 @@ class MainActivity : ComponentActivity() {
     private var generationFormRevision by mutableStateOf(0L)
     private var generationRequest: Any? = null
     private var generationVisit: Any? = null
+    private var generationKind: app.daiyu.android.model.generation.GenerationKind? = null
     private var generationInputPending by mutableStateOf(false)
     private val generationInputsDelegate = lazy {
         // A blocked provider must not retain this Activity across recreation.
@@ -2472,6 +2510,16 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.BOTTOM -> jumpToBottom()
             ChatMenuAction.SEARCH -> if (currentChat()) openSearch("history-search")
             ChatMenuAction.SETTINGS -> retainedPage = "settings"
+            ChatMenuAction.BROWSER_TOOLS -> if (currentChat()) openBrowserApproval()
+            ChatMenuAction.GUI_TOOLS -> if (currentChat()) openGuiPreparation()
+            ChatMenuAction.MCP_TOOLS -> if (currentChat()) openMcpApproval()
+            ChatMenuAction.TERMINAL_TOOLS -> if (currentChat() && draft.isNotBlank() && controller.active == null) {
+                cancelBrowserEditor(); cancelShizukuEditor(); dictationHost.invalidate()
+                terminalEditor = TerminalEditor(selected, terminalDraft())
+            }
+            ChatMenuAction.GENERATE_IMAGE -> if (currentChat()) openGenerationApproval(app.daiyu.android.model.generation.GenerationKind.IMAGE)
+            ChatMenuAction.GENERATE_VIDEO -> if (currentChat()) openGenerationApproval(app.daiyu.android.model.generation.GenerationKind.VIDEO)
+            ChatMenuAction.GENERATION_SETTINGS -> if (currentChat()) openGenerationSettings()
             ChatMenuAction.OPEN_TERMINAL -> openTerminal()
             ChatMenuAction.OPEN_BROWSER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) openBrowserVisualPage()
             ChatMenuAction.OPEN_WORKSPACE -> if (currentChat()) openLinuxSettings(filesOnly = true)
@@ -2678,7 +2726,7 @@ class MainActivity : ComponentActivity() {
                 enabled = available && pendingTextSend == null && generationApproval == null &&
                     !controller.generationSubmissionPending(),
                 modifier = Modifier.testTag("generation-approval-entry").heightIn(min = 48.dp),
-                onClick = ::openGenerationApproval)
+                onClick = { openGenerationApproval() })
             if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "GUI 精确动作审批（前台屏幕）",
                 enabled = available && pendingTextSend == null && guiEditor == null,
                 modifier = Modifier.testTag("gui-prepare-entry").heightIn(min = 48.dp),
@@ -3201,7 +3249,7 @@ class MainActivity : ComponentActivity() {
         if (entry != null && !entry.submitted) controller.abandonGeneration(entry)
     }
 
-    private fun openGenerationApproval() {
+    private fun openGenerationApproval(kind: app.daiyu.android.model.generation.GenerationKind? = null) {
         if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
             pendingTextSend != null || imageHost.hasAttachments || draft.isBlank() ||
@@ -3224,6 +3272,7 @@ class MainActivity : ComponentActivity() {
                 if (activityUsable() && generationRequest === request && generation == editorGeneration &&
                     revision == draftRevision && text == draft && conversation?.id == selected?.id &&
                     retainedPage == "chat" && !sidebarVisible && !imageHost.hasAttachments && videoHost.state.items.isEmpty()) {
+                    generationKind = kind
                     generationApproval = entry
                     generationVisit = Any()
                     generationForm = app.daiyu.android.ui.GenerationApprovalForm(prompt = text,
@@ -3298,7 +3347,8 @@ class MainActivity : ComponentActivity() {
                         } else app.daiyu.android.ui.GenerationApprovalHost(
                             identity = entry.identity,
                             editor = generationFormEditor(),
-                            profiles = entry.settings.profiles,
+                            profiles = entry.settings.profiles.filter { generationKind?.accepts(it.protocol) != false },
+                            mediaKind = generationKind,
                             downloads = entry.settings.downloads,
                             form = generationForm,
                             confirmationHandoff = entry.handoff,
@@ -3313,7 +3363,9 @@ class MainActivity : ComponentActivity() {
                             onConfirmed = {
                                 val valid = generationResumed() && !generationInputPending &&
                                     generationInputIdentity()?.entry === entry
-                                val accepted = valid && controller.sendGeneration(entry, generationFormEditor())
+                                val profile = entry.settings.profiles.singleOrNull { it.id == generationForm.profileId }
+                                val accepted = valid && profile != null && generationKind?.accepts(profile.protocol) != false &&
+                                    controller.sendGeneration(entry, generationFormEditor())
                                 generationVisit = null
                                 generationApproval = null
                                 if (!accepted) controller.abandonGeneration(entry)
@@ -4646,6 +4698,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onPostResume() {
         super.onPostResume()
+        controller.attachCommandApprovalUi(commandApprovalUi)
         legacyLaunchersReady = true
         // ActivityResult can arrive before RESUMED. Do not open a provider until then.
         window.decorView.post {
@@ -4655,6 +4708,8 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        controller.detachCommandApprovalUi(commandApprovalUi)
+        revokeCommandApproval()
         if (retainedPage == "session-gateway") {
             gatewayOwner?.revoke()
             gatewayReloadPending = true; gatewayReplacementAuthorized = false
@@ -5189,6 +5244,7 @@ class MainActivity : ComponentActivity() {
     }
     internal fun select(conversation: Conversation?) {
         requireActivityUsable()
+        revokeCommandApproval()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
         historySearchEpoch++

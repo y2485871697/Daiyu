@@ -1773,10 +1773,20 @@ class ChatController internal constructor(private val application:Application,
         }==true && active?.id==owner.id && active?.runId==owner.runId &&
             active?.conversationId==owner.conversationId
 
+    private val commandApprovals = CommandApprovalGate(
+        post = { action -> handler.post { action() } },
+        current = { owner -> synchronized(this) {
+            !closed && resources?.let { !it.fenced && owner.owns(it.initial) } == true
+        } })
+    internal fun attachCommandApprovalUi(ui: CommandApprovalUi) = commandApprovals.attach(ui)
+    internal fun detachCommandApprovalUi(ui: CommandApprovalUi) = commandApprovals.detach(ui)
+    internal fun revokeCommandApproval() = commandApprovals.revoke()
+
     // All callers hold the controller monitor. Revoke before any potentially slow runner control.
     private fun fenceRun(lifetime:RunResources) {
         if(lifetime.fenced) return
         lifetime.fenced=true
+        commandApprovals.revoke()
         lifetime.browserVisual?.revoke()
         guiEntry?.takeIf { it.assistantId == lifetime.initial.id && it.runId == lifetime.initial.runId &&
             it.conversationId == lifetime.initial.conversationId }?.let { it.revoked = true; it.session?.close() }
@@ -3389,6 +3399,8 @@ class ChatController internal constructor(private val application:Application,
                     (if (generation == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
                     (if (terminalRun == null) emptySet() else setOf(RunTerminalTools.CAPABILITY)) +
                     (if (terminalJobRun == null) emptySet() else setOf(TerminalJobSession.CAPABILITY)) +
+                    (if (terminalRun == null && terminalJobRun == null && gui == null && virtualDisplay == null &&
+                        video == null && generation == null) setOf(RunCommandTools.CAPABILITY) else emptySet()) +
                     (if (virtualDisplay == null) emptySet() else setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY)) +
                     (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
@@ -3429,6 +3441,18 @@ class ChatController internal constructor(private val application:Application,
                 } ?: browserPreparation?.childPlan?.parentAuthorization ?: browserBinding?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
                 }, shizuku=shizuku, browser=browserBinding, terminal=terminalRun?.binding, gui=gui?.session, terminalJobs=terminalJobRun,
+                commandFactory = if (RunCommandTools.CAPABILITY !in capabilities.enabled) null else { realOwner, task ->
+                    val host = ((application as? ChatApplication)?.terminalProvider?.state?.value as?
+                        app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
+                    val launch = try { host?.freezeSelectedCommandLaunchOnWorker(application.cacheDir, application.filesDir) }
+                        catch (_: Exception) { null }
+                    try {
+                        RunCommandTools.android(application, realOwner, task, launch, approve = { context, effect, disclosure ->
+                            commandApprovals.await(CommandApprovalRequest(realOwner, context.invocation.id.value,
+                                effect, disclosure), context.cancelled)
+                        })
+                    } catch (failure: Throwable) { launch?.close(); throw failure }
+                },
                 authorizationFactory = if (video != null) { realOwner ->
                     video.first.bindOwner(realOwner)
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,

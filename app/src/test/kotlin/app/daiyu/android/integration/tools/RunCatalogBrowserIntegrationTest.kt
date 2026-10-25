@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.CatalogFixturePort
+
 import app.daiyu.android.assistants.AssistantProfile
 import app.daiyu.android.browser.BrowserRunIdentity
 import app.daiyu.android.browser.BrowserRunPreparation
@@ -46,7 +48,7 @@ class RunCatalogBrowserIntegrationTest {
             override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) =
                 error("no model tool calls expected")
         }
-        val runner = ChatRunner(ModelPort { object : ModelSession {
+        val runner = ChatRunner(CatalogFixturePort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
             override fun cancel() {}
         } }, object : ConversationStore { override fun save(message: Message) {} },

@@ -30,6 +30,60 @@ class ToolDispatcherTest {
     private fun outcome(dispatcher: ToolDispatcher, task: TaskAuthorization = task(), call: ToolInvocation = call()) = dispatcher.dispatch(task, listOf(call)).single().outcome
     private fun code(outcome: DispatchOutcome) = (outcome as DispatchOutcome.NotExecuted).code
 
+    @Test fun freshConsentIsExactAndNeverMutatesTheRunGrantOrRepeatsOnReplay() {
+        val owner = RunExecutionOwner.issue(Message(MessageId("m"), ConversationId("c"), RunId("task"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        val original = task(emptySet())
+        var approvals = 0
+        var executions = 0
+        var grant: TaskAuthorization? = task(setOf(effect()))
+        val tool = object : RegisteredTool {
+            override val definition = ToolDefinition("write_note", 1, "consent", "notes.write", ToolEffect.WRITE, writeSchema)
+            override fun prepare(arguments: ToolArguments) = PreparedTool.approvedWrite(effect(),
+                approve = { context -> assertSame(original, context.authorization); approvals++; grant },
+                admit = { context -> assertSame(original, context.authorization); null },
+                execute = { context ->
+                    assertSame(grant, context.authorization)
+                    assertEquals(setOf(effect()), context.authorization.allowedWrites)
+                    executions++; ExecutionReceipt.Confirmed("written")
+                })
+        }
+        val dispatcher = dispatcher(InMemoryToolLedgerStore(), tool)
+        fun dispatch(id: String) = dispatcher.dispatchOwned(original, listOf(call(id)), owner).single().outcome
+        grant = null
+        assertEquals("write_approval_denied", code(dispatch("denied")))
+        grant = task(setOf(effect(), effect("other")))
+        assertEquals("write_approval_mismatch", code(dispatch("broad")))
+        grant = task(setOf(effect()))
+        assertTrue(dispatch("approved") is DispatchOutcome.Confirmed)
+        assertTrue((dispatch("new-call") as DispatchOutcome.Confirmed).replayed)
+        assertEquals(3, approvals); assertEquals(1, executions)
+        assertTrue(original.allowedWrites.isEmpty())
+    }
+
+    @Test fun consentCancellationAndUnknownNeverExecuteOrApproveAgain() {
+        val owner = RunExecutionOwner.issue(Message(MessageId("m"), ConversationId("c"), RunId("task"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        var cancelled = false
+        var approvals = 0
+        var executions = 0
+        var cancelOnApproval = true
+        val tool = object : RegisteredTool {
+            override val definition = ToolDefinition("write_note", 1, "consent", "notes.write", ToolEffect.WRITE, writeSchema)
+            override fun prepare(arguments: ToolArguments) = PreparedTool.approvedWrite(effect(),
+                approve = { approvals++; cancelled = cancelOnApproval; task(setOf(effect())) },
+                admit = { null }, execute = { executions++; ExecutionReceipt.Unknown("sent") })
+        }
+        val dispatcher = dispatcher(InMemoryToolLedgerStore(), tool)
+        fun dispatch(id: String) = dispatcher.dispatchOwned(task(emptySet()), listOf(call(id)), owner) { cancelled }.single().outcome
+        assertEquals("cancelled_before_execution", code(dispatch("cancel")))
+        assertEquals(0, executions)
+        cancelled = false; cancelOnApproval = false
+        assertTrue(dispatch("unknown") is DispatchOutcome.Unknown)
+        assertTrue(dispatch("retry-new-id") is DispatchOutcome.Unknown)
+        assertEquals(2, approvals); assertEquals(1, executions)
+    }
+
     @Test fun capabilityNeverGrantsTaskWritesAndGrantIsExact() {
         var executions = 0
         val tool = write { executions++; ExecutionReceipt.Confirmed("ok") }

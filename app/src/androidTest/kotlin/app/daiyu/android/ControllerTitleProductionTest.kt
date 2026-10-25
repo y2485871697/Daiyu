@@ -53,7 +53,7 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         val cancelled = AtomicInteger(); val calls = AtomicInteger()
         val controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0),
-            model = { ModelPort { object : ModelSession {
+            model = { CatalogFixturePort { object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     if (parentStatus == RunStatus.FAILED) error("synthetic parent failure")
                     sink(ModelEvent.TextFinal("a", "已保存回答"))
@@ -61,7 +61,7 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
                 override fun cancel() { }
             } } }, titleModelFactory = { frozen ->
                 assertEquals("synthetic-title", frozen.model)
-                ModelPort { object : ModelSession {
+                CatalogFixturePort { object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                         calls.incrementAndGet(); entered.countDown(); await(release)
                         sink(ModelEvent.Usage(7, null, 1))

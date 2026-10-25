@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.CatalogFixturePort
+
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
@@ -64,7 +66,7 @@ class RunCatalogGenerationBindingTest {
         rejected { tools.definitions }
         assertEquals(0, authCalls.get()); assertEquals(0, leafCalls.get())
         var opened = false
-        val model = object : ModelPort {
+        val model = object : CatalogFixturePort {
             override fun open(history: List<Message>): ModelSession = error("catalog route required")
             override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
                 opened = true

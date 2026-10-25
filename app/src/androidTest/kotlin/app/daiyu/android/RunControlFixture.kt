@@ -60,7 +60,7 @@ internal class RunControlFixture(base:Context,
         val factory: (ModelSettings) -> ModelPort = {
             // Test-only gate in real preparation, before the SQLite receipt or model open.
             beforeModel()
-            modelFactory?.invoke(it) ?: ModelPort {history ->
+            modelFactory?.invoke(it) ?: CatalogFixturePort {history ->
                 beforeOpen(history)
                 opens.incrementAndGet()
                 synchronized(queued) {histories.add(history);checkNotNull(queued.pollFirst())}

@@ -103,7 +103,7 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
             if (askUser) check(app.getSharedPreferences("conversation-ui", 0).edit()
                 .putBoolean("interactive_mode", true).commit())
             controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0), {
-                ModelPort {
+                CatalogFixturePort {
                     opens.incrementAndGet()
                     object : ModelSession {
                         var round = 0

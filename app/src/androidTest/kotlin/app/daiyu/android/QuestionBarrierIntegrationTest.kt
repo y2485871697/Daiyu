@@ -27,7 +27,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         private const val ARGS = """{"title":"Route choice","question":"Which route?","options":[{"id":"one","label":"First route"},{"id":"two","label":"Second route"}],"allow_other":false,"allow_delegation":false,"allow_note":false}"""
     }
     private class FixtureApplication(base:Context):Application() {init {attachBaseContext(base)}}
-    private class Probe:ModelPort {
+    private class Probe:CatalogFixturePort {
         val opens=AtomicInteger();val nexts=AtomicInteger()
         val failure=AtomicReference<Throwable?>()
         var beforeContinuation:(List<ToolOutput>)->Unit={}

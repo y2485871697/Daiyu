@@ -72,17 +72,20 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             settings.save(ModelSettings("https://example.invalid", "gui-storage", "synthetic-key", false))
             controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0), {
                 factories.incrementAndGet()
-                ModelPort { history ->
-                    modelInput.set(history)
-                    opens.incrementAndGet()
-                    if (automatic) ResponsesModel(settings.load(), { chat }).open(history)
-                    else object : ModelSession {
-                        override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                            modelEntered.countDown()
-                            check(modelRelease.await(10, TimeUnit.SECONDS))
-                            sink(ModelEvent.TextFinal("body", "done"))
+                object : ModelPort {
+                    override fun open(history: List<Message>) = error("GUI requires catalog definitions")
+                    override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
+                        modelInput.set(history)
+                        opens.incrementAndGet()
+                        if (automatic) return ResponsesModel(settings.load(), { chat }).open(history, definitions)
+                        else return object : ModelSession {
+                            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                                modelEntered.countDown()
+                                check(modelRelease.await(10, TimeUnit.SECONDS))
+                                sink(ModelEvent.TextFinal("body", "done"))
+                            }
+                            override fun cancel() { modelRelease.countDown() }
                         }
-                        override fun cancel() { modelRelease.countDown() }
                     }
                 }
             }, taskSurfaceStore = isolatedTaskSurfaceStore(TaskSurfacePreference.FOREGROUND),

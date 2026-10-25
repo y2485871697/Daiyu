@@ -323,7 +323,9 @@ internal class ControllerMessageImages(private val database: ConversationDatabas
         }
         override fun open(history: List<Message>): ModelSession {
             val plan = plan(history)
-            return if (plan.hasImages) delegate.open(history, emptyList<ToolDefinition>(), plan) else delegate.open(history)
+            return if (plan.hasImages) delegate.open(history, provider.asModelSettings().enabledTools().map {
+                ToolDefinition(it.toolName, it.description, "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}")
+            }, plan) else delegate.open(history)
         }
         override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession {
             val plan = plan(history)

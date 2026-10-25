@@ -89,7 +89,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         app = FixtureApplication(base, resolver)
         settings = ModelSettingsStore(app, alias)
         settings.save(ModelSettings("https://example.invalid", "not-in-a-capability-catalog", "fixture-key", false))
-        model = object : ModelPort {
+        model = object : CatalogFixturePort {
             override fun open(history: List<Message>): ModelSession = error("lost image plan")
             override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession {
                 check(images is FrozenMessageImagePlan && images.hasImages)

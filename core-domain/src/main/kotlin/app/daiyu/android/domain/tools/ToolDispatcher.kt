@@ -73,7 +73,7 @@ class ToolDispatcher(
                 return rejected("effect_contract_violation")
             if ((definition.effect == ToolEffect.WRITE) != (plan.writeEffect != null))
                 return rejected("effect_contract_violation")
-            if (plan.writeEffect != null && plan.writeEffect !in task.allowedWrites)
+            if (plan.writeEffect != null && plan.writeEffect !in task.allowedWrites && plan.approveWrite == null)
                 return rejected("task_write_not_authorized")
             plans.add(plan)
             requests.add(LedgerRequest(invocation.id.value, invocationKey(invocation, definition, arguments), plan.writeEffect?.key()))
@@ -124,7 +124,24 @@ class ToolDispatcher(
                     ToolDispatchResult(call.id, outcome)
                 })
             } else {
-                try { plans[index].execute(contexts[index]) }
+                try {
+                    val plan = plans[index]
+                    val context = contexts[index]
+                    if (plan.approveWrite == null) plan.execute(context)
+                    else {
+                        val original = checkNotNull(context)
+                        val approval = plan.approveWrite.invoke(original)
+                        when {
+                            approval == null -> ExecutionReceipt.NotExecuted("write_approval_denied")
+                            approval.sessionId != task.sessionId || approval.taskId != task.taskId ||
+                                approval.allowedWrites != setOf(plan.writeEffect) ->
+                                ExecutionReceipt.NotExecuted("write_approval_mismatch")
+                            cancelled() -> ExecutionReceipt.NotExecuted("cancelled_before_execution")
+                            else -> plan.admit(original) ?: plan.execute(ToolExecutionContext(
+                                original.owner, original.invocation, approval, cancelled))
+                        }
+                    }
+                }
                 // Once execution starts, exceptions (including interruption) do NOT prove non-execution.
                 catch (_: Exception) { ExecutionReceipt.Unknown("adapter_result_unconfirmed") }
             }

@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.CatalogFixturePort
+
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.runtime.RunnerOptions
@@ -18,7 +20,7 @@ class RunChildModelsTest {
     private fun call(profile: String = "review", id: String = "parent-call") = ToolInvocation(ToolCallId(id),
         RunChildModels.TOOL_NAME, """{"tasks":[{"profile_id":"$profile","prompt":"Review this task"}]}""")
     private fun model(opened: AtomicInteger, body: (List<Message>, (ModelEvent) -> Unit) -> Unit): ModelPort =
-        object : ModelPort {
+        object : CatalogFixturePort {
             override fun open(history: List<Message>): ModelSession = error("default tools must not be advertised")
             override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
                 assertTrue(definitions.isEmpty()); opened.incrementAndGet()
@@ -48,7 +50,7 @@ class RunChildModelsTest {
         }
         val catalog = tools(mapOf("review" to definition(port)), ledger)
         var rounds = 0
-        val parentPort = ModelPort { object : ModelSession {
+        val parentPort = CatalogFixturePort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                 if (rounds++ == 0) { assertTrue(outputs.isEmpty()); sink(ModelEvent.ToolReady(call())) }
                 else {
@@ -110,7 +112,7 @@ class RunChildModelsTest {
     @Test fun closeCancelsChildButIdleWaitsForRealExecutionExit() {
         val entered = CountDownLatch(1); val cancelled = CountDownLatch(1); val release = CountDownLatch(1)
         val idle = CountDownLatch(1); val result = AtomicReference<ToolDispatchResult>(); val failure = AtomicReference<Throwable>()
-        val port = object : ModelPort {
+        val port = object : CatalogFixturePort {
             override fun open(history: List<Message>): ModelSession = error("default tools")
             override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>) = object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {

@@ -170,8 +170,14 @@ internal object MessagesStream {
                         }
                     }
                     "message_delta" -> {
-                        protocol(id != null && reason == null && blocks.values.all { it.stopped })
-                        reason = event.getJSONObject("delta").getString("stop_reason")
+                        protocol(id != null && blocks.values.all { it.stopped })
+                        val delta = event.getJSONObject("delta")
+                        if (delta.has("stop_reason") && !delta.isNull("stop_reason")) {
+                            val nextReason = delta.get("stop_reason")
+                            protocol(nextReason is String && nextReason.isNotBlank())
+                            protocol(reason == null || reason == nextReason)
+                            reason = nextReason as String
+                        }
                         if (event.has("usage")) usage(event.getJSONObject("usage"))
                     }
                     "message_stop" -> {

@@ -1,5 +1,7 @@
 package app.daiyu.android.domain.delegation
 
+import app.daiyu.android.domain.CatalogFixturePort
+
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.SessionCapabilities
@@ -68,7 +70,7 @@ class ToolEnabledChildRunTest {
         val run = ToolEnabledChildRun(scope, ChildTaskRecord(scope.owner, parent.assistantMessageId.value, parent.ownerId,
             0, "profile", "explicit child"), parent, assembly.apply { this.scope = this@Fixture.scope }, {
             factories.incrementAndGet()
-            object : ModelPort {
+            object : CatalogFixturePort {
                 override fun open(history: List<Message>): ModelSession = error("schema required")
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                     check(definitions.isNotEmpty()); return transport

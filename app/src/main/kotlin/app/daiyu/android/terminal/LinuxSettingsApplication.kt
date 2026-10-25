@@ -64,6 +64,15 @@ class LinuxSettingsApplication private constructor(
         }
     }
 
+    internal fun freezeSelectedCommandLaunchOnWorker(tempDirectory: File,
+        hostWorkingDirectory: File): TerminalPtyLaunch.Linux? {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "terminal_freeze_requires_worker" }
+        val reference = terminalSelection.status().selected ?: return null
+        // Chroot command jobs have no owned-process transport yet. Never fall back to Android.
+        if (executionModes[reference] != LinuxExecutionMode.PROOT) return null
+        return freezeTerminalLaunchOnWorker(reference, tempDirectory, hostWorkingDirectory)
+    }
+
     /** Real application teardown only. A settings page must only close its own page handle. */
     override fun close() {
         settings.close()

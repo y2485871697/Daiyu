@@ -156,6 +156,37 @@ class MessagesTest : InstrumentationTestCase() {
         for (connection in connections) { assertTrue(connection.disconnected); assertTrue(connection.inputClosed); assertTrue(connection.outputClosed) }
     }
 
+    fun testPartialMessageDeltasKeepToolCallAndUsageThroughNextRequest() {
+        val partial = toolEvents().toMutableList()
+        val terminal = partial.size - 2
+        partial.addAll(terminal, listOf(
+            event("message_delta", "delta" to JSONObject(), "usage" to JSONObject().put("output_tokens", 1)),
+            event("message_delta", "delta" to JSONObject().put("stop_reason", JSONObject.NULL))))
+        partial.add(partial.size - 1, event("message_delta", "delta" to JSONObject().put("stop_reason", JSONObject.NULL),
+            "usage" to JSONObject().put("output_tokens", 4)))
+        val first = Connection(frames(partial))
+        val second = Connection(frames(textEvents()))
+        var opened = 0
+        val session = MessagesModel(settings) { listOf(first, second)[opened++] }.open(emptyList())
+        val events = mutableListOf<ModelEvent>()
+        session.next(emptyList(), events::add)
+        assertEquals("call", events.filterIsInstance<ModelEvent.ToolReady>().single().invocation.id.value)
+        assertEquals(1, JSONObject(events.filterIsInstance<ModelEvent.ToolReady>().single().invocation.arguments).getInt("a"))
+        assertEquals(4L, events.filterIsInstance<ModelEvent.Usage>().single().outputTokens)
+        session.next(listOf(ToolOutput(ToolCallId("call"), "exact output")), events::add)
+        assertEquals(JSONObject(first.request.toString("UTF-8")).getJSONArray("tools").toString(),
+            JSONObject(second.request.toString("UTF-8")).getJSONArray("tools").toString())
+        val messages = JSONObject(second.request.toString("UTF-8")).getJSONArray("messages")
+        val result = messages.getJSONObject(messages.length() - 1).getJSONArray("content").getJSONObject(0)
+        assertEquals("call", result.getString("tool_use_id"))
+        assertEquals("exact output", result.getString("content"))
+        val conflict = toolEvents().toMutableList()
+        conflict.add(conflict.size - 1, event("message_delta", "delta" to JSONObject().put("stop_reason", "end_turn")))
+        val unconfirmed = mutableListOf<ModelEvent>()
+        expectFailure(ModelFailure.PROTOCOL) { decode(frames(conflict), unconfirmed) }
+        assertTrue(unconfirmed.none { it is ModelEvent.ToolReady })
+    }
+
     fun testBlankLineFramingFragmentedJsonAndTerminalRequirements() {
         val events = mutableListOf<ModelEvent>()
         val raw = decode(": comment\r\n\r\n" + frames(toolEvents()).replace("\n", "\r\n"), events)

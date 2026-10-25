@@ -81,7 +81,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val f = fresh {
             factories.incrementAndGet()
             if (reject) error("synthetic-secret-must-not-escape")
-            ModelPort { opens.incrementAndGet(); session("accepted") }
+            CatalogFixturePort { opens.incrementAndGet(); session("accepted") }
         }
         val conversation = f.db.create("default")
         f.db.draft(conversation.id, "retained conversation draft"); f.db.draft("retained composer draft")
@@ -114,7 +114,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             assertTrue(f.db.messages(conversation.id).isEmpty())
             assertEquals("keep until accepted", f.db.conversations().single().draft)
             assertNull(f.controller.send(conversation, "reentrant duplicate"))
-            object : ModelPort {
+            object : CatalogFixturePort {
                 override fun open(history: List<Message>): ModelSession = error("explicit frozen tools required")
                 override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = error("legacy enums must not swallow catalog")
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
@@ -158,7 +158,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val opens = AtomicInteger()
         f = fresh { config ->
             f.settings.save(config.copy(model = "replacement-model"))
-            ModelPort { opens.incrementAndGet(); session("must not run") }
+            CatalogFixturePort { opens.incrementAndGet(); session("must not run") }
         }
         val conversation = f.db.create("default")
         f.db.draft(conversation.id, "keep until fresh send")
@@ -173,7 +173,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val factories = AtomicInteger(); val opens = AtomicInteger()
         val f = fresh {
             factories.incrementAndGet()
-            ModelPort { opens.incrementAndGet(); session("must not run") }
+            CatalogFixturePort { opens.incrementAndGet(); session("must not run") }
         }
         val conversation = f.db.create("default"); f.db.draft(conversation.id, "retained")
         f.db.writableDatabase.execSQL("CREATE TRIGGER reject_send BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'synthetic'); END")
@@ -182,7 +182,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertTrue(f.db.messages(conversation.id).isEmpty())
         assertEquals("retained", f.db.conversations().single().draft)
         assertNull(f.controller.active)
-    }    private class CatalogProbe : ModelPort {
+    }    private class CatalogProbe : CatalogFixturePort {
         var definitions = emptyList<ToolDefinition>()
         var history = emptyList<Message>()
         var batches = emptyList<List<ToolInvocation>>()
@@ -430,7 +430,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertEquals(old.revision,app.daiyu.android.skills.SkillStore(f.app).list().single().revision)
     }
     fun testSkillsCaptureFailurePersistsFailedWithoutOpeningModelAndCanStartNextRun() {
-        val opens=AtomicInteger();val f=fresh {ModelPort {opens.incrementAndGet();session("next-run")}}
+        val opens=AtomicInteger();val f=fresh {CatalogFixturePort {opens.incrementAndGet();session("next-run")}}
         val broken=File(f.app.filesDir,"agent-builtin-skills-v1");broken.writeText("not a directory")
         val c=f.db.create("default")
         assertNotNull(f.controller.send(c,"accepted before worker capture"))

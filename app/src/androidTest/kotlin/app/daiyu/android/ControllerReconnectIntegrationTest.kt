@@ -100,7 +100,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
             for (preset in ReconnectDurationPreset.entries) {
                 val session = FailingSession()
                 val opens = AtomicInteger()
-                val f = fresh(protocol) { ModelPort { opens.incrementAndGet(); session } }
+                val f = fresh(protocol) { CatalogFixturePort { opens.incrementAndGet(); session } }
                 f.controller.reconnectSettings.save(ReconnectSettings(preset))
                 try {
                     assertTrue(send(f) is ChatController.TextSendResult.Accepted)
@@ -132,7 +132,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
             val f = fresh(ProviderProtocol.MESSAGES) { config ->
                 assertEquals(ProviderProtocol.MESSAGES, config.protocol)
                 entered.countDown(); check(assemble.await(10, TimeUnit.SECONDS))
-                ModelPort {
+                CatalogFixturePort {
                     opened.countDown(); check(openSession.await(10, TimeUnit.SECONDS))
                     session
                 }
@@ -307,7 +307,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
     fun testQueuedDiagnosticRechecksEveryOriginalIdentityAndLifetimeGateOnHandler() {
         val held = FailingSession()
         val opens = AtomicInteger()
-        val f = fresh { ModelPort {
+        val f = fresh { CatalogFixturePort {
             // The first open is the real Runner. Subsequent calls are deliberate local probes
             // of its installed outer observer, with no provider IO, authorization or tool work.
             if (opens.incrementAndGet() == 1) held else throw ModelRequestException(ModelFailure.TIMEOUT)

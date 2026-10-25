@@ -45,7 +45,7 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
         init {
             settings.save(ModelSettings("https://example.invalid", "device-fixture", "synthetic-device-key", true))
             controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0), {
-                ModelPort { object : ModelSession {
+                CatalogFixturePort { object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                         modelEntered.countDown(); check(modelRelease.await(10, TimeUnit.SECONDS)); sink(ModelEvent.TextDelta("body", "complete"))
                     }

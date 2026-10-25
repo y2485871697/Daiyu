@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.CatalogFixturePort
+
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
@@ -125,7 +127,7 @@ class RunDeviceResourcesTest {
             SkillRunSession.create(task, setOf(SkillRunSession.READ), emptyList())
         }
         var rounds = 0
-        val model = object : ModelPort {
+        val model = object : CatalogFixturePort {
             override fun open(history: List<Message>): ModelSession = error("catalog required")
             override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
                 assertTrue(checkpoints.isNotEmpty())

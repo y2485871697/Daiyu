@@ -63,8 +63,14 @@ interface CheckpointedResumableModelSession : ResumableModelSession {
 }
 fun interface ModelPort {
     fun open(history: List<Message>): ModelSession
-    fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history)
-    fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession = open(history)
+    fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession {
+        if (tools.isNotEmpty()) throw UnsupportedOperationException("Model port does not support tools")
+        return open(history)
+    }
+    fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
+        if (definitions.isNotEmpty()) throw UnsupportedOperationException("Model port does not support tool definitions")
+        return open(history)
+    }
     /** Explicit platform-frozen image input; legacy transports must not silently drop it. */
     fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
         throw UnsupportedOperationException("This model does not accept frozen image input")

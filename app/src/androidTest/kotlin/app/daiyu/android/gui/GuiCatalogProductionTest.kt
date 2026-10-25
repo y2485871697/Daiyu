@@ -1,5 +1,7 @@
 package app.daiyu.android.gui
 
+import app.daiyu.android.CatalogFixturePort
+
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
@@ -34,7 +36,7 @@ class GuiCatalogProductionTest : InstrumentationTestCase() {
             override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) =
                 error("no tools expected")
         }
-        ChatRunner(ModelPort { object : ModelSession {
+        ChatRunner(CatalogFixturePort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
             override fun cancel() {}
         } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },

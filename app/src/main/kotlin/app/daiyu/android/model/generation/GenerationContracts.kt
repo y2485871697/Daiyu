@@ -2,7 +2,14 @@ package app.daiyu.android.model.generation
 
 /** Explicit wire contracts, not provider/model auto-detection or a claim of model capability. */
 enum class GenerationProtocol { OPENAI_IMAGES_JSON, OPENAI_IMAGE_EDIT_MULTIPART, OPENAI_VIDEO_MULTIPART }
-enum class GenerationKind { IMAGE, VIDEO }
+
+enum class GenerationKind {
+    IMAGE, VIDEO;
+    internal fun accepts(protocol: GenerationProtocol): Boolean = when (this) {
+        IMAGE -> protocol == GenerationProtocol.OPENAI_IMAGES_JSON || protocol == GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART
+        VIDEO -> protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART
+    }
+}
 
 data class GenerationIdentity(val operationId: String, val itemId: String) {
     internal fun validate() {

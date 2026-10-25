@@ -43,7 +43,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                     CatalogModelParameters(localIdentity = child.id)))) { false }
                 == CatalogCommitResult.COMMITTED)
             val factory: (ModelSettings) -> ModelPort = { config ->
-                object : ModelPort {
+                object : CatalogFixturePort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                         val isChild = config.model == "child-api"

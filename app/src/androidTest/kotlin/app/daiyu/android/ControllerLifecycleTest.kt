@@ -67,7 +67,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         beforeController(db)
         val calls=AtomicInteger();val sessions=mutableListOf<Session>()
         val controller=ChatController(app,db,settings,app.getSharedPreferences("conversation-ui",0),{
-            ModelPort {
+            CatalogFixturePort {
                 calls.incrementAndGet()
                 synchronized(sessions) {sessions.removeAt(0)}
             }

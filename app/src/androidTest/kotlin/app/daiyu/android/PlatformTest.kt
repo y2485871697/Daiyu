@@ -383,7 +383,7 @@ class PlatformTest:InstrumentationTestCase() {
         val settings=settingsStore(context);settings.save(config)
         val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
         val terminal=java.util.concurrent.CountDownLatch(1)
-        val model=ModelPort {object:ModelSession {
+        val model=CatalogFixturePort {object:ModelSession {
             override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {
                 entered.countDown();check(release.await(10,java.util.concurrent.TimeUnit.SECONDS))
                 sink(ModelEvent.TextDelta("m","迟到内容"))

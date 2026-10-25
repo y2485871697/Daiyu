@@ -58,7 +58,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         if (configured) settings.save(ModelSettings("https://example.invalid", "message-action-fixture", "synthetic-key", false))
         val opens = AtomicInteger()
         val controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0), { _ ->
-            ModelPort { history ->
+            CatalogFixturePort { history ->
                 opens.incrementAndGet()
                 object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {

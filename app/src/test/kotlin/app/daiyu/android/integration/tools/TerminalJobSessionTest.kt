@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.CatalogFixturePort
+
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
@@ -27,7 +29,7 @@ class TerminalJobSessionTest {
             override fun bindOwner(owner: RunExecutionOwner) { value = owner }
             override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
         }
-        ChatRunner(ModelPort { object : ModelSession {
+        ChatRunner(CatalogFixturePort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
             override fun cancel() {}
         } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },

@@ -113,6 +113,23 @@ import kotlinx.coroutines.withContext
                 }
             }
         }
+        fun policy(server: McpServer, enabled: Boolean = server.enabled,
+            allowed: Set<String> = server.allowedTools) {
+            val before = snapshot ?: return
+            if (busy || !current() || before.servers.none { it === server }) return
+            val next = before.servers.map { if (it === server) server.withPolicy(enabled, allowed) else it }
+            busy = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { runCatching { store.save(next, owner, before) } }
+                if (current()) {
+                    busy = false
+                    if (result.isSuccess) {
+                        snapshot = result.getOrThrow()
+                        status = "策略已保存；每次调用仍需精确参数批准，旧批准已失效。"
+                    } else status = "策略保存失败或已过期；保持原配置。"
+                }
+            }
+        }
         val selected = snapshot?.servers?.singleOrNull { it.id == selectedId }
         fun edit(server: McpServer?) {
             if (busy || !current()) return
@@ -173,6 +190,10 @@ import kotlinx.coroutines.withContext
                 item(key = "server-settings") {
                     SettingsSectionTitle("服务器设置")
                     SettingsCard {
+                        SettingsSwitchRow("启用服务器工具", selected.enabled, enabled = !busy,
+                            tag = "mcp-enable:${selected.id}", summary = "仅开放允许列表；不替代本轮调用批准") {
+                            policy(selected, enabled = it)
+                        }
                         SettingsRow("连接设置", summary = selected.endpoint,
                             showChevron = true, onClick = if (busy) null else ({ edit(selected) }), tag = "mcp-settings-edit")
                     }
@@ -181,7 +202,12 @@ import kotlinx.coroutines.withContext
                 if (selected.catalog.isEmpty()) item(key = "tools-empty") { SettingsNote("尚无工具，请刷新工具目录。") }
                 selected.catalog.forEach { tool ->
                     item(key = "tool:${tool.name}") {
-                        SettingsCard { SettingsRow(tool.name, summary = tool.description) }
+                        SettingsCard {
+                            SettingsSwitchRow(tool.name, tool.name in selected.allowedTools, enabled = !busy,
+                                tag = "mcp-allow:${selected.id}:${tool.name}", summary = tool.description) { allow ->
+                                policy(selected, allowed = if (allow) selected.allowedTools + tool.name else selected.allowedTools - tool.name)
+                            }
+                        }
                     }
                 }
                 item(key = "delete") {

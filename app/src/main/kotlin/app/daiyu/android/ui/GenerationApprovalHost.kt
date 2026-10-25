@@ -68,6 +68,7 @@ internal fun GenerationApprovalHost(
     onConfirmed: (ConfirmedGenerationPreparation) -> Boolean,
     onCancelled: () -> Unit,
     modifier: Modifier = Modifier,
+    mediaKind: GenerationKind? = null,
 ) {
     var preparation by remember(identity) { mutableStateOf<ControllerGenerationPreparation?>(null) }
     var error by remember(identity) { mutableStateOf<String?>(null) }
@@ -91,7 +92,11 @@ internal fun GenerationApprovalHost(
         onFormChange(value)
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("本次图片 / 视频生成（独立付费授权）")
+        Text(when (mediaKind) {
+            GenerationKind.IMAGE -> "本次图片生成（独立付费授权）"
+            GenerationKind.VIDEO -> "本次视频生成（独立付费授权）"
+            null -> "本次图片 / 视频生成（独立付费授权）"
+        })
         Text("不使用聊天模型。选择生成专用配置只是在填写表单，并不授权请求。")
         if (profiles.isEmpty()) Text("未配置独立生成模型；不会回退到聊天模型。")
         profiles.forEach { profile ->

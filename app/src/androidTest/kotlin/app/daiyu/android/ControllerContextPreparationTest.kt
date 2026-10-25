@@ -84,7 +84,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
     }
     fun testSummaryCleanupFailureFencesNewSendsWithoutEscapingCleanupCaller() {
         val opens = AtomicInteger()
-        val f = fresh { ModelPort { opens.incrementAndGet(); session() } }
+        val f = fresh { CatalogFixturePort { opens.incrementAndGet(); session() } }
         val reservation = RuntimeSummaryPreparation(BoundSummaryUsagePort("fixture", {}, {}),
             ContextPreparationCancellation(), {}, { throw android.database.sqlite.SQLiteException("fixture") })
         val close = ChatController::class.java.getDeclaredMethod("closeSummaryPreparationSafely", RuntimeSummaryPreparation::class.java)
@@ -152,7 +152,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
             override fun cancel() {}
         } },100000,90000,{SummaryRequestDeadline(60000)})
         val f = fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {summary}) {
-            ModelPort { input ->
+            CatalogFixturePort { input ->
                 history.set(input);opened.countDown()
                 assertTrue(releaseMain.await(10, TimeUnit.SECONDS))
                 session()
@@ -182,7 +182,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
     fun testNewConversationCannotBypassKnownBudget() {
         val factories=AtomicInteger()
         val f=fresh(CompressionSettings(false,2048,100)) {
-            factories.incrementAndGet();ModelPort {session()}
+            factories.incrementAndGet();CatalogFixturePort {session()}
         }
         val draft="too large ".repeat(1000);f.db.draft(draft)
         assertTrue(send(f,null,draft) is ChatController.TextSendResult.Rejected)
@@ -201,7 +201,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
                 assertTrue(c.moveToFirst())
                 assertEquals("concurrent original edit", org.json.JSONArray(c.getString(0)).getJSONObject(0).getString("text"))
             }
-            ModelPort {error("CAS conflict must not open")}
+            CatalogFixturePort {error("CAS conflict must not open")}
         }
         owner=seed(f,32);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
@@ -215,7 +215,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         lateinit var owner: Conversation
         f=fresh {
             f.db.draft(owner.id,"newer draft")
-            ModelPort {error("draft conflict must not open")}
+            CatalogFixturePort {error("draft conflict must not open")}
         }
         owner=seed(f,1);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
@@ -228,7 +228,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         lateinit var owner: Conversation
         f=fresh {
             f.db.delete(owner.id)
-            ModelPort {error("owner conflict must not open")}
+            CatalogFixturePort {error("owner conflict must not open")}
         }
         owner=seed(f,1);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
@@ -246,7 +246,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
             override fun cancel() {cancelled.countDown()}
         } },100000,90000,{SummaryRequestDeadline(60000)})
         val f=fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {bound}) {
-            mainFactories.incrementAndGet();ModelPort {session()}
+            mainFactories.incrementAndGet();CatalogFixturePort {session()}
         }
         val owner=seed(f);val service=ContextService(f.app,f.db)
         service.compress(owner.id,CompressionPolicy(keepTurns=2),ContextSummarizer {"旧摘要"})
@@ -276,7 +276,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
             override fun cancel() {}
         } },100000,90000,{SummaryRequestDeadline(60000)})
         val f=fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {bound}) {
-            factories.incrementAndGet();ModelPort {error("chat must not open")}
+            factories.incrementAndGet();CatalogFixturePort {error("chat must not open")}
         }
         val owner=seed(f);val before=ContextService(f.app,f.db).prepareSend(owner.id)
         f.db.draft(owner.id,"pending")
@@ -301,7 +301,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         f=fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {bound}) {
             // Summary has already run; only the final send CAS loses to a newer draft.
             f.db.draft(owner.id,"newer draft")
-            ModelPort {opens.incrementAndGet();session()}
+            CatalogFixturePort {opens.incrementAndGet();session()}
         }
         owner=seed(f);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
@@ -323,7 +323,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
             override fun cancel() {cancelled.countDown()}
         } },100000,90000,{SummaryRequestDeadline(60000)})
         val f=fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {bound}) {
-            factories.incrementAndGet();ModelPort {session()}
+            factories.incrementAndGet();CatalogFixturePort {session()}
         }
         val owner=seed(f);val service=ContextService(f.app,f.db)
         val before=service.prepareSend(owner.id)
@@ -365,7 +365,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
     fun testCancelTextSendAfterCommitGateKeepsAcceptedReceipt() {
         val opens=AtomicInteger();val cancellations=AtomicInteger()
         val onWritten = AtomicReference<(() -> Unit)?>(null)
-        val f=fresh(afterSendRowsWritten = { onWritten.get()?.invoke() }) {ModelPort {opens.incrementAndGet();session()}}
+        val f=fresh(afterSendRowsWritten = { onWritten.get()?.invoke() }) {CatalogFixturePort {opens.incrementAndGet();session()}}
         val owner=seed(f,1);f.db.draft(owner.id,"pending")
         val ticket=ChatController.TextSendTicket()
         // The real SQLite insert runs after beginCommit but before returning its receipt.
@@ -391,7 +391,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
 
     fun testProductionFactoryRejectsMissingSummaryProfileWithoutChatFallback() {
         val factories=AtomicInteger()
-        val f=fresh(production=true) {factories.incrementAndGet();ModelPort {session()}}
+        val f=fresh(production=true) {factories.incrementAndGet();CatalogFixturePort {session()}}
         // Real persisted v3 settings -> production policy -> independent profile store.
         // No injected coordinator/resolver in this test; missing credentials prevent transport I/O.
         ProductionCompressionSettingsStore(f.app).save(
@@ -407,7 +407,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
     fun testCloseAfterCommitGateReturnsReceiptWithoutStartingRunner() {
         val opens=AtomicInteger()
         val onWritten = AtomicReference<(() -> Unit)?>(null)
-        val f=fresh(afterSendRowsWritten = { onWritten.get()?.invoke() }) {ModelPort {opens.incrementAndGet();session()}}
+        val f=fresh(afterSendRowsWritten = { onWritten.get()?.invoke() }) {CatalogFixturePort {opens.incrementAndGet();session()}}
         val owner=seed(f,1);f.db.draft(owner.id,"pending")
         // Fires inside the real send transaction after beginCommit, before its receipt returns.
         onWritten.set { main {f.controller.close()} }
@@ -417,7 +417,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
 
     fun testLegacySynchronousMainThreadEntryRejectsWithoutIoAndWorkerRemainsCompatible() {
         val factories=AtomicInteger();val opened=CountDownLatch(1)
-        val f=fresh {factories.incrementAndGet();ModelPort {opened.countDown();session()}}
+        val f=fresh {factories.incrementAndGet();CatalogFixturePort {opened.countDown();session()}}
         f.db.draft("legacy")
         main {assertNull(f.controller.send(null,"legacy"))}
         assertEquals(0,factories.get());assertEquals("legacy",f.db.draft())

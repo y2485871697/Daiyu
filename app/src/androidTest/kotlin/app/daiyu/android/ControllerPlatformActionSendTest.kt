@@ -47,7 +47,7 @@ class ControllerPlatformActionSendTest : InstrumentationTestCase() {
                 return ExecutionReceipt.Confirmed("{\"stream\":\"music\",\"index\":3,\"read_back\":true}")
             }
         }
-        val port = object : ModelPort {
+        val port = object : CatalogFixturePort {
             override fun open(history: List<Message>): ModelSession = error("catalog definitions required")
             override fun open(history: List<Message>, tools: List<ToolDefinition>): ModelSession {
                 opens.incrementAndGet(); definitions.set(tools)

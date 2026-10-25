@@ -38,7 +38,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
     private class Fixture(val app: App, val database: ConversationDatabase, val controller: ChatController,
         val memory: MemoryProbe, val alias: String)
     private val fixtures=mutableListOf<Fixture>()
-    private fun port() = ModelPort { object : ModelSession {
+    private fun port() = CatalogFixturePort { object : ModelSession {
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent)->Unit) { sink(ModelEvent.TextFinal("answer", "done")) }
         override fun cancel() {}
     } }
@@ -198,7 +198,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         val factories=AtomicInteger(); val opened=AtomicInteger()
         val f=fresh(factory={ _, _ ->
             factories.incrementAndGet()
-            ModelPort { opened.incrementAndGet(); error("must never open") }
+            CatalogFixturePort { opened.incrementAndGet(); error("must never open") }
         })
         val store=f.controller.assistantStore
         store.save(AssistantProfile("default","before","personality before",createdAt=12,enabledSkillIds=listOf("before")))
@@ -281,7 +281,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         lateinit var f: Fixture
         f=fresh(factory={ _, _ ->
             f.controller.assistantStore.delete("default")
-            ModelPort { opened.incrementAndGet(); error("must never open") }
+            CatalogFixturePort { opened.incrementAndGet(); error("must never open") }
         })
         f.controller.assistantStore.save(AssistantProfile("other","other",""))
         f.database.draft("keep")
@@ -292,7 +292,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
 
     fun testCommittedPetEventUsesAcceptanceTitleAndActualPersistedTransition() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
-        val f = fresh(factory = { _, _ -> ModelPort { object : ModelSession {
+        val f = fresh(factory = { _, _ -> CatalogFixturePort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                 entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
                 sink(ModelEvent.TextFinal("answer", "done"))
@@ -338,7 +338,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         val f = fresh(factory = { provider, _ ->
             assertEquals("fixture", provider.model)
             assertNull(provider.imageInputSupported)
-            ModelPort { history ->
+            CatalogFixturePort { history ->
                 mainOpens.incrementAndGet()
                 assertTrue(history.all { it.blocks.none { block -> block is MessageBlock.Image } })
                 object : ModelSession {
@@ -365,7 +365,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
     fun testAuxiliaryConfigurationEditCancelsBlockedOpenButRetainsRunUntilWorkerDrains() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         val lateCancels = AtomicInteger(); val nextCalls = AtomicInteger()
-        val f = fresh(factory = { _, _ -> ModelPort {
+        val f = fresh(factory = { _, _ -> CatalogFixturePort {
             entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
             object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { nextCalls.incrementAndGet() }

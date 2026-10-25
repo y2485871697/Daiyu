@@ -34,7 +34,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         override fun getFilesDir(): File = privateFiles
         override fun getApplicationContext(): Context = this
     }
-    private class Probe : ModelPort {
+    private class Probe : CatalogFixturePort {
         val opens = AtomicInteger()
         val histories = java.util.concurrent.CopyOnWriteArrayList<List<Message>>()
         var beforeFactory: () -> Unit = {}

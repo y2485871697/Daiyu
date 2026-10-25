@@ -48,7 +48,12 @@ class RunningModeSettingsScreenTest : WiredActivityTestCase() {
         auth.root = true
         node("running-mode:root").performClick()
         ui.waitUntil(5_000) { store.mode.value == RunningMode.ROOT }
-        node("running-mode:root").assertIsSelected()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(hasTestTag("running-mode:root") and isSelected() and isEnabled())
+                .fetchSemanticsNodes().size == 1
+        }
+        node("running-mode:root").assertIsSelected().assertIsEnabled()
         ui.onNodeWithText("Root · 设备无root").assertDoesNotExist()
         node("running-mode:normal").performClick()
         ui.waitUntil(5_000) { store.mode.value == RunningMode.NORMAL }
@@ -69,7 +74,12 @@ class RunningModeSettingsScreenTest : WiredActivityTestCase() {
         auth.granted = true
         auth.answer.complete(true)
         ui.waitUntil(5_000) { store.mode.value == RunningMode.SHIZUKU }
-        node("running-mode:shizuku").assertIsSelected()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(hasTestTag("running-mode:shizuku") and isSelected() and isEnabled())
+                .fetchSemanticsNodes().size == 1
+        }
+        node("running-mode:shizuku").assertIsSelected().assertIsEnabled()
         assertEquals(2, auth.shizukuCalls)
         assertEquals(0, fixture.opens.get())
     }

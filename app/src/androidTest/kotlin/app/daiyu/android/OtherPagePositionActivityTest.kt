@@ -100,7 +100,10 @@ class OtherPagePositionActivityTest : WiredActivityTestCase() {
             val before = position("工作区", "workspace-file:30")
             assertTrue(before.scroll > 10f)
             backgroundAndResume()
-            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                entered.count == 0L
+            }
             node("workspace-file:30").assertDoesNotExist()
             release.countDown()
             assertPositionWithoutScrolling("工作区", "workspace-file:30", before)

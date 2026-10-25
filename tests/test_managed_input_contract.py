@@ -175,6 +175,14 @@ class ManagedInputContractTest(unittest.TestCase):
                       '!overlay.isEmpty', '.overlaps(bounds)', 'contained && !occluded',
                       'instrumentation.runOnMainSync { current = sample() }'):
             self.assertIn(token, stable)
+        precise = stable.split('if (android.os.Build.VERSION.SDK_INT >= 30)', 1)[1].split('} else {', 1)[0]
+        for token in ('val overlay = android.graphics.Region()', 'other.getRegionInScreen(overlay)',
+                      'overlay.op(targetPixels, android.graphics.Region.Op.INTERSECT)', '!overlay.isEmpty'):
+            self.assertIn(token, precise)
+        for forbidden in ('getBoundsInScreen', '.bounds', 'quickReject', '.center'):
+            self.assertNotIn(forbidden, precise)
+        self.assertIn('RectF(bounds.left, bounds.top, bounds.right, bounds.bottom).roundOut(targetPixels)', stable)
+        self.assertIn('Touch geometry rejected: $lastSample', stable)
         self.assertEqual(1, stable.count('automation.windows'))
         self.assertNotIn('requestFocus', stable)
         self.assertNotIn('injectInputEvent', stable)

@@ -116,15 +116,22 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             automation.serviceInfo = automation.serviceInfo.apply {
                 flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             }
+            var lastSample = "not sampled"
             fun sample(): TouchFrame? {
+                lastSample = "view attached=${view.isAttachedToWindow} focused=${view.hasWindowFocus()} " +
+                    "layoutRequested=${view.isLayoutRequested} sameToken=${view.windowToken == token}"
                 if (!view.isAttachedToWindow || !view.hasWindowFocus() || view.isLayoutRequested ||
                     view.windowToken != token) return null
-                val bounds = readBounds() ?: return null
+                val bounds = readBounds() ?: run { lastSample = "target bounds unavailable"; return null }
+                lastSample = "target=$bounds"
                 if (bounds.width <= 0f || bounds.height <= 0f ||
                     !listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() }) return null
                 val node = view.createAccessibilityNodeInfo() ?: return null
                 val id = try { node.windowId } finally { node.recycle() }
                 val windows = automation.windows
+                lastSample = "target=$bounds windowId=$id windows=" + windows.joinToString { other ->
+                    "id=${other.id},type=${other.type},layer=${other.layer},focused=${other.isFocused}"
+                }
                 val window = windows.singleOrNull { it.id == id && it.isFocused } ?: return null
                 val nativeBounds = android.graphics.Rect()
                 window.getBoundsInScreen(nativeBounds)
@@ -132,19 +139,30 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                     nativeBounds.right.toFloat(), nativeBounds.bottom.toFloat())
                 val contained = windowBounds.left <= bounds.left && windowBounds.top <= bounds.top &&
                     windowBounds.right >= bounds.right && windowBounds.bottom >= bounds.bottom
+                val targetPixels = android.graphics.Rect()
+                android.graphics.RectF(bounds.left, bounds.top, bounds.right, bounds.bottom).roundOut(targetPixels)
                 val occluded = windows.any { other ->
                     if (other.id == id || other.layer <= window.layer) false else {
-                        val overlay = android.graphics.Rect()
-                        other.getBoundsInScreen(overlay)
-                        !overlay.isEmpty && androidx.compose.ui.geometry.Rect(overlay.left.toFloat(), overlay.top.toFloat(),
-                            overlay.right.toFloat(), overlay.bottom.toFloat()).overlaps(bounds)
+                        if (android.os.Build.VERSION.SDK_INT >= 30) {
+                            val overlay = android.graphics.Region()
+                            other.getRegionInScreen(overlay)
+                            overlay.op(targetPixels, android.graphics.Region.Op.INTERSECT)
+                            !overlay.isEmpty
+                        } else {
+                            val overlay = android.graphics.Rect()
+                            other.getBoundsInScreen(overlay)
+                            !overlay.isEmpty && androidx.compose.ui.geometry.Rect(overlay.left.toFloat(), overlay.top.toFloat(),
+                                overlay.right.toFloat(), overlay.bottom.toFloat()).overlaps(bounds)
+                        }
                     }
                 }
+                lastSample += " native=$windowBounds contained=$contained occluded=$occluded"
                 return if (contained && !occluded) TouchFrame(bounds, windowBounds, id) else null
             }
             val deadline = android.os.SystemClock.uptimeMillis() + 5_000
             while (true) {
-                val stable = awaitStableWindowFrame(view) { sample() }
+                val stable = try { awaitStableWindowFrame(view) { sample() } }
+                    catch (failure: AssertionError) { throw AssertionError("Touch geometry rejected: $lastSample", failure) }
                 var current: TouchFrame? = null
                 instrumentation.runOnMainSync { current = sample() }
                 if (current == stable) return stable.bounds

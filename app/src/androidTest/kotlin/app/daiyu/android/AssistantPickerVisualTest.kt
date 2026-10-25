@@ -61,7 +61,6 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
     }
 
     private fun text(id: Int, vararg args: Any) = instrumentation.targetContext.getString(id, *args)
-    private fun bounds(tag: String) = ui.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun dp(px: Float) = px / density.get().density
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun actionGeometry(): List<Rect> {
@@ -91,23 +90,70 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
         assertEquals(.9f, input.density.fontScale, .001f)
     }
 
+    private data class TypeFrame(
+        val fontSize: TextUnit,
+        val lineHeight: TextUnit,
+        val fontScale: Float,
+        val fontWeight: FontWeight?,
+        val color: Color,
+        val height: Int,
+    )
+    private data class PickerFrame(
+        val bounds: List<Rect>,
+        val types: Map<String, TypeFrame>,
+        val density: Float,
+    )
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun pickerFrame(): PickerFrame {
+        val geometry = listOf("assistant-sheet", "assistant-search", "assistant-list", "assistant-item-visual-a",
+            "assistant-item-visual-b", "assistant-avatar-visual-a", "assistant-new", "assistant-done")
+            .map { ui.onNodeWithTag(it, useUnmergedTree = true).fetchSemanticsNode() }
+        val texts = listOf(text(R.string.assistant_picker_title), text(R.string.assistant_search),
+            text(R.string.assistant_count, 2), "Visual A", "First description", text(R.string.assistant_current),
+            text(R.string.assistant_new), text(R.string.assistant_done))
+            .associateWith { ui.onNodeWithText(it, useUnmergedTree = true).fetchSemanticsNode() }
+        val root = geometry.first().root
+        val view = (root as ViewRootForTest).view
+        val nodes = geometry + texts.values
+        return awaitStableWindowFrame(view) {
+            nodes.forEach { assertSame(root, it.root) }
+            if (nodes.any { !it.layoutInfo.isPlaced || !it.layoutInfo.coordinates.isAttached })
+                return@awaitStableWindowFrame null
+            val bounds = geometry.map { it.boundsInRoot }
+            if (bounds.any { it.isEmpty }) return@awaitStableWindowFrame null
+            val types = texts.mapValues { (_, node) ->
+                val results = mutableListOf<TextLayoutResult>()
+                assertTrue(checkNotNull(node.config[SemanticsActions.GetTextLayoutResult].action)(results))
+                val result = results.single()
+                val input = result.layoutInput
+                TypeFrame(input.style.fontSize, input.style.lineHeight, input.density.fontScale,
+                    input.style.fontWeight, input.style.color, result.size.height)
+            }
+            PickerFrame(bounds, types, density.get().density)
+        }
+    }
+
     fun testPickerKeepsReadableSpacingAndOnlyAppliesFontScaleOnce() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(scale, dark)
-            val sheet = bounds("assistant-sheet")
-            val search = bounds("assistant-search")
-            val list = bounds("assistant-list")
-            val first = bounds("assistant-item-visual-a")
-            val second = bounds("assistant-item-visual-b")
-            val avatar = bounds("assistant-avatar-visual-a")
-            val newButton = bounds("assistant-new")
-            val done = bounds("assistant-done")
+            val frame = pickerFrame()
+            val (sheet, search, list, first, second) = frame.bounds
+            val avatar = frame.bounds[5]
+            val newButton = frame.bounds[6]
+            val done = frame.bounds[7]
+            fun dp(px: Float) = px / frame.density
+            fun assertType(text: String, size: TextUnit, lineHeight: TextUnit) {
+                val sample = frame.types.getValue(text)
+                assertEquals(size, sample.fontSize)
+                assertEquals(lineHeight, sample.lineHeight)
+                assertEquals(.9f, sample.fontScale, .001f)
+            }
             assertTrue(dp(sheet.height) in 300f..520.5f)
             assertEquals(16f, dp(search.left - sheet.left), .6f)
             assertEquals(16f, dp(sheet.right - search.right), .6f)
             assertEquals(84f, dp(search.top - sheet.top), .8f)
             assertEquals(44f, dp(search.height), dp(1f) + .01f)
-            assertEquals(17f + dp(layout(text(R.string.assistant_count, 2)).size.height.toFloat()), dp(list.top - search.bottom), .8f)
+            assertEquals(17f + dp(frame.types.getValue(text(R.string.assistant_count, 2)).height.toFloat()), dp(list.top - search.bottom), .8f)
             assertEquals(2f, dp(first.top - list.top), .6f)
             assertEquals(2f, dp(first.left - list.left), .6f)
             assertEquals(76f, dp(first.height), .6f)
@@ -123,18 +169,18 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertEquals(17f, dp(sheet.bottom - done.bottom), .6f)
             assertEquals(dp(search.left), dp(newButton.left), .6f)
             assertType(text(R.string.assistant_picker_title), 18.sp, 26.sp)
-            assertEquals(FontWeight(650), layout(text(R.string.assistant_picker_title)).layoutInput.style.fontWeight)
+            assertEquals(FontWeight(650), frame.types.getValue(text(R.string.assistant_picker_title)).fontWeight)
             assertType(text(R.string.assistant_search), 14.sp, 20.sp)
             assertType(text(R.string.assistant_count, 2), 11.sp, 16.sp)
             assertType("Visual A", 15.sp, 21.sp)
-            assertEquals(FontWeight(550), layout("Visual A").layoutInput.style.fontWeight)
+            assertEquals(FontWeight(550), frame.types.getValue("Visual A").fontWeight)
             assertType("First description", 12.sp, 18.sp)
             assertType(text(R.string.assistant_current), 11.sp, 16.sp)
             assertType(text(R.string.assistant_new), 14.sp, 20.sp)
             assertType(text(R.string.assistant_done), 14.sp, 20.sp)
-            assertEquals(if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F), layout("Visual A").layoutInput.style.color)
-            assertEquals(if (dark) Color(0xFF9C92A8) else Color(0xFF968B9F), layout("First description").layoutInput.style.color)
-            assertEquals(if (dark) Color(0xFF261F30) else Color.White, layout(text(R.string.assistant_done)).layoutInput.style.color)
+            assertEquals(if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F), frame.types.getValue("Visual A").color)
+            assertEquals(if (dark) Color(0xFF9C92A8) else Color(0xFF968B9F), frame.types.getValue("First description").color)
+            assertEquals(if (dark) Color(0xFF261F30) else Color.White, frame.types.getValue(text(R.string.assistant_done)).color)
         }
     }
 

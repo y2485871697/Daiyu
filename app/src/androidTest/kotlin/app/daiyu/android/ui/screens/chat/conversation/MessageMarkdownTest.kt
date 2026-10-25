@@ -778,6 +778,43 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertEquals(listOf("https://example.test"), opened.toList())
     }
 
+    fun testCodeBlocksAreCenteredAndCopyTheirExactCodeFromTheTopRightAction() {
+        val first = "  echo \"代鱼\"\nls -la"
+        val second = "println(\"second\")"
+        show {
+            Column(Modifier.width(300.dp).verticalScroll(rememberScrollState()).testTag("code-host")) {
+                MessageMarkdown("```sh\n$first\n```\n\n```kotlin\n$second\n```")
+            }
+        }
+        awaitNodes(hasTestTag("markdown-code-block"), count = 2)
+        val host = ui.onNodeWithTag("code-host", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val cards = ui.onAllNodesWithTag("markdown-code-block", useUnmergedTree = true)
+        val firstCard = cards[0].fetchSemanticsNode().boundsInRoot
+        val firstCopy = ui.onAllNodesWithTag("markdown-code-copy", useUnmergedTree = true)[0]
+        val copyBounds = firstCopy.fetchSemanticsNode().boundsInRoot
+        val codeText = ui.onAllNodesWithTag("markdown-code-text", useUnmergedTree = true)[0]
+        val codeBounds = codeText.fetchSemanticsNode().boundsInRoot
+        val layouts = mutableListOf<TextLayoutResult>()
+        codeText.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        assertEquals(TextAlign.Left, layouts.single().layoutInput.style.textAlign)
+        assertEquals(host.center.x, firstCard.center.x, 1f)
+        assertTrue(copyBounds.right <= firstCard.right)
+        assertTrue(copyBounds.left > firstCard.center.x)
+        assertTrue(copyBounds.top < codeBounds.top)
+        firstCopy.assertHasClickAction().performClick()
+        mainThread {
+            val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            assertEquals(first, manager.primaryClip!!.getItemAt(0).text.toString())
+        }
+        ui.onAllNodesWithTag("markdown-code-copy", useUnmergedTree = true)[1].performClick()
+        mainThread {
+            val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            assertEquals(second, manager.primaryClip!!.getItemAt(0).text.toString())
+        }
+        ui.onNodeWithContentDescription("已复制代码", useUnmergedTree = true).assertExists()
+        assertTrue(opened.isEmpty())
+    }
+
     fun testLongTableHasBoundedScrollableViewportAndDoesNotTruncateCellText() {
         val header = (0..5).joinToString(" | ") { "H$it" }
         val delimiter = (0..5).joinToString(" | ") { "---" }

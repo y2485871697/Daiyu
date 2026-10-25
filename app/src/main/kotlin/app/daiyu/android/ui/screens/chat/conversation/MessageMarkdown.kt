@@ -18,18 +18,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
@@ -40,6 +43,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clipToBounds
@@ -64,6 +69,9 @@ import androidx.compose.ui.unit.sp
 import app.daiyu.android.MarkdownBlock
 import app.daiyu.android.MarkdownInline
 import app.daiyu.android.MarkdownText
+import app.daiyu.android.ui.icons.DaiyuIcons
+import kotlinx.coroutines.delay
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Text
 
@@ -187,18 +195,7 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>, openLink: (String) -> Un
                     fontWeight = FontWeight.Bold, fontSize = size.sp, lineHeight = (size + 8).sp,
                 ), visibleCharacters = visible)
             }
-            is MarkdownBlock.Code -> Column(Modifier.fillMaxWidth()
-                .background(conversationColors().soft, RoundedCornerShape(8.dp)).padding(9.dp)) {
-                if (block.language.isNotBlank()) BasicText(block.language,
-                    style = messageBodyStyle().copy(fontSize = 11.sp, lineHeight = 16.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary))
-                val text = if (visible >= block.text.length) block.text else {
-                    val boundaries = remember(block.text) { MarkdownTextBoundaries(block.text) }
-                    block.text.substring(0, boundaries.end(visible))
-                }
-                BasicText(text, style = messageBodyStyle().copy(fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp, lineHeight = 22.sp))
-            }
+            is MarkdownBlock.Code -> MarkdownCodeBlock(block, visible)
             is MarkdownBlock.Quote -> {
                 val ruleColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.5f)
                 Column(Modifier.fillMaxWidth().drawBehind {
@@ -232,6 +229,49 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>, openLink: (String) -> Un
             is MarkdownBlock.Table -> MarkdownTable(block, openLink, visible)
             MarkdownBlock.Rule -> Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp)
                 .background(MiuixTheme.colorScheme.outline.copy(alpha = 0.5f)))
+        }
+    }
+}
+
+@Composable
+private fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int) {
+    val colors = conversationColors()
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    var copied by remember(block.text) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1_400)
+            copied = false
+        }
+    }
+    val text = if (visibleCharacters >= block.text.length) block.text else {
+        val boundaries = remember(block.text) { MarkdownTextBoundaries(block.text) }
+        block.text.substring(0, boundaries.end(visibleCharacters))
+    }
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+            .background(colors.soft, RoundedCornerShape(8.dp)).testTag("markdown-code-block")
+            .padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            DisableSelection {
+                Row(Modifier.fillMaxWidth().testTag("markdown-code-header"), verticalAlignment = Alignment.CenterVertically) {
+                    BasicText(block.language, Modifier.weight(1f).padding(end = 8.dp),
+                        style = messageBodyStyle().copy(fontSize = 11.sp, lineHeight = 16.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary))
+                    Box(Modifier.size(40.dp).testTag("markdown-code-copy").conversationClickable {
+                        runCatching { clipboard.setText(AnnotatedString(block.text)) }
+                            .onSuccess { copied = true }
+                            .onFailure { android.widget.Toast.makeText(context, "复制失败，可长按选择文本", android.widget.Toast.LENGTH_SHORT).show() }
+                    }, contentAlignment = Alignment.Center) {
+                        Icon(if (copied) DaiyuIcons.Check else DaiyuIcons.Copy,
+                            if (copied) "已复制代码" else "复制代码", Modifier.size(16.dp),
+                            tint = if (copied) colors.success else colors.muted)
+                    }
+                }
+            }
+            BasicText(text, Modifier.fillMaxWidth().testTag("markdown-code-text"),
+                style = messageBodyStyle().copy(fontFamily = FontFamily.Monospace,
+                    fontSize = 14.sp, lineHeight = 22.sp, textAlign = TextAlign.Left))
         }
     }
 }

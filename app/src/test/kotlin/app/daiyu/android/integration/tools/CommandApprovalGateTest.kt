@@ -9,7 +9,7 @@ import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 
 class CommandApprovalGateTest {
-    private fun owner() = app.daiyu.android.domain.runtime.RunExecutionOwner.issue(Message(
+    private fun owner() = runnerOwner(Message(
         MessageId("m"), ConversationId("c"), RunId("r"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
     private class Ui : CommandApprovalUi {
         val shown = CountDownLatch(1)

@@ -321,7 +321,7 @@ class RunCatalogToolsTest {
         assertEquals(1, approvals); assertEquals(1, commands); assertEquals(2, requests)
         tools.close()
         val drained = java.util.concurrent.CompletableFuture<RunCatalogCloseResult>()
-        tools.observeClose { drained.complete(it) }
+        tools.closeWithResult { drained.complete(it) }
         assertEquals(RunCatalogCloseResult.Drained, drained.get(3, TimeUnit.SECONDS))
     }
 

@@ -11,7 +11,7 @@ import java.io.File
 
 class RunCommandToolsTest {
     private class Fixture {
-        val owner = RunExecutionOwner.issue(Message(MessageId("m"), ConversationId("c"), RunId("r"),
+        val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val task = TaskAuthorization("s", "r")
         var approved = true

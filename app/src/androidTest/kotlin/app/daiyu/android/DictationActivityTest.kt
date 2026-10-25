@@ -24,7 +24,7 @@ class DictationActivityTest : WiredActivityTestCase() {
         @Volatile var creates = 0
         @Volatile var cancels = 0
         @Volatile var destroys = 0
-        val listeners = mutableListOf<Attempt>()
+        val listeners = CopyOnWriteArrayList<Attempt>()
     }
     private inner class Attempt(private val gate: AudioOwnerGate, private val owner: VoiceOwner,
         private val allowed: () -> Boolean, events: OfflineSpeechSession.Events) : OfflineSpeechAttempt {
@@ -210,11 +210,17 @@ class DictationActivityTest : WiredActivityTestCase() {
 
     private fun result(text: String) = text
 
-    private fun voice() {
+    private fun voice(expectNewAttempt: Boolean = true) {
+        val previousCount = platform.listeners.size
         ui.onNode(hasContentDescription("语音输入") or hasContentDescription("停止语音输入"))
             .assertIsDisplayed().assertIsEnabled().performClick()
         ui.waitForIdle()
-        if (host.state.value.target != null && platform.listeners.isNotEmpty()) platform.listeners.last().awaitStarted()
+        if (expectNewAttempt) {
+            awaitControl("one new owned offline attempt after voice click") {
+                platform.listeners.size == previousCount + 1 && host.state.value.target != null
+            }
+            platform.listeners[previousCount].awaitStarted()
+        }
     }
     private fun permissionResult(granted: Boolean) {
         mainThread {
@@ -306,13 +312,13 @@ class DictationActivityTest : WiredActivityTestCase() {
         setDraft("original")
         setSelection(0, "original".length)
         platform.permission = false
-        voice()
+        voice(expectNewAttempt = false)
         assertEquals(1, permissionRequests)
         assertEquals(0, platform.creates)
         permissionResult(false)
         assertTrue(host.state.value.status.contains("被拒绝"))
         assertDraft("original")
-        voice()
+        voice(expectNewAttempt = false)
         assertEquals(2, permissionRequests)
         permissionResult(true)
         assertTrue(host.state.value.status.contains("再次点击"))
@@ -401,7 +407,8 @@ class DictationActivityTest : WiredActivityTestCase() {
         setDraft("base")
         voice()
         val old = platform.listeners.last()
-        voice() // Explicit stop.
+        voice(expectNewAttempt = false) // Explicit stop.
+        awaitControl("explicit stop retires old dictation target") { host.state.value.target == null }
         voice() // Same editor/revision, different dictation sessionId.
         old.onResults(result("old session"))
         instrumentation.waitForIdleSync()
@@ -461,8 +468,8 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertTrue(players.isEmpty())
         assertEquals(1, platform.cancels)
         assertEquals(1, platform.destroys)
-        voice() // Retire the failed old attempt.
-        voice() // A genuinely new attempt must hit the same poisoned gate.
+        voice(expectNewAttempt = false) // Retire the failed old attempt.
+        voice(expectNewAttempt = false) // A genuinely new attempt must hit the same poisoned gate.
         assertEquals(1, platform.creates)
         assertTrue(players.isEmpty())
         assertEquals(0, fixture.opens.get())

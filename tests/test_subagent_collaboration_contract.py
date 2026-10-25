@@ -202,11 +202,15 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
         choices = form.split('SubAgentChoiceWindow(title = when (field)', 1)[1]
         body = choices.split('options.forEach', 1)[0]
-        self.assertIn('Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll', body)
+        self.assertIn('Column(Modifier.fillMaxWidth())', body)
+        self.assertNotIn('.verticalScroll(', body)
         self.assertNotIn('.weight(', body)
         window = (UI / 'subagent/ConversationAgentChoice.kt').read_text()
         self.assertIn('content: @Composable () -> Unit', window)
-        self.assertIn('Box(Modifier.padding(6.dp)) { content() }', window)
+        self.assertIn('OptionSelectionSheet(title, onDismiss) { content() }', window)
+        sheet = (UI / 'OptionSelectionSheet.kt').read_text()
+        self.assertIn('.verticalScroll(rememberScrollState()).selectableGroup()', sheet)
+        self.assertIn('ChatSelectionSheet(title = title', sheet)
 
     def test_existing_model_picker_is_shared_with_identity_safe_display(self):
         picker = (UI / 'subagent/SubAgentModelPicker.kt').read_text()

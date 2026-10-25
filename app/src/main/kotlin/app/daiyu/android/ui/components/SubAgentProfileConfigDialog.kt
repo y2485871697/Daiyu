@@ -239,7 +239,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     else -> listOf(null to "跟随接口") + ImageResolutionTier.values.filter { !verifiedGrok || it in setOf("low", "high") }.map { it to ImageResolutionTier.label(it) }
                 }
                 SubAgentChoiceWindow(title = when (field) { "role" -> "职责"; "tier" -> "任务分工"; else -> "默认分辨率" }, onDismiss = { choices = null }) {
-                    Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.fillMaxWidth()) {
                         options.forEach { (value, label) ->
                             val select = { interact {
                                 session.edit { profile -> when (field) {
@@ -248,12 +248,11 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                                     else -> if (profile.role == "image_generation") profile.copy(imageResolution = value) else profile
                                 } }; choices = null
                             } }
-                            if (LocalConversationAgentStyle.current) ConversationAgentChoice(label, when (field) {
+                            ConversationAgentChoice(label, when (field) {
                                 "role" -> draft.role == value
                                 "tier" -> draft.tier?.wireValue == value
                                 else -> draft.imageResolution == value
                             }, select)
-                            else TextButton(onClick = select, modifier = Modifier.fillMaxWidth()) { Text(label) }
                         }
                     }
                 }

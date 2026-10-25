@@ -5,12 +5,9 @@ import androidx.compose.foundation.background
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
-import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.*
-import app.daiyu.android.ui.haptics.material.TextButton
 import app.daiyu.android.ui.haptics.material.IconButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -80,7 +77,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                     "选择${profile.name}职责", enabled = usable, dropdown = true,
                     onClick = { if (currentUsable) { rolePicker = !rolePicker } })
                 Box(Modifier.align(Alignment.CenterEnd).size(40.dp)) {
-                    if (usable) SubAgentDropdownMenu(rolePicker, { rolePicker = false }, Modifier.selectableGroup()) {
+                    if (usable && rolePicker) OptionSelectionSheet("职责", { rolePicker = false }) {
                         listOf("implementation" to "执行", "review" to "审查／总结", "image_generation" to "图片生成", "video_generation" to "视频生成").forEach { (role, label) ->
                             SubAgentSelectionItem(label, profile.role == role) {
                                 if (currentUsable) editor?.updateProfile(profile.id) { it.withRole(role) }
@@ -96,7 +93,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
                         "设置${profile.name}任务分工", enabled = usable, dropdown = true,
                         onClick = { if (currentUsable) { tierPicker = !tierPicker } })
                     Box(Modifier.align(Alignment.CenterEnd).size(40.dp)) {
-                        if (usable) SubAgentDropdownMenu(tierPicker, { tierPicker = false }, Modifier.selectableGroup()) {
+                        if (usable && tierPicker) OptionSelectionSheet("任务分工", { tierPicker = false }) {
                             (listOf<SubAgentTaskTier?>(null) + SubAgentTaskTier.entries).forEach { tier ->
                                 SubAgentSelectionItem(tier?.label ?: "未设置分工", profile.tier == tier) {
                                     if (currentUsable) editor?.updateProfile(profile.id) { latest -> if (latest.supportsTaskTier) latest.copy(tier = tier) else latest }
@@ -189,19 +186,20 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
     }
     if (usable && resolutionPicker && config != null) {
         val verifiedGrok = config.grokImage
-        AlertDialog(onDismissRequest = { resolutionPicker = false }, title = { Text("默认分辨率") }, text = { Column {
-            Text("低、中、高、超高表示请求档位，不承诺固定像素。自然语言和本次子代理参数可覆盖此默认值。" +
-                if (verifiedGrok) "当前 Grok 实测端点仅验证低、高；中、超高不可选。" else "实际支持取决于端点映射。")
+        OptionSelectionSheet("默认分辨率", onDismiss = { resolutionPicker = false },
+            subtitle = "低、中、高、超高表示请求档位，不承诺固定像素。自然语言和本次子代理参数可覆盖此默认值。" +
+                if (verifiedGrok) "当前 Grok 实测端点仅验证低、高；中、超高不可选。" else "实际支持取决于端点映射。") {
             (listOf<String?>(null) + ImageResolutionTier.values).forEach { tier ->
                 val allowed = !verifiedGrok || tier == null || tier in setOf("low", "high")
-                TextButton(enabled = usable && allowed, onClick = {
+                OptionSelectionItem(tier?.let(ImageResolutionTier::label) ?: "跟随接口",
+                    selected = profile.imageResolution == tier, enabled = usable && allowed, onClick = {
                     if (currentUsable) editor?.updateProfile(profile.id) { latest ->
                         if (latest.providerId == profile.providerId && latest.modelId == profile.modelId && latest.role == "image_generation") latest.copy(imageResolution = tier) else latest
                     }
                     resolutionPicker = false
-                }) { Text(tier?.let(ImageResolutionTier::label) ?: "跟随接口") }
+                })
             }
-        } }, confirmButton = { TextButton(onClick = { resolutionPicker = false }) { Text("关闭") } })
+        }
     }
     if (usable && modelPicker) {
         val all = SubAgentModelPickerProjector.project(providers, profile.providerId, profile.modelId)

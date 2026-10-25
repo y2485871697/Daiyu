@@ -5,9 +5,6 @@ import androidx.compose.foundation.background
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import app.daiyu.android.ui.haptics.material.DropdownMenuItem
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,8 +18,9 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.runningmode.*
 import app.daiyu.android.terminal.*
 import app.daiyu.android.terminal.install.LinuxInstallState
+import app.daiyu.android.ui.components.OptionSelectionSheet
+import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
-import app.daiyu.android.ui.components.WithoutPressRipple
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import kotlinx.coroutines.CancellationException
@@ -278,25 +276,17 @@ private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: B
                 DaiyuIcon(DaiyuIcons.ChevronDown, null, Modifier.size(13.dp), tint = colors.onSurfaceVariantSummary)
             }
         }
-        Box(Modifier.align(Alignment.BottomEnd)) {
-            key(popupScope) {
-                WithoutPressRipple {
-                    DropdownMenu(expanded, onDismissRequest = { if (ownerCurrent()) expanded = false }, modifier = Modifier.widthIn(max = 300.dp),
-                        shape = RoundedCornerShape(22.dp), containerColor = colors.surface) {
-                        currentChoices.value.forEachIndexed { index, choice ->
-                            val selectChoice: () -> Unit = {
-                                if (enabled && expanded && ownerCurrent()) { expanded = false; onSelect(index) }
-                            }
-                            val semanticSelectChoice = hapticClick(enabled, selectChoice)
-                            DropdownMenuItem(text = {
-                                Text(choice, modifier = Modifier.widthIn(max = 232.dp).padding(vertical = 8.dp),
-                                    style = MiuixTheme.textStyles.body1)
-                            }, trailingIcon = { if (index == selectedIndex) DaiyuIcon(DaiyuIcons.Check, "已选择", Modifier.size(22.dp)) },
-                                enabled = enabled,
-                                modifier = Modifier.testTag("linux-choice:$tag:$index").semantics { onClick { semanticSelectChoice(); true } },
-                                onClick = selectChoice)
-                        }
+        key(popupScope) {
+            if (expanded && enabled) OptionSelectionSheet(title,
+                onDismiss = { if (ownerCurrent()) expanded = false }) {
+                currentChoices.value.forEachIndexed { index, choice ->
+                    val selectChoice: () -> Unit = {
+                        if (enabled && expanded && ownerCurrent()) { expanded = false; onSelect(index) }
                     }
+                    val semanticSelectChoice = hapticClick(enabled, selectChoice)
+                    OptionSelectionItem(choice, selected = index == selectedIndex, enabled = enabled,
+                        modifier = Modifier.testTag("linux-choice:$tag:$index").semantics { onClick { semanticSelectChoice(); true } },
+                        onClick = selectChoice)
                 }
             }
         }

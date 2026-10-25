@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.*
 import app.daiyu.android.ui.haptics.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import app.daiyu.android.ui.haptics.material.DropdownMenuItem
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,8 +15,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -31,7 +27,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.model.ProviderProtocol
-import app.daiyu.android.ui.components.WithoutPressRipple
+import app.daiyu.android.ui.components.OptionSelectionSheet
+import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.Text
@@ -105,22 +102,15 @@ internal fun ProviderChoiceRow(title: String, value: String, tag: String, enable
                 DaiyuIcon(DaiyuIcons.ChevronDown, null, Modifier.size(12.dp))
             }
         }
-        WithoutPressRipple {
-            DropdownMenu(expanded && enabled, onDismissRequest = { expanded = false },
-                modifier = Modifier.widthIn(max = 320.dp).testTag("$tag-menu"),
-                shape = RoundedCornerShape(22.dp), containerColor = colors.surface) {
-                choices.forEachIndexed { index, choice ->
-                    DropdownMenuItem(
-                        text = { Text(choice, style = MiuixTheme.textStyles.body1) },
-                        modifier = Modifier.testTag(optionTags[index]).semantics { selected = index == selectedIndex },
-                        trailingIcon = { if (index == selectedIndex) DaiyuIcon(DaiyuIcons.Check, "已选择", size = 22.dp) },
-                        onClick = {
-                            if (expanded && currentEnabled && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                                expanded = false
-                                onSelect(index)
-                            }
-                        },
-                    )
+        if (expanded && enabled) OptionSelectionSheet(title, onDismiss = { expanded = false },
+            modifier = Modifier.testTag("$tag-menu")) {
+            choices.forEachIndexed { index, choice ->
+                OptionSelectionItem(choice, selected = index == selectedIndex,
+                    modifier = Modifier.testTag(optionTags[index])) {
+                    if (expanded && currentEnabled && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                        expanded = false
+                        onSelect(index)
+                    }
                 }
             }
         }

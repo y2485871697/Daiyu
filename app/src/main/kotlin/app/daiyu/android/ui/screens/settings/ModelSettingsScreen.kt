@@ -153,11 +153,6 @@ internal fun ModelSettingsScreen(
                         changeDraft(draft.copy(responsesPath = if (index == 0) "/v1/responses" else "/responses"))
                     }
                 }
-                if (draft.protocol == ProviderProtocol.MESSAGES) {
-                    SettingsTextField("Anthropic 版本", draft.anthropicVersion,
-                        { changeDraft(draft.copy(anthropicVersion = it)) },
-                        hint = "留空使用 2023-06-01；格式 YYYY-MM-DD", enabled = enabled, compact = true)
-                }
                 if (!speechOnly) SettingsSwitchRow("Provider 托管网页搜索", draft.protocol == ProviderProtocol.RESPONSES && draft.openAiWebSearchEnabled,
                     summary = "允许模型使用供应商提供的网页搜索",
                     enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES) {

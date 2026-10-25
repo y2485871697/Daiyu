@@ -254,28 +254,26 @@ class ActivityTest : WiredActivityTestCase() {
         } finally { release.countDown(); from.close(); source.deleteDatabase("conversations.db") }
     }
 
-    fun testMessagesVersionSavesExactlyAndReopens() {
+    fun testMessagesVersionIsHiddenAndPreservedWhenSavingAndReopening() {
         val original = fixture.settings.load()
-        val initial = original.copy(protocol = ProviderProtocol.MESSAGES, responsesPath = "",
-            requestOptions = original.requestOptions.copy(speedMode = null, codex = false, anthropicVersion = "2023-06-01"))
-        fixture.settings.save(initial, protocolChangeAuthorized = true)
-        openModels(); modelField("Anthropic 版本").assertEditableText("2023-06-01")
-        editModel("Anthropic 版本", "2023-06-02"); saveModel()
-        val saved = initial.copy(requestOptions = initial.requestOptions.copy(anthropicVersion = "2023-06-02"))
-        assertEquals(saved, fixture.settings.load())
-        awaitModelEditor()
-        backToChat(activity)
-        openModels(); modelField("Anthropic 版本").assertEditableText("2023-06-02")
-        for (invalid in listOf(" ", " 2023-06-02 ")) {
-            editModel("Anthropic 版本", invalid); saveModel()
+        for (version in listOf(null, "2023-06-02")) {
+            val initial = original.copy(protocol = ProviderProtocol.MESSAGES, responsesPath = "",
+                requestOptions = original.requestOptions.copy(speedMode = null, codex = false, anthropicVersion = version))
+            fixture.settings.save(initial, protocolChangeAuthorized = true)
+            openModels()
+            modelField("API Key").assertEditableText(initial.apiKey)
+            node("settings-field:Anthropic 版本").assertDoesNotExist()
+            editModel("API Key", "hidden-version-synthetic-key"); saveModel()
+            val saved = initial.copy(apiKey = "hidden-version-synthetic-key")
             assertEquals(saved, fixture.settings.load())
-            modelField("Anthropic 版本").assertEditableText(invalid)
+            awaitModelEditor()
+            backToChat(activity)
+            openModels()
+            modelField("API Key").assertEditableText(saved.apiKey)
+            node("settings-field:Anthropic 版本").assertDoesNotExist()
+            assertEquals(saved, fixture.settings.load())
+            backToChat(activity)
         }
-        editModel("Anthropic 版本", ""); saveModel()
-        assertEquals(saved.copy(requestOptions = saved.requestOptions.copy(anthropicVersion = null)), fixture.settings.load())
-        awaitModelEditor()
-        backToChat(activity)
-        openModels(); modelField("Anthropic 版本").assertEditableText("")
         assertEquals(0, fixture.opens.get())
     }
 

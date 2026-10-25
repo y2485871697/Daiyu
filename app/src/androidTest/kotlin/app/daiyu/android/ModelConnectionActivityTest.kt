@@ -116,7 +116,7 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         assertFalse(accepted); assertEquals(0, requests.get())
         testConnection(); awaitStatus("目录连接成功，返回 1 个模型"); assertEquals(1, requests.get())
     }
-    fun testOldDraftCannotStartConnectionAfterVersionEditWithinSameVisit() {
+    fun testOldDraftCannotStartConnectionAfterCredentialEditWithinSameVisit() {
         val original = fixture.settings.load()
         fixture.settings.save(original.copy(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES,
             responsesPath = "", requestOptions = app.daiyu.android.model.ProviderRequestOptions(anthropicVersion = "2023-06-01")),
@@ -124,7 +124,7 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         openModels(); connect()
         val retained = ui.onNode(SemanticsMatcher.keyIsDefined(RetainedProviderConnectionTest))
             .fetchSemanticsNode().config[RetainedProviderConnectionTest]
-        editModel("Anthropic 版本", "2023-06-02")
+        editModel("API Key", "connection-hidden-editor-edit")
         var accepted = true
         mainThread { accepted = retained.second(retained.first, { false }) { error("stale draft result") } }
         assertFalse(accepted); assertEquals(0, requests.get())

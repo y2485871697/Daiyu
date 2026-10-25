@@ -8,6 +8,22 @@ ANDROID = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
 
 
 class ProviderVisualContractTest(unittest.TestCase):
+    def test_anthropic_version_is_internal_and_has_no_visible_editor(self):
+        source = (SRC / "ModelSettingsScreen.kt").read_text()
+        self.assertNotIn('SettingsTextField("Anthropic 版本"', source)
+        self.assertNotIn('留空使用 2023-06-01；格式 YYYY-MM-DD', source)
+        self.assertIn('anthropicVersion: String = ""', source)
+        self.assertIn('it.anthropicVersion == draft.anthropicVersion', source)
+        activity = (ANDROID / "ActivityTest.kt").read_text()
+        self.assertIn('testMessagesVersionIsHiddenAndPreservedWhenSavingAndReopening', activity)
+        self.assertIn('for (version in listOf(null, "2023-06-02"))', activity)
+        self.assertIn('assertEquals(saved, fixture.settings.load())', activity)
+        for name in ("ActivityTest.kt", "ModelConnectionActivityTest.kt", "ProviderAuthenticationChoiceActivityTest.kt"):
+            regression = (ANDROID / name).read_text()
+            self.assertNotIn('editModel("Anthropic 版本"', regression)
+            self.assertNotIn('modelField("Anthropic 版本"', regression)
+            self.assertNotIn('reveal("settings-field:Anthropic 版本"', regression)
+
     def test_tabs_share_confirm_cancel_colors_and_keep_selection_semantics(self):
         source = (SRC / 'ProviderSettingsComponents.kt').read_text()
         tabs = source.split('internal fun ProviderSettingsTabs(', 1)[1].split('internal fun ProviderProtocolFields(', 1)[0]

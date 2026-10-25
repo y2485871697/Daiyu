@@ -157,7 +157,11 @@ internal fun ChatMessageList(
                         }.first { it }
                         continue
                     }
-                    val delta = motion.step(overflow.toFloat(), frameTime, currentDensity)
+                    val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
+                    // Keep new output above the overlay; only the remaining spacing eases in.
+                    val obscuredTail = if (currentOcclusionPx > 0)
+                        (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
+                    val delta = maxOf(motion.step(overflow.toFloat(), frameTime, currentDensity), obscuredTail.toFloat())
                     if (delta > 0f) listState.scrollBy(delta)
                 }
             } finally {

@@ -45,6 +45,7 @@ private class ProviderDetail(
 ) {
     val live = AtomicBoolean(true)
     val saveOwner = ModelSettingsSaveOwner()
+    var error by mutableStateOf<String?>(null)
     var pageUi = ProviderPageUiState()
     var balanceTestJob: kotlinx.coroutines.Job? = null
     fun revoke() { live.set(false); saveOwner.revoke(); balanceTestJob?.cancel(); balanceTestJob = null }
@@ -58,6 +59,7 @@ private class PausedProviderDraft(
     val pageUi: ProviderPageUiState,
 )
 private class NewProviderDraft(protocol: ProviderProtocol) {
+    var error by mutableStateOf<String?>(null)
     var draft by mutableStateOf(ModelSettingsDraftUi(providerName = "").selectProtocol(protocol))
     var balanceTestJob: kotlinx.coroutines.Job? = null
     fun revoke() { balanceTestJob?.cancel(); balanceTestJob = null }
@@ -191,6 +193,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     }
     fun mutate(expected: ProviderRegistrySnapshot, p: ProviderPagePermit,
         completed: ((ProviderRegistrySnapshot) -> Unit)? = null,
+        reportFailure: (String) -> Unit = { notice = it },
         action: (ProviderRepository, Long, () -> Unit) -> ProviderRegistrySnapshot,
     ) {
         if (!current(p) || registry !== expected || detail != null || loading || busy != null) return
@@ -205,10 +208,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         registry = result; notice = null
                         if (completed != null && serial == navigation) completed(result) else refresh()
                     }
-                    else { notice = "操作未确认，请刷新核对；不会自动重试。"; refresh() }
+                    else { reportFailure("操作未确认，请刷新核对；不会自动重试。"); refresh() }
                 }
             }
-        } catch (_: Exception) { if (busy === ticket) busy = null; if (current(p)) notice = "请等待当前运行或数据操作结束。" }
+        } catch (_: Exception) { if (busy === ticket) busy = null; if (current(p)) reportFailure("请等待当前运行或数据操作结束。") }
     }
     DisposableEffect(controller) {
         val listener: () -> Unit = { version++; if (busy == null && !loading && detail == null && creating == null && !checkingRegistry) refresh() }
@@ -283,7 +286,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             if (modelTab) ProviderEmptyModelsPage("添加提供商", { back() }, tabs,
                 "请先在配置页保存名称、Base URL 和 API Key，再添加或拉取模型。")
             else ModelSettingsScreen(draft, { if (enabled && creating === newProvider) {
-                newProvider.revoke(); newProvider.draft = it
+                newProvider.revoke(); newProvider.error = null; newProvider.draft = it
             } },
                 onSave = { submitted ->
                     val expected = registry
@@ -296,10 +299,12 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             require(submitted.protocol == submitted.savedProtocol || submitted.protocolChangeAuthorized)
                             submitted.providerSettings(ModelSettings("", "", "", false)).also { it.validateConnection() }
                         }
-                        if (value.isFailure) notice = "未保存，请检查名称、连接配置及密钥。"
+                        if (value.isFailure) newProvider.error = "未保存，请检查名称、连接配置及密钥。"
                         else mutate(expected, p, completed = { result ->
                             val added = result.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
                             open(added.slotId)
+                        }, reportFailure = { message ->
+                            if (creating === newProvider) newProvider.error = message
                         }) { repo, revision, admit ->
                             val created = repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
                                 submitted.protocolChangeAuthorized, enabled = submitted.providerEnabled, admit = admit)
@@ -312,7 +317,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         }
                     }
                 }, onFetchCatalog = {}, onBack = { back() }, pageTitle = "添加提供商", providerName = "",
-                headerContent = tabs, showCatalog = false, enabled = enabled, errorText = notice,
+                headerContent = tabs, showCatalog = false, enabled = enabled, errorText = newProvider.error,
                 testBalance = { value, requestCancelled, deliver ->
                     val configuration = value.providerBalanceConfiguration()
                     if (!current(p) || !enabled || creating !== newProvider || newProvider.draft !== value ||
@@ -361,8 +366,9 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         submitted.providerSettings(saved).also { it.validateConnection() }
                     }
                     if (value.isFailure) {
-                        notice = "未保存，请检查输入和必要确认。"
+                        d.error = "未保存，请检查输入和必要确认。"
                     } else {
+                        d.error = null
                         val ticket = Any(); busy = ticket
                         try {
                             controller.saveProviderSettings(d.editor, value.getOrThrow(), d.editing,
@@ -380,12 +386,12 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                                     else { closeDetail(); notice = "保存未完整确认，请重新打开详情核对名称与配置。"; refresh() }
                                 }
                             }
-                        } catch (_: Exception) { if (busy === ticket) busy = null; if (live()) notice = "当前不可保存；未重试。" }
+                        } catch (_: Exception) { if (busy === ticket) busy = null; if (live()) d.error = "当前不可保存；未重试。" }
                     }
                 }
             }
             val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled && d.draft === draft) {
-                d.balanceTestJob?.cancel(); d.balanceTestJob = null; d.draft = it
+                d.balanceTestJob?.cancel(); d.balanceTestJob = null; d.error = null; d.draft = it
             } }
             val balanceTest: ProviderBalanceTester = { value, requestCancelled, deliver ->
                 val configuration = value.providerBalanceConfiguration(d.editor.slotId)?.takeIf { runCatching { it.validateProviderBinding(); it.queryEnabled }.getOrDefault(false) }
@@ -414,7 +420,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }
             }
             fun connectionSettings(value: ModelSettingsDraftUi): ModelSettings? = try { value.providerSettings(saved) }
-                catch (_: IllegalArgumentException) { notice = "自定义请求头无效，请检查后重试。"; null }
+                catch (_: IllegalArgumentException) { d.error = "自定义请求头无效，请检查后重试。"; null }
             val connection: ModelConnectionTester = { value, requestCancelled, deliver ->
                 if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
                 else connectionSettings(value)?.let { settings ->
@@ -478,7 +484,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     pageTitle = detailTitle, providerName = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
                     credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                     headersUnavailable = d.editing.headersUnavailable,
-                    catalogEnabled = false, errorText = notice, testBalance = balanceTest, onDelete = delete,
+                    catalogEnabled = false, errorText = d.error, testBalance = balanceTest, onDelete = delete,
                     listState = d.pageUi.configurationListState)
             } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
                 createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
@@ -492,7 +498,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }, modifier = connectionModifier, pageTitle = detailTitle, providerName = d.name,
                 // A normal list visit uses the configuration/model split for every provider.
                 twoTabs = true, ownerCurrent = live,
-                enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
+                enabled = enabled, engineeringUi = engineeringUi, errorText = d.error,
                 credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                 headersUnavailable = d.editing.headersUnavailable,
                 testConnection = connection, localModelActions = actions, testBalance = balanceTest,
@@ -500,7 +506,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         } else if (loading) {
             SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
         } else if (authentication) {
-            ProviderAuthenticationPage(enabled, notice, onBack = { back() }, onApiKey = {
+            ProviderAuthenticationPage(enabled, null, onBack = { back() }, onApiKey = {
                 if (enabled) creating = NewProviderDraft(ProviderProtocol.RESPONSES)
             })
         } else {

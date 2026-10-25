@@ -118,7 +118,6 @@ internal fun <T> ProviderCatalogSettingsScreen(
                     tabs()
                     item {
                         state.status?.let { SettingsNote(it) }
-                        errorText?.let { SettingsNote(it, error = true) }
                     }
                 }) }
         } else ModelSettingsScreen(

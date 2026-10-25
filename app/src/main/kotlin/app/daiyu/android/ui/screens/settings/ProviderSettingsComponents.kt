@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -124,6 +125,18 @@ internal fun ProviderChoiceRow(title: String, value: String, tag: String, enable
             }
         }
     }
+}
+
+@Composable
+internal fun ProviderFormError(text: String) {
+    Text(
+        text = text,
+        style = MiuixTheme.textStyles.body2,
+        color = MiuixTheme.colorScheme.error,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp)
+            .testTag("model-save-error"),
+    )
 }
 
 @Composable

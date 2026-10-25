@@ -11,15 +11,6 @@ internal object ResponsesSearchProtocol {
     private const val MAX_TITLE = 2048
     private val citationFields = setOf("type", "start_index", "end_index", "url", "title")
 
-    fun requireEndpoint(endpoint: String) {
-        val uri = try { URI(endpoint) } catch (_: Exception) { null }
-        require(uri != null && uri.scheme.equals("https", true) && uri.host.equals("api.openai.com", true) &&
-            uri.port in setOf(-1, 443) && uri.rawPath == "/v1/responses" &&
-            uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) {
-            "原生网页搜索仅支持 https://api.openai.com/v1/responses；其他地址请先关闭搜索"
-        }
-    }
-
     fun validateItem(item: JSONObject) {
         when (item.opt("type")) {
             "web_search_call" -> {

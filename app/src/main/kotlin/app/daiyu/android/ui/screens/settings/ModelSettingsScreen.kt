@@ -262,7 +262,9 @@ internal fun ModelSettingsScreen(
         }
         }
         item(key = "model_save") {
-            if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)
+            if (!errorText.isNullOrBlank()) {
+                if (providerName == null) SettingsNote(errorText, error = true) else ProviderFormError(errorText)
+            }
             val saveModifier = Modifier.testTag("model-save")
                 .semantics { this[RetainedModelSaveAction] = submit }
             if (providerName != null) {

@@ -58,16 +58,25 @@ class ResponsesWebSearchTest {
         }
         reject { options.copy(customBody = """{"tools":[]}""").validate(ProviderProtocol.RESPONSES) }
     }
-    @Test fun officialFinalEndpointIsRequiredWithoutRewritingOrRestrictingDisabledGateways() {
+    @Test fun hostedSearchAcceptsConfiguredHttpsResponsesGatewaysWithoutRewritingEndpoints() {
         settings.validate()
-        settings.copy(endpoint = "https://API.OPENAI.COM:443/v1/responses").validate()
-        for (endpoint in listOf("https://gateway.invalid/v1/responses", "https://api.openai.com.evil/v1/responses",
-            "https://api.openai.com./v1/responses", "https://api.openai.com:444/v1/responses",
-            "https://api.openai.com/v1/responses?tenant=x", "https://api.openai.com/v1/responses#tail")) {
+        for (endpoint in listOf("https://API.OPENAI.COM:443/v1/responses", "https://gateway.invalid/v1/responses",
+            "https://gateway.invalid:8443/custom/responses")) {
+            val configured = settings.copy(endpoint = endpoint)
+            configured.validate()
+            assertEquals(endpoint, configured.requestEndpoint())
+            assertTrue(configured.requestSnapshot().asModelSettings().requestOptions.openAiWebSearchEnabled)
+        }
+        val customPath = settings.copy(endpoint = "https://gateway.invalid/api", responsesPath = "/openai/responses")
+        customPath.validate()
+        customPath.copy(model = "").validateConnection()
+        assertEquals("https://gateway.invalid/api/openai/responses", customPath.requestEndpoint())
+        for (endpoint in listOf("http://gateway.invalid/v1/responses", "https://user@gateway.invalid/v1/responses",
+            "https://gateway.invalid:0/v1/responses", "https://gateway.invalid/v1/responses?tenant=x",
+            "https://gateway.invalid/v1/responses#tail", "https://gateway.invalid/v1/chat/completions")) {
             reject { settings.copy(endpoint = endpoint).validate() }
         }
-        reject { ResponsesSearchProtocol.requireEndpoint("https://user@api.openai.com/v1/responses") }
-        reject { ResponsesSearchProtocol.requireEndpoint("http://api.openai.com/v1/responses") }
+        reject { settings.copy(responsesPath = "//other.invalid/responses").validate() }
         settings.copy(endpoint = "https://gateway.invalid/v1/responses", requestOptions = ProviderRequestOptions()).validate()
         val snapshot = settings.requestSnapshot()
         assertTrue(snapshot.asModelSettings().requestOptions.openAiWebSearchEnabled)
@@ -210,8 +219,14 @@ class ResponsesWebSearchTest {
             .open(listOf(user()), emptyList<ToolDefinition>()).next(emptyList()) {}
         assertFalse(summary.body().has("tools"))
         assertTrue(snapshot.requestOptions.openAiWebSearchEnabled)
-        var invalidConnections = 0
-        reject { ResponsesModel(settings.copy(endpoint = "https://gateway.invalid")) { invalidConnections++; connection }.open(listOf(user())) }
-        assertEquals(0, invalidConnections)
+        val gateway = settings.copy(endpoint = "https://gateway.invalid:8443/api", responsesPath = "/responses")
+        val gatewayConnection = Connection(wire(search(), message()))
+        val targets = mutableListOf<URL>()
+        ResponsesModel(gateway) { target -> targets += target; gatewayConnection }
+            .open(listOf(user()), emptyList<ToolDefinition>()).next(emptyList()) {}
+        assertEquals(listOf("https://gateway.invalid:8443/api/responses"), targets.map { it.toString() })
+        assertEquals("web_search", gatewayConnection.body().getJSONArray("tools").getJSONObject(0).getString("type"))
+        assertFalse(gatewayConnection.instanceFollowRedirects)
+        assertTrue(gatewayConnection.closed)
     }
 }

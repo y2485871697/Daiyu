@@ -54,14 +54,13 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
         require(model.isNotBlank()) { "请先在模型页选择模型" }
     }
     fun validateConnection() {
-        val resolvedEndpoint = requestEndpoint()
+        requestEndpoint()
         requestOptions.validate(protocol)
         require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }
         if (hasModelOverrides && requestOptions.customBody.isNotEmpty()) {
             val body = app.daiyu.android.model.MessagesRequest.jsonObject(requestOptions.customBody)
             require(!body.has("model") || body.opt("model") == model) { "自定义请求体 model 与能力声明所选模型冲突" }
         }
-        if (requestOptions.openAiWebSearchEnabled) app.daiyu.android.model.ResponsesSearchProtocol.requireEndpoint(resolvedEndpoint)
         require(model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写有效密钥"}
         require(!apiKey.contains('\n') && !apiKey.contains('\r')) {"密钥含非法换行"}
     }

@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.layout.*
 import app.daiyu.android.ui.haptics.selectable
@@ -36,20 +35,21 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun ProviderSettingsTabs(modelTab: Boolean, enabled: Boolean, onSelect: (Boolean) -> Unit) {
-    val colors = MiuixTheme.colorScheme
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         listOf("配置", "模型").forEachIndexed { index, title ->
             val selected = modelTab == (index == 1)
+            val buttonColors = if (selected) ButtonDefaults.textButtonColorsPrimary()
+                else ButtonDefaults.textButtonColors()
             val shape = RoundedCornerShape(14.dp)
             Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(shape)
-                .then(if (selected) Modifier.background(colors.surfaceVariant)
-                    else Modifier.border(1.dp, colors.onSurfaceVariantSummary, shape))
+                .background(if (enabled) buttonColors.color else buttonColors.disabledColor)
                 .testTag("settings-radio:$title")
                 .selectable(selected = selected, enabled = enabled, role = Role.Tab,
                     onClick = { onSelect(index == 1) }).padding(horizontal = 12.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center) {
-                Text(title, style = MiuixTheme.textStyles.body1, color = colors.onSurface)
+                Text(title, style = MiuixTheme.textStyles.body1,
+                    color = if (enabled) buttonColors.textColor else buttonColors.disabledTextColor)
             }
         }
     }

@@ -8,6 +8,22 @@ ANDROID = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
 
 
 class ProviderVisualContractTest(unittest.TestCase):
+    def test_tabs_share_confirm_cancel_colors_and_keep_selection_semantics(self):
+        source = (SRC / 'ProviderSettingsComponents.kt').read_text()
+        tabs = source.split('internal fun ProviderSettingsTabs(', 1)[1].split('internal fun ProviderProtocolFields(', 1)[0]
+        for fragment in ('if (selected) ButtonDefaults.textButtonColorsPrimary()',
+                         'else ButtonDefaults.textButtonColors()',
+                         '.background(if (enabled) buttonColors.color else buttonColors.disabledColor)',
+                         'color = if (enabled) buttonColors.textColor else buttonColors.disabledTextColor',
+                         'listOf("配置", "模型")', 'val selected = modelTab == (index == 1)',
+                         '.selectableGroup()', '.weight(1f).heightIn(min = 48.dp)',
+                         'RoundedCornerShape(14.dp)', '.testTag("settings-radio:$title")',
+                         '.selectable(selected = selected, enabled = enabled, role = Role.Tab,',
+                         'onClick = { onSelect(index == 1) }'):
+            self.assertIn(fragment, tabs)
+        for forbidden in ('.border(', 'colors.surfaceVariant', 'colors.onSurface', 'Color('):
+            self.assertNotIn(forbidden, tabs)
+
     def test_provider_actions_use_local_comfortable_sizes_and_haptic_button(self):
         source = (SRC / 'ProviderSettingsComponents.kt').read_text()
         helper = source.split('internal fun ProviderActionButton(', 1)[1]

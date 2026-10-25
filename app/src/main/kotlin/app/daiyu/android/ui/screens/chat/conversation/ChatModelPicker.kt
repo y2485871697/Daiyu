@@ -156,17 +156,14 @@ internal fun ChatModelPicker(
                                     Text(provider.name, color = colors.toolbar, fontSize = 14.sp, lineHeight = 20.sp,
                                         fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.testTag("chat-model-provider-name:${provider.id}"))
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        Text("${provider.models.size} 个模型", color = colors.muted, fontSize = 12.sp,
-                                            lineHeight = 18.sp, maxLines = 1,
-                                            modifier = Modifier.testTag("chat-model-count:${provider.id}"))
-                                        provider.balance?.let { balance ->
-                                            ProviderBalanceIndicator(state = balance,
-                                                modifier = Modifier.testTag("chat-model-provider-balance:${provider.id}"),
-                                                textStyle = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
-                                        }
-                                    }
+                                    Text("${provider.models.size} 个模型", color = colors.muted, fontSize = 12.sp,
+                                        lineHeight = 18.sp, maxLines = 1,
+                                        modifier = Modifier.testTag("chat-model-count:${provider.id}"))
+                                }
+                                modelPickerProviderBalance(provider)?.let { balance ->
+                                    ProviderBalanceIndicator(state = balance,
+                                        modifier = Modifier.testTag("chat-model-provider-balance:${provider.id}"),
+                                        textStyle = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
                                 }
                                 Icon(DaiyuIcons.ChevronDown, null, Modifier.testTag("chat-model-provider-expand:${provider.id}").size(18.dp).rotate(if (open) 0f else -90f), tint = colors.muted)
                             }

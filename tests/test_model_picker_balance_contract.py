@@ -14,9 +14,9 @@ def source(path):
 class ModelPickerBalanceContract(unittest.TestCase):
     def test_host_passes_each_provider_slots_state_without_currency_projection(self):
         host = source('MainActivity.kt')
-        mapping = host.split('val groups = registry.providers.filter { it.enabled }.map { provider ->', 1)[1]
+        mapping = host.split('ChatModelProviderUi(provider.slotId, provider.name,', 1)[1]
         mapping = mapping.split('ChatModelCatalogLoad(', 1)[0]
-        self.assertIn('ChatModelProviderUi(provider.slotId, provider.name,', mapping)
+        self.assertIn('registry.providers.filter { it.enabled', host)
         self.assertIn('balance = controller.providerBalances.get(provider.slotId).state.value)', mapping)
         for forbidden in ('project()', 'balanceText', 'activeSlotId', 'manualRefresh(', 'startPolling('):
             self.assertNotIn(forbidden, mapping)
@@ -24,13 +24,38 @@ class ModelPickerBalanceContract(unittest.TestCase):
     def test_provider_header_uses_static_shared_balance_component(self):
         picker = source('ui/screens/chat/conversation/ChatModelPicker.kt')
         self.assertIn('val balance: BalanceState? = null', picker)
-        header = picker.split('provider.balance?.let { balance ->', 1)[1].split('Icon(DaiyuIcons.ChevronDown', 1)[0]
+        header = picker.split('modelPickerProviderBalance(provider)?.let { balance ->', 1)[1].split('Icon(DaiyuIcons.ChevronDown', 1)[0]
         self.assertIn('ProviderBalanceIndicator(state = balance,', header)
         self.assertIn('chat-model-provider-balance:${provider.id}', header)
         self.assertIn('TextStyle(fontSize = 12.sp, lineHeight = 18.sp)', header)
         for forbidden in ('Text(balance', 'animateChanges = true', 'statusText', 'result.reason', 'clickable('):
             self.assertNotIn(forbidden, header)
         self.assertNotIn('DaiyuIcons.Balance', picker)
+
+    def test_provider_balance_is_a_trailing_sibling_before_expand(self):
+        picker = source('ui/screens/chat/conversation/ChatModelPicker.kt')
+        name_column = picker.split('Column(Modifier.weight(1f), verticalArrangement', 1)[1]
+        name_column, trailing = name_column.split('modelPickerProviderBalance(provider)?.let { balance ->', 1)
+        self.assertIn('chat-model-count:${provider.id}', name_column)
+        self.assertRegex(name_column, r'chat-model-count:\$\{provider.id\}.*?\)\)\s*}')
+        self.assertNotIn('ProviderBalanceIndicator', name_column)
+        self.assertLess(trailing.index('ProviderBalanceIndicator'), trailing.index('Icon(DaiyuIcons.ChevronDown'))
+        self.assertIn('verticalAlignment = Alignment.CenterVertically', picker.split('item(key = "heading:${provider.id}")', 1)[1].split('Column(Modifier.weight(1f)', 1)[0])
+
+    def test_all_picker_entrances_share_provider_scoped_read_only_balances(self):
+        for path in ('ui/screens/chat/conversation/LocalCatalogChatModelPicker.kt',
+                     'ui/screens/settings/SettingsModelPicker.kt',
+                     'ui/components/subagent/SubAgentModelPicker.kt', 'VoiceSettingsDialogs.kt'):
+            self.assertIn('ChatModelPicker(', source(path), path)
+        binding = source('ui/screens/chat/conversation/ModelPickerProviderBalance.kt')
+        for required in ('applicationContext as? ChatApplication', 'providerBalanceHost',
+                         'ProviderRegistry.validSlotId(provider.id)', 'key(host, provider.id)',
+                         'host.cached(provider.id)', 'host.get(provider.id)',
+                         'key(balanceRuntime)', 'collectAsStateWithLifecycle()', 'throw cancelled'):
+            self.assertIn(required, binding)
+        for forbidden in ('start(', 'manualRefresh(', 'requestRefresh(', 'activeSlotId',
+                          'EncryptedBalancePersistence(', 'BalanceRuntime(', 'runBlocking', '?: provider.balance'):
+            self.assertNotIn(forbidden, binding)
 
     def test_shared_indicator_keeps_money_bag_numeric_success_only_policy(self):
         indicator = source('balance/ui/ProviderBalanceIndicator.kt')

@@ -2,11 +2,19 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.layout
+import java.util.concurrent.atomic.AtomicInteger
+import app.daiyu.android.ui.components.captureForTopBar
+import app.daiyu.android.ui.components.rememberTopBarBackdrop
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -136,4 +144,58 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
             }
         }
     }
+
+    fun testAnimationFramesKeepMenuContentCompositionAndMeasurementStable() {
+        val fraction = mutableStateOf(0f)
+        val alpha = mutableStateOf(0f)
+        val visible = MutableTransitionState(false).apply { targetState = true }
+        val motion = PopupMotion(visible, fraction, alpha)
+        val contentCompositions = AtomicInteger()
+        val contentMeasures = AtomicInteger()
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode = AppearanceThemeMode.LIGHT),
+                    applyInterfaceScale = false) {
+                    val backdrop = rememberTopBarBackdrop()
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Canvas(Modifier.fillMaxSize().captureForTopBar(backdrop)) {
+                            val stripe = 4.dp.toPx()
+                            var x = 0f
+                            var index = 0
+                            while (x < size.width) {
+                                drawRect(if (index++ % 2 == 0) Color.Black else Color.White,
+                                    topLeft = Offset(x, 0f), size = Size(stripe, size.height))
+                                x += stripe
+                            }
+                        }
+                        ChatGlassMenuSurface(backdrop,
+                            Modifier.requiredSize(156.dp, 120.dp).testTag("stable-menu"), motion) {
+                            SideEffect { contentCompositions.incrementAndGet() }
+                            Box(Modifier.requiredSize(80.dp, 40.dp).layout { measurable, constraints ->
+                                contentMeasures.incrementAndGet()
+                                val body = measurable.measure(constraints)
+                                layout(body.width, body.height) { body.place(0, 0) }
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        val expectedCompositions = contentCompositions.get()
+        val expectedMeasures = contentMeasures.get()
+        assertTrue(expectedCompositions > 0)
+        assertTrue(expectedMeasures > 0)
+        for ((progress, opacity) in listOf(.2f to .4f, .45f to .7f, .8f to .9f, 1f to 1f, 1f to .5f)) {
+            mainThread {
+                fraction.value = progress
+                alpha.value = opacity
+            }
+            ui.waitForIdle()
+            ui.onNodeWithTag("stable-menu").assertWidthIsEqualTo(156.dp).assertHeightIsEqualTo(120.dp)
+            assertEquals("Animation must not recompose menu content", expectedCompositions, contentCompositions.get())
+            assertEquals("Animation must not remeasure menu content", expectedMeasures, contentMeasures.get())
+        }
+    }
+
 }

@@ -60,7 +60,6 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInRoot
@@ -257,9 +256,59 @@ internal fun ChatGlassMenuSurface(
 ) {
     val dark = MiuixTheme.colorScheme.background.luminance() < .3f
     val shape = RoundedCornerShape(19.dp)
-    val revealFraction = if (motion?.visibleState?.targetState == false) 1f
-        else (motion?.fraction?.value ?: 1f).coerceIn(0f, 1f)
-    val opacity = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)
+    val blur = if (backdrop == null) Modifier else Modifier.textureBlur(
+        backdrop = backdrop, shape = shape, blurRadius = 24f,
+        colors = BlurColors(blendColors = emptyList(), saturation = 1.35f),
+    )
+    val shades = if (dark) listOf(Color(0xE62C2739), Color(0xDB1B1924))
+        else listOf(Color(0xE6FFFFFF), Color(0xD4FAF7FF))
+    Box(modifier.width(IntrinsicSize.Max), propagateMinConstraints = true) {
+        // Only the shadow outline depends on reveal geometry in composition.
+        ChatMenuShadows(motion, dark, Modifier.matchParentSize())
+        Column(Modifier
+            .graphicsLayer { alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f) }
+            .etaMenuClipReveal(
+                fractionProgress = { menuRevealFraction(motion) },
+                preferAbove = false, cornerRadius = 19.dp, squircleEnabled = false,
+                clipWhenFullyRevealed = false,
+            )
+            .clip(shape).then(blur)
+            .pointerInput(Unit) { detectTapGestures(onTap = {}) }
+            .background(Brush.linearGradient(shades))
+            .border(1.dp, if (dark) Color(0x26DCCDFF) else Color(0xF0FFFFFF), shape)
+            .drawWithCache {
+                val edge = 1.dp.toPx()
+                val innerBounds = Rect(edge, edge, size.width - edge, size.height - edge)
+                val innerRadius = CornerRadius(18.dp.toPx())
+                val inner = Path().apply { addRoundRect(RoundRect(innerBounds, innerRadius)) }
+                val shifted = Path().apply {
+                    addRoundRect(RoundRect(innerBounds.translate(0f, edge), innerRadius))
+                }
+                // CSS inset 0 1px 0: only the top-facing part of the inner rounded edge.
+                val highlight = Path.combine(PathOperation.Difference, inner, shifted)
+                onDrawWithContent {
+                    drawContent()
+                    drawRoundRect(
+                        color = if (dark) Color(0x06D7C5FF) else Color(0x0E9581B3),
+                        topLeft = Offset(edge * 1.5f, edge * 1.5f),
+                        size = Size(size.width - edge * 3, size.height - edge * 3),
+                        cornerRadius = CornerRadius(17.5.dp.toPx()), style = Stroke(edge),
+                    )
+                    drawPath(highlight, if (dark) Color(0x14F5EBFF) else Color.White)
+                }
+            }
+            .verticalScroll(rememberScrollState()).padding(6.dp)) { content() }
+    }
+}
+
+private fun menuRevealFraction(motion: PopupMotion?): Float =
+    if (motion?.visibleState?.targetState == false) 1f
+    else (motion?.fraction?.value ?: 1f).coerceIn(0f, 1f)
+
+@Composable
+private fun ChatMenuShadows(motion: PopupMotion?, dark: Boolean, modifier: Modifier) {
+    val shape = remember { RoundedCornerShape(19.dp) }
+    val revealFraction = menuRevealFraction(motion)
     val radius = with(LocalDensity.current) { 19.dp.toPx() }
     val shadowShape = remember(shape, revealFraction, radius) {
         if (revealFraction == 1f) shape else GenericShape { size, _ ->
@@ -269,51 +318,17 @@ internal fun ChatGlassMenuSurface(
             }
         }
     }
-    val broadShadow = if (dark) Color(0x55000000) else Color(0x164C3A6B)
-    val nearShadow = if (dark) Color(0x22000000) else Color(0x05342048)
-    val blur = if (backdrop == null) Modifier else Modifier.textureBlur(
-        backdrop = backdrop, shape = shape, blurRadius = 24f,
-        colors = BlurColors(blendColors = emptyList(), saturation = 1.35f),
-    )
-    val shades = if (dark) listOf(Color(0xE62C2739), Color(0xDB1B1924))
-        else listOf(Color(0xE6FFFFFF), Color(0xD4FAF7FF))
-    Column(modifier.width(IntrinsicSize.Max)
-        // Keep the halo outside the body's alpha layer and reveal clip.
-        .dropShadow(shadowShape, Shadow(radius = if (dark) 35.dp else 34.dp,
-            offset = DpOffset(0.dp, if (dark) 14.dp else 12.dp),
-            color = broadShadow.copy(alpha = broadShadow.alpha * opacity)))
-        .dropShadow(shadowShape, Shadow(radius = 6.dp, offset = DpOffset(0.dp, 2.dp),
-            color = nearShadow.copy(alpha = nearShadow.alpha * opacity)))
-        .graphicsLayer { alpha = opacity }
-        .etaMenuClipReveal(
-            fractionProgress = { revealFraction },
-            preferAbove = false, cornerRadius = 19.dp, squircleEnabled = false,
-            clipWhenFullyRevealed = false,
-        )
-        .clip(shape).then(blur)
-        .pointerInput(Unit) { detectTapGestures(onTap = {}) }
-        .background(Brush.linearGradient(shades))
-        .border(1.dp, if (dark) Color(0x26DCCDFF) else Color(0xF0FFFFFF), shape)
-        .drawWithCache {
-            val edge = 1.dp.toPx()
-            val innerBounds = Rect(edge, edge, size.width - edge, size.height - edge)
-            val innerRadius = CornerRadius(18.dp.toPx())
-            val inner = Path().apply { addRoundRect(RoundRect(innerBounds, innerRadius)) }
-            val shifted = Path().apply {
-                addRoundRect(RoundRect(innerBounds.translate(0f, edge), innerRadius))
-            }
-            // CSS inset 0 1px 0: only the top-facing part of the inner rounded edge.
-            val highlight = Path.combine(PathOperation.Difference, inner, shifted)
-            onDrawWithContent {
-                drawContent()
-                drawRoundRect(
-                    color = if (dark) Color(0x06D7C5FF) else Color(0x0E9581B3),
-                    topLeft = Offset(edge * 1.5f, edge * 1.5f),
-                    size = Size(size.width - edge * 3, size.height - edge * 3),
-                    cornerRadius = CornerRadius(17.5.dp.toPx()), style = Stroke(edge),
-                )
-                drawPath(highlight, if (dark) Color(0x14F5EBFF) else Color.White)
-            }
+    Box(modifier
+        .dropShadow(shadowShape) {
+            this.radius = (if (dark) 35.dp else 34.dp).toPx()
+            offset = Offset(0f, (if (dark) 14.dp else 12.dp).toPx())
+            color = if (dark) Color(0x55000000) else Color(0x164C3A6B)
+            alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)
         }
-        .verticalScroll(rememberScrollState()).padding(6.dp)) { content() }
+        .dropShadow(shadowShape) {
+            this.radius = 6.dp.toPx()
+            offset = Offset(0f, 2.dp.toPx())
+            color = if (dark) Color(0x22000000) else Color(0x05342048)
+            alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)
+        })
 }

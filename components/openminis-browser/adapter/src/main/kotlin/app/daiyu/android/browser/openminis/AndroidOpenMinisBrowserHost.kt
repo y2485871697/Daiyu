@@ -3,6 +3,7 @@ package app.daiyu.android.browser.openminis
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.http.SslError
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
@@ -26,11 +27,10 @@ import com.openminis.app.browser.BrowserActionInput
 import com.openminis.app.browser.BrowserActionResult
 import com.openminis.app.browser.BrowserUseManager
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.yield
 import java.io.ByteArrayInputStream
 import java.util.concurrent.CompletableFuture
-import kotlin.coroutines.resume
 
 data class BrowserVisiblePage(
     val url: String, val title: String, val history: List<Pair<String, String>>,
@@ -561,16 +561,39 @@ private class AndroidBlankResource(
         }
     }
 
-    /** finish is not a visual readiness guarantee. Explicit screenshots fence the current state. */
-    private suspend fun awaitVisualState() = suspendCancellableCoroutine<Unit> { continuation ->
+    /** A detached WebView has no window traversal to drive its real visual-state callback. */
+    private suspend fun awaitVisualState() {
+        val ready = CompletableDeferred<Unit>()
         val request = ++visualRequest
-        view.postVisualStateCallback(request, object : WebView.VisualStateCallback() {
-            override fun onComplete(requestId: Long) {
-                if (requestId == request && continuation.isActive && !destroyed && live()) {
-                    continuation.resume(Unit)
+        var bitmap: Bitmap? = null
+        try {
+            view.postVisualStateCallback(request, object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) {
+                    if (requestId == request && ready.isActive && !destroyed && live()) {
+                        ready.complete(Unit)
+                    }
+                }
+            })
+            if (!ready.isCompleted && !view.isAttachedToWindow) {
+                kotlinx.coroutines.delay(16)
+                check(!destroyed && live())
+                if (!ready.isCompleted) {
+                    check(view.width > 0 && view.height > 0)
+                    val target = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                    bitmap = target
+                    val canvas = Canvas(target).apply { scale(1f / view.width, 1f / view.height) }
+                    while (!ready.isCompleted) {
+                        check(!destroyed && live())
+                        view.draw(canvas)
+                        kotlinx.coroutines.delay(16)
+                    }
                 }
             }
-        })
+            ready.await()
+        } finally {
+            ready.cancel()
+            bitmap?.recycle()
+        }
     }
 
     override fun revokeAdmission() { admissionRevoked = true }

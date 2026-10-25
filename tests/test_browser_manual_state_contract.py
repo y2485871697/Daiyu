@@ -87,3 +87,38 @@ class BrowserManualStateContractTest(unittest.TestCase):
                       'assertSame(view, parent.getChildAt(0))', 'view.progress != 100',
                       'historyApprovals.isEmpty()'):
             self.assertIn(token, host)
+
+    def test_detached_visual_readiness_drives_draw_but_only_real_callback_confirms(self):
+        host = (HOST / 'AndroidOpenMinisBrowserHost.kt').read_text()
+        gate = host.split('private suspend fun awaitVisualState()', 1)[1].split('override fun revokeAdmission', 1)[0]
+        self.assertIn('val ready = CompletableDeferred<Unit>()', gate)
+        self.assertIn('view.postVisualStateCallback(request, object : WebView.VisualStateCallback()', gate)
+        callback = gate.split('override fun onComplete(requestId: Long)', 1)[1].split('if (!ready.isCompleted', 1)[0]
+        self.assertIn('requestId == request && ready.isActive && !destroyed && live()', callback)
+        self.assertEqual(1, gate.count('ready.complete(Unit)'))
+        self.assertIn('ready.complete(Unit)', callback)
+        self.assertIn('if (!ready.isCompleted && !view.isAttachedToWindow)', gate)
+        self.assertIn('Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)', gate)
+        self.assertNotIn('Bitmap.createBitmap(view.width', gate)
+        self.assertLess(gate.index('kotlinx.coroutines.delay(16)'), gate.index('Bitmap.createBitmap('))
+        self.assertIn('scale(1f / view.width, 1f / view.height)', gate)
+        self.assertIn('check(view.width > 0 && view.height > 0)', gate)
+        pump = gate.split('while (!ready.isCompleted)', 1)[1].split('ready.await()', 1)[0]
+        self.assertIn('check(!destroyed && live())', pump)
+        self.assertIn('view.draw(canvas)', pump)
+        self.assertIn('kotlinx.coroutines.delay(16)', pump)
+        self.assertNotIn('reload(', gate)
+        self.assertNotIn('execute(', gate)
+        self.assertNotIn('onComplete(', pump)
+        self.assertIn('finally {\n            ready.cancel()\n            bitmap?.recycle()', gate)
+
+    def test_configuration_cache_regression_keeps_model_operation_detached(self):
+        source = (ANDROID / 'browser/BrowserProductionCompositionTest.kt').read_text()
+        test = source.split('fun testModelConfigurationInvalidatesVisibleConfigurationCache()', 1)[1].split('override fun tearDown', 1)[0]
+        self.assertIn('assertNull(originalView.parent)', test)
+        self.assertIn('assertFalse("model configuration must run offscreen", originalView.isAttachedToWindow)', test)
+        self.assertLess(test.index('originalView.isAttachedToWindow'), test.index('when (action)'))
+        self.assertIn('"set_viewport" -> confirmed(host, "action" to action, "viewport_width" to 800, "viewport_height" to 600)', test)
+        self.assertIn('assertSame(originalView, parent.getChildAt(0))', test)
+        self.assertIn('"$action must invalidate visible configuration deduplication", second.isLoading', test)
+        self.assertIn('assertEquals(appliedRequests, requests.get())', test)

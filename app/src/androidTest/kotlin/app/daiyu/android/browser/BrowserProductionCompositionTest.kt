@@ -459,6 +459,11 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
                 main { first.configure(configuration); assertViewport(originalView, 640, 480) }
                 awaitLoaded(first, originalView, requests, before, url)
             } finally { main { first.close(); host.session.releaseTakeover(firstToken) } }
+            main {
+                assertEquals(0, parent.childCount)
+                assertNull(originalView.parent)
+                assertFalse("model configuration must run offscreen", originalView.isAttachedToWindow)
+            }
             when (action) {
                 "set_user_agent" -> confirmed(host, "action" to action, "user_agent" to "desktop_chrome")
                 "set_viewport" -> confirmed(host, "action" to action, "viewport_width" to 800, "viewport_height" to 600)

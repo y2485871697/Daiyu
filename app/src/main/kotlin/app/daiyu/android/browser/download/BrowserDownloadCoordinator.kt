@@ -229,18 +229,21 @@ class BrowserDownloadCoordinator internal constructor(
     private fun entry(ticket: BrowserDownloadTicket): Entry =
         (entries[ticket.id] ?: error("BROWSER_DOWNLOAD_TICKET")).also { require(it.ticket === ticket) { "BROWSER_DOWNLOAD_TICKET" } }
     private fun cleanup(entry: Entry, primary: Exception?) {
-        var failure = primary
-        var cleaned = true
-        for (path in listOfNotNull(entry.staging, entry.target.takeIf { entry.targetOwned })) {
-            try { Files.deleteIfExists(paths.recheckPrivate(path)) } catch (e: Exception) {
-                cleaned = false
-                if (failure == null) failure = e else failure.addSuppressed(e)
+        synchronized(entry) {
+            synchronized(lock) { if (entries[entry.ticket.id] !== entry) return }
+            var failure = primary
+            var cleaned = true
+            for (path in listOfNotNull(entry.staging, entry.target.takeIf { entry.targetOwned })) {
+                try { Files.deleteIfExists(paths.recheckPrivate(path)) } catch (e: Exception) {
+                    cleaned = false
+                    if (failure == null) failure = e else failure.addSuppressed(e)
+                }
             }
+            if (cleaned) {
+                synchronized(lock) { entries.remove(entry.ticket.id) }
+                entry.invalidation?.close()
+            }
+            if (primary == null) failure?.let { throw it }
         }
-        if (cleaned) {
-            synchronized(lock) { entries.remove(entry.ticket.id) }
-            entry.invalidation?.close()
-        }
-        if (primary == null) failure?.let { throw it }
     }
 }

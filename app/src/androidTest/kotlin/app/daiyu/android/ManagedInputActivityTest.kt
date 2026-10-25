@@ -7,6 +7,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.Column
@@ -66,6 +68,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                                         else materialImeCursorColor(MaterialTheme.colorScheme.primary),
                                     errorCursorColor = if (cursorlessTag.value == "managed-second") androidx.compose.ui.graphics.Color.Transparent
                                         else materialImeCursorColor(MaterialTheme.colorScheme.error)))
+                            Spacer(Modifier.height(48.dp))
                             androidx.compose.material3.Text("外部标题", Modifier.testTag("managed-outside"))
                             app.daiyu.android.ui.haptics.material.TextButton(onClick = { clicks++ },
                                 modifier = Modifier.testTag("managed-button")) {
@@ -146,7 +149,9 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                         if (android.os.Build.VERSION.SDK_INT >= 30) {
                             val overlay = android.graphics.Region()
                             other.getRegionInScreen(overlay)
+                            val region = overlay.toString()
                             overlay.op(targetPixels, android.graphics.Region.Op.INTERSECT)
+                            if (!overlay.isEmpty) lastSample += " blocker=${other.id} region=$region intersection=$overlay"
                             !overlay.isEmpty
                         } else {
                             val overlay = android.graphics.Rect()

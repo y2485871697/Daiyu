@@ -187,6 +187,14 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertNotIn('requestFocus', stable)
         self.assertNotIn('injectInputEvent', stable)
 
+    def test_ordinary_outside_target_is_separate_from_editing_affordances(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()
+        setup = text.split('private fun showFields(', 1)[1].split('private fun awaitNoImeWindow(', 1)[0]
+        self.assertIn('Spacer(Modifier.height(48.dp))\n                            androidx.compose.material3.Text("外部标题", Modifier.testTag("managed-outside"))', setup)
+        self.assertEqual(1, setup.count('Spacer(Modifier.height(48.dp))'))
+        self.assertNotIn('clearFocus', setup)
+        self.assertNotIn('fieldToolbar?.hide', setup)
+
     def test_compose_regions_read_live_coordinates_and_window_origin_per_hit(self):
         text = SOURCE.read_text()
         self.assertIn('InputEntry(view, { state.focused }, { state.bounds(view) })', text)

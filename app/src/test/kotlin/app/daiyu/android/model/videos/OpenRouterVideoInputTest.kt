@@ -252,6 +252,7 @@ class OpenRouterVideoInputTest {
             if (continuation) input.put(JSONObject().put("type", "function_call_output")
                 .put("call_id", "call").put("output", "result"))
             val baseline = ResponsesRequest.body(settings.model, input, emptyList())
+            VideoRequestPolicy.disableReasoning(baseline)
             plan.validateRequest(settings, baseline, input)
             for (raw in forbiddenVideoBodies().filterNot { it == """{"model":"fixture/exact-model"}""" }) {
                 val request = JSONObject(baseline.toString())
@@ -332,8 +333,9 @@ class OpenRouterVideoInputTest {
             assertEquals(0.25, body.getDouble("temperature"), 0.0)
             assertEquals(0.9, body.getDouble("top_p"), 0.0)
             assertEquals(512, body.getInt("max_output_tokens"))
-            assertEquals(setOf("model", "input", "stream", "store", "include", "temperature", "top_p", "max_output_tokens"),
+            assertEquals(setOf("model", "input", "stream", "store", "include", "temperature", "top_p", "max_output_tokens", "reasoning"),
                 body.keys().asSequence().toSet())
+            assertEquals("none", body.getJSONObject("reasoning").getString("effort"))
         }
         val firstInput = JSONObject(first.sent.toString("UTF-8")).getJSONArray("input")
         val nextInput = JSONObject(second.sent.toString("UTF-8")).getJSONArray("input")

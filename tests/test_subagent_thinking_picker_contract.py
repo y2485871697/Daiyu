@@ -23,7 +23,7 @@ class SubAgentThinkingPickerContractTest(unittest.TestCase):
         self.assertNotIn("LocalConversationAgentStyle", text)
         text_branch, media_branch = text.split("return SubAgentThinkingPreference(SubAgentPreferences", 1)
         self.assertIn("if (!profile.isMedia)", text_branch)
-        self.assertIn("profile.reasoning ?: ReasoningEffort.DEFAULT", text_branch)
+        self.assertIn("ReasoningEffort.textPreference(profile.reasoning, config.effectiveReasoningEffort)", text_branch)
         self.assertIn("ReasoningEffort.entries.filter { it != ReasoningEffort.DEFAULT }", text_branch)
         self.assertNotIn("config.reasoningCapabilities", text_branch)
         self.assertIn(".applyReasoning(profile, config).effectiveReasoningEffort", media_branch)

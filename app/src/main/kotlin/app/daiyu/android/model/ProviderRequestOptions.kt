@@ -77,7 +77,7 @@ data class ProviderRequestOptions(
             if (body.has("generationConfig")) {
                 val config = body.opt("generationConfig")
                 require(config is JSONObject) { "Gemini generationConfig 必须为 JSON 对象" }
-                require(!config.has("thinkingConfig")) { "当前 Gemini 不支持 generationConfig.thinkingConfig；不会映射推理设置" }
+                if (config.has("thinkingConfig")) ReasoningRequestPolicy.validate(body, protocol)
                 require(!config.has("candidateCount") || config.opt("candidateCount") == 1) { "当前仅支持一个 Gemini 候选" }
             }
         }

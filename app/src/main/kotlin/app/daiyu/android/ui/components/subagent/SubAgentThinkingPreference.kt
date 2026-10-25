@@ -11,7 +11,7 @@ internal data class SubAgentThinkingPreference(val effort: ReasoningEffort, val 
 /** Text chat choices are request preferences, not inferred model capabilities. */
 internal fun subAgentThinkingPreference(profile: SubAgentProfile, config: SubAgentModelConfig): SubAgentThinkingPreference {
     if (!profile.isMedia) return SubAgentThinkingPreference(
-        profile.reasoning ?: ReasoningEffort.DEFAULT,
+        ReasoningEffort.textPreference(profile.reasoning, config.effectiveReasoningEffort),
         ReasoningEffort.entries.filter { it != ReasoningEffort.DEFAULT },
     )
     return SubAgentThinkingPreference(SubAgentPreferences.applyReasoning(profile, config).effectiveReasoningEffort,

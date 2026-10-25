@@ -118,7 +118,11 @@ class SavedSubAgentRuntimeBindingsTest {
         assertEquals("", saved.requestOptions.customBody)
         val messages = capture(high, saved.copy(protocol = ProviderProtocol.MESSAGES))
         assertEquals(8192, JSONObject(messages.requestOptions.customBody).getJSONObject("thinking").getInt("budget_tokens"))
-        assertEquals("", capture(profile, saved).requestOptions.customBody)
+        assertEquals("none", JSONObject(capture(profile, saved).requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
+        assertEquals("none", JSONObject(capture(profile.copy(reasoning = ReasoningEffort.DEFAULT), saved).requestOptions.customBody)
+            .getJSONObject("reasoning").getString("effort"))
+        assertEquals("high", JSONObject(capture(profile, saved, child.copy(defaultReasoning = ReasoningEffort.HIGH)).requestOptions.customBody)
+            .getJSONObject("reasoning").getString("effort"))
         val off = capture(profile.copy(reasoning = ReasoningEffort.OFF), saved)
         assertEquals("none", JSONObject(off.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
     }

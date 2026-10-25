@@ -37,7 +37,7 @@ internal class SavedSubAgentRuntimeBindings(
             }
             require(model.modelId.isNotBlank() && !model.supportsImageGeneration &&
                 !model.supportsVideoGeneration && !model.supportsSpeechSynthesis) { "Media children are unsupported" }
-            val effort = profile.reasoning ?: ReasoningEffort.DEFAULT
+            val effort = ReasoningEffort.textPreference(profile.reasoning, model.defaultReasoning)
             require(!model.reasoningMandatory || effort.enablesReasoning) { "This child model requires reasoning" }
             val saved = ModelFactory.snapshot(resolveSavedModel(profile.providerId, profile.modelId))
             require(saved.model == model.modelId) { "Saved model record changed" }

@@ -17,7 +17,7 @@ class SubAgentThinkingPreferenceTest {
             val draft = profile.copy(reasoning = effort)
             val projected = subAgentThinkingPreference(draft, config)
             assertEquals(choices, projected.options)
-            assertEquals(effort ?: ReasoningEffort.DEFAULT, projected.effort)
+            assertEquals(ReasoningEffort.textPreference(effort), projected.effort)
             assertEquals(effort, draft.reasoning)
         }
         assertTrue(config.reasoningCapabilities.selectableEfforts.isEmpty())
@@ -29,6 +29,7 @@ class SubAgentThinkingPreferenceTest {
         val settings = subAgentThinkingPreference(profile.copy(reasoning = ReasoningEffort.HIGH), explicit)
         assertEquals(7, settings.options.size)
         assertEquals(ReasoningEffort.HIGH, settings.effort)
+        assertEquals(ReasoningEffort.HIGH, SubAgentPreferences.applyReasoning(profile.copy(reasoning = ReasoningEffort.HIGH), explicit).effectiveReasoningEffort)
     }
 
     @Test fun mediaKeepsItsExistingExplicitCapabilityMapping() {
@@ -40,4 +41,13 @@ class SubAgentThinkingPreferenceTest {
         assertEquals(ReasoningEffort.HIGH, media.effort)
         assertTrue(subAgentThinkingPreference(mediaProfile, config).options.isEmpty())
     }
+    @Test fun inheritedModelPreferenceMatchesConcreteTextSelectionWithoutMutatingProfile() {
+        val inherited = config.copy(effectiveReasoningEffort = ReasoningEffort.HIGH)
+        assertEquals(ReasoningEffort.HIGH, subAgentThinkingPreference(profile, inherited).effort)
+        assertEquals(ReasoningEffort.OFF, subAgentThinkingPreference(profile.copy(reasoning = ReasoningEffort.DEFAULT), inherited).effort)
+        assertEquals(ReasoningEffort.OFF, subAgentThinkingPreference(profile.copy(reasoning = ReasoningEffort.OFF), inherited).effort)
+        assertEquals(ReasoningEffort.OFF, subAgentThinkingPreference(profile, config.copy(effectiveReasoningEffort = ReasoningEffort.DEFAULT)).effort)
+        assertNull(profile.reasoning)
+    }
+
 }

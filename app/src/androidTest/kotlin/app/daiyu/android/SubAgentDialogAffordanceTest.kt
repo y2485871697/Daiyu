@@ -88,7 +88,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         awaitUniqueTag("thinking-depth-slider")
         awaitNodeWindowFocus(node("thinking-depth-slider"))
         node("conversation-agent-sheet").assertIsDisplayed()
-        node("subagent-thinking-value").assertTextEquals("选择思考深度")
+        node("subagent-thinking-value").assertTextEquals("关闭")
         node("thinking-depth-slider").performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(4f)) }
         node("subagent-thinking-value").assertTextEquals("高")
         awaitControl("row reasoning saved without outer confirmation") {
@@ -183,9 +183,11 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         if (chatStyle) noHeaderNavigation()
         val initialPreferences = preferences.all.toMap()
         openThinking(initialTitle)
-        node("subagent-thinking-value").assertTextEquals("选择思考深度")
-        node("thinking-depth-slider").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ProgressBarRangeInfo))
-        node("thinking-depth-slider").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "尚未选择"))
+        node("subagent-thinking-value").assertTextEquals("关闭")
+        val initialRange = node("thinking-depth-slider").fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
+        assertEquals(0f, initialRange.current)
+        assertEquals(0f..6f, initialRange.range)
+        node("thinking-depth-slider").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
         select(4, "高")
         assertEquals(if (adding) 0 else 1, repository.snapshot(owner).profiles.size)
         assertNull(repository.snapshot(owner).profiles.singleOrNull()?.reasoning)
@@ -197,7 +199,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
 
         openDraft(newProfile = adding)
         openThinking(initialTitle)
-        node("subagent-thinking-value").assertTextEquals("选择思考深度")
+        node("subagent-thinking-value").assertTextEquals("关闭")
         select(4, "高")
         closeThinking(initialTitle)
         assertEquals(initialPreferences, preferences.all.toMap())

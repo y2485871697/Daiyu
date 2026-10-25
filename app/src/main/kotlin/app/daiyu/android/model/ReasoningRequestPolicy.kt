@@ -8,16 +8,19 @@ import org.json.JSONObject
  * Responses display only reported summary_text; Messages display only native thinking text.
  */
 internal object ReasoningRequestPolicy {
-    private val keys = setOf("reasoning", "reasoning_effort", "thinking", "output_config")
+    private val keys = setOf("reasoning", "reasoning_effort", "thinking", "output_config", "enable_thinking", "thinking_budget")
+
+    fun hasReasoning(body: JSONObject): Boolean = keys.any(body::has) ||
+        body.optJSONObject("generationConfig")?.has("thinkingConfig") == true
 
     fun freeze(provider: ProviderSnapshot, effort: ReasoningEffort): ProviderSnapshot {
         require(provider.reasoningOverride != false || effort == ReasoningEffort.DEFAULT || effort == ReasoningEffort.OFF) {
-            "当前模型已声明不支持思考；请选择默认或关闭"
+            "当前模型已声明不支持思考；请选择关闭"
         }
         val options = provider.requestOptions
         val body = if (options.customBody.isEmpty()) JSONObject() else MessagesRequest.jsonObject(options.customBody)
         if (effort != ReasoningEffort.DEFAULT) {
-            require(keys.none(body::has)) { "思考偏好与自定义推理参数冲突；请选择默认或移除自定义参数" }
+            require(!hasReasoning(body)) { "思考偏好与自定义推理参数冲突；请移除自定义推理参数后重试" }
             when (provider.protocol) {
                 ProviderProtocol.RESPONSES -> {
                     require(effort != ReasoningEffort.MAX) { "Responses 不支持 max 推理强度" }
@@ -37,7 +40,17 @@ internal object ReasoningRequestPolicy {
                         .also { if (budget != null) it.put("budget_tokens", budget) })
                     if (budget != null && !body.has("max_tokens")) body.put("max_tokens", budget + 4096)
                 }
-                else -> throw IllegalArgumentException("当前协议尚未接通思考偏好；请选择默认")
+                ProviderProtocol.CHAT_COMPLETIONS -> {
+                    require(effort == ReasoningEffort.OFF) { "当前 Chat Completions 仅接通关闭思考；请选择关闭" }
+                    body.put("reasoning_effort", "none")
+                }
+                ProviderProtocol.GEMINI -> {
+                    require(effort == ReasoningEffort.OFF) { "当前 Gemini 仅接通关闭思考；请选择关闭" }
+                    val generation = if (body.has("generationConfig")) body.opt("generationConfig") as? JSONObject
+                        ?: throw IllegalArgumentException("Gemini generationConfig 必须为 JSON 对象") else JSONObject()
+                    body.put("generationConfig", generation.put("thinkingConfig", JSONObject().put("thinkingBudget", 0)))
+                }
+                else -> throw IllegalArgumentException("当前协议尚未接通思考偏好")
             }
         }
         validate(body, provider.protocol, provider.reasoningOverride)
@@ -48,19 +61,19 @@ internal object ReasoningRequestPolicy {
 
     /** Called on the final merged request, before any connection, on every tool round. */
     fun validate(body: JSONObject, protocol: ProviderProtocol, reasoningOverride: Boolean? = null) {
-        if (keys.none(body::has)) return
+        if (!hasReasoning(body)) return
         fun strict(value: JSONObject, key: String): String = value.opt(key) as? String
             ?: throw IllegalArgumentException("推理参数 $key 必须为字符串")
         when (protocol) {
             ProviderProtocol.RESPONSES -> {
-                require(listOf("thinking", "reasoning_effort", "output_config").none(body::has)) { "Responses 仅支持 reasoning 对象" }
+                require((keys - "reasoning").none(body::has) && body.optJSONObject("generationConfig")?.has("thinkingConfig") != true) { "Responses 仅支持 reasoning 对象" }
                 val reasoning = body.opt("reasoning") as? JSONObject ?: throw IllegalArgumentException("Responses reasoning 必须为对象")
                 require(reasoning.keys().asSequence().all { it in setOf("effort", "summary") }) { "Responses reasoning 包含未支持参数" }
                 if (reasoning.has("effort")) require(strict(reasoning, "effort") in setOf("none", "minimal", "low", "medium", "high", "xhigh")) { "Responses reasoning.effort 不支持此值" }
                 if (reasoning.has("summary")) require(strict(reasoning, "summary") in setOf("auto", "concise", "detailed")) { "Responses reasoning.summary 不支持此值" }
             }
             ProviderProtocol.MESSAGES -> {
-                require(listOf("reasoning", "reasoning_effort", "output_config").none(body::has)) { "Messages 仅接通手动 thinking；adaptive/output_config 尚未支持" }
+                require((keys - "thinking").none(body::has) && body.optJSONObject("generationConfig")?.has("thinkingConfig") != true) { "Messages 仅接通手动 thinking；adaptive/output_config 尚未支持" }
                 val thinking = body.opt("thinking") as? JSONObject ?: throw IllegalArgumentException("Messages thinking 必须为对象")
                 when (strict(thinking, "type")) {
                     "disabled" -> require(thinking.keys().asSequence().toSet() == setOf("type")) { "禁用 thinking 不能附带预算或未知参数" }
@@ -76,6 +89,20 @@ internal object ReasoningRequestPolicy {
                     else -> throw IllegalArgumentException("Messages 仅支持 enabled/disabled thinking；adaptive 尚未接通")
                 }
             }
+            ProviderProtocol.CHAT_COMPLETIONS -> {
+                require((keys - "reasoning_effort").none(body::has) && body.optJSONObject("generationConfig")?.has("thinkingConfig") != true) {
+                    "Chat Completions 仅接通 reasoning_effort=none"
+                }
+                require(body.opt("reasoning_effort") == "none") { "Chat Completions 当前仅支持关闭思考" }
+            }
+            ProviderProtocol.GEMINI -> {
+                require(keys.none(body::has)) { "Gemini 仅支持嵌套 thinkingConfig" }
+                val thinking = body.optJSONObject("generationConfig")?.optJSONObject("thinkingConfig")
+                require(thinking != null && thinking.keys().asSequence().toSet() == setOf("thinkingBudget") &&
+                    thinking.opt("thinkingBudget") is Int && thinking.opt("thinkingBudget") == 0) {
+                    "Gemini 当前仅支持 thinkingBudget=0 关闭思考"
+                }
+            }
             else -> throw IllegalArgumentException("当前协议尚未接通推理参数")
         }
         if (reasoningOverride == false) {
@@ -84,6 +111,8 @@ internal object ReasoningRequestPolicy {
                     it.opt("effort") == "none" && !it.has("summary")
                 } == true
                 ProviderProtocol.MESSAGES -> body.optJSONObject("thinking")?.opt("type") == "disabled"
+                ProviderProtocol.CHAT_COMPLETIONS -> body.opt("reasoning_effort") == "none"
+                ProviderProtocol.GEMINI -> body.optJSONObject("generationConfig")?.optJSONObject("thinkingConfig")?.opt("thinkingBudget") == 0
                 else -> false
             }
             require(disabled) { "当前模型已声明不支持思考，不能发送启用推理的参数" }

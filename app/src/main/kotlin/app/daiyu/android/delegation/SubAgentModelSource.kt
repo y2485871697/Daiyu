@@ -56,6 +56,13 @@ internal enum class ReasoningEffort(val wireValue: String, val displayName: Stri
     XHIGH("xhigh", "超高", 6), MAX("max", "极高", 7);
     val enablesReasoning: Boolean get() = this != OFF
     companion object {
+        /** Text controls have seven concrete choices; legacy DEFAULT inherits a concrete fallback. */
+        fun textPreference(requested: ReasoningEffort?, modelDefault: ReasoningEffort = OFF): ReasoningEffort = when (requested) {
+            null -> modelDefault.takeUnless { it == DEFAULT } ?: OFF
+            DEFAULT -> OFF
+            else -> requested
+        }
+
         fun fromWireValue(value: String?): ReasoningEffort? {
             val normalized = value?.trim()?.lowercase().orEmpty()
             return entries.firstOrNull { it.wireValue == normalized } ?: when (normalized) {
@@ -122,8 +129,7 @@ internal object SubAgentPreferences {
     const val PROFILES_KEY = "agent_child_profiles_v1"
     fun applyReasoning(profile: SubAgentProfile, config: SubAgentModelConfig): SubAgentModelConfig {
         if (profile.isMedia) return config.copy(effectiveReasoningEffort = profile.reasoning ?: config.effectiveReasoningEffort)
-        val requested = profile.reasoning ?: return config
-        return config.copy(effectiveReasoningEffort = config.reasoningCapabilities.normalize(requested))
+        return config.copy(effectiveReasoningEffort = ReasoningEffort.textPreference(profile.reasoning, config.effectiveReasoningEffort))
     }
 }
 internal object MediaReasoningSettings {

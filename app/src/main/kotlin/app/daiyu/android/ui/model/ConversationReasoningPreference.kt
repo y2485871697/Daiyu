@@ -24,18 +24,19 @@ internal class ConversationReasoningPreference(private val values: KeyValue) {
     })
 
     fun get(conversationId: String?): ReasoningEffort = try {
-        ReasoningEffort.fromWireValue(values.get(key(conversationId))) ?: ReasoningEffort.DEFAULT
-    } catch (_: Exception) { ReasoningEffort.DEFAULT }
+        ReasoningEffort.textPreference(ReasoningEffort.fromWireValue(values.get(key(conversationId))))
+    } catch (_: Exception) { ReasoningEffort.OFF }
 
     @Synchronized fun snapshot(conversationId: String?): ReasoningEffort {
-        check(key(conversationId) !in unconfirmed) { "思考偏好保存未确认；请重新保存" }
-        val raw = values.get(key(conversationId)) ?: return ReasoningEffort.DEFAULT
-        return ReasoningEffort.fromWireValue(raw)
-            ?: throw IllegalStateException("思考偏好无效；请重新保存，未启动模型请求")
+        return snapshotKey(key(conversationId))
     }
 
     @Synchronized fun set(conversationId: String?, effort: ReasoningEffort) {
-        val key = key(conversationId)
+        save(key(conversationId), effort)
+    }
+
+    private fun save(key: String, requested: ReasoningEffort) {
+        val effort = ReasoningEffort.textPreference(requested)
         try {
             values.set(key, effort.wireValue)
             check(values.get(key) == effort.wireValue) { "思考偏好保存未确认" }
@@ -51,6 +52,30 @@ internal class ConversationReasoningPreference(private val values: KeyValue) {
         check(key(conversationId) !in unconfirmed) { "会话思考偏好保存未确认；请重新保存" }
         if (values.get(key(conversationId)) == null) set(conversationId, effort)
         else snapshot(conversationId) // Existing edits survive, but corrupt/unconfirmed values cannot be admitted.
+    }
+
+    /** Explicit New chat copies the current choice once, not a stale standalone draft. */
+    @Synchronized fun inheritDraft(sourceConversationId: String?) {
+        if (sourceConversationId != null) set(null, snapshot(sourceConversationId))
+    }
+
+    @Synchronized fun rememberModel(providerId: String, modelId: String, effort: ReasoningEffort) =
+        save(modelKey(providerId, modelId), effort)
+
+    @Synchronized fun rememberedModel(providerId: String, modelId: String): ReasoningEffort =
+        snapshotKey(modelKey(providerId, modelId))
+
+    private fun snapshotKey(key: String): ReasoningEffort {
+        check(key !in unconfirmed) { "思考偏好保存未确认；请重新保存" }
+        val raw = values.get(key) ?: return ReasoningEffort.OFF
+        val stored = ReasoningEffort.fromWireValue(raw)
+            ?: throw IllegalStateException("思考偏好无效；请重新保存，未启动模型请求")
+        return ReasoningEffort.textPreference(stored)
+    }
+
+    private fun modelKey(providerId: String, modelId: String): String {
+        require(providerId.isNotBlank() && modelId.isNotBlank())
+        return "reasoning:model:${providerId.length}:$providerId:$modelId"
     }
 
     // Separate namespaces prevent a real conversation ID (including "draft") colliding with null.

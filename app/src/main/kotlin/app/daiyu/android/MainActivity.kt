@@ -5250,6 +5250,7 @@ class MainActivity : ComponentActivity() {
         revokeCommandApproval()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
+        if (selectionReady && conversation == null) reasoningPreference.inheritDraft(selected?.id?.value)
         historySearchEpoch++
         if (revokeContextManagementEntry()) editorGeneration++
         voiceConversationDialogOwner = null

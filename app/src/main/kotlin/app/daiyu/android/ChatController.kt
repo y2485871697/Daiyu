@@ -3203,8 +3203,8 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged(); return null
         }
         if ((videoAttempt != null || physicalVideoHistory.inputs.isNotEmpty()) &&
-            frozenReasoning != app.daiyu.android.delegation.ReasoningEffort.DEFAULT) {
-            problem="原视频批准尚未接通独立思考偏好；请选择默认，草稿保留，未发起请求"
+            frozenReasoning != app.daiyu.android.delegation.ReasoningEffort.OFF) {
+            problem="原视频批准当前仅支持关闭思考；请选择关闭，草稿保留，未发起请求"
             notifyChanged();return null
         }
         var videoPrepared: PreparedControllerVideoSend? = null
@@ -3956,11 +3956,15 @@ class ChatController internal constructor(private val application:Application,
         notifyChanged()
         try { executor.execute {
             var changed = false
+            var branchReasoning: app.daiyu.android.delegation.ReasoningEffort? = null
             val result = try {
+                if (action == MessageAction.BRANCH || action == MessageAction.REGENERATE)
+                    branchReasoning = reasoningPreference.snapshot(target.conversationId.value)
                 when (action) {
                     MessageAction.EDIT_USER -> MessageActionResult.EditDraft(messageActionStore.originalUserText(target))
                     MessageAction.BRANCH -> {
                         val copy = messageActionStore.branch(target); changed = true
+                        reasoningPreference.retainAccepted(copy.id.value, checkNotNull(branchReasoning))
                         MessageActionResult.Branch(copy)
                     }
                     MessageAction.DELETE_TURN -> {
@@ -3979,6 +3983,7 @@ class ChatController internal constructor(private val application:Application,
                     MessageAction.RETRY_STEP -> messageActionStore.rejectRetry(target)
                     MessageAction.REGENERATE -> {
                         val prepared = messageActionStore.prepareRegeneration(target); changed = true
+                        reasoningPreference.retainAccepted(prepared.conversation.id.value, checkNotNull(branchReasoning))
                         val token = synchronized(this) {
                             if (closed) null else {
                                 // Retain the data reservation through result delivery as well
@@ -4004,7 +4009,11 @@ class ChatController internal constructor(private val application:Application,
                 MessageActionResult.Rejected("分支已确认未提交；原会话和原件保留，未重试")
             } catch (failure: app.daiyu.android.context.BranchOutcomeUnknown) {
                 changed = true
-                MessageActionResult.Unknown("分支提交或原件发布未确认；仅核实目标，不要再次分支或重放工具",
+                val reasoningConfirmed = try {
+                    reasoningPreference.retainAccepted(failure.locator.conversationId.value, checkNotNull(branchReasoning)); true
+                } catch (_: Exception) { false }
+                MessageActionResult.Unknown("分支提交或原件发布未确认；仅核实目标，不要再次分支或重放工具" +
+                    if (reasoningConfirmed) "" else "；目标思考偏好未确认，请重新保存后再发送",
                     failure.locator.copy(staticIdentities = failure.locator.staticIdentities.toList())).also { receipt ->
                     synchronized(this) { pendingBranchOutcomes.add(receipt) }
                 }
@@ -4127,6 +4136,18 @@ class ChatController internal constructor(private val application:Application,
             catch (_: Exception) { "提供商设置已保存；模型目录尚不可用，请重新打开详情" }
         })
     }
+    private fun switchChatReasoningModel(previousProvider: String?, previousModel: String?,
+        nextProvider: String, nextModel: String, changeModel: () -> Unit) {
+        if (previousProvider == nextProvider && previousModel == nextModel) { changeModel(); return }
+        val owner = preferences.getString("selected", null)
+        val next = reasoningPreference.rememberedModel(nextProvider, nextModel)
+        val previous = if (previousProvider != null && previousModel != null) reasoningPreference.snapshot(owner) else null
+        changeModel()
+        reasoningPreference.set(owner, next)
+        if (previousProvider != null && previousModel != null && previous != null)
+            reasoningPreference.rememberModel(previousProvider, previousModel, previous)
+    }
+
     internal fun selectProviderCatalogModel(editor: ProviderEditorSlot, expected: ModelSettings,
         ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
         cancelled: () -> Boolean = { false }, completed: (Boolean) -> Unit,
@@ -4134,12 +4155,18 @@ class ChatController internal constructor(private val application:Application,
         check(Looper.myLooper() == Looper.getMainLooper())
         invalidateVideoConfiguration()
         dataTask(failureNotice = "模型切换未保存；请重新打开目录", completed = completed, work = {
-            providers.withEditor(editor) { store ->
-                store.modelCatalog.readConfiguration {
-                    check(!cancelled()) { "模型选择页面已关闭" }
-                    store.selectCatalogModel(expected, ticket, cancelled)
+            val active = providers.activeEditor().slotId == editor.slotId
+            val change = {
+                providers.withEditor(editor) { store ->
+                    store.modelCatalog.readConfiguration {
+                        check(!cancelled()) { "模型选择页面已关闭" }
+                        store.selectCatalogModel(expected, ticket, cancelled)
+                    }
                 }
+                Unit
             }
+            if (active) switchChatReasoningModel(editor.slotId, providers.catalogSnapshot(editor).models.singleOrNull { it.id == expected.model }?.settings?.localIdentity,
+                editor.slotId, ticket.record.settings.localIdentity, change) else change()
             "模型已切换"
         })
     }
@@ -4151,7 +4178,12 @@ class ChatController internal constructor(private val application:Application,
         check(Looper.myLooper() == Looper.getMainLooper())
         invalidateVideoConfiguration()
         dataTask(failureNotice = "模型或提供商切换未完整确认；请重新打开目录核对", completed = completed, work = {
-            providers.selectActiveCatalogModel(expectedActive, expectedSettings, target, targetSettings, ticket, cancelled)
+            switchChatReasoningModel(expectedActive?.slotId,
+                expectedActive?.let { previous -> providers.catalogSnapshot(previous).models
+                    .singleOrNull { it.id == expectedSettings?.model }?.settings?.localIdentity },
+                target.slotId, ticket.record.settings.localIdentity) {
+                providers.selectActiveCatalogModel(expectedActive, expectedSettings, target, targetSettings, ticket, cancelled)
+            }
             "模型已切换"
         })
     }

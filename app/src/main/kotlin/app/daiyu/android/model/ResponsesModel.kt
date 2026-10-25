@@ -216,6 +216,7 @@ class ResponsesModel internal constructor(
             } else require(!request.has("background") || request.opt("background") == false) { "Background mode requires explicit informed opt-in" }
             val finalUrl = settings.requestEndpoint()
             SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
+            if (videoPlan != null) app.daiyu.android.model.videos.VideoRequestPolicy.disableReasoning(request)
             ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES, settings.reasoningOverride)
             val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext)
             // Video-only allowlist and exact history binding apply to the final merged payload

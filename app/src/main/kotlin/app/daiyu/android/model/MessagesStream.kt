@@ -108,7 +108,11 @@ internal object MessagesStream {
                                 chars += initialInput.toString().length
                                 protocol(chars <= 2_000_000)
                             }
-                            else -> throw ModelRequestException(ModelFailure.PROTOCOL)
+                            else -> {
+                                MessagesRequest.validateServerBlock(wire, "assistant")
+                                chars += wire.toString().length
+                                protocol(chars <= 2_000_000)
+                            }
                         }
                         blocks[index] = block
                     }
@@ -143,7 +147,7 @@ internal object MessagesStream {
                                 block.signature.append(signature)
                             }
                             "input_json_delta" -> {
-                                protocol(block.wire.getString("type") == "tool_use")
+                                protocol(block.wire.getString("type") == "tool_use" || MessagesRequest.isServerToolUse(block.wire.getString("type")))
                                 // Android getString coerces other JSON types; fragments must be strings.
                                 val fragment = delta.get("partial_json") as? String
                                     ?: throw ModelRequestException(ModelFailure.PROTOCOL)
@@ -165,8 +169,8 @@ internal object MessagesStream {
                                 protocol(block.signature.isNotBlank())
                                 block.wire.put("thinking", block.text.toString()).put("signature", block.signature.toString())
                             }
-                            "tool_use" -> if (block.json.isNotEmpty()) block.wire.put("input", MessagesRequest.jsonObject(
-                                block.json.toString(), MessagesRequest.MAX_TOOL_INPUT_CONTAINER_DEPTH))
+                            else -> if ((block.wire.getString("type") == "tool_use" || MessagesRequest.isServerToolUse(block.wire.getString("type"))) && block.json.isNotEmpty())
+                                block.wire.put("input", MessagesRequest.jsonObject(block.json.toString(), MessagesRequest.MAX_TOOL_INPUT_CONTAINER_DEPTH))
                         }
                     }
                     "message_delta" -> {
@@ -213,6 +217,9 @@ internal object MessagesStream {
             if (cancelled()) throw InterruptedException()
             return saved
         } catch (failure: JSONException) {
+            if (failure === deliveryFailure) throw failure
+            throw ModelRequestException(ModelFailure.PROTOCOL)
+        } catch (failure: IllegalArgumentException) {
             if (failure === deliveryFailure) throw failure
             throw ModelRequestException(ModelFailure.PROTOCOL)
         }

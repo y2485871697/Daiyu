@@ -84,14 +84,12 @@ class ProviderRequestWireTest {
         }
     }
 
-    @Test fun anthropicVersionOnResponsesFailsBeforeConnectionFactory() {
-        var calls = 0
-        expectRejected {
-            ResponsesModel(settings.copy(requestOptions = ProviderRequestOptions(anthropicVersion = "2023-06-01"))) {
-                calls++; throw AssertionError("connection attempted")
-            }.open(emptyList()).next(emptyList()) {}
-        }
-        assertEquals(0, calls)
+    @Test fun inactiveAnthropicVersionOnResponsesNeverBecomesAHeader() {
+        val conn = Connection(response())
+        ResponsesModel(settings.copy(requestOptions = ProviderRequestOptions(anthropicVersion = "2023-06-01"))) { conn }
+            .open(emptyList()).next(emptyList()) {}
+        assertNull(conn.getRequestProperty("anthropic-version"))
+        assertEquals("Bearer synthetic-key", conn.getRequestProperty("Authorization"))
     }
 
     @Test fun responsesCustomEndpointAndKeyStayInBodyWithoutChangingConfiguration() {
@@ -141,7 +139,7 @@ class ProviderRequestWireTest {
         assertEquals("https://body.invalid/v1/messages", body.get("endpoint"))
         assertEquals("body-key", body.get("key"))
         assertEquals("body-api-key", body.get("apiKey"))
-        assertEquals(4096, body.get("max_tokens"))
+        assertEquals(MessagesRequest.DEFAULT_MAX_TOKENS, body.get("max_tokens"))
         val metadata = body.getJSONObject("metadata")
         assertEquals(false, metadata.get("enabled"))
         assertEquals(7, metadata.get("attempt"))
@@ -288,7 +286,10 @@ class ProviderRequestWireTest {
         assertEquals("fixture", conn.body().getJSONObject("metadata").getString("user_id"))
         assertEquals("standard_only", conn.body().getString("service_tier"))
         assertEquals("messages-key", conn.getRequestProperty("x-api-key")); assertTrue(conn.closed)
-        expectRejected { ModelFactory.create(config.copy(requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.FAST))) }
+        val retained = config.copy(requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.FAST))
+        assertTrue(ModelFactory.create(retained) is MessagesModel)
+        val wire = retained.requestOptions.apply(MessagesRequest.body(retained.model, JSONArray(), emptyList(), MessagesRequest.DEFAULT_MAX_TOKENS), ProviderProtocol.MESSAGES)
+        assertFalse(wire.has("service_tier"))
     }
 
     @Test fun optionsRoundTripSnapshotAndBoundsStayImmutable() {

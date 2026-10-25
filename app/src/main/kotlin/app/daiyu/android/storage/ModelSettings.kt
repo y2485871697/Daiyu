@@ -39,7 +39,6 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
     fun requestEndpoint(): String = when (protocol) {
         ProviderProtocol.RESPONSES -> responsesEndpoint(endpoint, responsesPath)
         ProviderProtocol.MESSAGES -> {
-            require(responsesPath.isEmpty()) { "Messages 不使用 Responses 路径" }
             messagesEndpoint(endpoint)
         }
         ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> app.daiyu.android.model.NativeCompletionRequest.endpoint(this)
@@ -380,8 +379,7 @@ class ModelSettingsStore internal constructor(
         val previousEditing = loadForEditing()
         val previousConnection = previousEditing.settings
         val connectionChanged = previousEditing.credentialUnavailable ||
-            previousConnection.endpoint != settings.endpoint || previousConnection.protocol != settings.protocol ||
-            previousConnection.responsesPath != settings.responsesPath || previousConnection.apiKey != settings.apiKey ||
+            previousConnection.endpoint != settings.endpoint || previousConnection.apiKey != settings.apiKey ||
             previousConnection.customHeaders != settings.customHeaders
         val previousOptionsValid = try {
             val previousOptions = readRequestOptions()
@@ -392,7 +390,7 @@ class ModelSettingsStore internal constructor(
         require(!previousEditing.headersUnavailable ||
             (!preferences.contains("request-headers") && !preferences.contains("request-headers-iv")) || headersReplacementAuthorized) { "原请求头不可用；替换或清除需要明确确认" }
         require(previousOptionsValid || requestOptionsReplacementAuthorized) { "请求策略已损坏；替换或重置需要明确确认" }
-        require(readProtocol() == settings.protocol || protocolChangeAuthorized) {"切换协议须重新输入密钥并明确确认"}
+        require(readProtocol() == settings.protocol || protocolChangeAuthorized) {"切换协议需要明确保存确认"}
         val previous=preferences.all
         val owner=previous["key-owner"] as? String ?: UUID.randomUUID().toString()
         val alias="$keyAliasPrefix.$owner.${UUID.randomUUID()}"

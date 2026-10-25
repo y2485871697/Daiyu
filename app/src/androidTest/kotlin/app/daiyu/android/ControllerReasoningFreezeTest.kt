@@ -63,18 +63,35 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
         } finally { release.countDown(); fixture.close() }
     }
 
-    fun testUnsupportedPreferenceRejectsBeforeFactoryAcceptanceAndKeepsDraft() {
+    fun testConflictingCustomPreferenceRejectsBeforeFactoryAcceptanceAndKeepsDraft() {
         val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
         val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })
         try {
             awaitControl("controller ready") { fixture.controller.ready }
+            fixture.settings.save(fixture.settings.load().copy(requestOptions = app.daiyu.android.model.ProviderRequestOptions("""{"reasoning":{"effort":"high"}}""")))
             fixture.controller.reasoningPreference.set(null, ReasoningEffort.MAX)
             fixture.database.draft("retain")
             assertNull(fixture.controller.send(null, "retain"))
-            assertTrue(checkNotNull(fixture.controller.problem).contains("Responses 不支持 max"))
+            assertTrue(checkNotNull(fixture.controller.problem).contains("思考偏好与自定义推理参数冲突"))
             assertEquals("retain", fixture.database.draft())
             assertEquals(0, fixture.opens.get()); assertTrue(frozen.isEmpty())
             assertTrue(fixture.database.conversations().isEmpty())
+        } finally { fixture.close() }
+    }
+    fun testChatHighPreferenceReachesSharedProductionFreezeWithoutLocalRejection() {
+        val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
+        val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            fixture.settings.save(fixture.settings.load().copy(endpoint = "https://provider.invalid/v1",
+                protocol = app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS), protocolChangeAuthorized = true)
+            fixture.controller.reasoningPreference.set(null, ReasoningEffort.HIGH)
+            fixture.session("answer", held = false)
+            fixture.database.draft("chat reasoning")
+            assertNotNull(fixture.controller.send(null, "chat reasoning"))
+            awaitControl("chat complete") { fixture.controller.active == null }
+            assertEquals("high", JSONObject(frozen.single().requestOptions.customBody).getString("reasoning_effort"))
+            assertEquals(1, fixture.opens.get())
         } finally { fixture.close() }
     }
 }

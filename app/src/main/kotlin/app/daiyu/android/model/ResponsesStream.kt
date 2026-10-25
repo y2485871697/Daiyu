@@ -53,9 +53,38 @@ internal object ResponsesStream {
         check(!poisoned && output == null)
         val batch = mutableListOf<ModelEvent>()
         val sink: (ModelEvent)->Unit = { event -> if (acknowledgedSink == null) legacySink(event) else batch.add(event) }
+        fun index(event: JSONObject, key: String, fallback: Int = 0): Int {
+            val value = event.opt(key)
+            if (value == null || value === JSONObject.NULL) return fallback
+            checkProtocol(value is Int || value is Long)
+            val number = (value as Number).toLong()
+            checkProtocol(number in 0..Int.MAX_VALUE.toLong())
+            return number.toInt()
+        }
+        fun done(event: JSONObject, key: String, apply: (String) -> Unit) {
+            val value = event.opt(key)
+            if (value == null || value === JSONObject.NULL) return
+            checkProtocol(value is String)
+            apply(value as String)
+        }
+        fun call(item: JSONObject): ToolInvocation {
+            checkProtocol(item.optString("status", "completed") == "completed")
+            val id = item.getString("call_id"); val name = item.getString("name")
+            checkProtocol(id.isNotBlank() && name.isNotBlank())
+            val arguments = item.getString("arguments")
+            MessagesRequest.jsonObject(arguments)
+            return ToolInvocation(ToolCallId(id), name, arguments)
+        }
+        fun sameJson(a: Any?, b: Any?): Boolean = when {
+            a is JSONObject && b is JSONObject -> a.keys().asSequence().toSet() == b.keys().asSequence().toSet() && a.keys().asSequence().all { sameJson(a.get(it), b.get(it)) }
+            a is org.json.JSONArray && b is org.json.JSONArray -> a.length() == b.length() && (0 until a.length()).all { sameJson(a.get(it), b.get(it)) }
+            a is Number && b is Number -> a.toString().toBigDecimal().compareTo(b.toString().toBigDecimal()) == 0
+            else -> a == b
+        }
+        fun sameCall(a: ToolInvocation, b: ToolInvocation): Boolean = a.id == b.id && a.name == b.name && sameJson(MessagesRequest.jsonObject(a.arguments), MessagesRequest.jsonObject(b.arguments))
         fun text(event:JSONObject, value:String, final:Boolean) {
             val id=event.getString("item_id")
-            val index=event.getInt("content_index")
+            val index=index(event, "content_index")
             checkProtocol(index>=0)
             val content=parts.getOrPut(id) {sortedMapOf()}
             content[index]=if(final) value else content.getOrDefault(index,"")+value
@@ -65,7 +94,7 @@ internal object ResponsesStream {
         }
         fun summary(event:JSONObject, value:String, final:Boolean) {
             val id=event.getString("item_id")
-            val index=event.getInt("summary_index")
+            val index=index(event, "summary_index", index(event, "content_index"))
             checkProtocol(index>=0)
             val content=summaries.getOrPut(id) {sortedMapOf()}
             content[index]=if(final) value else content.getOrDefault(index,"")+value
@@ -81,8 +110,7 @@ internal object ResponsesStream {
             val content=sortedMapOf<Int,String>()
             for(i in 0 until parts.length()) {
                 val part=parts.getJSONObject(i)
-                checkProtocol(part.getString("type")=="summary_text")
-                content[i]=part.getString("text")
+                if (part.optString("type") == "summary_text") content[i]=part.getString("text")
             }
             val combined=content.values.joinToString("")
             checkProtocol(combined.length<=2_000_000)
@@ -125,27 +153,26 @@ internal object ResponsesStream {
                     checkProtocol(chars<=2_000_000)
                     summary(event,delta,false)
                 }
-                "response.reasoning_summary_text.done" -> summary(event,event.getString("text"),true)
+                "response.reasoning_summary_text.done" -> done(event,"text") { summary(event,it,true) }
                 "response.reasoning_summary_part.done" -> {
                     val part=event.getJSONObject("part")
-                    checkProtocol(part.getString("type")=="summary_text")
-                    summary(event,part.getString("text"),true)
+                    if (part.optString("type") == "summary_text") done(part,"text") { summary(event,it,true) }
                 }
                 "response.output_text.delta","response.refusal.delta" -> {
                     val delta=event.getString("delta");chars+=delta.length
                     checkProtocol(chars<=2_000_000)
                     text(event,delta,false)
                 }
-                "response.output_text.done" -> text(event,event.getString("text"),true)
-                "response.refusal.done" -> text(event,event.getString("refusal"),true)
+                "response.output_text.done" -> done(event,"text") { text(event,it,true) }
+                "response.refusal.done" -> done(event,"refusal") { text(event,it,true) }
                 "response.output_item.done" -> {
                     val item=event.getJSONObject("item")
+                    checkProtocol(item.optString("type") != "function_call_output")
                     summaryItem(item)
                     if(item.getString("type")=="function_call") {
-                        checkProtocol(item.optString("status","completed")=="completed")
-                        val call=ToolInvocation(ToolCallId(item.getString("call_id")),item.getString("name"),item.getString("arguments"))
-                        checkProtocol(calls.putIfAbsent(call.id.value,call)==null)
-                        sink(ModelEvent.ToolReady(call))
+                        val value = call(item)
+                        val previous = calls.putIfAbsent(value.id.value, value)
+                        checkProtocol(previous == null || sameCall(previous, value))
                     }
                 }
                 "response.completed" -> {
@@ -153,19 +180,21 @@ internal object ResponsesStream {
                     checkProtocol(response.getString("status")=="completed")
                     val out=response.getJSONArray("output")
                     try {
-                        for (i in 0 until out.length()) ResponsesSearchProtocol.validateItem(out.getJSONObject(i))
+                        for (i in 0 until out.length()) {
+                            checkProtocol(out.getJSONObject(i).optString("type") != "function_call_output")
+                            ResponsesSearchProtocol.validateItem(out.getJSONObject(i))
+                        }
                     } catch (_: IllegalArgumentException) { throw ModelRequestException(ModelFailure.PROTOCOL) }
-                    val confirmed=mutableSetOf<String>()
+                    val confirmed=linkedMapOf<String,ToolInvocation>()
                     for(i in 0 until out.length()) {
                         val item=out.getJSONObject(i)
                         if(item.getString("type")=="function_call") {
-                            val id=item.getString("call_id")
-                            checkProtocol(confirmed.add(id))
-                            checkProtocol(item.optString("status","completed")=="completed")
-                            checkProtocol(calls[id]==ToolInvocation(ToolCallId(id),item.getString("name"),item.getString("arguments")))
+                            val value = call(item)
+                            checkProtocol(confirmed.put(value.id.value, value) == null)
                         }
                     }
-                    checkProtocol(confirmed==calls.keys)
+                    checkProtocol(calls.all { (id, value) -> confirmed[id]?.let { sameCall(value, it) } == true })
+                    calls.clear(); calls.putAll(confirmed)
                     usage=ProviderUsage.responses(response)
                     for(i in 0 until out.length()) {
                         val item=out.getJSONObject(i)
@@ -186,6 +215,8 @@ internal object ResponsesStream {
                         app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(item)
                         item.toString()
                     }
+                    // Tools become executable only after the whole successful terminal is valid.
+                    calls.values.forEach { sink(ModelEvent.ToolReady(it)) }
                     // The terminal wire sequence is not ACKed before its derived tail events.
                     usage?.let(sink)
                     if (prefix != null) sink(ModelEvent.ProtocolOutput(prefix + checkNotNull(output)))

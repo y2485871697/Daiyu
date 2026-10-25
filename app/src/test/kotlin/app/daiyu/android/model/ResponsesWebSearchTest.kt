@@ -53,7 +53,7 @@ class ResponsesWebSearchTest {
             try { ProviderRequestOptions.decode(raw); fail("wrong type") } catch (_: IllegalStateException) {}
         }
         for (protocol in ProviderProtocol.entries.filter { it != ProviderProtocol.RESPONSES }) {
-            reject { options.validate(protocol) }
+            options.validate(protocol)
             reject { options.apply(JSONObject(), protocol) }
         }
         reject { options.copy(customBody = """{"tools":[]}""").validate(ProviderProtocol.RESPONSES) }

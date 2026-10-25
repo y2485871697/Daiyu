@@ -139,6 +139,26 @@ class NativeCompletionTest : InstrumentationTestCase() {
         }
     }
 
+    fun testChatReasoningSurvivesActualSecondPostWithTheSameFrozenEffort() {
+        val protocol = ProviderProtocol.CHAT_COMPLETIONS
+        val thought = frame(chat(JSONObject().put("reasoning_content", "reported thought")))
+        val connections = listOf(Connection(thought + tool(protocol)), Connection(text(protocol)))
+        val frozen = ReasoningRequestPolicy.freeze(settings(protocol).requestSnapshot(), app.daiyu.android.delegation.ReasoningEffort.HIGH)
+        var posts = 0
+        val session = NativeCompletionModel(frozen.asModelSettings(), { connections[posts++] }).open(input(),
+            listOf(ToolDefinition("get_battery_status", "battery", "{\"type\":\"object\",\"properties\":{}}")))
+        val events = mutableListOf<ModelEvent>()
+        session.next(emptyList(), events::add)
+        val call = events.filterIsInstance<ModelEvent.ToolReady>().single().invocation
+        assertEquals("reported thought", events.filterIsInstance<ModelEvent.ReasoningFinal>().single().text)
+        session.next(listOf(ToolOutput(call.id, "ok")), events::add)
+        assertEquals(2, posts)
+        connections.forEach { assertEquals("high", JSONObject(it.request.toString("UTF-8")).getString("reasoning_effort")) }
+        val second = JSONObject(connections[1].request.toString("UTF-8"))
+        assertEquals("reported thought", second.getJSONArray("messages").getJSONObject(1).getString("reasoning_content"))
+        assertTrue(connections.all { it.disconnected && it.inputClosed && it.outputClosed })
+    }
+
     fun testToolsNativeContinuationSavedHistoryAndIdMatching() {
         protocols.forEach { protocol ->
             val connections = listOf(Connection(tool(protocol)), Connection(text(protocol)))
@@ -493,7 +513,7 @@ class NativeCompletionTest : InstrumentationTestCase() {
                 catalogRequest(explicit).let { remoteModelsEndpoint(it.baseUrl, it.protocol) })
             for (endpoint in listOf("http://provider.invalid", "https://u:p@provider.invalid", "https://provider.invalid?q=secret", "https://provider.invalid/#bad", "https://provider.invalid:0", "https://provider.invalid/v1/responses"))
                 rejected { NativeCompletionModel(value.copy(endpoint = endpoint), { fail("must not connect"); Connection("") }).open(input()) }
-            rejected { value.copy(responsesPath = "/other").validate() }
+            assertEquals(value.requestEndpoint(), value.copy(responsesPath = "/other").requestEndpoint())
             if (protocol == ProviderProtocol.GEMINI)
                 rejected { SummaryProviderFactory.validate(value.requestSnapshot()) }
             else SummaryProviderFactory.validate(value.requestSnapshot())

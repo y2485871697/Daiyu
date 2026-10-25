@@ -6,12 +6,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AnthropicVersionOptionsTest {
-    @Test fun validVersionIsMessagesOnlyAndStrictCalendarDate() {
+    @Test fun validVersionIsRetainedForOtherEndpointsAndUsesStrictCalendarDate() {
         for (version in listOf("2023-06-01", "2024-02-29")) {
             val options = ProviderRequestOptions(anthropicVersion = version)
             options.validate(ProviderProtocol.MESSAGES)
             for (protocol in ProviderProtocol.entries.filter { it != ProviderProtocol.MESSAGES }) {
-                rejected { options.validate(protocol) }
+                options.validate(protocol)
+                // An empty wire body is still invalid; retaining an inactive header preference does not synthesize history.
                 rejected { options.apply(JSONObject(), protocol) }
             }
         }

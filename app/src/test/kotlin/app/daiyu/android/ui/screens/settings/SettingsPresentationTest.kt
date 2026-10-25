@@ -126,31 +126,31 @@ class SettingsPresentationTest {
     }
 
     @Test
-    fun leavingMessagesClearsVersionAndReturningDoesNotRestoreIt() {
+    fun leavingMessagesRetainsVersionAndReturningRestoresIt() {
         val original = ModelSettingsDraftUi(protocol = ProviderProtocol.MESSAGES, apiKey = "test-only-secret",
             anthropicVersion = "2023-06-02", protocolChangeAuthorized = true)
         assertTrue(original === original.selectProtocol(ProviderProtocol.MESSAGES))
         for (target in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)) {
             val switched = original.selectProtocol(target)
-            assertEquals("", switched.anthropicVersion); assertEquals("", switched.apiKey)
+            assertEquals(original.anthropicVersion, switched.anthropicVersion); assertEquals(original.apiKey, switched.apiKey)
             assertFalse(switched.protocolChangeAuthorized)
             assertEquals(ProviderProtocol.MESSAGES, switched.savedProtocol)
             val returned = switched.selectProtocol(ProviderProtocol.MESSAGES)
-            assertEquals("", returned.anthropicVersion); assertEquals("", returned.apiKey)
+            assertEquals(original.anthropicVersion, returned.anthropicVersion); assertEquals(original.apiKey, returned.apiKey)
             assertFalse(returned.protocolChangeAuthorized)
         }
     }
 
     @Test
-    fun protocolSwitchClearsSecretsAndRequiresFreshAuthorization() {
+    fun protocolSwitchRetainsSecretsAndRevokesPreviousAuthorization() {
         val original = ModelSettingsDraftUi(apiKey = "test-only-secret", responsesPath = "/responses",
             protocolChangeAuthorized = true, customHeaders = "private-headers")
         assertTrue(original === original.selectProtocol(ProviderProtocol.RESPONSES))
         val messages = original.selectProtocol(ProviderProtocol.MESSAGES)
-        assertEquals("", messages.apiKey)
-        assertEquals("", messages.customHeaders)
-        assertEquals("", messages.selectProtocol(ProviderProtocol.RESPONSES).customHeaders)
-        assertEquals("", messages.responsesPath)
+        assertEquals(original.apiKey, messages.apiKey)
+        assertEquals(original.customHeaders, messages.customHeaders)
+        assertEquals(original.customHeaders, messages.selectProtocol(ProviderProtocol.RESPONSES).customHeaders)
+        assertEquals(original.responsesPath, messages.responsesPath)
         assertEquals(ProviderProtocol.RESPONSES, messages.savedProtocol)
         assertFalse(messages.protocolChangeAuthorized)
         assertEquals(messages, messages.selectProtocol(ProviderProtocol.MESSAGES))

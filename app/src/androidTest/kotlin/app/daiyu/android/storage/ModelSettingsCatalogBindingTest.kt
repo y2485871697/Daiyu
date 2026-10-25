@@ -34,6 +34,32 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         try { root.deleteRecursively() } finally { super.tearDown() }
     }
 
+    fun testProtocolAndPathSaveKeepTheWholeDirectoryAndInvalidateOldTickets() {
+        val configured = initial.copy(responsesPath = "/responses")
+        store.save(configured)
+        append(importedModel("model-b"), importedModel("model-c", device = true))
+        val before = store.modelCatalogSnapshot()
+        val ticket = before.selectionFor("model-b")!!
+        val switched = configured.copy(protocol = app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS)
+        try { store.save(switched); fail("implicit protocol changes must remain forbidden") } catch (_: IllegalArgumentException) {}
+        assertEquals(configured, store.load())
+        store.save(switched, protocolChangeAuthorized = true)
+        val after = store.modelCatalogSnapshot()
+        assertEquals(before.providerIdentity, after.providerIdentity)
+        assertTrue(after.revision > before.revision)
+        assertEquals(before.models, after.models)
+        assertEquals(switched, store.load())
+        assertEquals(switched, ModelSettingsStore(context, prefix).load())
+        assertEquals(after, ModelSettingsStore(context, prefix).modelCatalogSnapshot())
+        rejectsSelection { store.selectCatalogModel(switched, ticket) }
+        store.save(switched.copy(responsesPath = "/v1/responses"))
+        assertEquals(after.providerIdentity, store.modelCatalogSnapshot().providerIdentity)
+        assertEquals(after.models, store.modelCatalogSnapshot().models)
+        store.save(switched.copy(apiKey = "new-account-key"))
+        assertTrue(after.providerIdentity != store.modelCatalogSnapshot().providerIdentity)
+        assertEquals(listOf(initial.model), store.modelCatalogSnapshot().models.map { it.id })
+    }
+
     fun testConnectionCanBeSavedWithoutInventingAModelAndRunStillRequiresSelection() {
         val repository = ProviderRepository(context, primary = store)
         val before = repository.snapshot()

@@ -300,7 +300,6 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             submitted.providerBalanceConfiguration()?.validateProviderBinding()
                             require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null)
                             require(submitted.headerFieldsValid && submitted.bodyFieldsValid)
-                            require(submitted.protocol == submitted.savedProtocol || submitted.protocolChangeAuthorized)
                             submitted.providerSettings(ModelSettings("", "", "", false)).also { it.validateConnection() }
                         }
                         if (value.isFailure) newProvider.error = "未保存，请检查名称、连接配置及密钥。"
@@ -311,7 +310,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             if (creating === newProvider) newProvider.error = message
                         }) { repo, revision, admit ->
                             val created = repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
-                                submitted.protocolChangeAuthorized, enabled = submitted.providerEnabled, admit = admit)
+                                submitted.protocol != submitted.savedProtocol, enabled = submitted.providerEnabled, admit = admit)
                             submitted.providerBalanceConfiguration()?.let {
                                 val added = created.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
                                 val runtime = kotlinx.coroutines.runBlocking { controller.providerBalances.get(added.slotId) }
@@ -357,9 +356,6 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(submitted.endpoint)) { "请使用豆包语音服务地址" }
                         require(submitted.headerFieldsValid && submitted.bodyFieldsValid) { "请先修正请求头或请求体字段。" }
                         require(submitted.savedProtocol == saved.protocol) { "编辑基线已变化，请重新打开详情。" }
-                        require(submitted.protocol == saved.protocol || submitted.protocolChangeAuthorized) {
-                            "切换协议须重新输入密钥并明确确认"
-                        }
                         require(!d.editing.requestOptionsUnavailable || submitted.requestOptionsReplacementAuthorized) {
                             "请求策略已损坏；替换或重置需要明确确认"
                         }
@@ -378,7 +374,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         val ticket = Any(); busy = ticket
                         try {
                             controller.saveProviderSettings(d.editor, value.getOrThrow(), d.editing,
-                                submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, d.saveOwner,
+                                submitted.protocol != saved.protocol, submitted.requestOptionsReplacementAuthorized, d.saveOwner,
                                 headersReplacementAuthorized = submitted.headersReplacementAuthorized,
                                 providerName = submitted.providerName.orEmpty().trim(),
                                 providerEnabled = submitted.providerEnabled,

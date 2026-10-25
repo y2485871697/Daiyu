@@ -5928,11 +5928,10 @@ class MainActivity : ComponentActivity() {
             check(controller.active == null && !controller.dataBusy)
             val editing = checkNotNull(editingSettings)
             require(value.savedProtocol == editing.settings.protocol)
-            require(value.protocol == editing.settings.protocol || value.protocolChangeAuthorized)
             require(!editing.requestOptionsUnavailable || value.requestOptionsReplacementAuthorized)
             val owner = checkNotNull(modelEditingOwner)
             val saveOwner = modelSaveOwner ?: ModelSettingsSaveOwner().also { modelSaveOwner = it }
-            controller.saveModelSettings(value.toSettings(editing.settings), value.protocolChangeAuthorized,
+            controller.saveModelSettings(value.toSettings(editing.settings), value.protocol != editing.settings.protocol,
                 value.requestOptionsReplacementAuthorized, editing, saveOwner) { success ->
                 if (activityUsable()) {
                     if (success) controller.revokeImageProvider()

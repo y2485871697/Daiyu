@@ -8,6 +8,20 @@ import org.json.JSONObject
 
 /** Anthropic wire mapping only; deliberately does not reinterpret Responses protocol items. */
 internal object MessagesRequest {
+    const val DEFAULT_MAX_TOKENS = 64_000
+    fun isServerToolUse(type: String) = type == "server_tool_use" || type != "tool_use" && type.endsWith("_tool_use")
+    fun isServerToolResult(type: String) = type != "tool_result" && type.endsWith("_tool_result")
+    fun validateServerBlock(block: JSONObject, role: String) {
+        require(role == "assistant")
+        fun string(key: String): String = (block.opt(key) as? String)?.takeIf { it.isNotBlank() }
+            ?: throw JSONException("Invalid server tool block")
+        val type = string("type")
+        when {
+            isServerToolUse(type) -> { string("id"); string("name"); block.getJSONObject("input") }
+            isServerToolResult(type) -> { string("tool_use_id"); require(block.has("content") && !block.isNull("content")) }
+            else -> throw IllegalArgumentException("Unsupported Messages history content")
+        }
+    }
     // Count containers, including the root, not edges; scalars consume no depth.
     const val MAX_JSON_CONTAINER_DEPTH = 128
     // POST root -> messages array -> saved role/content message.
@@ -152,7 +166,6 @@ internal object MessagesRequest {
     }
 
     fun endpoint(settings: ModelSettings): String {
-        require(settings.responsesPath.isEmpty()) { "Messages does not use responsesPath" }
         settings.copy(protocol = ProviderProtocol.MESSAGES).validate()
         return messagesEndpoint(settings.endpoint)
     }
@@ -304,7 +317,7 @@ internal object MessagesRequest {
                     require(role == "user")
                     block.strictString("tool_use_id"); block.strictString("content")
                 }
-                else -> throw IllegalArgumentException("Unsupported Messages history content")
+                else -> validateServerBlock(block, role)
             }
         }
     }

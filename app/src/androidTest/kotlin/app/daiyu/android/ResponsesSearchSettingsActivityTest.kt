@@ -3,7 +3,7 @@ package app.daiyu.android
 import androidx.compose.ui.test.*
 
 class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
-    fun testOfficialSearchSettingPersistsAndProtocolSwitchDoesNotRestoreIt() {
+    fun testOfficialSearchSettingPersistsAndProtocolSwitchPreservesItsDraft() {
         setDraft("search settings unsent"); openModels()
         editModel("Base URL", "https://api.openai.com/v1")
         reveal("settings-switch:Provider 托管网页搜索").assertIsOff().performClick().assertIsOn()
@@ -14,7 +14,7 @@ class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
         chooseProviderProtocol("OpenAI Chat Completions")
         reveal("settings-switch:Provider 托管网页搜索").assertIsOff().assertIsNotEnabled()
         chooseProviderProtocol("OpenAI Responses")
-        reveal("settings-switch:Provider 托管网页搜索").assertIsOff().assertIsEnabled()
+        reveal("settings-switch:Provider 托管网页搜索").assertIsOn().assertIsEnabled()
         assertTrue(fixture.settings.load().requestOptions.openAiWebSearchEnabled)
         assertEquals(0, fixture.opens.get())
     }

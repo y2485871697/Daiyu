@@ -35,23 +35,25 @@ class ReasoningDefaultProtocolTest {
         assertFalse(JSONObject(source.requestOptions.customBody).getJSONObject("generationConfig").has("thinkingConfig"))
     }
 
-    @Test fun nativeProtocolsDoNotPretendToSupportNewEnabledEfforts() {
-        for (protocol in listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI))
-            assertThrows(IllegalArgumentException::class.java) { ReasoningRequestPolicy.freeze(provider(protocol), ReasoningEffort.HIGH) }
+    @Test fun nativeProtocolsFreezeEnabledEffortsAsRealWireParameters() {
+        val chat = JSONObject(ReasoningRequestPolicy.freeze(provider(ProviderProtocol.CHAT_COMPLETIONS), ReasoningEffort.HIGH).requestOptions.customBody)
+        assertEquals("high", chat.getString("reasoning_effort"))
+        val gemini = JSONObject(ReasoningRequestPolicy.freeze(provider(ProviderProtocol.GEMINI), ReasoningEffort.HIGH).requestOptions.customBody)
+        assertEquals(8000, gemini.getJSONObject("generationConfig").getJSONObject("thinkingConfig").getInt("thinkingBudget"))
     }
 
     @Test fun customReasoningIsNeverSilentlyOverwrittenByTheOffDefault() {
         for ((protocol, body) in listOf(
             ProviderProtocol.RESPONSES to """{"reasoning":{"effort":"high"}}""",
             ProviderProtocol.MESSAGES to """{"thinking":{"type":"enabled","budget_tokens":1024},"max_tokens":2048}""",
-            ProviderProtocol.CHAT_COMPLETIONS to """{"reasoning_effort":"high"}""",
+            ProviderProtocol.CHAT_COMPLETIONS to """{"reasoning_effort":1}""",
             ProviderProtocol.CHAT_COMPLETIONS to """{"enable_thinking":true}""",
             ProviderProtocol.GEMINI to """{"generationConfig":{"thinkingConfig":{"thinkingBudget":0}}}""",
         )) assertThrows(IllegalArgumentException::class.java) { frozen(protocol, body) }
     }
 
-    @Test fun geminiRejectsNonZeroOrNonIntegerBudgetAndExtraThinkingKeys() {
-        for (thinking in listOf("null", "0", """{"thinkingBudget":1}""", """{"thinkingBudget":0.0}""",
+    @Test fun geminiRejectsInvalidBudgetTypesAndConflictingThinkingKeys() {
+        for (thinking in listOf("null", "0", """{"thinkingBudget":0.0}""",
             """{"thinkingBudget":"0"}""", """{"thinkingBudget":false}""", """{"thinkingBudget":0,"thinkingLevel":"HIGH"}""")) {
             val encoded = """{"generationConfig":{"thinkingConfig":$thinking}}"""
             val raw = JSONObject(encoded)
@@ -61,10 +63,10 @@ class ReasoningDefaultProtocolTest {
         assertThrows(IllegalArgumentException::class.java) { frozen(ProviderProtocol.GEMINI, """{"generationConfig":null}""") }
     }
 
-    @Test fun chatRejectsOtherVendorThinkingFieldsAndNonStringNone() {
-        for (raw in listOf("""{"reasoning_effort":null}""", """{"reasoning_effort":"high"}""",
-            """{"reasoning_effort":"none","thinking":{"type":"enabled"}}""",
-            """{"reasoning_effort":"none","enable_thinking":true}"""))
+    @Test fun chatRejectsInvalidVendorThinkingTypes() {
+        for (raw in listOf("""{"reasoning_effort":null}""", """{"reasoning_effort":1}""",
+            """{"thinking":{"type":"invalid"}}""",
+            """{"enable_thinking":"true"}"""))
             assertThrows(IllegalArgumentException::class.java) { ReasoningRequestPolicy.validate(JSONObject(raw), ProviderProtocol.CHAT_COMPLETIONS) }
     }
 }

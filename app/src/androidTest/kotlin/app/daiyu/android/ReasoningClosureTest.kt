@@ -123,8 +123,9 @@ class ReasoningClosureTest : InstrumentationTestCase() {
                     assertEquals("auto", request.getJSONObject("reasoning").getString("summary"))
                     assertEquals(1, opened); assertEquals(0, tools)
                 } else {
-                    assertEquals(2048, request.getJSONObject("thinking").getInt("budget_tokens"))
-                    assertEquals(6144, request.getInt("max_tokens"))
+                    assertEquals("adaptive", request.getJSONObject("thinking").getString("type"))
+                    assertEquals("low", request.getJSONObject("output_config").getString("effort"))
+                    assertEquals(MessagesRequest.DEFAULT_MAX_TOKENS, request.getInt("max_tokens"))
                     assertEquals(request.getJSONObject("thinking").toString(), second.json().getJSONObject("thinking").toString())
                     assertEquals(2, opened); assertEquals(1, tools)
                     val replay = second.json().getJSONArray("messages").getJSONObject(1).getJSONArray("content")
@@ -248,10 +249,10 @@ class ReasoningClosureTest : InstrumentationTestCase() {
 
     fun testInvalidAndUnsupportedPoliciesFailBeforeConnection() {
         val cases = listOf(
-            ProviderProtocol.MESSAGES to "{\"thinking\":{\"type\":\"adaptive\"}}",
+            ProviderProtocol.MESSAGES to "{\"thinking\":{\"type\":\"adaptive\",\"budget_tokens\":1024}}",
             ProviderProtocol.MESSAGES to "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":4096},\"max_tokens\":4096}",
             ProviderProtocol.MESSAGES to "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":1024},\"temperature\":0.5}",
-            ProviderProtocol.RESPONSES to "{\"reasoning\":{\"effort\":\"max\"}}",
+            ProviderProtocol.RESPONSES to "{\"reasoning\":{\"effort\":\"invalid\"}}",
             ProviderProtocol.RESPONSES to "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":1024}}",
         )
         for ((protocol, body) in cases) {

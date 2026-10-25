@@ -21,11 +21,11 @@ class MessagesModel internal constructor(
 ) : ModelPort {
     internal constructor(settings: ModelSettings, maxTokens: Int, connect: (URL) -> HttpsURLConnection) :
         this(settings, maxTokens, connect, null)
-    constructor(settings: ModelSettings, maxTokens: Int = 4096) :
+    constructor(settings: ModelSettings, maxTokens: Int = MessagesRequest.DEFAULT_MAX_TOKENS) :
         this(settings, maxTokens, { it.openConnection() as HttpsURLConnection })
-    internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, 4096, connect)
+    internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, MessagesRequest.DEFAULT_MAX_TOKENS, connect)
     internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null,
-                         sessionContext: SessionGatewayContext? = null) : this(snapshot.asModelSettings(), 4096,
+                         sessionContext: SessionGatewayContext? = null) : this(snapshot.asModelSettings(), MessagesRequest.DEFAULT_MAX_TOKENS,
         { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions, sessionContext)
 
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())

@@ -97,7 +97,8 @@ class MessagesTest : InstrumentationTestCase() {
             "https://example.invalid/#fragment", "https://example.invalid/v1/responses", "https://example.invalid/v1/chat/completions")) {
             expectRejected { MessagesModel(settings.copy(endpoint = endpoint)).open(emptyList()) }
         }
-        expectRejected { MessagesModel(settings.copy(responsesPath = "/messages")).open(emptyList()) }
+        assertEquals(settings.requestEndpoint(), MessagesRequest.endpoint(settings.copy(responsesPath = "/responses")))
+        MessagesModel(settings.copy(responsesPath = "/responses")).open(emptyList())
         var opened = false
         val model = MessagesModel(settings) { opened = true; Connection(frames(textEvents())) }
         for (status in RunStatus.values()) {

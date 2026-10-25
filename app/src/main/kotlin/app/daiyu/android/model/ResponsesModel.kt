@@ -210,6 +210,7 @@ class ResponsesModel internal constructor(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.openAiWebSearchEnabled), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
+            if (java.net.URI(settings.endpoint).host.equals("ark.cn-beijing.volces.com", true)) request.remove("include")
             if (backgroundResume != null) {
                 backgroundResume.requireMatches(settings)
                 request.put("background", true).put("stream", true).put("store", false)

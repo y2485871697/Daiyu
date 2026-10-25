@@ -70,20 +70,11 @@ internal val RetainedModelSaveAction = SemanticsPropertyKey<() -> Unit>("Retaine
 
 internal data class ModelCatalogEntryUi(val id: String, val displayName: String = id, val apiModelId: String = id)
 
-/** Changing protocols deliberately clears the key and the previous binding authorization. */
+/** Endpoint selection is a draft edit. Only an explicit save authorizes rebinding. */
 internal fun ModelSettingsDraftUi.selectProtocol(selected: ProviderProtocol): ModelSettingsDraftUi =
     if (selected == protocol) this else copy(
         protocol = selected,
-        apiKey = "",
-        customHeaders = "",
-        responsesPath = if (selected != ProviderProtocol.RESPONSES) "" else responsesPath,
         protocolChangeAuthorized = false,
-        headersReplacementAuthorized = false,
-        anthropicVersion = if (selected == ProviderProtocol.MESSAGES) anthropicVersion else "",
-        openAiWebSearchEnabled = false,
-        headerFieldsValid = true,
-        bodyFieldsValid = true,
-        headerFieldRows = null, bodyFieldRows = null, headerFieldsError = null, bodyFieldsError = null,
     )
 
 /**
@@ -149,8 +140,7 @@ internal fun ModelSettingsScreen(
                     { changeDraft(draft.copy(providerName = it)) }, enabled = enabled, compact = true, tag = "provider-name")
                 SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled && !speechOnly, compact = true)
                 SettingsTextField("API Key", draft.apiKey, { key ->
-                    changeDraft(draft.copy(apiKey = key,
-                        protocolChangeAuthorized = draft.protocol != draft.savedProtocol && key.isNotBlank()))
+                    changeDraft(draft.copy(apiKey = key))
                 }, password = true, enabled = enabled, compact = true)
                 if (!speechOnly) ProviderProtocolFields(draft, enabled, changeDraft)
                 if (credentialUnavailable) SettingsNote("密钥失效，请重输", error = true)
@@ -168,7 +158,7 @@ internal fun ModelSettingsScreen(
                         { changeDraft(draft.copy(anthropicVersion = it)) },
                         hint = "留空使用 2023-06-01；格式 YYYY-MM-DD", enabled = enabled, compact = true)
                 }
-                if (!speechOnly) SettingsSwitchRow("Provider 托管网页搜索", draft.openAiWebSearchEnabled,
+                if (!speechOnly) SettingsSwitchRow("Provider 托管网页搜索", draft.protocol == ProviderProtocol.RESPONSES && draft.openAiWebSearchEnabled,
                     summary = "允许模型使用供应商提供的网页搜索",
                     enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES) {
                     changeDraft(draft.copy(openAiWebSearchEnabled = it))

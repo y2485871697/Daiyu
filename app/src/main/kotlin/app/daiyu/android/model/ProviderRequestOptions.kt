@@ -20,9 +20,8 @@ data class ProviderRequestOptions(
 
     fun validate(protocol: ProviderProtocol) {
         sessionGateway.validate()
-        require(!openAiWebSearchEnabled || protocol == ProviderProtocol.RESPONSES) { "原生网页搜索仅用于 OpenAI Responses" }
+        // Endpoint-specific preferences remain stored; only their matching transport applies them.
         if (anthropicVersion != null) {
-            require(protocol == ProviderProtocol.MESSAGES) { "Anthropic 版本仅用于 Messages" }
             val date = if (Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(anthropicVersion)) {
                 try { LocalDate.parse(anthropicVersion) } catch (_: DateTimeParseException) { null }
             } else null
@@ -38,9 +37,6 @@ data class ProviderRequestOptions(
                 "Gemini 自定义请求体仅支持 generationConfig 与 safetySettings"
             }
             validateBodyOptions(body, protocol)
-        }
-        require(protocol == ProviderProtocol.RESPONSES || (speedMode == null && !codex)) {
-            "GPT 档位仅用于 Responses"
         }
         require(!codex || speedMode != GptSpeedMode.ULTRA_FAST) { "Codex 不支持 ULTRA_FAST" }
     }

@@ -14,7 +14,6 @@ internal object NativeCompletionRequest {
         if (protocol !in setOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)) throw UnsupportedProviderException(protocol.wireName)
     }
     fun endpoint(settings: ModelSettings): String {
-        require(settings.responsesPath.isEmpty()) { "当前协议不使用 Responses 路径" }
         val uri = try { URI(settings.endpoint) } catch (_: Exception) { throw IllegalArgumentException("请输入有效的 HTTPS 服务地址") }
         require(uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.userInfo == null &&
             uri.query == null && uri.fragment == null && (uri.port == -1 || uri.port in 1..65535)) { "请输入无查询参数的 HTTPS 服务地址" }
@@ -24,7 +23,7 @@ internal object NativeCompletionRequest {
         return when (settings.protocol) {
             ProviderProtocol.CHAT_COMPLETIONS -> {
                 require(!path.endsWith("/responses") && !path.endsWith("/messages") && !path.contains(":streamGenerateContent")) { "请求地址与所选协议不匹配" }
-                when { path.isEmpty() -> "$base/v1/chat/completions"; path.endsWith("/v1") -> "$base/chat/completions"; else -> base }
+                when { path.isEmpty() -> "$base/v1/chat/completions"; path.endsWith("/chat/completions") -> base; else -> "$base/chat/completions" }
             }
             ProviderProtocol.GEMINI -> {
                 val model = settings.model.removePrefix("models/")
@@ -67,6 +66,8 @@ internal object NativeCompletionRequest {
         if (protocol == ProviderProtocol.CHAT_COMPLETIONS) {
             require(item.optString("role") in setOf("assistant", "user", "tool")) { "历史不是 Chat Completions 原生数据" }
             require(!item.has("parts") && (item.opt("content") is String || item.isNull("content"))) { "历史不是 Chat Completions 原生数据" }
+            if (item.has("reasoning_content")) item.string("reasoning_content")
+            if (item.has("reasoning_details")) require(item.opt("reasoning_details") is JSONArray)
             if (item.has("tool_calls")) require(item.opt("tool_calls") is JSONArray)
             if (item.string("role") == "tool") { item.string("tool_call_id"); item.string("content") }
             item.optJSONArray("tool_calls")?.let { array -> for (i in 0 until array.length()) {
@@ -82,7 +83,8 @@ internal object NativeCompletionRequest {
             val parts = item.getJSONArray("parts")
             for (i in 0 until parts.length()) {
                 val part = parts.getJSONObject(i)
-                require(listOf("text", "functionCall", "functionResponse").count { part.has(it) } == 1 &&
+                require((listOf("text", "functionCall", "functionResponse").count { part.has(it) } == 1 ||
+                    part.keys().asSequence().toSet() == setOf("thoughtSignature")) &&
                     part.keys().asSequence().all { it in setOf("text", "functionCall", "functionResponse", "thought", "thoughtSignature") }) { "不支持的 Gemini 历史内容" }
                 if (part.has("text")) part.string("text")
                 if (part.has("thought")) require(part.opt("thought") is Boolean)
@@ -201,6 +203,7 @@ internal object NativeCompletionRequest {
         val gemini = settings.protocol == ProviderProtocol.GEMINI
         val request = if (gemini) JSONObject().put("contents", history) else JSONObject().put("model", settings.model)
             .put("messages", history).put("stream", true).put("stream_options", JSONObject().put("include_usage", true))
+        if (!gemini && URI(settings.endpoint).host.equals("api.mistral.ai", true)) request.remove("stream_options")
         if (!instructions.isNullOrBlank()) {
             if (gemini) request.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", instructions))))
             else {

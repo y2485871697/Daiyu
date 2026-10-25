@@ -45,8 +45,11 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
 
     def test_no_implicit_fallback_to_provider_default_for_native_off(self):
         policy = (SRC / 'model/ReasoningRequestPolicy.kt').read_text()
-        self.assertIn('body.put("reasoning_effort", "none")', policy)
-        self.assertIn('JSONObject().put("thinkingBudget", 0)', policy)
+        self.assertIn('RikkaHubReasoning.chat(body,', policy)
+        self.assertIn('RikkaHubReasoning.gemini(body,', policy)
+        mapping = (SRC / 'model/RikkaHubReasoning.kt').read_text()
+        self.assertIn('val wire = if (enabled) effort.wireValue else "none"', mapping)
+        self.assertIn('thinking.put("thinkingBudget", 0)', mapping)
         self.assertIn('require(!hasReasoning(body))', policy)
         options = (SRC / 'model/ProviderRequestOptions.kt').read_text()
         self.assertIn('if (config.has("thinkingConfig")) ReasoningRequestPolicy.validate(body, protocol)', options)

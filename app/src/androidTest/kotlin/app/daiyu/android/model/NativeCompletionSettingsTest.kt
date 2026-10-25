@@ -70,20 +70,20 @@ class NativeCompletionSettingsTest : InstrumentationTestCase() {
         assertEquals("https://google.invalid/v1beta/models/gemini-fixture:streamGenerateContent?alt=sse", store.load().requestEndpoint())
     }
 
-    fun testDraftProtocolChangeClearsKeyPathAndPreviousConsentWithoutSilentlyResettingOptions() {
+    fun testDraftProtocolChangePreservesConfigurationAndRevokesPreviousConsent() {
         val initial = ModelSettingsDraftUi(endpoint = "https://provider.invalid", apiKey = "old-key", responsesPath = "/responses",
             customBody = "{\"temperature\":0.4}", protocolChangeAuthorized = true)
         protocols.forEach { protocol ->
             val selected = initial.selectProtocol(protocol)
             assertEquals(protocol, selected.protocol); assertEquals(ProviderProtocol.RESPONSES, selected.savedProtocol)
-            assertEquals("", selected.apiKey); assertEquals("", selected.responsesPath); assertFalse(selected.protocolChangeAuthorized)
+            assertEquals(initial.apiKey, selected.apiKey); assertEquals(initial.responsesPath, selected.responsesPath); assertFalse(selected.protocolChangeAuthorized)
             assertEquals(initial.customBody, selected.customBody)
             val authorized = selected.copy(apiKey = "new-key", protocolChangeAuthorized = true)
             assertEquals(authorized, authorized.selectProtocol(protocol))
         }
     }
 
-    fun testOptionsFiveGatewayFieldsRoundTripAndUnsupportedModesFailClosed() {
+    fun testOptionsFiveGatewayFieldsAndInactivePreferencesRoundTrip() {
         val rule = SessionGatewayRule("^fixture$", "/v1/chat/completions", SessionGatewayRule.DEFAULT_RETENTION,
             SessionGatewayRule.DEFAULT_SOURCE, "prompt_cache_key")
         val options = ProviderRequestOptions("{\"temperature\":0.2}", sessionGateway = rule)
@@ -92,8 +92,8 @@ class NativeCompletionSettingsTest : InstrumentationTestCase() {
         assertEquals(rule, store.load().requestOptions.sessionGateway)
         assertEquals(options, ProviderRequestOptions.decode(options.encode()))
         protocols.forEach { protocol ->
-            rejected { ProviderRequestOptions(speedMode = GptSpeedMode.FAST).validate(protocol) }
-            rejected { ProviderRequestOptions(codex = true).validate(protocol) }
+            ProviderRequestOptions(speedMode = GptSpeedMode.FAST).validate(protocol)
+            ProviderRequestOptions(codex = true).validate(protocol)
             rejected { ProviderRequestOptions("{\"tools\":[]}").validate(protocol) }
         }
         rejected { ProviderRequestOptions("{\"contents\":[]}").validate(ProviderProtocol.GEMINI) }

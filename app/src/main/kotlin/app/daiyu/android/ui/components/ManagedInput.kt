@@ -24,6 +24,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
@@ -106,7 +107,7 @@ internal fun Modifier.managedInput(): Modifier = composed {
     val focus = LocalFocusManager.current
     val state = remember(view, focus) { ComposeInputRegion() }
     val entry = remember(view, focus) {
-        InputEntry(view, { state.focused }, { state.bounds }) {
+        InputEntry(view, { state.focused }, { state.bounds(view) }) {
             if (state.focused) focus.clearFocus(force = true)
         }
     }
@@ -114,15 +115,7 @@ internal fun Modifier.managedInput(): Modifier = composed {
         val detach = bindInput(entry)
         onDispose { detach() }
     }
-    this.onGloballyPositioned { coordinates ->
-        if (coordinates.isAttached) {
-            val bounds = coordinates.boundsInWindow()
-            val screen = IntArray(2); val window = IntArray(2)
-            view.getLocationOnScreen(screen); view.getLocationInWindow(window)
-            state.bounds = RectF(bounds.left + screen[0] - window[0], bounds.top + screen[1] - window[1],
-                bounds.right + screen[0] - window[0], bounds.bottom + screen[1] - window[1])
-        } else state.bounds = null
-    }.onFocusChanged {
+    this.onGloballyPositioned { state.coordinates = it }.onFocusChanged {
         if (state.focused != it.hasFocus) inputTrace("compose focus=${it.hasFocus} attached=${view.isAttachedToWindow}")
         state.focused = it.hasFocus
     }
@@ -189,7 +182,17 @@ private fun clearWithoutNativeFocusFallback(view: View, clear: () -> Unit) {
 
 private class ComposeInputRegion {
     var focused = false
-    var bounds: RectF? = null
+    var coordinates: LayoutCoordinates? = null
+
+    fun bounds(view: View): RectF? {
+        if (!view.isAttachedToWindow) return null
+        val current = coordinates?.takeIf { it.isAttached } ?: return null
+        val bounds = current.boundsInWindow()
+        val screen = IntArray(2); val window = IntArray(2)
+        view.getLocationOnScreen(screen); view.getLocationInWindow(window)
+        return RectF(bounds.left + screen[0] - window[0], bounds.top + screen[1] - window[1],
+            bounds.right + screen[0] - window[0], bounds.bottom + screen[1] - window[1])
+    }
 }
 
 /** Native question/pet fields keep their existing text, selection and visual transformation. */

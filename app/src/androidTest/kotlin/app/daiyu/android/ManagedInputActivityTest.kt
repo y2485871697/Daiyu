@@ -36,6 +36,10 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     private val cursorlessTag = mutableStateOf<String?>(null)
     private var fieldsInDialog = false
     private fun showFields(dialog: Boolean = false) {
+        if (dialog) {
+            dismissIme()
+            awaitNoImeWindow(activity.window.decorView)
+        }
         cursorlessTag.value = null
         fieldsInDialog = dialog
         mainThread {
@@ -77,6 +81,26 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         }
     }
 
+    private fun awaitNoImeWindow(view: android.view.View) {
+        val automation = instrumentation.uiAutomation
+        val oldFlags = automation.serviceInfo.flags
+        try {
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            awaitStableWindowFrame(view) {
+                val absent = automation.windows.none { window ->
+                    val bounds = android.graphics.Rect()
+                    window.getBoundsInScreen(bounds)
+                    window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD && !bounds.isEmpty
+                }
+                absent.takeIf { it }
+            }
+        } finally {
+            automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
+        }
+    }
+
     private data class TouchFrame(
         val bounds: androidx.compose.ui.geometry.Rect,
         val windowBounds: androidx.compose.ui.geometry.Rect,
@@ -100,14 +124,23 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                     !listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() }) return null
                 val node = view.createAccessibilityNodeInfo() ?: return null
                 val id = try { node.windowId } finally { node.recycle() }
-                val window = automation.windows.singleOrNull { it.id == id && it.isFocused } ?: return null
+                val windows = automation.windows
+                val window = windows.singleOrNull { it.id == id && it.isFocused } ?: return null
                 val nativeBounds = android.graphics.Rect()
                 window.getBoundsInScreen(nativeBounds)
                 val windowBounds = androidx.compose.ui.geometry.Rect(nativeBounds.left.toFloat(), nativeBounds.top.toFloat(),
                     nativeBounds.right.toFloat(), nativeBounds.bottom.toFloat())
                 val contained = windowBounds.left <= bounds.left && windowBounds.top <= bounds.top &&
                     windowBounds.right >= bounds.right && windowBounds.bottom >= bounds.bottom
-                return if (contained) TouchFrame(bounds, windowBounds, id) else null
+                val occluded = windows.any { other ->
+                    if (other.id == id || other.layer <= window.layer) false else {
+                        val overlay = android.graphics.Rect()
+                        other.getBoundsInScreen(overlay)
+                        !overlay.isEmpty && androidx.compose.ui.geometry.Rect(overlay.left.toFloat(), overlay.top.toFloat(),
+                            overlay.right.toFloat(), overlay.bottom.toFloat()).overlaps(bounds)
+                    }
+                }
+                return if (contained && !occluded) TouchFrame(bounds, windowBounds, id) else null
             }
             val deadline = android.os.SystemClock.uptimeMillis() + 5_000
             while (true) {

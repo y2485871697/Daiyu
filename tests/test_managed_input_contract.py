@@ -130,10 +130,10 @@ class ManagedInputContractTest(unittest.TestCase):
                       '!view.isAttachedToWindow', '!view.hasWindowFocus()', 'view.isLayoutRequested',
                       'FLAG_RETRIEVE_INTERACTIVE_WINDOWS', 'view.createAccessibilityNodeInfo() ?: return null',
                       'val id = try { node.windowId } finally { node.recycle() }',
-                      'automation.windows.singleOrNull { it.id == id && it.isFocused }',
+                      'val windows = automation.windows', 'windows.singleOrNull { it.id == id && it.isFocused }',
                       'window.getBoundsInScreen(nativeBounds)', 'windowBounds.left <= bounds.left',
                       'windowBounds.top <= bounds.top', 'windowBounds.right >= bounds.right',
-                      'windowBounds.bottom >= bounds.bottom', 'if (contained) TouchFrame(bounds, windowBounds, id)',
+                      'windowBounds.bottom >= bounds.bottom', 'if (contained && !occluded) TouchFrame(bounds, windowBounds, id)',
                       'TouchFrame(bounds, windowBounds, id)', 'instrumentation.runOnMainSync { current = sample() }',
                       'if (current == stable) return stable.bounds', 'uptimeMillis() < deadline',
                       'finally', 'flags = oldFlags'):
@@ -153,6 +153,45 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertEqual(1, tap.count('realTap(tag)'))
         self.assertNotIn('requestFocus', tap)
         self.assertNotIn('awaitDialogEnter', bounds)
+
+    def test_dialog_clears_previous_ime_before_creating_new_window(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()
+        setup = text.split('private fun showFields(', 1)[1].split('private fun awaitNoImeWindow(', 1)[0]
+        self.assertLess(setup.index('dismissIme()'), setup.index('awaitNoImeWindow(activity.window.decorView)'))
+        self.assertLess(setup.index('awaitNoImeWindow(activity.window.decorView)'), setup.index('activity.setContent'))
+        waiter = text.split('private fun awaitNoImeWindow(', 1)[1].split('private data class TouchFrame(', 1)[0]
+        for token in ('FLAG_RETRIEVE_INTERACTIVE_WINDOWS', 'awaitStableWindowFrame(view)',
+                      'automation.windows.none', 'TYPE_INPUT_METHOD', '!bounds.isEmpty',
+                      'absent.takeIf { it }', 'finally', 'flags = oldFlags'):
+            self.assertIn(token, waiter)
+        self.assertNotIn('requestFocus', setup + waiter)
+        self.assertNotIn('injectInputEvent', setup + waiter)
+
+    def test_touch_geometry_rejects_higher_windows_without_reinjecting(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()
+        stable = text.split('private fun stableScreenBounds(', 1)[1].split('@OptIn', 1)[0]
+        for token in ('val windows = automation.windows', 'windows.singleOrNull', 'val occluded = windows.any',
+                      'other.id == id', 'other.layer <= window.layer', 'other.getBoundsInScreen(overlay)',
+                      '!overlay.isEmpty', '.overlaps(bounds)', 'contained && !occluded',
+                      'instrumentation.runOnMainSync { current = sample() }'):
+            self.assertIn(token, stable)
+        self.assertEqual(1, stable.count('automation.windows'))
+        self.assertNotIn('requestFocus', stable)
+        self.assertNotIn('injectInputEvent', stable)
+
+    def test_compose_regions_read_live_coordinates_and_window_origin_per_hit(self):
+        text = SOURCE.read_text()
+        self.assertIn('InputEntry(view, { state.focused }, { state.bounds(view) })', text)
+        self.assertIn('this.onGloballyPositioned { state.coordinates = it }', text)
+        region = text.split('private class ComposeInputRegion {', 1)[1].split('/** Native', 1)[0]
+        for token in ('var coordinates: LayoutCoordinates?', 'fun bounds(view: View): RectF?',
+                      '!view.isAttachedToWindow', 'coordinates?.takeIf { it.isAttached }',
+                      'current.boundsInWindow()', 'view.getLocationOnScreen(screen)',
+                      'view.getLocationInWindow(window)', 'return RectF(', 'screen[0] - window[0]',
+                      'screen[1] - window[1]'):
+            self.assertIn(token, region)
+        self.assertNotIn('var bounds: RectF?', region)
+        self.assertNotIn('requestFocus', region)
 
 
 if __name__ == '__main__':

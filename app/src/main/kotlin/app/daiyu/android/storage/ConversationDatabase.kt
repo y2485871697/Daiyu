@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 25), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 26), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -48,6 +48,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         ConversationCompletionMarkers.installSchema(db)
         RecordedUsageHistory.install(db)
         AssistantReplyIdentities.install(db)
+        app.daiyu.android.timeline.ChatTimelineStore.install(db)
     }
     private fun installGenerationSchema(db: SQLiteDatabase) {
         SQLiteGenerationAttemptStore.installSchema(db)
@@ -58,7 +59,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..24 && newVersion == 25) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..25 && newVersion == 26) { "不支持此数据库版本，保留原数据" }
+        app.daiyu.android.timeline.ChatTimelineStore.install(db)
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
         app.daiyu.android.platform.NotificationHistoryStore.installSchema(db)
@@ -573,7 +575,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             }
         }
     }
-    internal fun preflightBackup(text:String) { val (_, rows, _) = parseBackup(text); backupReplyIdentities(text, rows) }
+    internal fun preflightBackup(text:String): List<Message> { val (_, rows, _) = parseBackup(text); backupReplyIdentities(text, rows); return rows }
     fun importBackup(text:String):Pair<Int,Int> = importBackup(text, deferVideoWitness = false)
     internal fun importBackupForVideoAssets(db: SQLiteDatabase, text: String): Pair<Int, Int> {
         check(db === writableDatabase && db.inTransaction())

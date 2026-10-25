@@ -5589,9 +5589,41 @@ class MainActivity : ComponentActivity() {
         }
         return result
     }
+    private var timelineConversation: ConversationId? = null
+    private var timelineEntries: List<app.daiyu.android.timeline.ChatTimelineEntry> = emptyList()
+    private var timelineRead: kotlinx.coroutines.Job? = null
+    private var timelineReadRevision = -1L
+    private fun refreshTimeline() {
+        val id = selected?.id
+        if (timelineConversation != id) {
+            timelineRead?.cancel(); timelineRead = null
+            timelineConversation = id; timelineEntries = emptyList(); timelineReadRevision = -1L
+        }
+        if (id == null || timelineRead?.isActive == true) return
+        val revision = controller.timelineVersion
+        if (timelineReadRevision == revision) return
+        val generation = editorGeneration
+        timelineRead = lifecycleScope.launch {
+            try {
+                val entries = try { withContext(Dispatchers.IO) { controller.timelineHistory(id) } }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { return@launch }
+                if (!activityUsable() || selected?.id != id || editorGeneration != generation) return@launch
+                timelineEntries = entries; timelineReadRevision = revision
+                publishChat(rowsChanged = false)
+            } finally {
+                if (timelineRead === kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]) {
+                    timelineRead = null
+                    if (activityUsable() && selected?.id == id &&
+                        (controller.timelineVersion != revision || editorGeneration != generation)) refreshTimeline()
+                }
+            }
+        }
+    }
     private fun publishChat() = publishChat(rowsChanged = true)
 
     private fun publishChat(rowsChanged: Boolean) {
+        if (rowsChanged) refreshTimeline()
         contextReceiptRevision = controller.contextUsageRevision
         conversationUsageRevision = controller.usageRevision
         taskLocationVisit?.takeIf { !taskLocationCurrent(it) }?.let(::cancelTaskLocation)
@@ -5625,6 +5657,8 @@ class MainActivity : ComponentActivity() {
         val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
+            timeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty(),
+            compressionActivity = controller.compressionActivity?.takeIf { it.conversationId == selected?.id?.value },
             turns = ChatTurnMapper.withStreamingOwner(if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey

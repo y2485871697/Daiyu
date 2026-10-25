@@ -76,6 +76,10 @@ internal class SQLiteRuntimeStore private constructor(
         available(); check(recovered)
         return transactions.run { db -> preparations.seed(db, initial) }
     }
+    private var compressionModel: Pair<Message, app.daiyu.android.timeline.SummaryModelIdentity?>? = null
+    @Synchronized internal fun bindCompressionModel(initial: Message, model: app.daiyu.android.timeline.SummaryModelIdentity?) {
+        available(); check(recovered); compressionModel = initial to model
+    }
     private var recovered = false
     private var closed = false
     private fun available() { check(!closed && lock.isValid) { "运行存储所有权已释放" } }
@@ -156,6 +160,9 @@ internal class SQLiteRuntimeStore private constructor(
             boundContext?.let { (_, model) ->
                 contextChanged = CloudContextUsageStore.record(db, checkpoint, model)
             }
+            val summaryIdentity = compressionModel?.takeIf { it.first.id == m.id && it.first.runId == m.runId &&
+                it.first.conversationId == m.conversationId }?.second
+            contextService?.publishRunCompression(db, checkpoint, summaryIdentity)
             if (checkpoint.phase == ExecutionPhase.TERMINAL) contextService?.publishRunArchive(db, checkpoint)
         }
         if (contextChanged) contextUsageRevision++

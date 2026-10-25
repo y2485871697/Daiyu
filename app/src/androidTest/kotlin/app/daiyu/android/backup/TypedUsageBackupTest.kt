@@ -36,7 +36,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val base = testContext(instrumentation.targetContext, "typed-backup-${UUID.randomUUID()}-")
         val files = File(base.cacheDir, "typed-backup-${UUID.randomUUID()}").apply { check(mkdirs()) }
         val context = object : ContextWrapper(base) { override fun getFilesDir() = files }
-        return Fixture(context, ConversationDatabase(context)).also { fixtures.add(it); assertEquals(25, it.db.writableDatabase.version) }
+        return Fixture(context, ConversationDatabase(context)).also { fixtures.add(it); assertEquals(26, it.db.writableDatabase.version) }
     }
     override fun tearDown() {
         try { fixtures.forEach { it.db.close(); it.context.deleteDatabase("conversations.db"); it.context.filesDir.deleteRecursively() } }
@@ -98,7 +98,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val source = fresh(); val p = parent(source)
         additional(source, p, "creation", UsageRequestSource.MANUAL_SUMMARY, ModelEvent.Usage(17, 8, 5, 2))
         val exported = source.service().exportPackage()
-        assertEquals(6, JSONObject(exported).getInt("version"))
+        assertEquals(7, JSONObject(exported).getInt("version"))
         assertEquals(2L, row(exported, "creation").getLong("cache_creation_tokens"))
         val target = fresh(); target.service().importPackage(exported); target.reopen()
         assertEquals(2L, row(target.service().exportPackage(), "creation").getLong("cache_creation_tokens"))
@@ -115,6 +115,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         assertTrue(row(legacy.service().exportPackage(), "creation").isNull("cache_creation_tokens"))
     }
     private fun downgradeCreation(data: JSONObject) {
+        data.getJSONObject("tables").remove("chat_timeline_events")
         fun strip(rows: org.json.JSONArray) {
             repeat(rows.length()) { rows.getJSONObject(it).remove("cache_creation_tokens") }
         }
@@ -191,7 +192,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val source = fresh(); val (p, _) = runtimeSeed(source)
         val physicalBefore = checkpointPayloads(source)
         val exported = source.service().exportPackage()
-        assertEquals(6, JSONObject(exported).getInt("version")); assertFalse(exported.contains("RUNTIME_PRIVATE_HISTORY"))
+        assertEquals(7, JSONObject(exported).getInt("version")); assertFalse(exported.contains("RUNTIME_PRIVATE_HISTORY"))
         assertEquals(2, runtime(exported).getJSONArray("checkpoints").length()); assertEquals(8, runtimeRows(exported).length())
         assertEquals(0L, runtimeRow(exported, "main-missing").getLong("has_usage"))
         assertEquals(1L, runtimeRow(exported, "main-null").getLong("has_usage"))
@@ -338,7 +339,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         source.db.writableDatabase.execSQL("DROP TABLE recorded_usage_requests")
         source.db.writableDatabase.execSQL("DROP TABLE recorded_usage_checkpoints")
         source.db.writableDatabase.version = 19; source.reopen()
-        assertEquals(25, source.db.writableDatabase.version); assertEquals(retained, checkpointPayloads(source))
+        assertEquals(26, source.db.writableDatabase.version); assertEquals(retained, checkpointPayloads(source))
         assertEquals(runtime(current).toString(), runtime(source.service().exportPackage()).toString())
         assertEquals(0L, runtimeRow(current, "legacy-missing").getLong("has_usage"))
         val old = JSONObject(mutate(current) { data ->
@@ -352,7 +353,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         target.db.writableDatabase.execSQL("DROP TABLE recorded_usage_requests")
         target.db.writableDatabase.execSQL("DROP TABLE recorded_usage_checkpoints")
         target.db.writableDatabase.version = 19; target.reopen()
-        assertEquals(25, target.db.writableDatabase.version)
+        assertEquals(26, target.db.writableDatabase.version)
         assertEquals(0, target.count("recorded_usage_requests")); assertEquals(0, target.count("recorded_usage_checkpoints"))
         assertTrue(target.service().importPackage(old).alreadyImported)
         val imported = fresh(); imported.service().importPackage(current)
@@ -362,7 +363,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
     fun testTypedManualAndChildRoundTripIsClosedStableAndDoesNotMutateSource() {
         val source = fresh(); val p = seed(source); val original = physical(source)
         val exported = source.service().exportPackage()
-        assertEquals(6, JSONObject(exported).getInt("version")); assertEquals(original, physical(source))
+        assertEquals(7, JSONObject(exported).getInt("version")); assertEquals(original, physical(source))
         assertEquals(exported, source.service().exportPackage())
         assertEquals(4, payload(exported).getJSONObject("child_task_history").getInt("version"))
         assertEquals(0L, row(exported, "title-zero").getLong("input_tokens"))
@@ -407,6 +408,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
             if (version == 2) children(source, p)
             val current = source.service().exportPackage()
             val oldPayload = mutate(current) { data ->
+                data.getJSONObject("tables").remove("chat_timeline_events")
                 data.remove("static_generation_history"); data.getJSONObject("inventory").remove("static_generation_outputs")
                 data.remove("runtime_usage_history")
                 data.getJSONObject("inventory").remove("runtime_usage_checkpoints")
@@ -538,7 +540,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         }
         target.db.writableDatabase.version = 20
         target.reopen()
-        assertEquals(25, target.db.readableDatabase.version)
+        assertEquals(26, target.db.readableDatabase.version)
         assertTrue(target.service().importPackage(old).alreadyImported)
         val exported = payload(target.service().exportPackage()).getJSONObject("child_task_history")
         assertEquals(4, exported.getInt("version"))

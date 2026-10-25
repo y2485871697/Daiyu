@@ -7,7 +7,8 @@ import app.daiyu.android.domain.runtime.*
 import java.util.UUID
 
 /** A narrow live-run projection. Original rows and the tool journal are never replaced. */
-internal class ProductionRunContext(private val frozen: FrozenContextPreparation, private val parent: Message) : RunContextRuntime {
+internal class ProductionRunContext(private val frozen: FrozenContextPreparation, private val parent: Message,
+    private val progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {}) : RunContextRuntime {
     override val windowTokens = checkNotNull(frozen.policy.contextTokens)
     @Volatile private var cancellation: ContextPreparationCancellation? = null
     override fun cancel() { cancellation?.cancel() }
@@ -30,8 +31,12 @@ internal class ProductionRunContext(private val frozen: FrozenContextPreparation
             if (cancelled()) return null
             val model = checkNotNull(frozen.runtimeModel)(usage)
             val prefix = logical.take(cut)
-            val text = ModelContextSummarizer(model, cancellation).summarize(
-                CompressionInput(prefix, ContextRevision.digest(prefix))).trim()
+            val activity = app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
+                parent.conversationId.value, prefix.size, model.displayIdentity)
+            progress(activity)
+            val text = try { ModelContextSummarizer(model, cancellation).summarize(
+                CompressionInput(prefix, ContextRevision.digest(prefix))).trim() }
+            finally { progress(activity.copy(running = false)) }
             if (cancelled()) return null
             val id = "summary-${UUID.randomUUID()}"
             val summary = Message(MessageId(id), parent.conversationId, RunId(id), Message.USER_ROLE,

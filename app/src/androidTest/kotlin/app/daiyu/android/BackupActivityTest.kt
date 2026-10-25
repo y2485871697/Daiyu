@@ -291,7 +291,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             assertTrue(text.contains("historical answer"))
             val envelope=org.json.JSONObject(text)
             assertEquals("daiyu-neutral-complete",envelope.getString("format"))
-            assertEquals(6,envelope.getInt("version"))
+            assertEquals(7,envelope.getInt("version"))
             NeutralBackupService(fixtureApp,controller.database).preflight(text)
             controller.database.conversations().forEach {controller.database.delete(it.id)}
             // Reset only revision for the second independent UI route; format fixtures stay tiny.

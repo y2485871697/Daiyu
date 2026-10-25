@@ -70,7 +70,8 @@ class ProviderSummaryModelResolver internal constructor(
         require(configuration.binding == binding) { "摘要模型绑定不匹配；未回退主模型" }
         val adapter = ProviderSummaryModelPort(configuration, connect, deadlines, usage)
         return BoundSummaryModel(binding, adapter, configuration.contextWindowTokens, configuration.inputBudgetTokens,
-            startDeadline = { SummaryRequestDeadline(configuration.deadlineMillis, deadlines::nanoTime) }).also { bound ->
+            startDeadline = { SummaryRequestDeadline(configuration.deadlineMillis, deadlines::nanoTime) },
+            displayIdentity = app.daiyu.android.timeline.SummaryModelIdentity(binding.providerId, configuration.apiModel, configuration.provider.protocol.name)).also { bound ->
                 bound.rebind = { fresh -> requireNotNull(ProviderSummaryModelResolver({ configuration }, connect, deadlines).resolve(binding, fresh)) }
             }
     }

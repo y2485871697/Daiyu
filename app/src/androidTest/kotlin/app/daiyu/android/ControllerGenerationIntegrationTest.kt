@@ -781,7 +781,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
                 target.database.readableDatabase, "neutral_backup_history"))
             target.database.writableDatabase.execSQL("DROP TRIGGER controller_bad_receipt")
             assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("已导入"))
-            assertEquals(25, target.database.readableDatabase.version)
+            assertEquals(26, target.database.readableDatabase.version)
             assertEquals(0, count("generation_outputs")); assertEquals(0, count("runtime_checkpoints"))
             assertEquals(2, count("generation_attempts")); assertEquals(1, count("child_task_commands")); assertEquals(1, count("child_request_usage"))
             originalRows.forEach { (conversation, rows) ->
@@ -882,7 +882,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
                         protocol = GenerationProtocol.OPENAI_IMAGES_JSON, endpoint = "https://example.invalid/images/generations",
                         model = "offline", apiKey = "synthetic-memory-only")), 0, false, emptySet()), null)
             assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("完整中立备份已导出"))
-            assertEquals(6, org.json.JSONObject(file.readText()).getInt("version"))
+            assertEquals(7, org.json.JSONObject(file.readText()).getInt("version"))
             assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("已导入"))
             val historicalCopy = branchThroughProduction(target.controller, image.conversation.id)
             val historicalDisplay = staticThroughProduction(target.controller, historicalCopy.id)

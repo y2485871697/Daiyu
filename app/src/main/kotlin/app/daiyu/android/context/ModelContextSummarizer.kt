@@ -41,6 +41,7 @@ data class BoundSummaryModel(
     val inputBudgetTokens: Long,
     /** Invoked once at summarize entry, never reset by open/next. */
     val startDeadline: () -> SummaryRequestDeadline,
+    internal val displayIdentity: app.daiyu.android.timeline.SummaryModelIdentity? = null,
 ) {
     internal var rebind: ((BoundSummaryUsagePort) -> BoundSummaryModel)? = null
     init { require(contextWindowTokens > 0 && inputBudgetTokens in 1..contextWindowTokens) }
@@ -55,6 +56,7 @@ class ModelContextSummarizer(
     private val bound: BoundSummaryModel,
     private val cancellation: ContextPreparationCancellation,
 ) : ContextSummarizer {
+    override val displayIdentity get() = bound.displayIdentity
     override fun summarize(input: CompressionInput): String {
         val deadline = bound.startDeadline()
         fun checkLive() { cancellation.check(); deadline.check() }

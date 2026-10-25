@@ -223,7 +223,55 @@ class ChatController internal constructor(private val application:Application,
         }
     }
 
-    private val contextService by lazy { ContextService(application, database) }
+    private val contextService by lazy { ContextService(application, database).also { it.onCompression = ::postCompressionActivity } }
+    @Volatile internal var compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null; private set
+    private val reconnectTimeline = linkedMapOf<String, app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
+    private val reconnectObservedAt = hashMapOf<String, Long>()
+    private val timelineExecutor = Executors.newSingleThreadExecutor()
+    private var timelineWriters = 0
+    internal val timelineRevision = java.util.concurrent.atomic.AtomicLong()
+    internal val timelineVersion: Long get() = timelineRevision.get() + app.daiyu.android.timeline.ChatTimelineStore.revision.get()
+    private fun postCompressionActivity(value: app.daiyu.android.timeline.CompressionActivity) {
+        synchronized(this) {
+            if (closed) return
+            if (value.running) compressionActivity = value
+            else if (compressionActivity?.id == value.id) compressionActivity = null
+            timelineRevision.incrementAndGet()
+        }
+        handler.post { synchronized(this) { if (!closed) notifyChanged() } }
+    }
+    internal fun timelineHistory(id: ConversationId): List<app.daiyu.android.timeline.ChatTimelineEntry> {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        val live = synchronized(this) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            reconnectTimeline.values.filter { it.anchor.conversationId == id.value }.map { entry ->
+                val delta = reconnectObservedAt[entry.id]?.let { (now - it).coerceAtLeast(0L) } ?: 0L
+                if (entry.status == "running") entry.copy(elapsedMs = entry.elapsedMs + delta.coerceAtMost(Long.MAX_VALUE - entry.elapsedMs))
+                else entry
+            }
+        }
+        val liveIds = live.map { it.id }.toSet()
+        return (contextService.timeline(id).filterNot { it.id in liveIds }.map { entry ->
+            if (entry is app.daiyu.android.timeline.ChatTimelineEntry.Reconnect && entry.status == "running")
+                entry.copy(status = "stopped") else entry
+        } + live).sortedWith(compareBy({ it.created }, { it.id }))
+    }
+    private fun persistReconnect(entry: app.daiyu.android.timeline.ChatTimelineEntry.Reconnect) {
+        // Called under the controller monitor; pending writes pin storage through close.
+        timelineWriters++
+        try { timelineExecutor.execute {
+            try {
+                app.daiyu.android.context.DatabaseTransactions { database.writableDatabase }.run { db ->
+                    if (db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(entry.anchor.conversationId)).use { it.moveToFirst() })
+                        app.daiyu.android.timeline.ChatTimelineStore.write(db, entry)
+                }
+            } catch (_: Exception) { /* Display diagnostics never authorize transport recovery. */ }
+            finally { handler.post { synchronized(this) {
+                timelineWriters--
+                if (closed) closeStorageWhenIdle()
+            } } }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) { timelineWriters-- }
+    }
     private val contextPreparation by lazy { contextPreparationFactory(application, contextService) }
 
     internal class TextSendTicket
@@ -1788,6 +1836,17 @@ class ChatController internal constructor(private val application:Application,
     private fun fenceRun(lifetime:RunResources) {
         if(lifetime.fenced) return
         lifetime.fenced=true
+        reconnectTimeline.values.filter { it.anchor.conversationId == lifetime.initial.conversationId.value &&
+            it.anchor.runId == lifetime.initial.runId.value && it.status == "running" }.forEach { previous ->
+            val observedAt = reconnectObservedAt.remove(previous.id)
+            val delta = observedAt?.let { (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) } ?: 0L
+            val stopped = previous.copy(status = "stopped",
+                elapsedMs = previous.elapsedMs + delta.coerceAtMost(Long.MAX_VALUE - previous.elapsedMs))
+            reconnectTimeline[previous.id] = stopped
+            persistReconnect(stopped)
+        }
+        if (compressionActivity?.conversationId == lifetime.initial.conversationId.value) compressionActivity = null
+        timelineRevision.incrementAndGet()
         commandApprovals.revoke()
         lifetime.browserVisual?.revoke()
         guiEntry?.takeIf { it.assistantId == lifetime.initial.id && it.runId == lifetime.initial.runId &&
@@ -3499,24 +3558,48 @@ class ChatController internal constructor(private val application:Application,
             checkNotNull(runtimeStore).bindContextUsage(assistant, app.daiyu.android.ui.model.ContextUsageModel(
                 frozenProvider.editor.slotId, provider.model, frozenProvider.configurationRevision,
                 provider.contextWindowOverride?.toLong(), frozenProvider.editor.registryRevision))
+            checkNotNull(runtimeStore).bindCompressionModel(assistant, preparedContext.frozen.summaryIdentity)
             val owned = ChatRunner(observedModel, database, tools,
                 RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics { event ->
-                    if (event.status == "succeeded") {
-                        postReconnectNotice(null)
-                        return@runnerPolicyWithDiagnostics
+                    // Capture before enqueueing UI work so a later fence cannot erase an emitted terminal.
+                    synchronized(this) {
+                        val original = reconnectResources
+                        val current = active
+                        if (original == null || resources !== original || original.fenced || closed ||
+                            runner !== original.runner || current?.id != assistant.id || current.runId != run ||
+                            current.conversationId != conversationId) return@runnerPolicyWithDiagnostics
+                        val id = "error-reconnect:${run.value.length}:${run.value}:${event.reconnectId.length}:${event.reconnectId}"
+                        val previous = reconnectTimeline[id]
+                        if (previous != null && previous.status != "running") return@runnerPolicyWithDiagnostics
+                        val logical = MessageHistory.expand(listOf(current))
+                        val entry = app.daiyu.android.timeline.ChatTimelineEntry.Reconnect(id,
+                            previous?.anchor ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex),
+                            previous?.created ?: System.currentTimeMillis(), event.status,
+                            maxOf(previous?.elapsedMs ?: 0, event.elapsedMs), event.reason.name, event.round, provider.model)
+                        reconnectTimeline[id] = entry
+                        if (event.status == "running") reconnectObservedAt[id] = android.os.SystemClock.elapsedRealtime()
+                        else reconnectObservedAt.remove(id)
+                        timelineRevision.incrementAndGet()
+                        persistReconnect(entry)
                     }
-                    val status = when (event.status) {
+                    val notice = when (event.status) {
                         "running" -> "正在重连"
                         "stopped" -> "重连已暂停或停止"
                         "failed" -> "重连未恢复"
-                        else -> return@runnerPolicyWithDiagnostics
+                        else -> null
                     }
-                    postReconnectNotice("$status · 第${event.round + 1}轮 · ${event.elapsedMs / 1000}秒")
+                    postReconnectNotice(notice?.let { "$it · 第${event.round + 1}轮 · ${event.elapsedMs / 1000}秒" })
                 },
                     runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
                     contextRuntime = if (video == null && auxiliaryFrozen == null &&
                         preparedContext.frozen.policy.enabled && preparedContext.frozen.runtimeModel != null)
-                        app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) else null,
+                        app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) { activity ->
+                            synchronized(this) {
+                                val original = reconnectResources
+                                if (!activity.running || (original != null && resources === original && !original.fenced))
+                                    postCompressionActivity(activity)
+                            }
+                        } else null,
                     onUsage = { synchronized(this) {
                         if (!closed && active?.id == assistant.id && active?.runId == run &&
                             active?.conversationId == conversationId) notifyChanged()
@@ -3882,7 +3965,7 @@ class ChatController internal constructor(private val application:Application,
         if (browserChildren.isNotEmpty()) return // Child workers/UNKNOWN still own the DB and ledger.
         pruneBackgroundRuns()
         if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || guiEntry!=null || generationReaders!=0 ||
-            unacceptedTools.isNotEmpty() || messageActionReaders!=0 || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || closingStorage) return
+            unacceptedTools.isNotEmpty() || messageActionReaders!=0 || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || timelineWriters!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -3904,7 +3987,7 @@ class ChatController internal constructor(private val application:Application,
         closingStorage=true
         executor.execute {
             try {closeGenerationOutputReaders();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
-            finally {titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
+            finally {timelineExecutor.shutdown();titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }
     private val staticGenerationAssets by lazy { app.daiyu.android.media.StaticGenerationAssets(
@@ -4590,15 +4673,21 @@ class ChatController internal constructor(private val application:Application,
         }}
         return accepted
     }
-    internal fun resume(owner:Message):Boolean = synchronized(this) {
-        val lifetime = resources?.takeIf { it.runner === ownedRunner(owner) &&
-            it.browserVisual?.automationHeld != true } ?: return false
-        val accepted = lifetime.runner.resume()
-        if (accepted) {
-            resumePausedChildren(lifetime, lifetime.childPauseEpoch)
-            notifyChanged()
+    internal fun resume(owner:Message):Boolean {
+        val (lifetime, pauseEpoch) = synchronized(this) {
+            val current = resources?.takeIf { it.runner === ownedRunner(owner) &&
+                it.browserVisual?.automationHeld != true } ?: return false
+            current to current.childPauseEpoch
         }
-        accepted
+        // Reconnect diagnostics acquire our monitor from the budget callback.
+        val accepted = lifetime.runner.resume()
+        if (accepted) synchronized(this) {
+            if (resources === lifetime && ownedRunner(owner) === lifetime.runner) {
+                resumePausedChildren(lifetime, pauseEpoch)
+                notifyChanged()
+            }
+        }
+        return accepted
     }
     internal fun stopMain(owner: Message): Boolean {
         val lifetime = synchronized(this) {

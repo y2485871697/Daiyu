@@ -63,6 +63,7 @@ class FrozenContextPreparation internal constructor(
     internal val summarizer: ContextSummarizer?,
     val cancellation: ContextPreparationCancellation,
     internal val runtimeModel: ((BoundSummaryUsagePort) -> BoundSummaryModel)? = null,
+    internal val summaryIdentity: app.daiyu.android.timeline.SummaryModelIdentity? = null,
 ) {
     val pendingMessages: List<Message> = freezeContextMessages(pending)
     internal val consumed = AtomicBoolean(false)
@@ -128,7 +129,7 @@ class ContextPreparationCoordinator(
         require(binding == null || bound == null || bound.binding == binding) { "摘要模型绑定已变化；未回退主模型" }
         cancellation.check()
         return FrozenContextPreparation(this, conversationId, settings, policy, pending,
-            bound?.let { ModelContextSummarizer(it, cancellation) }, cancellation, bound?.rebind)
+            bound?.let { ModelContextSummarizer(it, cancellation) }, cancellation, bound?.rebind, bound?.displayIdentity)
     }
 
     fun prepare(frozen: FrozenContextPreparation): PreparedSendContext {

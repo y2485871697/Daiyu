@@ -71,7 +71,8 @@ internal fun CompressionConversationDialog(
         LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp)
             .testTag("context-management"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (operation == ContextManagementOperation.COMPRESS) item("operation") {
-                Text("正在压缩会话…", Modifier.testTag("compression-dialog-operation"))
+                app.daiyu.android.ui.screens.chat.conversation.CompressionProgressNotice(
+                    draft.modelLabel.orEmpty(), Modifier.testTag("compression-dialog-operation"), label = "正在压缩会话…")
                 AssistantPreviewButton("取消压缩", onCancelOperation,
                     Modifier.fillMaxWidth().testTag("context-cancel"), enabled = !cancellationRequested)
             }

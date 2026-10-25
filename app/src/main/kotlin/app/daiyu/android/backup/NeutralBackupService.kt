@@ -113,10 +113,20 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     private fun captureExport(configuration: Map<String, Any?>?, conversationId: ConversationId?) = transactions.run { db ->
         val text = videoIntegration?.exportText?.invoke(db, conversationId)
             ?: if (conversationId == null) store.exportBackup() else store.exportConversationBackup(conversationId)
-        store.preflightBackup(text)
+        val history = store.preflightBackup(text)
+        val anchors = app.daiyu.android.timeline.TimelineAnchor.keys(history)
         val tables = JSONObject()
-        columnsFor(6).forEach { (table, columns) -> tables.put(table,
-            if (table == "context_usage") BackupUsageCodec.export(db, conversationId?.value) else readTable(db, table, columns, conversationId)) }
+        columnsFor(7).forEach { (table, columns) -> tables.put(table,
+            if (table == "context_usage") BackupUsageCodec.export(db, conversationId?.value)
+            else readTable(db, table, columns, conversationId).let { rows ->
+                if (table != "chat_timeline_events") rows else JSONArray().apply {
+                    repeat(rows.length()) { index ->
+                        val row = rows.getJSONObject(index)
+                        val entry = app.daiyu.android.timeline.ChatTimelineStore.decode(string(row, "id"), integer(row, "created"), JSONObject(string(row, "payload")))
+                        if (entry.anchor.listKey in anchors) put(row)
+                    }
+                }
+            }) }
         val config = if (configuration == null) readConfig(db) else projectConfiguration(configuration).first
         validateConfig(config)
         val messages = objectOf(objectOf(text).getString("payload")).getJSONArray("messages")
@@ -226,8 +236,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         if (videos.sidecars.isNotEmpty()) payload.put("message_videos", videoManifest)
         val inventory = inventory(payload)
         payload.put("inventory", inventoryJson(inventory))
-        validatePayload(6, "export-validation", payload, originals)
-        return PreparedExport(spool, spool.write(6, payload))
+        validatePayload(7, "export-validation", payload, originals)
+        return PreparedExport(spool, spool.write(7, payload))
     }
     fun preflight(text: String): BackupInventory {
         Utf8Payload.byteCount(text, MAX_PACKAGE)
@@ -487,7 +497,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             (if (version >= 2L) setOf("generation_history", "child_task_history") else emptySet()) +
             (if (version >= 4L) setOf("runtime_usage_history") else emptySet()) +
             (if (version >= 5L) setOf("static_generation_history") else emptySet()))
-        store.preflightBackup(string(payload, "text_backup"))
+        val history = store.preflightBackup(string(payload, "text_backup"))
         val legacy = objectOf(string(payload, "text_backup"))
         require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") in 1..2)
         val oldRaw = string(legacy, "payload"); require(Utf8Payload.sha256(oldRaw) == legacy.getString("sha256"))
@@ -500,6 +510,18 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         schema.forEach { (table, columns) -> val rows = tables.getJSONArray(table); require(rows.length() <= 50000)
             val primary = columns.first(); uniqueIds(rows, primary)
             repeat(rows.length()) { fields(rows.getJSONObject(it), columns.toSet()) }
+        }
+        if (version >= 7) {
+            val anchors = app.daiyu.android.timeline.TimelineAnchor.keys(history)
+            val events = tables.getJSONArray("chat_timeline_events")
+            repeat(events.length()) { index ->
+                val row = events.getJSONObject(index)
+                val entry = app.daiyu.android.timeline.ChatTimelineStore.decode(string(row, "id"), integer(row, "created"), JSONObject(string(row, "payload")))
+                require(entry.anchor.conversationId in conversationIds && entry.anchor.conversationId == string(row, "conversation_id") &&
+                    entry.anchor.messageId == string(row, "message_id"))
+                require(string(row, "kind") == if (entry is app.daiyu.android.timeline.ChatTimelineEntry.Compression) "compression" else "reconnect")
+                require(entry.anchor.listKey in anchors) { "提示位置不属于备份历史" }
+            }
         }
         val hashes = hashSetOf<String>(); var total = 0L
         val encoded = payload.getJSONArray("blobs"); require(encoded.length() <= 50000)
@@ -603,7 +625,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         }
     private fun readTable(db: SQLiteDatabase, table: String, columns: List<String>, conversationId: ConversationId?): JSONArray {
         val where = if (conversationId == null) "" else when (table) {
-            "context_branches", "context_archives" -> " WHERE conversation_id=?"
+            "context_branches", "context_archives", "chat_timeline_events" -> " WHERE conversation_id=?"
             "context_usage" -> " WHERE branch_id=?"
             "neutral_assets" -> " WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=?)"
             else -> error("未知备份表")
@@ -662,6 +684,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         private val BOOLEAN_KEYS = setOf("battery", "device-status")
         private val CONFIG_KEYS = setOf("endpoint", "model", "responses-path", "protocol") + BOOLEAN_KEYS
         private fun columnsFor(version: Long): Map<String, List<String>> = LinkedHashMap(COLUMNS).apply {
+            if (version >= 7) put("chat_timeline_events", app.daiyu.android.timeline.ChatTimelineStore.columns)
             put("context_usage", if (version >= 6) BackupUsageCodec.columns else if (version >= 3) BackupUsageCodec.typedColumns else BackupUsageCodec.legacyColumns)
         }
         private val COLUMNS = linkedMapOf(

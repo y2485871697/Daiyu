@@ -115,7 +115,7 @@ class CrossAppNotificationsTest : InstrumentationTestCase() {
             old.close()
             val upgraded = ConversationDatabase(context)
             try {
-                assertEquals(25, upgraded.readableDatabase.version)
+                assertEquals(26, upgraded.readableDatabase.version)
                 assertFalse(NotificationHistoryStore(upgraded).enabled())
                 upgraded.readableDatabase.rawQuery("SELECT title,draft,updated FROM conversations WHERE id='fixture'", null).use {
                     assertTrue(it.moveToFirst()); assertEquals("synthetic", it.getString(0)); assertEquals("draft", it.getString(1)); assertEquals(123L, it.getLong(2))

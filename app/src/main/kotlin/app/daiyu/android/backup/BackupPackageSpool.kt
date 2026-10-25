@@ -79,7 +79,7 @@ internal class BackupPackageSpool(parent: File) : Closeable {
         require(envelope.get("format") == "daiyu-neutral-complete")
         val version = envelope.get("version")
         require(version is Int || version is Long)
-        val number = (version as Number).toLong(); require(number in 1L..6L)
+        val number = (version as Number).toLong(); require(number in 1L..7L)
         val id = requireNotNull(payloadDigest)
         require(envelope.get("sha256") == id) { "备份摘要不匹配" }
         val payload = raw.inputStream().use { input ->
@@ -140,7 +140,7 @@ internal class BackupPackageSpool(parent: File) : Closeable {
     }
     /** Produces the versioned envelope, including the hash of the actual serialized payload. */
     fun write(version: Long, payload: JSONObject): File {
-        require(version in 1L..6L)
+        require(version in 1L..7L)
         val raw = temporary(); val sha = MessageDigest.getInstance("SHA-256")
         DigestOutputStream(LimitedOutput(FileOutputStream(raw), MAX_PACKAGE), sha).writer(Charsets.UTF_8).use { writer ->
             writeObject(writer, payload, true)

@@ -70,7 +70,13 @@ internal fun ChatMessageList(
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     composerBottomInset: Dp = 0.dp,
+    timeline: List<app.daiyu.android.timeline.ChatTimelineEntry> = emptyList(),
+    compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null,
 ) {
+    val timelineAfter = remember(timeline) { timeline.groupBy { it.anchor.listKey } }
+    val compressionVisible = compressionActivity?.running == true
+    val tailIndex = turns.lastIndex + if (compressionVisible) 1 else 0
+    val currentTailIndex by rememberUpdatedState(tailIndex)
     val listState = rememberLazyListState()
     val dragging by listState.interactionSource.collectIsDraggedAsState()
     var followBottom by rememberSaveable { mutableStateOf(true) }
@@ -100,8 +106,8 @@ internal fun ChatMessageList(
                     listState.animateScrollToItem(index)
                     consumedScrollSerial = request.serial
                 }
-            } else if (request.followBottom && turns.isNotEmpty()) {
-                listState.scrollToItem(turns.lastIndex)
+            } else if (request.followBottom && tailIndex >= 0) {
+                listState.scrollToItem(tailIndex)
                 consumedScrollSerial = request.serial
             }
         }
@@ -117,7 +123,7 @@ internal fun ChatMessageList(
     // Keep a single motion across target-height updates instead of snapping each new line.
     LaunchedEffect(listState) {
         snapshotFlow {
-            followBottom && !currentDragging && currentTurns.isNotEmpty() &&
+            followBottom && !currentDragging && currentTailIndex >= 0 &&
                 (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
         }.collectLatest { canFollow ->
             if (!canFollow) return@collectLatest
@@ -126,12 +132,12 @@ internal fun ChatMessageList(
                 while (true) {
                     // Layout notifications may arrive during measurement; scroll only on a frame.
                     val frameTime = withFrameNanos { it }
-                    if (!followBottom || currentDragging || currentTurns.isEmpty() ||
+                    if (!followBottom || currentDragging || currentTailIndex < 0 ||
                         (currentScrollSerial != null && currentScrollSerial != consumedScrollSerial)) {
                         motion.reset()
                         continue
                     }
-                    val index = currentTurns.lastIndex
+                    val index = currentTailIndex
                     val layout = listState.layoutInfo
                     val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
                     if (last == null) {
@@ -144,7 +150,7 @@ internal fun ChatMessageList(
                         motion.reset()
                         // Recheck on subscription, including growth coalesced with reaching bottom.
                         snapshotFlow {
-                            val nextIndex = currentTurns.lastIndex
+                            val nextIndex = currentTailIndex
                             val nextLayout = listState.layoutInfo
                             val nextLast = nextLayout.visibleItemsInfo.lastOrNull { it.index == nextIndex }
                             nextLast == null || nextLast.offset + nextLast.size + nextLayout.afterContentPadding > nextLayout.viewportEndOffset
@@ -215,6 +221,15 @@ internal fun ChatMessageList(
                             turnExtras(turn)
                         }
                     }
+                    timelineAfter[turn.listKey].orEmpty().forEach { entry ->
+                        key(entry.id) { ChatTimelineDivider(entry) }
+                    }
+                }
+            }
+            if (compressionVisible) {
+                item(key = "chat-context-compressing", contentType = "compression") {
+                    CompressionProgressNotice(compressionActivity?.model?.model.orEmpty(), Modifier.animateItem(
+                        fadeInSpec = androidx.compose.animation.core.tween(180), placementSpec = null, fadeOutSpec = null))
                 }
             }
         }

@@ -36,7 +36,7 @@ class StreamingFollowContract(unittest.TestCase):
     def test_explicit_scroll_and_touch_keep_ownership(self):
         self.assertIn("currentScrollSerial != null && currentScrollSerial != consumedScrollSerial", self.follow)
         self.assertIn("currentScrollSerial == null || currentScrollSerial == consumedScrollSerial", self.follow)
-        self.assertIn("if (!followBottom || currentDragging || currentTurns.isEmpty()", self.follow)
+        self.assertIn("if (!followBottom || currentDragging || currentTailIndex < 0", self.follow)
         self.assertIn("followBottom = false; wasDragged = false", self.source)
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)
         self.assertIn("listState.animateScrollToItem(index)", self.source)

@@ -120,6 +120,7 @@ internal fun ModelSettingsScreen(
     onDelete: (() -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
 ) {
+    val speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(draft.endpoint)
     val latestDraft by rememberUpdatedState(draft)
     val latestEnabled by rememberUpdatedState(enabled)
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
@@ -146,12 +147,12 @@ internal fun ModelSettingsScreen(
             SettingsCard {
                 if (providerName != null) SettingsTextField("名称", draft.providerName ?: providerName,
                     { changeDraft(draft.copy(providerName = it)) }, enabled = enabled, compact = true, tag = "provider-name")
-                SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled, compact = true)
+                SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled && !speechOnly, compact = true)
                 SettingsTextField("API Key", draft.apiKey, { key ->
                     changeDraft(draft.copy(apiKey = key,
                         protocolChangeAuthorized = draft.protocol != draft.savedProtocol && key.isNotBlank()))
                 }, password = true, enabled = enabled, compact = true)
-                ProviderProtocolFields(draft, enabled, changeDraft)
+                if (!speechOnly) ProviderProtocolFields(draft, enabled, changeDraft)
                 if (credentialUnavailable) SettingsNote("密钥失效，请重输", error = true)
                 if (draft.savedProtocol == ProviderProtocol.UNKNOWN) SettingsNote("协议无效，请重选", error = true)
                 if (providerName == null && draft.protocol == ProviderProtocol.RESPONSES) {
@@ -167,12 +168,13 @@ internal fun ModelSettingsScreen(
                         { changeDraft(draft.copy(anthropicVersion = it)) },
                         hint = "留空使用 2023-06-01；格式 YYYY-MM-DD", enabled = enabled, compact = true)
                 }
-                SettingsSwitchRow("Provider 托管网页搜索", draft.openAiWebSearchEnabled,
+                if (!speechOnly) SettingsSwitchRow("Provider 托管网页搜索", draft.openAiWebSearchEnabled,
                     summary = "允许模型使用供应商提供的网页搜索",
                     enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES) {
                     changeDraft(draft.copy(openAiWebSearchEnabled = it))
                 }
                 if (testConnection != null) {
+                    if (speechOnly) SettingsNote("测试会合成“你好”，可能产生语音服务用量；不会播放或录音。")
                     if (providerName != null) {
                         ProviderActionButton(text = if (connection.running) "正在测试连接" else "测试连接",
                             enabled = enabled && !connection.running, onClick = connection.start,
@@ -227,7 +229,7 @@ internal fun ModelSettingsScreen(
                     }
                 }
             }
-            item(key = "provider_balance") {
+            if (!speechOnly) item(key = "provider_balance") {
                 ProviderBalanceFields(draft, enabled, changeDraft, testBalance, balance)
             }
         }

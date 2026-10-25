@@ -50,10 +50,13 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
         "ModelSettings(protocol=${protocol.wireName}, endpoint=$endpoint, model=$model, apiKey=<redacted>, batteryEnabled=$batteryEnabled, " +
             "responsesPath=$responsesPath, deviceStatusEnabled=$deviceStatusEnabled, requestOptions=$requestOptions)"
     fun validate() {
+        require(!app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint)) { "豆包语音提供商不能用于聊天" }
         validateConnection()
         require(model.isNotBlank()) { "请先在模型页选择模型" }
     }
     fun validateConnection() {
+        if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint))
+            app.daiyu.android.voice.providers.DoubaoSpeech.validateBaseUrl(endpoint)
         requestEndpoint()
         requestOptions.validate(protocol)
         require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }
@@ -432,8 +435,13 @@ class ModelSettingsStore internal constructor(
             // Still under catalog -> settings locks. A catalog failure compensates preferences below.
             // A connection/key change starts a fresh identity, even if wire model IDs happen to match.
             if (connectionChanged) {
-                modelCatalog.replaceRegisteredProvider(if (settings.model.isBlank()) emptyList() else listOf(CatalogModelParameters.fromCurrent(settings)))
+                val speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(settings.endpoint)
+                val initialModels = if (speechOnly) app.daiyu.android.voice.providers.DoubaoSpeech.catalogModels.map { (id, label) ->
+                    CatalogModelParameters.newModel(RemoteModel(id, label))
+                } else if (settings.model.isBlank()) emptyList() else listOf(CatalogModelParameters.fromCurrent(settings))
+                modelCatalog.replaceRegisteredProvider(initialModels)
                 catalogReplaced = true
+                if (speechOnly) modelCatalog.register(initialModels)
                 check(preferences.edit().remove(CATALOG_PENDING).commit()) { "提供商目录保存未确认" }
             } else {
                 if (previousConnection.model.isNotBlank() && previousConnection.model != settings.model && !previousEditing.requestOptionsUnavailable) {

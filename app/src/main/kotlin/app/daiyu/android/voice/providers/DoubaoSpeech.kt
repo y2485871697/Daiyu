@@ -11,6 +11,11 @@ import org.json.JSONTokener
 // Migrated/adapted from old f001fb82 tts/DoubaoSpeech.kt and CloudSpeechSynthesizer decoding.
 // This is the dedicated Doubao protocol, NOT an OpenAI /audio/speech compatibility shim.
 object DoubaoSpeech {
+    const val BASE_URL = "https://openspeech.bytedance.com"
+    val catalogModels = listOf(
+        "seed-tts-2.0" to "豆包语音合成 2.0",
+        "seed-audio-1.0" to "豆包音频生成 1.0",
+    )
     const val CREATE_URL = "https://openspeech.bytedance.com/api/v3/tts/create"
     const val UNIDIRECTIONAL_URL = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
 
@@ -27,6 +32,12 @@ object DoubaoSpeech {
         else -> "seed-tts-2.0"
     }
     fun requestId(): String = UUID.randomUUID().toString()
+
+    fun validateBaseUrl(baseUrl: String) {
+        val uri = VoiceUrls.validate(baseUrl, "https")
+        speechCheck(uri.host.equals("openspeech.bytedance.com", true) && uri.port in setOf(-1, 443) &&
+            uri.rawPath.orEmpty() in setOf("", "/")) { "请使用豆包语音官方服务地址" }
+    }
 
     fun request(config: SpeechProviderConfig, text: String, speaker: String, personal: DoubaoPersonalVoice? = null): VoiceHttpRequest {
         speechCheck(config.engine == SpeechEngine.DOUBAO && config.apiKey.isNotBlank()) { "请配置豆包语音 API Key" }

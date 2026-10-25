@@ -58,7 +58,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
             }
             node("provider-add").assertHasClickAction()
             node("provider-add-anthropic").assertHasClickAction()
-            node("provider-add-speech").assertHasNoClickAction()
+            node("provider-add-speech").assertHasClickAction()
         }
         assertEquals(saved, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())
@@ -154,7 +154,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         openProviderManagement()
         reveal("provider-add", "模型提供商").assertExists()
         reveal("provider-add-anthropic", "模型提供商").assertExists()
-        reveal("provider-add-speech", "模型提供商").assertHasNoClickAction()
+        reveal("provider-add-speech", "模型提供商").assertHasClickAction()
         reveal("provider-open-primary", "模型提供商").assertExists()
         node("provider-enabled-primary").assertDoesNotExist()
         node("provider-refresh").assertDoesNotExist()
@@ -167,4 +167,68 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("删除提供商").assertExists()
         assertEquals(0, fixture.opens.get())
     }
+    fun testDoubaoAddRegistersPresetsWithoutChangingChatOrOpeningModel() {
+        openProviderManagement()
+        val before = fixture.controller.providers.snapshot()
+        val chatBefore = before.activeSlotId?.let { fixture.controller.providers.editing(fixture.controller.providers.editor(it)).settings }
+        val voiceBefore = activity.getSharedPreferences("voice-credentials-v1", android.content.Context.MODE_PRIVATE).all.toMap()
+        reveal("provider-add-speech", "模型提供商").performClick()
+        awaitUniqueTag("page:添加提供商")
+        node("page:认证方式").assertDoesNotExist()
+        reveal("provider-name", "添加提供商").assertTextContains("豆包语音")
+        reveal("settings-field:Base URL", "添加提供商").assertTextContains("https://openspeech.bytedance.com")
+        node("provider-endpoint-select").assertDoesNotExist()
+        reveal("settings-field:API Key", "添加提供商").performTextReplacement("synthetic-doubao-key")
+        assertEquals(before, fixture.controller.providers.snapshot())
+        reveal("model-save", "添加提供商").performClick()
+        awaitUniqueTag("page:豆包语音")
+        val after = fixture.controller.providers.snapshot()
+        val added = after.providers.single { it.name == "豆包语音" }
+        assertTrue(added.enabled)
+        assertEquals(before.activeSlotId, after.activeSlotId)
+        val editor = fixture.controller.providers.editor(added.slotId)
+        val saved = fixture.controller.providers.editing(editor).settings
+        assertEquals("synthetic-doubao-key", saved.apiKey)
+        assertEquals("seed-tts-2.0", saved.model)
+        assertEquals(listOf("seed-tts-2.0", "seed-audio-1.0"),
+            fixture.controller.providers.catalogSnapshot(editor).models.map { it.id })
+        val originalIdentities = fixture.controller.providers.catalogSnapshot(editor).models.map { it.settings.localIdentity }
+        reveal("settings-field:API Key", "豆包语音").performTextReplacement("synthetic-doubao-replacement-key")
+        reveal("model-save", "豆包语音").performClick()
+        awaitControl("replacement speech key saved") {
+            fixture.controller.providers.editing(fixture.controller.providers.editor(added.slotId)).settings.apiKey == "synthetic-doubao-replacement-key"
+        }
+        awaitUniqueTag("page:豆包语音")
+        val replaced = fixture.controller.providers.catalogSnapshot(fixture.controller.providers.editor(added.slotId))
+        assertEquals(listOf("seed-tts-2.0", "seed-audio-1.0"), replaced.models.map { it.id })
+        assertTrue(replaced.models.none { it.settings.localIdentity in originalIdentities })
+        val source = app.daiyu.android.ui.screens.settings.SettingsModelSource(activity, fixture.controller.providers)
+        assertTrue(source.choices(app.daiyu.android.ui.screens.settings.SettingsModelProtocols).none { it.provider.slotId == added.slotId })
+        assertEquals(listOf("seed-tts-2.0"), source.speechChoices().filter { it.connection.provider.slotId == added.slotId }.map { it.model })
+        assertTrue(fixture.controller.savedSubAgentProviders().none { it.id == added.slotId })
+        try { fixture.controller.providers.activate(after.revision, added.slotId); fail("speech account activated for chat") }
+        catch (_: IllegalArgumentException) { }
+        assertEquals(after, fixture.controller.providers.snapshot())
+        val chatAfter = after.activeSlotId?.let { fixture.controller.providers.editing(fixture.controller.providers.editor(it)).settings }
+        assertEquals(chatBefore, chatAfter)
+        assertEquals(voiceBefore, activity.getSharedPreferences("voice-credentials-v1", android.content.Context.MODE_PRIVATE).all.toMap())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPausingUnsavedDoubaoProviderDoesNotRegister() {
+        openProviderManagement()
+        val before = fixture.controller.providers.snapshot()
+        reveal("provider-add-speech", "模型提供商").performClick()
+        awaitUniqueTag("page:添加提供商")
+        reveal("settings-field:API Key", "添加提供商").performTextReplacement("must-not-persist")
+        realPauseResume(activity, atPause = {})
+        node("page:添加提供商").assertDoesNotExist()
+        assertEquals(before, fixture.controller.providers.snapshot())
+        assertEquals(0, fixture.opens.get())
+        reveal("provider-add-speech", "模型提供商").performClick()
+        awaitUniqueTag("page:添加提供商")
+        reveal("settings-field:API Key", "添加提供商").assertTextEquals("")
+        reveal("provider-name", "添加提供商").assertTextContains("豆包语音")
+    }
+
 }

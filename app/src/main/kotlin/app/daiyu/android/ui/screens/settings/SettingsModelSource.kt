@@ -30,7 +30,7 @@ internal class SettingsModelSource(context: Context, private val providers: Prov
     fun remember(feature: String, choice: SettingsModelChoice) {
         check(labels.edit().putString("$feature.label", choice.label).putString("$feature.key", choice.key).putString("$feature.protocol", choice.protocol.wireName).commit())
     }
-    fun choices(protocols: Set<ProviderProtocol>): List<SettingsModelChoice> {
+    fun choices(protocols: Set<ProviderProtocol>, includeSpeech: Boolean = false): List<SettingsModelChoice> {
         val state = providers.snapshot()
         val result = state.providers.filter { it.enabled }.flatMap { provider ->
             val editor = providers.editor(provider.slotId)
@@ -39,7 +39,9 @@ internal class SettingsModelSource(context: Context, private val providers: Prov
                 store.modelCatalog.readConfiguration {
                     val protocol = store.localModelCatalogProtocol()
                     val catalog = store.localModelCatalogSnapshot()
-                    if (protocol !in protocols || catalog == null) emptyList() else catalog.models.map { record ->
+                    val endpoint = store.nonSecretConfiguration()["endpoint"] as? String ?: ""
+                    if (protocol !in protocols || catalog == null ||
+                        (!includeSpeech && app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint))) emptyList() else catalog.models.map { record ->
                         SettingsModelChoice(editor, provider.name, protocol, checkNotNull(catalog.selectionFor(record.id)),
                             store.nonSecretConfiguration()["endpoint"] as? String ?: "")
                     }
@@ -51,7 +53,7 @@ internal class SettingsModelSource(context: Context, private val providers: Prov
     }
     fun speechChoices(): List<SettingsSpeechModelChoice> {
         val state = providers.snapshot()
-        val cached = choices(SettingsModelProtocols - ProviderProtocol.MESSAGES)
+        val cached = choices(SettingsModelProtocols - ProviderProtocol.MESSAGES, includeSpeech = true)
             .filter { SpeechModelCapabilities.readAloud(it.selection.record.id) }
         val result = state.providers.filter { it.enabled }.flatMap { provider ->
             val editor = providers.editor(provider.slotId)

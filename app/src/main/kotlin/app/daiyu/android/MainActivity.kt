@@ -5752,12 +5752,14 @@ class MainActivity : ComponentActivity() {
                 val choices = registry.providers.filter { it.enabled }.mapNotNull { provider ->
                     val editor = ProviderEditorSlot(provider.slotId, registry.revision)
                     runCatching { controller.providers.withEditor(editor) { store ->
-                        ChatModelProviderChoice(editor, if (provider.slotId == registry.activeSlotId) store.load() else null,
+                        val endpoint = store.nonSecretConfiguration()["endpoint"] as? String ?: ""
+                        if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint)) null
+                        else ChatModelProviderChoice(editor, if (provider.slotId == registry.activeSlotId) store.load() else null,
                             store.localModelCatalogSnapshot())
                     } }.getOrNull()?.let { provider.slotId to it }
                 }.toMap()
                 check(controller.providers.snapshot().revision == registry.revision) { "提供商列表已变化" }
-                val groups = registry.providers.filter { it.enabled }.map { provider ->
+                val groups = registry.providers.filter { it.enabled && it.slotId in choices }.map { provider ->
                     ChatModelProviderUi(provider.slotId, provider.name,
                         choices[provider.slotId]?.catalog?.models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) },
                         balance = controller.providerBalances.get(provider.slotId).state.value)

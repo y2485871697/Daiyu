@@ -10,7 +10,8 @@ import java.util.concurrent.CancellationException
 /** Blocking worker-side facade. Saved and draft credentials never share a request. */
 class ModelCatalogService(
     private val loadSaved: () -> ModelSettings,
-    private val fetcher: RemoteModelFetcher = RemoteModelFetcher()
+    private val fetcher: RemoteModelFetcher = RemoteModelFetcher(),
+    private val speechTransport: app.daiyu.android.voice.providers.VoiceHttpTransport? = null,
 ) {
     constructor(store: ModelSettingsStore, fetcher: RemoteModelFetcher = RemoteModelFetcher()) :
         this(store::load, fetcher)
@@ -55,7 +56,10 @@ class ModelCatalogService(
     }
 
     internal fun testDraft(settings: ModelSettings, isCancelled: () -> Boolean): ModelConnectionResult = try {
-        ModelConnectionResult.Connected(fetchDraft(settings, isCancelled).size)
+        if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(settings.endpoint))
+            app.daiyu.android.voice.providers.DoubaoSpeechConnection(speechTransport
+                ?: app.daiyu.android.voice.network.OkHttpVoiceTransport()).test(settings, isCancelled)
+        else ModelConnectionResult.Connected(fetchDraft(settings, isCancelled).size)
     } catch (_: InterruptedException) {
         ModelConnectionResult.Failed(RemoteModelFailure.CANCELLED)
     } catch (_: CancellationException) {
@@ -70,6 +74,10 @@ class ModelCatalogService(
 
     fun fetchDraft(settings: ModelSettings, isCancelled: () -> Boolean = { false }): List<RemoteModel> {
         if (Thread.currentThread().isInterrupted || isCancelled()) throw InterruptedException()
+        if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(settings.endpoint)) {
+            settings.validateConnection()
+            return app.daiyu.android.voice.providers.DoubaoSpeech.catalogModels.map { (id, label) -> RemoteModel(id, label) }
+        }
         val request = catalogRequest(settings)
         val models = fetcher.fetch(request, isCancelled)
         if (Thread.currentThread().isInterrupted || isCancelled()) throw InterruptedException()

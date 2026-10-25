@@ -114,7 +114,7 @@ class ProviderVisualContractTest(unittest.TestCase):
         for fragment in ('listOf(false, true)', 'listOf(.9f, 1.3f)', 'key(dark, fontScale)',
                          'useUnmergedTree = true', 'icon.left', 'title.left', 'summary.left',
                          'row.center.y, icon.center.y', 'checkNotNull(iconWidth), icon.width',
-                         'checkNotNull(iconHeight), icon.height', 'node("provider-add-speech").assertHasNoClickAction()',
+                         'checkNotNull(iconHeight), icon.height', 'node("provider-add-speech").assertHasClickAction()',
                          'testAnthropicAddUsesInlineNameAndKeepsProviderDisabled'):
             self.assertIn(fragment, directory)
 

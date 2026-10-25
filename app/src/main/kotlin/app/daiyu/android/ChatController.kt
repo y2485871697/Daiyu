@@ -1453,7 +1453,9 @@ class ChatController internal constructor(private val application:Application,
             check(editor.registryRevision == state.revision)
             providers.withEditor(editor) { store ->
                 store.modelCatalog.readConfiguration {
-                    store.localModelCatalogSnapshot()?.let { snapshot ->
+                    val endpoint = store.nonSecretConfiguration()["endpoint"] as? String ?: ""
+                    if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint)) null
+                    else store.localModelCatalogSnapshot()?.let { snapshot ->
                         projectSubAgentProvider(snapshot, store.localModelCatalogProtocol()).copy(id = row.slotId, name = row.name)
                     }
                 }

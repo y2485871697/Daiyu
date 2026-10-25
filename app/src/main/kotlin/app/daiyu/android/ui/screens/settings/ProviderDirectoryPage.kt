@@ -23,7 +23,7 @@ import top.yukonga.miuix.kmp.basic.Text
 internal data class ProviderCardSummary(val endpoint: String, val protocol: ProviderProtocol, val modelCount: Int?) {
     fun description(enabled: Boolean): String = listOfNotNull(
         endpoint.takeIf { it.isNotBlank() },
-        listOfNotNull(when (protocol) {
+        listOfNotNull(if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint)) "豆包语音" else when (protocol) {
             ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS -> "Custom OpenAI-compatible"
             ProviderProtocol.MESSAGES -> "Anthropic"
             else -> null
@@ -40,6 +40,7 @@ internal fun ProviderDirectoryPage(
     onOpen: (RegisteredProvider) -> Unit, onManage: (RegisteredProvider) -> Unit,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
+    onAddSpeech: () -> Unit = {},
 ) {
     SettingsScaffoldPage("模型提供商", onBack, modifier, listState = listState) {
         item("provider-search") {
@@ -61,7 +62,7 @@ internal fun ProviderDirectoryPage(
                     showChevron = true, onClick = if (enabled) onAddAnthropic else null)
                 SettingsRow("新增豆包语音", summary = "仅用于朗读，填写语音控制台 API Key，不是方舟聊天 Key。",
                     tag = "provider-add-speech", leading = { DaiyuIcon(DaiyuIcons.Voice, null, Modifier.testTag("provider-add-speech-icon")) },
-                    trailing = { DaiyuIcon(DaiyuIcons.ChevronRight, null) })
+                    showChevron = true, onClick = if (enabled) onAddSpeech else null)
             }
         }
         item("provider-count") { SettingsSectionTitle("已配置提供商（共 ${registry?.providers?.size ?: 0} 个）") }

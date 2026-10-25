@@ -58,9 +58,12 @@ private class PausedProviderDraft(
     val draft: ModelSettingsDraftUi, val balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration?,
     val pageUi: ProviderPageUiState,
 )
-private class NewProviderDraft(protocol: ProviderProtocol) {
+private class NewProviderDraft(protocol: ProviderProtocol, val speechOnly: Boolean = false) {
     var error by mutableStateOf<String?>(null)
-    var draft by mutableStateOf(ModelSettingsDraftUi(providerName = "").selectProtocol(protocol))
+    var draft by mutableStateOf((if (speechOnly) ModelSettingsDraftUi(
+        providerName = "豆包语音", endpoint = app.daiyu.android.voice.providers.DoubaoSpeech.BASE_URL,
+        model = "seed-tts-2.0", providerEnabled = true,
+    ) else ModelSettingsDraftUi(providerName = "")).selectProtocol(protocol))
     var balanceTestJob: kotlinx.coroutines.Job? = null
     fun revoke() { balanceTestJob?.cancel(); balanceTestJob = null }
 }
@@ -293,6 +296,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     if (enabled && creating === newProvider && newProvider.draft === submitted && expected != null) {
                         val value = runCatching {
                             ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
+                            require(!newProvider.speechOnly || app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(submitted.endpoint))
                             submitted.providerBalanceConfiguration()?.validateProviderBinding()
                             require(!submitted.balanceOption.enabled || submitted.providerBalanceConfiguration() != null)
                             require(submitted.headerFieldsValid && submitted.bodyFieldsValid)
@@ -349,6 +353,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             val save: (ModelSettingsDraftUi) -> Unit = { submitted ->
                 if (live() && enabled && d.draft === submitted) {
                     val value = runCatching {
+                        require(!app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(saved.endpoint) ||
+                            app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(submitted.endpoint)) { "请使用豆包语音服务地址" }
                         require(submitted.headerFieldsValid && submitted.bodyFieldsValid) { "请先修正请求头或请求体字段。" }
                         require(submitted.savedProtocol == saved.protocol) { "编辑基线已变化，请重新打开详情。" }
                         require(submitted.protocol == saved.protocol || submitted.protocolChangeAuthorized) {
@@ -514,18 +520,23 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 notice, onBack = { back() },
                 onAddOpenAi = { if (enabled) authentication = true },
                 onAddAnthropic = { if (enabled) creating = NewProviderDraft(ProviderProtocol.MESSAGES) },
+                onAddSpeech = { if (enabled) creating = NewProviderDraft(ProviderProtocol.CHAT_COMPLETIONS, speechOnly = true) },
                 onOpen = { if (enabled) open(it.slotId) },
                 onManage = { if (enabled) managing = it }, modifier = Modifier.testTag("provider-management"),
                 listState = directoryListState)
         }
         val managed = managing
         val managedRegistry = registry
+        val managedSpeech = managed?.let { summaries[it.slotId]?.endpoint }?.let {
+            app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(it)
+        } == true
         if (managed != null && managedRegistry != null) DaiyuChoiceSheet(managed.name,
-            listOf("配置与模型", if (managed.enabled) "禁用" else "启用", "设为当前提供商", "删除提供商"),
+            listOf("配置与模型", if (managed.enabled) "禁用" else "启用") +
+                (if (managedSpeech) emptyList() else listOf("设为当前提供商")) + "删除提供商",
             onSelect = { index ->
                 if (current(p) && enabled && managing === managed) {
                     managing = null
-                    when (index) {
+                    when (if (managedSpeech && index == 2) 3 else index) {
                         0 -> open(managed.slotId)
                         1 -> mutate(managedRegistry, p) { repo, revision, admit ->
                             repo.setEnabled(revision, managed.slotId, !managed.enabled, admit)

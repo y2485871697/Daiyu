@@ -18,7 +18,7 @@ internal object SpeechModelCapabilities {
     fun builtInModels(endpoint: String): List<Pair<String, String>> {
         val host = host(endpoint)
         return when {
-            host == "openspeech.bytedance.com" -> listOf("seed-tts-2.0" to "豆包语音合成 2.0")
+            host == "openspeech.bytedance.com" -> DoubaoSpeech.catalogModels.filter { readAloud(it.first) }
             "xiaomimimo" in host -> listOf("mimo-v2.5-tts" to "小米语音 2.5")
             "minimax" in host -> listOf("speech-2.8-hd" to "MiniMax Speech 2.8 HD", "speech-2.6-hd" to "MiniMax Speech 2.6 HD")
             "stepfun" in host -> listOf("step-tts-mini" to "Step TTS Mini", "stepaudio-2.5-tts" to "StepAudio 2.5 TTS")

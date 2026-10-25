@@ -292,10 +292,15 @@ private fun ModelUsagePane(
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
                 UsageTokenRows(tokens)
                 ModelMetricRow(stringResource(R.string.stats_model_cache_hit_rate),
-                    if (stats.tokenAccountingAvailable && filtered.providers.isNotEmpty() && filtered.totalInputTokens > 0L)
-                        formatCacheHitRate(filtered.totalCachedTokens, filtered.totalInputTokens) else "—")
+                    if (stats.tokenAccountingAvailable && tokens.input != null && tokens.cached != null && tokens.input > 0L)
+                        formatCacheHitRate(tokens.cached, tokens.input) else "—")
             }
         }
+        if (stats.unattributedUsageRequests > 0 || stats.accountingFailure) Text(
+            "仅含已知模型及日期的请求；${stats.unattributedUsageRequests} 笔历史用量未归属。" +
+                (if (stats.accountingFailure) "用量保存曾失败，请查看错误日志。" else ""),
+            style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp), color = usagePalette().muted,
+            modifier = Modifier.testTag("usage-model-coverage"))
         if (filtered.providers.isEmpty()) {
             Text(
                 text = stringResource(
@@ -613,35 +618,35 @@ private fun ModelUsageRow(
             ) {
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_token_total),
-                    value = formatTokenCount(model.totalTokens),
+                    value = formatUsageTokens(model.totalTokens.takeIf { model.inputComplete && model.outputComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_fresh_input_tokens),
-                    value = formatTokenCount(model.freshInputTokens),
+                    value = formatUsageTokens(model.freshInputTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_output_tokens),
-                    value = formatTokenCount(model.outputTokens),
+                    value = formatUsageTokens(model.outputTokens.takeIf { model.outputComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_cached_tokens),
-                    value = formatTokenCount(model.cachedTokens),
+                    value = formatUsageTokens(model.cachedTokens.takeIf { model.cachedComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_cache_creation_tokens),
-                    value = formatTokenCount(model.cacheCreationTokens),
+                    value = formatUsageTokens(model.cacheCreationTokens.takeIf { model.creationComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_cache_hit_rate),
-                    value = formatCacheHitRate(model.cachedTokens, model.inputTokens),
+                    value = if (model.cachedComplete && model.inputComplete) formatCacheHitRate(model.cachedTokens, model.inputTokens) else "—",
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_daily_avg),
-                    value = formatTokenCount(model.dailyAverageTokens),
+                    value = formatUsageTokens(model.dailyAverageTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_conversation_avg),
-                    value = formatTokenCount(model.conversationAverageTokens),
+                    value = formatUsageTokens(model.conversationAverageTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_conversations),
@@ -805,6 +810,7 @@ private fun HeatmapCell(
 private fun UsageTokenRows(tokens: UsageTokenMetrics) {
     ModelMetricRow(stringResource(R.string.stats_page_token_total), formatUsageTokens(tokens.total))
     ModelMetricRow("输入（含缓存）", formatUsageTokens(tokens.input))
+    ModelMetricRow(stringResource(R.string.stats_page_fresh_input_tokens), formatUsageTokens(freshInput(tokens)))
     ModelMetricRow(stringResource(R.string.stats_page_output_tokens), formatUsageTokens(tokens.output))
     ModelMetricRow(stringResource(R.string.stats_page_cached_tokens), formatUsageTokens(tokens.cached))
     ModelMetricRow(stringResource(R.string.stats_page_cache_creation_tokens), formatUsageTokens(tokens.creation))
@@ -813,6 +819,9 @@ private fun UsageTokenRows(tokens: UsageTokenMetrics) {
 @Composable
 private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
     val tokens = stats.overviewTokens
+    val currentTokens = stats.currentAccountingTokens
+    fun scoped(current: Long?, lifetime: Long?): String = if (currentTokens == null) formatUsageTokens(lifetime)
+        else formatCurrentLifetime(formatUsageTokens(current), formatUsageTokens(lifetime))
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -841,16 +850,26 @@ private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) 
             )
         }
         StatCard(Modifier.fillMaxWidth(), Icons.Rounded.Add,
-            stringResource(R.string.stats_page_token_total), formatUsageTokens(tokens.total))
+            stringResource(R.string.stats_page_token_total), scoped(currentTokens?.total, tokens.total))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            StatCard(Modifier.weight(1f), Icons.Rounded.Keyboard, "输入（含缓存）", formatUsageTokens(tokens.input))
+            StatCard(Modifier.weight(1f), Icons.Rounded.Keyboard, "输入（含缓存）", scoped(currentTokens?.input, tokens.input))
             StatCard(Modifier.weight(1f), Icons.AutoMirrored.Rounded.Notes,
-                stringResource(R.string.stats_page_output_tokens), formatUsageTokens(tokens.output))
+                stringResource(R.string.stats_page_output_tokens), scoped(currentTokens?.output, tokens.output))
         }
+        StatCard(Modifier.fillMaxWidth(), Icons.Rounded.Keyboard,
+            stringResource(R.string.stats_page_fresh_input_tokens), scoped(currentTokens?.let(::freshInput), freshInput(tokens)))
         StatCard(Modifier.fillMaxWidth(), Icons.Rounded.Bolt,
-            stringResource(R.string.stats_page_cached_tokens), formatUsageTokens(tokens.cached))
+            stringResource(R.string.stats_page_cached_tokens), scoped(currentTokens?.cached, tokens.cached))
         StatCard(Modifier.fillMaxWidth(), Icons.Rounded.Add,
-            stringResource(R.string.stats_page_cache_creation_tokens), formatUsageTokens(tokens.creation))
+            stringResource(R.string.stats_page_cache_creation_tokens), scoped(currentTokens?.creation, tokens.creation))
+        if (stats.unknownConversationDates > 0 || stats.unattributedUsageRequests > 0 || stats.accountingFailure) {
+            Text(buildString {
+                if (stats.unknownConversationDates > 0) append("${stats.unknownConversationDates} 个旧会话缺少创建日期；热力图仅含已知日期。")
+                if (stats.unattributedUsageRequests > 0) append("${stats.unattributedUsageRequests} 笔历史用量缺少模型或日期，已计入总览，不参与模型和日期筛选。")
+                if (stats.accountingFailure) append("本次进程曾发生用量保存失败，请查看错误日志。")
+            }, style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp), color = usagePalette().muted,
+                modifier = Modifier.testTag("usage-accounting-coverage"))
+        }
         StatCard(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             icon = Icons.Rounded.RocketLaunch,
@@ -858,6 +877,13 @@ private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) 
             value = if (stats.lifetimeAccountingAvailable) formatStatCount(stats.launchCount.toLong()) else "—",
         )
     }
+}
+
+private fun freshInput(tokens: UsageTokenMetrics): Long? {
+    val input = tokens.input ?: return null
+    val cached = tokens.cached ?: return null
+    val creation = tokens.creation ?: return null
+    return (input - cached).coerceAtLeast(0L).let { (it - creation).coerceAtLeast(0L) }
 }
 
 private fun formatCurrentLifetime(current: String, lifetime: String): String =

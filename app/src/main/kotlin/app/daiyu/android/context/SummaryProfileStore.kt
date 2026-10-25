@@ -25,7 +25,7 @@ data class SummaryProfileSettings(
 ) {
     internal fun configuration(): SummaryProviderConfiguration {
         require(!provider.batteryEnabled && !provider.deviceStatusEnabled) { "摘要 profile 不得启用工具" }
-        val snapshot = provider.requestSnapshot()
+        val snapshot = provider.copy(usageIdentity = provider.usageIdentity ?: app.daiyu.android.model.UsageModelIdentity(binding.providerId, "摘要模型")).requestSnapshot()
         SummaryProviderFactory.validate(snapshot)
         return SummaryProviderConfiguration(binding, snapshot, provider.model,
             budgets.contextWindowTokens, budgets.inputBudgetTokens, budgets.maxOutputTokens,

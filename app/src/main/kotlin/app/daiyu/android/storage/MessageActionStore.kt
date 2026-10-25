@@ -107,6 +107,7 @@ internal class MessageActionStore(private val database: ConversationDatabase,
             removed.any { it.id == segment.messageId }
         } }) { "不能删除另一所有者引用的消息" }
         history.forEach { SQLiteMessageVideoStore.readVerified(db, it) }
+        UsageStatisticsStore.retireMessages(db, removed)
         removed.forEach { row ->
             db.delete("neutral_assets", "message_id=?", arrayOf(row.id.value))
             db.delete(SQLiteGenerationOutputStore.TABLE, "conversation_id=? AND assistant_id=? AND run_id=?",

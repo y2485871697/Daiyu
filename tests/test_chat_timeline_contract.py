@@ -62,9 +62,9 @@ class ChatTimelineContractTest(unittest.TestCase):
 
     def test_backup_v7_validates_display_payload_and_authoritative_anchor(self):
         backup = source('backup/NeutralBackupService.kt')
-        self.assertIn('columnsFor(7)', backup)
-        self.assertIn('validatePayload(7, "export-validation"', backup)
-        self.assertIn('spool.write(7, payload)', backup)
+        self.assertIn('columnsFor(8)', backup)
+        self.assertIn('validatePayload(8, "export-validation"', backup)
+        self.assertIn('spool.write(8, payload)', backup)
         self.assertIn('require(entry.anchor.listKey in anchors)', backup)
         codec = source('timeline/ChatTimelineStore.kt')
         self.assertIn('row.keys().asSequence().toSet() == common + detail', codec)

@@ -13,11 +13,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 26), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 27), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
+    internal val usageLaunchCount: Int get() = usagePreferences.getInt("launch_count", 0)
+    private val usagePreferences = context.getSharedPreferences("usage-statistics-local", Context.MODE_PRIVATE)
     internal val runtimeLockFile = java.io.File(context.getDatabasePath("conversations.db").canonicalPath + ".runtime-owner")
     /** A message row keeps the v4 columns as the legacy projection.  This column is an
      * append-only, lossless history of the provider attempts.  Empty means an old row and
@@ -49,6 +51,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         RecordedUsageHistory.install(db)
         AssistantReplyIdentities.install(db)
         app.daiyu.android.timeline.ChatTimelineStore.install(db)
+        UsageStatisticsStore.install(db)
     }
     private fun installGenerationSchema(db: SQLiteDatabase) {
         SQLiteGenerationAttemptStore.installSchema(db)
@@ -59,7 +62,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..25 && newVersion == 26) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..26 && newVersion == 27) { "不支持此数据库版本，保留原数据" }
         app.daiyu.android.timeline.ChatTimelineStore.install(db)
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
@@ -108,6 +111,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         CloudContextUsageStore.installSchema(db)
         ConversationUsageStore.installSchema(db)
         ConversationUsageStore.backfill(db)
+        UsageStatisticsStore.install(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
@@ -249,12 +253,14 @@ class ConversationDatabase internal constructor(context: Context, private val af
             // NULL is reserved for explicit legacy/import fixtures, never a global fallback.
             if (assistantId != null) requireAssistant(db, assistantId)
             check(db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",assistantId)}) != -1L)
+            UsageStatisticsStore.created(db, value.id.value, value.updatedAt)
         }
         return value
     }
     fun draft(id: ConversationId, text: String) {check(writableDatabase.update("conversations",ContentValues().apply {put("draft",text)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun rename(id: ConversationId, title: String) { require(title.isNotBlank());check(writableDatabase.update("conversations",ContentValues().apply {put("title",title)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun delete(id: ConversationId) { transaction { db ->
+        UsageStatisticsStore.retire(db, id.value)
         SQLiteMessageVideoStore.deleteConversation(db, id.value)
         db.delete(SQLiteGenerationOutputStore.TABLE, "conversation_id=?", arrayOf(id.value))
         db.rawQuery("SELECT 1 FROM generation_outputs WHERE conversation_id=? LIMIT 1", arrayOf(id.value)).use {
@@ -331,6 +337,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 val value=Conversation(user.conversationId,"新会话","",System.currentTimeMillis(),assistantId=expectedAssistantId)
                 newConversationRowId=db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",expectedAssistantId)})
                 check(newConversationRowId != -1L) {"新会话未持久化"}
+                UsageStatisticsStore.created(db, value.id.value, value.updatedAt)
                 check(db.update("composer",ContentValues().apply {put("draft","")},"id=1",null)==1)
             }
             check(db.update("conversations",ContentValues().apply {if (!preserveDraft) put("draft","");put("updated",System.currentTimeMillis())},"id=?",arrayOf(user.conversationId.value))==1) {"会话不存在"}

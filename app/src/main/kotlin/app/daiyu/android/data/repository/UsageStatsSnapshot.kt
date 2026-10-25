@@ -24,16 +24,27 @@ internal data class UsageStatsSnapshot(
     val conversationsPerDay: Map<LocalDate, Int> = emptyMap(),
     val launchCount: Int = 0,
     val modelUsage: ModelUsageSnapshot = ModelUsageSnapshot(),
+    val currentAccountingTokens: UsageTokenMetrics? = null,
+    val lifetimeAccountingTokens: UsageTokenMetrics? = null,
+    val unknownConversationDates: Int = 0,
+    val unattributedUsageRequests: Int = 0,
+    val accountingFailure: Boolean = false,
     val recordedUsage: RecordedUsageStats? = null,
     val attributedUsage: app.daiyu.android.model.usage.AttributedUsageStats? = null,
 ) {
     val recordedProjection: RecordedUsageProjection? get() = attributedUsage?.let(::RecordedUsageProjection)
-    val overviewTokens: UsageTokenMetrics get() = recordedProjection?.tokens ?: UsageTokenMetrics()
-    fun modelTokens(filtered: ModelUsageSnapshot): UsageTokenMetrics =
-        if (tokenAccountingAvailable && filtered.providers.isNotEmpty()) UsageTokenMetrics(
-            filtered.totalInputTokens, filtered.totalOutputTokens, filtered.totalCachedTokens,
-            filtered.totalCacheCreationTokens, filtered.totalTokens,
-        ) else UsageTokenMetrics()
+    val overviewTokens: UsageTokenMetrics get() = lifetimeAccountingTokens ?: recordedProjection?.tokens ?: UsageTokenMetrics()
+    fun modelTokens(filtered: ModelUsageSnapshot): UsageTokenMetrics {
+        if (!tokenAccountingAvailable) return UsageTokenMetrics()
+        val models = filtered.models
+        fun metric(complete: (ModelUsageModelUi) -> Boolean, value: (ModelUsageModelUi) -> Long): Long? =
+            if (models.all(complete) && models.tokenSumAvailable(value)) models.safeTokenSum(value) else null
+        val input = metric({ it.inputComplete }, { it.inputTokens })
+        val output = metric({ it.outputComplete }, { it.outputTokens })
+        return UsageTokenMetrics(input, output, metric({ it.cachedComplete }, { it.cachedTokens }),
+            metric({ it.creationComplete }, { it.cacheCreationTokens }),
+            if (input == null || output == null || input > Long.MAX_VALUE - output) null else input + output)
+    }
     val totalConversations: Int get() = currentConversations
     val totalMessages: Int get() = currentMessages
     val totalInputTokens: Long get() = lifetimeInputTokens

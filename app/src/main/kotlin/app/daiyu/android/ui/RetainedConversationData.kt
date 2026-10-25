@@ -164,11 +164,10 @@ internal class RetainedConversationData(private val database: ConversationDataba
     }
 
     fun stats(): UsageStatsSnapshot = DatabaseTransactions { database.readableDatabase }.run { db ->
-        val conversations = db.rawQuery("SELECT COUNT(*) FROM conversations", null).use { it.moveToFirst(); it.getInt(0) }
-        val messages = db.rawQuery("SELECT COUNT(*) FROM messages", null).use { it.moveToFirst(); it.getInt(0) }
         val usage = RecordedUsageReader.readAttributed(db)
-        UsageStatsSnapshot(currentDataAvailable = true, currentConversations = conversations,
-            currentMessages = messages, recordedUsage = usage.parentCoverage, attributedUsage = usage)
+        app.daiyu.android.storage.UsageStatisticsStore.snapshot(db, database.usageLaunchCount).copy(
+            recordedUsage = usage.parentCoverage, attributedUsage = usage,
+            accountingFailure = app.daiyu.android.model.usage.UsageAccounting.failures.value != null)
     }
 
     fun folders(): List<ConversationFolderUi> {

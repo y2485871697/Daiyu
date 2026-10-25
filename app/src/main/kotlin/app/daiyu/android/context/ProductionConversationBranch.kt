@@ -155,6 +155,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                     put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis())
                 }
                 check(db.insertOrThrow("conversations", null, values) != -1L)
+                app.daiyu.android.storage.UsageStatisticsStore.created(db, copy.value, values.getAsLong("updated"))
                 copied.forEachIndexed { position, mapped ->
                     check(db.insertOrThrow("messages", null, ContextService.messageValues(mapped)) != -1L)
                     snapshot.replyIdentities[position]?.let { AssistantReplyIdentities.insert(db, mapped, it) }

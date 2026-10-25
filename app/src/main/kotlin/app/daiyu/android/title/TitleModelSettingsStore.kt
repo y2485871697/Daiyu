@@ -58,7 +58,7 @@ class TitleModelSettingsStore internal constructor(
         if (!settings.enabled || settings.binding != binding) unavailable()
         val provider = try { loadModel() } catch (_: Exception) { unavailable() }
         if (savedIdentity != identity(provider)) unavailable()
-        try { validate(provider); provider.requestSnapshot() } catch (_: Exception) { unavailable() }
+        try { validate(provider); provider.copy(usageIdentity = app.daiyu.android.model.UsageModelIdentity(binding.providerId, "标题模型")).requestSnapshot() } catch (_: Exception) { unavailable() }
     }
 
     /** Serialize the final DB CAS with local disable/rebind; never silently use a new profile. */

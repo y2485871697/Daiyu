@@ -30,7 +30,7 @@ class RecordedUsageProjectionTest {
         assertEquals(value.tokens, snapshot.overviewTokens)
         assertEquals(UsageTokenMetrics(), snapshot.modelTokens(ModelUsageSnapshot()))
         val attributedOnly = snapshot.copy(tokenAccountingAvailable = true)
-        assertEquals(UsageTokenMetrics(), attributedOnly.modelTokens(ModelUsageSnapshot()))
+        assertEquals(UsageTokenMetrics(0, 0, 0, 0, 0), attributedOnly.modelTokens(ModelUsageSnapshot()))
         assertEquals(UsageTokenMetrics(), UsageStatsSnapshot(tokenAccountingAvailable = true,
             currentInputTokens = 900).overviewTokens)
         val partial = projection(listOf(row(false, ModelEvent.Usage(null, 0, null))))

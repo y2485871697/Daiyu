@@ -49,7 +49,7 @@ internal object ManualSummaryTargets {
                 // Keep registry/catalog locks across metadata comparison and credential capture.
                 if (descriptor(repo, expected.binding) != expected) throw SummaryProfileChangedException()
                 val target = ticket.target
-                val frozen = if (target == null) store.loadForRun() else repo.freezeCatalog(target).settings
+                val frozen = if (target == null) repo.freezeActive().settings else repo.freezeCatalog(target).settings
                 CatalogSummaryExecutionPolicy.configuration(expected.binding,
                     CatalogSummaryExecutionPolicy.summarySettings(forSummary(frozen, ticket.protocol)))
             }

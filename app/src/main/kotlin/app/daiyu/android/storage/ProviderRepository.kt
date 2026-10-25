@@ -131,15 +131,15 @@ internal class ProviderRepository(
                 }
             } catch (_: StaleProviderRegistryException) { CatalogCommitResult.STALE }
         }
-    fun catalogEndpoint(target: ProviderCatalogRunTarget): String = withCatalogTarget(target) { store, _ ->
+    fun catalogEndpoint(target: ProviderCatalogRunTarget): String = withCatalogTarget(target) { store, _, _ ->
         store.catalogRequestEndpoint(target.apiModel)
     }
     fun freezeCatalog(target: ProviderCatalogRunTarget, checkDescriptor: (String) -> Unit = {}): ProviderRunConfiguration =
-        withCatalogTarget(target) { store, revision ->
+        withCatalogTarget(target) { store, revision, provider ->
             checkDescriptor(store.catalogRequestEndpoint(target.apiModel))
-            ProviderRunConfiguration(target.editor, store.loadForRun(target.apiModel).also { it.validate() }, revision)
+            ProviderRunConfiguration(target.editor, store.loadForRun(target.apiModel).also { it.validate() }.copy(usageIdentity = app.daiyu.android.model.UsageModelIdentity(provider.slotId, provider.name)), revision)
         }
-    private fun <T> withCatalogTarget(target: ProviderCatalogRunTarget, block: (ModelSettingsStore, Long) -> T): T = registry.access { state ->
+    private fun <T> withCatalogTarget(target: ProviderCatalogRunTarget, block: (ModelSettingsStore, Long, RegisteredProvider) -> T): T = registry.access { state ->
         if (!matches(state, target.editor)) throw StaleProviderRegistryException()
         check(requireProvider(state, target.editor.slotId).enabled) { "提供商未启用" }
         val store = resolveStore(target.editor.slotId)
@@ -150,7 +150,7 @@ internal class ProviderRepository(
             check(catalog.providerIdentity == target.catalogIdentity) { "提供商连接已变化" }
             val record = checkNotNull(catalog.models.singleOrNull { it.id == target.apiModel }) { "摘要模型已删除" }
             check(record.settings.localIdentity == target.localIdentity) { "摘要模型记录已变化" }
-            block(store, revision)
+            block(store, revision, requireProvider(state, target.editor.slotId))
         }
     }
     /** UI metadata only; never decrypts keys/headers, validates credentials or creates a request. */
@@ -170,7 +170,7 @@ internal class ProviderRepository(
         check(requireProvider(state, id).enabled) { "提供商未启用" }
         val store = resolveStore(id)
         store.modelCatalog.readConfiguration { revision ->
-            ProviderRunConfiguration(ProviderEditorSlot(id, state.revision), store.loadForRun().also { it.validate() }, revision)
+            ProviderRunConfiguration(ProviderEditorSlot(id, state.revision), store.loadForRun().also { it.validate() }.copy(usageIdentity = app.daiyu.android.model.UsageModelIdentity(id, requireProvider(state, id).name)), revision)
         }
     }
     fun isCurrentActive(frozen: ProviderRunConfiguration): Boolean = try {
@@ -180,7 +180,7 @@ internal class ProviderRepository(
             else {
                 val store = resolveStore(frozen.editor.slotId)
                 store.modelCatalog.readConfiguration { revision ->
-                    revision == frozen.configurationRevision && store.loadForRun() == frozen.settings
+                    revision == frozen.configurationRevision && store.loadForRun() == frozen.settings.copy(usageIdentity = null)
                 }
             }
         }

@@ -7,12 +7,13 @@ import java.time.ZoneId
 internal data class ModelUsageSnapshot(
     val providers: List<ModelUsageProviderUi> = emptyList(),
 ) {
-    val totalInputTokens: Long get() = providers.sumOf { it.inputTokens }
-    val totalFreshInputTokens: Long get() = providers.sumOf { it.freshInputTokens }
-    val totalOutputTokens: Long get() = providers.sumOf { it.outputTokens }
-    val totalCachedTokens: Long get() = providers.sumOf { it.cachedTokens }
-    val totalCacheCreationTokens: Long get() = providers.sumOf { it.cacheCreationTokens }
-    val totalTokens: Long get() = totalInputTokens + totalOutputTokens
+    val models: List<ModelUsageModelUi> get() = providers.flatMap { it.models }
+    val totalInputTokens: Long get() = providers.safeTokenSum { it.inputTokens }
+    val totalFreshInputTokens: Long get() = providers.safeTokenSum { it.freshInputTokens }
+    val totalOutputTokens: Long get() = providers.safeTokenSum { it.outputTokens }
+    val totalCachedTokens: Long get() = providers.safeTokenSum { it.cachedTokens }
+    val totalCacheCreationTokens: Long get() = providers.safeTokenSum { it.cacheCreationTokens }
+    val totalTokens: Long get() = listOf(totalInputTokens, totalOutputTokens).safeTokenSum { it }
 
     fun filtered(startMillis: Long?, endMillis: Long?): ModelUsageSnapshot {
         if (startMillis == null && endMillis == null) return this
@@ -30,11 +31,11 @@ internal data class ModelUsageProviderUi(
     val name: String,
     val models: List<ModelUsageModelUi>,
 ) {
-    val inputTokens: Long get() = models.sumOf { it.inputTokens }
-    val freshInputTokens: Long get() = models.sumOf { it.freshInputTokens }
-    val outputTokens: Long get() = models.sumOf { it.outputTokens }
-    val cachedTokens: Long get() = models.sumOf { it.cachedTokens }
-    val cacheCreationTokens: Long get() = models.sumOf { it.cacheCreationTokens }
+    val inputTokens: Long get() = models.safeTokenSum { it.inputTokens }
+    val freshInputTokens: Long get() = models.safeTokenSum { it.freshInputTokens }
+    val outputTokens: Long get() = models.safeTokenSum { it.outputTokens }
+    val cachedTokens: Long get() = models.safeTokenSum { it.cachedTokens }
+    val cacheCreationTokens: Long get() = models.safeTokenSum { it.cacheCreationTokens }
 }
 
 internal data class ModelUsageEvent(
@@ -46,6 +47,10 @@ internal data class ModelUsageEvent(
     val conversationId: String? = null,
     val round: Int? = null,
     val requestId: String? = null,
+    val inputReported: Boolean = true,
+    val outputReported: Boolean = true,
+    val cachedReported: Boolean = true,
+    val creationReported: Boolean = true,
 )
 
 internal data class ModelUsageModelUi(
@@ -58,13 +63,17 @@ internal data class ModelUsageModelUi(
     val events: List<ModelUsageEvent> = emptyList(),
     val cachedTokens: Long = 0L,
     val cacheCreationTokens: Long = 0L,
+    val inputComplete: Boolean = true,
+    val outputComplete: Boolean = true,
+    val cachedComplete: Boolean = true,
+    val creationComplete: Boolean = true,
 ) {
     /** Uncached prefix: full prompt minus reads and writes. */
     val freshInputTokens: Long
-        get() = (inputTokens - cachedTokens - cacheCreationTokens).coerceAtLeast(0L)
+        get() = ((inputTokens - cachedTokens).coerceAtLeast(0L) - cacheCreationTokens).coerceAtLeast(0L)
     /** Fresh input, output, cache reads and cache writes. */
     val totalTokens: Long
-        get() = inputTokens + outputTokens
+        get() = listOf(inputTokens, outputTokens).safeTokenSum { it }
     val dailyAverageTokens: Long
         get() = if (activeDays <= 0) 0L else freshInputTokens / activeDays
     val conversationAverageTokens: Long
@@ -72,22 +81,24 @@ internal data class ModelUsageModelUi(
 
     fun filtered(startMillis: Long?, endMillis: Long?): ModelUsageModelUi? {
         if (startMillis == null && endMillis == null) return this
-        val matched = events.filter { event ->
+        val matched = events.collapsedByRound().filter { event ->
             (startMillis == null || event.atMillis >= startMillis) &&
                 (endMillis == null || event.atMillis <= endMillis)
-        }.collapsedByRound()
+        }
         if (matched.isEmpty()) return null
         val conversations = matched.mapNotNull { it.conversationId }.toSet()
         val days = matched.map { eventDay(it.atMillis) }.toSet()
-        val filteredInput = matched.sumOf { it.inputTokens }
+        val filteredInput = matched.safeTokenSum { it.inputTokens }
         return copy(
             inputTokens = filteredInput,
-            outputTokens = matched.sumOf { it.outputTokens },
-            cachedTokens = matched.sumOf { it.cachedTokens },
-            cacheCreationTokens = matched.sumOf { it.cacheCreationTokens },
+            outputTokens = matched.safeTokenSum { it.outputTokens },
+            cachedTokens = matched.safeTokenSum { it.cachedTokens },
+            cacheCreationTokens = matched.safeTokenSum { it.cacheCreationTokens },
             conversationCount = conversations.size,
             activeDays = days.size,
             events = matched,
+            inputComplete = matched.all { it.inputReported } && matched.tokenSumAvailable { it.inputTokens }, outputComplete = matched.all { it.outputReported } && matched.tokenSumAvailable { it.outputTokens },
+            cachedComplete = matched.all { it.cachedReported } && matched.tokenSumAvailable { it.cachedTokens }, creationComplete = matched.all { it.creationReported } && matched.tokenSumAvailable { it.cacheCreationTokens },
         )
     }
 }
@@ -106,7 +117,7 @@ internal fun List<ModelUsageEvent>.collapsedByRound(): List<ModelUsageEvent> {
         if (event.requestId.isNullOrBlank() && (round == null || conversation.isNullOrBlank())) {
             kept += event
         } else {
-            val key = event.requestId?.let { "request:$it" } ?: "legacy:$conversation#$round"
+            val key = event.requestId?.let { "request:$conversation:$it" } ?: "legacy:$conversation#$round"
             val existing = indexByKey[key]
             if (existing == null) {
                 indexByKey[key] = kept.size
@@ -117,4 +128,15 @@ internal fun List<ModelUsageEvent>.collapsedByRound(): List<ModelUsageEvent> {
         }
     }
     return kept
+}
+
+internal fun <T> Iterable<T>.tokenSumAvailable(value: (T) -> Long): Boolean {
+    var sum = 0L
+    for (item in this) { val n = value(item); if (n > Long.MAX_VALUE - sum) return false; sum += n }
+    return true
+}
+internal fun <T> Iterable<T>.safeTokenSum(value: (T) -> Long): Long {
+    var sum = 0L
+    for (item in this) { val n = value(item); if (n > Long.MAX_VALUE - sum) return Long.MAX_VALUE; sum += n }
+    return sum
 }

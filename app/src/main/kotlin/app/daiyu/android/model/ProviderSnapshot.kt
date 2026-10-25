@@ -20,6 +20,7 @@ class MissingProviderCredentialException :
 
 /** Validated, immutable configuration retained for one run; diagnostics redact the key. */
 class ProviderSnapshot private constructor(
+    val usageIdentity: UsageModelIdentity?,
     val protocol: ProviderProtocol,
     val endpoint: String,
     val model: String,
@@ -40,6 +41,7 @@ class ProviderSnapshot private constructor(
         Collections.unmodifiableSet(tools.toSet())
 
     fun asModelSettings(): ModelSettings = ModelSettings(
+        usageIdentity = usageIdentity,
         endpoint = endpoint,
         model = model,
         apiKey = apiKey,
@@ -96,6 +98,7 @@ class ProviderSnapshot private constructor(
             if (protocol == ProviderProtocol.UNKNOWN) settings.validate()
             else settings.copy(protocol = protocol).validate()
             return ProviderSnapshot(
+                usageIdentity = settings.usageIdentity,
                 protocol = protocol,
                 endpoint = settings.endpoint,
                 model = settings.model,

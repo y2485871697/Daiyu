@@ -72,7 +72,7 @@ class MessageImageDatabaseTest : android.test.AndroidTestCase() {
             MessageBlock.Tool(ToolInvocation(ToolCallId("call"), "lookup", "tool argument needle"), "tool result needle")))
         database.save(completed)
         reopen()
-        assertEquals(26, database.readableDatabase.version)
+        assertEquals(27, database.readableDatabase.version)
         assertEquals(listOf(user, completed), database.messages(id).map { it.second })
         for (query in listOf("visible search phrase", "tool argument needle", "tool result needle")) {
             assertEquals(listOf(id), database.conversations(query).map { it.id })

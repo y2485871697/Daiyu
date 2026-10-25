@@ -66,7 +66,7 @@ class BackupPackageSpoolTest {
         }
     }
     @Test fun everySupportedVersionRetainsTheActualPayloadDigest() {
-        for (version in 1L..7L) BackupPackageSpool(temp.root).use { spool ->
+        for (version in 1L..8L) BackupPackageSpool(temp.root).use { spool ->
             val raw = payload().toString(); val parsed = spool.read(envelope(raw, version).byteInputStream())
             assertEquals(version, parsed.version); assertEquals(digest(raw.toByteArray()), parsed.id)
         }

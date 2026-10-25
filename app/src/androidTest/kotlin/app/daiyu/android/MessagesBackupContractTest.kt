@@ -24,7 +24,7 @@ class MessagesBackupContractTest : InstrumentationTestCase() {
         try {
             assertFalse(instrumentation.targetContext.getDatabasePath("conversations.db").canonicalPath == f.source.getDatabasePath("conversations.db").canonicalPath)
             assertFalse(f.source.getDatabasePath("conversations.db").canonicalPath == f.target.getDatabasePath("conversations.db").canonicalPath)
-            assertEquals(26, f.from.readableDatabase.version); assertEquals(26, f.to.readableDatabase.version)
+            assertEquals(27, f.from.readableDatabase.version); assertEquals(27, f.to.readableDatabase.version)
             test(f)
         } finally {
             try { f.from.close() } finally {
@@ -253,7 +253,7 @@ class MessagesBackupContractTest : InstrumentationTestCase() {
         assertEquals(expected, f.from.messages(c.id).last().second); assertEquals(backup, f.from.exportBackup())
         f.to.preflightBackup(backup); assertEquals(1 to 2, f.to.importBackup(backup))
         f.to.close(); f.to = ConversationDatabase(f.target)
-        assertEquals(26, f.to.readableDatabase.version); assertEquals(listOf(user, expected), f.to.messages(c.id).map { it.second })
+        assertEquals(27, f.to.readableDatabase.version); assertEquals(listOf(user, expected), f.to.messages(c.id).map { it.second })
         assertReplay(f.to, expected); assertEquals(backup, f.to.exportBackup())
     }
     fun testLegacyResponsesBackupKeepsOldPathAndRejectsMissingTypeOrMixedItems() = fixture { f ->
@@ -283,7 +283,7 @@ class MessagesBackupContractTest : InstrumentationTestCase() {
         assertEquals("既有未创建草稿", f.to.draft()); assertEquals(1 to 2, f.to.importBackup(backup))
         assertEquals(expected, f.to.messages(c.id).last().second); assertEquals(existing, f.to.messages(existing.conversationId).last().second)
         val after = f.to.exportBackup(); f.to.close(); f.to = ConversationDatabase(f.target)
-        assertEquals(26, f.to.readableDatabase.version); assertEquals(after, f.to.exportBackup())
+        assertEquals(27, f.to.readableDatabase.version); assertEquals(after, f.to.exportBackup())
         assertEquals(protocol, f.to.messages(c.id).last().second.protocolItems)
         assertTrue(f.to.messages(c.id).last().second.historySegments.isEmpty()); assertEquals("既有未创建草稿", f.to.draft())
     }

@@ -106,7 +106,7 @@ class TitleModelCoordinator internal constructor(
             // Factory/open may block or reach transport code. Neither runs under the
             // admission/settings monitor. A config/close winner permanently revokes this job;
             // a late open is cancelled before it can issue next(), never rebound to a new key.
-            val session = createModel(job.provider).open(request, emptyList<ToolDefinition>())
+            val session = app.daiyu.android.model.usage.UsageRecorder.wrap(createModel(job.provider), job.provider, job.conversationId.value).open(request, emptyList<ToolDefinition>())
             val admitted = synchronized(gate) {
                 if (closed || job.revoked) false else {
                     try {

@@ -30,6 +30,7 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
     val contextWindowOverride: Int? = null,
     val reasoningOverride: Boolean? = null,
     val visionOverride: Boolean? = null,
+    val usageIdentity: app.daiyu.android.model.UsageModelIdentity? = null,
 ) {
     val hasModelOverrides: Boolean get() = contextWindowOverride != null || reasoningOverride != null || visionOverride != null
     fun enabledTools(): Set<ReadOnlyTool> = buildSet {

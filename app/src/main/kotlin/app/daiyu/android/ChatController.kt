@@ -97,6 +97,12 @@ class ChatApplication:Application() {
         hapticsRuntime.installForeground(this)
         touchHaptics = app.daiyu.android.ui.haptics.TouchHaptics.install(hapticsRuntime)
         controller = ChatController(this)
+        app.daiyu.android.model.usage.UsageRecorder.install(controller.database)
+        val launchPreferences = getSharedPreferences("usage-statistics-local", MODE_PRIVATE)
+        try {
+            val count = launchPreferences.getInt("launch_count", 0)
+            check(launchPreferences.edit().putInt("launch_count", Math.addExact(count, 1)).commit())
+        } catch (failure: Exception) { app.daiyu.android.model.usage.UsageAccounting.report(failure) }
         pets = app.daiyu.android.pet.PetApplicationHost(this,
             app.daiyu.android.pet.PetModelResolver { selection ->
                 controller.independentModels.resolvePet(selection, controller.assistantStore)
@@ -1624,7 +1630,7 @@ class ChatController internal constructor(private val application:Application,
                 freezeSavedChildModels(key) { provider ->
                     val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversation))
                         ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
-                    messageImages.wrap(delegate, provider)
+                    app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
                 }
             } catch (_: Exception) { return ChildTaskCommandReceipt.Rejected("child_model_binding_unavailable") }
             if (!runCatching { models.isCurrent() }.getOrDefault(false)) return ChildTaskCommandReceipt.Rejected("child_model_configuration_changed")
@@ -3234,7 +3240,7 @@ class ChatController internal constructor(private val application:Application,
             freezeSavedChildModels(key) { provider ->
                 val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(childConversation))
                     ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
-                messageImages.wrap(delegate, provider)
+                app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
             }
         }
         val childPreparation = if (!withChildren) null else try {
@@ -3467,7 +3473,7 @@ class ChatController internal constructor(private val application:Application,
                 }
             } }
         }
-        val observedModel = frozenReconnect.observeFailures(preparedModel, ::postReconnectNotice)
+        val observedModel = frozenReconnect.observeFailures(app.daiyu.android.model.usage.UsageRecorder.wrap(preparedModel, requestProvider, conversationId.value), ::postReconnectNotice)
         var preparingTools: RunCatalogTools? = null
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null

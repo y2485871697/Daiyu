@@ -119,7 +119,8 @@ class AndroidPetModelPort internal constructor(
                 try {
                     if (!live(frozenModel)) return@submit
                     val settings = frozenModel?.settings ?: error("Pet selection unavailable")
-                    val transport = transportFactory(settings, frozenRequest.maxOutputTokens)
+                    val transport = app.daiyu.android.model.usage.UsageRecorder.wrap(
+                        transportFactory(settings, frozenRequest.maxOutputTokens), settings.requestSnapshot(), inferConversation = false)
                     val message = Message(MessageId("pet-prompt-${frozenRequest.requestId}"), ConversationId(frozenRequest.sessionId),
                         RunId(frozenRequest.requestId), Message.USER_ROLE,
                         listOf(MessageBlock.Text("pet-input", frozenRequest.prompt)), RunStatus.COMPLETED)

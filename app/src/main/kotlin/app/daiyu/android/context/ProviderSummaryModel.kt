@@ -143,7 +143,8 @@ internal class ProviderSummaryModelPort(
             catch (failure: Exception) { runCatching { connection.disconnect() }; throw failure }
         }
         deadline.check()
-        val session = provider.open(frozen, emptyList<ToolDefinition>())
+        val session = app.daiyu.android.model.usage.UsageRecorder.wrap(provider, configuration.provider,
+            usagePort?.conversationId ?: frozen.first().conversationId.value).open(frozen, emptyList<ToolDefinition>())
         try {
             deadline.check()
             return TerminalSession(session, configuration.provider.protocol, deadline, deadlines, usagePort)

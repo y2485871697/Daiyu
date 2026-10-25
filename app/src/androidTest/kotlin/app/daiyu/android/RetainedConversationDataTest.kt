@@ -61,8 +61,8 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         val hit = data.search("needle").single()
         assertEquals(conversation.id.value, hit.conversationId); assertEquals(user.id.value, hit.messageId)
         val snapshot = data.stats()
-        assertEquals(1, snapshot.currentConversations); assertEquals(122, snapshot.currentMessages)
-        assertFalse(snapshot.heatmapAvailable); assertFalse(snapshot.tokenAccountingAvailable); assertFalse(snapshot.lifetimeAccountingAvailable)
+        assertEquals(1, snapshot.currentConversations); assertEquals(61, snapshot.currentMessages)
+        assertTrue(snapshot.heatmapAvailable); assertTrue(snapshot.tokenAccountingAvailable); assertTrue(snapshot.lifetimeAccountingAvailable)
         assertTrue(snapshot.modelUsage.providers.isEmpty())
         val recorded = snapshot.recordedUsage!!
         assertTrue(recorded.scanComplete); assertEquals(61, recorded.messagesWithoutCheckpoint)
@@ -154,7 +154,7 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         database.writableDatabase.version = 6
         database.close(); database = ConversationDatabase(scoped)
         data = RetainedConversationData(database, ContextService(scoped, database))
-        assertEquals(26, database.readableDatabase.version)
+        assertEquals(27, database.readableDatabase.version)
         val restored = database.conversations().single()
         assertEquals(conversation.id, restored.id); assertEquals("迁移草稿", restored.draft)
         assertEquals("已有目录", restored.folder); assertTrue(restored.pinned)

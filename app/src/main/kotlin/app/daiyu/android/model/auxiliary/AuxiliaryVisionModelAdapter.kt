@@ -83,7 +83,7 @@ internal class AuxiliaryVisionModelAdapter(
             // Never use open(history): it would inherit the provider's enabled tools.
             val usage = beginUsage?.invoke()
             activeUsage = usage
-            try { port.open(history, emptyList<ToolDefinition>(), request.images).also { active = it } }
+            try { app.daiyu.android.model.usage.UsageRecorder.wrap(port, snapshot, row.conversationId.value).open(history, emptyList<ToolDefinition>(), request.images).also { active = it } }
             catch (failure: Throwable) { usage?.close(); activeUsage = null; throw failure }
         }
         try {

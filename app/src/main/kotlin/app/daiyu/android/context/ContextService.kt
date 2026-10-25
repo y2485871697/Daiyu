@@ -426,6 +426,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 }
             }
         }
+        app.daiyu.android.storage.UsageStatisticsStore.created(db, copy.value, System.currentTimeMillis())
         check(db.insertOrThrow("context_branches", null, ContentValues().apply { put("conversation_id", copy.value); put("parent_id", id.value)
             put("through_message", through.value); put("parent_revision", ContextRevision.digest(original.take(index + 1))) }) != -1L)
         check(read(db, copy) == copied) { "分支消息持久回执不一致" }
@@ -470,6 +471,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         }) { "不能截断未完成工具批次" }
         val seq = db.rawQuery("SELECT seq FROM messages WHERE id=? AND conversation_id=?", arrayOf(through.value, id.value)).use { it.moveToFirst(); it.getLong(0) }
         db.execSQL("DELETE FROM neutral_assets WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=? AND seq>?)", arrayOf<Any>(id.value, seq))
+        app.daiyu.android.storage.UsageStatisticsStore.retireMessages(db, original.drop(cutoff))
         db.delete("messages", "conversation_id=? AND seq>?", arrayOf(id.value, seq.toString()))
         if (replacementUserText != null) {
             db.delete("neutral_assets", "message_id=?", arrayOf(through.value))

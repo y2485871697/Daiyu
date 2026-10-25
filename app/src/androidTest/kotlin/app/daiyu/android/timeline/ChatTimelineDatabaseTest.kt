@@ -97,7 +97,7 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         ChatTimelineStore.write(db.writableDatabase, event(db, other).copy(status = "failed"))
         val source = NeutralBackupService(context, db)
         for ((text, includesOther) in listOf(source.exportPackage() to true, source.exportConversation(owner) to false)) {
-            assertEquals(7, JSONObject(text).getInt("version"))
+            assertEquals(8, JSONObject(text).getInt("version"))
             val (destination, target) = fresh(); val importer = NeutralBackupService(destination, target)
             assertFalse(importer.importPackage(text).alreadyImported)
             assertEquals(listOf(saved), ChatTimelineStore.read(target.readableDatabase, owner.value))
@@ -138,7 +138,7 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         val (_, db) = fresh(); val owner = seed(db); val before = db.messages(owner)
         db.writableDatabase.execSQL("DROP TABLE chat_timeline_events")
         db.writableDatabase.version = 25; db.close()
-        assertEquals(26, db.writableDatabase.version); assertEquals(before, db.messages(owner))
+        assertEquals(27, db.writableDatabase.version); assertEquals(before, db.messages(owner))
         assertTrue(ChatTimelineStore.read(db.readableDatabase, owner.value).isEmpty())
     }
 }

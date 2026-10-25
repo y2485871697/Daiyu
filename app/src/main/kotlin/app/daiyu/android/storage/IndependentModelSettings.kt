@@ -46,7 +46,7 @@ internal class IndependentModelSettings(context: Context) {
             "独立模型未启用或未配置"
         }
         val settings = stores.getValue(slot).load().also { it.validate() }
-        Frozen(record, ProviderSnapshot.capture(settings, settings.protocol, imageInputSupported = record.imageInput))
+        Frozen(record, ProviderSnapshot.capture(settings.copy(usageIdentity = app.daiyu.android.model.UsageModelIdentity(record.providerId, if (slot == Slot.VISION) "辅助视觉" else "女仆模型")), settings.protocol, imageInputSupported = record.imageInput))
     }
     fun visionSelection(): AuxiliaryModelSelection = synchronized(lock) {
         val record = record(Slot.VISION)

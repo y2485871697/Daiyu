@@ -161,7 +161,7 @@ class ControllerVideoWitnessDatabaseTest : InstrumentationTestCase() {
             if (version < 10) f.db.writableDatabase.execSQL("UPDATE conversations SET assistant_id=NULL")
             val retained = snapshot(f.db.readableDatabase).filterKeys { it != witnessTable && it != "message_video_inputs" }
             downgrade(f, version)
-            assertEquals(26, f.db.readableDatabase.version)
+            assertEquals(27, f.db.readableDatabase.version)
             assertEquals(retained, snapshot(f.db.readableDatabase).filterKeys { it != witnessTable && it != "message_video_inputs" })
             assertEquals(0, count(f, "message_video_inputs"))
             assertEquals(2, count(f, witnessTable))
@@ -180,7 +180,7 @@ class ControllerVideoWitnessDatabaseTest : InstrumentationTestCase() {
         val f = fresh()
         val turn = seed(f)
         downgrade(f, 12)
-        assertEquals(26, f.db.readableDatabase.version)
+        assertEquals(27, f.db.readableDatabase.version)
         f.db.readableDatabase.rawQuery("SELECT reference_count,manifest_sha256 FROM $witnessTable WHERE message_id=?",
             arrayOf(turn.user.id.value)).use { c ->
             assertTrue(c.moveToFirst()); assertEquals(-1L, c.getLong(0)); assertTrue(c.isNull(1))
@@ -206,7 +206,7 @@ class ControllerVideoWitnessDatabaseTest : InstrumentationTestCase() {
         val turn = seed(f, video = true)
         val retained = snapshot(f.db.readableDatabase).filterKeys { it != witnessTable }
         downgrade(f, 12)
-        assertEquals(26, f.db.readableDatabase.version)
+        assertEquals(27, f.db.readableDatabase.version)
         // Check durable evidence BEFORE first history capture: it must have been installed by upgrade.
         assertWitness(f, turn.user, turn.inputs)
         assertWitness(f, turn.assistant, emptyList())
@@ -353,7 +353,7 @@ class ControllerVideoWitnessDatabaseTest : InstrumentationTestCase() {
                 raw.execSQL("DROP TRIGGER witness_migration_fault")
             }
             f.reopen()
-            assertEquals(26, f.db.readableDatabase.version)
+            assertEquals(27, f.db.readableDatabase.version)
             assertWitness(f, turn.user, turn.inputs)
             assertWitness(f, turn.assistant, emptyList())
             assertEquals("composer draft", f.db.draft())
@@ -380,7 +380,7 @@ class ControllerVideoWitnessDatabaseTest : InstrumentationTestCase() {
         sql.rawQuery("PRAGMA foreign_key_check(message_video_inputs)", null).use { assertTrue(it.moveToFirst()) }
         val before = snapshot(sql)
         repeat(2) {
-            assertEquals(26, f.db.readableDatabase.version)
+            assertEquals(27, f.db.readableDatabase.version)
             // No physical row owns this valid payload; silently skipping it is not acceptable.
             rejects { capture(f, turn) }
             rejects { f.db.exportBackup() }

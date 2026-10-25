@@ -105,10 +105,10 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     /** A conversation package excludes global drafts/configuration and never follows parent provenance. */
     fun exportConversation(conversationId: ConversationId): String = exportPackage(emptyMap(), conversationId)
     private data class ExportCapture(val text: String, val tables: JSONObject, val config: JSONObject,
-        val generation: JSONObject, val children: JSONObject, val runtime: JSONObject,
+        val generation: JSONObject, val children: JSONObject, val runtime: JSONObject, val statistics: JSONObject,
         val static: List<app.daiyu.android.storage.StaticGenerationOutput>, val historical: Set<String>, val video: JSONObject?) {
         fun signature() = listOf(text, tables.toString(), config.toString(), generation.toString(), children.toString(),
-            runtime.toString(), StaticGenerationCodec.encodeSection(static).toString(), historical.sorted().toString(), video?.toString())
+            runtime.toString(), statistics.toString(), StaticGenerationCodec.encodeSection(static).toString(), historical.sorted().toString(), video?.toString())
     }
     private fun captureExport(configuration: Map<String, Any?>?, conversationId: ConversationId?) = transactions.run { db ->
         val text = videoIntegration?.exportText?.invoke(db, conversationId)
@@ -116,7 +116,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val history = store.preflightBackup(text)
         val anchors = app.daiyu.android.timeline.TimelineAnchor.keys(history)
         val tables = JSONObject()
-        columnsFor(7).forEach { (table, columns) -> tables.put(table,
+        columnsFor(8).forEach { (table, columns) -> tables.put(table,
             if (table == "context_usage") BackupUsageCodec.export(db, conversationId?.value)
             else readTable(db, table, columns, conversationId).let { rows ->
                 if (table != "chat_timeline_events") rows else JSONArray().apply {
@@ -132,6 +132,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val messages = objectOf(objectOf(text).getString("payload")).getJSONArray("messages")
         ExportCapture(text, tables, config, BackupGenerationCodec.export(db, conversationId?.value),
             BackupChildTaskCodec.export(db, conversationId?.value), BackupRuntimeUsageCodec.export(db, conversationId?.value),
+            BackupStatisticsCodec.export(db, conversationId?.value),
             StaticGenerationCodec.read(db, conversationId?.value),
             BackupHistoryRows.history(db, "generation_output", conversationId?.value).keys.toSet(),
             if (videoIntegration == null) null else BackupVideoManifest.read(db, messages))
@@ -230,14 +231,14 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val payload = JSONObject().put("text_backup", text).put("tables", tables).put("config", config)
             .put("blobs", contents).put("excluded", JSONArray(listOf("凭据、授权令牌和密钥材料不导出", "生成授权结果及供应商地址不导出；恢复只读历史，不恢复执行许可")))
             .put("generation_history", generationHistory).put("child_task_history", childHistory)
-            .put("runtime_usage_history", capture.runtime)
+            .put("runtime_usage_history", capture.runtime).put("statistics", capture.statistics)
             .put("static_generation_history", StaticGenerationCodec.encodeSection(capture.static))
         if (images.isNotEmpty()) payload.put("message_images", manifest)
         if (videos.sidecars.isNotEmpty()) payload.put("message_videos", videoManifest)
         val inventory = inventory(payload)
         payload.put("inventory", inventoryJson(inventory))
-        validatePayload(7, "export-validation", payload, originals)
-        return PreparedExport(spool, spool.write(7, payload))
+        validatePayload(8, "export-validation", payload, originals)
+        return PreparedExport(spool, spool.write(8, payload))
     }
     fun preflight(text: String): BackupInventory {
         Utf8Payload.byteCount(text, MAX_PACKAGE)
@@ -340,6 +341,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             attempted = true; db.beginTransaction()
             var successful = false
             try {
+            val statisticsReceipt = BackupStatisticsCodec.prepare(db, parsed.statistics)
             val result = run {
             val duplicate = db.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
             check(duplicate == duplicateSnapshot) { "导入身份在原件阶段已变化；未自动重试" }
@@ -350,6 +352,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 BackupGenerationCodec.verifyRestored(db, parsed.generation)
                 BackupChildTaskCodec.verifyRestored(db, parsed.children)
                 BackupRuntimeUsageCodec.verify(db, parsed.runtimeUsage)
+                BackupStatisticsCodec.verify(db, parsed.statistics)
                 verifyImportedConfiguration(db, parsed.payload.getJSONObject("config"))
                 store.verifyImportedVideoWitnesses(db, parsed.payload.getString("text_backup"))
                 // Original bytes were independently reverified outside SQL, not inferred from this marker.
@@ -381,7 +384,11 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             BackupRuntimeUsageCodec.restore(db, parsed.runtimeUsage)
             val importedConversations = uniqueIds(objectOf(objectOf(parsed.payload.getString("text_backup"))
                 .getString("payload")).getJSONArray("conversations"), "id")
-            app.daiyu.android.storage.ConversationUsageStore.backfill(db, importedConversations)
+            if (parsed.statistics == null) {
+                app.daiyu.android.storage.ConversationUsageStore.backfill(db, importedConversations)
+                app.daiyu.android.storage.UsageStatisticsStore.importLegacyReceipts(db, importedConversations)
+            }
+            else BackupStatisticsCodec.restore(db, parsed.statistics)
             if (parsed.static.isNotEmpty()) BackupHistoryRows.install(db)
             val importedMessages = objectOf(objectOf(parsed.payload.getString("text_backup")).getString("payload")).getJSONArray("messages")
             parsed.static.forEach { StaticGenerationCodec.saveInTransaction(db, it, importedMessages) }
@@ -416,6 +423,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             ImportResult(parsed.id, parsed.inventory, false)
             }
             onStage("正在提交导入事务")
+            BackupStatisticsCodec.verify(db, parsed.statistics, statisticsReceipt)
             db.setTransactionSuccessful(); successful = true
             // Return is evaluated now, but finally confirms COMMIT before delivery.
             return result
@@ -489,14 +497,15 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val videos: BackupVideoManifest.Validated, val generation: BackupGenerationCodec.Validated,
         val children: BackupChildTaskCodec.Validated, val runtimeUsage: BackupRuntimeUsageCodec.Validated,
         val version: Long, val columns: Map<String, List<String>>,
-        val static: List<app.daiyu.android.storage.StaticGenerationOutput>)
+        val static: List<app.daiyu.android.storage.StaticGenerationOutput>, val statistics: BackupStatisticsCodec.Validated?)
     private fun validatePayload(version: Long, id: String, payload: JSONObject, bytes: Map<String, ByteArray>): Parsed {
         val schema = columnsFor(version)
         val payloadFields = setOf("text_backup", "tables", "config", "blobs", "excluded", "inventory")
         fields(payload, payloadFields + listOf("message_images", "message_videos").filter { payload.has(it) } +
             (if (version >= 2L) setOf("generation_history", "child_task_history") else emptySet()) +
             (if (version >= 4L) setOf("runtime_usage_history") else emptySet()) +
-            (if (version >= 5L) setOf("static_generation_history") else emptySet()))
+            (if (version >= 5L) setOf("static_generation_history") else emptySet()) +
+            (if (version >= 8L) setOf("statistics") else emptySet()))
         val history = store.preflightBackup(string(payload, "text_backup"))
         val legacy = objectOf(string(payload, "text_backup"))
         require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") in 1..2)
@@ -585,7 +594,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         expected.keys().forEach { key -> require(declared.get(key) == expected.get(key) ||
             declared.get(key) is Number && expected.get(key) is Number &&
                 integer(declared, key) == integer(expected, key)) { "数量或字节清单不一致" } }
-        return Parsed(id, payload, bytes, inventory, images, videos, generation, children, runtimeUsage, version, schema, static)
+        return Parsed(id, payload, bytes, inventory, images, videos, generation, children, runtimeUsage, version, schema, static,
+            BackupStatisticsCodec.validate(if (version >= 8L) payload.getJSONObject("statistics") else null, conversationIds))
     }
     private fun inventory(payload: JSONObject): BackupInventory {
         val legacy = objectOf(payload.getString("text_backup")); val tables = payload.getJSONObject("tables")

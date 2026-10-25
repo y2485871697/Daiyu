@@ -197,4 +197,43 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         node("dialog-cancel").performClick()
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
     }
+    fun testUnsavedModelAddSurvivesRepeatedPauseWithoutWritingCatalog() {
+        openLocalModels()
+        val before = fixture.settings.localModelCatalogSnapshot()
+        reveal("local-model-add").performClick()
+        node("settings-field:展示名称").performTextReplacement("retained custom model")
+        node("settings-field:Model ID").performTextReplacement("retained-model-id")
+        node("settings-field:上下文窗口（tokens）").performTextReplacement("32768")
+        repeat(2) {
+            realPauseResume(activity)
+            awaitUniqueTag("catalog-model-editor")
+            node("dialog-confirm").assertIsEnabled()
+            node("settings-field:展示名称").assertEditableText("retained custom model")
+            node("settings-field:Model ID").assertEditableText("retained-model-id")
+            node("settings-field:上下文窗口（tokens）").assertEditableText("32768")
+            assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+        }
+        node("dialog-cancel").performClick()
+        assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testUnsavedModelEditSurvivesPauseAndRejectsOldSaveCallback() {
+        openLocalModels()
+        val before = fixture.settings.localModelCatalogSnapshot()
+        reveal("local-model-rename:extra-local").performClick()
+        node("settings-field:展示名称").performTextReplacement("retained local rename")
+        val oldSave = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        realPauseResume(activity)
+        awaitUniqueTag("catalog-model-editor")
+        node("dialog-confirm").assertIsEnabled()
+        mainThread { oldSave() }
+        node("settings-field:展示名称").assertEditableText("retained local rename")
+        assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+        node("dialog-confirm").performClick()
+        awaitControl("resumed local rename saved") {
+            fixture.settings.localModelCatalogSnapshot()?.models?.single { it.id == "extra-local" }?.displayName == "retained local rename"
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

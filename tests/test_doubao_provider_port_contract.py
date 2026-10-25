@@ -16,7 +16,7 @@ class DoubaoProviderPortContractTest(unittest.TestCase):
         row = ui.split('SettingsRow("新增豆包语音"', 1)[1].split('item("provider-count")', 1)[0]
         self.assertIn('onClick = if (enabled) onAddSpeech else null', row)
         host = source('ui/screens/settings/ProviderManagementRoute.kt')
-        self.assertIn('onAddSpeech = { if (enabled) creating = NewProviderDraft(ProviderProtocol.CHAT_COMPLETIONS, speechOnly = true) }', host)
+        self.assertIn('onAddSpeech = { if (current(p) && enabled) creating = NewProviderDraft(ProviderProtocol.CHAT_COMPLETIONS, speechOnly = true) }', host)
         self.assertIn('providerName = "豆包语音"', host)
         self.assertIn('model = "seed-tts-2.0", providerEnabled = true', host)
 
@@ -95,7 +95,7 @@ class DoubaoProviderPortContractTest(unittest.TestCase):
         self.assertIn('assertEquals(1, requests.get())', test)
         activity = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ProviderAuthenticationChoiceActivityTest.kt').read_text()
         self.assertIn('testDoubaoAddRegistersPresetsWithoutChangingChatOrOpeningModel', activity)
-        self.assertIn('testPausingUnsavedDoubaoProviderDoesNotRegister', activity)
+        self.assertIn('testPausingUnsavedDoubaoProviderRetainsDraftWithoutRegistering', activity)
         self.assertNotIn('"provider-add-speech").assertHasNoClickAction()', activity)
 
 

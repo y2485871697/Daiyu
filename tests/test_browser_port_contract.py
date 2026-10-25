@@ -46,7 +46,9 @@ class BrowserPortContractTest(unittest.TestCase):
         self.assertIn('HUMAN_BROWSER_NO_COOKIE_EXPORT', local)
         self.assertIn('override fun restore() { /* Human sessions have no model execution to resume. */ }', local)
         main = (APP / 'MainActivity.kt').read_text()
-        self.assertIn('if (retainedPage == "browser") retainedPage = "chat"', main)
+        self.assertIn('closeBrowserVisualVisit(clearTarget = false)', main)
+        pause = main.split('override fun onPause()', 1)[1].split('override fun onStop()', 1)[0]
+        self.assertNotIn('retainedPage = "chat"', pause)
         self.assertIn('if (human.needsReplacement)', main)
         host = (HOST / 'AndroidOpenMinisBrowserHost.kt').read_text()
         self.assertIn('if (human != null && visibleIdentity == null) return', host)

@@ -50,6 +50,27 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         node("context-management").assertDoesNotExist()
         ui.onNodeWithText("上下文页面已失效；请返回原会话重新打开").assertDoesNotExist()
     }
+    private fun assertPausedContextRoute() {
+        mainThread {
+            val getter = MainActivity::class.java.declaredMethods.single { it.name == "getRetainedPage" }
+            assertEquals("context-management", getter.apply { isAccessible = true }.invoke(activity))
+            assertNoVisit()
+        }
+        awaitUniqueTag("context-management-paused")
+        node("context-compression-confirmation").assertDoesNotExist()
+    }
+    private fun continueAndAwait(): ContextManagementControllerAdapter {
+        awaitLocalReaders()
+        node("context-management-resume").performClick()
+        awaitUniqueTag("context-management")
+        lateinit var result: ContextManagementControllerAdapter
+        mainThread { result = adapter() }
+        awaitControl("fresh context visit after explicit continue") {
+            result.state.value.operation == null && result.state.value.snapshot != null
+        }
+        assertFalse(result.state.value.confirmingCompression)
+        return result
+    }
     private fun stopped(block: () -> Unit) {
         val original = activity
         val stopped = java.util.concurrent.CountDownLatch(1)
@@ -233,7 +254,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPauseWithoutStopRevokesOldCompressionConfirmationAndClosesRoute() {
+    fun testPauseWithoutStopRevokesOldCompressionConfirmationAndRetainsRoute() {
         seedAndSelect()
         val before = fixture.database.exportBackup()
         val old = openAndAwait()
@@ -248,10 +269,8 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             assertNull(old.state.value.snapshot)
             assertFalse(old.state.value.confirmingCompression)
         })
-        awaitUniqueTag("chat-draft")
-        assertChatRoute()
-        assertDraft("retained unsent draft")
-        val next = openAndAwait()
+        assertPausedContextRoute()
+        val next = continueAndAwait()
         mainThread {
             old.refresh(); old.confirmCompression()
             assertSame(next, adapter())
@@ -261,6 +280,26 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testPausedContextContinueCallbackCannotSurviveAnotherPauseOrSelection() {
+        val conversation = seedAndSelect()
+        val before = fixture.database.exportBackup()
+        openAndAwait()
+        realPauseResume(activity)
+        assertPausedContextRoute()
+        val oldContinue = checkNotNull(node("context-management-resume").fetchSemanticsNode().config[
+            androidx.compose.ui.semantics.SemanticsActions.OnClick].action)
+        realPauseResume(activity, atPause = { oldContinue(); assertNoVisit() })
+        assertPausedContextRoute()
+        mainThread { oldContinue(); assertNoVisit() }
+        val next = continueAndAwait()
+        realPauseResume(activity)
+        assertPausedContextRoute()
+        mainThread { activity.select(null); oldContinue(); next.confirmCompression(); assertNoVisit() }
+        assertChatRoute()
+        mainThread { activity.select(conversation); oldContinue(); assertNoVisit() }
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
     fun testSelectionAndPageChangesRevokeBeforeOldCommandsAndSameIdGetsNewVisit() {
         val conversation = seedAndSelect()
         val old = openAndAwait()
@@ -416,10 +455,9 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             assertFalse(old.state.value.confirmingCompression)
             assertNoVisit()
         }
-        assertChatRoute() // Resume closes the revoked modal without a manual Back workaround.
-        assertDraft("retained unsent draft")
+        assertPausedContextRoute()
         mainThread { oldClick(); backgroundClick(); oldConfirm(); assertNoVisit() }
-        val next = openAndAwait()
+        val next = continueAndAwait()
         assertNotSame(old, next)
         assertEquals(conversation.id, next.state.value.owner.conversationId)
         mainThread {

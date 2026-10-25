@@ -814,12 +814,12 @@ class MainActivity : ComponentActivity() {
     // Revoke BEFORE navigation/lifecycle changes, including when no route has been opened yet.
     private fun revokeContextManagementEntry(closeRoute: Boolean = true): Boolean {
         contextManagementEntryEpoch++
-        val visit = contextManagementVisit ?: return false
+        val visit = contextManagementVisit
         contextManagementVisit = null
-        controller.invalidateContextManagement(visit.adapter)
-        // A revoked visit cannot leave its modal route mounted. Navigation owns its destination.
+        if (visit != null) controller.invalidateContextManagement(visit.adapter)
+        // Explicit navigation closes the page; lifecycle revocation keeps only a paused shell.
         if (closeRoute && retainedPage == "context-management") retainedPage = "chat"
-        return true
+        return visit != null
     }
     private var legacyPage by mutableStateOf<LegacyLibraryHost.Page?>(null)
     private var legacyVisit: java.util.concurrent.atomic.AtomicBoolean? = null
@@ -869,11 +869,16 @@ class MainActivity : ComponentActivity() {
             putExtra(Intent.EXTRA_TITLE, request.suggestedName)
         }, request::result)
     }
+    private class BrowserResumeTarget(val conversationId: ConversationId?, val owner: WorkStepOwnerUi?)
+    private var browserResumeTarget by mutableStateOf<BrowserResumeTarget?>(null)
+    private var browserVisualEpoch by mutableStateOf(0L)
     private var browserVisualVisit by mutableStateOf<BrowserVisualVisit?>(null)
     private val humanBrowsers = mutableMapOf<ConversationId?, LocalBrowserVisual>()
-    private fun closeBrowserVisualVisit() {
+    private fun closeBrowserVisualVisit(clearTarget: Boolean = true) {
+        browserVisualEpoch++
         val original = browserVisualVisit
         browserVisualVisit = null
+        if (clearTarget) browserResumeTarget = null
         original?.close()
     }
     private fun browserVisualPageCurrent(original: BrowserVisualVisit): Boolean =
@@ -888,16 +893,45 @@ class MainActivity : ComponentActivity() {
         val original = selected?.id?.let { controller.openBrowserVisual(it, expectedOwner) }
         if (expectedOwner != null && original == null) return
         retainedPage = "browser"
-        browserVisualVisit = original ?: humanBrowsers.getOrPut(selected?.id) {
-            LocalBrowserVisual(applicationContext, selected?.id)
-        }.let { human ->
-            if (human.needsReplacement) {
-                human.close()
-                LocalBrowserVisual(applicationContext, selected?.id).also {
-                    humanBrowsers[selected?.id] = it
-                }.openVisit()
-            } else human.openVisit()
-        }
+        browserResumeTarget = BrowserResumeTarget(selected?.id, original?.owner?.let {
+            WorkStepOwnerUi(it.conversationId.value, it.runId.value, it.id.value)
+        })
+        browserVisualVisit = original ?: openHumanBrowserVisit()
+    }
+
+    private fun openHumanBrowserVisit(): BrowserVisualVisit? = humanBrowsers.getOrPut(selected?.id) {
+        LocalBrowserVisual(applicationContext, selected?.id)
+    }.let { human ->
+        if (human.needsReplacement) {
+            human.close()
+            LocalBrowserVisual(applicationContext, selected?.id).also {
+                humanBrowsers[selected?.id] = it
+            }.openVisit()
+        } else human.openVisit()
+    }
+
+    private fun resumeBrowserVisualPage(target: BrowserResumeTarget?, epoch: Long) {
+        if (target == null || browserResumeTarget !== target || epoch != browserVisualEpoch ||
+            !activityUsable() || !voiceForeground || !generationResumed() || retainedPage != "browser" ||
+            sidebarVisible || selected?.id != target.conversationId || !selectionReady ||
+            !controller.ready || controller.dataBusy || pendingTextSend != null ||
+            controller.textSendState() != null || browserVisualVisit != null) return
+        val next = if (target.owner != null) {
+            controller.openBrowserVisual(checkNotNull(target.conversationId), target.owner)
+        } else openHumanBrowserVisit()
+        if (next == null) toast("原浏览器任务已结束或不可用；请返回会话后重新打开")
+        else { browserVisualEpoch++; browserVisualVisit = next }
+    }
+
+    private fun resumeContextManagementPage(conversation: ConversationId?, generation: Long, epoch: Long) {
+        if (conversation == null || selected?.id != conversation || editorGeneration != generation ||
+            contextManagementEntryEpoch != epoch || contextManagementVisit != null ||
+            !activityUsable() || !voiceForeground || !generationResumed() || sidebarVisible ||
+            retainedPage != "context-management") return
+        val owner = ContextManagementOwner(conversation, generation)
+        val adapter = controller.openContextManagement(owner)
+        if (adapter == null) toast("上下文页面暂不可用；请等待当前任务结束后再试")
+        else { contextManagementEntryEpoch++; contextManagementVisit = ContextManagementVisit(owner, adapter) }
     }
 
     private var retainedPageState by mutableStateOf("chat")
@@ -1002,7 +1036,10 @@ class MainActivity : ComponentActivity() {
     private var interactiveModeObservation: AutoCloseable? = null
     @Volatile private var selected: Conversation? = null
         set(value) {
-            if (field?.id != value?.id) { closeBrowserVisualVisit() }
+            if (field?.id != value?.id) {
+                closeBrowserVisualVisit()
+                if (retainedPage == "browser") retainedPage = "chat"
+            }
             if (field?.id != value?.id && revokeContextManagementEntry()) editorGeneration++
             if (field?.id != value?.id) { revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit() }
             field = value
@@ -2147,17 +2184,44 @@ class MainActivity : ComponentActivity() {
                             }, onClose = {
                                 if (contextManagementVisit === visit) returnToChat()
                             })
-                    } else app.daiyu.android.ui.components.UsageGlassDialog("压缩会话", onDismiss = { returnToChat() }) {
-                        top.yukonga.miuix.kmp.basic.Text("上下文页面已失效；请返回原会话重新打开")
-                        app.daiyu.android.ui.components.UsageAction("返回", { returnToChat() })
+                    } else {
+                        val conversation = selected?.id
+                        val generation = editorGeneration
+                        val epoch = contextManagementEntryEpoch
+                        val closePaused: () -> Unit = {
+                            if (retainedPage == "context-management" && contextManagementVisit == null &&
+                                contextManagementEntryEpoch == epoch) returnToChat()
+                        }
+                        app.daiyu.android.ui.components.UsageGlassDialog("压缩会话", onDismiss = closePaused) {
+                            top.yukonga.miuix.kmp.basic.Text("页面已暂停；继续查看会重新读取上下文，压缩操作需重新确认",
+                                modifier = Modifier.testTag("context-management-paused"))
+                            app.daiyu.android.ui.components.UsageAction("继续查看",
+                                { resumeContextManagementPage(conversation, generation, epoch) },
+                                modifier = Modifier.testTag("context-management-resume"))
+                            app.daiyu.android.ui.components.UsageAction("返回", closePaused)
+                        }
                     }
                 }
                 if (retainedPage == "browser") {
                     val original = browserVisualVisit
-                    key(original) {
+                    if (original != null) key(original) {
                         app.daiyu.android.ui.screens.browser.BrowserVisualScreen(original,
-                            ownerCurrent = { original != null && browserVisualPageCurrent(original) },
-                            onBack = { if (activityUsable() && retainedPage == "browser") returnToChat() })
+                            ownerCurrent = { browserVisualPageCurrent(original) },
+                            onBack = { if (activityUsable() && browserVisualVisit === original && retainedPage == "browser") returnToChat() })
+                    } else {
+                        val target = browserResumeTarget
+                        val epoch = browserVisualEpoch
+                        val closePaused: () -> Unit = {
+                            if (retainedPage == "browser" && browserVisualVisit == null &&
+                                browserResumeTarget === target && browserVisualEpoch == epoch) returnToChat()
+                        }
+                        app.daiyu.android.ui.components.UsageGlassDialog("浏览器", onDismiss = closePaused) {
+                            top.yukonga.miuix.kmp.basic.Text("浏览器已暂停；点击继续查看后才重新连接，不会自动恢复任务",
+                                modifier = Modifier.testTag("browser-paused"))
+                            app.daiyu.android.ui.components.UsageAction("继续查看", { resumeBrowserVisualPage(target, epoch) },
+                                modifier = Modifier.testTag("browser-resume"))
+                            app.daiyu.android.ui.components.UsageAction("返回", closePaused)
+                        }
                     }
                 }
                 }
@@ -4684,6 +4748,7 @@ class MainActivity : ComponentActivity() {
         refreshUnknownBranchOutcome()
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
         contextManagementEntryEpoch++
+        browserVisualEpoch++
         if (selectionReady) publishChat() // Re-arm foreground read confirmation; never acknowledge on background refresh.
         prepareMessageActionSnapshot()
         if (retainedPage == "platform-settings") platformSettingsRevision++
@@ -4730,7 +4795,7 @@ class MainActivity : ComponentActivity() {
             gatewayOwner?.revoke()
             gatewayReloadPending = true; gatewayReplacementAuthorized = false
         }
-        revokeContextManagementEntry()
+        revokeContextManagementEntry(closeRoute = false)
         dismissChatModels()
         historySearchEpoch++
         val mediaPicker = pendingGenerationMediaOriginal
@@ -4739,8 +4804,7 @@ class MainActivity : ComponentActivity() {
             retainedPage == "chat" && !sidebarVisible && selected?.id?.value == mediaPicker.binding.conversationId
         mediaPicker?.pickerHopPending = false
 
-        closeBrowserVisualVisit()
-        if (retainedPage == "browser") retainedPage = "chat"
+        closeBrowserVisualVisit(clearTarget = false)
         chatReferencePick?.let { request ->
             val preserve = request.live && request.firstPickerHop && !request.returned &&
                 chatReferenceAvailable() && chatReferenceMatches(request)
@@ -4818,9 +4882,10 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
+        closeBrowserVisualVisit(clearTarget = false)
         if (chatReferencePick?.pickerAway != true) revokeChatReferencePick()
         revokePlatformActionVisit()
-        revokeContextManagementEntry()
+        revokeContextManagementEntry(closeRoute = false)
         revokeTerminalJobsVisit()
         invalidateMessageActionEditor()
         gatewayOwner?.revoke()

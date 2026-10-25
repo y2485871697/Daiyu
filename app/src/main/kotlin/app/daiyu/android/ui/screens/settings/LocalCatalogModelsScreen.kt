@@ -77,27 +77,49 @@ internal fun <T> LocalCatalogModelsScreen(
     var request by remember { mutableStateOf<AtomicBoolean?>(null) }
     var loaded by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
-    var editing by remember { mutableStateOf<CatalogModelSelection<T>?>(null) }
+    var editing by remember { mutableStateOf<CatalogModelSelection<T>?>(null, referentialEqualityPolicy()) }
     var query by queryState
     val loadingListState = rememberLazyListState()
     val loadingScrollBehavior = MiuixScrollBehavior()
     var adding by remember { mutableStateOf<Any?>(null) }
+    var addingBase by remember { mutableStateOf<SavedModelCatalogSnapshot<T>?>(null) }
+    var editorStale by remember { mutableStateOf(false) }
+    var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var deleting by remember { mutableStateOf<CatalogModelSelection<T>?>(null) }
     fun current() = visit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun cancel() {
         request?.set(true); request = null; snapshot = null; loaded = false; editing = null; deleting = null; adding = null
     }
+    fun pause() {
+        request?.set(true); request = null; deleting = null
+        // New identities fence pre-pause callbacks without unmounting the form or its input.
+        editing = editing?.copy()
+        adding = adding?.let { Any() }
+    }
     fun reload() {
         if (!current() || request != null) return
-        editing = null; deleting = null; snapshot = null; loaded = false
+        deleting = null; loaded = false
         val token = AtomicBoolean(false); request = token
         scope.launch {
             try {
                 val value = withContext(Dispatchers.IO) { persistence.read(providerIdentity) }
-                if (current() && request === token && !token.get()) { snapshot = value; loaded = true }
+                if (current() && request === token && !token.get()) {
+                    val selection = editing
+                    val addBase = addingBase.takeIf { adding != null }
+                    if ((selection != null && (value == null || value.providerIdentity != selection.providerIdentity ||
+                            value.revision != selection.expectedRevision ||
+                            value.models.singleOrNull { it.id == selection.record.id } != selection.record)) ||
+                        (addBase != null && (value == null || value.providerIdentity != addBase.providerIdentity || value.revision != addBase.revision))) {
+                        editorStale = true
+                        notice = "目录已变化，草稿已保留；请取消后重新打开。"
+                    }
+                    snapshot = value; loaded = true
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
-                if (current() && request === token && !token.get()) { loaded = true; notice = "本地模型读取失败，请刷新" }
+                if (current() && request === token && !token.get()) {
+                    loaded = true; editorStale = true; notice = "本地模型读取失败，草稿已保留；请刷新"
+                }
             } finally { if (request === token) request = null }
         }
     }
@@ -130,7 +152,7 @@ internal fun <T> LocalCatalogModelsScreen(
     }
     fun saveForm(value: CatalogModelEdit, selection: CatalogModelSelection<T>?) {
         val base = snapshot ?: return
-        if (!current() || !currentEnabled || request != null || (selection != null && !matches(selection))) return
+        if (!current() || !currentEnabled || editorStale || request != null || (selection != null && !matches(selection))) return
         if (runCatching { value.validate() }.isFailure) return
         if (selection == null && base.models.any { it.id == value.id }) { notice = "Model ID 已存在"; return }
         val token = AtomicBoolean(false); request = token
@@ -152,8 +174,8 @@ internal fun <T> LocalCatalogModelsScreen(
     }
     DisposableEffect(lifecycle, visit) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) cancel()
-            if (event == Lifecycle.Event.ON_RESUME) reload()
+            if (event == Lifecycle.Event.ON_PAUSE) { resumed = false; pause() }
+            if (event == Lifecycle.Event.ON_RESUME) { resumed = true; reload() }
         }
         lifecycle.addObserver(observer)
         onDispose { visit.set(false); cancel(); lifecycle.removeObserver(observer) }
@@ -161,15 +183,16 @@ internal fun <T> LocalCatalogModelsScreen(
     LaunchedEffect(visit) { reload() }
     val back = { if (current()) { visit.set(false); cancel(); onBack() } }
     BackHandler(previewEnabled = backPreviewEnabled) { back() }
+    val editorEnabled = enabled && resumed && request == null
     val addVisit = adding
     if (addVisit != null) CatalogModelEditorDialog(CatalogModelEdit("", "自定义模型"), isNew = true,
-        enabled = enabled && request == null, errorText = notice,
+        enabled = editorEnabled, canSave = !editorStale, errorText = notice,
         onSave = { if (adding === addVisit) saveForm(it, null) }, onDismiss = { if (request == null && adding === addVisit) adding = null })
     editing?.let { selection ->
         val form = actions.form
         if (form != null) CatalogModelEditorDialog(form(selection.record), isNew = false,
-            enabled = enabled && request == null, errorText = notice,
-            canDelete = selection.record.id != actions.currentModelId,
+            enabled = editorEnabled, canSave = !editorStale, errorText = notice,
+            canDelete = !editorStale && selection.record.id != actions.currentModelId,
             onDelete = { if (editing === selection && current() && currentEnabled && request == null && matches(selection)) { editing = null; deleting = selection } },
             onSave = { if (editing === selection) saveForm(it, selection) },
             onDismiss = { if (request == null && editing === selection) editing = null })
@@ -195,7 +218,7 @@ internal fun <T> LocalCatalogModelsScreen(
         headerContent()
         item("catalog-state") {
             val add = if (actions.add != null && enabled && request == null && loaded && snapshot != null)
-                ({ notice = null; adding = Any() }) else null
+                ({ notice = null; editorStale = false; addingBase = snapshot; adding = Any() }) else null
             if (managementEndpoint != null) ProviderModelManagementCard(managementEndpoint, fetchingModels, onFetchModels, add)
             else if (actions.add != null) SettingsCard {
                 SettingsRow("添加自定义模型", summary = "手动填写展示名称与 Model ID", tag = "local-model-add",
@@ -222,7 +245,7 @@ internal fun <T> LocalCatalogModelsScreen(
                                 Box(Modifier.size(40.dp).testTag("local-model-rename:${model.id}")
                                     .clickable(enabled = enabled && request == null) {
                                         if (current() && currentEnabled && selection != null && matches(selection)) {
-                                            notice = null; editing = selection
+                                            notice = null; editorStale = false; editing = selection
                                         }
                                     }, contentAlignment = Alignment.Center) { DaiyuIcon(Icons.Rounded.Tune, "模型设置") }
                             })

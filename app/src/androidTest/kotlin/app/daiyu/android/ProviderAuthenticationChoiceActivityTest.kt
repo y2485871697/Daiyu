@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import app.daiyu.android.ui.screens.settings.RetainedModelSaveAction
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
@@ -117,15 +118,46 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPausedAddDoesNotRegisterOrRestoreCredentials() {
+    fun testPausedAddRetainsDraftWithoutRegisteringAndOldSaveStaysRevoked() {
         openProviderManagement()
         val before = fixture.controller.providers.snapshot()
         reveal("provider-add", "模型提供商").performClick()
         reveal("provider-auth-api-key", "认证方式").performClick()
         awaitUniqueTag("page:添加提供商")
-        fillNew("must not register")
-        realPauseResume(activity, atPause = {})
-        node("page:添加提供商").assertDoesNotExist()
+        fillNew("retained unsaved provider")
+        val oldSave = reveal("model-save", "添加提供商").fetchSemanticsNode().config[RetainedModelSaveAction]
+        repeat(2) {
+            realPauseResume(activity, atPause = { oldSave() })
+            awaitUniqueTag("page:添加提供商")
+            reveal("model-save", "添加提供商").assertIsEnabled()
+            mainThread { oldSave() }
+            reveal("provider-name", "添加提供商").assertTextContains("retained unsaved provider")
+            reveal("settings-field:Base URL", "添加提供商").assertTextContains("https://fixture.invalid/v1")
+            reveal("settings-field:API Key", "添加提供商").assertTextContains("synthetic-new-key")
+            assertEquals(before, fixture.controller.providers.snapshot())
+            assertEquals(0, fixture.opens.get())
+        }
+        reveal("model-save", "添加提供商").performClick()
+        awaitUniqueTag("page:retained unsaved provider")
+        assertEquals(before.providers.size + 1, fixture.controller.providers.snapshot().providers.size)
+    }
+    fun testAuthenticationAndNewModelTabRetainTheirPageAcrossPause() {
+        openProviderManagement()
+        val before = fixture.controller.providers.snapshot()
+        reveal("provider-add", "模型提供商").performClick()
+        realPauseResume(activity)
+        awaitUniqueTag("page:认证方式")
+        reveal("provider-auth-api-key", "认证方式").performClick()
+        fillNew("tab draft")
+        selectProviderTab("模型")
+        repeat(2) {
+            realPauseResume(activity)
+            awaitUniqueTag("page:添加提供商")
+            node("settings-radio:模型").assertIsSelected()
+            node("provider-name").assertDoesNotExist()
+        }
+        selectProviderTab("配置")
+        reveal("provider-name", "添加提供商").assertTextContains("tab draft")
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())
     }
@@ -215,20 +247,36 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPausingUnsavedDoubaoProviderDoesNotRegister() {
+    fun testPausingUnsavedDoubaoProviderRetainsDraftWithoutRegistering() {
         openProviderManagement()
         val before = fixture.controller.providers.snapshot()
         reveal("provider-add-speech", "模型提供商").performClick()
         awaitUniqueTag("page:添加提供商")
         reveal("settings-field:API Key", "添加提供商").performTextReplacement("must-not-persist")
         realPauseResume(activity, atPause = {})
-        node("page:添加提供商").assertDoesNotExist()
+        awaitUniqueTag("page:添加提供商")
+        reveal("settings-field:API Key", "添加提供商").assertTextContains("must-not-persist")
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())
+        backToPage(activity, "page:模型提供商")
         reveal("provider-add-speech", "模型提供商").performClick()
         awaitUniqueTag("page:添加提供商")
         reveal("settings-field:API Key", "添加提供商").assertTextEquals("")
         reveal("provider-name", "添加提供商").assertTextContains("豆包语音")
     }
 
+    fun testAnthropicCreationRemainsOnItsDirectEntryAfterPause() {
+        openProviderManagement()
+        val before = fixture.controller.providers.snapshot()
+        reveal("provider-add-anthropic", "模型提供商").performClick()
+        fillNew("retained Anthropic")
+        realPauseResume(activity)
+        awaitUniqueTag("page:添加提供商")
+        reveal("settings-field:Anthropic 版本", "Anthropic fixture").assertExists()
+        reveal("provider-name", "添加提供商").assertTextContains("retained Anthropic")
+        backToPage(activity, "page:模型提供商")
+        node("page:认证方式").assertDoesNotExist()
+        assertEquals(before, fixture.controller.providers.snapshot())
+        assertEquals(0, fixture.opens.get())
+    }
 }

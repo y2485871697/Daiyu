@@ -15,9 +15,9 @@ class ContextRouteLifecycleContractTest(unittest.TestCase):
     def test_revocation_clears_owner_before_callbacks_and_closes_only_its_route(self):
         body = self.main.split('private fun revokeContextManagementEntry(', 1)[1].split('private var legacyPage', 1)[0]
         self.assertIn('closeRoute: Boolean = true', body)
-        empty = body.index('val visit = contextManagementVisit ?: return false')
+        empty = body.index('val visit = contextManagementVisit')
         clear = body.index('contextManagementVisit = null')
-        invalidate = body.index('controller.invalidateContextManagement(visit.adapter)')
+        invalidate = body.index('if (visit != null) controller.invalidateContextManagement(visit.adapter)')
         close = body.index('if (closeRoute && retainedPage == "context-management") retainedPage = "chat"')
         self.assertLess(empty, clear)
         self.assertLess(clear, invalidate)
@@ -29,12 +29,12 @@ class ContextRouteLifecycleContractTest(unittest.TestCase):
         setter = self.main.split('private var retainedPage: String', 1)[1].split('private var paneState', 1)[0]
         self.assertIn('if (value != retainedPageState && revokeContextManagementEntry(closeRoute = false)) editorGeneration++', setter)
         self.assertIn('retainedPageState = value', setter)
-        self.assertEqual(1, self.main.count('revokeContextManagementEntry(closeRoute = false)'))
+        self.assertEqual(1, setter.count('revokeContextManagementEntry(closeRoute = false)'))
 
     def test_pause_stop_and_editor_changes_still_revoke_not_restore(self):
         for method, end in [('onPause()', 'override fun onStop()'), ('onStop()', 'override fun onDestroy()')]:
             body = self.main.split('override fun ' + method, 1)[1].split(end, 1)[0]
-            self.assertIn('revokeContextManagementEntry()', body)
+            self.assertIn('revokeContextManagementEntry(closeRoute = false)', body)
         resume = self.main.split('override fun onResume()', 1)[1].split('private fun applyPreferredRefreshRate()', 1)[0]
         self.assertIn('contextManagementEntryEpoch++', resume)
         self.assertNotIn('openContextManagement(', resume)
@@ -42,16 +42,16 @@ class ContextRouteLifecycleContractTest(unittest.TestCase):
         editor = self.main.split('@Volatile private var editorGeneration', 1)[1].split('private var draftRevision', 1)[0]
         self.assertIn('revokeContextManagementEntry()', editor)
 
-    def test_pause_and_stop_assert_chat_instead_of_manually_backing_out(self):
+    def test_pause_and_stop_keep_route_without_restoring_old_authority(self):
         tests = self.activity_tests
         self.assertIn('private fun assertChatRoute()', tests)
         self.assertIn('assertEquals("chat", getter.apply { isAccessible = true }.invoke(activity))', tests)
-        self.assertIn('ui.onNodeWithText("上下文页面已失效；请返回原会话重新打开").assertDoesNotExist()', tests)
-        for name in ('testPauseWithoutStopRevokesOldCompressionConfirmationAndClosesRoute',
+        self.assertIn('fun testPausedContextContinueCallbackCannotSurviveAnotherPauseOrSelection()', tests)
+        for name in ('testPauseWithoutStopRevokesOldCompressionConfirmationAndRetainsRoute',
                      'testStopRevokesUnopenedEntryAndOpenAdapterConsentAndResumeNeedsFreshClick'):
             body = tests.split('fun ' + name + '()', 1)[1].split('\n    fun ', 1)[0]
-            self.assertIn('assertChatRoute()', body)
-            self.assertIn('val next = openAndAwait()', body)
+            self.assertIn('assertPausedContextRoute()', body)
+            self.assertIn('val next = continueAndAwait()', body)
             self.assertNotIn('backToChat(activity)', body)
             self.assertIn('assertEquals(before, fixture.database.exportBackup())', body)
             self.assertIn('assertEquals(0, fixture.opens.get())', body)

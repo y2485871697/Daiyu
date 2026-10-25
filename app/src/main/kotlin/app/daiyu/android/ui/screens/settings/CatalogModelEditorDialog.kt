@@ -36,7 +36,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean, enabled: Boolean,
     onSave: (CatalogModelEdit) -> Unit, onDismiss: () -> Unit,
-    canDelete: Boolean = false, onDelete: () -> Unit = {}, errorText: String? = null,
+    canSave: Boolean = true, canDelete: Boolean = false, onDelete: () -> Unit = {}, errorText: String? = null,
 ) {
     var value by remember(initial) { mutableStateOf(initial) }
     val accent = assistantPreviewPalette()
@@ -83,7 +83,7 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                     }
                     MiuixDialogActions("保存", onCancel = onDismiss, onConfirm = { if (enabled) onSave(value) },
                         modifier = Modifier.padding(top = 16.dp).testTag("catalog-model-actions"),
-                        confirmEnabled = enabled && runCatching { value.validate() }.isSuccess, cancelEnabled = enabled)
+                        confirmEnabled = enabled && canSave && runCatching { value.validate() }.isSuccess, cancelEnabled = enabled)
                 }
             }
         }

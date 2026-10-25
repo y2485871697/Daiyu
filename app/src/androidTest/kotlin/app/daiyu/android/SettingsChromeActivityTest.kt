@@ -27,6 +27,7 @@ import androidx.core.view.WindowCompat
 import android.content.res.Configuration
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.data.model.AppearanceTopBarBlurStyle
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.settings.AppearanceSettingsScreen
 import app.daiyu.android.ui.screens.settings.DaiyuSettingsScreen
@@ -220,6 +221,86 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertTrue(state.morphLoadingBeforeResponseOnly) }
         node("page:外观与主题").performScrollToIndex(0)
         capture("appearance-dark")
+    }
+
+    fun testTopBarBlurChoicesUseUnifiedSheetAndCommitOnlyTheSelectedValue() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            val initial = AppearanceSettings(
+                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                interfaceScale = scale, topBarBlurStyle = AppearanceTopBarBlurStyle.PROGRESSIVE)
+            var state by mutableStateOf(initial)
+            val requests = mutableListOf<AppearanceSettings>()
+            mainThread {
+                activity.setContent {
+                    val density = LocalDensity.current
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                        AgentAppTheme(state, true) {
+                            AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it }, onBack = {})
+                        }
+                    }
+                }
+            }
+            fun open() {
+                reveal("settings-row:顶栏模糊样式", "外观与主题").performTouchInput { click() }
+                node("chat-selection-sheet").assertIsDisplayed()
+                node("daiyu-choice-sheet").assertDoesNotExist()
+                ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+                val sheet = node("chat-selection-sheet").fetchSemanticsNode().boundsInRoot
+                var previousBottom = sheet.top
+                for (tag in listOf("settings-radio:高斯模糊", "settings-radio:渐进模糊", "choice-sheet-cancel")) {
+                    val bounds = node(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                    assertTrue(bounds.left >= sheet.left && bounds.right <= sheet.right)
+                    assertTrue(bounds.top >= previousBottom && bounds.bottom <= sheet.bottom)
+                    previousBottom = bounds.bottom
+                }
+            }
+            open()
+            node("settings-radio:高斯模糊").assertIsNotSelected()
+            node("settings-radio:渐进模糊").assertIsSelected()
+            node("settings-radio:高斯模糊").performTouchInput { click() }
+            node("chat-selection-sheet").assertDoesNotExist()
+            ui.runOnIdle { assertEquals(listOf(initial.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.GAUSSIAN)), requests) }
+            node("settings-row:顶栏模糊样式").assertTextContains("高斯模糊")
+            open()
+            node("settings-radio:高斯模糊").assertIsSelected()
+            node("settings-radio:渐进模糊").assertIsNotSelected().performTouchInput { click() }
+            node("chat-selection-sheet").assertDoesNotExist()
+            ui.runOnIdle {
+                assertEquals(listOf(initial.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.GAUSSIAN), initial), requests)
+                assertEquals(initial, state)
+            }
+            node("settings-row:顶栏模糊样式").assertTextContains("渐进模糊")
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testTopBarBlurCancelOutsideAndBackDoNotChangeAppearance() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return
+        val initial = AppearanceSettings(topBarBlurStyle = AppearanceTopBarBlurStyle.PROGRESSIVE)
+        var state by mutableStateOf(initial)
+        val requests = mutableListOf<AppearanceSettings>()
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(state, false) {
+                    AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it }, onBack = {})
+                }
+            }
+        }
+        repeat(3) { action ->
+            reveal("settings-row:顶栏模糊样式", "外观与主题").performTouchInput { click() }
+            node("chat-selection-sheet").assertIsDisplayed()
+            node("settings-radio:渐进模糊").assertIsSelected()
+            when (action) {
+                0 -> node("choice-sheet-cancel").performTouchInput { click() }
+                1 -> node("preview-dialog-scrim").performTouchInput { click(Offset(width / 2f, height * .1f)) }
+                else -> instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            }
+            node("chat-selection-sheet").assertDoesNotExist()
+            ui.runOnIdle { assertTrue(requests.isEmpty()); assertEquals(initial, state) }
+            node("settings-row:顶栏模糊样式").assertTextContains("渐进模糊")
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testAppearanceGroupsRetainControlsAtLargeFontAndBothScales() {

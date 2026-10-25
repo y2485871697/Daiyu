@@ -4,12 +4,15 @@ import androidx.compose.material3.SwitchDefaults
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -40,7 +43,8 @@ import androidx.compose.ui.unit.sp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.data.model.AppearanceTopBarBlurStyle
-import app.daiyu.android.ui.components.DaiyuChoiceSheet
+import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -103,13 +107,24 @@ internal fun AppearanceSettingsScreen(
     var choosingBlur by remember { mutableStateOf(false) }
     val blurStyles = listOf("高斯模糊", "渐进模糊")
     val blurSupported = isRuntimeShaderSupported()
-    if (choosingBlur) DaiyuChoiceSheet(
-        title = "顶栏模糊样式", options = blurStyles,
-        onSelect = { index ->
-            onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))
-            choosingBlur = false
-        }, onDismiss = { choosingBlur = false },
-    )
+    if (choosingBlur) ChatSelectionSheet(
+        title = "顶栏模糊样式", onDismiss = { choosingBlur = false },
+        showCloseButton = false, titleFontSize = 20.sp,
+        footer = {
+            AssistantPreviewButton("取消", { choosingBlur = false },
+                Modifier.fillMaxWidth().testTag("choice-sheet-cancel"))
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 440.dp)
+            .verticalScroll(rememberScrollState()).selectableGroup()) {
+            blurStyles.forEachIndexed { index, title ->
+                SettingsRadioRow(title, selected = state.topBarBlurStyle.ordinal == index) {
+                    onChange(state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index]))
+                    choosingBlur = false
+                }
+            }
+        }
+    }
     if (scaleEditor) WindowDialog(show = true, title = "界面缩放", onDismissRequest = { scaleEditor = false }) {
         Column {
             SettingsTextField("缩放百分比", scaleInput, { scaleInput = it.filter(Char::isDigit).take(3) }, hint = "80–110")

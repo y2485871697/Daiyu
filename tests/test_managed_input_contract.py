@@ -118,12 +118,34 @@ class ManagedInputContractTest(unittest.TestCase):
     def test_real_touches_map_layout_window_bounds_to_screen_before_injection(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()
         bounds = text.split('private fun screenBounds(', 1)[1].split('private fun injectGesture(', 1)[0]
-        for token in ('awaitNodeWindowFocus(interaction)', 'awaitStableWindowFrame(view)',
+        for token in ('awaitNodeWindowFocus(interaction)', 'stableScreenBounds(view)',
                       'val coordinates = target.layoutInfo.coordinates', 'coordinates.boundsInWindow()',
                       'view.getLocationOnScreen(screen)', 'view.getLocationInWindow(window)',
                       '(screen[0] - window[0]).toFloat()', '(screen[1] - window[1]).toFloat()',
-                      'view.windowToken != token', '!coordinates.isAttached', 'screen-bounds tag=$tag'):
+                      '!coordinates.isAttached', 'screen-bounds tag=$tag'):
             self.assertIn(token, bounds)
+        self.assertLess(bounds.index('awaitNodeWindowFocus(interaction)'), bounds.index('stableScreenBounds(view)'))
+        stable = text.split('private fun stableScreenBounds(', 1)[1].split('private fun screenBounds(', 1)[0]
+        for token in ('awaitStableWindowFrame(view) { sample() }', 'view.windowToken != token',
+                      '!view.isAttachedToWindow', '!view.hasWindowFocus()', 'view.isLayoutRequested',
+                      'FLAG_RETRIEVE_INTERACTIVE_WINDOWS', 'view.createAccessibilityNodeInfo() ?: return null',
+                      'val id = try { node.windowId } finally { node.recycle() }',
+                      'automation.windows.singleOrNull { it.id == id && it.isFocused }',
+                      'window.getBoundsInScreen(nativeBounds)', 'windowBounds.left <= bounds.left',
+                      'windowBounds.top <= bounds.top', 'windowBounds.right >= bounds.right',
+                      'windowBounds.bottom >= bounds.bottom', 'if (contained) TouchFrame(bounds, windowBounds, id)',
+                      'TouchFrame(bounds, windowBounds, id)', 'instrumentation.runOnMainSync { current = sample() }',
+                      'if (current == stable) return stable.bounds', 'uptimeMillis() < deadline',
+                      'finally', 'flags = oldFlags'):
+            self.assertIn(token, stable)
+        self.assertLess(stable.index('instrumentation.runOnMainSync { current = sample() }'),
+                        stable.index('if (current == stable) return stable.bounds'))
+        self.assertNotIn('view.accessibilityWindowId', stable)
+        self.assertNotIn('injectInputEvent', stable)
+        self.assertNotIn('requestFocus', stable)
+        native_tap = text.split('fun tap(view: android.view.View)', 1)[1].split('fun awaitNativeIme', 1)[0]
+        self.assertIn('stableScreenBounds(view)', native_tap)
+        self.assertNotIn('mainThread', native_tap)
         self.assertNotIn('target.boundsInRoot', bounds)
         self.assertIn('ui.waitUntil(5_000)', text.split('private fun awaitFieldFocus(', 1)[1].split('private fun awaitFieldIme(', 1)[0])
         self.assertIn('tag=$tag expected=$focused observed=$observed', text)

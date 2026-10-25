@@ -77,6 +77,52 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         }
     }
 
+    private data class TouchFrame(
+        val bounds: androidx.compose.ui.geometry.Rect,
+        val windowBounds: androidx.compose.ui.geometry.Rect,
+        val windowId: Int,
+    )
+
+    private fun stableScreenBounds(view: android.view.View,
+        readBounds: () -> androidx.compose.ui.geometry.Rect?): androidx.compose.ui.geometry.Rect {
+        val automation = instrumentation.uiAutomation
+        val oldFlags = automation.serviceInfo.flags
+        val token = view.windowToken
+        try {
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            fun sample(): TouchFrame? {
+                if (!view.isAttachedToWindow || !view.hasWindowFocus() || view.isLayoutRequested ||
+                    view.windowToken != token) return null
+                val bounds = readBounds() ?: return null
+                if (bounds.width <= 0f || bounds.height <= 0f ||
+                    !listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() }) return null
+                val node = view.createAccessibilityNodeInfo() ?: return null
+                val id = try { node.windowId } finally { node.recycle() }
+                val window = automation.windows.singleOrNull { it.id == id && it.isFocused } ?: return null
+                val nativeBounds = android.graphics.Rect()
+                window.getBoundsInScreen(nativeBounds)
+                val windowBounds = androidx.compose.ui.geometry.Rect(nativeBounds.left.toFloat(), nativeBounds.top.toFloat(),
+                    nativeBounds.right.toFloat(), nativeBounds.bottom.toFloat())
+                val contained = windowBounds.left <= bounds.left && windowBounds.top <= bounds.top &&
+                    windowBounds.right >= bounds.right && windowBounds.bottom >= bounds.bottom
+                return if (contained) TouchFrame(bounds, windowBounds, id) else null
+            }
+            val deadline = android.os.SystemClock.uptimeMillis() + 5_000
+            while (true) {
+                val stable = awaitStableWindowFrame(view) { sample() }
+                var current: TouchFrame? = null
+                instrumentation.runOnMainSync { current = sample() }
+                if (current == stable) return stable.bounds
+                assertTrue("Touch window changed before injection: stable=$stable current=$current",
+                    android.os.SystemClock.uptimeMillis() < deadline)
+            }
+        } finally {
+            automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
+        }
+    }
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun screenBounds(tag: String): androidx.compose.ui.geometry.Rect {
         val interaction = node(tag).scrollToVisible()
@@ -84,23 +130,19 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         awaitNodeWindowFocus(interaction)
         val target = interaction.fetchSemanticsNode()
         val view = (target.root as androidx.compose.ui.platform.ViewRootForTest).view
-        val token = view.windowToken
-        val stable = awaitStableWindowFrame(view) {
+        val stable = stableScreenBounds(view) {
             val coordinates = target.layoutInfo.coordinates
-            if (view.windowToken != token || !target.layoutInfo.isPlaced ||
-                !coordinates.isAttached) null else {
+            if (!target.layoutInfo.isPlaced || !coordinates.isAttached) null else {
                 val screen = IntArray(2)
                 val window = IntArray(2)
                 view.getLocationOnScreen(screen)
                 view.getLocationInWindow(window)
-                val bounds = coordinates.boundsInWindow().translate(
+                coordinates.boundsInWindow().translate(
                     androidx.compose.ui.geometry.Offset((screen[0] - window[0]).toFloat(),
                         (screen[1] - window[1]).toFloat()))
-                bounds.takeIf { it.width > 0f && it.height > 0f &&
-                    listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() } }
             }
         }
-        android.util.Log.d("ManagedInputTest", "screen-bounds tag=$tag bounds=$stable token=$token")
+        android.util.Log.d("ManagedInputTest", "screen-bounds tag=$tag bounds=$stable token=${view.windowToken}")
         return stable
     }
 
@@ -456,12 +498,13 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             }
         }
         fun tap(view: android.view.View) {
-            val center = java.util.concurrent.atomic.AtomicReference<androidx.compose.ui.geometry.Offset>()
-            mainThread {
-                val screen = IntArray(2); view.getLocationOnScreen(screen)
-                center.set(androidx.compose.ui.geometry.Offset(screen[0] + view.width / 2f, screen[1] + view.height / 2f))
-            }
-            injectGesture(listOf(0L to center.get(), 40L to center.get()))
+            val center = stableScreenBounds(view) {
+                val screen = IntArray(2)
+                view.getLocationOnScreen(screen)
+                androidx.compose.ui.geometry.Rect(screen[0].toFloat(), screen[1].toFloat(),
+                    (screen[0] + view.width).toFloat(), (screen[1] + view.height).toFloat())
+            }.center
+            injectGesture(listOf(0L to center, 40L to center))
         }
         fun awaitNativeIme(visible: Boolean) = awaitStableWindowFrame(first) {
             val insets = androidx.core.view.ViewCompat.getRootWindowInsets(first)

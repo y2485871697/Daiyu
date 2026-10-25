@@ -1,7 +1,7 @@
 package app.daiyu.android.assistants
 
 object AssistantDefaults {
-    val ENABLED_SKILL_IDS: List<String> = listOf("self-improving-agent", "skill-creator", "skill-installer")
+    val ENABLED_SKILL_IDS: List<String> = emptyList()
 }
 
 data class AssistantProfile(

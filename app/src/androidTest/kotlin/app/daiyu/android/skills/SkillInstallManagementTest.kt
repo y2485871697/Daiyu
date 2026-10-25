@@ -16,7 +16,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /** No network or app registry: both stores, preferences and every response belong to the fixture. */
-internal class SkillInstallFixture(private val base: Context, rootSelection: Boolean = false, packagedBuiltins: Boolean = false) : AutoCloseable {
+internal class SkillInstallFixture(private val base: Context, rootSelection: Boolean = false, fixtureBuiltins: Boolean = false) : AutoCloseable {
     val commit = "a".repeat(40)
     private val token = "skill-install-${UUID.randomUUID()}"
     private val root = File(base.cacheDir, token).apply { check(mkdir()) }
@@ -47,7 +47,8 @@ internal class SkillInstallFixture(private val base: Context, rootSelection: Boo
             url == "https://codeload.github.com/owner/repo/zip/$commit" -> zip()
             else -> error("unexpected_url")
         }
-    }, builtin, user, builtinCatalogFactory = { if (packagedBuiltins) BuiltinSkillCatalog(context) else BuiltinSkillCatalog.empty() })
+    }, builtin, user, builtinCatalogFactory = { if (fixtureBuiltins) BuiltinSkillCatalog(mapOf("builtin-demo" to
+        "---\nname: builtin-demo\ndescription: Trusted test package\n---\nfixture body".toByteArray())) else BuiltinSkillCatalog.empty() })
     val manager by lazy { SkillManagement.create { registry } }
     private val path get() = if (directory.isEmpty()) "SKILL.md" else "$directory/SKILL.md"
     fun markdown(body: String) = "---\nname: demo\ndescription: Install test\n---\n$body\n".toByteArray()

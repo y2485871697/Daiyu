@@ -190,7 +190,7 @@ Normalization deliberately cannot widen a selection:
 | Omitted or `null` | Backward-compatible enabled catalog, with enabled builtins shadowing same-name user entries. This is not the assistant path. |
 | `emptySet()` | No selected skills. Authorized read tools may remain advertised, but the index is empty and every skill read rejects. Never convert empty to null. |
 | `builtin:name` / `user:name` | Exact, case-sensitive origin and name. No fallback to another origin if missing or disabled. Both same-name origins appear only when both exact IDs were explicitly requested. |
-| Bare `name` (e.g. `self-improving-agent`) | Resolve only if that installed directory name exists in exactly one origin. If both origins contain it, ignore this ambiguous token (fail closed), even when a namesake is disabled or has damaged metadata. An additional explicit ID still selects its exact origin. |
+| Bare `name` (e.g. `demo`) | Resolve only if that installed directory name exists in exactly one origin. If both origins contain it, ignore this ambiguous token (fail closed), even when a namesake is disabled or has damaged metadata. An additional explicit ID still selects its exact origin. |
 | Unknown/malformed token | Select nothing for that token; never reinterpret as all skills. No trimming, lowercasing, wildcard matching or prefix repair. Names use `[a-z0-9]+(?:-[a-z0-9]+)*`, length 1..64. |
 
 All selections still require global enablement, individual enablement and `skills.read`.
@@ -249,3 +249,15 @@ These tests were authored and statically reviewed only. This implementation agen
 shell, build or tests and claims no passing test count. Parent compilation and test execution
 are required; API26/API37.2 instrumentation and real Controller-path acceptance are not
 established by this change.
+
+
+### Removed default packages
+
+The app ships no default Skill packages and new assistants select no skills. The former
+self-improving-agent, skill-creator and skill-installer packages are retired only from the
+app-private builtin store, after transaction recovery and before any store operation.
+User-installed packages, including namesakes, are preserved and remain installable through
+ZIP/GitHub management. No fixed skill-body injection or automatic learning log was wired
+into this project's runtime; its existing selected-skill read tools and memory remain intact.
+The assistant editor retains its Skills section and shows only a single “None” line when
+its available-skill list is empty; rendering that state does not edit saved selections.

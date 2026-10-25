@@ -308,14 +308,14 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
 
     // The same page controller as Compose, with explicit worker-start and UI-delivery
     // boundaries. No sleeps, network, app stores or executor scheduling assumptions.
-    private fun usePackagedBuiltins() {
+    private fun useFixtureBuiltins() {
         skills.close()
-        skills = SkillInstallFixture(instrumentation.targetContext, packagedBuiltins = true)
+        skills = SkillInstallFixture(instrumentation.targetContext, fixtureBuiltins = true)
     }
 
     fun testBuiltinReinstallNeedsConfirmationCancelDoesNotWriteAndKeepsGlobalOff() {
-        usePackagedBuiltins()
-        val original = skills.manager.snapshot().entries.single { it.id == "builtin:skill-creator" }
+        useFixtureBuiltins()
+        val original = skills.manager.snapshot().entries.single { it.id == "builtin:builtin-demo" }
         skills.manager.setEnabled(original.id, false, original.skill.revision)
         skills.manager.setGlobalEnabled(false)
         show()
@@ -323,11 +323,11 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         node("skill-reinstall:${original.id}").performClick()
         node("skills-confirm-reinstall").assertIsEnabled()
         ui.onNodeWithText("取消").performClick()
-        assertFalse(skills.builtin.list().single { it.name == "skill-creator" }.enabled)
+        assertFalse(skills.builtin.list().single { it.name == "builtin-demo" }.enabled)
         reveal("skill-row:${original.id}", "技能").performClick()
         node("skill-reinstall:${original.id}").performClick()
         node("skills-confirm-reinstall").performClick()
-        ui.waitUntil(10_000) { skills.builtin.list().single { it.name == "skill-creator" }.enabled }
+        ui.waitUntil(10_000) { skills.builtin.list().single { it.name == "builtin-demo" }.enabled }
         ready("skills-global")
         node("skills-global").assertIsOff()
         assertFalse(skills.registry.enabled)
@@ -339,7 +339,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         finishNext()
         var entry: SkillManagement.Entry? = null
         mainThread {
-            entry = controller.state!!.entries.single { it.id == "builtin:skill-creator" }
+            entry = controller.state!!.entries.single { it.id == "builtin:builtin-demo" }
             controller.prepareReinstall(checkNotNull(entry))
         }
         worker.drain(); deliver()
@@ -349,7 +349,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
     }
 
     fun testBuiltinReinstallCanceledConfirmationCannotBeReusedAndDuplicateWritesOnce() {
-        usePackagedBuiltins()
+        useFixtureBuiltins()
         val page = ControlledPage()
         try {
             val canceled = page.prepareBuiltinReinstall()
@@ -368,7 +368,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
     }
 
     fun testLeavingRejectsQueuedBuiltinReinstallAndLateConfirmation() {
-        usePackagedBuiltins()
+        useFixtureBuiltins()
         val page = ControlledPage()
         val approved = page.prepareBuiltinReinstall()
         var writes = 0
@@ -381,7 +381,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
     }
 
     fun testAdmittedBuiltinReinstallFinishesAfterLeaveWithoutLatePageUpdate() {
-        usePackagedBuiltins()
+        useFixtureBuiltins()
         val page = ControlledPage()
         val approved = page.prepareBuiltinReinstall()
         val entered = CountDownLatch(1)
@@ -401,13 +401,13 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         failure.get()?.let { throw it }
         page.worker.drain(); page.deliver()
         assertEquals(1, writes)
-        assertEquals(approved.entry.skill.revision, skills.builtin.list().single { it.name == "skill-creator" }.revision)
-        assertTrue(skills.builtin.list().single { it.name == "skill-creator" }.enabled)
+        assertEquals(approved.entry.skill.revision, skills.builtin.list().single { it.name == "builtin-demo" }.revision)
+        assertTrue(skills.builtin.list().single { it.name == "builtin-demo" }.enabled)
         mainThread { assertNull(page.controller.installMessage) }
     }
 
     fun testBuiltinReinstallUnknownConsumesConfirmationAndRefreshNeverReplays() {
-        usePackagedBuiltins()
+        useFixtureBuiltins()
         val page = ControlledPage()
         try {
             val approved = page.prepareBuiltinReinstall()
@@ -427,7 +427,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
     }
 
     fun testBuiltinReinstallOldPageTokenCannotBorrowFreshPageConfirmation() {
-        usePackagedBuiltins()
+        useFixtureBuiltins()
         val old = ControlledPage()
         val stale = old.prepareBuiltinReinstall()
         old.close()

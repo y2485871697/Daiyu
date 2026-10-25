@@ -2,7 +2,7 @@
 <resources>
   <string name="ui_enable_memory_4b69b7">Enable memory</string>
   <string name="ui_copy_4edd1d">copy</string>
-  <string name="ui_no_skills_installed_yet_4e960f">No Skills installed yet</string>
+  <string name="assistant_skills_none">None</string>
   <string name="ui_edit_a7f814">edit</string>
   <string name="ui_memory_b55ff5">Memory</string>
   <string name="skills_no_description">No description</string>

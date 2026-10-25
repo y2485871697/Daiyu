@@ -22,8 +22,13 @@ class SkillCleanupPending(val installedSkills: List<InstalledSkill>, cause: Thro
 class SkillRemovalCleanupPending(val removedSkill: InstalledSkill, cause: Throwable) : IllegalStateException("skill_removal_cleanup_pending", cause)
 
 /** Dedicated app-private store; never points at the repository's own skills directory. */
-class SkillStore(private val root: File, builtinNames: Set<String> = emptySet()) {
+class SkillStore(
+    private val root: File,
+    builtinNames: Set<String> = emptySet(),
+    retiredNames: Set<String> = emptySet(),
+) {
     private val builtinNames = builtinNames.toSet()
+    private val retiredNames = retiredNames.toSet()
     constructor(context: Context) : this(File(context.filesDir, "runtime-skills-v1"))
     companion object {
         const val MAX_FILE_BYTES = 256 * 1024
@@ -38,6 +43,8 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
         require(!java.nio.file.Files.isSymbolicLink(installed.toPath())) { "unsafe_root" }
         require(installed.isDirectory || installed.mkdirs()) { "storage_unavailable" }
         recoverLocked()
+        // Recovery may restore an old package; retire it under the same store lock.
+        retiredNames.forEach { SkillFiles.remove(SkillFiles.path(installed, it)) }
         block()
     }
     fun recover() { access { Unit } }
@@ -167,6 +174,7 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
         prepared.forEach { SkillCompatibilityPolicy.requireAvailable(it.compatibility) }
         val names = prepared.map { it.header.name }
         require(names.none { it in builtinNames }) { "builtin_conflict" }
+        require(names.none { it in retiredNames }) { "builtin_retired" }
         if (expectedIncomingRevisions != null) {
             require(expectedIncomingRevisions.keys == names.toSet() && prepared.all { expectedIncomingRevisions[it.header.name] == it.revision }) { "incoming_revision_conflict" }
         }

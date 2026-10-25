@@ -49,13 +49,15 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
     private lateinit var store: AssistantStore
     private lateinit var editorAssets: AssistantAssets
 
-    private fun show(scale: Float = 1f, dark: Boolean = false, prompt: String = "Original prompt") {
+    private fun show(scale: Float = 1f, dark: Boolean = false, prompt: String = "Original prompt",
+        installedSkills: List<AssistantSkill> = listOf(AssistantSkill("visual-skill", "Visual skill", "Skill description")),
+        selectedSkills: List<String> = emptyList()) {
         saved.set(0)
         closed.set(0)
         writes.set(0)
         memory.set(AssistantMemorySnapshot("Original memory", "base"))
         val profile = AssistantProfile("editor-visual", "Visual editor", prompt,
-            memoryEnabled = false, enabledSkillIds = emptyList())
+            memoryEnabled = false, enabledSkillIds = selectedSkills)
         store = object : AssistantStore {
             override val assistants = MutableStateFlow(listOf(profile))
             override val selectedId = MutableStateFlow(profile.id)
@@ -86,7 +88,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                         applyInterfaceScale = true) {
                         density.set(LocalDensity.current)
                         AssistantEditScreen(profile.id, { closed.incrementAndGet() }, store, editorAssets,
-                            installedSkills = listOf(AssistantSkill("visual-skill", "Visual skill", "Skill description")),
+                            installedSkills = installedSkills,
                             onSaved = { saved.incrementAndGet() })
                     }
                 }
@@ -114,6 +116,42 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
     private fun setField(tag: String, value: String) {
         tagged(tag).scrollToVisible().performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString(value)) }
         tagged(tag).assertTextEquals(value)
+    }
+
+    fun testEmptySkillsShowsSingleLineNoneWithoutDirtyingProfile() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            val previousSelection = listOf("builtin:skill-creator")
+            show(scale, dark, installedSkills = emptyList(), selectedSkills = previousSelection)
+            val inSkills = hasAnyAncestor(hasTestTag("assistant-skills"))
+            val empty = tagged("assistant-skills-empty").scrollToVisible()
+            empty.assertIsDisplayed().assertTextEquals(text(R.string.assistant_skills_none))
+            tagged("assistant-section-legend:${text(R.string.route_skills)}").assertIsDisplayed()
+            ui.onNodeWithText(text(R.string.assistant_skills_caption), useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText(text(R.string.assistant_independent_switches), useUnmergedTree = true).assertDoesNotExist()
+            ui.onAllNodes(inSkills and SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState),
+                useUnmergedTree = true).assertCountEquals(0)
+            ui.onAllNodes(inSkills and SemanticsMatcher.keyIsDefined(SemanticsProperties.Text),
+                useUnmergedTree = true).assertCountEquals(2) // The title and the one empty-state line.
+            val layouts = mutableListOf<TextLayoutResult>()
+            empty.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            assertEquals(1, layouts.single().lineCount)
+            tagged("assistant-edit-save").assertIsNotEnabled()
+            assertEquals(previousSelection, store.assistants.value.single().enabledSkillIds)
+            assertEquals(0, writes.get())
+            tagged("assistant-edit-cancel").performClick()
+            assertEquals(0, writes.get())
+        }
+    }
+
+    fun testAvailableUnselectedSkillsKeepCaptionAndSwitch() {
+        show()
+        tagged("assistant-skills").scrollToVisible()
+        tagged("assistant-skills-empty").assertDoesNotExist()
+        ui.onNodeWithText(text(R.string.assistant_skills_caption), useUnmergedTree = true).assertExists()
+        ui.onNodeWithText(text(R.string.assistant_independent_switches), useUnmergedTree = true).assertExists()
+        tagged("assistant-skill-visual-skill").assertIsOff()
+        tagged("assistant-edit-save").assertIsNotEnabled()
+        assertEquals(0, writes.get())
     }
 
     fun testEditorMatchesPreviewTypographyAndKeepsFooterOutsideScrollingContent() {

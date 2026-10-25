@@ -418,13 +418,7 @@ private fun SkillProductRow(entry: SkillManagement.Entry, enabled: Boolean,
     onDetails: () -> Unit, onRemove: () -> Unit) {
     var expanded by remember(entry.id) { mutableStateOf(false) }
     val colors = MiuixTheme.colorScheme
-    val icon = when {
-        !entry.builtin -> DaiyuIcons.Skills
-        entry.skill.name == "self-improving-agent" -> SkillIcons.Improve
-        entry.skill.name == "skill-creator" -> SkillIcons.Create
-        entry.skill.name == "skill-installer" -> SkillIcons.Import
-        else -> DaiyuIcons.Skills
-    }
+    val icon = DaiyuIcons.Skills
     Row(Modifier.fillMaxWidth().testTag("skill-row:${entry.id}").heightIn(min = 96.dp)
         .padding(start = 18.dp, end = 8.dp, top = 16.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         DaiyuIcon(icon, null, tint = colors.onSurfaceVariantSummary, size = 26.dp,

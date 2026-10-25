@@ -177,27 +177,29 @@ fun AssistantEditScreen(
                 stringResource(R.string.assistant_system_prompt), enabled = !saving, singleLine = false,
                 minHeight = 110.dp, maxHeight = 250.dp, fieldModifier = Modifier.testTag("assistant-edit-prompt").isolateEditorScroll(scrollIsolation))
             AssistantPreviewSection(stringResource(R.string.route_skills), Modifier.testTag("assistant-skills")) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
-                    Text(stringResource(R.string.assistant_skills_caption), color = colors.muted,
-                        fontSize = (12f * s).sp, lineHeight = (18f * s).sp, modifier = Modifier.weight(1f))
-                    Text(stringResource(R.string.assistant_independent_switches), color = colors.muted,
-                        fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
-                }
-                Spacer(Modifier.height(7.dp * s))
                 if (installedSkills.isEmpty()) {
-                    Text(stringResource(R.string.ui_no_skills_installed_yet_4e960f), color = colors.muted,
-                        fontSize = (13f * s).sp, lineHeight = (20f * s).sp,
-                        modifier = Modifier.padding(vertical = 14.dp * s))
-                } else installedSkills.forEachIndexed { index, skill ->
-                    if (index > 0) {
-                        Spacer(Modifier.height(3.dp * s))
-                        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
+                    Text(stringResource(R.string.assistant_skills_none), color = colors.muted,
+                        fontSize = (13f * s).sp, lineHeight = (20f * s).sp, maxLines = 1,
+                        modifier = Modifier.testTag("assistant-skills-empty"))
+                } else {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
+                        Text(stringResource(R.string.assistant_skills_caption), color = colors.muted,
+                            fontSize = (12f * s).sp, lineHeight = (18f * s).sp, modifier = Modifier.weight(1f))
+                        Text(stringResource(R.string.assistant_independent_switches), color = colors.muted,
+                            fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
                     }
-                    AssistantSkillSwitchRow(skill, enabledSkillIds.contains(skill.id), !saving) { enabled ->
-                        if (session.isActive && !saving) {
-                            val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
-                            enabledSkillIds = next
+                    Spacer(Modifier.height(7.dp * s))
+                    installedSkills.forEachIndexed { index, skill ->
+                        if (index > 0) {
+                            Spacer(Modifier.height(3.dp * s))
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
+                        }
+                        AssistantSkillSwitchRow(skill, enabledSkillIds.contains(skill.id), !saving) { enabled ->
+                            if (session.isActive && !saving) {
+                                val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
+                                enabledSkillIds = next
+                            }
                         }
                     }
                 }

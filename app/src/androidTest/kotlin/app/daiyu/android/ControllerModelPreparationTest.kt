@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerModelPreparationTest : InstrumentationTestCase() {
     private val expectedBaseCatalog = setOf("get_battery_status", "context_usage", "ask_user",
-        "skills_list", "skills_read", "skills_read_resource", "assistant_memory_read", "assistant_memory_search")
+        "assistant_memory_read", "assistant_memory_search")
     private class FixtureApplication(base: Context) : Application() {
         private val privateFiles=File(base.cacheDir,"controller-model-files-${UUID.randomUUID()}").apply {check(mkdirs() || isDirectory)}
         init { attachBaseContext(base) }
@@ -399,8 +399,8 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val demo = (0 until listed.length()).map { listed.getJSONObject(it) }.single { it.getString("id") == "user:demo" }
         assertEquals(old.revision, demo.getString("revision"))
         val ids = (0 until listed.length()).map { listed.getJSONObject(it).getString("id") }
-        assertEquals(4, ids.size)
-        assertEquals(setOf("builtin:self-improving-agent", "builtin:skill-creator", "builtin:skill-installer", "user:demo"), ids.toSet())
+        assertEquals(1, ids.size)
+        assertEquals(setOf("user:demo"), ids.toSet())
         val body=org.json.JSONObject(outputs[1].output);assertTrue(body.getBoolean("ok"));assertFalse(body.getBoolean("executable"))
         assertTrue(body.getString("content").endsWith("old-body"));assertFalse(body.getString("content").contains("new-body"))
         val resource=org.json.JSONObject(outputs[2].output);assertFalse(resource.getBoolean("ok"));assertEquals("skill_conflict",resource.getString("error"))
@@ -431,12 +431,14 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     }
     fun testSkillsCaptureFailurePersistsFailedWithoutOpeningModelAndCanStartNextRun() {
         val opens=AtomicInteger();val f=fresh {CatalogFixturePort {opens.incrementAndGet();session("next-run")}}
-        val broken=File(f.app.filesDir,"agent-builtin-skills-v1");broken.writeText("not a directory")
+        installSkill(f)
+        val broken=File(f.app.filesDir,"runtime-skills-v1/installed/demo/SKILL.md")
+        val original=broken.readBytes();broken.writeText("changed body")
         val c=f.db.create("default")
         assertNotNull(f.controller.send(c,"accepted before worker capture"))
         awaitState(f) {f.controller.active==null}
         assertEquals(0,opens.get());assertEquals(RunStatus.FAILED,f.db.messages(c.id).last().second.status)
-        assertTrue(ledger(f).isEmpty());assertTrue(broken.delete())
+        assertTrue(ledger(f).isEmpty());broken.writeBytes(original)
         finish(f,c);assertEquals(1,opens.get())
     }
     fun testStopBeforeSkillBatchExecutionPreventsReadAndLedgerReservation() {

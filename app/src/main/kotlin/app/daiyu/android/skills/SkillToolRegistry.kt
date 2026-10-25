@@ -14,7 +14,8 @@ class SkillToolRegistry(
     user: SkillStore? = null,
     private val builtinCatalogFactory: () -> BuiltinSkillCatalog = { if (builtin == null) BuiltinSkillCatalog(context) else BuiltinSkillCatalog.empty() }
 ) {
-    private val builtin = builtin ?: SkillStore(File(context.filesDir, "agent-builtin-skills-v1"))
+    private val builtin = builtin ?: SkillStore(File(context.filesDir, "agent-builtin-skills-v1"),
+        retiredNames = BuiltinSkillCatalog.RETIRED_NAMES)
     private val builtinCatalog by lazy(builtinCatalogFactory)
     private val userStore by lazy { user ?: SkillStore(File(context.filesDir, "runtime-skills-v1"), this.builtin.installedNamesForRun() + builtinCatalog.names) }
     private val preferences = context.getSharedPreferences("runtime-skills-v1-settings", Context.MODE_PRIVATE)

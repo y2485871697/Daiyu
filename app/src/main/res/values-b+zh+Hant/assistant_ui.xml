@@ -2,7 +2,7 @@
 <resources>
   <string name="ui_enable_memory_4b69b7">啟用記憶</string>
   <string name="ui_copy_4edd1d">複製</string>
-  <string name="ui_no_skills_installed_yet_4e960f">尚未安裝任何 Skill</string>
+  <string name="assistant_skills_none">無</string>
   <string name="ui_edit_a7f814">編輯</string>
   <string name="ui_memory_b55ff5">記憶</string>
   <string name="skills_no_description">沒有說明</string>

@@ -16,13 +16,16 @@ internal data class CatalogModelParameters(
     val reasoningOverride: Boolean? = null,
     val visionOverride: Boolean? = null,
 ) {
+    val reasoningSupported: Boolean get() = reasoningOverride ?: true
+    val visionSupported: Boolean get() = visionOverride ?: true
+
     /** Retain only the CURRENT connection/credential; model-local policy comes from this record. */
     fun applyTo(current: ModelSettings, model: String): ModelSettings = current.copy(
         model = model, batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
         requestOptions = requestOptions,
         contextWindowOverride = contextWindowOverride,
-        reasoningOverride = reasoningOverride,
-        visionOverride = visionOverride,
+        reasoningOverride = reasoningSupported,
+        visionOverride = visionSupported,
     )
 
     companion object {

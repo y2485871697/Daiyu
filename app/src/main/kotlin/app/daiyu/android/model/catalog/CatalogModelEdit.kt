@@ -5,8 +5,8 @@ internal data class CatalogModelEdit(
     val id: String,
     val displayName: String,
     val contextWindow: String = "",
-    val reasoning: Boolean? = null,
-    val vision: Boolean? = null,
+    val reasoning: Boolean = true,
+    val vision: Boolean = true,
 ) {
     fun validate() {
         require(id.isNotBlank() && id == id.trim() && id.length <= 200 && id.none { it.code < 32 || it.code == 127 })
@@ -26,6 +26,6 @@ internal data class CatalogModelEdit(
     }
     companion object {
         fun from(record: SavedCatalogModel<CatalogModelParameters>) = CatalogModelEdit(record.id, record.displayName,
-            record.settings.contextWindowOverride?.toString().orEmpty(), record.settings.reasoningOverride, record.settings.visionOverride)
+            record.settings.contextWindowOverride?.toString().orEmpty(), record.settings.reasoningSupported, record.settings.visionSupported)
     }
 }

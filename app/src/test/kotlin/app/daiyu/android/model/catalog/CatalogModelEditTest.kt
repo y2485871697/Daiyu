@@ -9,17 +9,24 @@ import java.io.File
 
 class CatalogModelEditTest {
     @get:Rule val temporary = TemporaryFolder()
-    @Test fun oldCodecDefaultsRemainUnknownAndNewOverridesRoundTrip() {
+    @Test fun oldCodecDefaultsAreEnabledWithoutRewritingStoredOverrides() {
         val original = CatalogModelParameters()
         val old = JSONObject(CatalogModelParametersCodec.encode(original))
         listOf("context_window_override", "reasoning_override", "vision_override").forEach { old.remove(it) }
-        assertEquals(original, CatalogModelParametersCodec.decode(old.toString()))
+        val decoded = CatalogModelParametersCodec.decode(old.toString())
+        assertEquals(original, decoded)
+        assertNull(decoded.reasoningOverride)
+        assertNull(decoded.visionOverride)
+        assertTrue(decoded.reasoningSupported)
+        assertTrue(decoded.visionSupported)
+        assertEquals(CatalogModelEdit("legacy", "Legacy"),
+            CatalogModelEdit.from(SavedCatalogModel("legacy", "Legacy", decoded)))
         val value = original.copy(contextWindowOverride = 272000, reasoningOverride = true, visionOverride = false)
         assertEquals(value, CatalogModelParametersCodec.decode(CatalogModelParametersCodec.encode(value)))
         old.put("context_window_override", "272000")
         assertThrows(IllegalStateException::class.java) { CatalogModelParametersCodec.decode(old.toString()) }
     }
-    @Test fun editAndRestorePreserveIdentityAndExistingPolicy() {
+    @Test fun editAndClearContextPreserveIdentityPolicyAndCapabilityChoices() {
         val original = SavedCatalogModel("local-model", "Original", CatalogModelParameters(batteryEnabled = true,
             requestOptions = app.daiyu.android.model.ProviderRequestOptions(customBody = "{\"temperature\":0.25}")))
         val edit = CatalogModelEdit("local-model", "Updated", "4096", true, false)
@@ -27,11 +34,33 @@ class CatalogModelEditTest {
         assertEquals(original.settings.localIdentity, changed.settings.localIdentity)
         assertEquals(original.settings.requestOptions, changed.settings.requestOptions)
         assertTrue(changed.settings.batteryEnabled)
-        val restored = CatalogModelEdit.from(changed).copy(contextWindow = "", reasoning = null, vision = null).applyTo(changed)
-        assertEquals(original.settings, restored.settings)
+        val restored = CatalogModelEdit.from(changed).copy(contextWindow = "").applyTo(changed)
+        assertEquals(original.settings.copy(reasoningOverride = true, visionOverride = false), restored.settings)
         assertEquals("Updated", restored.displayName)
         assertThrows(IllegalArgumentException::class.java) { edit.copy(contextWindow = "0").validate() }
         assertThrows(IllegalArgumentException::class.java) { edit.copy(contextWindow = "2147483648").validate() }
+    }
+    @Test fun newModelsDefaultOnAndSavedOffSurvivesReopenAndPolicyUpdate() {
+        val form = CatalogModelEdit("model", "Model")
+        assertTrue(form.reasoning)
+        assertTrue(form.vision)
+        val fresh = form.newRecord()
+        assertTrue(fresh.settings.reasoningSupported)
+        assertTrue(fresh.settings.visionSupported)
+        for (reasoning in listOf(false, true)) for (vision in listOf(false, true)) {
+            val changed = form.copy(reasoning = reasoning, vision = vision).applyTo(fresh)
+            val persistence = FileSavedModelCatalogPersistence(
+                File(temporary.root, "models-$reasoning-$vision"), CatalogModelParametersCodec)
+            persistence.register(listOf(changed))
+            val reopened = FileSavedModelCatalogPersistence(
+                File(temporary.root, "models-$reasoning-$vision"), CatalogModelParametersCodec).current()!!.models.single()
+            assertEquals(form.copy(reasoning = reasoning, vision = vision), CatalogModelEdit.from(reopened))
+            assertEquals(fresh.settings.localIdentity, reopened.settings.localIdentity)
+            val updated = CatalogModelParameters.updated(app.daiyu.android.storage.ModelSettings(
+                "https://example.invalid", "model", "synthetic-key", false), reopened)
+            assertEquals(reasoning, updated.settings.reasoningSupported)
+            assertEquals(vision, updated.settings.visionSupported)
+        }
     }
     @Test fun atomicModelFormSaveRejectsStaleForgedAndCancelledTickets() {
         val persistence = FileSavedModelCatalogPersistence(File(temporary.root, "models"), CatalogModelParametersCodec)

@@ -91,7 +91,9 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         node("settings-field:Model ID").performTextReplacement("custom-model")
         node("settings-field:上下文窗口（tokens）").performTextReplacement("8192")
         node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:支持推理"))
-        node("settings-switch:支持推理").performClick()
+        node("settings-switch:支持推理").assertIsOn().performClick().assertIsOff()
+        node("settings-switch:支持视觉").assertIsOn()
+        node("catalog-model-auto").assertDoesNotExist()
         assertEquals(before, fixture.settings.localModelCatalogSnapshot())
         node("dialog-confirm").assertIsEnabled().performClick()
         awaitControl("custom record saved") {
@@ -100,8 +102,8 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         val record = fixture.settings.localModelCatalogSnapshot()!!.models.single { it.id == "custom-model" }
         assertEquals("自定义模型", record.displayName)
         assertEquals(8192, record.settings.contextWindowOverride)
-        assertEquals(true, record.settings.reasoningOverride)
-        assertNull(record.settings.visionOverride)
+        assertEquals(false, record.settings.reasoningOverride)
+        assertEquals(true, record.settings.visionOverride)
         assertEquals(saved, fixture.settings.load())
         assertEquals(0, fixture.opens.get())
         reveal("local-model-add").performClick()
@@ -128,7 +130,8 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
             ui.onAllNodes(hasTestTag("local-model-add") and isEnabled()).fetchSemanticsNodes().size == 1
         }
         val renamedRow = reveal("local-model:extra-local")
-        val expectedRenamed = extra.copy(displayName = "Renamed local model")
+        val expectedRenamed = extra.copy(displayName = "Renamed local model",
+            settings = extra.settings.copy(reasoningOverride = true, visionOverride = true))
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()
             fixture.settings.localModelCatalogSnapshot()?.models
@@ -139,7 +142,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         }
         renamedRow.assert(hasAnyDescendant(hasText("Renamed local model")))
         val renamed = checkNotNull(fixture.settings.localModelCatalogSnapshot())
-        assertEquals(extra.copy(displayName = "Renamed local model"), renamed.models.single { it.id == extra.id })
+        assertEquals(expectedRenamed, renamed.models.single { it.id == extra.id })
         assertEquals(current, renamed.models.single { it.id == current.id })
         reveal("local-model-rename:extra-local").performClick()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:extra-local"))

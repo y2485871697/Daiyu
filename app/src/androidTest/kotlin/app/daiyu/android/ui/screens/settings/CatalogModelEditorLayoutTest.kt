@@ -39,7 +39,8 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
     private var deletions = 0
 
     private fun show(dark: Boolean = false, scale: Float = 1f, fontScale: Float = 1f,
-        canDelete: Boolean = true, isNew: Boolean = false) {
+        canDelete: Boolean = true, isNew: Boolean = false,
+        initial: CatalogModelEdit = CatalogModelEdit("layout-model", "布局模型", "8192")) {
         mainThread {
             visible = false
             enabled = true
@@ -57,7 +58,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
                                 modifier = Modifier.size(160.dp, 44.dp).testTag("global-accent-reference"))
                         }
                         if (visible) CatalogModelEditorDialog(
-                            CatalogModelEdit("layout-model", "布局模型", "8192", true, true),
+                            initial,
                             isNew = isNew, enabled = enabled, canDelete = canDelete,
                             onSave = { saved = it; saves++ }, onDelete = { deletions++ },
                             onDismiss = { dismissals++; visible = false })
@@ -94,7 +95,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         }
     }
 
-    fun testFourButtonsAndFieldsShareContentEdgesWithFixedFooter() {
+    fun testThreeButtonsAndFieldsShareContentEdgesWithFixedFooter() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(dark, scale, fontScale = 1.3f)
             open()
@@ -110,7 +111,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
             assertTrue(save.left > cancel.right)
             for (tag in listOf("settings-field:展示名称", "settings-field:Model ID",
                 "settings-field:上下文窗口（tokens）", "catalog-model-capabilities",
-                "catalog-model-auto", "local-model-delete:layout-model")) {
+                "local-model-delete:layout-model")) {
                 val bounds = revealEditor(tag).fetchSemanticsNode().boundsInRoot
                 assertEquals("$tag left", footer.left, bounds.left, 1f)
                 assertEquals("$tag right", footer.right, bounds.right, 1f)
@@ -132,8 +133,6 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
             open()
             assertFill("dialog-confirm", primary)
             assertFill("dialog-cancel", palette.secondaryVariant)
-            revealEditor("catalog-model-auto")
-            assertFill("catalog-model-auto", primary)
             revealEditor("local-model-delete:layout-model")
             assertFill("local-model-delete:layout-model", palette.error)
             node("dialog-cancel").performClick()
@@ -141,13 +140,45 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         }
     }
 
-    fun testFullWidthActionsRetainValidationResetAndDisabledGuards() {
+    fun testCapabilityRowsAreSingleLineCenteredAndSavedOffReopensOff() {
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
+            show(dark = dark, fontScale = fontScale)
+            open()
+            node("catalog-model-auto").assertDoesNotExist()
+            ui.onNodeWithText("恢复自动").assertDoesNotExist()
+            for (summary in listOf("自动：不支持或未知", "手动：支持", "手动：不支持"))
+                ui.onNodeWithText(summary).assertDoesNotExist()
+            for (title in listOf("支持推理", "支持视觉")) {
+                val row = revealEditor("settings-switch:$title").assertIsOn().fetchSemanticsNode().boundsInRoot
+                val label = ui.onNode(hasText(title) and hasAnyAncestor(hasTestTag("catalog-model-capabilities")),
+                    useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                assertEquals("$title vertical center", row.center.y, label.center.y, 1f)
+                assertTrue("$title fits row", label.left >= row.left && label.right <= row.right)
+            }
+            revealEditor("settings-switch:支持推理").performClick().assertIsOff()
+            revealEditor("settings-switch:支持视觉").performClick().assertIsOff()
+            node("dialog-confirm").performClick()
+            val configured = checkNotNull(saved)
+            assertFalse(configured.reasoning)
+            assertFalse(configured.vision)
+            node("dialog-cancel").performClick()
+            show(dark = dark, fontScale = fontScale, initial = configured)
+            open()
+            revealEditor("settings-switch:支持推理").assertIsOff()
+            revealEditor("settings-switch:支持视觉").assertIsOff()
+            node("dialog-cancel").performClick()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testFullWidthDeleteAndFooterRetainValidationAndDisabledGuards() {
         show(canDelete = false)
         open()
         node("settings-field:Model ID").assertIsNotEnabled()
         revealEditor("settings-field:上下文窗口（tokens）").performTextReplacement("invalid")
         node("dialog-confirm").assertIsNotEnabled()
-        revealEditor("catalog-model-auto").performTouchInput { click(Offset(width - 12f, center.y)) }
+        node("catalog-model-auto").assertDoesNotExist()
+        revealEditor("settings-field:上下文窗口（tokens）").performTextReplacement("")
         revealEditor("settings-field:上下文窗口（tokens）").assertEditableText("")
         assertNull(saved)
         node("dialog-confirm").performClick()
@@ -156,7 +187,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         revealEditor("local-model-delete:layout-model").assertIsNotEnabled()
         revealEditor("settings-field:上下文窗口（tokens）").performTextReplacement("16384")
         mainThread { enabled = false }
-        for (tag in listOf("catalog-model-auto", "local-model-delete:layout-model"))
+        for (tag in listOf("local-model-delete:layout-model", "settings-switch:支持推理", "settings-switch:支持视觉"))
             revealEditor(tag).assertIsNotEnabled().performTouchInput { click(center) }
         for (tag in listOf("dialog-confirm", "dialog-cancel"))
             node(tag).assertIsNotEnabled().performTouchInput { click(center) }

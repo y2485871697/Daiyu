@@ -20,7 +20,8 @@ class CatalogModelParametersTest {
         val migrated = CatalogModelParameters.fromCurrent(source)
         val decoded = CatalogModelParametersCodec.decode(CatalogModelParametersCodec.encode(migrated.settings))
         assertEquals(options, decoded.requestOptions)
-        assertEquals(source, decoded.applyTo(source.copy(requestOptions = ProviderRequestOptions()), source.model))
+        assertEquals(source.copy(reasoningOverride = true, visionOverride = true),
+            decoded.applyTo(source.copy(requestOptions = ProviderRequestOptions()), source.model))
         val file = File(temporary.root, "anthropic-version-catalog")
         val saved = FileSavedModelCatalogPersistence(file, CatalogModelParametersCodec).register(listOf(migrated))
         val reopened = FileSavedModelCatalogPersistence(file, CatalogModelParametersCodec).current()
@@ -73,6 +74,14 @@ class CatalogModelParametersTest {
         assertEquals(ProviderRequestOptions(), one.settings.requestOptions)
         assertFalse(one.settings.batteryEnabled)
         assertFalse(one.settings.deviceStatusEnabled)
+        for (record in listOf(one, two)) {
+            assertTrue(record.settings.reasoningSupported)
+            assertTrue(record.settings.visionSupported)
+            val projected = record.settings.applyTo(ModelSettings("https://example.invalid", "old", "key", false,
+                reasoningOverride = false, visionOverride = false), record.id)
+            assertEquals(true, projected.reasoningOverride)
+            assertEquals(true, projected.visionOverride)
+        }
         assertNotEquals(one.settings.localIdentity, two.settings.localIdentity)
     }
 
@@ -84,7 +93,7 @@ class CatalogModelParametersTest {
             requestOptions = ProviderRequestOptions("{\"temperature\":0.1}"))
         val applied = selected.applyTo(current, "b")
         assertEquals(current.copy(model = "b", batteryEnabled = false, deviceStatusEnabled = true,
-            requestOptions = selected.requestOptions), applied)
+            requestOptions = selected.requestOptions, reasoningOverride = true, visionOverride = true), applied)
         assertEquals(current.apiKey, applied.apiKey)
         assertEquals(current.endpoint, applied.endpoint)
         assertEquals(current.protocol, applied.protocol)

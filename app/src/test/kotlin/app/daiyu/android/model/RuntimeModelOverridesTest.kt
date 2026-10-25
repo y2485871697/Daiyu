@@ -28,7 +28,7 @@ class RuntimeModelOverridesTest {
         }
     }
 
-    @Test fun switchingToAutomaticModelDoesNotInheritPreviousOverrides() {
+    @Test fun switchingToDefaultModelEnablesCapabilitiesWithoutInheritingPreviousOverrides() {
         val source = settings().copy(contextWindowOverride = 8192, reasoningOverride = true, visionOverride = true)
         val explicit = CatalogModelParameters(contextWindowOverride = 4096, reasoningOverride = false,
             visionOverride = false).applyTo(source, "model-b")
@@ -37,9 +37,15 @@ class RuntimeModelOverridesTest {
         assertEquals(false, explicit.visionOverride)
         val automatic = CatalogModelParameters().applyTo(explicit, "model-c")
         assertNull(automatic.contextWindowOverride)
-        assertNull(automatic.reasoningOverride)
-        assertNull(automatic.visionOverride)
+        assertEquals(true, automatic.reasoningOverride)
+        assertEquals(true, automatic.visionOverride)
         assertEquals(source.apiKey, automatic.apiKey)
+        assertEquals(true, ProviderSnapshot.capture(automatic).imageInputSupported)
+        assertEquals(false, ProviderSnapshot.capture(explicit).imageInputSupported)
+        val snapshot = ProviderSnapshot.capture(automatic)
+        val high = ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.HIGH)
+        assertEquals(true, high.reasoningOverride)
+        assertEquals("high", JSONObject(high.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
     }
 
     @Test fun disabledReasoningRejectsBothPreferenceAndCustomActivation() {

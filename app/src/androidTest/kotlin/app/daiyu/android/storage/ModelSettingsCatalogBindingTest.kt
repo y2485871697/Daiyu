@@ -190,8 +190,8 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertFalse(repository.isCurrentActive(frozen))
         val next = repository.freezeActive()
         assertNull(next.settings.contextWindowOverride)
-        assertNull(next.settings.reasoningOverride)
-        assertNull(next.settings.visionOverride)
+        assertEquals(true, next.settings.reasoningOverride)
+        assertEquals(true, next.settings.visionOverride)
         assertTrue(repository.isCurrentActive(next))
         assertEquals(8192, frozen.settings.contextWindowOverride)
     }
@@ -211,7 +211,7 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(extra.settings.requestOptions, frozen.settings.requestOptions)
         assertEquals(32768, frozen.settings.contextWindowOverride)
         assertEquals(false, frozen.settings.reasoningOverride)
-        assertNull(frozen.settings.visionOverride)
+        assertEquals(true, frozen.settings.visionOverride)
         assertEquals(initial.model, store.load().model)
         assertEquals(preferences, raw.all)
         assertEquals(catalog, store.localModelCatalogSnapshot())
@@ -312,7 +312,9 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         val local = reopened.localModelCatalogSnapshot()!!
         assertEquals(listOf("model-a", "model-b", "model-c"), local.models.map { it.id })
         reopened.selectCatalogModel(a, local.selectionFor("model-b")!!)
-        assertEquals(b.settings.applyTo(a, "model-b"), reopened.load())
+        val expectedB = b.settings.applyTo(a, "model-b")
+        assertEquals(expectedB.copy(reasoningOverride = null, visionOverride = null), reopened.load())
+        assertEquals(expectedB, reopened.loadForRun())
         val editedB = reopened.load().copy(batteryEnabled = true,
             requestOptions = ProviderRequestOptions("{\"temperature\":0.4}"))
         reopened.save(editedB)

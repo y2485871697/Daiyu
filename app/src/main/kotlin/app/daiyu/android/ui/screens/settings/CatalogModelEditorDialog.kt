@@ -67,17 +67,10 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                         Column(Modifier.fillMaxWidth().testTag("catalog-model-capabilities")
                             .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
-                            SettingsSwitchRow("支持推理", value.reasoning == true, enabled,
-                                summary = capabilitySummary(value.reasoning)) { value = value.copy(reasoning = it) }
-                            SettingsSwitchRow("支持视觉", value.vision == true, enabled,
-                                summary = capabilitySummary(value.vision)) { value = value.copy(vision = it) }
+                            SettingsSwitchRow("支持推理", value.reasoning, enabled) { value = value.copy(reasoning = it) }
+                            SettingsSwitchRow("支持视觉", value.vision, enabled) { value = value.copy(vision = it) }
                         }
                         if (!isNew) {
-                            Spacer(Modifier.height(12.dp))
-                            TextButton("恢复自动", enabled = enabled,
-                                modifier = Modifier.fillMaxWidth().testTag("catalog-model-auto"),
-                                colors = ButtonDefaults.textButtonColorsPrimary(),
-                                onClick = { value = value.copy(contextWindow = "", reasoning = null, vision = null) })
                             Spacer(Modifier.height(12.dp))
                             TextButton("删除模型", enabled = enabled && canDelete,
                                 modifier = Modifier.fillMaxWidth().testTag("local-model-delete:${initial.id}"),
@@ -115,10 +108,4 @@ private fun CatalogModelField(label: String, value: String, enabled: Boolean,
 private fun CatalogModelNote(text: String) {
     Text(text, style = MiuixTheme.textStyles.footnote2, color = MiuixTheme.colorScheme.error,
         modifier = Modifier.padding(top = 8.dp))
-}
-
-private fun capabilitySummary(value: Boolean?) = when (value) {
-    null -> "自动：不支持或未知"
-    true -> "手动：支持"
-    false -> "手动：不支持"
 }

@@ -133,7 +133,7 @@ class ModelSettingsStore internal constructor(
         val current = load()
         val selected = modelCatalog.readRegisteredModel(modelId ?: current.model)
         if (modelId == null) current.copy(contextWindowOverride = selected?.settings?.contextWindowOverride,
-            reasoningOverride = selected?.settings?.reasoningOverride, visionOverride = selected?.settings?.visionOverride)
+            reasoningOverride = selected?.settings?.reasoningSupported ?: true, visionOverride = selected?.settings?.visionSupported ?: true)
         else checkNotNull(selected) { "摘要模型不在本地目录中" }.let { it.settings.applyTo(current, it.id) }
     }
 

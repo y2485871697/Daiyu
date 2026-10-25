@@ -133,6 +133,33 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testConversationLongPressKeepsOriginalActionsWithoutTaskRecords() {
+        lateinit var conversation: Conversation
+        mainThread {
+            conversation = fixture.database.create()
+            fixture.database.rename(conversation.id, "保留原会话菜单")
+        }
+        val before = fixture.database.exportBackup()
+        val owner = mainThreadValue { MainActivity::class.java.getDeclaredField("selected").apply { isAccessible = true }.get(activity) }
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        val tag = "drawer-conversation:${conversation.id.value}"
+        node("drawer-list").performScrollToKey(conversation.id.value)
+        awaitUniqueTag(tag)
+        node(tag).performTouchInput { longClick() }
+        for (id in listOf(R.string.action_rename, R.string.conversation_pin,
+            R.string.conversation_export, R.string.drawer_move_to_folder, R.string.action_delete)) {
+            ui.onNodeWithText(instrumentation.targetContext.getString(id))
+                .assertIsDisplayed().assertHasClickAction()
+        }
+        ui.onAllNodesWithText(instrumentation.targetContext.getString(R.string.business_task_records))
+            .assertCountEquals(0)
+        assertEquals("chat", mainThreadValue { hostValue("getRetainedPage") })
+        assertEquals(true, mainThreadValue { hostValue("getSidebarVisible") })
+        assertEquals(owner, mainThreadValue { MainActivity::class.java.getDeclaredField("selected").apply { isAccessible = true }.get(activity) })
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testManageSelectsInPlacePreservesOwnerDraftAndReopensWithoutLosingSelection() {
         lateinit var first: Conversation
         lateinit var second: Conversation

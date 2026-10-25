@@ -2015,7 +2015,6 @@ class MainActivity : ComponentActivity() {
                         onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
                         onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
                         onConversationExport = { item -> backupGuard { openConversationExport(item.id) } },
-                        onConversationTasks = { item -> guard { openChildTaskRecords(item.id) } },
                         onNewConversation = { guard { dismissSidebar(); select(null) } },
                         onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
                         onCreateFolder = { name -> guard { retainedData.createFolder(name); updatePane() } },

@@ -164,7 +164,6 @@ internal fun ConversationSidePaneScaffold(
     onMoveConversationToFolder: (ConversationSummaryUi) -> Unit = {},
     onConversationTogglePin: (ConversationSummaryUi) -> Unit = {},
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
-    onConversationTasks: ((ConversationSummaryUi) -> Unit)? = null,
     onNewConversation: () -> Unit,
     onSelectFolder: (String?) -> Unit = {},
     onCreateFolder: (String) -> Unit = {},
@@ -301,7 +300,6 @@ internal fun ConversationSidePaneScaffold(
                     onNewConversation = onNewConversation,
                     onConversationTogglePin = onConversationTogglePin,
                     onConversationExport = onConversationExport,
-                    onConversationTasks = onConversationTasks,
                     managing = managing,
                     onManagingChange = { managing = it },
                     onSelectFolder = onSelectFolder,
@@ -346,7 +344,6 @@ private fun ConversationPanePanel(
     onMoveConversationToFolder: (ConversationSummaryUi) -> Unit = {},
     onConversationTogglePin: (ConversationSummaryUi) -> Unit = {},
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
-    onConversationTasks: ((ConversationSummaryUi) -> Unit)? = null,
     onNewConversation: () -> Unit,
     onSelectFolder: (String?) -> Unit = {},
     onCreateFolder: (String) -> Unit = {},
@@ -491,7 +488,6 @@ private fun ConversationPanePanel(
                                 onMoveToFolder = { onMoveConversationToFolder(conversation) },
                                 onTogglePin = { onConversationTogglePin(conversation) },
                                 onExport = { onConversationExport(conversation) },
-                                onTasks = onConversationTasks?.let { action -> { action(conversation) } },
                             )
                         }
                     }
@@ -894,7 +890,6 @@ private fun ConversationTextRow(
     onMoveToFolder: () -> Unit,
     onTogglePin: () -> Unit,
     onExport: () -> Unit,
-    onTasks: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     var showActionMenu by remember(managing) { mutableStateOf(false) }
@@ -1041,14 +1036,6 @@ private fun ConversationTextRow(
                     onExport()
                 },
             )
-            if (onTasks != null) {
-                DropdownMenuItem(
-                    modifier = DrawerMenuItemModifier,
-                    contentPadding = DrawerMenuItemPadding,
-                    text = { Text(stringResource(R.string.business_task_records)) },
-                    onClick = { showActionMenu = false; onTasks() },
-                )
-            }
             DropdownMenuItem(
                 modifier = DrawerMenuItemModifier,
                 contentPadding = DrawerMenuItemPadding,

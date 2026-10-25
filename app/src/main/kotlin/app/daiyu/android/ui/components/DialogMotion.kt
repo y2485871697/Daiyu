@@ -15,6 +15,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
@@ -33,6 +47,74 @@ import top.yukonga.miuix.kmp.anim.folmeSpring
 
 internal val DialogEnterSettled = SemanticsPropertyKey<Boolean>("DialogEnterSettled")
 
+internal val DialogMotionProgress = SemanticsPropertyKey<Float>("DialogMotionProgress")
+internal val DialogDismissing = SemanticsPropertyKey<Boolean>("DialogDismissing")
+
+internal enum class BottomSheetDismissSource { System, Outside }
+
+internal class BottomSheetMotion {
+    val progress = Animatable(0f, visibilityThreshold = 0.0001f)
+    val scrimProgress = Animatable(0f)
+    var dismissSource by mutableStateOf<BottomSheetDismissSource?>(null)
+
+    fun requestDismiss(source: BottomSheetDismissSource) {
+        if (dismissSource == null) dismissSource = source
+    }
+}
+
+private val LocalBottomSheetMotion = staticCompositionLocalOf<BottomSheetMotion?> { null }
+
+@Composable
+internal fun DialogMotionProvider(
+    motion: BottomSheetMotion?,
+    onDismiss: () -> Unit,
+    onOutsideDismiss: () -> Unit = onDismiss,
+    content: @Composable () -> Unit,
+) {
+    if (motion != null) {
+        val size = LocalWindowInfo.current.containerSize
+        val density = LocalDensity.current.density
+        val largeScreen = size.width / density >= 840f && size.height / density >= 480f
+        val latestDismiss by rememberUpdatedState(onDismiss)
+        val latestOutsideDismiss by rememberUpdatedState(onOutsideDismiss)
+        LaunchedEffect(motion.dismissSource) {
+            val source = motion.dismissSource
+            val target = if (source == null) 1f else 0f
+            coroutineScope {
+                launch { motion.scrimProgress.animateTo(target, tween(300, easing = DecelerateEasing(1.5f))) }
+                motion.progress.animateTo(target, dialogEnterSpec(largeScreen))
+            }
+            if (source != null) {
+                when (source) {
+                    BottomSheetDismissSource.System -> latestDismiss()
+                    BottomSheetDismissSource.Outside -> latestOutsideDismiss()
+                }
+                // A vetoing owner keeps the window: restore it instead of leaving an invisible modal.
+                withFrameNanos { }
+                motion.dismissSource = null
+            }
+        }
+    }
+    CompositionLocalProvider(LocalBottomSheetMotion provides motion, content = content)
+}
+
+@Composable
+internal fun Modifier.dialogDismissInputGuard(): Modifier {
+    val motion = LocalBottomSheetMotion.current ?: return this
+    val guarded = if (motion.dismissSource == null) this else clearAndSetSemantics {
+        this[DialogDismissing] = true
+        this[DialogMotionProgress] = motion.progress.value
+    }
+    return guarded.pointerInput(motion) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (motion.dismissSource != null) event.changes.forEach { it.consume() }
+            }
+        }
+    }
+}
+
 // Same motion as Miuix 0.9.4-rc01 WindowDialog; callers retain their own layout.
 internal fun dialogEnterSpec(largeScreen: Boolean): FiniteAnimationSpec<Float> =
     if (largeScreen) folmeSpring(damping = 0.9f, response = 0.3f)
@@ -40,6 +122,7 @@ internal fun dialogEnterSpec(largeScreen: Boolean): FiniteAnimationSpec<Float> =
 
 @Composable
 internal fun rememberDialogEnterProgress(largeScreen: Boolean): Animatable<Float, androidx.compose.animation.core.AnimationVector1D> {
+    LocalBottomSheetMotion.current?.let { return it.progress }
     val progress = remember { Animatable(0f, visibilityThreshold = 0.0001f) }
     LaunchedEffect(Unit) { progress.animateTo(1f, dialogEnterSpec(largeScreen)) }
     return progress
@@ -71,6 +154,11 @@ internal fun Modifier.dialogDimBackground(color: Color, animate: Boolean = true)
         drawRect(color)
         drawContent()
     }
+    val shared = LocalBottomSheetMotion.current
+    if (shared != null) return drawWithContent {
+        drawRect(color.copy(alpha = color.alpha * shared.scrimProgress.value))
+        drawContent()
+    }
     val progress = remember { Animatable(0f) }
     LaunchedEffect(Unit) { progress.animateTo(1f, tween(300, easing = DecelerateEasing(1.5f))) }
     return drawWithContent {
@@ -89,14 +177,21 @@ internal fun PlatformDialogFade() {
 internal fun DisablePlatformDialogAnimation() {
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window
     val targetDim = remember(window) { window?.attributes?.dimAmount ?: 0f }
+    val motion = LocalBottomSheetMotion.current
     SideEffect { window?.setWindowAnimations(0) }
     DisposableEffect(window) {
         window?.setDimAmount(0f)
         onDispose { window?.setDimAmount(targetDim) }
     }
-    LaunchedEffect(window) {
-        animate(0f, 1f, animationSpec = tween(300, easing = DecelerateEasing(1.5f))) { value, _ ->
-            window?.setDimAmount(targetDim * value)
+    LaunchedEffect(window, motion) {
+        if (motion != null) {
+            snapshotFlow { motion.scrimProgress.value }.collect { value ->
+                window?.setDimAmount(targetDim * value)
+            }
+        } else {
+            animate(0f, 1f, animationSpec = tween(300, easing = DecelerateEasing(1.5f))) { value, _ ->
+                window?.setDimAmount(targetDim * value)
+            }
         }
     }
 }
@@ -109,9 +204,15 @@ internal fun DaiyuDialog(
     bottomSheet: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    ComposeDialog(onDismissRequest = onDismissRequest, properties = properties) {
-        if (bottomSheet) DisablePlatformDialogAnimation() else PlatformDialogFade()
-        Box(if (bottomSheet && animateContent) Modifier.dialogEnterMotion() else Modifier) { content() }
+    val motion = remember(bottomSheet) { if (bottomSheet) BottomSheetMotion() else null }
+    ComposeDialog(onDismissRequest = {
+        motion?.requestDismiss(BottomSheetDismissSource.System) ?: onDismissRequest()
+    }, properties = properties) {
+        DialogMotionProvider(motion, onDismissRequest) {
+            if (bottomSheet) DisablePlatformDialogAnimation() else PlatformDialogFade()
+            val contentMotion = if (bottomSheet && animateContent) Modifier.dialogEnterMotion() else Modifier
+            Box(contentMotion.dialogDismissInputGuard()) { content() }
+        }
     }
 }
 

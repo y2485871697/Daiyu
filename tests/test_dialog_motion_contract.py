@@ -128,8 +128,8 @@ class DialogMotionContractTest(unittest.TestCase):
         dialog = motion.split("internal fun DaiyuDialog(", 1)[1].split("internal fun DaiyuAlertDialog(", 1)[0]
         self.assertIn("bottomSheet: Boolean = false", dialog)
         self.assertIn("if (bottomSheet) DisablePlatformDialogAnimation() else PlatformDialogFade()", dialog)
-        self.assertIn("if (bottomSheet && animateContent) Modifier.dialogEnterMotion() else Modifier", dialog)
-        self.assertIn("onDismissRequest = onDismissRequest", dialog)
+        self.assertIn("val contentMotion = if (bottomSheet && animateContent) Modifier.dialogEnterMotion() else Modifier", dialog)
+        self.assertIn("motion?.requestDismiss(BottomSheetDismissSource.System) ?: onDismissRequest()", dialog)
         alert = motion.split("internal fun DaiyuAlertDialog(", 1)[1]
         self.assertIn("confirmButton = { PlatformDialogFade(); confirmButton() }", alert)
         self.assertIn("modifier = modifier", alert)

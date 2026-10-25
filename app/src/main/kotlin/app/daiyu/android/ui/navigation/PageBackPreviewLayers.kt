@@ -15,8 +15,10 @@ import kotlinx.coroutines.launch
 
 /** Freezes the outgoing live layer before its nodes detach; historical pages are pixels only. */
 internal class PageBackPreviewLayers(private val context: GraphicsContext, private val scope: CoroutineScope) {
-    internal class Frame(val key: Any, val layer: GraphicsLayer) {
+    internal class Frame(val key: Any, val layer: GraphicsLayer, var sourceKey: Any = key) {
         var size = IntSize.Zero
+        var childChangeCaptured: Boolean? = null
+        var holdingForChild by mutableStateOf(false)
         var backTargetKey: Any? = null
         var returnDirection = 1f
         var animateReturn = false
@@ -24,7 +26,9 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         var capture: Job? = null
     }
     internal class Departure(val frame: Frame, val target: Any, val progress: Float,
-        val predictive: Boolean, val direction: Float)
+        val predictive: Boolean, val direction: Float, val forward: Boolean = false) {
+        var forwardSkipped by mutableStateOf(false)
+    }
 
     private val frames = LinkedHashMap<Any, Frame>()
     private var pending: Departure? = null
@@ -43,7 +47,25 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
                 ?.let { Departure(it, key, 0f, predictive = false, direction = it.returnDirection) }
     }
 
-    fun freezeCurrent() { frames[currentKey]?.let { freeze(it) } }
+    fun transition(key: Any, backTargetKey: Any?, animateEnter: Boolean, size: IntSize): Departure? {
+        val previous = frames[currentKey]?.takeIf { currentKey != key }
+        val departure = enter(key)
+        if (departure != null) return departure
+        if (!animateEnter || previous == null || !previous.animateReturn ||
+            previous.sourceKey != backTargetKey || previous.childChangeCaptured == false) return null
+        val source = frames[previous.sourceKey]?.takeIf {
+            it.animateReturn && size != IntSize.Zero && it.size == size
+        } ?: return null
+        return Departure(source, key, 0f, predictive = false, direction = previous.returnDirection, forward = true)
+    }
+
+    fun freezeCurrent() {
+        frames[currentKey]?.let {
+            it.childChangeCaptured = it.animateReturn && it.size != IntSize.Zero
+            it.holdingForChild = it.childChangeCaptured == true
+            freeze(it)
+        }
+    }
 
     private fun freeze(frame: Frame) {
         if (frame.image != null || frame.size == IntSize.Zero || frame.capture?.isActive == true) return
@@ -61,9 +83,9 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         }
     }
 
-    fun frame(key: Any): Frame {
+    fun frame(key: Any, sourceKey: Any = key): Frame {
         frames.remove(key)?.let { release(it) }
-        return Frame(key, context.createGraphicsLayer()).also { frames[key] = it }
+        return Frame(key, context.createGraphicsLayer(), sourceKey).also { frames[key] = it }
     }
 
     private fun release(frame: Frame) {

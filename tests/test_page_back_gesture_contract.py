@@ -167,8 +167,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('contentKey: Any = routeKey,', self.host)
         self.assertIn('key(contentKey) {', self.host)
         self.assertNotIn('key(routeKey) {', self.host)
-        self.assertIn('val departure = remember(layers, visualRouteKey) { layers.enter(visualRouteKey) }', self.host)
-        self.assertIn('val frame = remember(layers, visualRouteKey) { layers.frame(visualRouteKey) }', self.host)
+        self.assertIn('layers.transition(visualRouteKey, visualBackTargetKey, animateEnter = animateBackEnabled && resumed, size = viewport)', self.host)
+        self.assertIn('layers.frame(visualRouteKey, sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey)', self.host)
         self.assertIn('remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey)', self.host)
         self.assertIn('routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,', self.main)
         self.assertIn('contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,', self.main)
@@ -216,7 +216,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('frame.size = IntSize(placeable.width, placeable.height)', surface)
         self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', surface)
         self.assertNotIn('frame.layer.record', surface)
-        self.assertNotIn('drawWithContent', surface)
+        self.assertIn('if (held != null) drawImage(held)', surface)
+        self.assertIn('drawContent()', surface)
         self.assertEqual(1, surface.count('{ content() }'))
         self.assertNotIn('target.image?.let { drawImage(it) }', surface)
         for tag in ('page-back-target', 'page-back-departure'):
@@ -264,10 +265,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('animateBackEnabled = retainedPage != "assistant-edit" && retainedPage != "history-search"', self.main)
         self.assertIn('"conversation-search", "message-search" -> searchPage?.returnPage', self.main)
         self.assertIn('"history-search" -> null', self.main)
-        self.assertIn('val showDeparture = departure != null && departing && departure.frame.image != null', self.host)
-        effect = self.host.split('LaunchedEffect(departure)', 1)[1].split('SideEffect { layers.trim', 1)[0]
-        self.assertLess(effect.index('departure.frame.capture?.join()'), effect.index('if (departure.frame.image != null)'))
-        self.assertIn('if (departure != null && showDeparture)', self.host)
+        self.assertIn('val showDeparture = departure != null && departing && departure.frame.image != null && !departure.forwardSkipped && state.previewAllowed', self.host)
+        effect = self.host.split('LaunchedEffect(departure, departure?.forwardSkipped)', 1)[1].split('SideEffect { layers.trim', 1)[0]
+        self.assertLess(effect.index('departure.frame.capture?.join()'), effect.index('if (departure.frame.image != null && !departure.forwardSkipped)'))
+        self.assertIn('if (departure != null && showDeparture && !departure.forward)', self.host)
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         self.assertIn('it.target == key && it.frame === previous', layers)
 

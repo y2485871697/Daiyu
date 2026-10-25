@@ -40,6 +40,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToUp
@@ -291,18 +292,24 @@ internal fun PageBackGestureHost(
     stack.freezeCurrent = { layers.freezeCurrent() }
     val visualRouteKey = stack.routeKey(routeKey)
     val visualBackTargetKey = stack.targetKey(routeKey, backTargetKey)
-    val departure = remember(layers, visualRouteKey) { layers.enter(visualRouteKey) }
-    val frame = remember(layers, visualRouteKey) { layers.frame(visualRouteKey) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
+    val departure = remember(layers, visualRouteKey) {
+        layers.transition(visualRouteKey, visualBackTargetKey, animateEnter = animateBackEnabled && resumed, size = viewport)
+    }
+    val frame = remember(layers, visualRouteKey) {
+        layers.frame(visualRouteKey, sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey)
+    }
     val target = layers.find(visualBackTargetKey, viewport)
     var departing by remember(departure) { mutableStateOf(departure != null) }
     val exit = remember(departure) { Animatable(0f) }
-    LaunchedEffect(departure) {
+    LaunchedEffect(departure, departure?.forwardSkipped) {
         if (departure != null) {
-            departure.frame.capture?.join()
-            if (departure.frame.image != null) {
-                if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
-                else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))
+            if (!departure.forwardSkipped) {
+                departure.frame.capture?.join()
+                if (departure.frame.image != null && !departure.forwardSkipped) {
+                    if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))
+                    else exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))
+                }
             }
             departing = false
         }
@@ -327,6 +334,7 @@ internal fun PageBackGestureHost(
         onDispose { state.alive = false; state.reset() }
     }
     SideEffect {
+        frame.sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey
         frame.backTargetKey = visualBackTargetKey
         frame.returnDirection = state.returnDirection
         frame.animateReturn = animateBackEnabled && resumed && state.previewAllowed
@@ -338,7 +346,7 @@ internal fun PageBackGestureHost(
             animationSpec = if (state.active) snap() else spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f), label = "page-back-reset")
     }
     state.transitionBlocked = departing || (state.previewAllowed && !state.active && progress > 0f)
-    val showDeparture = departure != null && departing && departure.frame.image != null
+    val showDeparture = departure != null && departing && departure.frame.image != null && !departure.forwardSkipped && state.previewAllowed
     CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackStackPath provides stackPath,
         LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }) {
         Box(modifier.fillMaxSize().testTag("page-back-host").clipToBounds().background(background).onSizeChanged { viewport = it }.then(
@@ -413,18 +421,42 @@ internal fun PageBackGestureHost(
                     drawRect(Color.Black, alpha = 0.5f * (1f - progress))
                 }.testTag("page-back-scrim"))
             }
+            if (departure != null && showDeparture && departure.forward) {
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    translationX = -departure.direction * size.width * 0.25f * exit.value
+                    alpha = 1f - 0.1f * exit.value
+                }.drawBehind {
+                    departure.frame.image?.let { drawImage(it) }
+                }.testTag("page-enter-previous"))
+                Box(Modifier.fillMaxSize().drawBehind {
+                    drawRect(Color.Black, alpha = 0.5f * exit.value)
+                }.testTag("page-enter-scrim"))
+            }
             key(contentKey) {
                 Box(Modifier.fillMaxSize().graphicsLayer {
                     val visibleProgress = if (target != null && state.previewAllowed) progress else 0f
-                    if (departure != null && showDeparture) {
+                    if (departure != null && showDeparture && departure.forward) {
+                        translationX = kotlin.math.round(departure.direction * size.width * (1f - exit.value))
+                    } else if (departure != null && showDeparture) {
                         val value = departure.progress + (1f - departure.progress) * exit.value
                         translationX = -departure.direction * size.width * 0.25f * (1f - value)
                         alpha = 1f - 0.1f * (1f - value)
                     } else translationX = kotlin.math.round(state.direction * size.width * visibleProgress)
-                }.then(if (target != null && state.previewAllowed && progress > 0f) {
-                    if (state.direction > 0f) Modifier.absoluteSquircleClip(topLeft = cornerRadius, topRight = 0.dp, bottomRight = 0.dp, bottomLeft = cornerRadius)
+                }.then(if ((target != null && state.previewAllowed && progress > 0f) ||
+                    (showDeparture && departure?.forward == true)) {
+                    if ((if (departure?.forward == true) departure.direction else state.direction) > 0f) Modifier.absoluteSquircleClip(topLeft = cornerRadius, topRight = 0.dp, bottomRight = 0.dp, bottomLeft = cornerRadius)
                     else Modifier.absoluteSquircleClip(topLeft = 0.dp, topRight = cornerRadius, bottomRight = cornerRadius, bottomLeft = 0.dp)
-                } else Modifier).testTag("page-back-surface").layout { measurable, constraints ->
+                } else Modifier).testTag("page-back-surface").drawWithContent {
+                    if (departure?.forward == true && departing && !showDeparture) {
+                        departure.forwardSkipped = true
+                    }
+                    val held = frame.image.takeIf { frame.holdingForChild && frame.childChangeCaptured == true && state.previewAllowed }
+                    if (held != null) drawImage(held)
+                    else {
+                        if (frame.holdingForChild) frame.childChangeCaptured = false
+                        drawContent()
+                    }
+                }.layout { measurable, constraints ->
                     val placeable = measurable.measure(constraints)
                     layout(placeable.width, placeable.height) {
                         if (captureFromContent) placeable.place(x = 0, y = 0)
@@ -435,17 +467,26 @@ internal fun PageBackGestureHost(
                     }
                 }.background(background)) { content() }
             }
-            if (departure != null && showDeparture) Box(Modifier.fillMaxSize().drawBehind {
+            if (departure != null && showDeparture && !departure.forward) Box(Modifier.fillMaxSize().drawBehind {
                 val value = departure.progress + (1f - departure.progress) * exit.value
                 drawRect(Color.Black, alpha = 0.5f * (1f - value))
             }.testTag("page-back-departure-scrim"))
-            if (departure != null && showDeparture) Box(Modifier.fillMaxSize().graphicsLayer {
+            if (departure != null && showDeparture && !departure.forward) Box(Modifier.fillMaxSize().graphicsLayer {
                 val value = departure.progress + (1f - departure.progress) * exit.value
                 translationX = kotlin.math.round(departure.direction * size.width * value)
             }.then(if (departure.direction > 0f) Modifier.absoluteSquircleClip(topLeft = cornerRadius, topRight = 0.dp, bottomRight = 0.dp, bottomLeft = cornerRadius)
                 else Modifier.absoluteSquircleClip(topLeft = 0.dp, topRight = cornerRadius, bottomRight = cornerRadius, bottomLeft = 0.dp)).drawBehind {
                 departure.frame.image?.let { drawImage(it) }
             }.testTag("page-back-departure").pointerInput(departure) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false).consume()
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        event.changes.forEach { it.consume() }
+                    } while (event.changes.any { it.pressed })
+                }
+            })
+            if (departing && departure?.forward == true) Box(Modifier.fillMaxSize().testTag("page-enter-blocker").pointerInput(departure) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false).consume()
                     do {

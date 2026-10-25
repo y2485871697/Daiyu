@@ -28,6 +28,7 @@ internal fun CompactDialogTextField(
     modifier: Modifier = Modifier,
 ) {
     val colors = MiuixTheme.colorScheme
+    val container = etaInputContainerColor()
     val style = MiuixTheme.textStyles.body1.copy(fontSize = 14.sp, lineHeight = 21.sp, color = colors.onSurface)
     Box(Modifier.fillMaxWidth().padding(start = 9.dp, end = 9.dp, bottom = 13.dp)) {
         BasicTextField(
@@ -38,7 +39,7 @@ internal fun CompactDialogTextField(
             cursorBrush = imeCursorBrush(colors.primary),
             modifier = modifier.managedInput().fillMaxWidth().heightIn(min = 48.dp)
                 .semantics { contentDescription = placeholder }
-                .clip(RoundedCornerShape(16.dp)).background(colors.surfaceVariant),
+                .clip(RoundedCornerShape(16.dp)).background(container),
             decorationBox = { editor ->
                 Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) Text(placeholder, style = style, color = colors.onSurfaceVariantSummary)

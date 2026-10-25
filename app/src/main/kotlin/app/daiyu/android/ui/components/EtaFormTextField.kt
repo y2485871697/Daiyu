@@ -13,7 +13,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.VisualTransformation
@@ -26,7 +25,7 @@ internal val EtaInputCornerRadius = 14.dp
 @Composable
 internal fun etaInputContainerColor(): Color {
     val colors = MiuixTheme.colorScheme
-    return lerp(colors.surface, colors.surfaceContainerHigh, 0.35f)
+    return colors.surfaceContainerHigh
 }
 
 /** Rounded, softly filled form field. Floating labels remain on the top outline. */

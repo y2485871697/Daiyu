@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.settings
 
 import app.daiyu.android.ui.app.DaiyuPalette
 
+import app.daiyu.android.ui.components.etaInputContainerColor
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -189,6 +190,7 @@ internal fun SettingsTextField(
     compact: Boolean = false,
     embedded: Boolean = false,
 ) {
+    val container = etaInputContainerColor()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var secretVisible by remember(password) { mutableStateOf(false) }
     var editorValue by remember { mutableStateOf(TextFieldValue(value)) }
@@ -258,7 +260,7 @@ internal fun SettingsTextField(
                     .focusRequester(focusRequester).onFocusChanged { fieldFocused = it.isFocused }
                     .then(if (embedded) Modifier.padding(vertical = 12.dp) else Modifier)
                     .then(if (compact) Modifier else Modifier.clip(RoundedCornerShape(12.dp))
-                        .background(MiuixTheme.colorScheme.surfaceVariant).padding(14.dp))
+                        .background(container).padding(14.dp))
                     .semantics { contentDescription = label },
                 decorationBox = { editor ->
                     Box(contentAlignment = Alignment.CenterStart) {
@@ -272,7 +274,7 @@ internal fun SettingsTextField(
     if (compact) {
         Row(Modifier.managedInput().testTag("$tag-container").fillMaxWidth()
             .then(if (embedded) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-            .clip(RoundedCornerShape(16.dp)).background(MiuixTheme.colorScheme.surfaceVariant)
+            .clip(RoundedCornerShape(16.dp)).background(container)
             .padding(start = if (embedded) 12.dp else 16.dp,
                 end = if (embedded && password) 0.dp else if (embedded) 12.dp else 16.dp,
                 top = if (embedded) 0.dp else 6.dp, bottom = if (embedded) 0.dp else 6.dp)

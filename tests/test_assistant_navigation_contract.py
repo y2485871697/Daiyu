@@ -81,6 +81,32 @@ class AssistantNavigationContractTest(unittest.TestCase):
         self.assertNotIn('Color.White', legend)
         self.assertIn('clipOp = ClipOp.Difference', section)
 
+    def test_chat_entry_waits_for_native_geometry_before_one_real_click(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/AssistantNavigationActivityTest.kt').read_text()
+        opening = source.split('private fun openPicker(', 1)[1].split('private fun dismissOutside()', 1)[0]
+        chat = opening.split('        } else {', 1)[1]
+        for token in ('assertIsDisplayed().assertIsEnabled()', 'awaitNodeWindowFocus(entry)',
+                      'awaitStableWindowFrame(view)', 'view.windowToken != token',
+                      '!target.layoutInfo.isPlaced', '!target.layoutInfo.coordinates.isAttached',
+                      'target.boundsInRoot.translate(target.positionOnScreen - target.positionInRoot)',
+                      'it.width > 0f && it.height > 0f', 'value.isFinite()',
+                      'ui.runOnIdle { screenBounds() }', 'awaitUniqueTag("assistant-list")'):
+            self.assertIn(token, chat)
+        self.assertLess(chat.index('awaitNodeWindowFocus(entry)'), chat.index('awaitStableWindowFrame(view)'))
+        self.assertLess(chat.index('awaitStableWindowFrame(view)'), chat.index('entry.assertIsDisplayed().assertIsEnabled().performClick()'))
+        final_check = 'assertEquals("Assistant entry moved before touch", settled, ui.runOnIdle { screenBounds() })'
+        self.assertIn(final_check, chat)
+        self.assertLess(chat.index(final_check), chat.index('entry.assertIsDisplayed().assertIsEnabled().performClick()'))
+        self.assertEqual(1, chat.count('.performClick()'))
+        for forbidden in ('performSemanticsAction', 'Thread.sleep', 'repeat(', 'openAssistantPicker('):
+            self.assertNotIn(forbidden, chat)
+        oracle = source.split('fun testEditorKeepsOriginalPageComposed()', 1)[1]
+        self.assertIn('for (fromSettings in listOf(false, true))', oracle)
+        self.assertIn('for (system in listOf(false, true))', oracle)
+        self.assertEqual(3, oracle.count('assertEquals(original, node(tag).fetchSemanticsNode().id)'))
+        self.assertIn('assertEquals(before, fixture.database.exportBackup())', oracle)
+        self.assertIn('assertEquals(0, fixture.opens.get())', oracle)
+
     def test_device_regressions_cover_outside_reopen_background_avatar_and_transparency(self):
         tests = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
         navigation = (tests / 'AssistantNavigationActivityTest.kt').read_text()

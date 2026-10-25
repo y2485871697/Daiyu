@@ -8,6 +8,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
 
 class AssistantNavigationActivityTest : WiredActivityTestCase() {
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun openPicker(fromSettings: Boolean) {
         if (fromSettings) {
             openSettings()
@@ -15,7 +16,21 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
             node("settings-row:助手").assertIsDisplayed().assertIsEnabled().performClick()
             awaitUniqueTag("assistant-list")
         } else {
-            node("chat-assistant").performClick()
+            val entry = node("chat-assistant").assertIsDisplayed().assertIsEnabled()
+            awaitNodeWindowFocus(entry)
+            val target = entry.fetchSemanticsNode()
+            val view = (target.root as androidx.compose.ui.platform.ViewRootForTest).view
+            val token = view.windowToken
+            fun screenBounds() = target.boundsInRoot.translate(target.positionOnScreen - target.positionInRoot)
+            val settled = awaitStableWindowFrame(view) {
+                if (view.windowToken != token || !target.layoutInfo.isPlaced ||
+                    !target.layoutInfo.coordinates.isAttached) null else screenBounds().takeIf {
+                    it.width > 0f && it.height > 0f &&
+                        listOf(it.left, it.top, it.right, it.bottom).all { value -> value.isFinite() }
+                }
+            }
+            assertEquals("Assistant entry moved before touch", settled, ui.runOnIdle { screenBounds() })
+            entry.assertIsDisplayed().assertIsEnabled().performClick()
             awaitUniqueTag("assistant-list")
         }
     }

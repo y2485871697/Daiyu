@@ -197,6 +197,7 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         node("subagent-gpt-divider-worker").assertExists()
         ui.onNodeWithContentDescription("Worker模型").assertHeightIsAtLeast(48.dp).performClick()
         node("chat-model-picker").assertIsDisplayed()
+        ui.onAllNodes(hasText("无") and hasClickAction() and hasAnyAncestor(hasTestTag("chat-model-picker"))).assertCountEquals(0)
         node("chat-model-option:other-local").performClick()
         awaitControl("non-GPT binding saved") { data.repository.snapshot(data.editor.owner).profiles.single().modelId == "other-local" }
         node("subagent-gpt-divider-worker").assertDoesNotExist()
@@ -210,7 +211,8 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("配置Worker").performClick()
         ui.onNodeWithText("子代理配置").assertIsDisplayed()
         ui.onNodeWithContentDescription("草稿GPT速度").assertDoesNotExist()
-        ui.onNodeWithText("取消").performClick()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
         assertEquals(0, fixture.opens.get())
     }
 
@@ -319,9 +321,9 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
                     }
                 }
             }
-            val cancel = ui.onNode(hasText("取消") and hasClickAction())
+            val delete = ui.onNode(hasText("删除") and hasClickAction())
             val confirm = ui.onNode(hasText("确认") and hasClickAction())
-            cancel.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+            delete.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             confirm.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             val actions = node("subagent-config-actions")
             awaitNodeWindowFocus(actions)
@@ -354,15 +356,15 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             assertTrue("Compact row must keep label left of current value", speedLabel.right < speedValue.left)
             assertEquals("Compact row label/value share one line", speedLabel.center.y, speedValue.center.y, 1f)
             val windowBefore = windowFrame()
-            val cancelNode = cancel.fetchSemanticsNode()
+            val deleteNode = delete.fetchSemanticsNode()
             val confirmNode = confirm.fetchSemanticsNode()
             val actionsNode = actions.fetchSemanticsNode()
-            val (cancelBounds, confirmBounds, actionsBefore) = ui.runOnIdle {
-                Triple(cancelNode.boundsInRoot, confirmNode.boundsInRoot, actionsNode.boundsInRoot)
+            val (deleteBounds, confirmBounds, actionsBefore) = ui.runOnIdle {
+                Triple(deleteNode.boundsInRoot, confirmNode.boundsInRoot, actionsNode.boundsInRoot)
             }
-            val baseline = "dark=$dark fontScale=$fontScale window=$windowBefore cancel=$cancelBounds confirm=$confirmBounds actions=$actionsBefore"
-            assertEquals(baseline, cancelBounds.height, confirmBounds.height, 1f)
-            assertEquals(baseline, cancelBounds.top, confirmBounds.top, 1f)
+            val baseline = "dark=$dark fontScale=$fontScale window=$windowBefore delete=$deleteBounds confirm=$confirmBounds actions=$actionsBefore"
+            assertEquals(baseline, deleteBounds.height, confirmBounds.height, 1f)
+            assertEquals(baseline, deleteBounds.top, confirmBounds.top, 1f)
             val speed = ui.onNodeWithContentDescription("草稿GPT速度")
             for (mode in listOf(GptSpeedMode.FAST, GptSpeedMode.ULTRA_FAST, GptSpeedMode.NORMAL)) {
                 speed.scrollToVisible().assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
@@ -377,8 +379,9 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             assertEquals("Pure scrolling must keep window and IME unchanged: $geometry", windowBefore, windowAfter)
             assertEquals(geometry, actionsBefore.top, after.top, 1f)
             ui.onNodeWithContentDescription("草稿任务分工").scrollToVisible().assertHeightIsAtLeast(48.dp)
-            cancel.assertIsDisplayed().performClick()
+            delete.assertIsDisplayed().performClick()
             ui.runOnIdle { assertFalse(visible) }
+            assertTrue(data.repository.snapshot(data.editor.owner).profiles.isEmpty())
         }
         assertEquals(0, fixture.opens.get())
     }

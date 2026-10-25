@@ -46,7 +46,7 @@ class SubAgentResumeDisplayContractTest(unittest.TestCase):
         self.assertIn("session.editor.modelRefreshing.collectAsState()", text)
         self.assertIn("val usable = !modelRefreshing &&", text)
         self.assertIn("if (!modelRefreshing) session.bindParallel(boundConfig)", text)
-        self.assertIn("val ready = usable && (!hasModelIdentity || boundConfig != null)", text)
+        self.assertIn("val ready = usable && boundConfig != null", text)
         self.assertIn("session.editor.modelDisplayProviders?.collectAsState()?.value ?: providers", text)
         self.assertIn("session.canCommit(latestEditor, latestEnabled)", text)
 

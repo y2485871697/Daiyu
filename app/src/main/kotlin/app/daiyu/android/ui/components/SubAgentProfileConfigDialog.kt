@@ -53,6 +53,8 @@ internal class SubAgentProfileDraftSession private constructor(
     }
     fun canCommit(currentEditor: ConversationSubAgentEditor?, allowed: Boolean, ticket: Any = openToken): Boolean =
         ticket === openToken && isCurrent(currentEditor, allowed) && editor.enabled && !editor.modelRefreshing.value
+    fun canDelete(currentEditor: ConversationSubAgentEditor?, allowed: Boolean, ticket: Any = openToken): Boolean =
+        expectedProfile != null && ticket === openToken && isCurrent(currentEditor, allowed) && editor.enabled
     fun edit(change: (SubAgentProfile) -> SubAgentProfile) {
         val old = draft; draft = change(old)
         if (old.providerId != draft.providerId || old.modelId != draft.modelId) { bindingChanged = true; resetParallel() }
@@ -138,8 +140,9 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
         else -> effective?.displayName ?: "未启用"
     }
     val verifiedGrok = boundConfig?.grokImage ?: false
-    val hasModelIdentity = draft.providerId.isNotBlank() || draft.modelId.isNotBlank()
-    val ready = usable && (!hasModelIdentity || boundConfig != null) && session.parallelBoundTo(boundConfig) && session.name.trim().isNotBlank() && session.parallelIsValid() && (session.expectedProfile != null || boundConfig != null)
+    val ready = usable && boundConfig != null && session.parallelBoundTo(boundConfig) && session.name.trim().isNotBlank() && session.parallelIsValid()
+    val editing = session.expectedProfile != null
+    val secondaryEnabled = !session.submitting && (!editing || session.canDelete(currentEditor, enabled))
     val interact: (() -> Unit) -> Unit = { action -> if (session.canCommit(latestEditor, latestEnabled) && !session.submitting) { action() } }
     val dismiss = { session.dismiss(); latestDismiss() }
     val userDismiss = { if (!session.submitting) dismiss() }
@@ -184,7 +187,20 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                         else TextButton(enabled = !session.submitting, onClick = onRetry) { Text("重试恢复配置（保留草稿）") }
                     }
                 }
-                SubAgentDraftDialogActions(ready, !session.submitting, userDismiss, onConfirm = {
+                SubAgentDraftDialogActions(ready, secondaryEnabled, if (editing) "删除" else "取消", onSecondary = {
+                    val expected = session.expectedProfile
+                    if (expected == null) userDismiss()
+                    else if (!session.submitting && session.canDelete(latestEditor, latestEnabled)) {
+                        val ticket = session.openToken
+                        session.submitting = true; session.error = null
+                        try {
+                            val result = session.editor.removeProfileDraft(expected, session.expectedApplicationToken,
+                                canCommit = { session.canDelete(latestEditor, latestEnabled, ticket) })
+                            if (result is ConversationSubAgentPreferences.WriteResult.Saved && session.isCurrent(latestEditor, latestEnabled)) dismiss()
+                            else if (session.isCurrent(latestEditor, latestEnabled)) session.error = "未删除：配置已变更或暂不可编辑，请检查后重试。"
+                        } finally { session.submitting = false }
+                    }
+                }, onConfirm = {
                     if (ready && !session.submitting && session.canCommit(latestEditor, latestEnabled)) {
                         val capturedDraft = session.draft.copy(name = session.name.trim()); val capturedTicket = session.openToken
                         val capturedExpected = session.expectedProfile; val capturedApplication = session.expectedApplicationToken; val capturedParallel = session.parallelChange()
@@ -207,9 +223,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                 val models = all.copy(providerGroups = all.providerGroups.map { group -> group.copy(models = group.models.filter { draft.acceptsModel(it.supportsImageGeneration, it.supportsVideoGeneration) }) }.filter { it.models.isNotEmpty() })
                 SubAgentModelPickerDialog(models, true, { modelPicker = false }, { provider, model ->
                     if (session.canCommit(latestEditor, latestEnabled)) session.selectModel(ModelFeatureSelection(true, provider, model)); modelPicker = false
-                }, "选择${draft.name}模型", onClearSelection = {
-                    if (session.canCommit(latestEditor, latestEnabled)) session.selectModel(ModelFeatureSelection(true, "", "")); modelPicker = false
-                })
+                }, "选择${draft.name}模型")
             }
             if (usable && thinkingPicker && canThink && effective != null) {
                 val binding = draft
@@ -248,17 +262,18 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     }
 }
 @Composable
-private fun SubAgentDraftDialogActions(confirmEnabled: Boolean, cancelEnabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
+private fun SubAgentDraftDialogActions(confirmEnabled: Boolean, secondaryEnabled: Boolean, secondaryLabel: String,
+    onSecondary: () -> Unit, onConfirm: () -> Unit) {
     if (LocalConversationAgentStyle.current) {
         HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(top = 10.dp).testTag("subagent-config-actions"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ConversationAgentButton("取消", cancelEnabled, modifier = Modifier.weight(1f).fillMaxHeight()) { onCancel() }
+            ConversationAgentButton(secondaryLabel, secondaryEnabled, modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onSecondary)
             ConversationAgentButton("确认", confirmEnabled, primary = true, modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onConfirm)
         }
         return
     }
     Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MiuixTextButton(text = "取消", modifier = Modifier.weight(1f), enabled = cancelEnabled, onClick = { onCancel() })
+        MiuixTextButton(text = secondaryLabel, modifier = Modifier.weight(1f), enabled = secondaryEnabled, onClick = onSecondary)
         MiuixTextButton(text = "确认", modifier = Modifier.weight(1f), enabled = confirmEnabled, colors = MiuixButtonDefaults.textButtonColorsPrimary(), onClick = onConfirm)
     }
 }

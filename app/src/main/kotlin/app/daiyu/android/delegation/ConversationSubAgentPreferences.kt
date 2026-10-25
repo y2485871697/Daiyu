@@ -289,6 +289,22 @@ internal class ConversationSubAgentPreferences(
         next.validate(); transaction(mapOf(key(owner) to encode(next)), owner)
         WriteResult.Saved(revision(owner).value, next.detached())
     }
+    fun removeProfile(owner: SubAgentConfigKey, expectedProfile: SubAgentProfile, expectedApplicationToken: String?,
+        canCommit: () -> Boolean = { true }): WriteResult = synchronized(lock) {
+        ensureClean()
+        fun allowed(): Boolean = canCommit() &&
+            (if (owner is SubAgentConfigKey.Preset) presetExists(owner.value) else canEdit(owner)) &&
+            (owner !is SubAgentConfigKey.Draft || stored(key(owner)) != null)
+        if (!allowed()) return@synchronized WriteResult.Rejected
+        val current = read(owner).detached()
+        if (current.presetApplicationToken != expectedApplicationToken ||
+            current.profiles.singleOrNull { it.id == expectedProfile.id } != expectedProfile) return@synchronized WriteResult.Rejected
+        val next = current.copy(profiles = current.profiles.filterNot { it.id == expectedProfile.id })
+        next.validate()
+        if (!allowed()) return@synchronized WriteResult.Rejected
+        transaction(mapOf(key(owner) to encode(next)), owner)
+        WriteResult.Saved(revision(owner).value, next.detached())
+    }
     fun modelDefaults(profile: SubAgentProfile): SubAgentModelDefaults.Entry? = synchronized(lock) { defaults()[SubAgentProfile.modelReasoningKey(profile.providerId, profile.modelId)] }
     private fun defaults(): Map<String, SubAgentModelDefaults.Entry> = stored(SubAgentModelDefaults.KEY)?.let(SubAgentModelDefaults::decode).orEmpty()
     fun updateConfirmedProfile(owner: SubAgentConfigKey, profileId: String, binding: SubAgentParallelModel? = null,

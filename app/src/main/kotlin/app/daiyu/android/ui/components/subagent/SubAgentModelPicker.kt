@@ -25,7 +25,7 @@ internal object SubAgentModelPickerProjector {
 
 @Composable
 internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: Boolean, onDismiss: () -> Unit,
-    onModelSelected: (String, String) -> Unit, title: String, onClearSelection: (() -> Unit)? = null) {
+    onModelSelected: (String, String) -> Unit, title: String) {
     if (!show) return
     val providers = state.providerGroups.map { group ->
         ChatModelProviderUi(group.providerId, group.providerName,
@@ -42,6 +42,5 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
             message = if (providers.isEmpty()) "没有可用模型" else null),
         onSelect = { select(providerId, it) }, onDismiss = onDismiss,
         onSelectOtherProvider = { provider, model -> select(provider, model) }, title = title,
-        onClearSelection = onClearSelection,
     )
 }

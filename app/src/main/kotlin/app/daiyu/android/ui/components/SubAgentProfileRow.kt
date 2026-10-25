@@ -211,10 +211,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
         SubAgentModelPickerDialog(models, true, { modelPicker = false }, { provider, model ->
             if (currentUsable) editor?.saveModel(profile.id, ModelFeatureSelection(true, provider, model), expected = profile)
             modelPicker = false
-        }, "选择${profile.name}模型", onClearSelection = {
-            if (currentUsable) editor?.saveModel(profile.id, ModelFeatureSelection(true, "", ""), expected = profile)
-            modelPicker = false
-        })
+        }, "选择${profile.name}模型")
     }
     if (usable && thinkingPicker && config != null && canThink) {
         val effort = requireNotNull(effective)

@@ -1,6 +1,8 @@
 package app.daiyu.android.delegation
 
 import android.content.SharedPreferences
+import app.daiyu.android.ui.components.ConversationSubAgentEditor
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -89,6 +91,183 @@ class ConversationSubAgentPreferencesTest {
         try { repository.presets(); fail("read must remain fenced") } catch (_: IllegalStateException) { }
         assertTrue(repository.recoverDurability())
         assertEquals("原名", repository.presets().single().name)
+    }
+
+
+    @Test fun deletingProfileIsDurableAndPreservesOtherProfilesPoolsDefaultsAndAppliedCopies() {
+        val disk = MemoryPreferences()
+        val repository = ConversationSubAgentPreferences(disk)
+        val preset = repository.addPreset("group")
+        val owner = SubAgentConfigKey.Preset(preset.id)
+        val first = SubAgentProfile("first", "First", providerId = "provider", modelId = "selection")
+        val neighbor = first.copy(id = "neighbor", name = "Neighbor")
+        val pool = SubAgentParallelModel("provider", "api-model")
+        repository.updateConfirmedProfile(owner, first.id, pool) {
+            it.copy(profiles = listOf(first, neighbor), parallelLimits = mapOf(pool to 4))
+        }
+        val defaults = repository.modelDefaults(first)
+        val conversation = SubAgentConfigKey.Conversation("conversation")
+        repository.applyPreset(conversation, preset.id)
+        val copy = repository.snapshot(conversation)
+        val result = repository.removeProfile(owner, first, repository.snapshot(owner).presetApplicationToken)
+        assertTrue(result is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertEquals(listOf(neighbor), (result as ConversationSubAgentPreferences.WriteResult.Saved).config.profiles)
+        val reopened = ConversationSubAgentPreferences(disk.reopen())
+        assertEquals(listOf(neighbor), reopened.snapshot(owner).profiles)
+        assertTrue(reopened.presetExists(preset.id))
+        assertEquals(4, reopened.snapshot(owner).parallelLimit(pool))
+        assertEquals(defaults, reopened.modelDefaults(first))
+        assertEquals(copy, reopened.snapshot(conversation))
+    }
+
+    @Test fun deletingLastConversationProfileKeepsOwnerAndRejectsRepeatedDelete() {
+        val disk = MemoryPreferences()
+        val repository = ConversationSubAgentPreferences(disk)
+        val owner = SubAgentConfigKey.Conversation("conversation")
+        val profile = SubAgentProfile("profile", "Unconfigured legacy profile")
+        repository.update(owner) { it.copy(profiles = listOf(profile), enabled = true) }
+        val token = repository.snapshot(owner).presetApplicationToken
+        assertTrue(repository.removeProfile(owner, profile, token) is ConversationSubAgentPreferences.WriteResult.Saved)
+        val after = repository.snapshot(owner)
+        assertTrue(after.profiles.isEmpty())
+        assertTrue(after.enabled)
+        assertTrue(repository.ownerState(owner).exists)
+        val diskAfter = disk.all.toMap()
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected, repository.removeProfile(owner, profile, token))
+        assertEquals(diskAfter, disk.all)
+        assertEquals(after, ConversationSubAgentPreferences(disk.reopen()).snapshot(owner))
+    }
+
+    @Test fun staleProfileAndReappliedGroupCannotBeDeletedThroughOldDialog() {
+        val disk = MemoryPreferences()
+        val repository = ConversationSubAgentPreferences(disk)
+        val preset = repository.addPreset("group")
+        val profile = SubAgentProfile("profile", "Original")
+        repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = listOf(profile)) }
+        val owner = SubAgentConfigKey.Conversation("conversation")
+        repository.applyPreset(owner, preset.id)
+        val opened = repository.snapshot(owner)
+        repository.update(owner) { it.copy(profiles = listOf(profile.copy(name = "Changed"))) }
+        val changed = disk.all.toMap()
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            repository.removeProfile(owner, profile, opened.presetApplicationToken))
+        assertEquals(changed, disk.all)
+        repository.applyPreset(owner, preset.id)
+        assertEquals(profile, repository.snapshot(owner).profiles.single())
+        assertNotEquals(opened.presetApplicationToken, repository.snapshot(owner).presetApplicationToken)
+        val reapplied = disk.all.toMap()
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            repository.removeProfile(owner, profile, opened.presetApplicationToken))
+        assertEquals(reapplied, disk.all)
+    }
+
+    @Test fun deletingProfileMergesUnrelatedProfileChangesInsteadOfRestoringOldSnapshot() {
+        val repository = ConversationSubAgentPreferences(MemoryPreferences())
+        val owner = SubAgentConfigKey.Conversation("conversation")
+        val target = SubAgentProfile("target", "Target")
+        val other = SubAgentProfile("other", "Other")
+        repository.update(owner) { it.copy(profiles = listOf(target, other)) }
+        val opened = repository.snapshot(owner)
+        val updated = other.copy(name = "Updated elsewhere")
+        repository.update(owner) { it.copy(profiles = listOf(target, updated), enabled = false) }
+        assertTrue(repository.removeProfile(owner, target, opened.presetApplicationToken) is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertEquals(listOf(updated), repository.snapshot(owner).profiles)
+        assertFalse(repository.snapshot(owner).enabled)
+    }
+
+    @Test fun deletionRejectsRunningOwnerLostPermissionAndMissingDraftOrPresetWithoutWriting() {
+        val disk = MemoryPreferences()
+        var editable = true
+        val repository = ConversationSubAgentPreferences(disk) { editable }
+        val owner = SubAgentConfigKey.Conversation("conversation")
+        val profile = SubAgentProfile("profile", "Worker")
+        repository.update(owner) { it.copy(profiles = listOf(profile)) }
+        var before = disk.all.toMap()
+        editable = false
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected, repository.removeProfile(owner, profile, null))
+        assertEquals(before, disk.all)
+        editable = true
+        var calls = 0
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            repository.removeProfile(owner, profile, null) { ++calls == 1 })
+        assertEquals(2, calls)
+        assertEquals(before, disk.all)
+        val draft = repository.createDraft(owner)
+        repository.delete(draft)
+        val preset = repository.addPreset("removed")
+        repository.removePreset(preset.id)
+        before = disk.all.toMap()
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected, repository.removeProfile(draft, profile, null))
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            repository.removeProfile(SubAgentConfigKey.Preset(preset.id), profile, null))
+        assertEquals(before, disk.all)
+    }
+
+    @Test fun deletionCommitFailureUsesExistingRecoveryAndKeepsOriginalProfile() {
+        val disk = MemoryPreferences()
+        val repository = ConversationSubAgentPreferences(disk)
+        val owner = SubAgentConfigKey.Conversation("conversation")
+        val profile = SubAgentProfile("profile", "Worker")
+        repository.update(owner) { it.copy(profiles = listOf(profile)) }
+        val original = repository.snapshot(owner)
+        disk.failNextCommit = true
+        try { repository.removeProfile(owner, profile, null); fail("commit must fail") } catch (_: IllegalStateException) { }
+        try { repository.snapshot(owner); fail("read must remain fenced") } catch (_: IllegalStateException) { }
+        assertTrue(repository.recoverDurability())
+        assertEquals(original, repository.snapshot(owner))
+        assertEquals(original, ConversationSubAgentPreferences(disk.reopen()).snapshot(owner))
+    }
+
+    @Test fun editorDeletionDoesNotResolveUnavailableModelAndRefreshesItsOwnState() {
+        val disk = MemoryPreferences()
+        val repository = ConversationSubAgentPreferences(disk)
+        val owner = SubAgentConfigKey.Conversation("conversation")
+        val profile = SubAgentProfile("profile", "Worker", providerId = "missing", modelId = "removed")
+        repository.update(owner) { it.copy(profiles = listOf(profile)) }
+        val editor = ConversationSubAgentEditor(owner, repository, { error("deletion must not resolve a model") }) { true }
+        assertTrue(editor.removeProfileDraft(profile, null) is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertTrue((editor.state as app.daiyu.android.ui.components.SubAgentEditorState.Loaded).config.profiles.isEmpty())
+        assertTrue(ConversationSubAgentPreferences(disk.reopen()).snapshot(owner).profiles.isEmpty())
+    }
+
+    @Test fun editorDeletionRejectsDisposedSessionAndRechecksItsCommitGate() {
+        val disk = MemoryPreferences()
+        val repository = ConversationSubAgentPreferences(disk)
+        val owner = SubAgentConfigKey.Conversation("conversation")
+        val profile = SubAgentProfile("profile", "Worker")
+        repository.update(owner) { it.copy(profiles = listOf(profile)) }
+        val editor = ConversationSubAgentEditor(owner, repository, { null }) { true }
+        val before = disk.all.toMap()
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected, editor.removeProfileDraft(profile, null) { false })
+        var calls = 0
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            editor.removeProfileDraft(profile, null) { ++calls < 3 })
+        assertEquals(3, calls)
+        assertEquals(before, disk.all)
+        editor.dispose()
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected, editor.removeProfileDraft(profile, null))
+        assertEquals(before, disk.all)
+    }
+
+    @Test fun blankModelCannotBeSelectedOrCommittedButLegacyConfigurationStillLoadsAndDeletes() = runBlocking {
+        val disk = MemoryPreferences()
+        val repository = ConversationSubAgentPreferences(disk)
+        val owner = SubAgentConfigKey.Conversation("conversation")
+        val profile = SubAgentProfile("profile", "Legacy blank model")
+        repository.update(owner) { it.copy(profiles = listOf(profile)) }
+        val editor = ConversationSubAgentEditor(owner, repository, { error("blank selection must not resolve a model") }) { true }
+        val before = disk.all.toMap()
+        try { editor.changeProfileModel(profile, ModelFeatureSelection(true, "", "")); fail("model required") }
+        catch (_: IllegalArgumentException) { }
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            editor.commitProfileDraft(profile, profile, null, null))
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            editor.commitProfileDraft(profile.copy(id = "new"), null, null, null))
+        assertSame(ConversationSubAgentPreferences.WriteResult.Rejected,
+            editor.saveModel(profile.id, ModelFeatureSelection(true, "", ""), profile))
+        assertEquals(before, disk.all)
+        assertEquals(profile, ConversationSubAgentPreferences(disk.reopen()).snapshot(owner).profiles.single())
+        assertTrue(editor.removeProfileDraft(profile, null) is ConversationSubAgentPreferences.WriteResult.Saved)
     }
 
 }

@@ -178,7 +178,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         openDraft(newProfile = adding)
         val initialTitle = if (adding) "添加子代理" else "子代理配置"
         ui.onNodeWithText(initialTitle).assertIsDisplayed()
-        ui.onNodeWithText("取消").assertIsDisplayed()
+        ui.onNodeWithText(if (adding) "取消" else "删除").assertIsDisplayed()
         ui.onNodeWithText("确认").assertIsDisplayed()
         if (chatStyle) noHeaderNavigation()
         val initialPreferences = preferences.all.toMap()
@@ -191,7 +191,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertNull(repository.snapshot(owner).profiles.singleOrNull()?.reasoning)
         assertEquals(initialPreferences, preferences.all.toMap())
         closeThinking(initialTitle)
-        ui.onNodeWithText("取消").performClick()
+        if (adding) ui.onNodeWithText("取消").performClick() else back()
         ui.runOnIdle { assertNull(active) }
         assertEquals(initialPreferences, preferences.all.toMap())
 
@@ -214,7 +214,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(ReasoningEffort.HIGH, repository.snapshot(owner).profiles.single().reasoning)
         assertEquals(savedHigh, preferences.all.toMap())
         closeThinking("子代理配置")
-        ui.onNodeWithText("取消").performClick()
+        back()
         ui.runOnIdle { assertNull(active) }
         assertEquals(savedHigh, preferences.all.toMap())
 
@@ -235,7 +235,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(0f, offRange.current)
         assertEquals(0f..6f, offRange.range)
         closeThinking("子代理配置")
-        ui.onNodeWithText("取消").performClick()
+        back()
         assertEquals(ReasoningEffort.OFF, repository.snapshot(owner).profiles.single().reasoning)
         assertEquals(1, repository.snapshot(owner).profiles.size)
         assertEquals(0, fixture.opens.get())

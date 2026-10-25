@@ -95,7 +95,7 @@ internal class ConversationSubAgentEditor(
         return SubAgentProfile(UUID.randomUUID().toString(), "子代理 $number")
     }
     fun changeProfileModel(profile: SubAgentProfile, selection: ModelFeatureSelection): SubAgentProfile {
-        require(selection.providerId.isBlank() == selection.modelId.isBlank()) { "Incomplete model selection" }
+        require(selection.providerId.isNotBlank() && selection.modelId.isNotBlank()) { "A model selection is required" }
         val blank = profile.copy(providerId = selection.providerId, modelId = selection.modelId,
             enabled = true, tier = null, reasoning = null, imageResolution = null, reasoningByModel = emptyMap(), gptSpeedByModel = emptyMap())
         return repository.modelDefaults(blank)?.restore(blank) ?: blank
@@ -107,15 +107,15 @@ internal class ConversationSubAgentEditor(
         return try {
             val capturedOwnerState = repository.ownerState(owner)
             if (owner is SubAgentConfigKey.Draft && !capturedOwnerState.exists) throw LostOwner()
-            if (draft.providerId.isBlank() != draft.modelId.isBlank()) throw LostOwner()
-            val binding = if (draft.providerId.isBlank()) null else {
+            if (draft.providerId.isBlank() || draft.modelId.isBlank()) throw LostOwner()
+            val binding = run {
                 val provider = providerLookup(draft.providerId)?.takeIf { it.id == draft.providerId && it.isEnabled } ?: throw LostOwner()
                 currentCoroutineContext().ensureActive()
                 val model = provider.models.singleOrNull { it.id == draft.modelId && it.isEnabled } ?: throw LostOwner()
                 if (model.modelId.isBlank() || model.supportsSpeechSynthesis || !draft.acceptsModel(model.supportsImageGeneration, model.supportsVideoGeneration)) throw LostOwner()
                 SubAgentParallelModel(provider.id, model.modelId)
             }
-            if (parallelLimitChange != null && (binding == null || parallelLimitChange.model != binding || parallelLimitChange.value < 0 || parallelLimitChange.expected < 0)) throw LostOwner()
+            if (parallelLimitChange != null && (parallelLimitChange.model != binding || parallelLimitChange.value < 0 || parallelLimitChange.expected < 0)) throw LostOwner()
             repository.updateConfirmedProfile(owner, draft.id, binding, { enabled && canCommit() }, expectedOwnerState = capturedOwnerState) { old ->
                 if (!enabled || !canCommit() || old.presetApplicationToken != expectedApplicationToken) throw LostOwner()
                 val current = old.profiles.singleOrNull { it.id == draft.id }
@@ -125,11 +125,20 @@ internal class ConversationSubAgentEditor(
                 old.copy(profiles = if (expectedProfile == null) old.profiles + draft else old.profiles.map { if (it.id == draft.id) draft else it },
                     parallelLimits = parallelLimitChange?.let { old.parallelLimits + (it.model to it.value) } ?: old.parallelLimits)
             }.also { result -> if (result is ConversationSubAgentPreferences.WriteResult.Saved) {
-                binding?.let { resolvedBindings[SubAgentProfile.modelReasoningKey(draft.providerId, draft.modelId)] = it }
+                resolvedBindings[SubAgentProfile.modelReasoningKey(draft.providerId, draft.modelId)] = binding
                 storedState = SubAgentEditorState.Loaded(result.config)
             } }
         } catch (_: LostOwner) { ConversationSubAgentPreferences.WriteResult.Rejected }
         catch (failure: Exception) { fail(failure); ConversationSubAgentPreferences.WriteResult.Rejected }
+    }
+    fun removeProfileDraft(expectedProfile: SubAgentProfile, expectedApplicationToken: String?,
+        canCommit: () -> Boolean = { true }): ConversationSubAgentPreferences.WriteResult {
+        if (!enabled || !canCommit()) return ConversationSubAgentPreferences.WriteResult.Rejected
+        return try {
+            repository.removeProfile(owner, expectedProfile, expectedApplicationToken) { enabled && canCommit() }.also { result ->
+                if (result is ConversationSubAgentPreferences.WriteResult.Saved) storedState = SubAgentEditorState.Loaded(result.config)
+            }
+        } catch (failure: Exception) { fail(failure); ConversationSubAgentPreferences.WriteResult.Rejected }
     }
     fun add(): ConversationSubAgentPreferences.WriteResult { val draft = newProfileDraft(); return update { old -> old.copy(profiles = old.profiles + draft) } }
     private fun confirmedUpdate(id: String, binding: SubAgentParallelModel? = null,
@@ -182,6 +191,7 @@ internal class ConversationSubAgentEditor(
         catch (failure: Exception) { fail(failure); ConversationSubAgentPreferences.WriteResult.Rejected }
     }
     fun saveModel(id: String, selection: ModelFeatureSelection, expected: SubAgentProfile? = null) = confirmedUpdate(id) { config ->
+        if (selection.providerId.isBlank() || selection.modelId.isBlank()) throw LostOwner()
         val old = config.profiles.singleOrNull { it.id == id } ?: throw LostOwner()
         if (expected != null && old != expected) throw LostOwner()
         if (old.providerId == selection.providerId && old.modelId == selection.modelId) config else {

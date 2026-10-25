@@ -102,7 +102,13 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
     private fun nameField(value: String) = ui.onNode(hasSetTextAction() and hasText(value))
     private fun formSwitch() = ui.onNode(isToggleable() and hasAnyAncestor(hasTestTag("subagent-config-window")))
     private fun confirm() = ui.onNode(hasText("确认") and hasClickAction())
-    private fun cancel() = ui.onNode(hasText("取消") and hasClickAction())
+    private fun delete() = ui.onNode(hasText("删除") and hasClickAction() and hasAnyAncestor(hasTestTag("subagent-config-actions")))
+    private fun dismissForm() {
+        ui.onNode(isRoot() and hasAnyDescendant(hasTestTag("subagent-config-window"))).performTouchInput {
+            click(androidx.compose.ui.geometry.Offset(2f, 2f))
+        }
+        ui.waitForIdle()
+    }
 
     fun testProfileFieldsCenterTextAndKeepNameAndParallelBackgroundTransparent() {
         val backdrop = Color(0xff643a82)
@@ -153,10 +159,12 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
             }
     }
 
-    fun testSettingsEditUsesSharedSheetAndNewSwitchButCancelDiscardsAllChanges() {
+    fun testSettingsEditUsesSharedSheetAndNewSwitchButOutsideDiscardsAllChanges() {
         val (repository, owner) = openGroup()
         val before = repository.snapshot(owner)
         openExisting()
+        delete().assertIsDisplayed().assertIsEnabled()
+        ui.onAllNodes(hasText("取消") and hasClickAction() and hasAnyAncestor(hasTestTag("subagent-config-actions"))).assertCountEquals(0)
         awaitNodeWindowFocus(nameField("Existing worker"))
         nameField("Existing worker").performTextReplacement("Discarded edit")
         formSwitch().scrollToVisible().assertIsOn().performClick().assertIsOff()
@@ -168,13 +176,45 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.onNodeWithText("请输入 0 或正整数").assertExists()
         confirm().assertIsNotEnabled()
         assertEquals(before, repository.snapshot(owner))
-        cancel().performClick()
+        dismissForm()
         node("subagent-config-window").assertDoesNotExist()
         assertEquals(before, repository.snapshot(owner))
         openExisting()
         nameField("Existing worker").assertExists()
         formSwitch().scrollToVisible().assertIsOn()
-        cancel().performClick()
+        dismissForm()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSettingsDeleteRemovesOnlyTheOpenedProfileEvenWhenDraftIsInvalid() {
+        val (repository, owner) = openGroup()
+        val original = repository.snapshot(owner).profiles.single()
+        val neighbor = original.copy(id = "neighbor", name = "Neighbor")
+        repository.update(owner) { it.copy(profiles = it.profiles + neighbor) }
+        val conversation = SubAgentConfigKey.Conversation("independent-conversation")
+        repository.applyPreset(conversation, owner.value)
+        val conversationBefore = repository.snapshot(conversation)
+        openExisting()
+        awaitNodeWindowFocus(nameField("Existing worker"))
+        nameField("Existing worker").performTextReplacement("")
+        confirm().assertIsNotEnabled()
+        delete().assertIsEnabled().performTouchInput { click() }
+        awaitControl("profile deleted from selected preset") { repository.snapshot(owner).profiles == listOf(neighbor) }
+        node("subagent-config-window").assertDoesNotExist()
+        assertTrue(repository.presetExists(owner.value))
+        assertEquals(conversationBefore, repository.snapshot(conversation))
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testAddingKeepsCancelAndDoesNotExposeDeleteOrWriteConfiguration() {
+        val (repository, owner) = openGroup()
+        val before = repository.snapshot(owner)
+        ui.onNode(hasText("添加子代理") and hasClickAction()).performClick()
+        delete().assertDoesNotExist()
+        ui.onNode(hasText("取消") and hasClickAction() and hasAnyAncestor(hasTestTag("subagent-config-actions")))
+            .assertIsEnabled().performClick()
+        node("subagent-config-window").assertDoesNotExist()
+        assertEquals(before, repository.snapshot(owner))
         assertEquals(0, fixture.opens.get())
     }
 
@@ -190,6 +230,7 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("草稿模型").scrollToVisible().performClick()
         // The nested picker inherits the same style scope as the settings profile sheet.
         val inPicker = hasAnyAncestor(hasTestTag("chat-model-picker"))
+        ui.onAllNodes(hasText("无") and hasClickAction() and inPicker).assertCountEquals(0)
         ui.onNode(hasTestTag("chat-model-provider:${provider.id}") and hasText(provider.name) and inPicker).assertExists()
         ui.onNode(hasTestTag("chat-model-option:${model.id}") and hasText(model.displayName) and inPicker
             and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))

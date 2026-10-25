@@ -234,9 +234,9 @@ internal fun <T> LocalCatalogModelsScreen(
                                 "支持推理".takeIf { form?.reasoning == true }, "支持视觉".takeIf { form?.vision == true },
                                 "当前".takeIf { selected })
                             labels.forEach { label ->
-                                Text(label, style = MiuixTheme.textStyles.body2,
+                                Text(label, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onPrimary,
                                     modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                                        .background(MiuixTheme.colorScheme.surfaceVariant).padding(horizontal = 7.dp, vertical = 2.dp))
+                                        .background(MiuixTheme.colorScheme.primary).padding(horizontal = 7.dp, vertical = 2.dp))
                             }
                         }
                     }

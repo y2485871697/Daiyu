@@ -127,7 +127,17 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) {
             ui.onAllNodes(hasTestTag("local-model-add") and isEnabled()).fetchSemanticsNodes().size == 1
         }
-        reveal("local-model:extra-local").assert(hasAnyDescendant(hasText("Renamed local model")))
+        val renamedRow = reveal("local-model:extra-local")
+        val expectedRenamed = extra.copy(displayName = "Renamed local model")
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            fixture.settings.localModelCatalogSnapshot()?.models
+                ?.singleOrNull { it.id == extra.id } == expectedRenamed &&
+                ui.onAllNodes(hasTestTag("local-model:extra-local") and
+                hasAnyAncestor(hasTestTag("page:主模型服务商")) and
+                hasAnyDescendant(hasText("Renamed local model"))).fetchSemanticsNodes().size == 1
+        }
+        renamedRow.assert(hasAnyDescendant(hasText("Renamed local model")))
         val renamed = checkNotNull(fixture.settings.localModelCatalogSnapshot())
         assertEquals(extra.copy(displayName = "Renamed local model"), renamed.models.single { it.id == extra.id })
         assertEquals(current, renamed.models.single { it.id == current.id })

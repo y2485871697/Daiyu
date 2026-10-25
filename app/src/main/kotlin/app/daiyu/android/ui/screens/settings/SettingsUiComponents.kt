@@ -248,7 +248,7 @@ internal fun SettingsTextField(
                 },
                 enabled = enabled,
                 singleLine = !multiline,
-                minLines = if (multiline) 4 else 1,
+                minLines = if (multiline && !embedded) 4 else 1,
                 maxLines = if (multiline) 8 else 1,
                 textStyle = MiuixTheme.textStyles.body1.copy(color = MiuixTheme.colorScheme.onSurface),
                 cursorBrush = imeCursorBrush(MiuixTheme.colorScheme.primary),

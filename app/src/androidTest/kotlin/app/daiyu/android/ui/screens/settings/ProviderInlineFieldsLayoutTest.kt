@@ -135,25 +135,63 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
     fun testBodyUsesTheSameFooterAndDeleteColumnWithoutLosingMultilineJson() {
-        mainThread { draft = ModelSettingsDraftUi(customBody = """{"temperature":0.5}""") }
-        show(headers = false); open(headers = false)
-        val name = control("model-body-field-name:0-container").fetchSemanticsNode().boundsInRoot
-        val value = control("model-body-field-value:0-container").fetchSemanticsNode().boundsInRoot
-        val delete = control("model-body-field-delete:0").fetchSemanticsNode().boundsInRoot
-        assertEquals(name.left, value.left, 1f); assertEquals(name.right, value.right, 1f)
-        assertTrue("JSON retains its multiline editor", value.height > name.height * 2)
-        assertTrue("delete stays beside fields", delete.left >= value.right - 1f)
-        assertEquals((name.top + value.bottom) / 2, delete.center.y, 1f)
-        control("model-body-field-value:0").performTextReplacement("{\n  \"nested\": true\n}")
-        assertTrue(draft.bodyFieldsValid)
-        control("model-body-field-value:0").performTextReplacement("invalid-json")
-        assertFalse(draft.bodyFieldsValid)
-        control("model-body-field-value:0").assertEditableText("invalid-json")
-        control("model-body-field-add").performScrollTo().assertIsDisplayed()
-        capture("provider-body-invalid")
-        control("model-body-field-delete:0").performScrollTo().performClick()
-        control("model-body-field-add").performScrollTo().assertIsDisplayed()
-        assertTrue(draft.bodyFieldsValid)
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
+            mainThread { draft = ModelSettingsDraftUi(customBody = """{"temperature":0.5}""") }
+            show(headers = false, dark = dark, fontScale = fontScale); open(headers = false)
+            val name = control("model-body-field-name:0-container").fetchSemanticsNode().boundsInRoot
+            fun valueHeight() = control("model-body-field-value:0-container").getUnclippedBoundsInRoot().height.value
+            val value = control("model-body-field-value:0-container").fetchSemanticsNode().boundsInRoot
+            val delete = control("model-body-field-delete:0").fetchSemanticsNode().boundsInRoot
+            val density = activity.resources.displayMetrics.density
+            val tolerance = 1f / density
+            val nameHeight = control("model-body-field-name:0-container").getUnclippedBoundsInRoot().height.value
+            val shortHeight = valueHeight()
+            val deleteTouch = control("model-body-field-delete:0").fetchSemanticsNode().touchBoundsInRoot
+            assertEquals(name.left, value.left, 1f); assertEquals(name.right, value.right, 1f)
+            assertEquals("short JSON starts at one line", nameHeight, shortHeight, tolerance)
+            assertTrue("delete stays beside fields", delete.left >= value.right - 1f)
+            assertEquals((name.top + value.bottom) / 2, delete.center.y, 1f)
+            assertTrue("delete retains a 48dp touch target", deleteTouch.width / density >= 47f && deleteTouch.height / density >= 47f)
+            val editor = control("model-body-field-value:0")
+            editor.performTextReplacement("")
+            awaitVisualIdle()
+            assertEquals("empty JSON does not reserve blank lines", nameHeight, valueHeight(), tolerance)
+            editor.assertEditableText("")
+            assertFalse(draft.bodyFieldsValid)
+            editor.performTextReplacement("{\n  \"nested\": true\n}")
+            awaitVisualIdle()
+            assertTrue("JSON grows for multiple lines", valueHeight() > shortHeight * 1.5f)
+            assertTrue(draft.bodyFieldsValid)
+            val wrapped = "{\"text\":\"${"x".repeat(180)}\"}"
+            editor.performTextReplacement(wrapped)
+            awaitVisualIdle()
+            assertTrue("long single-line JSON wraps naturally", valueHeight() > shortHeight * 1.5f)
+            editor.assertEditableText(wrapped)
+            fun jsonLines(count: Int) = (0 until count).joinToString(",\n", "{\n", "\n}") { "  \"field$it\": $it" }
+            editor.performTextReplacement(jsonLines(12))
+            awaitVisualIdle()
+            val cappedHeight = valueHeight()
+            assertTrue("long JSON grows before the eight-line cap", cappedHeight > shortHeight * 2)
+            val longer = jsonLines(24)
+            editor.performTextReplacement(longer)
+            awaitVisualIdle()
+            assertEquals("long JSON keeps a bounded editor", cappedHeight, valueHeight(), tolerance)
+            editor.assertEditableText(longer)
+            assertTrue(draft.bodyFieldsValid)
+            editor.performTextReplacement("0.5")
+            awaitVisualIdle()
+            assertEquals("JSON shrinks again with short content", nameHeight, valueHeight(), tolerance)
+            editor.performTextReplacement("invalid-json")
+            assertFalse(draft.bodyFieldsValid)
+            editor.assertEditableText("invalid-json")
+            control("model-body-field-add").performScrollTo().assertIsDisplayed()
+            capture("provider-body-invalid-${if (dark) "dark" else "light"}-$fontScale")
+            control("model-body-field-delete:0").performScrollTo().performTouchInput { click() }
+            control("model-body-field-add").performScrollTo().assertIsDisplayed()
+            assertTrue(draft.bodyFieldsValid)
+            control("model-body-field-name:0").assertDoesNotExist()
+            control("model-body-fields").performScrollTo().performClick()
+        }
         assertEquals(0, fixture.opens.get())
     }
     fun testDeletingARevealedHeaderDoesNotRevealTheNextRow() {

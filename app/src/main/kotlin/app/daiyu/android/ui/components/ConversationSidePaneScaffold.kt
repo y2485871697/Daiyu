@@ -894,6 +894,7 @@ private fun ConversationTextRow(
 ) {
     var showActionMenu by remember(managing) { mutableStateOf(false) }
     val view = LocalView.current
+    val rowSelected = if (managing) checked else selected
 
     Box(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -911,7 +912,10 @@ private fun ConversationTextRow(
                 .border(1.dp, if (selected) conversationPanePreviewPalette().line else Color.Transparent,
                     RoundedCornerShape(DrawerMetrics.RowCornerRadius))
                 .testTag("drawer-conversation:${conversation.id}")
-                .semantics { if (managing) { role = Role.Checkbox; this.selected = checked } }
+                .semantics {
+                    if (managing) role = Role.Checkbox
+                    this.selected = rowSelected
+                }
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() }, indication = null,
                     onClick = {

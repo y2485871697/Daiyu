@@ -43,7 +43,7 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
             assertEquals(expectedDraft, hostValue("getDraft"))
         }
         node("conversation-drawer").assertIsDisplayed()
-        node("drawer-conversation:${conversation.id.value}").assertIsDisplayed()
+        node("drawer-conversation:${conversation.id.value}").assertIsDisplayed().assertIsSelected()
         node("drawer-search-input").assertEditableText("保留侧栏")
         node("chat-draft").assertIsNotEnabled()
     }

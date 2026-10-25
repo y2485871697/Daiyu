@@ -10,7 +10,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
     def test_sidebar_selection_switches_owner_without_close_or_navigation(self):
         host = (SRC / 'MainActivity.kt').read_text()
         callback = host.split('onConversationSelected = ', 1)[1].split('\n', 1)[0]
-        self.assertEqual('{ id -> guard { select(retainedConversation(id)) } },', callback)
+        self.assertEqual('{ id -> selectPaneConversation(id) },', callback)
         self.assertNotIn('dismissSidebar', callback)
         self.assertNotIn('returnToChat', callback)
         select = host.split('internal fun select(conversation: Conversation?) {', 1)[1].split('private fun sendDraft(', 1)[0]
@@ -21,6 +21,45 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('selections[id] = selectionStart to selectionEnd', select)
         self.assertIn('selected = conversation; selectionReady = true; draft = targetDraft', select)
         self.assertIn('publishChat(); jumpToBottom(); refresh()', select)
+
+    def test_selection_feedback_precedes_async_history_and_keeps_pending_highlight(self):
+        host = (SRC / 'MainActivity.kt').read_text()
+        click = host.split('private fun selectPaneConversation(', 1)[1].split('private fun retainedConversation(', 1)[0]
+        self.assertLess(click.index('paneState = paneState.copy(selectedConversationId = id)'),
+                        click.index('withContext(Dispatchers.IO) { read(id) }'))
+        self.assertIn('paneSelectionRequest !== request', click)
+        self.assertIn('selected?.id != owner || editorGeneration != editor', click)
+        self.assertIn('catch (cancelled: kotlinx.coroutines.CancellationException)', click)
+        self.assertIn('select(snapshot.conversation, snapshot)', click)
+        self.assertIn('if (revision != currentPaneRevision()) continue', click)
+        pause = host.split('override fun onPause() {', 1)[1].split('override fun onStop()', 1)[0]
+        self.assertIn('cancelPaneConversationSelection()', pause)
+        opening = host.split('private fun openSidebar()', 1)[1].split('private fun dismissSidebar()', 1)[0]
+        self.assertIn('cancelPaneConversationSelection()', opening)
+        self.assertNotIn('retainedConversation(id)', click)
+        self.assertIn('selectedConversationId = pendingPaneConversationId ?: selected?.id?.value', host)
+        selected = host.split('private fun select(conversation: Conversation?, prepared:', 1)[1].split('private fun sendDraft(', 1)[0]
+        self.assertIn('prepared?.conversations ?: controller.database.conversations()', selected)
+        self.assertIn('prepared?.messages ?: controller.database.messages(conversation.id)', selected)
+        self.assertLess(selected.index('paneState = paneState.copy(selectedConversationId = conversation?.id?.value)'),
+                        selected.index('publishChat(); jumpToBottom(); refresh()'))
+        pane = (SRC / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
+        self.assertIn('val rowSelected = if (managing) checked else selected', pane)
+        self.assertIn('this.selected = rowSelected', pane)
+
+    def test_async_selection_regressions_cover_blocking_latest_failure_and_destroy(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneSwitchActivityTest.kt').read_text()
+        for name in ['testSelectionFeedbackPrecedesSlowHistoryAndPaneRefresh',
+                     'testLastClickWinsWhenCancelledReadFailsLate',
+                     'testFailedHistoryReadRestoresOriginalSelectionAndDraft',
+                     'testDestroyedActivityRejectsLateConversationRead']:
+            self.assertIn(name, test)
+        for fragment in ['assertIsSelected()', 'assertIsNotSelected()',
+                         'Looper.myLooper() == Looper.getMainLooper()',
+                         'realReader(id)', 'paneRelease.countDown()', 'ui.mainClock.advanceTimeByFrame()',
+                         'oldJob.isCompleted', 'closingJob.isCompleted',
+                         'assertEquals(0, fixture.opens.get())']:
+            self.assertIn(fragment, test)
 
     def test_search_and_new_conversation_keep_explicit_chat_navigation(self):
         host = (SRC / 'MainActivity.kt').read_text()

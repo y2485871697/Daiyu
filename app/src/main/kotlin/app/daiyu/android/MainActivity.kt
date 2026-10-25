@@ -965,7 +965,7 @@ class MainActivity : ComponentActivity() {
                 browserSettingsPageOwner?.revoke()
                 browserSettingsPageOwner = null
             }
-            if (value != "chat") { dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
+            if (value != "chat") { cancelPaneConversationSelection(); dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
             retainedPageState = value
@@ -979,6 +979,19 @@ class MainActivity : ComponentActivity() {
         controller.active?.let { Triple(it.conversationId, it.id, it.runId) })
     internal var paneSnapshotReader: (ConversationId?) -> RetainedConversationData.PaneSnapshot =
         { activeConversationId -> retainedData.paneSnapshot(activeConversationId) }
+    internal data class PaneConversationSnapshot(
+        val conversation: Conversation,
+        val conversations: List<Conversation>,
+        val messages: List<Pair<Long, Message>>,
+    )
+    internal var paneConversationReader: (String) -> PaneConversationSnapshot = { id ->
+        val conversations = controller.database.conversations()
+        val conversation = conversations.single { it.id.value == id }
+        PaneConversationSnapshot(conversation, conversations, controller.database.messages(conversation.id))
+    }
+    private var paneSelectionJob: Job? = null
+    private var paneSelectionRequest: Any? = null
+    private var pendingPaneConversationId: String? = null
     private var paneRefreshSerial = 0L
     private var paneRefreshPending = false
     private var paneRefreshRunning = false
@@ -2009,7 +2022,7 @@ class MainActivity : ComponentActivity() {
                         assistants = projectedAssistants, selectedAssistantId = activeAssistant,
                         onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
                         onSearchChange = { paneState = paneState.copy(searchQuery = it) },
-                        onConversationSelected = { id -> guard { select(retainedConversation(id)) } },
+                        onConversationSelected = { id -> selectPaneConversation(id) },
                         onConversationRename = { item -> editRetainedConversation(item, false) },
                         onConversationDelete = { item -> confirmDelete(item.id) },
                         onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
@@ -4709,6 +4722,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        cancelPaneConversationSelection()
         controller.detachCommandApprovalUi(commandApprovalUi)
         revokeCommandApproval()
         if (retainedPage == "session-gateway") {
@@ -5047,6 +5061,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun openSidebar() { guard {
+        cancelPaneConversationSelection()
         dictationHost.invalidate()
         offlineHost.invalidate()
         cancelShizukuEditor()
@@ -5106,7 +5121,7 @@ class MainActivity : ComponentActivity() {
                     paneState = currentPane.copy(
                         conversations = all.filter { it.folderId == currentPane.selectedFolderId },
                         historyConversations = all,
-                        selectedConversationId = selected?.id?.value,
+                        selectedConversationId = pendingPaneConversationId ?: selected?.id?.value,
                         folders = snapshot.folders,
                         conversationsLoaded = true,
                     )
@@ -5118,6 +5133,52 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun cancelPaneConversationSelection() {
+        val job = paneSelectionJob
+        paneSelectionRequest = null
+        pendingPaneConversationId = null
+        paneSelectionJob = null
+        job?.cancel()
+        paneState = paneState.copy(selectedConversationId = selected?.id?.value)
+    }
+
+    private fun selectPaneConversation(id: String) { guard {
+        check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null))
+        check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
+        cancelPaneConversationSelection()
+        val request = Any()
+        val owner = selected?.id
+        val editor = editorGeneration
+        val read = paneConversationReader
+        paneSelectionRequest = request
+        pendingPaneConversationId = id
+        paneState = paneState.copy(selectedConversationId = id)
+        paneSelectionJob = lifecycleScope.launch {
+            try {
+                while (paneSelectionRequest === request) {
+                    val revision = currentPaneRevision()
+                    val snapshot = withContext(Dispatchers.IO) { read(id) }
+                    if (paneSelectionRequest !== request || !activityUsable() ||
+                        retainedPage != "chat" || selected?.id != owner || editorGeneration != editor) return@launch
+                    if (revision != currentPaneRevision()) continue
+                    select(snapshot.conversation, snapshot)
+                    break
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (paneSelectionRequest === request && activityUsable()) toast("操作或保存失败；原数据保留")
+            } finally {
+                if (paneSelectionRequest === request) {
+                    paneSelectionRequest = null
+                    pendingPaneConversationId = null
+                    paneSelectionJob = null
+                    if (activityUsable()) paneState = paneState.copy(selectedConversationId = selected?.id?.value)
+                }
+            }
+        }
+    } }
+
     private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
     private fun openRetainedConversation(id: String) { val conversation = retainedConversation(id); dismissSidebar(); returnToChat(); select(conversation) }
     private fun toggleRetainedPin(id: String) {
@@ -5125,6 +5186,7 @@ class MainActivity : ComponentActivity() {
         controller.database.organize(conversation.id, conversation.folder, !conversation.pinned); updatePane()
     }
     private fun deleteRetainedConversation(id: String) {
+        if (pendingPaneConversationId == id) cancelPaneConversationSelection()
         if (selected?.id?.value == id && revokeContextManagementEntry()) editorGeneration++
         val conversation = retainedConversation(id)
         check(controller.active?.conversationId != conversation.id && !controller.hasLiveChildTasks(conversation.id)) {
@@ -5245,6 +5307,11 @@ class MainActivity : ComponentActivity() {
         }
     }
     internal fun select(conversation: Conversation?) {
+        cancelPaneConversationSelection()
+        select(conversation, null)
+    }
+
+    private fun select(conversation: Conversation?, prepared: PaneConversationSnapshot?) {
         requireActivityUsable()
         revokeCommandApproval()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
@@ -5259,7 +5326,7 @@ class MainActivity : ComponentActivity() {
         cancelShizukuEditor()
         cancelBrowserEditor()
         cancelGuiEditor()
-        val list = controller.database.conversations()
+        val list = prepared?.conversations ?: controller.database.conversations()
         var targetDraft = if (conversation == null) controller.database.draft() else list.first { it.id == conversation.id }.draft
         if (selectionReady) {
             val id = selected?.id
@@ -5284,6 +5351,7 @@ class MainActivity : ComponentActivity() {
         draftRevision = maxOf(draftRevision + 1, imageHost.session.attachments.state.value.draft.revision)
         val restoringSupplement = !selectionReady
         selected = conversation; selectionReady = true; draft = targetDraft
+        paneState = paneState.copy(selectedConversationId = conversation?.id?.value)
         if (restoringSupplement) {
             restoredSupplementEditor = restoredSupplementEditor?.takeIf {
                 it.conversationId == conversation?.id?.value && it.text == draft
@@ -5293,7 +5361,7 @@ class MainActivity : ComponentActivity() {
         val range = selections[conversation?.id]
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
-        shown = if (conversation == null) mutableListOf() else controller.database.messages(conversation.id).toMutableList()
+        shown = if (conversation == null) mutableListOf() else (prepared?.messages ?: controller.database.messages(conversation.id)).toMutableList()
         childStatusVisit = null; usageVisit = null; collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
     }
     private fun sendDraft(text: String, universal: UniversalSend? = null) {

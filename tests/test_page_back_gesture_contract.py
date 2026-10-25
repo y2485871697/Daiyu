@@ -109,6 +109,15 @@ class PageBackGestureContractTest(unittest.TestCase):
             self.assertNotIn(obsolete, self.host)
         self.assertNotIn('systemGestureExclusion', self.host)
 
+    def test_horizontal_intent_is_not_cancelled_by_minor_vertical_jitter(self):
+        self.assertIn('dy > viewConfiguration.touchSlop && dx <= dy * 1.5f', self.host)
+        self.assertNotIn('if (dy > viewConfiguration.touchSlop || dx < -viewConfiguration.touchSlop)', self.host)
+        regressions = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
+        self.assertIn('fun testHorizontalDominantFirstMoveSurvivesVerticalJitterAcrossTouchSlop()', regressions)
+        self.assertIn('start + Offset(slop * 8f, verticalDrift)', regressions)
+        self.assertIn('for (predictionEnabled in listOf(false, true))', regressions)
+        self.assertIn('for (verticalDirection in listOf(-1f, 1f))', regressions)
+
     def test_predictive_platform_opt_in_is_explicit_and_scoped_to_main_activity(self):
         manifest = ET.parse(ROOT / 'app/src/main/AndroidManifest.xml').getroot()
         android = '{http://schemas.android.com/apk/res/android}'
@@ -167,6 +176,21 @@ class PageBackGestureContractTest(unittest.TestCase):
         for method in ('testExplicitContentKeyKeepsLiveCompositionUntilContentActuallyChanges',
                        'testDefaultContentKeyStillFollowsRouteKey'):
             self.assertIn('fun ' + method + '()', regressions)
+
+    def test_chat_preview_records_drawer_content_not_its_overlay_before_open_settles(self):
+        self.assertIn('captureFromContent = retainedPage == "chat" && !sidebarVisible', self.main)
+        self.assertIn('captureFromContent: Boolean = false', self.host)
+        self.assertIn('LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }', self.host)
+        self.assertIn('if (captureFromContent) placeable.place(x = 0, y = 0)', self.host)
+        source = self.host.split('internal fun Modifier.pageBackPreviewSource()', 1)[1].split('private val LocalPageBackGesture', 1)[0]
+        self.assertIn('LocalPageBackPreviewFrame.current ?: return this', source)
+        self.assertIn('placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)', source)
+        drawer = (APP / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
+        self.assertIn('import app.daiyu.android.ui.navigation.pageBackPreviewSource', drawer)
+        self.assertIn('.captureForTopBar(backdrop).pageBackPreviewSource()) { content() }', drawer)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
+        self.assertIn('fun testDrawerOverlayPaintedBeforeRouteChangeNeverPollutesChatBackPreview()', test)
+        self.assertLess(test.index('mainThread { drawerPainted = true }'), test.index('changeScreen("chat-sidebar")', test.index('fun testDrawerOverlayPaintedBeforeRouteChange')))
 
     def test_previous_page_is_readonly_recorded_content_not_a_second_composition(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()

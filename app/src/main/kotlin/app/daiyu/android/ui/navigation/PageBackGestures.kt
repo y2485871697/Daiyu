@@ -141,6 +141,21 @@ private class PageBackCallbackSession {
     }
 }
 
+private val LocalPageBackPreviewFrame = staticCompositionLocalOf<PageBackPreviewLayers.Frame?> { null }
+
+/** Records only the page body when a surrounding overlay is not part of its back target. */
+@Composable
+internal fun Modifier.pageBackPreviewSource(): Modifier {
+    val frame = LocalPageBackPreviewFrame.current ?: return this
+    return layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints)
+        layout(placeable.width, placeable.height) {
+            frame.size = IntSize(placeable.width, placeable.height)
+            placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)
+        }
+    }.background(MiuixTheme.colorScheme.background)
+}
+
 private val LocalPageBackGesture = staticCompositionLocalOf<PageBackGestureState?> { null }
 
 /** Keeps nested page handlers in the dispatcher's existing last-enabled-first order. */
@@ -241,6 +256,7 @@ internal fun PageBackGestureHost(
     backTargetKey: Any? = null,
     previewScopeKey: Any? = null,
     contentKey: Any = routeKey,
+    captureFromContent: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
@@ -311,7 +327,8 @@ internal fun PageBackGestureHost(
             animationSpec = if (state.active) snap() else spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f), label = "page-back-reset")
     }
     state.transitionBlocked = departing || (state.previewAllowed && !state.active && progress > 0f)
-    CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackStackPath provides stackPath) {
+    CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackStackPath provides stackPath,
+        LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }) {
         Box(modifier.fillMaxSize().testTag("page-back-host").clipToBounds().background(background).onSizeChanged { viewport = it }.then(
             if (canNavigateBack && swipeDismissEnabled && resumed && !imeVisible && !departing) Modifier.pointerInput(state, layoutDirection) {
                 val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
@@ -358,7 +375,8 @@ internal fun PageBackGestureHost(
                                     continue
                                 }
                                 consumedMovement = false
-                                if (dy > viewConfiguration.touchSlop || dx < -viewConfiguration.touchSlop) break
+                                if (dx < -viewConfiguration.touchSlop ||
+                                    (dy > viewConfiguration.touchSlop && dx <= dy * 1.5f)) break
                                 if (dx <= viewConfiguration.touchSlop || dx <= dy * 1.5f) continue
                                 claimed = true
                             }
@@ -397,8 +415,11 @@ internal fun PageBackGestureHost(
                 } else Modifier).testTag("page-back-surface").layout { measurable, constraints ->
                     val placeable = measurable.measure(constraints)
                     layout(placeable.width, placeable.height) {
-                        frame.size = IntSize(placeable.width, placeable.height)
-                        placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)
+                        if (captureFromContent) placeable.place(x = 0, y = 0)
+                        else {
+                            frame.size = IntSize(placeable.width, placeable.height)
+                            placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)
+                        }
                     }
                 }.background(background)) { content() }
             }

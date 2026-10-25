@@ -26,6 +26,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     private var screen by mutableStateOf("chat")
     private var localPage by mutableStateOf<Int?>(null)
     private var localLoading by mutableStateOf(false)
+    private var drawerPainted by mutableStateOf(false)
     private var backCount = 0
     private var controllers = 0
     private var disposed = 0
@@ -43,7 +44,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         finally { if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false) }
     }
 
-    private fun mount(local: Boolean = false) {
+    private fun mount(local: Boolean = false, drawerPreviewSource: Boolean = false) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -52,9 +53,15 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     PageBackGestureHost(routeKey = rendered, contentKey = if (rendered == "chat-sidebar") "chat" else rendered,
                         canNavigateBack = rendered == "settings", swipeDismissEnabled = true, predictiveBackEnabled = true,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
+                        captureFromContent = drawerPreviewSource && rendered == "chat",
                         backTargetKey = if (rendered == "settings") "chat" else null) {
-                        PageBackHandler(enabled = rendered == "settings") { backCount++; screen = "chat" }
-                        PageBackStack(if (local) localPage else null, if (localPage == 2) 1 else null) {
+                        PageBackHandler(enabled = rendered == "settings") { backCount++; drawerPainted = false; screen = "chat" }
+                        if (drawerPreviewSource && rendered != "settings") {
+                            Box(Modifier.fillMaxSize()) {
+                                Box(Modifier.fillMaxSize().pageBackPreviewSource().background(Color.Red))
+                                if (drawerPainted) Box(Modifier.fillMaxSize().background(Color.Green))
+                            }
+                        } else PageBackStack(if (local) localPage else null, if (localPage == 2) 1 else null) {
                             DisposableEffect(Unit) { controllers++; onDispose { disposed++ } }
                             PageBackHandler(enabled = local && localPage != null) {
                                 backCount++
@@ -95,6 +102,61 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         assertEquals("target red at p=$progress", expected(source.red, background.red), actual.red, .025f)
         assertEquals("target green at p=$progress", expected(source.green, background.green), actual.green, .025f)
         assertEquals("target blue at p=$progress", expected(source.blue, background.blue), actual.blue, .025f)
+    }
+
+    @OptIn(ExperimentalActivityApi::class)
+    fun testDrawerOverlayPaintedBeforeRouteChangeNeverPollutesChatBackPreview() {
+        mount(drawerPreviewSource = true)
+        mainThread { drawerPainted = true }
+        ui.waitForIdle()
+        val drawerPixels = captureScreenNode(ui.onNodeWithTag("page-back-surface")).toPixelMap()
+        val drawer = drawerPixels[drawerPixels.width / 2, drawerPixels.height / 2]
+        assertTrue("drawer has painted while root is still chat, actual=$drawer", drawer.green > .9f && drawer.red < .1f)
+        assertEquals("chat", screen)
+        changeScreen("chat-sidebar")
+        changeScreen("settings")
+        val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+        ui.mainClock.autoAdvance = false
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                for (edge in listOf(BackEventCompat.EDGE_LEFT, BackEventCompat.EDGE_RIGHT)) {
+                    mainThread { activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, edge)) }
+                    mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, .5f, edge)) }
+                    ui.mainClock.advanceTimeByFrame()
+                    assertTarget(Color.Red, .5f)
+                    mainThread { activity.onBackPressedDispatcher.dispatchOnBackCancelled() }
+                    ui.mainClock.advanceTimeBy(1000)
+                    assertEquals("settings", screen)
+                    assertEquals(0, backCount)
+                }
+            }
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .12f, height * .6f), 16)
+                moveTo(Offset(width * .18f, height * .6f), 16)
+                moveTo(Offset(width * .40f, height * .6f), 80)
+            }
+            ui.mainClock.advanceTimeByFrame()
+            ui.mainClock.advanceTimeByFrame()
+            val moved = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            val progress = (moved.left - initial.left) / initial.width
+            assertTrue("horizontal preview moved", progress in .25f.. .40f)
+            assertTarget(Color.Red, progress)
+            ui.onNodeWithTag("page-back-host").performTouchInput { cancel() }
+            ui.mainClock.advanceTimeBy(1000)
+            assertEquals("settings", screen)
+            assertEquals(0, backCount)
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                swipe(Offset(width * .05f, height * .6f), Offset(width * .90f, height * .6f), 500)
+            }
+            ui.mainClock.advanceTimeBy(1000)
+            assertEquals("chat", screen)
+            assertEquals(1, backCount)
+            assertFalse(drawerPainted)
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
     }
 
     @OptIn(ExperimentalActivityApi::class)

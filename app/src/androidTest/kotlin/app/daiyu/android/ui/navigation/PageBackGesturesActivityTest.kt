@@ -252,6 +252,28 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testHorizontalDominantFirstMoveSurvivesVerticalJitterAcrossTouchSlop() {
+        mount()
+        val slop = android.view.ViewConfiguration.get(activity).scaledTouchSlop.toFloat()
+        var expectedBacks = 0
+        for (predictionEnabled in listOf(false, true)) {
+            mainThread { predictive = predictionEnabled }
+            for (verticalDirection in listOf(-1f, 1f)) {
+                ui.onNodeWithTag("page-back-host").performTouchInput {
+                    val start = Offset(width * .1f, height * .5f)
+                    val verticalDrift = verticalDirection * slop * 2f
+                    down(start)
+                    moveTo(start + Offset(slop * 8f, verticalDrift), 16)
+                    moveTo(Offset(width * .9f, start.y + verticalDrift), 240)
+                    up()
+                }
+                ui.waitForIdle()
+                assertEquals(++expectedBacks, backCount)
+            }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testClickableSettingRowYieldsItsPressToPageSwipeWithoutFiringClick() {
         mount(clickableRows = true)
         ui.onNodeWithTag("clickable-row:2").performTouchInput {

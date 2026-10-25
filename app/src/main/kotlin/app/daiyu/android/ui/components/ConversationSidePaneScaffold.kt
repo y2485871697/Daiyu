@@ -107,6 +107,7 @@ import app.daiyu.android.ui.model.ConversationFolderUi
 import app.daiyu.android.ui.model.searchResults
 import app.daiyu.android.ui.model.ConversationPaneUiState
 import app.daiyu.android.ui.haptics.TouchHaptics
+import app.daiyu.android.ui.navigation.pageBackPreviewSource
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -322,7 +323,7 @@ internal fun ConversationSidePaneScaffold(
             },
         ) {
             Box(Modifier.fillMaxSize()
-                .captureForTopBar(backdrop)) { content() }
+                .captureForTopBar(backdrop).pageBackPreviewSource()) { content() }
         }
         }
     }

@@ -42,6 +42,7 @@
   <string name="conversation_export">Export conversation</string>
   <string name="stats_page_title">Usage stats</string>
   <string name="stats_page_heatmap_title">Chat heatmap</string>
+  <string name="stats_page_heatmap_unavailable">Daily conversation data unavailable</string>
   <string name="stats_page_heatmap_less">Less</string>
   <string name="stats_page_heatmap_more">More</string>
   <string name="stats_page_dow_mon">Mon</string>

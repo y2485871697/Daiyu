@@ -4,6 +4,11 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
@@ -23,11 +28,14 @@ import app.daiyu.android.domain.usage.aggregateAttributedUsage
 import app.daiyu.android.model.usage.AttributedUsageStats
 import app.daiyu.android.model.usage.ChildUsageCoverage
 import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.components.UsagePalette
 import app.daiyu.android.ui.screens.stats.UsageStatsScreen
 import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.atomic.AtomicInteger
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.DayOfWeek
+import java.time.temporal.TemporalAdjusters
 
 class UsagePresentationActivityTest : WiredActivityTestCase() {
     private fun usagePage() = node("page:${activity.getString(R.string.stats_page_title)}")
@@ -160,6 +168,84 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         node("usage-model-filter").assertExists()
         ui.onAllNodesWithText("0%").assertCountEquals(0)
         ui.onAllNodesWithText("0.0%").assertCountEquals(0)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    private fun heatmapCell(date: LocalDate) =
+        ui.onNodeWithTag("usage-heatmap-cell:$date", useUnmergedTree = true)
+
+    fun testUnavailableHeatmapKeepsSquareGridInsteadOfRowsOfDashesAcrossThemesAndScales() {
+        val today = LocalDate.now()
+        val sunday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            show(dark = dark, scale = scale) { empty() }
+            awaitUniqueTag("usage-heatmap-grid")
+            awaitVisualIdle()
+            node("usage-heatmap-grid").assert(SemanticsMatcher.expectValue(
+                SemanticsProperties.StateDescription, activity.getString(R.string.stats_page_heatmap_unavailable)))
+            ui.onAllNodes(SemanticsMatcher("dated heatmap cells") {
+                it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("usage-heatmap-cell:") == true
+            }, useUnmergedTree = true).assertCountEquals(53 * 7)
+            ui.onAllNodes(hasText("—") and hasAnyAncestor(hasTestTag("usage-heatmap")),
+                useUnmergedTree = true).assertCountEquals(0)
+            var previousBottom: Float? = null
+            for (day in 0..6) {
+                val cell = heatmapCell(sunday.plusDays(day.toLong())).assertIsDisplayed().fetchSemanticsNode()
+                val bounds = cell.boundsInRoot
+                val density = cell.layoutInfo.density.density
+                assertEquals(11f, bounds.width / density, .6f)
+                assertEquals(bounds.width, bounds.height, 1f)
+                previousBottom?.let { assertEquals(2f, (bounds.top - it) / density, .6f) }
+                previousBottom = bounds.bottom
+            }
+            val pixels = heatmapCell(today).captureToImage().toPixelMap()
+            val expected = UsagePalette(dark).bubble
+            // A real filled cell, not a text dash on a transparent background.
+            for (y in listOf(pixels.height / 3, pixels.height / 2, pixels.height * 2 / 3)) {
+                val actual = pixels[pixels.width / 2, y]
+                assertEquals(expected.red, actual.red, .015f)
+                assertEquals(expected.green, actual.green, .015f)
+                assertEquals(expected.blue, actual.blue, .015f)
+            }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testAvailableHeatmapPreservesZeroAndFourHeatLevelsWithoutUnknownState() {
+        val today = LocalDate.now()
+        val counts = (0..6).associate { today.minusDays((6 - it).toLong()) to it + 1 }
+        for (dark in listOf(false, true)) {
+            show(dark = dark) { empty().copy(heatmapAvailable = true, conversationsPerDay = counts) }
+            awaitUniqueTag("usage-heatmap-grid")
+            awaitVisualIdle()
+            node("usage-heatmap-grid").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+            val dates = listOf(today.minusDays(8), today.minusDays(6), today.minusDays(4),
+                today.minusDays(2), today)
+            val colors = dates.map { date ->
+                val pixels = heatmapCell(date).assertIsDisplayed().captureToImage().toPixelMap()
+                pixels[pixels.width / 2, pixels.height / 2].toArgb()
+            }
+            assertEquals("Zero and the four heat levels must stay distinct", 5, colors.toSet().size)
+            assertEquals(UsagePalette(dark).bubble.toArgb(), colors.first())
+            assertEquals(UsagePalette(dark).accent.toArgb(), colors.last())
+            val grid = node("usage-heatmap-grid")
+            val gridBounds = grid.fetchSemanticsNode().boundsInRoot
+            val pixels = grid.captureToImage().toPixelMap()
+            for ((date, alpha) in listOf(today.minusDays(6) to .25f,
+                today.minusDays(4) to .5f, today.minusDays(2) to .75f)) {
+                val cell = heatmapCell(date).fetchSemanticsNode()
+                val bounds = cell.boundsInRoot
+                val x = (bounds.center.x - gridBounds.left).toInt()
+                val y = (bounds.center.y - gridBounds.top).toInt()
+                // The 2dp gap above this row exposes the actual card backing.
+                val gapY = (bounds.top - gridBounds.top - cell.layoutInfo.density.density).toInt()
+                val expected = UsagePalette(dark).accent.copy(alpha = alpha).compositeOver(pixels[x, gapY])
+                val actual = pixels[x, y]
+                assertEquals(expected.red, actual.red, .015f)
+                assertEquals(expected.green, actual.green, .015f)
+                assertEquals(expected.blue, actual.blue, .015f)
+            }
+        }
         assertEquals(0, fixture.opens.get())
     }
 

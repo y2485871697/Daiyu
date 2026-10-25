@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.stats
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
@@ -49,6 +50,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -694,8 +697,14 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>, available: Boo
     )
     val scrollState = rememberScrollState(initial = Int.MAX_VALUE)
     val colors = usagePalette()
+    val unavailableDescription = stringResource(R.string.stats_page_heatmap_unavailable)
 
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(
+        modifier = Modifier.testTag("usage-heatmap-grid").semantics {
+            if (!available) stateDescription = unavailableDescription
+        },
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Column(
             modifier = Modifier.width(12.dp),
             verticalArrangement = Arrangement.spacedBy(cellSpacing),
@@ -759,6 +768,7 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>, available: Boo
                                 alpha = heatmapAlpha(count, q1, q2, q3, isFuture),
                                 sizeDp = cellSize.value.toInt(),
                                 unknown = !available && !isFuture,
+                                modifier = Modifier.testTag("usage-heatmap-cell:$date"),
                             )
                         }
                     }
@@ -769,24 +779,26 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>, available: Boo
 }
 
 @Composable
-private fun HeatmapCell(alpha: Float, sizeDp: Int, unknown: Boolean = false) {
+private fun HeatmapCell(
+    alpha: Float,
+    sizeDp: Int,
+    unknown: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     val colors = usagePalette()
     val color = when {
-        unknown -> androidx.compose.ui.graphics.Color.Transparent
+        unknown -> colors.bubble
         alpha < 0f -> colors.bubble.copy(alpha = 0.3f)
         alpha == 0f -> colors.bubble
         else -> colors.accent.copy(alpha = alpha)
     }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(sizeDp.dp)
             .clip(RoundedCornerShape(2.dp))
-            .background(color),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (unknown) Text("—", fontSize = (sizeDp - 2).coerceAtLeast(6).sp,
-            color = colors.muted)
-    }
+            .background(color)
+            .then(if (unknown) Modifier.border(0.5.dp, colors.line, RoundedCornerShape(2.dp)) else Modifier),
+    )
 }
 
 @Composable

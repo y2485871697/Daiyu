@@ -106,6 +106,22 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         catch (_: IllegalStateException) { }
     }
 
+    fun testActualModelSelectionPersistsWithoutWeakeningTerminalValidationOrOwner() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val source = tasks(owner, 1).single()
+        runtime.childTasks.enqueue(owner, listOf(source)); runtime.childTasks.started(source)
+        val display = ChildTaskDisplay("Reviewer", "changed-model", "Changed model")
+        runtime.childTasks.selected(source, display)
+        assertEquals(source.copy(status = ChildTaskStatus.RUNNING, display = display), runtime.childTasks.get(source.owner))
+        rejects { runtime.childTasks.finished(source, ChildTaskStatus.COMPLETED, "") }
+        rejects { runtime.childTasks.finished(source, ChildTaskStatus.COMPLETED, "x".repeat(65537)) }
+        rejects { runtime.childTasks.finished(source, ChildTaskStatus.NOT_EXECUTED, "invalid text") }
+        rejects { runtime.childTasks.selected(source.copy(owner = source.owner.copy(generation = 7)), display) }
+        assertEquals(ChildTaskStatus.RUNNING, runtime.childTasks.get(source.owner)?.status)
+        runtime.childTasks.finished(source, ChildTaskStatus.COMPLETED, "valid")
+        assertEquals(source.copy(status = ChildTaskStatus.COMPLETED, display = display, text = "valid"), runtime.childTasks.get(source.owner))
+    }
+
     fun testDirectedCommandCasProvenanceAndDurableReplay() {
         val db = fresh(); val runtime = lease(db); val owner = parent(db)
         val source = tasks(owner, 1).single()

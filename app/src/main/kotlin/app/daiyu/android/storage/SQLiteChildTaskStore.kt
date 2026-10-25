@@ -102,6 +102,21 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
 
     override fun started(task: ChildTaskRecord) = change(task, ChildTaskStatus.RUNNING, "", null)
 
+    override fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) {
+        transactions.run { db ->
+            val prior = checkNotNull(find(db, task.owner.childRunId)) { "child_task_missing" }
+            check(prior.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null,
+                revision = task.revision, display = task.display) == task && prior.status == ChildTaskStatus.RUNNING) {
+                "child_task_owner_mismatch"
+            }
+            val values = ContentValues().apply {
+                put("agent_name_snapshot", display?.agentName); put("model_id_snapshot", display?.modelId)
+                put("model_name_snapshot", display?.modelName)
+            }
+            check(db.update(TABLE, values, "task_id=? AND status='RUNNING'", arrayOf(task.owner.childRunId)) == 1)
+        }
+    }
+
     override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
         require(status in TERMINAL)
         change(task, status, text, detail)
@@ -113,7 +128,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
             val prior = db.query(TABLE, COLUMNS, "task_id=?", arrayOf(task.owner.childRunId), null, null, null).use {
                 check(it.moveToFirst()) { "child_task_missing" }; row(it)
             }
-            check(prior.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null, revision = task.revision) == task) { "child_task_owner_mismatch" }
+            check(prior.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null, revision = task.revision, display = task.display) == task) { "child_task_owner_mismatch" }
             check(prior.status !in TERMINAL && (status != ChildTaskStatus.RUNNING || prior.status == ChildTaskStatus.QUEUED)) {
                 "child_task_already_finished"
             }

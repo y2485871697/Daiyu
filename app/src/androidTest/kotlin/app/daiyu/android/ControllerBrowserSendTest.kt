@@ -469,6 +469,10 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         assertEquals(2, fixture.opens.get())
         assertEquals(listOf(pending.identity.conversationId, pending.identity.conversationId), sessionOwners)
         assertFalse(plan.drained)
+        assertEquals(ControllerBrowserPreparation.State.TRANSFERRED, pending.state)
+        pending.cancel() // The preparation no longer owns the transferred child.
+        assertFalse(plan.drained)
+        assertFalse(plan.snapshot?.stopRequested ?: true)
         assertTrue(fixture.histories.any { history -> history.any { it.runId.value == plan.scope.owner.childRunId } })
         val journal = app.daiyu.android.storage.SQLiteChildTaskStore(fixture.database)
         val running = checkNotNull(journal.get(plan.scope.owner))

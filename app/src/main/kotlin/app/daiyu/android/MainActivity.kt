@@ -3307,23 +3307,24 @@ class MainActivity : ComponentActivity() {
     @Composable private fun ChildStopChoiceSurface() {
         val choice = childStopChoice ?: return
         if (!voiceForeground) return
-        fun finish(stop: Boolean) {
+        fun finish(disposition: app.daiyu.android.domain.delegation.ChildTaskStopDisposition) {
             if (!activityUsable()) return
-            controller.finishChildStopChoice(choice, stop)
+            controller.finishChildStopChoice(choice, disposition)
             refresh()
         }
-        app.daiyu.android.ui.components.DaiyuAlertDialog(
-            onDismissRequest = { finish(false) },
-            title = { androidx.compose.material3.Text("主回复已停止") },
-            text = { androidx.compose.material3.Text("已向本次捕获的后台子任务请求暂停。保留暂停，还是停止这些子任务？正在读取中的任务会在可暂停边界停下。") },
-            confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(
-                modifier = Modifier.testTag("main-stop-keep-children"), onClick = { finish(false) }) {
-                androidx.compose.material3.Text("保留暂停")
-            } },
-            dismissButton = { app.daiyu.android.ui.haptics.material.TextButton(
-                modifier = Modifier.testTag("main-stop-cancel-children"), onClick = { finish(true) }) {
-                androidx.compose.material3.Text("停止这些子任务")
-            } })
+        app.daiyu.android.ui.components.OptionSelectionSheet(
+            title = "主回复已停止",
+            onDismiss = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE) }) {
+            app.daiyu.android.ui.components.OptionSelectionItem(
+                "继续子代理", selected = false, modifier = Modifier.testTag("main-stop-continue-children"),
+                onClick = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.CONTINUE) })
+            app.daiyu.android.ui.components.OptionSelectionItem(
+                "暂停子代理", selected = true, modifier = Modifier.testTag("main-stop-keep-children"),
+                onClick = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE) })
+            app.daiyu.android.ui.components.OptionSelectionItem(
+                "停止子代理", selected = false, modifier = Modifier.testTag("main-stop-cancel-children"),
+                onClick = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.STOP) })
+        }
     }
 
     @Composable private fun UnknownBranchSurface() {

@@ -53,6 +53,8 @@ interface ChildTaskStore {
     fun enqueueCommand(parent: RunExecutionOwner, command: ChildTaskCommand, successor: ChildTaskRecord): ChildTaskCommandReceipt =
         ChildTaskCommandReceipt.Rejected("child_commands_unsupported")
     fun started(task: ChildTaskRecord)
+    /** Actual request selection; never overwrites identity or grants replay permission. */
+    fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) {}
     fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String = "", detail: String? = null)
     fun list(conversationId: String, limit: Int = 20): List<ChildTaskRecord>
 }

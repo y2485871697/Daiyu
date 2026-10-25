@@ -1,0 +1,71 @@
+"""Source wiring checks only; concurrency and UI methods await the approved runtime batch."""
+from pathlib import Path
+import unittest
+ROOT = Path(__file__).resolve().parents[1]
+APP = ROOT / "app/src/main/kotlin/app/daiyu/android"
+DOMAIN = ROOT / "core-domain/src/main/kotlin/app/daiyu/android/domain/delegation"
+class ChildStopHotConfigurationContractTest(unittest.TestCase):
+    def test_three_choices_reuse_model_sheet_and_dismiss_preserves_pause(self):
+        text = (APP / "MainActivity.kt").read_text().split("@Composable private fun ChildStopChoiceSurface()",1)[1].split("@Composable private fun UnknownBranchSurface()",1)[0]
+        self.assertIn("OptionSelectionSheet(",text)
+        self.assertNotIn("DaiyuAlertDialog(",text)
+        self.assertLess(text.index("继续子代理"), text.index("暂停子代理"))
+        self.assertLess(text.index("暂停子代理"), text.index("停止子代理"))
+        self.assertIn("onDismiss = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE) }",text)
+    def test_stop_choice_never_relooks_up_active_group(self):
+        text = (APP / "ChatController.kt").read_text().split("internal fun finishChildStopChoice(",1)[1].split("private fun capturePausedChildren",1)[0]
+        self.assertIn("childStopChoices.remove(choice)",text)
+        for body in ["capture.tasks.resumeGroup(capture.group)","capture.tasks.finishGroup(capture.group, false)","capture.tasks.finishGroup(capture.group, true)","plan.finishPause(epoch, disposition)"]:
+            self.assertIn(body,text)
+    def test_fresh_dispatch_and_original_task_definitions_are_separate(self):
+        text = (DOMAIN / "RetainedChildTasks.kt").read_text()
+        self.assertIn("fun configure(binding: ChildTaskBinding",text)
+        self.assertIn("val definition = task.definition",text)
+        self.assertIn("definition = resources.models.getValue(inputTask.profileId)",text)
+        self.assertIn("resources.poolKeys",text)
+        tool = (APP / "integration/tools/RunChildTasks.kt").read_text()
+        self.assertIn("supervisor.configure(binding, it())",tool)
+        self.assertIn("currentProfiles?.invoke() ?: profiles",tool)
+    def test_hot_request_claim_rechecks_selection_and_shares_actual_pool(self):
+        text = (DOMAIN / "ChildModelBatch.kt").read_text()
+        self.assertIn("selectedModel = definition.current()",text)
+        self.assertIn("sharedPool?.invoke(selectedModel)",text)
+        self.assertIn("selectedModel.sameSelection(definition.current())",text)
+        selected = text.split("store?.selected(record, selectedModel.display)",1)[1]
+        self.assertLess(selected.index("selectedModel.sameSelection(definition.current())"), selected.index("val transport = port.open"))
+        self.assertIn("checkNotNull(permit).release(); acquired = false",text)
+        self.assertIn("if (!workerFinished || !cleanupFinished || itemReleased) false",text)
+        self.assertIn("(transport as ResumableModelSession).resume(attemptSink)",text)
+    def test_compatible_edits_preserve_old_ids_and_structural_changes_keep_snapshot(self):
+        text = (APP / "delegation/SubAgentHotUpdatePolicy.kt").read_text()
+        self.assertIn("profiles.all",text); self.assertIn("it.id == previous.id",text)
+        self.assertIn("previous.copy(providerId = current.providerId, modelId = current.modelId",text)
+        binding = (APP / "delegation/SavedSubAgentRuntimeBindings.kt").read_text()
+        self.assertIn("frozen.acceptsModelHotUpdate(next) && next.parallelLimit(model) == original.parallelLimit",binding)
+        self.assertIn("latestModel(binding.profile.id) else original",binding)
+    def test_history_access_is_registered_independently_of_new_configuration(self):
+        text = (APP / "integration/tools/RunChildTaskAccess.kt").read_text()
+        for name in ["inspect_child_tasks", "get_child_task", "control_child_task"]: self.assertIn(name,text)
+        self.assertIn("context.owner.conversationId.value != conversationId",text)
+        self.assertIn("row.revision != revision",text)
+        self.assertIn('put("new_request", false)',text)
+        self.assertIn("next_text_offset",text)
+        self.assertNotIn("enqueue(",text)
+        catalog = (APP / "integration/tools/RunCatalogTools.kt").read_text()
+        self.assertIn("childTaskAccess?.tools()?.forEach { registry.register(it) }",catalog)
+    def test_browser_pause_never_cancels_or_replays_tools(self):
+        text = (DOMAIN / "ToolEnabledChildRun.kt").read_text()
+        pause = text.split("fun pause(): ChildTaskControlReceipt",1)[1].split("fun resume()",1)[0]
+        self.assertIn("pauseControl.pause()",pause); self.assertNotIn("runner?.pause()",pause)
+        self.assertIn("check(pauseControl.awaitBoundary() && !stopped() && !cancelled())",text)
+        self.assertIn("pauseControl.terminate()",text)
+        stop = (APP / "ChatController.kt").read_text().split("internal fun stopMain(",1)[1].split("// True acknowledges",1)[0]
+        self.assertIn("plan.capturePause()",stop); self.assertNotIn("it.close()",stop)
+
+    def test_single_profile_revision_check_does_not_read_added_profiles(self):
+        text = (APP / "ChatController.kt").read_text().split("private fun freezeSavedChildModels",1)[1].split("internal fun savedSubAgentProviders",1)[0]
+        self.assertLess(text.index("val selection ="), text.index("val catalogRevisions ="))
+        self.assertIn("val catalogRevisions = selection.profiles",text)
+    def test_transferred_browser_preparation_cannot_stop_owned_child(self):
+        text = (APP / "ControllerBrowserPreparation.kt").read_text().split("fun cancel()",1)[1].split("fun retryCleanup",1)[0]
+        self.assertLess(text.index("phase == State.TRANSFERRED"), text.index("child?.close()"))

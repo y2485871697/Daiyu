@@ -95,7 +95,9 @@ class RunControlsContractTest(unittest.TestCase):
         self.assertIn('lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()', controller)
         activity = (APP / 'MainActivity.kt').read_text()
         self.assertIn('controller.stopMain(owner)', activity)
-        self.assertIn('onDismissRequest = { finish(false) }', activity)
+        self.assertIn('onDismiss = { finish(app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE) }', activity)
+        self.assertIn('OptionSelectionSheet(', activity)
+        self.assertIn('main-stop-continue-children', activity)
         self.assertIn('main-stop-keep-children', activity)
         self.assertIn('main-stop-cancel-children', activity)
 
@@ -107,15 +109,18 @@ class RunControlsContractTest(unittest.TestCase):
         surface = activity.split('@Composable private fun ChildStopChoiceSurface()', 1)[1].split('@Composable private fun UnknownBranchSurface()', 1)[0]
         self.assertIn('val choice = childStopChoice ?: return', surface)
         self.assertNotIn('val choice = controller.childStopChoice()', surface)
-        self.assertLess(surface.index('controller.finishChildStopChoice(choice, stop)'), surface.index('refresh()'))
+        self.assertLess(surface.index('controller.finishChildStopChoice(choice, disposition)'), surface.index('refresh()'))
 
     def test_explicit_resume_releases_same_group_before_completion_can_publish(self):
         controller = (APP / 'ChatController.kt').read_text()
         resume = controller.split('internal fun resume(owner:Message)', 1)[1].split('internal fun stopMain(', 1)[0]
-        self.assertTrue(resume.lstrip().startswith(':Boolean = synchronized(this)'))
-        self.assertEqual(1, resume.count('ownedRunner(owner)'))
+        # Reconnect diagnostics re-enter the controller: do not hold its monitor across resume.
+        self.assertIn('val (lifetime, pauseEpoch) = synchronized(this)', resume)
+        self.assertEqual(2, resume.count('ownedRunner(owner)'))
         self.assertLess(resume.index('ownedRunner(owner)'), resume.index('lifetime.runner.resume()'))
-        self.assertIn('resumePausedChildren(lifetime, lifetime.childPauseEpoch)', resume)
+        self.assertIn('current to current.childPauseEpoch', resume)
+        self.assertIn('if (resources === lifetime && ownedRunner(owner) === lifetime.runner)', resume)
+        self.assertIn('resumePausedChildren(lifetime, pauseEpoch)', resume)
 
     def test_supplement_receipt_resumes_only_original_pause_epoch(self):
         controller = (APP / 'ChatController.kt').read_text()

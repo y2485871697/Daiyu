@@ -35,9 +35,11 @@ data class RetainedChildTask(
 internal class ChildTaskResources(
     val session: SessionCapabilities,
     val authorization: TaskAuthorization,
-    val models: Map<String, ChildModelDefinition>,
+    var models: Map<String, ChildModelDefinition>,
     val onChanged: () -> Unit
-)
+) {
+    val poolKeys = models.values.map { it.poolKey }.toMutableSet()
+}
 
 /** A digest is a replay tombstone, not a retained prompt or permission to run again. */
 internal class ChildTaskRequest(val fingerprint: ByteArray, var remaining: Int) {
@@ -89,7 +91,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     }
     private class Task(val binding: ChildTaskBinding, val request: ChildTaskRequest,
         val initial: ChildTaskRecord, val invocation: ToolInvocation, val deadline: Long,
-        val pause: ChildTaskPauseControl, val source: ChildTaskRecord? = null) {
+        val pause: ChildTaskPauseControl, val source: ChildTaskRecord? = null,
+        val definition: ChildModelDefinition) {
         var record = initial
         var stopRequested = false
         var settled = false
@@ -106,6 +109,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private val tasks = linkedMapOf<String, Task>()
     // In-flight only, across bindings: a reentrant store must see pending, never join its own I/O.
     private val pendingCommands = mutableMapOf<String, ChildTaskCommandRequest>()
+    private val progress = linkedMapOf<ChildRunOwner, String>()
     private val workers = Executors.newFixedThreadPool(MAX_WORKERS) { action ->
         Thread(action, "retained-child-task").apply { isDaemon = true }
     }
@@ -182,7 +186,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                     owner.assistantMessageId.value, owner.ownerId, index, inputTask.profileId, inputTask.prompt,
                     display = resources.models.getValue(inputTask.profileId).display)
                 Task(binding, request, record, context.invocation, deadline,
-                    ChildTaskPauseControl { notifyChanged(binding) }).also {
+                    ChildTaskPauseControl { notifyChanged(binding) }, definition = resources.models.getValue(inputTask.profileId)).also {
                         tasks[record.owner.childRunId] = it
                         inheritPauseGroup(it)
                     }
@@ -216,6 +220,36 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     }
 
     fun source(owner: ChildRunOwner): ChildTaskRecord? = store.get(owner)
+    fun progress(owner: ChildRunOwner): String = synchronized(gate) { progress[owner].orEmpty() }
+
+    private fun progress(task: Task, text: String) {
+        synchronized(gate) {
+            if (closed || task.stopRequested || task.settled) return
+            progress[task.initial.owner] = text
+            while (progress.size > maxRetainedTasks) progress.remove(progress.keys.first())
+        }
+    }
+
+    /** New admissions use the current group; accepted tasks retain their own definitions. */
+    fun configure(binding: ChildTaskBinding, models: Map<String, ChildModelDefinition>): Boolean {
+        requireBinding(binding)
+        val frozen = models.toMap()
+        require(frozen.keys.all { it.isNotBlank() && it.length <= 200 })
+        val limits = frozen.values.groupBy { it.poolKey }.mapValues { (_, definitions) ->
+            require(definitions.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
+            definitions.first().parallelLimit
+        }
+        return synchronized(gate) {
+            val resources = binding.resources ?: return@synchronized false
+            if (closed || !binding.accepting) return@synchronized false
+            require(limits.all { (key, limit) -> pools[key]?.limit?.let { it == limit } != false }) { "child_pool_limit_conflict" }
+            limits.forEach { (key, limit) ->
+                if (resources.poolKeys.add(key)) pools.getOrPut(key) { Pool(limit) }.bindings++
+            }
+            resources.models = Collections.unmodifiableMap(frozen)
+            true
+        }
+    }
 
     fun command(binding: ChildTaskBinding, context: ToolExecutionContext, command: ChildTaskCommand): ChildTaskCommandReceipt {
         requireBinding(binding)
@@ -295,7 +329,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                     display = binding.resources?.models?.get(command.profileId)?.display)
                 Task(binding, ChildTaskRequest(fingerprint.toByteArray(), 1), record, invocation,
                     System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis),
-                    ChildTaskPauseControl { notifyChanged(binding) }, source).also {
+                    ChildTaskPauseControl { notifyChanged(binding) }, source,
+                    checkNotNull(binding.resources).models.getValue(command.profileId)).also {
                     it.admitting = true
                     reserved = it
                     tasks[record.owner.childRunId] = it
@@ -519,9 +554,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private fun execute(task: Task) {
         // Resources and pool references stay pinned until this task's real batch drain.
         val resources = synchronized(gate) { checkNotNull(task.binding.resources) }
-        val definition = resources.models.getValue(task.initial.profileId)
-        val pool = synchronized(gate) { pools.getValue(definition.poolKey) }
-        var acquired = false
+        val definition = task.definition
         var batch: ChildModelBatch? = null
         try {
             // A terminal row or stop intent is NOT a transport drain. No successor opens early.
@@ -540,14 +573,20 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             if (task.initial.commandKind == ChildTaskCommandKind.APPEND && preceding?.status != ChildTaskStatus.COMPLETED) {
                 finishUnsent(task, "child_append_source_unconfirmed"); return
             }
-            while (!acquired && !stopped(task) && System.nanoTime() < task.deadline)
-                acquired = pool.permits.tryAcquire(25, TimeUnit.MILLISECONDS)
-            if (!acquired || stopped(task) || System.nanoTime() >= task.deadline) {
+            if (stopped(task) || System.nanoTime() >= task.deadline) {
                 finishUnsent(task, "child_not_sent")
                 return
             }
             val remaining = TimeUnit.NANOSECONDS.toMillis(task.deadline - System.nanoTime()).coerceAtLeast(1)
-            batch = ChildModelBatch(mapOf(task.initial.profileId to definition), remaining, journal(task), usageRecorder)
+            batch = ChildModelBatch(mapOf(task.initial.profileId to definition), remaining, journal(task), usageRecorder,
+                onProgress = { _, text -> progress(task, text) },
+                sharedPool = { selected -> synchronized(gate) {
+                    check(!task.settled && task.binding.resources === resources)
+                    val pool = pools.getOrPut(selected.poolKey) { Pool(selected.parallelLimit) }
+                    require(pool.limit == selected.parallelLimit) { "child_pool_limit_conflict" }
+                    if (resources.poolKeys.add(selected.poolKey)) pool.bindings++
+                    pool.permits
+                } })
             batch.bind(task.binding.owner, resources.session, resources.authorization)
             synchronized(gate) { task.batch = batch }
             if (stopped(task)) {
@@ -566,7 +605,6 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             val release = {
                 if (synchronized(gate) { task.record.status == ChildTaskStatus.QUEUED && !task.journalUnconfirmed })
                     finishUnsent(task, "child_not_sent")
-                if (acquired) pool.permits.release()
                 settled(task)
             }
             if (batch == null) release() else batch.closeWhenIdle(release)
@@ -583,6 +621,11 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 synchronized(gate) { state.journalUnconfirmed = true }
                 throw failure
             }
+            notifyChanged(state.binding)
+        }
+        override fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) {
+            store.selected(task, display)
+            synchronized(gate) { state.record = state.record.copy(display = display) }
             notifyChanged(state.binding)
         }
         override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
@@ -632,7 +675,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private fun releaseBindingIfIdle(binding: ChildTaskBinding) {
         if (binding.accepting || binding.outstanding != 0) return
         val resources = binding.resources ?: return
-        resources.models.values.map { it.poolKey }.toSet().forEach { key ->
+        resources.poolKeys.forEach { key ->
             val pool = pools.getValue(key)
             pool.bindings--
             if (pool.bindings == 0) pools.remove(key)

@@ -463,8 +463,14 @@ class ChatController internal constructor(private val application:Application,
         children.forEach { it.close() }
         browserChildrenChanged()
     }
+    private val browserChildProgress = linkedMapOf<app.daiyu.android.domain.delegation.ChildRunOwner, String>()
     private fun browserChildrenChanged() {
         handler.post { synchronized(this) {
+            browserChildren.forEach { plan ->
+                val text = plan.progress
+                if (text.isNotEmpty()) browserChildProgress[plan.scope.owner] = text
+            }
+            while (browserChildProgress.size > 64) browserChildProgress.remove(browserChildProgress.keys.first())
             browserChildren.removeAll { it.drained }
             if (closed) closeStorageWhenIdle() else notifyChanged()
         } }
@@ -1340,13 +1346,27 @@ class ChatController internal constructor(private val application:Application,
     private var closingStorage=false
     internal class ChildPauseCapture(val tasks: RunChildTasks,
         val group: app.daiyu.android.domain.delegation.ChildTaskPauseGroup)
-    internal class ChildStopChoice internal constructor(val owner: Message, internal val capture: ChildPauseCapture)
+    internal class ChildStopChoice internal constructor(val owner: Message, internal val capture: ChildPauseCapture?,
+        internal val browser: List<Pair<ControllerChildBrowserPlan, Long>> = emptyList())
     private val childStopChoices = java.util.ArrayDeque<ChildStopChoice>()
     @Synchronized internal fun childStopChoice(): ChildStopChoice? = childStopChoices.peekFirst()
-    internal fun finishChildStopChoice(choice: ChildStopChoice, stop: Boolean): Boolean {
+    internal fun finishChildStopChoice(choice: ChildStopChoice,
+        disposition: app.daiyu.android.domain.delegation.ChildTaskStopDisposition): Boolean {
         synchronized(this) { if (!childStopChoices.remove(choice)) return false }
-        return choice.capture.tasks.finishGroup(choice.capture.group, stop)
+        choice.capture?.let { capture ->
+            when (disposition) {
+                app.daiyu.android.domain.delegation.ChildTaskStopDisposition.CONTINUE -> capture.tasks.resumeGroup(capture.group)
+                app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE -> capture.tasks.finishGroup(capture.group, false)
+                app.daiyu.android.domain.delegation.ChildTaskStopDisposition.STOP -> capture.tasks.finishGroup(capture.group, true)
+            }
+        }
+        choice.browser.forEach { (plan, epoch) -> plan.finishPause(epoch, disposition) }
+        browserChildrenChanged()
+        return true
     }
+    internal fun finishChildStopChoice(choice: ChildStopChoice, stop: Boolean): Boolean =
+        finishChildStopChoice(choice, if (stop) app.daiyu.android.domain.delegation.ChildTaskStopDisposition.STOP
+            else app.daiyu.android.domain.delegation.ChildTaskStopDisposition.PAUSE)
     private fun capturePausedChildren(lifetime: RunResources): ChildPauseCapture? {
         if (!lifetime.childrenPauseRequested) lifetime.childPauseEpoch++
         lifetime.childrenPauseRequested = true
@@ -1476,12 +1496,13 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }
-    private fun freezeSavedChildModels(key: SubAgentConfigKey.Conversation,
-        runModel: (ProviderSnapshot) -> ModelPort): FrozenSubAgentModels {
+    private fun freezeSavedChildModels(key: SubAgentConfigKey.Conversation, hotUpdates: Boolean = true,
+        profileId: String? = null, runModel: (ProviderSnapshot) -> ModelPort): FrozenSubAgentModels {
         val ownerState = childPreferences.ownerState(key)
         val config = childPreferences.snapshot(key)
         val registryRevision = providers.snapshot().revision
-        val catalogRevisions = config.profiles.filter { it.enabled }.map { it.providerId }.distinct().associateWith { slot ->
+        val selection = if (profileId == null) config else config.copy(profiles = config.profiles.filter { it.id == profileId })
+        val catalogRevisions = selection.profiles.filter { it.enabled }.map { it.providerId }.distinct().associateWith { slot ->
             providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it } }
         }
         val bindingsCurrent = {
@@ -1491,7 +1512,10 @@ class ChatController internal constructor(private val application:Application,
                     providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it == revision } }
                 }
         }
-        return childBindings.freeze(key, config, savedSubAgentProviders(), ::readSavedChildProviderModel, bindingsCurrent, runModel)
+        return childBindings.freeze(key, selection, savedSubAgentProviders(), ::readSavedChildProviderModel, bindingsCurrent, runModel,
+            latestConfig = if (hotUpdates) ({ childPreferences.snapshot(key) }) else null,
+            latestModel = if (hotUpdates) ({ id -> freezeSavedChildModels(key, hotUpdates = false,
+                profileId = id, runModel = runModel).getValue(id) }) else null)
     }
     internal fun savedSubAgentProviders(): List<SubAgentProvider> {
         check(Looper.myLooper() != Looper.getMainLooper())
@@ -1534,21 +1558,24 @@ class ChatController internal constructor(private val application:Application,
     internal fun liveChildTasks(conversationId: ConversationId): List<app.daiyu.android.domain.delegation.RetainedChildTask> {
         val retained = synchronized(this) {
             check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
-            backgroundRuns.values.toList()
+            backgroundRuns.values.toList() to browserChildren.toList()
         }
-        return retained.flatMap { it.snapshots() }.filter { it.record.owner.conversationId == conversationId.value }
+        return (retained.first.flatMap { it.snapshots() } + retained.second.mapNotNull { it.snapshot })
+            .filter { it.record.owner.conversationId == conversationId.value }
     }
     internal fun pauseChildTask(record: ChildTaskRecord): app.daiyu.android.domain.delegation.ChildTaskControlReceipt {
         val retained = synchronized(this) {
             if (closed || !ready || recoveryFailed) null else backgroundRuns[RunId(record.owner.parentRunId)]
         }
-        return retained?.pause(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
+        val browser = synchronized(this) { browserChildren.firstOrNull { !closed && ready && it.scope.owner == record.owner } }
+        return browser?.pause() ?: retained?.pause(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
     }
     internal fun resumeChildTask(record: ChildTaskRecord): app.daiyu.android.domain.delegation.ChildTaskControlReceipt {
         val retained = synchronized(this) {
             if (closed || !ready || recoveryFailed) null else backgroundRuns[RunId(record.owner.parentRunId)]
         }
-        return retained?.resume(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
+        val browser = synchronized(this) { browserChildren.firstOrNull { !closed && ready && it.scope.owner == record.owner } }
+        return browser?.resume() ?: retained?.resume(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
     }
     /** Worker-only records action. Historical work gets a new real Runner owner, never a reopened binding. */
     internal fun directChildTask(command: ChildTaskCommand): ChildTaskCommandReceipt {
@@ -3194,13 +3221,24 @@ class ChatController internal constructor(private val application:Application,
         val replyIdentity = try { AssistantReplyIdentity.capture(assistantContext, assistantAssets) } catch (_: Exception) {
             problem="助手头像读取失败；草稿保留，未发起请求";notifyChanged();return null
         }
-        val childPreparation = if (!withChildren) null else try {
-            val key=SubAgentConfigKey.Conversation(checkNotNull(conversation).id.value)
+        val conversationId=platformAction?.conversationId ?: mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+            ?: ConversationId(UUID.randomUUID().toString())
+        val currentChildProfiles: () -> Set<String> = {
+            val key = SubAgentConfigKey.Conversation(conversationId.value)
+            val current = childPreferences.snapshot(key)
+            if (!current.enabled) emptySet() else current.profiles.filter { it.enabled }.map { it.id }.toSet()
+        }
+        val currentChildModels: () -> FrozenSubAgentModels = {
+            val childConversation = conversationId
+            val key = SubAgentConfigKey.Conversation(childConversation.value)
             freezeSavedChildModels(key) { provider ->
-                val delegate=sessionModel?.invoke(provider,assistantContext,SessionGatewayContext(checkNotNull(conversation).id))
-                    ?: assistantModel?.invoke(provider,assistantContext) ?: model(provider.asModelSettings())
-                messageImages.wrap(delegate,provider)
+                val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(childConversation))
+                    ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
+                messageImages.wrap(delegate, provider)
             }
+        }
+        val childPreparation = if (!withChildren) null else try {
+            currentChildModels()
         } catch (_:Exception) {
             problem="子模型配置不可用、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
         }
@@ -3238,8 +3276,6 @@ class ChatController internal constructor(private val application:Application,
             problem="错误重连配置无效或写入未确认；请重新保存，草稿保留，未启动聊天模型请求"
             notifyChanged(); return null
         }
-        val conversationId=platformAction?.conversationId ?: mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
-            ?: ConversationId(UUID.randomUUID().toString())
         val run=platformAction?.runId ?: mcpPreparation?.scope?.runId ?: gui?.runId ?: terminalJobPreparation?.identity?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         if (conversation == null) try { reasoningPreference.retainAccepted(conversationId.value, frozenReasoning) }
         catch (_: Exception) { problem="会话思考偏好保存未确认；草稿保留，未发起请求";notifyChanged();return null }
@@ -3439,9 +3475,21 @@ class ChatController internal constructor(private val application:Application,
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
                 run, preparedContext.archiveId)
+            val childTaskAccess = app.daiyu.android.integration.tools.RunChildTaskAccess(conversationId.value,
+                records = { childTasks(conversationId) },
+                source = { owner -> checkNotNull(childSupervisor).source(owner) },
+                live = { liveChildTasks(conversationId) },
+                progress = { owner ->
+                    checkNotNull(childSupervisor).progress(owner).ifEmpty {
+                        synchronized(this) { browserChildProgress[owner].orEmpty() }
+                    }
+                },
+                resume = ::resumeChildTask, pause = ::pauseChildTask, stop = ::stopChildTask,
+                currentProfiles = currentChildProfiles)
             val children = if (childModels.isEmpty()) null else RunChildModels(
                 ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks,
-                    usageRecorder = checkNotNull(runtimeStore).childUsage), childModels.keys)
+                    usageRecorder = checkNotNull(runtimeStore).childUsage,
+                    currentModels = currentChildModels), childModels.keys, currentProfiles = currentChildProfiles)
             preparingChildren = children
             val devices = RunDeviceResources(application, resultPolicy = platformSnapshot.resultPolicy)
             preparingDevices = devices
@@ -3449,7 +3497,8 @@ class ChatController internal constructor(private val application:Application,
             val capabilities = SessionCapabilities(gui?.sessionId ?: terminalJobPreparation?.identity?.sessionId ?: terminalRun?.preview?.identity?.sessionId ?: run.value,
                 (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(if (platformSnapshot.allDeviceTools) ReadOnlyTool.entries.toSet() else config.enabledTools(),
                     platformAllowed = platformSnapshot.platformAllowed) else emptySet()) + contextTools.map { it.definition.capability } +
-                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
+                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE,
+                        app.daiyu.android.integration.tools.RunChildTaskAccess.CAPABILITY) +
                     (if (assistantContext.memoryReadPort == null) emptySet() else setOf(ScopedAssistantMemoryTools.READ)) +
                     (if (interactiveSnapshot.enabled && gui == null) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
@@ -3471,7 +3520,7 @@ class ChatController internal constructor(private val application:Application,
                         check(!closed)
                         val supervisor=checkNotNull(childSupervisor)
                         val binding=supervisor.bind(owner,grants,authorization,childModels,::backgroundTasksChanged)
-                        RunChildTasks(supervisor,binding,childModels.keys).also { tasks ->
+                        RunChildTasks(supervisor, binding, childModels.keys, currentChildModels, currentChildProfiles).also { tasks ->
                             backgroundRuns[run] = tasks
                             resources?.takeIf { it.initial.runId == run && it.childrenPauseRequested }?.let { lifetime ->
                                 lifetime.pausedChildren = ChildPauseCapture(tasks, tasks.pauseGroup())
@@ -3483,7 +3532,7 @@ class ChatController internal constructor(private val application:Application,
             // The SAME frozen authorization reaches Dispatcher and RunShizukuCommands.bind.
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
-                backgroundFactory, memoryContext=assistantContext, mcp=mcpPreparation?.scope,
+                backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope,
                 platformAction=platformAction?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
                     grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->
@@ -4694,15 +4743,15 @@ class ChatController internal constructor(private val application:Application,
             resources?.takeIf { ownedRunner(owner) === it.runner }?.also { lifetime ->
                 val capture = capturePausedChildren(lifetime)
                 capture?.tasks?.close()
-                if (capture != null && capture.tasks.hasCaptured(capture.group))
-                    childStopChoices.addLast(ChildStopChoice(lifetime.initial, capture))
+                val browser = browserChildren.filter { it.parent.identity.runId == owner.runId }
+                    .mapNotNull { plan -> plan.capturePause()?.let { plan to it } }
+                if ((capture != null && capture.tasks.hasCaptured(capture.group)) || browser.isNotEmpty())
+                    childStopChoices.addLast(ChildStopChoice(lifetime.initial, capture, browser))
                 fenceRun(lifetime)
             }
         } ?: return false
         lifetime.runner.stop()
         lifetime.auxiliary?.cancel()
-        synchronized(this) { browserChildren.filter { it.parent.identity.runId == owner.runId }.toList() }
-            .forEach { it.close() }
         browserChildrenChanged()
         lifetime.tools.close()
         handler.post { synchronized(this) { cleanupRun(lifetime); notifyChanged() } }

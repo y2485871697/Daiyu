@@ -258,8 +258,10 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         for check in ('ownerState(key)', 'snapshot(key) == config', 'providers.snapshot().revision == registryRevision', 'it == revision'):
             self.assertIn(check, helper)
         binding = (SRC / 'delegation/SavedSubAgentRuntimeBindings.kt').read_text()
-        create = binding.split('ChildTaskDisplay(binding.profile.name', 1)[1].split('\n', 1)[0]
+        create = binding.split('val original = ChildModelDefinition(', 1)[1]
         self.assertIn('runModel(binding.child)', create)
+        self.assertIn('frozen.acceptsModelHotUpdate(next)', create)
+        self.assertIn('latestModel(binding.profile.id) else original', create)
         self.assertNotIn('resolveSavedModel', create)
 
 

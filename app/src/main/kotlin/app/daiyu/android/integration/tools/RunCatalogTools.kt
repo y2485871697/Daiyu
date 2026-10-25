@@ -70,6 +70,7 @@ internal class RunCatalogTools(
     private val mcp: app.daiyu.android.mcp.McpRunScope? = null,
     private val platformAction: PlatformActionScope? = null,
     private val commandFactory: ((RunExecutionOwner, TaskAuthorization) -> RunCommandTools)? = null,
+    private val childTaskAccess: RunChildTaskAccess? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -266,6 +267,7 @@ internal class RunCatalogTools(
                         }
                     }.forEach { registry.register(it) }
                 }
+                childTaskAccess?.tools()?.forEach { registry.register(it) }
                 children?.let { registry.register(it.tool()) }
                 background?.let { registry.register(it.tool()); registry.register(it.commandTool()) }
                 shizuku?.let { registry.register(it.commands.tool()) }

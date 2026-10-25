@@ -217,19 +217,20 @@ internal class ControllerBrowserPreparation private constructor(
 
     /** Short admission fence; an in-flight accept owns publication and defers native cleanup. */
     fun cancel() {
-        childPlan?.close()
-        val clean = synchronized(lock) {
+        val (child, clean) = synchronized(lock) {
             if (phase == State.TRANSFERRED || phase == State.DRAINED) return
             cancelled = true
             preparation.cancel()
             authorization?.revoke()
-            if (acceptInFlight) return // Commit still borrows the binding; its result decides ownership.
-            when (phase) {
-                State.PREVIEW, State.CONFIRMED -> { phase = State.DRAINED; false }
-                State.OPENING -> false // The queued constructor owns the final publication/cleanup.
-                else -> { if (!stickyUnknown) phase = State.CLOSING; true }
-            }
+            val clean = if (acceptInFlight) false // Commit still borrows the binding; its result decides ownership.
+                else when (phase) {
+                    State.PREVIEW, State.CONFIRMED -> { phase = State.DRAINED; false }
+                    State.OPENING -> false // The queued constructor owns the final publication/cleanup.
+                    else -> { if (!stickyUnknown) phase = State.CLOSING; true }
+                }
+            childPlan to clean
         }
+        child?.close()
         if (clean) requestCleanup()
     }
 

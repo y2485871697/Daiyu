@@ -28,6 +28,37 @@ internal class ControllerChildBrowserPlan private constructor(
     private var closed = false
     private var launched = false
     private var child: ToolEnabledChildRun? = null
+    private var pauseRequested = false
+    private var controlEpoch = 0L
+    val snapshot: RetainedChildTask? get() = synchronized(gate) { child?.snapshot }
+    val progress: String get() = synchronized(gate) { child?.progress.orEmpty() }
+    val pauseState: ChildTaskPauseState get() = synchronized(gate) {
+        child?.pauseState ?: if (pauseRequested) ChildTaskPauseState.PENDING else ChildTaskPauseState.ACTIVE
+    }
+    fun capturePause(): Long? = synchronized(gate) {
+        if (closed || drained || pauseRequested) return@synchronized null
+        controlEpoch++; pauseRequested = true; child?.pause()
+        controlEpoch
+    }
+    fun finishPause(epoch: Long, disposition: ChildTaskStopDisposition) {
+        val stop = synchronized(gate) {
+            if (closed || epoch != controlEpoch) return
+            controlEpoch++
+            if (disposition == ChildTaskStopDisposition.CONTINUE) { pauseRequested = false; child?.resume() }
+            disposition == ChildTaskStopDisposition.STOP
+        }
+        if (stop) close()
+    }
+    fun pause(): ChildTaskControlReceipt = synchronized(gate) {
+        if (closed || drained) return@synchronized ChildTaskControlReceipt.STALE
+        controlEpoch++; pauseRequested = true
+        child?.pause() ?: ChildTaskControlReceipt.PENDING
+    }
+    fun resume(): ChildTaskControlReceipt = synchronized(gate) {
+        if (closed || drained) return@synchronized ChildTaskControlReceipt.STALE
+        controlEpoch++; pauseRequested = false
+        child?.resume() ?: ChildTaskControlReceipt.RESUMED
+    }
     val confirmed: Boolean get() = synchronized(gate) { approved && !closed }
     val drained: Boolean get() = synchronized(gate) { child?.drained ?: (closed && session.closeResult() == RunCatalogCloseResult.Drained) }
     val cleanupUnknown: Boolean get() = synchronized(gate) { child?.cleanupUnknown == true || session.closeResult() is RunCatalogCloseResult.Unknown }
@@ -59,7 +90,10 @@ internal class ControllerChildBrowserPlan private constructor(
                 parent.assistant.id, prompt)
             // Retain both resource owners BEFORE start/prepare/native constructor can run.
             val assembly = CatalogChildBrowserAssembly(context, session, ledger)
-            ToolEnabledChildRun(scope, record, owner, assembly, model, store, capacity, onChanged).also { child = it }
+            ToolEnabledChildRun(scope, record, owner, assembly, model, store, capacity, onChanged).also {
+                child = it
+                if (pauseRequested) it.pause()
+            }
         }
         retained.start()
     }

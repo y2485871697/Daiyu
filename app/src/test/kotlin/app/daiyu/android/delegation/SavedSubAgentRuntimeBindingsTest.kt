@@ -35,6 +35,32 @@ class SavedSubAgentRuntimeBindingsTest {
         assertTrue(captured.all { it.tools.isEmpty() })
     }
 
+    @Test fun compatibleModelAndAdditionsUpdateOnlyCurrentSelectionNotOriginalFactory() {
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val changed = child.copy(id = "new-record", modelId = "new-api-model")
+        val source = listOf(provider.copy(models = listOf(child, changed)))
+        var latest = config
+        val resolve: (String, String) -> ModelSettings = { _, id ->
+            if (id == changed.id) saved.copy(model = changed.modelId) else saved
+        }
+        val original = bindings.freeze(owner, config, source, resolve,
+            latestConfig = { latest }, latestModel = { id ->
+                bindings.freeze(owner, latest.copy(profiles = latest.profiles.filter { it.id == id }), source, resolve).getValue(id)
+            }).getValue(profile.id)
+        latest = config.copy(profiles = listOf(profile.copy(modelId = changed.id),
+            profile.copy(id = "added", name = "Added", providerId = "unavailable", modelId = "missing")))
+        original.current().create(); original.create()
+        assertEquals(listOf(changed.modelId, child.modelId), captured.map { it.model })
+        latest = config.copy(profiles = listOf(profile.copy(modelId = changed.id)),
+            parallelLimits = mapOf(SubAgentParallelModel(provider.id, child.modelId) to 0))
+        original.current().create()
+        assertEquals(child.modelId, captured.last().model)
+        latest = config.copy(profiles = listOf(profile.copy(role = "implementation")))
+        original.current().create()
+        assertEquals(child.modelId, captured.last().model)
+    }
+
     @Test fun unavailableSelectionsAndMediaRejectBeforeReadingCredentials() {
         var reads = 0
         val bindings = SavedSubAgentRuntimeBindings()

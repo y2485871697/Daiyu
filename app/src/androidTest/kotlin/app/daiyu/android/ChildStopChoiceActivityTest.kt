@@ -87,6 +87,9 @@ class ChildStopChoiceActivityTest : WiredActivityTestCase() {
         awaitControl("main stopped before choice") { fixture.controller.active == null }
         awaitUniqueTag("main-stop-keep-children")
         node("main-stop-cancel-children").assertIsDisplayed()
+        node("main-stop-continue-children").assertIsDisplayed()
+        node("main-stop-keep-children").assertIsSelected()
+        node("main-stop-continue-children").assertIsNotSelected()
         assertEquals(1, parentOpens.get()); assertEquals(1, childOpens.get())
         val pending = fixture.controller.liveChildTasks(conversation.id).single()
         assertEquals(ChildTaskPauseState.PENDING, pending.pauseState)
@@ -122,6 +125,23 @@ class ChildStopChoiceActivityTest : WiredActivityTestCase() {
         awaitChoiceGone()
         assertFalse(fixture.controller.finishChildStopChoice(choice, true))
         finishPreservedChild(owner)
+    }
+
+    fun testContinueChoiceResumesOriginalChildWithoutReopeningParentOrChild() {
+        val owner = stoppedOwner()
+        val child = fixture.controller.liveChildTasks(owner.conversationId).single().record.owner
+        val choice = checkNotNull(fixture.controller.childStopChoice())
+        node("main-stop-continue-children").performClick()
+        awaitChoiceGone()
+        val retained = fixture.controller.liveChildTasks(owner.conversationId).single()
+        assertEquals(child, retained.record.owner)
+        assertEquals(ChildTaskPauseState.ACTIVE, retained.pauseState)
+        assertEquals(0, childCancels.get())
+        assertFalse(fixture.controller.finishChildStopChoice(choice, true))
+        childRelease.countDown()
+        assertTrue(childExited.await(5, TimeUnit.SECONDS))
+        awaitControl("continued original child drains") { !fixture.controller.hasLiveChildTasks() }
+        assertEquals(1, parentOpens.get()); assertEquals(1, childOpens.get())
     }
 
     fun testBackDismissPreservesCapturedChildAndUnmountsChoice() {

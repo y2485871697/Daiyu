@@ -84,6 +84,22 @@ class ToolEnabledChildRunTest {
         }
     }
 
+    @Test fun pauseBeforeStartPreservesOriginalBrowserChildAndNeverConstructsUntilResume() {
+        val f = Fixture()
+        try {
+            assertEquals(ChildTaskControlReceipt.PENDING, f.run.pause())
+            assertTrue(f.run.start())
+            val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            while (f.run.pauseState != ChildTaskPauseState.PAUSED && System.nanoTime() < end) Thread.sleep(5)
+            assertEquals(ChildTaskPauseState.PAUSED, f.run.pauseState)
+            assertEquals(0, f.assembly.prepares.get()); assertEquals(0, f.factories.get())
+            assertEquals(ChildTaskControlReceipt.RESUMED, f.run.resume())
+            await(f.journal.finished); await(f.assembly.observed)
+            f.transport.returnCancel.countDown(); f.assembly.report(ChildToolDrain.Drained)
+            f.waitDrained(); assertEquals(1, f.journal.enqueues.get()); assertEquals(1, f.factories.get())
+        } finally { f.transport.returnCancel.countDown(); f.run.close() }
+    }
+
     @Test fun workerExitAndBrowserDrainDoNotReleaseWhileTransportCancelIsBlocked() {
         val f = Fixture()
         try {

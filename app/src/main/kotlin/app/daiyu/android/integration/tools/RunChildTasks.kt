@@ -8,7 +8,8 @@ import org.json.JSONObject
 
 /** Opt-in background admission; parent closure seals submission, not the accepted children. */
 internal class RunChildTasks(private val supervisor: RetainedChildTasks, private val binding: ChildTaskBinding,
-    profiles: Set<String>) : AutoCloseable {
+    profiles: Set<String>, private val currentModels: (() -> Map<String, ChildModelDefinition>)? = null,
+    private val currentProfiles: (() -> Set<String>)? = null) : AutoCloseable {
     private val profiles = profiles.toSet()
     init { require(this.profiles.isNotEmpty()) }
 
@@ -18,7 +19,7 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
             CAPABILITY, ToolEffect.READ_ONLY,
             ToolSchema(listOf(ArgumentField("tasks", ArgumentType.ArrayValue(
                 ArgumentType.ObjectValue(ToolSchema(listOf(
-                    ArgumentField("profile_id", ArgumentType.Text(200, profiles, 1)),
+                    ArgumentField("profile_id", ArgumentType.Text(200, minimumLength = 1)),
                     ArgumentField("prompt", ArgumentType.Text(4096, minimumLength = 1))
                 ))), minimumItems = 1, maximumItems = 8)))))
 
@@ -27,8 +28,10 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
                 val task = it as ToolArguments
                 ChildModelTask(task.text("profile_id"), task.text("prompt"))
             }
-            require(tasks.all { it.prompt.isNotBlank() }) { "invalid_arguments" }
+            val available = currentProfiles?.invoke() ?: profiles
+            require(tasks.all { it.prompt.isNotBlank() && it.profileId in available }) { "invalid_arguments" }
             return PreparedTool.contextual { context ->
+                if (!refreshModels()) return@contextual ExecutionReceipt.NotExecuted("child_model_configuration_unavailable")
                 when (val result = supervisor.submit(binding, context, tasks)) {
                     is ChildTaskAdmission.Rejected -> ExecutionReceipt.NotExecuted(result.code)
                     is ChildTaskAdmission.Unconfirmed -> ExecutionReceipt.Unknown(result.code)
@@ -50,6 +53,10 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
         }
     }
 
+    private fun refreshModels(): Boolean = try {
+        currentModels?.let { supervisor.configure(binding, it()) } ?: true
+    } catch (_: Exception) { false }
+
     fun command(invocation: ToolInvocation, command: ChildTaskCommand) = supervisor.command(binding, invocation, command)
 
     fun commandTool(): RegisteredTool = object : RegisteredTool {
@@ -66,16 +73,18 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
                 ArgumentField("parent_owner_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("expected_revision", ArgumentType.Text(20, minimumLength = 1)),
                 ArgumentField("kind", ArgumentType.Text(20, setOf("APPEND", "REPLACE", "REDISPATCH"), 1)),
-                ArgumentField("profile_id", ArgumentType.Text(200, profiles, 1)),
+                ArgumentField("profile_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("instruction", ArgumentType.Text(4096, minimumLength = 1)),
                 ArgumentField("acknowledge_possible_execution", ArgumentType.Text(5, setOf("true", "false"), 1))
             )))
         override fun prepare(arguments: ToolArguments): PreparedTool {
+            require(arguments.text("profile_id") in (currentProfiles?.invoke() ?: profiles)) { "invalid_child_profile" }
             val owner = ChildRunOwner(arguments.text("conversation_id"),
                 arguments.text("parent_run_id"), arguments.text("task_group_id"), arguments.text("generation").toLong(),
                 arguments.text("child_run_id"), arguments.text("assistant_message_id"))
             val revision = arguments.text("expected_revision").toLong().also { require(it >= 0) }
             return PreparedTool.contextual { context ->
+                if (!refreshModels()) return@contextual ExecutionReceipt.NotExecuted("child_model_configuration_unavailable")
                 val source = supervisor.source(owner)
                 if (source == null || source.parentMessageId != arguments.text("parent_message_id") || source.parentOwnerId != arguments.text("parent_owner_id"))
                     ExecutionReceipt.NotExecuted("child_source_stale")

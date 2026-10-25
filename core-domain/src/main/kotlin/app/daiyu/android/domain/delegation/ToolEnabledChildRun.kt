@@ -2,6 +2,7 @@ package app.daiyu.android.domain.delegation
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
+import app.daiyu.android.domain.tools.ReceiptBatchStart
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -48,6 +49,21 @@ class ToolEnabledChildRun(
     private var unknown = false
     private var released = false
     private var runner: ChatRunner? = null
+    @Volatile private var observed = record
+    @Volatile var progress: String = ""
+        private set
+    val snapshot: RetainedChildTask get() = synchronized(gate) {
+        RetainedChildTask(observed, cancelled && observed.status != ChildTaskStatus.COMPLETED,
+            released, unknown, pauseControl.snapshot())
+    }
+    private val pauseControl = ChildTaskPauseControl(::changed)
+    val pauseState: ChildTaskPauseState get() = pauseControl.snapshot()
+    fun pause(): ChildTaskControlReceipt = synchronized(gate) {
+        if (cancelled || workerExited) ChildTaskControlReceipt.STALE else pauseControl.pause()
+    }
+    fun resume(): ChildTaskControlReceipt = synchronized(gate) {
+        if (cancelled || workerExited) ChildTaskControlReceipt.STALE else pauseControl.resume()
+    }
     val drained: Boolean get() = synchronized(gate) { released }
     val cleanupUnknown: Boolean get() = synchronized(gate) { unknown }
 
@@ -85,7 +101,7 @@ class ToolEnabledChildRun(
                     break
                 }
             }
-            check(!stopped())
+            check(!stopped() && pauseControl.awaitBoundary())
             check(assembly.prepareOnWorker() && !stopped())
             val initial = Message(MessageId(scope.owner.assistantMessageId), ConversationId(scope.owner.conversationId),
                 RunId(scope.owner.childRunId), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
@@ -99,15 +115,20 @@ class ToolEnabledChildRun(
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                     check(!stopped() && definitions.isNotEmpty())
                     store.started(record)
+                    observed = record.copy(status = ChildTaskStatus.RUNNING)
                     check(!stopped())
+                    check(pauseControl.awaitBoundary() && !stopped())
                     val port = model()
-                    check(!stopped())
+                    check(!stopped() && pauseControl.awaitBoundary())
                     sent = true
                     val transport = port.open(history, definitions)
                     synchronized(gate) { transportDrained = false }
                     val once = AtomicBoolean(false)
                     return object : ModelSession {
-                        override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = transport.next(outputs, sink)
+                        override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                            check(pauseControl.awaitBoundary() && !stopped())
+                            transport.next(outputs, sink)
+                        }
                         override fun cancel() {
                             if (!once.compareAndSet(false, true)) return
                             try { transport.cancel() }
@@ -120,8 +141,22 @@ class ToolEnabledChildRun(
                     }
                 }
             }
+            val receipts = object : ReceiptBatchToolExecutor by assembly.receipts {
+                override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<app.daiyu.android.domain.tools.ToolDispatchResult> {
+                    check(pauseControl.awaitBoundary() && !stopped() && !cancelled())
+                    return assembly.receipts.execute(message, invocations, cancelled)
+                }
+                override fun start(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): ReceiptBatchStart {
+                    check(pauseControl.awaitBoundary() && !stopped() && !cancelled())
+                    return assembly.receipts.start(message, invocations, cancelled)
+                }
+            }
             val childRunner = ChatRunner(selected, memory, assembly.tools,
-                RunnerOptions(receiptBatchExecutor = assembly.receipts)) { scope.requireOwner(it) }
+                RunnerOptions(receiptBatchExecutor = receipts)) { message ->
+                    scope.requireOwner(message)
+                    progress = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }.take(16 * 1024)
+                    changed()
+                }
             synchronized(gate) { runner = childRunner }
             if (stopped()) childRunner.stop() else {
                 val result = childRunner.run(initial, listOf(user))
@@ -138,6 +173,10 @@ class ToolEnabledChildRun(
                     ChildTaskStatus.UNKNOWN else ChildTaskStatus.NOT_EXECUTED,
                     text = result?.blocks?.filterIsInstance<MessageBlock.Text>()?.joinToString("\n") { it.text }.orEmpty(),
                     detail = if (result != null) null else if (sent) "child_result_unconfirmed" else "child_not_sent")
+                observed = record.copy(status = if (result != null) ChildTaskStatus.COMPLETED else if (sent)
+                    ChildTaskStatus.UNKNOWN else ChildTaskStatus.NOT_EXECUTED,
+                    text = result?.blocks?.filterIsInstance<MessageBlock.Text>()?.joinToString("\n") { it.text }.orEmpty(),
+                    detail = if (result != null) null else if (sent) "child_result_unconfirmed" else "child_not_sent")
             } catch (_: Exception) { synchronized(gate) { unknown = true } }
             close()
             synchronized(gate) { workerExited = true }
@@ -148,6 +187,7 @@ class ToolEnabledChildRun(
     override fun close() {
         val active = synchronized(gate) {
             cancelled = true
+            pauseControl.terminate()
             if (!attempted) { attempted = true; workerExited = true }
             runner
         }

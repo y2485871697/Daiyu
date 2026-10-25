@@ -12,7 +12,7 @@ internal class FrozenSubAgentModels(
     fun isCurrent(): Boolean = current()
 }
 
-/** Resolve the saved conversation configuration once; running children keep their captured snapshot. */
+/** Admission is frozen; compatible model edits are resolved only at a new request boundary. */
 internal class SavedSubAgentRuntimeBindings(
     private val createModel: (ProviderSnapshot) -> ModelPort = ModelFactory::create,
 ) {
@@ -22,7 +22,9 @@ internal class SavedSubAgentRuntimeBindings(
     fun freeze(owner: SubAgentConfigKey.Conversation, config: ConversationSubAgentConfig,
         providers: List<SubAgentProvider>, resolveSavedModel: (String, String) -> ModelSettings,
         bindingsCurrent: () -> Boolean = { true },
-        runModel: (ProviderSnapshot) -> ModelPort = createModel): FrozenSubAgentModels {
+        runModel: (ProviderSnapshot) -> ModelPort = createModel,
+        latestConfig: (() -> ConversationSubAgentConfig)? = null,
+        latestModel: ((String) -> ChildModelDefinition)? = null): FrozenSubAgentModels {
         val frozen = config.detached(); frozen.validate()
         require(frozen.enabled) { "Sub-agent configuration is disabled" }
         val enabled = frozen.profiles.filter { it.enabled }
@@ -60,8 +62,16 @@ internal class SavedSubAgentRuntimeBindings(
         require(current()) { "Saved provider or model record changed during preparation" }
         val definitions = selected.associate { binding ->
             val model = SubAgentParallelModel(binding.profile.providerId, binding.child.model)
-            binding.profile.id to ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model),
-                ChildTaskDisplay(binding.profile.name, binding.child.model, binding.modelName)) { runModel(binding.child) }
+            val display = ChildTaskDisplay(binding.profile.name, binding.child.model, binding.modelName)
+            val original = ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model), display,
+                latest = null, selection = binding.child) { runModel(binding.child) }
+            binding.profile.id to if (latestConfig == null || latestModel == null) original else
+                ChildModelDefinition(original.poolKey, original.parallelLimit, display,
+                    latest = {
+                        val next = latestConfig()
+                        if (frozen.acceptsModelHotUpdate(next) && next.parallelLimit(model) == original.parallelLimit)
+                            latestModel(binding.profile.id) else original
+                    }, selection = binding.child) { runModel(binding.child) }
         }
         return FrozenSubAgentModels(definitions, current)
     }

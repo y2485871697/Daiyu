@@ -6,7 +6,8 @@ import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
 
 /** One parent-owned, text-only batch. No child tools or recursive delegation. */
-internal class RunChildModels(private val batch: ChildModelBatch, profiles: Set<String>) : AutoCloseable {
+internal class RunChildModels(private val batch: ChildModelBatch, profiles: Set<String>,
+    private val currentProfiles: (() -> Set<String>)? = null) : AutoCloseable {
     private val profiles = profiles.toSet()
     init { require(this.profiles.isNotEmpty()) }
 
@@ -19,7 +20,7 @@ internal class RunChildModels(private val batch: ChildModelBatch, profiles: Set<
             CAPABILITY, ToolEffect.READ_ONLY,
             ToolSchema(listOf(ArgumentField("tasks", ArgumentType.ArrayValue(
                 ArgumentType.ObjectValue(ToolSchema(listOf(
-                    ArgumentField("profile_id", ArgumentType.Text(200, profiles, 1)),
+                    ArgumentField("profile_id", ArgumentType.Text(200, minimumLength = 1)),
                     ArgumentField("prompt", ArgumentType.Text(4096, minimumLength = 1))
                 ))), minimumItems = 1, maximumItems = 8)))))
 
@@ -28,7 +29,8 @@ internal class RunChildModels(private val batch: ChildModelBatch, profiles: Set<
                 val task = it as ToolArguments
                 ChildModelTask(task.text("profile_id"), task.text("prompt"))
             }
-            require(tasks.all { it.prompt.isNotBlank() }) { "invalid_arguments" }
+            val available = currentProfiles?.invoke() ?: profiles
+            require(tasks.all { it.prompt.isNotBlank() && it.profileId in available }) { "invalid_arguments" }
             return PreparedTool.contextual { context -> batch.execute(context, tasks) }
         }
     }

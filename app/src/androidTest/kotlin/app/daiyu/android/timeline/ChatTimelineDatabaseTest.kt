@@ -138,7 +138,7 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         val (_, db) = fresh(); val owner = seed(db); val before = db.messages(owner)
         db.writableDatabase.execSQL("DROP TABLE chat_timeline_events")
         db.writableDatabase.version = 25; db.close()
-        assertEquals(27, db.writableDatabase.version); assertEquals(before, db.messages(owner))
+        assertEquals(28, db.writableDatabase.version); assertEquals(before, db.messages(owner))
         assertTrue(ChatTimelineStore.read(db.readableDatabase, owner.value).isEmpty())
     }
 }

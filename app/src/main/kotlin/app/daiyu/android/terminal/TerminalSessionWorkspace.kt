@@ -56,7 +56,8 @@ class TerminalSessionWorkspace(
     private val admitLinux: (LinuxGenerationRef, () -> Boolean) -> Boolean,
 ) : AutoCloseable {
     private class Session(val owner: TerminalUiOwner, var entry: TerminalSessionEntry,
-        val conversation: ConversationId?) {
+        val conversation: ConversationId?, val workspace: TerminalWorkspaceDirectory?,
+        val workspacePin: AutoCloseable?) {
         var offset = 0L
         var setup = false
         var ready = false
@@ -69,6 +70,8 @@ class TerminalSessionWorkspace(
     }
     private val lock = Any()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // Cleanup survives workspace observation teardown, especially UNKNOWN native ownership.
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val sessions = linkedMapOf<String, Session>()
     private val retired = mutableSetOf<TerminalUiOwner>()
     private var closed = false
@@ -111,15 +114,18 @@ class TerminalSessionWorkspace(
         publish { it.copy(activeSessionId = id, linuxSelected = entry.linux != null, error = null) }
     }
 
-    fun create(conversation: ConversationId? = null): Boolean = synchronized(lock) {
+    /** Pin transfers only on true. Retained across stop/restart until session disposal and
+     * confirmed host cleanup; false leaves ownership with caller. */
+    fun create(conversation: ConversationId? = null, workspace: TerminalWorkspaceDirectory? = null,
+        workspacePin: AutoCloseable? = null): Boolean = synchronized(lock) {
         if (closed) return@synchronized false
         val state = mutableState.value
-        val linux = if (state.linuxSelected) state.linux.selected else null
+        val linux = if (state.linuxSelected) workspace?.reference ?: state.linux.selected else null
         if (state.simple && sessions.values.count { it.entry.simple } >= 6) return@synchronized false
-        if (state.linuxSelected && (linux == null || state.linux.state != "FILES_READY")) return@synchronized false
+        if (state.linuxSelected && (linux == null || (workspace?.reference == null && state.linux.state != "FILES_READY"))) return@synchronized false
         val owner = createOwner()
-        val accepted = if (linux == null) owner.openAndroid(conversation)
-            else admitLinux(linux) { owner.openLinux(linux, conversation) }
+        val accepted = if (linux == null) owner.openAndroid(conversation, workspace)
+            else admitLinux(linux) { owner.openLinux(linux, conversation, workspace) }
         if (!accepted) {
             if (owner !== initialOwner) owner.close()
             publish { it.copy(error = "无法打开终端会话") }
@@ -127,7 +133,7 @@ class TerminalSessionWorkspace(
         }
         val id = owner.uiSessionId
         val label = if (linux == null) "Android" else state.linux.distribution?.replaceFirstChar { it.uppercase() } ?: "Linux"
-        val session = Session(owner, TerminalSessionEntry(id, state.simple, linux, label, owner.host.state.value), conversation)
+        val session = Session(owner, TerminalSessionEntry(id, state.simple, linux, label, owner.host.state.value), conversation, workspace, workspacePin)
         sessions[id] = session
         activeByMode[state.simple] = id
         publish { it.copy(activeSessionId = id, error = null) }
@@ -135,9 +141,10 @@ class TerminalSessionWorkspace(
         true
     }
 
-    fun send(expectedId: String?, text: String, conversation: ConversationId? = null) = synchronized(lock) {
+    fun send(expectedId: String?, text: String, conversation: ConversationId? = null,
+        workspace: TerminalWorkspaceDirectory? = null) = synchronized(lock) {
         if (closed || mutableState.value.activeSessionId != expectedId || text.isEmpty()) return@synchronized
-        if (expectedId == null && !create(conversation)) return@synchronized
+        if (expectedId == null && !create(conversation, workspace)) return@synchronized
         val session = sessions[mutableState.value.activeSessionId] ?: return@synchronized
         if (session.removed || session.restart) return@synchronized
         if (!session.entry.simple) {
@@ -188,8 +195,9 @@ class TerminalSessionWorkspace(
         session.setupTimeout?.cancel()
         retired += session.owner
         session.owner.close()
-        scope.launch {
+        cleanupScope.launch {
             session.owner.host.state.first { !it.ownsResources }
+            session.workspacePin?.close()
             synchronized(lock) { retired.remove(session.owner); session.observation?.cancel() }
         }
         if (activeByMode[session.entry.simple] == id) {
@@ -312,8 +320,8 @@ class TerminalSessionWorkspace(
         session.ready = false; session.setup = false; session.offset = 0L
         session.decoder = TerminalBlockProtocol()
         val reference = session.entry.linux
-        val accepted = if (reference == null) session.owner.openAndroid(session.conversation)
-            else admitLinux(reference) { session.owner.openLinux(reference, session.conversation) }
+        val accepted = if (reference == null) session.owner.openAndroid(session.conversation, session.workspace)
+            else admitLinux(reference) { session.owner.openLinux(reference, session.conversation, session.workspace) }
         session.entry = session.entry.copy(restarting = false, state = session.owner.host.state.value)
         publish { it.copy(error = if (accepted) null else "无法重启终端会话") }
     }
@@ -325,7 +333,13 @@ class TerminalSessionWorkspace(
     override fun close() = synchronized(lock) {
         if (closed) return@synchronized
         closed = true
-        sessions.values.forEach { it.owner.close() }
+        sessions.values.forEach { session ->
+            session.owner.close()
+            cleanupScope.launch {
+                session.owner.host.state.first { !it.ownsResources }
+                session.workspacePin?.close()
+            }
+        }
         retired.forEach { it.close() }
         initialOwner.close()
         scope.cancel()

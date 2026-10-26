@@ -30,6 +30,7 @@ internal sealed interface TerminalPtyLaunch {
         val expected: LinuxGenerationRef,
         val tempDirectory: File,
         val hostWorkingDirectory: File,
+        val workspace: LinuxWorkspaceDirectory?,
         private val lease: LinuxEnvironmentStore.Lease,
         val argv: List<String>,
         val environment: Map<String, String>,
@@ -49,26 +50,27 @@ internal sealed interface TerminalPtyLaunch {
         }
         val executionMode get() = if (rootScope == null) app.daiyu.android.terminal.LinuxExecutionMode.PROOT else app.daiyu.android.terminal.LinuxExecutionMode.CHROOT
         internal fun commandConfiguration(): TerminalConfiguration {
-            val current = lease.configuration(tempDirectory, hostWorkingDirectory)
+            val current = lease.configuration(tempDirectory, hostWorkingDirectory, workspace)
             check(rootScope == null && current.linux?.rootScope == null) { "linux_chroot_command_jobs_not_supported" }
             return current
         }
         internal fun revalidate() {
-            val current = lease.configuration(tempDirectory, hostWorkingDirectory)
+            val current = lease.configuration(tempDirectory, hostWorkingDirectory, workspace)
             val backend = checkNotNull(current.linux)
             check(backend.shellArgv == argv && backend.environment + current.environment == environment && backend.rootScope == rootScope) { "terminal_launch_changed" }
         }
         companion object {
             /** Worker-only metadata/identity checks; does not launch a process. */
-            fun freeze(store: LinuxEnvironmentStore, expected: LinuxGenerationRef, tempDirectory: File, hostWorkingDirectory: File): Linux {
+            fun freeze(store: LinuxEnvironmentStore, expected: LinuxGenerationRef, tempDirectory: File, hostWorkingDirectory: File,
+                workspace: LinuxWorkspaceDirectory? = null): Linux {
                 require(tempDirectory.isAbsolute && hostWorkingDirectory.isAbsolute)
                 val lease = store.acquire(expected)
                 try {
                     val temp = tempDirectory.canonicalFile
                     val cwd = hostWorkingDirectory.canonicalFile
-                    val configuration = lease.configuration(temp, cwd)
+                    val configuration = lease.configuration(temp, cwd, workspace)
                     val backend = checkNotNull(configuration.linux)
-                    return Linux(store, expected, temp, cwd, lease,
+                    return Linux(store, expected, temp, cwd, workspace, lease,
                         Collections.unmodifiableList(backend.shellArgv.toList()),
                         Collections.unmodifiableMap((backend.environment + configuration.environment).toMap()), backend.rootScope)
                 } catch (failure: Throwable) { lease.close(); throw failure }
@@ -378,7 +380,7 @@ internal class CatalogTerminalBinding private constructor(
                     is TerminalPtyLaunch.Linux -> {
                         launch.revalidate()
                         wrap(AndroidPtyHost.openLinux(context, owner, launch.store, launch.expected,
-                            launch.tempDirectory, launch.hostWorkingDirectory, plan.journalDirectory, plan.sessionScope, plan.rows, plan.columns))
+                            launch.tempDirectory, launch.hostWorkingDirectory, plan.journalDirectory, plan.sessionScope, plan.rows, plan.columns, launch.workspace))
                     }
                 }
             }

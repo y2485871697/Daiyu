@@ -67,6 +67,33 @@ class TerminalEnvironmentHostDeviceTest : InstrumentationTestCase() {
         } finally { files.deleteRecursively() }
     }
 
+    fun testTwoAndroidSessionsUseTheirOwnHostCwdEvenWithLinuxWorkspaceMetadata() {
+        val root = File(instrumentation.targetContext.filesDir, "cwd-test-${UUID.randomUUID()}").apply { mkdirs() }.canonicalFile
+        val hosts = (0..1).map { TerminalEnvironmentHost.android(instrumentation.targetContext) }
+        val directories = listOf(File(root, "rootfs/project"), File(root, "private")).map { it.apply { mkdirs() } }
+        try {
+            hosts.forEachIndexed { index, host ->
+                val authorization = TaskAuthorization("cwd-$index", UUID.randomUUID().toString())
+                val owner = PtyRunOwner(ConversationId("cwd-$index"), authorization,
+                    TerminalEnvironmentHost.ANDROID_ENVIRONMENT, TerminalEnvironmentHost.ANDROID_GENERATION)
+                val workspace = TerminalWorkspaceDirectory(directories[index],
+                    if (index == 0) LinuxWorkspaceDirectory(directories[index], "/project") else null)
+                assertTrue(host.open(TerminalOpenRequest(owner, "cwd-${UUID.randomUUID()}", workspace = workspace)))
+                await("Android workspace startup") { host.state.value.acceptsInput || !host.state.value.ownsResources }
+                assertTrue("no Linux fallback: ${host.state.value.error}", host.state.value.acceptsInput)
+                assertTrue(host.send(authorization, "printf '\\nSESSION_CWD=%s\\n' \"\$(pwd -P)\"; exit\n").get(5, TimeUnit.SECONDS).ok)
+            }
+            hosts.forEachIndexed { index, host ->
+                await("Android workspace exit") { host.state.value.terminationConfirmed }
+                assertTrue(host.state.value.output.lines().map(String::trim).contains("SESSION_CWD=${directories[index].path}"))
+            }
+        } finally {
+            hosts.forEach { it.close() }
+            hosts.forEach { host -> await("workspace cleanup") { !host.state.value.ownsResources } }
+            root.deleteRecursively()
+        }
+    }
+
     fun testExplicitAppIdentityOpenRealOutputExitAndNoObservationReplay() {
         val host = TerminalEnvironmentHost.android(instrumentation.targetContext)
         val owner = PtyRunOwner(ConversationId("r09-device"), TaskAuthorization("r09-device", UUID.randomUUID().toString()),

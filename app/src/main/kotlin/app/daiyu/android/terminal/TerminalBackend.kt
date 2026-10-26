@@ -29,10 +29,13 @@ data class LinuxBackend(
 
 /** Fixed host transport for an explicitly selected installation, never model argv. */
 @ConsistentCopyVisibility
-data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, internal val identityProbe: Boolean = false) {
+data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, internal val identityProbe: Boolean = false,
+    val guestWorkingDirectory: String = "/") {
     init {
         require(rootfs.isAbsolute && rootfs == rootfs.canonicalFile && rootfs.isDirectory)
         require(su.isAbsolute && su.toPath().normalize() == su.toPath() && su.isFile)
+        LinuxPathSyntax.guest(guestWorkingDirectory)
+        require(!identityProbe || guestWorkingDirectory == "/") { "linux_chroot_probe_cwd_not_supported" }
     }
     companion object {
         private val transportPaths = listOf("/system/bin/su", "/system/bin/chroot", "/system/bin/env", "/system/bin/sh")
@@ -46,8 +49,13 @@ data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, 
             files.forEach { trustedTransportIdentity(it) }
         }
     }
-    internal fun guestArgv(): List<String> = listOf("/system/bin/chroot", rootfs.path, "/bin/sh") +
-        if (identityProbe) listOf("-c", "id -u") else emptyList()
+    internal fun guestArgv(): List<String> = listOf("/system/bin/chroot", rootfs.path, "/bin/sh") + when {
+        identityProbe -> listOf("-c", "id -u")
+        guestWorkingDirectory == "/" -> emptyList()
+        // Fixed bridge: cwd is a positional argument, never shell source. RootScope still owns
+        // the cgroup, private procfs mount and D/launcher-exit termination protocol.
+        else -> listOf("-c", "cd -- \"\$1\" && exec /bin/sh", "daiyu-workspace", guestWorkingDirectory)
+    }
 }
 internal class BackendUnavailable(val code: String, val cleanup: BackendProbeCleanup? = null) : Exception(code)
 

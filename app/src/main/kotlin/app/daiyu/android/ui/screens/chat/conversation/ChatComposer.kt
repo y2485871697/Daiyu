@@ -92,6 +92,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null,
     onInputFocusChanged: (Boolean) -> Unit = {},
     isInputDismissInProgress: () -> Boolean = { false },
+    onOpenWorkspace: () -> Unit = actions.onOpenWorkspace,
     attachmentContent: @Composable () -> Unit = {}) {
     var lifecycleDismissInProgress by remember { mutableStateOf(false) }
     app.daiyu.android.ui.components.DismissImeOnStop { dismiss ->
@@ -146,8 +147,15 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     }
     Column(modifier.managedInput().fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = 10.dp, bottom = 16.dp)) {
         ChatComposerSurface(backdrop) {
+        ComposerWorkspacePullUpArea {
+            lifecycleDismissInProgress = true
+            try { hideChatInputIme(focus, keyboard, view) }
+            finally { lifecycleDismissInProgress = false }
+            onOpenWorkspace()
+        }
+        // The original top padding is now a content-side blank drag strip.
         // Include the transparent 1dp CSS border in the composer box model.
-        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),

@@ -67,6 +67,7 @@ data class ChatScreenActions(
     val onInteractiveModeChange: (Boolean) -> Unit = {},
     /** Measured visible completed turn keys after a frame, not merely selected/loaded history. */
     val onVisibleCompleted: (Set<String>) -> Unit = {},
+    val onOpenWorkspace: () -> Unit = {},
     /** Actual typewriter growth in a visible row, never a network chunk or recomposition. */
     val onVisibleTextAdvance: (String) -> Unit = {},
 )

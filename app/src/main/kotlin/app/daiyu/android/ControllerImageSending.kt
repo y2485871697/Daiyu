@@ -207,10 +207,11 @@ internal class ControllerImageAttempt(
             // Journals predate message times. The original row is the authority on replay,
             // including a legacy null; never turn an uncertain receipt into a fresh send.
             check(user == expectedUser(user.createdAt) && assistant.runId == runId && assistant.role == Message.ASSISTANT_ROLE)
-            val conversation = db.rawQuery("SELECT title,draft,updated,folder,pinned FROM conversations WHERE id=?",
+            val conversation = db.rawQuery("SELECT title,draft,updated,folder,pinned,assistant_id,workspace_binding FROM conversations WHERE id=?",
                 arrayOf(owner.conversationId)).use {
                 check(it.moveToFirst())
-                Conversation(user.conversationId, it.getString(0), it.getString(1), it.getLong(2), it.getString(3), it.getInt(4) != 0)
+                Conversation(user.conversationId, it.getString(0), it.getString(1), it.getLong(2), it.getString(3), it.getInt(4) != 0,
+                    if (it.isNull(5)) null else it.getString(5), if (it.isNull(6)) null else it.getString(6))
             }
             accepted(conversation, confirmJournal)
         }

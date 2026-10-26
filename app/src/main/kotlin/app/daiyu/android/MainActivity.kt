@@ -1006,6 +1006,7 @@ class MainActivity : ComponentActivity() {
         get() = retainedPageState
         set(value) {
             if (value != retainedPageState) {
+                revokeWorkspaceVisit()
                 resetRootExitConfirmation()
                 revokeCommandApproval()
                 revokeTerminalJobsVisit()
@@ -1102,6 +1103,7 @@ class MainActivity : ComponentActivity() {
     @Volatile private var selected: Conversation? = null
         set(value) {
             if (field?.id != value?.id) {
+                revokeWorkspaceVisit()
                 closeBrowserVisualVisit()
                 if (retainedPage == "browser") retainedPage = "chat"
             }
@@ -1594,6 +1596,57 @@ class MainActivity : ComponentActivity() {
     private var assistantAvatarRevision by mutableStateOf(0L)
     private var collaborationOwner by mutableStateOf<String?>(null)
     private var collaborationVisible by mutableStateOf(false)
+    private data class WorkspaceVisit(val token: Any, val conversation: ConversationId?, val generation: Long,
+        val editor: app.daiyu.android.workspace.ConversationWorkspaceEditor,
+        val source: String, val path: String, val busy: Boolean = false, val error: String? = null)
+    private var workspaceVisit by mutableStateOf<WorkspaceVisit?>(null)
+    private var workspaceOpenToken: Any? = null
+    private fun revokeWorkspaceVisit() { workspaceOpenToken = null; workspaceVisit = null }
+    private fun workspaceCurrent(visit: WorkspaceVisit) = activityUsable() && voiceForeground &&
+        retainedPage == "chat" && !sidebarVisible && selected?.id == visit.conversation &&
+        workspaceVisit?.token === visit.token && editorGeneration == visit.generation
+    private fun openConversationWorkspace() {
+        if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
+            workspaceOpenToken != null || workspaceVisit != null) return
+        val owner = selected?.id
+        val generation = editorGeneration
+        val token = Any()
+        workspaceOpenToken = token
+        fun current() = workspaceOpenToken === token && activityUsable() && voiceForeground &&
+            retainedPage == "chat" && !sidebarVisible && selected?.id == owner && editorGeneration == generation
+        lifecycleScope.launch {
+            try {
+                val editor = withContext(Dispatchers.IO) { controller.workspaceEditorOnWorker(owner) }
+                if (current()) workspaceVisit = WorkspaceVisit(token, owner, generation, editor, editor.selectedSourceId, editor.path)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { if (current()) toast("工作区信息读取失败") }
+            finally { if (workspaceOpenToken === token) workspaceOpenToken = null }
+        }
+    }
+    private fun saveConversationWorkspace(visit: WorkspaceVisit) {
+        if (!workspaceCurrent(visit) || workspaceVisit !== visit || visit.busy) return
+        workspaceVisit = visit.copy(busy = true, error = null)
+        lifecycleScope.launch {
+            val failure = try {
+                val saved = withContext(Dispatchers.IO) {
+                    controller.saveWorkspaceOnWorker(visit.conversation, visit.editor.binding, visit.source, visit.path)
+                }
+                if (saved) null else "会话正在运行或绑定已变化，请稍后重新打开"
+            } catch (failure: Exception) {
+                when (failure.message) {
+                    "workspace_rootfs_changed" -> "Rootfs 已更换或不可用，请重新选择"
+                    "workspace_private_root_required" -> "请选择应用私有目录中的路径"
+                    "workspace_symlink_not_supported" -> "工作区不支持符号链接，请填写实际目录"
+                    else -> "工作区路径不可用，请填写已存在的目录"
+                }
+            }
+            if (workspaceCurrent(visit)) {
+                if (failure == null) { workspaceVisit = null; refresh() }
+                else workspaceVisit = visit.copy(error = failure)
+            }
+        }
+    }
+
     private var childStatusVisit by mutableStateOf<Pair<Any, String?>?>(null)
     private data class UsageVisit(val token: Any, val conversation: ConversationId?)
     private var usageVisit by mutableStateOf<UsageVisit?>(null)
@@ -1861,7 +1914,9 @@ class MainActivity : ComponentActivity() {
                                 isCurrent = { terminalPageCurrent(page) },
                                 onOpenTasks = { openTerminalTasks(page) },
                                 onCreateSession = { createTerminalSession(page) },
-                                onSend = { id, text -> if (terminalPageCurrent(page)) workspace.send(id, text, selected?.id) },
+                                onSend = { id, text -> if (terminalPageCurrent(page)) {
+                                    if (id == null) createTerminalSession(page, text) else workspace.send(id, text, selected?.id)
+                                } },
                                 onOpenEnvironment = { if (terminalPageCurrent(page)) openLinuxSettings() },
                                 onBack = {
                                     if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
@@ -2404,6 +2459,21 @@ class MainActivity : ComponentActivity() {
                         }
                     } else LaunchedEffect(visit) { if (childStatusVisit === visit) childStatusVisit = null }
                 }
+                workspaceVisit?.let { visit ->
+                    if (workspaceCurrent(visit)) {
+                        app.daiyu.android.ui.components.ConversationWorkspaceSheet(
+                            visible = true, sources = visit.editor.sources.map {
+                                app.daiyu.android.ui.components.WorkspaceSourceOption(it.id, it.title, it.rootPath, it.initialPath)
+                            }, selectedSourceId = visit.source, path = visit.path, busy = visit.busy, error = visit.error,
+                            onSourceChange = { source -> if (!visit.busy && workspaceVisit === visit && workspaceCurrent(visit)) {
+                                val option = visit.editor.sources.firstOrNull { it.id == source }
+                                if (option != null) workspaceVisit = visit.copy(source = source, path = option.initialPath, error = null)
+                            } }, onPathChange = { path -> if (!visit.busy && workspaceVisit === visit && workspaceCurrent(visit)) {
+                                workspaceVisit = visit.copy(path = path, error = null)
+                            } }, onSave = { saveConversationWorkspace(visit) },
+                            onDismiss = { if (workspaceVisit?.token === visit.token) revokeWorkspaceVisit() })
+                    } else LaunchedEffect(visit.token) { if (workspaceVisit?.token === visit.token) workspaceVisit = null }
+                }
                 val owner = collaborationOwner
                 ConversationCollaborationDialog(show = collaborationVisible, conversationId = owner,
                     onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = backupBusy,
@@ -2554,6 +2624,7 @@ class MainActivity : ComponentActivity() {
         val renderedSpeed = confirmedGptSpeed
         val renderedSpeedConversation = selected?.id?.value
         return ChatScreenActions(
+        onOpenWorkspace = { if (currentChat()) openConversationWorkspace() },
         onCycleGptSpeed = { cycleChatGptSpeed(renderedSpeed, renderedSpeedConversation) },
         onVisibleCompleted = completionReadAction(),
         onVisibleTextAdvance = { key ->
@@ -4922,6 +4993,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        revokeWorkspaceVisit()
         resetRootExitConfirmation()
         cancelPaneConversationSelection()
         controller.detachCommandApprovalUi(commandApprovalUi)
@@ -5196,11 +5268,40 @@ class MainActivity : ComponentActivity() {
     }
     private fun terminalPageCurrent(page: Any) = activityUsable() && voiceForeground &&
         retainedPage == "terminal" && terminalPageOwner === page && !sidebarVisible
-    private fun createTerminalSession(page: Any) {
-        if (!terminalPageCurrent(page)) return
+    private var terminalWorkspaceCreation: Any? = null
+    private fun createTerminalSession(page: Any, initialText: String? = null) {
+        if (!terminalPageCurrent(page) || terminalWorkspaceCreation != null) return
         val application = (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)
             ?.application ?: return
-        application.terminalSessions.create(selected?.id)
+        val conversation = selected?.id
+        val before = application.terminalSessions.state.value
+        val creation = Any()
+        terminalWorkspaceCreation = creation
+        lifecycleScope.launch {
+            val pending = java.util.concurrent.atomic.AtomicReference<app.daiyu.android.workspace.ConversationWorkspaceRun?>()
+            try {
+                withContext(Dispatchers.IO) { pending.set(controller.freezeConversationWorkspaceOnWorker(conversation)) }
+                val frozen = checkNotNull(pending.get())
+                val current = application.terminalSessions.state.value
+                if (!terminalPageCurrent(page) || selected?.id != conversation || current.simple != before.simple ||
+                    current.linuxSelected != before.linuxSelected ||
+                    (initialText != null && current.activeSessionId != before.activeSessionId)) return@launch
+                val reference = frozen.resolved.rootfs?.let {
+                    app.daiyu.android.terminal.LinuxGenerationRef(it.environmentId, it.generation)
+                } ?: application.terminalOwner.host.state.value.linux.selected
+                val directory = frozen.terminal(reference)
+                if (application.terminalSessions.create(conversation, directory, frozen)) {
+                    pending.set(null)
+                    if (initialText != null) application.terminalSessions.send(
+                        application.terminalSessions.state.value.activeSessionId, initialText, conversation)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { if (terminalPageCurrent(page)) toast("会话工作区不可用，未创建终端") }
+            finally {
+                pending.getAndSet(null)?.close()
+                if (terminalWorkspaceCreation === creation) terminalWorkspaceCreation = null
+            }
+        }
     }
     private fun openTerminal() {
         requireActivityUsable()
@@ -5566,7 +5667,7 @@ class MainActivity : ComponentActivity() {
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
         shown = if (conversation == null) mutableListOf() else (prepared?.messages ?: controller.database.messages(conversation.id)).toMutableList()
-        childStatusVisit = null; usageVisit = null; collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
+        childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
     }
     private fun sendDraft(text: String, universal: UniversalSend? = null) {
         if (pendingTextSend != null || text != draft || text.isBlank()) {

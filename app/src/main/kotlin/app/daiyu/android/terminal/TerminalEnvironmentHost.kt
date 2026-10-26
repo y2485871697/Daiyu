@@ -3,7 +3,6 @@ package app.daiyu.android.terminal
 import android.content.Context
 import app.daiyu.android.runningmode.AndroidRunningModeStore
 import app.daiyu.android.runningmode.RunningMode
-import app.daiyu.android.workspace.PrivateWorkspacePaths
 import app.daiyu.android.domain.tools.TaskAuthorization
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +21,7 @@ data class TerminalOpenRequest(
     val owner: PtyRunOwner,
     val sessionScope: String,
     val linux: LinuxGenerationRef? = null,
+    val workspace: TerminalWorkspaceDirectory? = null,
 )
 
 data class TerminalLinuxChoice(val reference: LinuxGenerationRef, val label: String,
@@ -418,16 +418,25 @@ private class AndroidTerminalEnvironmentBackend(
                 requireMode(request.linux)
                 // Validate before creating home/tmp/journal or looking up the PTY helper. The
                 // guard lease prevents a selection change until openLinux acquires its own lease.
-                return selection.withSelection(request.linux) { store ->
+                val open: (LinuxEnvironmentStore) -> TerminalOwnedResource = { store ->
                     val cwd = File(root, "home").apply { check(mkdirs() || isDirectory) }
                     val temp = File(root, "tmp").apply { check(mkdirs() || isDirectory) }
+                    check(request.workspace == null || request.workspace.linux != null) { "linux_workspace_mapping_required" }
                     val session = AndroidPtyHost.openLinux(context, request.owner, store, request.linux,
-                        temp, cwd, File(root, "journal"), request.sessionScope)
+                        temp, cwd, File(root, "journal"), request.sessionScope, workspace = request.workspace?.linux)
                     TerminalResource(session::read, session::write, session::close, session::awaitTermination, session::resize, session::readAvailable)
                 }
+                return if (request.workspace == null) selection.withSelection(request.linux, open)
+                    else {
+                        check(request.workspace.reference == null || request.workspace.reference == request.linux) { "linux_workspace_generation_mismatch" }
+                        selection.withInstallation(request.linux, open)
+                    }
             }
             val home = File(root, "home").apply { check(mkdirs() || isDirectory) }
-            val cwd = PrivateWorkspacePaths(context.filesDir).ensureRoot()
+            val cwd = request.workspace?.hostDirectory ?: File(context.filesDir, "workspace").apply {
+                check(mkdirs() || isDirectory) { "terminal_workspace_unavailable" }
+            }
+            require(cwd.isAbsolute && cwd == cwd.canonicalFile && cwd.isDirectory) { "terminal_workspace_unavailable" }
             val journal = File(root, "journal")
             // Fixed Android app-UID shell. No su, Shizuku, arbitrary backend/argv or background job API.
             val session = AndroidPtyHost.open(context, request.owner, listOf("/system/bin/sh"),
@@ -492,6 +501,21 @@ internal class TerminalTrustedLinuxSelection(
         check(directory.isDirectory) { "linux_environment_not_selected" }
         return store.acquire(reference).use { lease ->
             lease.assertMatches(trusted)
+            action(store)
+        }
+    }
+
+    /** Independent immutable approved generation store; never reads/writes selected-linux.json. */
+    fun <T> withInstallation(reference: LinuxGenerationRef, action: (LinuxEnvironmentStore) -> T): T {
+        val installation = trusted(reference)
+        val id = java.security.MessageDigest.getInstance("SHA-256")
+            .digest("${reference.environmentId}\u0000${reference.generation}".toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        val generationDirectory = File(directory.parentFile, "workspace-generations/$id")
+        val store = LinuxEnvironmentStore(generationDirectory, directorySync, fileKey, chrootRoot,
+            trustedInstallation = installation)
+        return store.acquire(reference).use { lease ->
+            lease.assertMatches(installation)
             action(store)
         }
     }

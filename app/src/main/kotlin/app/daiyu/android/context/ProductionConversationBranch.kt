@@ -45,7 +45,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             val inputs: List<List<MessageVideoInput>>, val generation: StaticGenerationBranch.Capture?,
             val replyIdentities: List<app.daiyu.android.assistants.AssistantReplyIdentity?>)
         fun sourceValues(sql: SQLiteDatabase) = BackupHistoryRows.read(sql, "conversations",
-            listOf("id", "title", "folder", "assistant_id", "pinned", "draft", "updated"), " WHERE id=?", arrayOf(id.value))
+            listOf("id", "title", "folder", "assistant_id", "workspace_binding", "pinned", "draft", "updated"), " WHERE id=?", arrayOf(id.value))
         fun attachments(sql: SQLiteDatabase) = BackupHistoryRows.read(sql, "neutral_assets",
             listOf("id", "message_id", "kind", "mime", "bytes", "blob_hash"),
             " WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=?)", arrayOf(id.value))
@@ -160,6 +160,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                     put("id", copy.value); put("title", source.getString("title") + " · 分支")
                     if (source.isNull("folder")) putNull("folder") else put("folder", source.getString("folder"))
                     if (source.isNull("assistant_id")) putNull("assistant_id") else put("assistant_id", source.getString("assistant_id"))
+                    if (source.isNull("workspace_binding")) putNull("workspace_binding") else put("workspace_binding", source.getString("workspace_binding"))
                     put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis())
                 }
                 check(db.insertOrThrow("conversations", null, values) != -1L)

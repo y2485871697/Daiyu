@@ -40,7 +40,9 @@ data class LinuxGenerationRef(val environmentId: String, val generation: String)
 class LinuxEnvironmentStore internal constructor(private val directory: File,
     private val directorySync: (File) -> Unit,
     private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
-    private val chrootRoot: File? = null) {
+    private val chrootRoot: File? = null,
+    private val initializeDirectory: Boolean = true,
+    private val trustedInstallation: LinuxInstallation? = null) {
     constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
     internal constructor(directory: File, directorySync: (File) -> Unit, fileKey: (java.nio.file.Path) -> Any?) :
         this(directory, directorySync, fileKey, null)
@@ -56,10 +58,14 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     private val control get() = shared
 
 
-    init { TerminalDurability.ensureDirectory(directory, directorySync) }
+    init { if (initializeDirectory) TerminalDurability.ensureDirectory(directory, directorySync) }
+
+    /** Pure inspection of supplied trusted metadata; never reads or writes a selection. */
+    internal fun installationIdentity(installation: LinuxInstallation): List<String> = validate(installation)
 
     /** User-selected installation, never implicit fallback to another distribution. */
     fun select(installation: LinuxInstallation) = synchronized(control) {
+        check(trustedInstallation == null) { "linux_immutable_generation_store" }
         check(shared.leases == 0) { "linux_environment_in_use" }
         val frozen = installation.copy(sharedMounts = installation.sharedMounts.toMap())
         validate(frozen)
@@ -71,6 +77,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     }
 
     fun clearSelection() = synchronized(control) {
+        check(trustedInstallation == null) { "linux_immutable_generation_store" }
         check(shared.leases == 0) { "linux_environment_in_use" }
         // Persist an explicit empty choice rather than an un-fsynced unlink.
         runnerPins.admitted(requireEmpty = true) {
@@ -145,37 +152,55 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
             check(installation == expected) { "linux_trusted_installation_mismatch" }
             check(validate(installation) == identities) { "linux_installation_changed" }
         }
-        fun backend(tempDirectory: File): LinuxBackend = synchronized(control) {
+        private val workspaceIdentities = mutableMapOf<LinuxWorkspaceDirectory, List<String>>()
+        fun backend(tempDirectory: File, workspace: LinuxWorkspaceDirectory? = null): LinuxBackend = synchronized(control) {
             check(!closed) { "linux_environment_lease_closed" }
             check(validate(installation) == identities) { "linux_installation_changed" }
             require(tempDirectory.isAbsolute && tempDirectory.isDirectory && tempDirectory.canWrite())
+            if (workspace != null) {
+                val identity = workspace.validateFor(installation).map { file ->
+                    val key = checkNotNull(fileKey(file.toPath())) { "linux_path_identity_unavailable" }
+                    "${file.path}\n$key"
+                }
+                val frozen = workspaceIdentities.getOrPut(workspace) { identity }
+                check(frozen == identity) { "linux_workspace_changed" }
+            }
+            val guestCwd = workspace?.guestDirectory ?: installation.guestWorkingDirectory
+            val mounts = if (workspace?.bindWorkspace == true) {
+                require(installation.sharedMounts.values.none { target ->
+                    target == "/workspace" || target.startsWith("/workspace/") || "/workspace".startsWith(target.trimEnd('/') + "/")
+                }) { "linux_workspace_shared_mount_conflict" }
+                installation.sharedMounts + (workspace.hostDirectory.path to workspace.guestDirectory)
+            } else installation.sharedMounts
             val environment = mapOf("HOME" to "/root", "TMPDIR" to "/tmp", "TERM" to "xterm-256color",
                 "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
             if (installation.executionMode == LinuxExecutionMode.CHROOT) {
-                val launch = RootScopeLaunch(installation.rootfs, File("/system/bin/su"))
+                val launch = RootScopeLaunch(installation.rootfs, File("/system/bin/su"), guestWorkingDirectory = guestCwd)
                 LinuxBackend(installation.distribution, launch.guestArgv(), identityArgv = emptyList(), environment = environment, expectedUid = 0,
-                    environmentId = "${installation.environmentId}:${installation.generation}", rootScope = launch)
+                    environmentId = "${installation.environmentId}:${installation.generation}", guestWorkingDirectory = guestCwd, rootScope = launch)
             } else {
                 val helpers = installation.requireProotFiles()
-                val binds = installation.sharedMounts.entries.sortedBy { it.key }.flatMap { (host, guest) -> listOf("-b", "$host:$guest") }
+                val binds = mounts.entries.sortedBy { it.key }.flatMap { (host, guest) -> listOf("-b", "$host:$guest") }
                 LinuxBackend(
                     label = installation.distribution,
                     shellArgv = listOf(helpers.executable.path, "-0", "-r", installation.rootfs.path,
-                        "-w", installation.guestWorkingDirectory) + binds + listOf("/bin/sh"),
+                        "-w", guestCwd) + binds + listOf("/bin/sh"),
                     identityArgv = emptyList(),
                     environment = environment - setOf("TMPDIR", "TERM") + mapOf("PROOT_LOADER" to helpers.loader.path,
                         "PROOT_TMP_DIR" to tempDirectory.canonicalPath),
                     expectedUid = 0,
                     environmentId = installation.environmentId + ":" + installation.generation,
-                    guestWorkingDirectory = installation.guestWorkingDirectory,
-                    sharedMounts = installation.sharedMounts.toMap()
+                    guestWorkingDirectory = guestCwd,
+                    sharedMounts = mounts.toMap()
                 )
             }
         }
-        fun configuration(tempDirectory: File, hostWorkingDirectory: File): TerminalConfiguration {
-            require(hostWorkingDirectory.isAbsolute && hostWorkingDirectory.isDirectory)
+        fun configuration(tempDirectory: File, hostWorkingDirectory: File,
+            workspace: LinuxWorkspaceDirectory? = null): TerminalConfiguration {
+            val cwd = workspace?.hostDirectory ?: hostWorkingDirectory
+            require(cwd.isAbsolute && cwd.isDirectory)
             return TerminalConfiguration(backend = "linux", root = false,
-                workingDirectory = hostWorkingDirectory, linux = backend(tempDirectory))
+                workingDirectory = cwd, linux = backend(tempDirectory, workspace))
         }
         internal fun claimExecution(): AutoCloseable = synchronized(control) {
             check(!closed) { "linux_environment_lease_closed" }
@@ -265,6 +290,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     }
 
     private fun load(): LinuxInstallation? {
+        trustedInstallation?.let { return it }
         if (!selection.exists()) return null
         check(selection.length() <= 32768) { "linux_installation_metadata_limit" }
         val value = JSONObject(selection.readText(Charsets.UTF_8))

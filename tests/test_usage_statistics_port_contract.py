@@ -9,8 +9,8 @@ def read(p): return (SRC / p).read_text()
 class UsageStatisticsPortContractTest(unittest.TestCase):
     def test_new_and_upgraded_databases_install_independent_accounting(self):
         source=read('storage/ConversationDatabase.kt')
-        self.assertIn('null, 27)', source)
-        self.assertIn('oldVersion in 1..26 && newVersion == 27', source)
+        self.assertIn('null, 28)', source)
+        self.assertIn('oldVersion in 1..27 && newVersion == 28', source)
         upgrade=source.split('override fun onUpgrade',1)[1]
         self.assertLess(upgrade.index('UsageStatisticsStore.install(db)'),upgrade.index('if (oldVersion >= 13) return'))
         self.assertLess(upgrade.index('ConversationUsageStore.backfill(db)'),upgrade.index('UsageStatisticsStore.install(db)'))

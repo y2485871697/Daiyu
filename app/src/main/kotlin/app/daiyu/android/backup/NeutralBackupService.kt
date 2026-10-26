@@ -509,7 +509,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             (if (version >= 8L) setOf("statistics") else emptySet()))
         val history = store.preflightBackup(string(payload, "text_backup"))
         val legacy = objectOf(string(payload, "text_backup"))
-        require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") in 1..2)
+        require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") in 1..3)
         val oldRaw = string(legacy, "payload"); require(Utf8Payload.sha256(oldRaw) == legacy.getString("sha256"))
         val old = objectOf(oldRaw); val conversations = old.getJSONArray("conversations"); val messages = old.getJSONArray("messages")
         require(conversations.length() <= 1000 && messages.length() <= 50000)

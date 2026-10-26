@@ -120,11 +120,11 @@ internal class ControllerVideoJournal(private val preferences: SharedPreferences
                 ControllerVideoManifestWitness.verify(db, user, actual)
                 ControllerVideoManifestWitness.verify(db, assistant, SQLiteMessageVideoStore.read(db, assistant))
                 check(MessageVideoInputCodec.encode(user, actual) == MessageVideoInputCodec.encode(user, expected))
-                db.rawQuery("SELECT title,draft,updated,folder,pinned,assistant_id FROM conversations WHERE id=?",
+                db.rawQuery("SELECT title,draft,updated,folder,pinned,assistant_id,workspace_binding FROM conversations WHERE id=?",
                     arrayOf(conversationId.value)).use { c ->
                     check(c.moveToFirst())
                     Conversation(conversationId, c.getString(0), c.getString(1), c.getLong(2), c.getString(3), c.getInt(4) != 0,
-                        if (c.isNull(5)) null else c.getString(5))
+                        if (c.isNull(5)) null else c.getString(5), if (c.isNull(6)) null else c.getString(6))
                 }
             }
             Recovery(receipt(VideoDraftOutcome.ACCEPTED), conversation, userId, assistantId, runId)
@@ -235,7 +235,8 @@ internal class ControllerVideoAttempt(
         prepared: PreparedControllerVideoSend, plan: ControllerVideoModelPlan,
         expectedAssistantId: String?, expectedDraftText: String,
         cancelled: () -> Boolean, beforeSend: (SQLiteDatabase) -> Unit = {},
-        replyIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null): VideoDraftReceipt {
+        replyIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null,
+        expectedWorkspaceBinding: String? = null): VideoDraftReceipt {
         check(reserved && !settled && !databaseEntered)
         check(!database.writableDatabase.inTransaction()) { "video_outer_transaction_forbidden" }
         return try {
@@ -259,7 +260,8 @@ internal class ControllerVideoAttempt(
                 journal.phase(this, "DB_ENTERED")
                 databaseEntered = true
                 val conversation = database.send(prepared.user, prepared.assistant, request.conversation == null,
-                    expectedAssistantId, videoInputs = prepared.inputs, replyIdentity = replyIdentity)
+                    expectedAssistantId, videoInputs = prepared.inputs, replyIdentity = replyIdentity,
+                    expectedWorkspaceBinding = expectedWorkspaceBinding)
                 // Same OUTERMOST transaction. Parent must also wire all ordinary sends/imports;
                 // insert-or-verify permits parent DB wiring without replacing existing evidence.
                 ControllerVideoManifestWitness.insert(db, prepared.user, prepared.inputs)

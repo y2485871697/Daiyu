@@ -50,7 +50,7 @@ internal class ControllerTerminalJobPreparation(
             session
         }
         val complete = if (owned != null) { owned.close(); owned.awaitCloseOnWorker(30_000) }
-        else if (!attempted) { (plan.launch as? TerminalPtyLaunch.Linux)?.close(); true }
+        else if (!attempted) { (plan.launch as? TerminalPtyLaunch.Linux)?.close(); plan.releaseWorkspace(); true }
         else false // uncertain claim is retained, never release an assumed preview pin
         synchronized(lock) { drained = complete }
         return complete

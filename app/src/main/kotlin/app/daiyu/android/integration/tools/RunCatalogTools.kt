@@ -71,6 +71,7 @@ internal class RunCatalogTools(
     private val platformAction: PlatformActionScope? = null,
     private val commandFactory: ((RunExecutionOwner, TaskAuthorization) -> RunCommandTools)? = null,
     private val childTaskAccess: RunChildTaskAccess? = null,
+    private val workspacePin: AutoCloseable? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -670,12 +671,29 @@ internal class RunCatalogTools(
             done(RunCatalogCloseResult.Unknown("catalog_close_unconfirmed"))
         }
     }
+    private var workspaceReleaseStarted = false
+    private var workspaceReleaseFinished = false
     private fun notifyClosed() {
+        val release = synchronized(closeLock) {
+            if (localDrainReadyLocked() && (!usesVirtualDisplaySession || virtualDisplaySessionDrained) &&
+                workspacePin != null && !workspaceReleaseStarted) {
+                workspaceReleaseStarted = true
+                true
+            } else false
+        }
+        if (release) {
+            val failure = runCatching { workspacePin?.close() }.exceptionOrNull()
+            synchronized(closeLock) {
+                workspaceReleaseFinished = true
+                if (failure != null) recordCloseFailure("workspace_close_unconfirmed")
+            }
+        }
         val notification = synchronized(closeLock) {
             if (closeResult == null && observationsStarted && !registeringObservations &&
                 activeCreations == 0 && pendingStops == 0 && activeDispatches == 0 &&
                 (closeFailure != null || (remainingObservations == 0 &&
-                    (!usesVirtualDisplaySession || virtualDisplaySessionDrained)))) {
+                    (!usesVirtualDisplaySession || virtualDisplaySessionDrained) &&
+                    (workspacePin == null || workspaceReleaseFinished)))) {
                 closeResult = closeFailure ?: RunCatalogCloseResult.Drained
             }
             val result = closeResult ?: return

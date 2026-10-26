@@ -63,7 +63,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         prefs(source)
         val db = database()
         val store = SqliteAssistantStore(db).also { it.requireReady() }
-        assertEquals(27, db.readableDatabase.version)
+        assertEquals(28, db.readableDatabase.version)
         assertEquals(listOf(second, first), store.list())
         assertEquals(first.id, store.selectedId.value)
         assertEquals(source, raw())
@@ -100,7 +100,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         helper.close()
         val upgraded = database()
         val restored = SqliteAssistantStore(upgraded).also { it.requireReady() }
-        assertEquals(27, upgraded.readableDatabase.version)
+        assertEquals(28, upgraded.readableDatabase.version)
         assertEquals(profile, restored.read(profile.id))
         assertEquals(profile.id, restored.selectedId.value)
         assertEquals(profile.id, upgraded.assistantId(conversation.id))
@@ -203,14 +203,16 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         val branch = ContextService(context, db).branch(owner.id, a.id)
         assertEquals("bound", db.assistantId(branch))
         val backup = db.exportConversationBackup(owner.id)
-        assertEquals(2, JSONObject(backup).getInt("version"))
+        assertEquals(3, JSONObject(backup).getInt("version"))
         db.delete(owner.id); store.delete("bound")
         db.importBackup(backup)
         assertEquals("bound", db.assistantId(owner.id)) // Missing stays missing; never default.
         db.delete(owner.id)
         val envelope = JSONObject(backup)
         val payload = JSONObject(envelope.getString("payload"))
-        payload.getJSONArray("conversations").getJSONObject(0).remove("assistant_id")
+        payload.getJSONArray("conversations").getJSONObject(0).apply {
+            remove("assistant_id"); remove("workspace_binding")
+        }
         val text = payload.toString()
         val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
         db.importBackup(envelope.put("version", 1).put("payload", text).put("sha256", digest).toString())
@@ -219,8 +221,13 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
     fun testV2NullBindingReceiptIsExactAndTamperingRollsBack() {
         val db = database(); val owner = db.create("default")
         db.writableDatabase.execSQL("UPDATE conversations SET assistant_id=NULL WHERE id=?", arrayOf(owner.id.value))
-        val backup = db.exportConversationBackup(owner.id)
-        assertEquals(2, JSONObject(backup).getInt("version"))
+        val exported = JSONObject(db.exportConversationBackup(owner.id))
+        assertEquals(3, exported.getInt("version"))
+        val payload = JSONObject(exported.getString("payload"))
+        payload.getJSONArray("conversations").getJSONObject(0).remove("workspace_binding")
+        val text = payload.toString()
+        val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+        val backup = exported.put("version", 2).put("payload", text).put("sha256", digest).toString()
         db.delete(owner.id); db.importBackup(backup)
         assertNull(db.assistantId(owner.id))
         db.delete(owner.id)

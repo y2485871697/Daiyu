@@ -350,6 +350,9 @@ class ChatController internal constructor(private val application:Application,
         var terminalJob: ControllerTerminalJobPreparation? = null
         var terminalJobRun: TerminalJobSession? = null
         var terminalLaunch: TerminalPtyLaunch? = null
+        var workspace: app.daiyu.android.workspace.ConversationWorkspaceRun? = null
+        var workspaceBinding: String? = null
+        var workspaceTransferred = false
         var terminalRun: TerminalConfirmedRun? = null
         var terminalCatalog: RunCatalogTools? = null
         var terminalCleanupStarted = false
@@ -517,6 +520,45 @@ class ChatController internal constructor(private val application:Application,
             }
         } catch (_:Exception) {problem="助手绑定失败；原绑定和草稿保留";notifyChanged();false}
         finally {finishPreparation(token)}
+    }
+    private val conversationWorkspaces by lazy {
+        app.daiyu.android.workspace.ConversationWorkspaceAccess(application) {
+            ((application as? ChatApplication)?.terminalProvider?.state?.value as?
+                app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
+        }
+    }
+    internal fun workspaceEditorOnWorker(owner: ConversationId?) =
+        conversationWorkspaces.editor(database.workspaceBinding(owner))
+
+    internal fun saveWorkspaceOnWorker(owner: ConversationId?, expected: String?, source: String, path: String): Boolean {
+        val token = synchronized(this) {
+            if (!idleAvailable() || hasLiveChildTasks()) return false
+            reservePreparation()
+        }
+        return try {
+            val binding = conversationWorkspaces.binding(source, path)
+            val encoded = app.daiyu.android.workspace.ConversationWorkspaceCodec.encode(binding)
+            conversationWorkspaces.freeze(encoded).use {
+                database.bindWorkspace(owner, expected, encoded).also { if (it) notifyChanged() }
+            }
+        } finally { finishPreparation(token) }
+    }
+    internal fun freezeConversationWorkspaceOnWorker(owner: ConversationId?) =
+        conversationWorkspaces.freeze(database.workspaceBinding(owner))
+
+    private fun freezeWorkspace(token: Preparation, owner: ConversationId?): app.daiyu.android.workspace.ConversationWorkspaceRun {
+        token.workspace?.let { return it }
+        val raw = database.workspaceBinding(owner)
+        val frozen = conversationWorkspaces.freeze(raw)
+        token.workspaceBinding = raw
+        token.workspace = frozen
+        return frozen
+    }
+    private fun releaseWorkspace(token: Preparation) {
+        if (!token.workspaceTransferred) {
+            token.workspace?.close()
+            token.workspace = null
+        }
     }
     private var pendingImage:ImageSendHandle?=null
     // AC037 dedicated platform approval lane. Ordinary send paths never populate it.
@@ -1663,7 +1705,8 @@ class ChatController internal constructor(private val application:Application,
             val user = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.USER_ROLE,
                 listOf(MessageBlock.Text("child-command", "子任务${command.kind.name}；来源 ${command.source.owner.childRunId}\n${command.instruction}")), RunStatus.COMPLETED, createdAt = acceptedAt)
             val initial = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING, createdAt = acceptedAt)
-            database.send(user, initial, expectedAssistantId = frozenAssistantId, preserveDraft = true, replyIdentity = replyIdentity)
+            database.send(user, initial, expectedAssistantId = frozenAssistantId, preserveDraft = true, replyIdentity = replyIdentity,
+                expectedWorkspaceBinding = database.workspaceBinding(conversation))
             val supervisor = checkNotNull(childSupervisor)
             val currentConfiguration = childPreferences.snapshot(key)
             supervisor.reconcile(conversation.value) { pool -> currentConfiguration.parallelLimitForPool(key, pool) }
@@ -2246,6 +2289,7 @@ class ChatController internal constructor(private val application:Application,
         finishNonTerminalPreparation(token)
     }
     private fun releasePreparation(token: Preparation) {
+        releaseWorkspace(token)
         synchronized(this) {
             if (preparation !== token) return
             preparation = null
@@ -2278,6 +2322,7 @@ class ChatController internal constructor(private val application:Application,
                 }
             }
         }
+        releaseWorkspace(token)
         synchronized(this) {
             if (preparation !== token) return
             preparation = null
@@ -2719,15 +2764,21 @@ class ChatController internal constructor(private val application:Application,
             val (profile, provider) = terminalConfiguration(conversation, freezePreparationProvider(token))
             val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
             check(assistantStore.read(profile.id) == profile)
-            val launch = if (linux == null) TerminalPtyLaunch.Android(listOf("/system/bin/sh"),
+            val workspace = freezeWorkspace(token, conversation?.id)
+            val linuxReference = if (linux == null) null else workspace.resolved.rootfs?.let {
+                app.daiyu.android.terminal.LinuxGenerationRef(it.environmentId, it.generation)
+            } ?: linux
+            val launch = if (linuxReference == null) TerminalPtyLaunch.Android(listOf("/system/bin/sh"),
                 mapOf("HOME" to application.filesDir.path, "TMPDIR" to application.cacheDir.path,
-                    "PATH" to "/system/bin:/system/xbin"), application.filesDir)
+                    "PATH" to "/system/bin:/system/xbin"), workspace.resolved.hostDirectory)
             else checkNotNull(((application as? ChatApplication)?.terminalProvider?.state?.value as?
                 app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application)
-                .freezeTerminalLaunchOnWorker(linux, application.cacheDir, application.filesDir)
+                .freezeTerminalLaunchOnWorker(linuxReference, application.cacheDir, workspace.resolved.hostDirectory, workspace.linux(linuxReference))
             token.terminalLaunch = launch
-            val plan = TerminalJobPlan(conversation?.id ?: ConversationId(UUID.randomUUID().toString()),
-                RunId(UUID.randomUUID().toString()), launch, command, mode)
+            val jobWorkspace = workspace.retain()
+            val plan = try { TerminalJobPlan(conversation?.id ?: ConversationId(UUID.randomUUID().toString()),
+                RunId(UUID.randomUUID().toString()), launch, command, mode, jobWorkspace) }
+                catch (failure: Throwable) { jobWorkspace.close(); throw failure }
             val pending = ControllerTerminalJobPreparation(application, conversation, draft, profile, provider, plan)
             synchronized(this) {
                 token.terminalJob = pending
@@ -2819,13 +2870,17 @@ class ChatController internal constructor(private val application:Application,
             val (profile, provider) = terminalConfiguration(conversation, freezePreparationProvider(token))
             val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
             check(assistantStore.read(profile.id) == profile) { "assistant_profile_changed" }
-            launch = if (linux == null) TerminalPtyLaunch.Android(listOf("/system/bin/sh"),
+            val workspace = freezeWorkspace(token, conversation?.id)
+            val linuxReference = if (linux == null) null else workspace.resolved.rootfs?.let {
+                app.daiyu.android.terminal.LinuxGenerationRef(it.environmentId, it.generation)
+            } ?: linux
+            launch = if (linuxReference == null) TerminalPtyLaunch.Android(listOf("/system/bin/sh"),
                 mapOf("HOME" to application.filesDir.path, "TMPDIR" to application.cacheDir.path,
-                    "PATH" to "/system/bin:/system/xbin", "TERM" to "xterm-256color"), application.filesDir)
+                    "PATH" to "/system/bin:/system/xbin", "TERM" to "xterm-256color"), workspace.resolved.hostDirectory)
             else {
                 val host = checkNotNull(((application as? ChatApplication)?.terminalProvider?.state?.value as?
                     app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application)
-                host.freezeTerminalLaunchOnWorker(linux, application.cacheDir, application.filesDir)
+                host.freezeTerminalLaunchOnWorker(linuxReference, application.cacheDir, workspace.resolved.hostDirectory, workspace.linux(linuxReference))
             }
             token.terminalLaunch = launch
             val plan = TerminalChatPlan.create(conversation?.id ?: ConversationId(UUID.randomUUID().toString()),
@@ -3238,6 +3293,10 @@ class ChatController internal constructor(private val application:Application,
                     "SELECT draft FROM conversations WHERE id=?", arrayOf(conversation.id.value)
                 ).use { check(it.moveToFirst()); it.getString(0) }
         } catch (_:Exception) { return null }
+        val workspace = try { freezeWorkspace(token, conversation?.id) } catch (failure: Exception) {
+            problem = "会话工作区不可用（${failure.message}）；草稿保留，未发送请求"
+            notifyChanged(); return null
+        }
         val assistantContext = token.browserContext ?: try {
             val binding=if(conversation==null) token.assistantId
                 else database.assistantId(conversation.id)
@@ -3572,6 +3631,7 @@ class ChatController internal constructor(private val application:Application,
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
                 backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope,
+                workspacePin = workspace,
                 platformAction=platformAction?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
                     grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->
@@ -3593,10 +3653,18 @@ class ChatController internal constructor(private val application:Application,
                 commandFactory = if (RunCommandTools.CAPABILITY !in capabilities.enabled) null else { realOwner, task ->
                     val host = ((application as? ChatApplication)?.terminalProvider?.state?.value as?
                         app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
-                    val launch = try { host?.freezeSelectedCommandLaunchOnWorker(application.cacheDir, application.filesDir) }
-                        catch (_: Exception) { null }
+                    val reference = workspace.resolved.rootfs?.let { app.daiyu.android.terminal.LinuxGenerationRef(it.environmentId, it.generation) }
+                        ?: host?.terminalOwner?.host?.state?.value?.linux?.selected
+                    val commandLinux = host?.workspaceRootsOnWorker()?.firstOrNull {
+                        it.environmentId == reference?.environmentId && it.generation == reference?.generation &&
+                            it.executionMode == app.daiyu.android.terminal.LinuxExecutionMode.PROOT
+                    }
+                    val launch = if (host == null || reference == null || commandLinux == null) null else
+                        host.freezeTerminalLaunchOnWorker(reference, application.cacheDir, workspace.resolved.hostDirectory,
+                            workspace.linux(reference))
                     try {
-                        RunCommandTools.android(application, realOwner, task, launch, approve = { context, effect, disclosure ->
+                        RunCommandTools.android(application, realOwner, task, launch,
+                            workingDirectory = workspace.resolved.hostDirectory, approve = { context, effect, disclosure ->
                             commandApprovals.await(CommandApprovalRequest(realOwner, context.invocation.id.value,
                                 effect, disclosure), context.cancelled)
                         })
@@ -3637,6 +3705,7 @@ class ChatController internal constructor(private val application:Application,
                 SkillToolRegistry(application).captureForRun(grants, authorization,
                     selection = assistantContext.enabledSkillIds.toSet())
             }
+            token.workspaceTransferred = true
             preparingTools = tools
             if (mcpPreparation != null) token.mcpCatalog = tools
             if (terminalRun != null || terminalJobRun != null) token.terminalCatalog = tools
@@ -3749,8 +3818,15 @@ class ChatController internal constructor(private val application:Application,
             if (videoAttempt != null) {
                 val receipt = videoAttempt.commit(database, physicalVideoHistory, checkNotNull(videoPrepared),
                     checkNotNull(videoPlan), assistantContext.assistantId, frozenDraft, replyIdentity = replyIdentity,
+                    expectedWorkspaceBinding = token.workspaceBinding,
                     cancelled = { preparationCancelled(token) || video?.first?.isRevoked() == true },
                     beforeSend = { db ->
+                        val table = if (conversation == null) "composer" else "conversations"
+                        val ownerId = conversation?.id?.value ?: "1"
+                        val binding = db.rawQuery("SELECT workspace_binding FROM $table WHERE id=?", arrayOf(ownerId)).use {
+                            check(it.moveToFirst()); if (it.isNull(0)) null else it.getString(0)
+                        }
+                        check(binding == token.workspaceBinding) { "send_workspace_changed" }
                         check(contextService.matchesHistoryRevision(db, conversationId, preparedContext.expectedHistoryRevision))
                     })
                 token.videoReceipt = receipt
@@ -3776,7 +3852,8 @@ class ChatController internal constructor(private val application:Application,
                 databaseSendEntered=true
                     if (actionRevision != null) messageActionStore.commitRevision(db, actionRevision)
                     database.send(user,assistant,conversation==null,assistantContext.assistantId,
-                        preserveDraft = actionRevision != null, replyIdentity = replyIdentity)
+                        preserveDraft = actionRevision != null, replyIdentity = replyIdentity,
+                        expectedWorkspaceBinding = token.workspaceBinding)
                 } } catch (failure: Exception) {
                     // A failed pre-write CAS is definitely rejected, not an ambiguous commit.
                     if (browserPreparation != null && !databaseSendEntered) null else throw failure

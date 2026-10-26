@@ -39,17 +39,18 @@ class TerminalUiOwner(
     val caller: StateFlow<TaskAuthorization> = mutableCaller.asStateFlow()
 
     /** Explicit user action only. true means host admission, not successful asynchronous startup. */
-    fun openAndroid(conversationId: ConversationId? = null): Boolean = synchronized(lock) {
-        open(conversationId, null)
+    fun openAndroid(conversationId: ConversationId? = null, workspace: TerminalWorkspaceDirectory? = null): Boolean = synchronized(lock) {
+        open(conversationId, null, workspace)
     }
 
     /** A stale persisted selection cannot authorize a Linux run without the current parent gate. */
-    fun openLinux(reference: LinuxGenerationRef, conversationId: ConversationId? = null): Boolean = synchronized(lock) {
+    fun openLinux(reference: LinuxGenerationRef, conversationId: ConversationId? = null,
+        workspace: TerminalWorkspaceDirectory? = null): Boolean = synchronized(lock) {
         if (reference !in trustedLinux()) return@synchronized false
-        open(conversationId, reference)
+        open(conversationId, reference, workspace)
     }
 
-    private fun open(conversationId: ConversationId?, linux: LinuxGenerationRef?): Boolean {
+    private fun open(conversationId: ConversationId?, linux: LinuxGenerationRef?, workspace: TerminalWorkspaceDirectory?): Boolean {
         // UNKNOWN delivery and cleanup retain host ownership; neither is a reason to replay/open.
         if (!host.state.value.canOpen) return false
         val runId = freshId()
@@ -63,6 +64,7 @@ class TerminalUiOwner(
             ),
             sessionScope = "terminal-$runId",
             linux = linux,
+            workspace = workspace,
         )
         if (!host.open(request)) return false
         mutableCaller.value = authorization

@@ -368,9 +368,10 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             m.blocks.none { it is MessageBlock.Tool && it.result == null }
         }) { "不能截断未完成工具批次" }
         val copy = ConversationId(UUID.randomUUID().toString())
-        val values = db.rawQuery("SELECT title,folder,assistant_id FROM conversations WHERE id=?", arrayOf(id.value)).use { c ->
+        val values = db.rawQuery("SELECT title,folder,assistant_id,workspace_binding FROM conversations WHERE id=?", arrayOf(id.value)).use { c ->
             require(c.moveToFirst()); ContentValues().apply { put("id", copy.value); put("title", c.getString(0) + " · 分支")
-                put("folder", c.getString(1)); put("assistant_id", c.getString(2)); put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis()) }
+                put("folder", c.getString(1)); put("assistant_id", c.getString(2)); put("workspace_binding", c.getString(3))
+                put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis()) }
         }
         db.insertOrThrow("conversations", null, values)
         val runs = mutableMapOf<RunId, RunId>()
@@ -442,6 +443,12 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         app.daiyu.android.storage.UsageStatisticsStore.created(db, copy.value, System.currentTimeMillis())
         check(db.insertOrThrow("context_branches", null, ContentValues().apply { put("conversation_id", copy.value); put("parent_id", id.value)
             put("through_message", through.value); put("parent_revision", ContextRevision.digest(original.take(index + 1))) }) != -1L)
+        val inheritedWorkspace = values.getAsString("workspace_binding")
+        listOf(id, copy).forEach { owner ->
+            db.rawQuery("SELECT workspace_binding FROM conversations WHERE id=?", arrayOf(owner.value)).use {
+                check(it.moveToFirst() && it.getString(0) == inheritedWorkspace) { "分支工作区绑定已变化；已回滚" }
+            }
+        }
         check(read(db, copy) == copied) { "分支消息持久回执不一致" }
         copied.forEachIndexed { position, message ->
             check(app.daiyu.android.storage.AssistantReplyIdentities.read(db, message) == replyIdentities[position]) { "分支回复身份持久回执不一致" }

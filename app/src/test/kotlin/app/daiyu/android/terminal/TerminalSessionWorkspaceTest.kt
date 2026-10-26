@@ -38,7 +38,10 @@ class TerminalSessionWorkspaceTest {
     }
     private class Backend(val rejectSetup: Boolean = false, val rejectCommand: Boolean = false) : TerminalEnvironmentBackend {
         val resources = CopyOnWriteArrayList<Resource>()
-        override fun open(request: TerminalOpenRequest) = Resource(rejectSetup, rejectCommand).also { resources += it }
+        val requests = CopyOnWriteArrayList<TerminalOpenRequest>()
+        override fun open(request: TerminalOpenRequest) = Resource(rejectSetup, rejectCommand).also {
+            requests += request; resources += it
+        }
         override fun linuxStatus() = TerminalLinuxState()
         override fun selectLinux(reference: LinuxGenerationRef?) = Unit
     }
@@ -56,6 +59,44 @@ class TerminalSessionWorkspaceTest {
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(5)
         assertTrue("workspace did not converge", condition())
     }
+    @Test fun restartAndSendKeepOriginalConversationWorkspaceDespiteNewCallerBinding() {
+        Fixture().use { f ->
+            f.workspace.setSimple(false)
+            val original = TerminalWorkspaceDirectory(java.io.File("/approved/rootfs/first"))
+            val changed = TerminalWorkspaceDirectory(java.io.File("/private/second"))
+            val conversation = app.daiyu.android.domain.ConversationId("original")
+            assertTrue(f.workspace.create(conversation, original))
+            val id = f.workspace.state.value.activeSessionId!!
+            await { f.workspace.state.value.active?.state?.acceptsInput == true }
+            f.workspace.send(id, "input", app.daiyu.android.domain.ConversationId("changed"), changed)
+            f.workspace.restart(id)
+            await { f.backends.single().requests.size == 2 && f.workspace.state.value.active?.state?.acceptsInput == true }
+            f.backends.single().requests.forEach { request ->
+                assertSame(original, request.workspace)
+                assertEquals(conversation, request.owner.conversationId)
+            }
+        }
+    }
+
+    @Test fun workspacePinSurvivesStopAndRestartUntilSessionRemoval() {
+        Fixture().use { f ->
+            f.workspace.setSimple(false)
+            val closes = java.util.concurrent.atomic.AtomicInteger()
+            val pin = AutoCloseable { closes.incrementAndGet() }
+            assertTrue(f.workspace.create(workspace = TerminalWorkspaceDirectory(java.io.File("/approved/project")), workspacePin = pin))
+            val id = f.workspace.state.value.activeSessionId!!
+            await { f.workspace.state.value.active?.state?.acceptsInput == true }
+            f.workspace.stop(id)
+            await { f.workspace.state.value.active?.state?.ownsResources == false }
+            assertEquals(0, closes.get())
+            f.workspace.restart(id)
+            await { f.workspace.state.value.activeSessionId != id && f.workspace.state.value.active?.state?.acceptsInput == true }
+            assertEquals(0, closes.get())
+            f.workspace.closeSession(f.workspace.state.value.activeSessionId!!)
+            await { closes.get() == 1 }
+        }
+    }
+
     @Test fun entryObservationAndModeSelectionNeverOpenAShell() {
         Fixture().use { f ->
             f.workspace.refresh(); f.workspace.setSimple(false); f.workspace.setSimple(true)

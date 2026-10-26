@@ -352,6 +352,20 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         return synchronized(dispatchLifecycle) { activeDispatches == 0 }
     }
 
+    /** The retained daemon handle, process exit AND output pump completion are authoritative. */
+    internal fun awaitJobTermination(id: String, timeoutMillis: Long): Boolean {
+        require(timeoutMillis in 1..30000)
+        if (synchronized(dispatchLifecycle) { !closed || activeDispatches != 0 }) return false
+        val job = synchronized(jobs) { jobs[id]?.takeIf { owns(it) && it.scope == scope } } ?: return false
+        val handle = job.handle ?: return job.state in setOf("start_failed", "cancelled_before_dispatch")
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        if (handle.process.isAlive && !handle.process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) return false
+        val reader = job.reader ?: return false
+        val remaining = deadline - System.nanoTime()
+        if (reader.isAlive && remaining > 0) TimeUnit.NANOSECONDS.timedJoin(reader, remaining)
+        return !reader.isAlive && job.outputComplete
+    }
+
     /** Explicit trusted-host cleanup after run closure; unresolved journals remain intact. */
     fun retireCompletedScope(): JSONObject {
         if (!closed) return error("run_must_close_before_retirement")

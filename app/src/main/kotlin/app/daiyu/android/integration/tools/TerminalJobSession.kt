@@ -15,7 +15,10 @@ internal class TerminalJobPlan(
     val launch: TerminalPtyLaunch,
     val command: String,
     val mode: String,
+    private val workspacePin: AutoCloseable? = null,
 ) {
+    private val workspaceReleased = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun releaseWorkspace() { if (workspaceReleased.compareAndSet(false, true)) workspacePin?.close() }
     val sessionId = runId.value
     private var claimed = false
     @Synchronized fun claim() {
@@ -59,6 +62,7 @@ internal interface TerminalJobTransport : AutoCloseable {
     fun inspectTail(id: String): JSONObject = inspect(id)
     fun stop(id: String): JSONObject
     fun awaitOrdinaryTermination(timeoutMillis: Long): Boolean
+    fun awaitJobTermination(id: String, timeoutMillis: Long): Boolean = false
 }
 
 /** Factory failed before any process or probe was started; unknown factories must not use this. */
@@ -84,6 +88,7 @@ internal class TerminalJobSession private constructor(
     private var stopFailed = false
     private var drained = false
     private var joining = false
+    private var workspaceObservationStarted = false
     private var job: String? = null
     val jobId: String? get() = synchronized(lock) { job }
 
@@ -228,6 +233,19 @@ internal class TerminalJobSession private constructor(
                 if (remaining <= 0 || !owned.awaitOrdinaryTermination(remaining.coerceAtMost(30000))) return false
             }
             (plan.launch as? TerminalPtyLaunch.Linux)?.release()
+            val daemon = synchronized(lock) { job }
+            if (plan.mode != "daemon" || !attempted) plan.releaseWorkspace()
+            else if (daemon != null && owned != null) {
+                val observe = synchronized(lock) {
+                    if (workspaceObservationStarted) false else { workspaceObservationStarted = true; true }
+                }
+                if (observe) Thread({
+                    try {
+                        while (!owned.awaitJobTermination(daemon, 30_000)) Thread.sleep(1000)
+                        plan.releaseWorkspace()
+                    } catch (_: Exception) { /* Unconfirmed daemon retains its workspace pin. */ }
+                }, "terminal-daemon-workspace").apply { isDaemon = true; start() }
+            }
             complete = true
             return true
         } finally { synchronized(lock) { joining = false; if (complete) drained = true } }
@@ -264,6 +282,7 @@ internal class TerminalJobSession private constructor(
                     override fun stop(id: String) = registry.stopOwnedJob(id)
                     override fun close() = registry.close()
                     override fun awaitOrdinaryTermination(timeoutMillis: Long) = registry.awaitOrdinaryTermination(timeoutMillis)
+                    override fun awaitJobTermination(id: String, timeoutMillis: Long) = registry.awaitJobTermination(id, timeoutMillis)
                 }
             }
         internal fun approved(plan: TerminalJobPlan, authorization: TaskAuthorization,

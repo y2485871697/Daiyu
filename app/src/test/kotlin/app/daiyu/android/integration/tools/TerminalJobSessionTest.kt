@@ -54,6 +54,25 @@ class TerminalJobSessionTest {
         override fun close() { closes.incrementAndGet() }
         override fun awaitOrdinaryTermination(timeoutMillis: Long): Boolean { waits.incrementAndGet(); return exited }
     }
+    @Test fun daemonWorkspaceOutlivesCatalogUntilPhysicalExit() {
+        val released = AtomicInteger()
+        val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+        val daemonBackend = object : Backend() {
+            override fun awaitJobTermination(id: String, timeoutMillis: Long): Boolean = finished.get()
+        }
+        val daemonPlan = TerminalJobPlan(message.conversationId, message.runId,
+            TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), File(System.getProperty("java.io.tmpdir")).absoluteFile),
+            "printf daemon", "daemon", AutoCloseable { released.incrementAndGet() })
+        val fixture = Fixture(backend = daemonBackend, suppliedPlan = daemonPlan)
+        fixture.call()
+        assertEquals(RunCatalogCloseResult.Drained, fixture.close())
+        assertEquals(0, released.get())
+        finished.set(true)
+        val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (released.get() == 0 && System.nanoTime() < until) Thread.sleep(10)
+        assertEquals(1, released.get())
+    }
+
     private inner class Fixture(val backend: Backend = Backend(), mode: String = "async",
         store: ToolLedgerStore = InMemoryToolLedgerStore(), enabled: Boolean = true,
         create: (() -> TerminalJobTransport)? = null, suppliedPlan: TerminalJobPlan? = null) {

@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 27), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 28), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -30,7 +30,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("PRAGMA synchronous=FULL")
     }
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0,assistant_id TEXT)")
+        db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0,assistant_id TEXT,workspace_binding TEXT)")
         db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]',created_at INTEGER CHECK(created_at IS NULL OR (typeof(created_at)='integer' AND created_at>=0)))")
         db.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
         createUiFolders(db)
@@ -58,11 +58,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
         SQLiteGenerationOutputStore.installSchema(db)
     }
     private fun createComposer(db:SQLiteDatabase) {
-        db.execSQL("CREATE TABLE composer(id INTEGER PRIMARY KEY CHECK(id=1),draft TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE composer(id INTEGER PRIMARY KEY CHECK(id=1),draft TEXT NOT NULL,workspace_binding TEXT)")
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..26 && newVersion == 27) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..27 && newVersion == 28) { "不支持此数据库版本，保留原数据" }
         app.daiyu.android.timeline.ChatTimelineStore.install(db)
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
@@ -112,6 +112,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         ConversationUsageStore.installSchema(db)
         ConversationUsageStore.backfill(db)
         UsageStatisticsStore.install(db)
+        installWorkspaceBindings(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
@@ -123,6 +124,49 @@ class ConversationDatabase internal constructor(context: Context, private val af
             val row = storedMessage(db, ConversationId(conversation), id, verifyVideoWitness = false)
             ControllerVideoManifestWitness.migrateLegacy(db, listOf(row), emptyIsProven = oldVersion < 12)
         }
+    }
+    private fun installWorkspaceBindings(db: SQLiteDatabase) {
+        // Legacy fixtures can keep newer columns while lowering user_version.
+        // Run after v1 has created composer and before the >=13 early return.
+        listOf("conversations", "composer").forEach { table ->
+            val exists = db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                var found = false
+                while (c.moveToNext()) if (c.getString(1) == "workspace_binding") found = true
+                found
+            }
+            if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN workspace_binding TEXT")
+        }
+    }
+    /** Opaque canonical binding descriptions only; authorization/JSON decoding belongs to workspace. */
+    private fun validateWorkspaceBinding(value: String?) {
+        if (value != null) {
+            require(value.isNotBlank()) { "工作区绑定不能为空白" }
+            Utf8Payload.byteCount(value, 4096)
+        }
+    }
+    internal fun workspaceBinding(id: ConversationId?): String? = workspaceBinding(readableDatabase, id)
+    private fun workspaceBinding(db: SQLiteDatabase, id: ConversationId?): String? {
+        val table = if (id == null) "composer" else "conversations"
+        return db.rawQuery("SELECT workspace_binding FROM $table WHERE id=?", arrayOf(id?.value ?: "1")).use {
+            check(it.moveToFirst()) { "会话或新聊天草稿不存在" }
+            if (it.isNull(0)) null else it.getString(0)
+        }
+    }
+    internal fun bindWorkspace(id: ConversationId?, expected: String?, next: String?): Boolean {
+        validateWorkspaceBinding(next)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val table = if (id == null) "composer" else "conversations"
+            val args = if (expected == null) arrayOf(id?.value ?: "1") else arrayOf(id?.value ?: "1", expected)
+            val predicate = if (expected == null) "workspace_binding IS NULL" else "workspace_binding=?"
+            val changed = db.update(table, ContentValues().apply { put("workspace_binding", next) },
+                "id=? AND $predicate", args) == 1
+            if (!changed) return false // Do not commit even trigger side effects of a failed CAS.
+            check(workspaceBinding(db, id) == next) { "工作区绑定回执不匹配" }
+            db.setTransactionSuccessful()
+            return true
+        } finally { db.endTransaction() }
     }
     private fun installUsageCreationColumns(db: SQLiteDatabase) {
         listOf("child_request_usage", "runtime_preparations", "context_usage", RecordedUsageHistory.REQUESTS).forEach { table ->
@@ -203,8 +247,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
         val conditions=mutableListOf<String>();val args=mutableListOf<String>()
         if(folder!=null) {conditions.add("folder=?");args.add(folder)}
         val where=if(conditions.isEmpty()) "" else " WHERE "+conditions.joinToString(" AND ")
-        val list=readableDatabase.rawQuery("SELECT id,title,draft,updated,folder,pinned,assistant_id FROM conversations$where ORDER BY pinned DESC,updated DESC,id ASC",args.toTypedArray()).use {c->
-            buildList {while(c.moveToNext()) add(Conversation(ConversationId(c.getString(0)),c.getString(1),c.getString(2),c.getLong(3),c.getString(4),c.getInt(5)!=0,c.getString(6)))}
+        val list=readableDatabase.rawQuery("SELECT id,title,draft,updated,folder,pinned,assistant_id,workspace_binding FROM conversations$where ORDER BY pinned DESC,updated DESC,id ASC",args.toTypedArray()).use {c->
+            buildList {while(c.moveToNext()) add(Conversation(ConversationId(c.getString(0)),c.getString(1),c.getString(2),c.getLong(3),c.getString(4),c.getInt(5)!=0,c.getString(6),c.getString(7)))}
         }
         if(query.isEmpty()) return list
         val matches=mutableSetOf<String>()
@@ -247,13 +291,15 @@ class ConversationDatabase internal constructor(context: Context, private val af
         }
         return changed
     }
-    fun create(assistantId: String? = null):Conversation {
-        val value=Conversation(ConversationId(UUID.randomUUID().toString()),"新会话","",System.currentTimeMillis(),assistantId=assistantId)
+    fun create(assistantId: String? = null, workspaceBinding: String? = null):Conversation {
+        validateWorkspaceBinding(workspaceBinding)
+        val value=Conversation(ConversationId(UUID.randomUUID().toString()),"新会话","",System.currentTimeMillis(),assistantId=assistantId,workspaceBinding=workspaceBinding)
         transaction { db ->
             // NULL is reserved for explicit legacy/import fixtures, never a global fallback.
             if (assistantId != null) requireAssistant(db, assistantId)
-            check(db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",assistantId)}) != -1L)
+            check(db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",assistantId);put("workspace_binding",workspaceBinding)}) != -1L)
             UsageStatisticsStore.created(db, value.id.value, value.updatedAt)
+            check(workspaceBinding(db, value.id) == workspaceBinding) { "创建工作区绑定回执不匹配" }
         }
         return value
     }
@@ -317,7 +363,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
         expectedAssistantId:String? = if(newConversation) selectedAssistantId() else assistantId(user.conversationId),
         videoInputs: List<app.daiyu.android.model.videos.MessageVideoInput> = emptyList(),
         preserveDraft: Boolean = false,
-        replyIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null):Conversation {
+        replyIdentity: app.daiyu.android.assistants.AssistantReplyIdentity? = null,
+        expectedWorkspaceBinding: String? = null):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
         require(!preserveDraft || !newConversation)
         require(replyIdentity == null || replyIdentity.assistantId == expectedAssistantId)
@@ -328,17 +375,24 @@ class ConversationDatabase internal constructor(context: Context, private val af
             requireAssistant(db, expectedAssistantId)
             if (!newConversation) check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND assistant_id=?",
                 arrayOf(user.conversationId.value, expectedAssistantId)).use { it.moveToFirst() }) { "会话助手绑定已变化；草稿保留" }
+            val currentWorkspace = workspaceBinding(db, if (newConversation) null else user.conversationId)
+            validateWorkspaceBinding(currentWorkspace)
+            check(currentWorkspace == expectedWorkspaceBinding) { "工作区绑定已变化；草稿保留" }
+            val expectedComposerWorkspace = if (newConversation) null else workspaceBinding(db, null)
             val expectedComposer=if(newConversation) "" else composerDraft(db)
             val retainedDraft = if (preserveDraft) db.rawQuery("SELECT draft FROM conversations WHERE id=?", arrayOf(user.conversationId.value)).use {
                 check(it.moveToFirst()); it.getString(0)
             } else ""
             var newConversationRowId:Long?=null
             if(newConversation) {
-                val value=Conversation(user.conversationId,"新会话","",System.currentTimeMillis(),assistantId=expectedAssistantId)
-                newConversationRowId=db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",expectedAssistantId)})
+                val value=Conversation(user.conversationId,"新会话","",System.currentTimeMillis(),assistantId=expectedAssistantId,workspaceBinding=currentWorkspace)
+                newConversationRowId=db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",expectedAssistantId);put("workspace_binding",currentWorkspace)})
                 check(newConversationRowId != -1L) {"新会话未持久化"}
                 UsageStatisticsStore.created(db, value.id.value, value.updatedAt)
-                check(db.update("composer",ContentValues().apply {put("draft","")},"id=1",null)==1)
+                val composerPredicate = if (currentWorkspace == null) "workspace_binding IS NULL" else "workspace_binding=?"
+                val composerArgs = currentWorkspace?.let { arrayOf(it) }
+                check(db.update("composer",ContentValues().apply {put("draft","");putNull("workspace_binding")},
+                    "id=1 AND $composerPredicate",composerArgs)==1) { "新聊天工作区绑定已变化；草稿保留" }
             }
             check(db.update("conversations",ContentValues().apply {if (!preserveDraft) put("draft","");put("updated",System.currentTimeMillis())},"id=?",arrayOf(user.conversationId.value))==1) {"会话不存在"}
             // RAISE(IGNORE) can return -1 without throwing, even from insertOrThrow.
@@ -360,7 +414,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             check(AssistantReplyIdentities.read(db, assistant) == replyIdentity) { "发送回复身份回执不一致" }
             validateRunHistory(db,user.conversationId,user.runId)
             app.daiyu.android.ControllerVideoHistory(this).assertAppended(db, videoHistory, user, assistant, videoInputs)
-            conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0,assistant_id FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
+            conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0,assistant_id,workspace_binding FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
                 check(it.moveToFirst() && (newConversationRowId==null || it.getLong(4)==newConversationRowId)) {"发送会话身份不匹配"}
                 val nextDraft = if (preserveDraft) db.rawQuery("SELECT draft FROM conversations WHERE id=?", arrayOf(user.conversationId.value)).use { c ->
                     check(c.moveToFirst()); c.getString(0)
@@ -368,9 +422,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
                     else { check(it.getInt(5)==1) {"发送会话草稿未清空"}; "" }
                 check(it.getString(6)==expectedAssistantId) { "发送助手绑定回执不匹配" }
                 requireAssistant(db, expectedAssistantId)
-                Conversation(user.conversationId,it.getString(0),nextDraft,it.getLong(1),it.getString(2),it.getInt(3)!=0,it.getString(6))
+                check(it.getString(7)==currentWorkspace) { "发送工作区绑定回执不匹配" }
+                Conversation(user.conversationId,it.getString(0),nextDraft,it.getLong(1),it.getString(2),it.getInt(3)!=0,it.getString(6),it.getString(7))
             }
             check(composerDraft(db)==expectedComposer) {"发送草稿不匹配"}
+            check(workspaceBinding(db, null)==expectedComposerWorkspace) { "发送改变了新聊天工作区绑定" }
         }
         return checkNotNull(conversation)
     }
@@ -471,7 +527,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             val messageCount=db.rawQuery("SELECT count(*) FROM messages$messageWhere",args).use {it.moveToFirst();it.getLong(0)}
             require(conversationCount<=1000 && messageCount<=50000) {"文本备份最多1000个会话、50000条消息"}
             val composerBytes=if(conversationId==null) "(SELECT length(CAST(draft AS BLOB)) FROM composer WHERE id=1)" else "0"
-            val rawBytes=db.rawQuery("SELECT (SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(title AS BLOB))+length(CAST(draft AS BLOB))+length(CAST(folder AS BLOB))),0) FROM conversations$conversationWhere)+(SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(conversation_id AS BLOB))+length(CAST(run_id AS BLOB))+length(CAST(blocks AS BLOB))+length(CAST(protocol AS BLOB))+coalesce(length(CAST(error AS BLOB)),0)+length(CAST(history_segments AS BLOB))),0) FROM messages$messageWhere)+$composerBytes",args?.let {it+it}).use {it.moveToFirst();it.getLong(0)}
+            val rawBytes=db.rawQuery("SELECT (SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(title AS BLOB))+length(CAST(draft AS BLOB))+length(CAST(folder AS BLOB))+coalesce(length(CAST(workspace_binding AS BLOB)),0)),0) FROM conversations$conversationWhere)+(SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(conversation_id AS BLOB))+length(CAST(run_id AS BLOB))+length(CAST(blocks AS BLOB))+length(CAST(protocol AS BLOB))+coalesce(length(CAST(error AS BLOB)),0)+length(CAST(history_segments AS BLOB))),0) FROM messages$messageWhere)+$composerBytes",args?.let {it+it}).use {it.moveToFirst();it.getLong(0)}
             require(rawBytes<=16*1024*1024) {"备份超过16MiB上限"}
             var encodedBytes=0L
             fun reserve(value:JSONObject) {
@@ -479,9 +535,9 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 require(encodedBytes<=16*1024*1024) {"备份超过16MiB上限"}
             }
             val conversations=JSONArray()
-            db.rawQuery("SELECT id,title,updated,folder,pinned,assistant_id FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
+            db.rawQuery("SELECT id,title,updated,folder,pinned,assistant_id,workspace_binding FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
                 val draft=checkNotNull(SQLiteText.read(db, "conversations", "draft", "id", c.getString(0), 16L*1024*1024))
-                val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",draft).put("updated",c.getLong(2)).put("folder",c.getString(3)).put("pinned",c.getInt(4)!=0).put("assistant_id",c.getString(5) ?: JSONObject.NULL)
+                val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",draft).put("updated",c.getLong(2)).put("folder",c.getString(3)).put("pinned",c.getInt(4)!=0).put("assistant_id",c.getString(5) ?: JSONObject.NULL).put("workspace_binding",c.getString(6) ?: JSONObject.NULL)
                 reserve(value);conversations.put(value)
             }}
             val messages=JSONArray()
@@ -510,7 +566,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             val draft=if(conversationId==null) composerDraft(db) else ""
             reserve(JSONObject().put("draft",draft))
             val payload=JSONObject().put("conversations",conversations).put("messages",messages).put("draft",draft).toString()
-            result=JSONObject().put("format","daiyu-neutral-text").put("version",2).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()
+            result=JSONObject().put("format","daiyu-neutral-text").put("version",3).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()
         }
         Utf8Payload.byteCount(result, 16L*1024*1024)
         parseBackup(result)
@@ -521,7 +577,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         val envelope=backupObject(text)
         require(envelope.keys().asSequence().toSet()==setOf("format","version","conversation_count","message_count","sha256","payload"))
         val version=integer(envelope,"version")
-        require(string(envelope,"format")=="daiyu-neutral-text" && version in 1L..2L)
+        require(string(envelope,"format")=="daiyu-neutral-text" && version in 1L..3L)
         val payload=string(envelope,"payload");require(backupDigest(payload)==string(envelope,"sha256"))
         val data=backupObject(payload);require(data.keys().asSequence().toSet()==setOf("conversations","messages","draft"))
         val conversations=data.getJSONArray("conversations");val messages=data.getJSONArray("messages")
@@ -531,12 +587,19 @@ class ConversationDatabase internal constructor(context: Context, private val af
         fun identity(value:String):String {require(value.isNotBlank() && value.length<=200);return value}
         val imported=(0 until conversations.length()).map {i->val c=conversations.getJSONObject(i)
             val fields=setOf("id","title","draft","updated","folder","pinned")
-            require(c.keys().asSequence().toSet()==if(version==1L) fields else fields+"assistant_id")
+            require(c.keys().asSequence().toSet()==when(version) {
+                1L -> fields
+                2L -> fields+"assistant_id"
+                else -> fields+setOf("assistant_id", "workspace_binding")
+            })
             val id=identity(string(c,"id"));require(ids.add(id));val folder=string(c,"folder");require(folder.length<=200)
             // v1 has no binding: keep NULL. v2 retains the exact ID, including a deleted ID;
             // importing never selects the global assistant or creates replacement profiles.
             val assistantId=if(version==1L || c.isNull("assistant_id")) null else app.daiyu.android.assistants.AssistantStorage.id(string(c,"assistant_id"))
-            Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"),assistantId)
+            // This remains an unapproved description. Import never resolves it or touches a directory.
+            val workspace = if(version < 3L || c.isNull("workspace_binding")) null else string(c,"workspace_binding")
+            validateWorkspaceBinding(workspace)
+            Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"),assistantId,workspace)
         }
         val restored=(0 until messages.length()).map {i->val m=messages.getJSONObject(i)
             require((m.keys().asSequence().toSet() - MessageTimeCodec.FIELD - "reply_identity").let {it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol") || it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol","history_segments")})
@@ -597,18 +660,20 @@ class ConversationDatabase internal constructor(context: Context, private val af
         transaction {db->
             // Append only. Any identity collision aborts the entire transaction.
             imported.forEach {c->check(db.insertOrThrow("conversations",null,ContentValues().apply {
-                put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0);put("assistant_id",c.assistantId)
+                put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0);put("assistant_id",c.assistantId);put("workspace_binding",c.workspaceBinding)
             }) != -1L) { "备份会话未写入" }}
             restored.forEach {
                 check(db.insertOrThrow("messages",null,values(it)) != -1L) { "备份消息未写入" }
                 replyIdentities[it.id.value]?.let { identity -> AssistantReplyIdentities.insert(db, it, identity) }
                 if (!deferVideoWitness) SQLiteMessageVideoStore.insert(db, it, emptyList())
             }
+            val composerWorkspace = workspaceBinding(db, null)
             val existing=composerDraft(db)
             require(draft.isEmpty() || existing.isEmpty() || draft==existing) {"未创建会话草稿冲突；未覆盖"}
             if(existing.isEmpty()) check(db.update("composer",ContentValues().apply {put("draft",draft)},"id=1",null)==1)
             check(db.rawQuery("SELECT 1 FROM composer WHERE id=1 AND draft=?",
                 arrayOf(if (existing.isEmpty()) draft else existing)).use { it.moveToFirst() })
+            check(workspaceBinding(db, null) == composerWorkspace) { "导入改变了新聊天工作区绑定" }
             verifyBackupRows(db, imported, restored, verifyVideoWitness = !deferVideoWitness)
             restored.forEach { check(AssistantReplyIdentities.read(db, it) == replyIdentities[it.id.value]) { "回复身份导入回执不一致" } }
         }
@@ -653,7 +718,12 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 args += assistantId
                 "assistant_id IS ?"
             }
-            check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND title=? AND draft=? AND updated=? AND folder=? AND pinned=? AND $assistant",
+            val workspaceBinding = c.workspaceBinding
+            val workspace = if (workspaceBinding == null) "workspace_binding IS NULL" else {
+                args += workspaceBinding
+                "workspace_binding IS ?"
+            }
+            check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND title=? AND draft=? AND updated=? AND folder=? AND pinned=? AND $assistant AND $workspace",
                 args.toTypedArray()).use { it.moveToFirst() }) { "备份会话回执不匹配" }
         }
         restored.forEach { message ->

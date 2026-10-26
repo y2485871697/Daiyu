@@ -76,6 +76,25 @@ class TerminalUiOwnerTest {
         }
     }
 
+    @Test fun workspaceIsFrozenPerAndroidRequestWithoutChangingBackendOrSelection() {
+        val first = Fixture()
+        val second = Fixture()
+        val a = TerminalWorkspaceDirectory(java.io.File("/approved/rootfs/a"),
+            LinuxWorkspaceDirectory(java.io.File("/approved/rootfs/a"), "/a"))
+        val b = TerminalWorkspaceDirectory(java.io.File("/private/workspace"))
+        try {
+            assertTrue(first.owner.openAndroid(ConversationId("conversation-a"), a))
+            assertTrue(second.owner.openAndroid(ConversationId("conversation-b"), b))
+            await { first.backend.requests.size == 1 && second.backend.requests.size == 1 }
+            assertSame(a, first.backend.requests.single().workspace)
+            assertSame(b, second.backend.requests.single().workspace)
+            assertNull(first.backend.requests.single().linux)
+            assertEquals(0, first.backend.selections.get())
+            assertEquals(0, second.backend.selections.get())
+            assertEquals(java.io.File("/approved/rootfs/a"), first.backend.requests.single().workspace!!.hostDirectory)
+        } finally { first.dispose(); second.dispose() }
+    }
+
     @Test fun constructionAndPageReobservationHaveStableIdleCallerAndNoIo() {
         val f = Fixture()
         try {

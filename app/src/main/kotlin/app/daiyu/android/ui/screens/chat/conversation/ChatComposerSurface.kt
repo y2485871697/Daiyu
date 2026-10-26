@@ -1,12 +1,17 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
@@ -18,12 +23,17 @@ import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.components.captureForTopBar
 import app.daiyu.android.ui.components.rememberTopBarBackdrop
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.abs
+import kotlin.math.max
 
 @Composable
 internal fun ChatComposerSurface(backdrop: LayerBackdrop? = null, content: @Composable ColumnScope.() -> Unit) {
@@ -40,6 +50,47 @@ internal fun ChatComposerSurface(backdrop: LayerBackdrop? = null, content: @Comp
         }.then(blur).background(tint.copy(alpha = if (dark) .36f else .32f)))
         Column(Modifier.fillMaxWidth().testTag("chat-composer-surface").clip(shape), content = content)
     }
+}
+
+/** Content-side blank strip only: never an ancestor of text, attachments or voice controls. */
+@Composable
+internal fun ComposerWorkspacePullUpArea(onOpenWorkspace: () -> Unit) {
+    val latestOpenWorkspace by rememberUpdatedState(onOpenWorkspace)
+    Box(Modifier.fillMaxWidth().height(12.dp).testTag("chat-workspace-gesture-area")
+        .semantics {
+            contentDescription = "会话工作区"
+            onClick(label = "打开会话工作区") { latestOpenWorkspace(); true }
+        }
+        .pointerInput(Unit) {
+            val threshold = max(48.dp.toPx(), viewConfiguration.touchSlop * 3f)
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = true)
+                val origin = down.position
+                var upward = false
+                var rejected = false
+                down.consume()
+                do {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id }
+                    if (change == null || event.changes.size != 1 || event.changes.any { it.isConsumed }) rejected = true
+                    if (change != null) {
+                        val delta = change.position - origin
+                        // A horizontal/downward start cannot become an opener later.
+                        if (!upward && !rejected && delta.getDistance() > viewConfiguration.touchSlop) {
+                            if (-delta.y > abs(delta.x) * 1.5f) upward = true else rejected = true
+                        }
+                        if (abs(delta.x) > threshold || delta.y > viewConfiguration.touchSlop) rejected = true
+                        // Commit only on a normal up. Cancellation does not reach this
+                        // branch, and one pointer stream can commit at most once.
+                        if (!change.pressed && change.previousPressed && !rejected && upward &&
+                            -delta.y >= threshold && -delta.y > abs(delta.x) * 1.5f) {
+                            latestOpenWorkspace()
+                        }
+                    }
+                    event.changes.forEach { it.consume() }
+                } while (event.changes.any { it.pressed })
+            }
+        })
 }
 
 

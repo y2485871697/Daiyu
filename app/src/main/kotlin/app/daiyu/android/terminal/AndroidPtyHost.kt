@@ -85,12 +85,13 @@ object AndroidPtyHost {
         sessionScope: String,
         rows: Int = 24,
         columns: Int = 80,
+        workspace: LinuxWorkspaceDirectory? = null,
     ): LinuxPtySession {
         return store.acquire(expected).use { guard ->
             LinuxRuntimePlatform.requireSupported(guard.executionMode)
             LinuxPtySession.open(
                 owner, store, expected, helper(context), tempDirectory, hostWorkingDirectory,
-                journalDirectory, sessionScope, rows, columns,
+                journalDirectory, sessionScope, rows, columns, workspace,
             )
         }
     }

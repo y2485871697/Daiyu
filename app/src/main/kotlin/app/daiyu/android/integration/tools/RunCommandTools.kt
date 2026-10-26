@@ -28,8 +28,9 @@ internal class RunCommandTools(
         const val CAPABILITY = "terminal.command.consent"
         fun android(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
             linux: TerminalPtyLaunch.Linux?,
+            workingDirectory: java.io.File = app.daiyu.android.workspace.PrivateWorkspacePaths(context.filesDir).ensureRoot(),
             approve: (ToolExecutionContext, WriteEffect, String) -> Boolean): RunCommandTools {
-            val configuration = TerminalConfiguration(workingDirectory = context.filesDir,
+            val configuration = TerminalConfiguration(workingDirectory = workingDirectory,
                 environment = mapOf("HOME" to context.filesDir.path, "TMPDIR" to context.cacheDir.path,
                     "PATH" to "/system/bin:/system/xbin"))
             return RunCommandTools(configuration, owner, authorization, linux, approve) { environment, frozen ->
@@ -82,7 +83,7 @@ internal class RunCommandTools(
     }
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = app.daiyu.android.domain.tools.ToolDefinition("terminal_exec", 1,
-            "在 Android 应用身份或已选定 Linux 中执行命令。每次先显示完整命令和环境，用户明确批准才启动；不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
+            "在 Android 应用身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；Linux 工作目录：${linuxConfiguration?.linux?.guestWorkingDirectory ?: "未配置"}。两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。每次先显示完整命令和环境，用户明确批准才启动；不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("command", ArgumentType.Text(maxLength = 32768, minimumLength = 1)),
                 ArgumentField("environment", ArgumentType.Text(choices = setOf("android", "linux"))),

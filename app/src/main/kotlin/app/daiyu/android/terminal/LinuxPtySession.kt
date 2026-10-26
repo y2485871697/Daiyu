@@ -54,7 +54,8 @@ class LinuxPtySession private constructor(
             sessionScope: String,
             rows: Int = 24,
             columns: Int = 80,
-        ): LinuxPtySession = openConfigured(owner, store, expected, tempDirectory, hostWorkingDirectory) { configuration ->
+            workspace: LinuxWorkspaceDirectory? = null,
+        ): LinuxPtySession = openConfigured(owner, store, expected, tempDirectory, hostWorkingDirectory, workspace) { configuration ->
             val backend = checkNotNull(configuration.linux)
             val root = backend.rootScope
             if (root == null) {
@@ -63,7 +64,7 @@ class LinuxPtySession private constructor(
                     checkNotNull(configuration.workingDirectory), journalDirectory, sessionScope, rows, columns)
             } else {
                 check(!configuration.root && backend.shellArgv == root.guestArgv()) { "linux_chroot_launch_mismatch" }
-                check(backend.guestWorkingDirectory == "/" && backend.sharedMounts.isEmpty()) { "linux_chroot_mapping_not_supported" }
+                check(backend.guestWorkingDirectory == root.guestWorkingDirectory && backend.sharedMounts.isEmpty()) { "linux_chroot_mapping_not_supported" }
                 PtyRunSession.openRootScope(owner, helper, root, backend.environment + configuration.environment,
                     checkNotNull(configuration.workingDirectory), journalDirectory, sessionScope, rows, columns)
             }
@@ -76,6 +77,7 @@ class LinuxPtySession private constructor(
             expected: LinuxGenerationRef,
             tempDirectory: File,
             hostWorkingDirectory: File,
+            workspace: LinuxWorkspaceDirectory? = null,
             openSession: (TerminalConfiguration) -> PtyRunSession,
         ): LinuxPtySession {
             val lease = store.acquire(expected)
@@ -84,7 +86,7 @@ class LinuxPtySession private constructor(
                 check(owner.environmentId == expected.environmentId && owner.generation == expected.generation) {
                     "linux_pty_owner_generation_mismatch"
                 }
-                val configuration = lease.configuration(tempDirectory, hostWorkingDirectory)
+                val configuration = lease.configuration(tempDirectory, hostWorkingDirectory, workspace)
                 check(configuration.linux?.environmentId == "${owner.environmentId}:${owner.generation}") {
                     "linux_pty_owner_generation_mismatch"
                 }

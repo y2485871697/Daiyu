@@ -239,8 +239,8 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         require(it.moveToFirst()) { "会话已不存在" }; if (it.isNull(0)) null else it.getString(0)
     }
     private fun conversation(db: SQLiteDatabase, id: ConversationId): Conversation = db.rawQuery(
-        "SELECT title,draft,updated,folder,pinned,assistant_id FROM conversations WHERE id=?", arrayOf(id.value)).use {
+        "SELECT title,draft,updated,folder,pinned,assistant_id,workspace_binding FROM conversations WHERE id=?", arrayOf(id.value)).use {
         check(it.moveToFirst()); Conversation(id, it.getString(0), it.getString(1), it.getLong(2), it.getString(3), it.getInt(4) != 0,
-            if (it.isNull(5)) null else it.getString(5))
+            if (it.isNull(5)) null else it.getString(5), if (it.isNull(6)) null else it.getString(6))
     }
 }

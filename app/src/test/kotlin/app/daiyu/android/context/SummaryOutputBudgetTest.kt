@@ -32,6 +32,7 @@ class SummaryOutputBudgetTest {
     }
     @Test fun reportedTotalOutputIncludesHiddenReasoningAndIsNotAccumulated() {
         val budget = SummaryOutputBudget(6)
+        budget.observe(ModelEvent.Usage(1, null))
         budget.observe(ModelEvent.Usage(1, 6)); budget.observe(ModelEvent.Usage(1, 6))
         reject { budget.observe(ModelEvent.Usage(1, 7)) }
     }

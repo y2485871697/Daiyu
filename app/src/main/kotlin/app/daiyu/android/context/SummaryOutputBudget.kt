@@ -16,7 +16,10 @@ internal class SummaryOutputBudget(private val textLimit: Int) {
             is ModelEvent.TextFinal -> text[event.itemId] = event.text
             is ModelEvent.ReasoningDelta -> reasoning[event.itemId] = reasoning[event.itemId].orEmpty() + event.text
             is ModelEvent.ReasoningFinal -> reasoning[event.itemId] = event.text
-            is ModelEvent.Usage -> require(event.outputTokens == null || event.outputTokens <= totalLimit) { "摘要输出超过本地预算；保留原文" }
+            is ModelEvent.Usage -> {
+                val outputTokens = event.outputTokens
+                require(outputTokens == null || outputTokens <= totalLimit) { "摘要输出超过本地预算；保留原文" }
+            }
             else -> Unit
         }
         val bytes = byteSize(text.values)

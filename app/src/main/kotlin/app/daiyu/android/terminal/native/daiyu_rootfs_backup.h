@@ -33,7 +33,8 @@ static void rb_io(int fd,void *buffer,size_t size,int writing) {
     rb_need(size<=RB_LIMIT-rb_bytes,"size limit"); rb_bytes+=size;
     unsigned char *p=buffer;
     while(size) { ssize_t n=writing?write(fd,p,size):read(fd,p,size); if(n<0 && errno==EINTR) continue;
-        if(n<=0) rb_fail(writing?"write":"truncated stream"); p+=n; size-=(size_t)n; }
+        if(n<=0) rb_fail(writing?"write":"truncated stream");
+        p+=n; size-=(size_t)n; }
 }
 static void rb_u32(uint32_t *v,int writing) {
     unsigned char p[4]; if(writing) { p[0]=*v>>24;p[1]=*v>>16;p[2]=*v>>8;p[3]=*v; }
@@ -53,7 +54,8 @@ static uint64_t rb_mnt(int fd) {
     char path[80],line[256];unsigned long long id=0;snprintf(path,sizeof(path),"/proc/self/fdinfo/%d",fd);
     FILE *file=fopen(path,"re");if(!file)rb_fail("fdinfo");
     while(fgets(line,sizeof(line),file)) if(sscanf(line,"mnt_id: %llu",&id)==1)break;
-    if(fclose(file))rb_fail("fdinfo close");rb_need(id!=0,"mount identity missing");return id;
+    if(fclose(file))rb_fail("fdinfo close");
+    rb_need(id!=0,"mount identity missing");return id;
 }
 static void rb_same_mount(int fd) { rb_need(rb_mnt(fd)==rb_mount,"mounted subtree"); }
 static void rb_procpath(char *path,size_t size,int fd,const char *name) {
@@ -64,11 +66,14 @@ static void rb_read_meta(struct rb_meta *m,int fd,int parent,const char *name,co
     m->sec=st->st_mtim.tv_sec;m->nsec=(uint32_t)st->st_mtim.tv_nsec;
     char path[PATH_MAX]; if(fd<0)rb_procpath(path,sizeof(path),parent,name);
     ssize_t n=fd>=0?flistxattr(fd,NULL,0):llistxattr(path,NULL,0);
-    if(n<0 && errno==ENOTSUP)n=0; if(n<0)rb_fail("list attributes");rb_need(n<=65536,"attribute names");
+    if(n<0 && errno==ENOTSUP)n=0;
+    if(n<0)rb_fail("list attributes");
+    rb_need(n<=65536,"attribute names");
     char *names=rb_alloc((size_t)n+1);
     if(n && (fd>=0?flistxattr(fd,names,(size_t)n):llistxattr(path,names,(size_t)n))!=n)rb_fail("attributes changed");
     for(ssize_t p=0;p<n;) { size_t len=strnlen(names+p,(size_t)(n-p));rb_need(len>0 && len<(size_t)(n-p),"attribute name");
-        if(strcmp(names+p,"security.selinux"))m->count++;p+=(ssize_t)len+1; }
+        if(strcmp(names+p,"security.selinux"))m->count++;
+        p+=(ssize_t)len+1; }
     rb_need(m->count<=1024,"attribute count");m->attrs=rb_alloc(m->count*sizeof(*m->attrs));
     uint32_t index=0;size_t total=0;
     for(ssize_t p=0;p<n;) { const char *key=names+p;size_t len=strlen(key);p+=(ssize_t)len+1;if(!strcmp(key,"security.selinux"))continue;
@@ -84,13 +89,15 @@ static void rb_meta_io(struct rb_meta *m,int writing) {
     rb_u32(&m->mode,writing);rb_u32(&m->uid,writing);rb_u32(&m->gid,writing);
     uint64_t sec=(uint64_t)m->sec;rb_u64(&sec,writing);m->sec=(int64_t)sec;rb_u32(&m->nsec,writing);rb_u32(&m->count,writing);
     rb_need(m->mode<=07777 && m->nsec<1000000000 && m->count<=1024,"metadata limit");
-    if(!writing)m->attrs=rb_alloc(m->count*sizeof(*m->attrs));size_t total=0;
+    if(!writing)m->attrs=rb_alloc(m->count*sizeof(*m->attrs));
+    size_t total=0;
     for(uint32_t i=0;i<m->count;i++) {
         struct rb_attr *a=&m->attrs[i];char name[256];if(writing){rb_need(strlen(a->name)<sizeof(name),"attribute name");strcpy(name,a->name);}
         rb_string(name,sizeof(name),writing,0);rb_need(strcmp(name,"security.selinux") && !strchr(name,'/'),"host attribute");
         if(!writing){for(uint32_t j=0;j<i;j++)rb_need(strcmp(name,m->attrs[j].name),"duplicate attribute");a->name=rb_dup(name);}
         rb_u32(&a->size,writing);rb_need(a->size<=1048576 && total<=1048576-a->size,"attribute limit");total+=a->size;
-        if(!writing)a->value=rb_alloc(a->size);rb_io(writing?1:0,a->value,a->size,writing);
+        if(!writing)a->value=rb_alloc(a->size);
+        rb_io(writing?1:0,a->value,a->size,writing);
     }
 }
 static void rb_meta_free(struct rb_meta *m) {
@@ -104,10 +111,12 @@ static void rb_apply(struct rb_meta *m,int fd,int parent,const char *name,int sy
     char path[PATH_MAX];if(symlink)rb_procpath(path,sizeof(path),parent,name);
     /* Remove inherited ACLs/attributes before installing the captured set. SELinux remains host-owned. */
     ssize_t n=symlink?llistxattr(path,NULL,0):flistxattr(fd,NULL,0);if(n<0 && errno==ENOTSUP)n=0;
-    if(n<0)rb_fail("list destination attributes");rb_need(n<=65536,"destination attributes");char *names=rb_alloc((size_t)n+1);
+    if(n<0)rb_fail("list destination attributes");
+    rb_need(n<=65536,"destination attributes");char *names=rb_alloc((size_t)n+1);
     if(n && (symlink?llistxattr(path,names,(size_t)n):flistxattr(fd,names,(size_t)n))!=n)rb_fail("destination attributes changed");
     for(ssize_t p=0;p<n;){size_t len=strnlen(names+p,(size_t)(n-p));rb_need(len>0 && len<(size_t)(n-p),"destination attribute name");
-        if(strcmp(names+p,"security.selinux") && (symlink?lremovexattr(path,names+p):fremovexattr(fd,names+p))<0)rb_fail("remove inherited attribute");p+=(ssize_t)len+1;}
+        if(strcmp(names+p,"security.selinux") && (symlink?lremovexattr(path,names+p):fremovexattr(fd,names+p))<0)rb_fail("remove inherited attribute");
+        p+=(ssize_t)len+1;}
     rb_free(names,(size_t)n+1);
     for(uint32_t i=0;i<m->count;i++){struct rb_attr *a=&m->attrs[i];if((symlink?lsetxattr(path,a->name,a->value,a->size,0):fsetxattr(fd,a->name,a->value,a->size,0))<0)rb_fail("restore attribute");}
     struct timespec times[2]={{.tv_nsec=UTIME_OMIT},{.tv_sec=(time_t)m->sec,.tv_nsec=m->nsec}};
@@ -158,7 +167,8 @@ static void rb_pack_dir(int fd,const char *relative,unsigned depth) {
             char handle[80];snprintf(handle,sizeof(handle),"/proc/self/fd/%d",node);int file=open(handle,O_RDONLY|O_NONBLOCK|O_CLOEXEC);if(file<0)rb_fail("open file");close(node);
             struct rb_meta m={0};rb_read_meta(&m,file,0,NULL,&st);rb_meta_io(&m,1);rb_meta_free(&m);rb_need(st.st_size>=0,"file size");uint64_t bytes=(uint64_t)st.st_size;rb_u64(&bytes,1);
             unsigned char block[65536];uint64_t left=bytes;while(left){size_t count=left>sizeof(block)?sizeof(block):(size_t)left;ssize_t got=read(file,block,count);if(got<0 && errno==EINTR)continue;if(got<=0)rb_fail("file truncated");rb_io(1,block,(size_t)got,1);left-=(size_t)got;}
-            if(fstat(file,&actual)<0 || rb_changed(&st,&actual))rb_fail("file changed");close(file);
+            if(fstat(file,&actual)<0 || rb_changed(&st,&actual))rb_fail("file changed");
+            close(file);
             if(link){link->dev=st.st_dev;link->ino=st.st_ino;link->path=rb_dup(path);}}
         else {int node=openat(fd,name,O_PATH|O_NOFOLLOW|O_CLOEXEC);if(node<0)rb_fail("open symlink");rb_same_mount(node);close(node);
             struct rb_meta m={0};rb_read_meta(&m,-1,fd,name,&st);rb_meta_io(&m,1);rb_meta_free(&m);
@@ -166,8 +176,10 @@ static void rb_pack_dir(int fd,const char *relative,unsigned depth) {
             if(fstatat(fd,name,&after,AT_SYMLINK_NOFOLLOW)<0 || rb_changed(&st,&after))rb_fail("symlink changed");}
         errno=0;
     }
-    if(errno)rb_fail("read directory");if(closedir(directory)<0)rb_fail("close directory");
-    if(fstat(fd,&after)<0 || rb_changed(&before,&after))rb_fail("directory changed");unsigned char end='E';rb_io(1,&end,1,1);
+    if(errno)rb_fail("read directory");
+    if(closedir(directory)<0)rb_fail("close directory");
+    if(fstat(fd,&after)<0 || rb_changed(&before,&after))rb_fail("directory changed");
+    unsigned char end='E';rb_io(1,&end,1,1);
 }
 static void rb_unpack_dir(int fd,const char *relative,unsigned depth) {
     rb_need(depth<=128,"depth limit");struct rb_dir *pending=rb_alloc(sizeof(*pending));pending->path=rb_dup(relative);
@@ -182,7 +194,8 @@ static void rb_unpack_dir(int fd,const char *relative,unsigned depth) {
             struct rb_link *record=rb_find_link(st.st_dev,st.st_ino);
             if(!record->path){rb_need(st.st_nlink==1,"hardlink chain");record->dev=st.st_dev;record->ino=st.st_ino;record->path=rb_dup(target);}
             else rb_need(!strcmp(record->path,target),"hardlink chain");
-            if(linkat(parent,leaf,fd,name,0)<0)rb_fail("restore hardlink");close(parent);}
+            if(linkat(parent,leaf,fd,name,0)<0)rb_fail("restore hardlink");
+            close(parent);}
         else {struct rb_meta m={0};rb_meta_io(&m,0);
             if(type=='F'){uint64_t bytes=0;rb_u64(&bytes,0);rb_need(bytes<=RB_LIMIT-rb_bytes,"file limit");
                 int file=openat(fd,name,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);if(file<0)rb_fail("create file");rb_same_mount(file);
@@ -205,7 +218,8 @@ static int rb_open_root(const char *path) {
     int fd=open("/",O_PATH|O_DIRECTORY|O_CLOEXEC);if(fd<0)rb_fail("open filesystem root");
     char *save=NULL,*part=strtok_r(copy,"/",&save);rb_need(part!=NULL,"root directory");
     while(part){rb_need(strcmp(part,".") && strcmp(part,".."),"root path component");int next=openat(fd,part,O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
-        if(next<0)rb_fail("open root component");close(fd);fd=next;part=strtok_r(NULL,"/",&save);}
+        if(next<0)rb_fail("open root component");
+        close(fd);fd=next;part=strtok_r(NULL,"/",&save);}
     return fd;
 }
 static void rb_remove_dir(int fd,unsigned depth) {
@@ -213,8 +227,10 @@ static void rb_remove_dir(int fd,unsigned depth) {
     while((entry=readdir(dir))!=NULL){if(!strcmp(entry->d_name,".")||!strcmp(entry->d_name,".."))continue;
         struct stat st;if(fstatat(fd,entry->d_name,&st,AT_SYMLINK_NOFOLLOW)<0)rb_fail("cleanup stat");
         if(S_ISDIR(st.st_mode)){int child=rb_cleanup_child(fd,entry->d_name);rb_remove_dir(child,depth+1);close(child);if(unlinkat(fd,entry->d_name,AT_REMOVEDIR)<0)rb_fail("cleanup rmdir");}
-        else if(unlinkat(fd,entry->d_name,0)<0)rb_fail("cleanup unlink");errno=0;}
-    if(errno)rb_fail("cleanup readdir");closedir(dir);if(fsync(fd)<0)rb_fail("cleanup sync");
+        else if(unlinkat(fd,entry->d_name,0)<0)rb_fail("cleanup unlink");
+        errno=0;}
+    if(errno)rb_fail("cleanup readdir");
+    closedir(dir);if(fsync(fd)<0)rb_fail("cleanup sync");
 }
 static uint64_t rb_number(const char *text) { char *end;errno=0;unsigned long long n=strtoull(text,&end,10);rb_need(*text && *text!='-' && !*end && !errno,"numeric argument");return n; }
 static int rootfs_backup_main(int argc,char **argv) {
@@ -235,7 +251,9 @@ static int rootfs_backup_main(int argc,char **argv) {
         rb_source_uid=(uint32_t)ids[0];rb_source_gid=(uint32_t)ids[1];rb_target_uid=(uint32_t)ids[2];rb_target_gid=(uint32_t)ids[3];
         rb_need(geteuid()==0 || (rb_target_uid==getuid() && rb_target_gid==getgid()),"target identity");
         rb_need((root.st_mode&0777)==0700,"private staging required");DIR *d=fdopendir(dup(rb_rootfd));if(!d)rb_fail("staging directory");struct dirent *e;errno=0;
-        while((e=readdir(d))!=NULL)rb_need(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."),"staging not empty");if(errno)rb_fail("staging readdir");closedir(d);
+        while((e=readdir(d))!=NULL)rb_need(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."),"staging not empty");
+        if(errno)rb_fail("staging readdir");
+        closedir(d);
         rb_unpack_dir(rb_rootfd,"",0);
     }
     unsigned char end='Z';rb_io(pack?1:0,&end,1,pack);rb_need(end=='Z',"end marker");

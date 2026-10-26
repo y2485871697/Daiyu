@@ -63,6 +63,10 @@ object AndroidToolRegistry {
                             val start = arguments.integer("start_ms"); val end = arguments.integer("end_ms")
                             end > start && end - start <= AndroidPlatformReads.MAX_CALENDAR_WINDOW_MS
                         }
+                        PlatformReadTool.FILE_TEXT ->
+                            !(arguments.contains("offset_bytes") && arguments.contains("start_line")) &&
+                                !(arguments.contains("start_line") && arguments.contains("skip_lines")) &&
+                                (!arguments.contains("query") || arguments.text("query").isNotBlank())
                         PlatformReadTool.CONTACTS -> arguments.text("query").isNotBlank()
                         else -> true
                     }

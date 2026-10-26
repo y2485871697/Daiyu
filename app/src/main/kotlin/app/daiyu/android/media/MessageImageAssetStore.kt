@@ -50,7 +50,9 @@ class MessageImageAssetStore(
                 validateReferences(owner, snapshot)
                 snapshot.map {
                     checkImageCancellation(isCancelled)
-                    FrozenImageAttachment(it.asAttachment(), readLocked(owner, it))
+                    FrozenImageAttachment.source(it.asAttachment(), checkedFile(directory(owner), it.id + ".image")) {
+                        synchronized(gate) { io { openVerified(owner, it, isCancelled) } }
+                    }.also { frozen -> frozen.openSource().use { } }
                 }.also { checkImageCancellation(isCancelled) }
             }
         }
@@ -78,19 +80,13 @@ class MessageImageAssetStore(
                 MessageImageReference(owner, image.id, image.mime, image.bytes, image.sha256, image.width, image.height)
             }
             validateReferences(owner, references)
-            val contents = snapshot.zip(references).map { (image, ref) ->
-                checkImageCancellation(isCancelled)
-                image.bytes().also { bytes ->
-                    if (bytes.size != ref.bytes || imageDigest(bytes) != ref.sha256) fail(ImageAttachmentFailure.CORRUPT)
-                }
-            }
             val manifest = Manifest(owner, draftOwner, references)
             val directory = directory(owner)
             if (directory.exists()) {
                 if (readManifest(owner, directory) != manifest) fail(ImageAttachmentFailure.CORRUPT)
                 references.forEach {
                     checkImageCancellation(isCancelled)
-                    readLocked(owner, it)
+                    openVerified(owner, it, isCancelled).use { }
                 }
                 checkImageCancellation(isCancelled)
                 return@io references.toList()
@@ -99,9 +95,14 @@ class MessageImageAssetStore(
             cleanStagingLocked(owner)
             val staging = directory(owner, ".pending", create = true)
             try {
-                contents.zip(references).forEach { (bytes, ref) ->
+                snapshot.zip(references).forEach { (image, ref) ->
                     checkImageCancellation(isCancelled)
-                    writeSynced(staging, ref.id + ".image", bytes)
+                    val target = checkedFile(staging, ref.id + ".image")
+                    if (!target.createNewFile()) fail(ImageAttachmentFailure.STORAGE)
+                    FileOutputStream(target).use { output ->
+                        image.openSource().use { input -> copyVerifiedImage(input, output, ref.bytes.toLong(), ref.sha256, isCancelled) }
+                        output.fd.sync()
+                    }
                 }
                 writeSynced(staging, MANIFEST, encode(manifest))
                 checkImageCancellation(isCancelled)
@@ -247,6 +248,36 @@ class MessageImageAssetStore(
         }
         if (references.map { it.id }.toSet().size != references.size) fail(ImageAttachmentFailure.CORRUPT)
         if (references.sumOf { it.bytes.toLong() } > limits.maxDraftBytes) fail(ImageAttachmentFailure.TOO_LARGE)
+    }
+
+    private fun openVerified(owner: MessageImageOwner, reference: MessageImageReference,
+        cancelled: () -> Boolean): java.io.FileInputStream {
+        validateReferences(owner, listOf(reference))
+        val directory = directory(owner)
+        if (reference !in readManifest(owner, directory).references) fail(ImageAttachmentFailure.CORRUPT)
+        val file = checkedFile(directory, reference.id + ".image")
+        if (!Files.isRegularFile(file.toPath(), NOFOLLOW_LINKS)) fail(ImageAttachmentFailure.MISSING)
+        val input = java.io.FileInputStream(file)
+        try {
+            if (input.channel.size() != reference.bytes.toLong()) fail(ImageAttachmentFailure.CORRUPT)
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(64 * 1024)
+            var count = 0L
+            while (true) {
+                checkImageCancellation(cancelled)
+                val read = input.read(buffer)
+                if (read < 0) break
+                count += read
+                if (count > reference.bytes) fail(ImageAttachmentFailure.CORRUPT)
+                digest.update(buffer, 0, read)
+            }
+            val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+            if (count != reference.bytes.toLong() || hash != reference.sha256) fail(ImageAttachmentFailure.CORRUPT)
+            input.channel.position(0)
+            return input
+        } catch (failure: Exception) {
+            input.close(); throw failure
+        }
     }
 
     private fun readLocked(owner: MessageImageOwner, reference: MessageImageReference): ByteArray {

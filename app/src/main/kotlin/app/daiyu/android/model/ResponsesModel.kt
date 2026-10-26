@@ -185,6 +185,7 @@ class ResponsesModel internal constructor(
         private val imagePlan = ImageRequestPreflight.history(settings, ProviderProtocol.RESPONSES, capability, historySnapshot, images)
         private val videoPlan = videos?.also { it.validate(settings, videoCapability, historySnapshot) }
         private val input = ResponsesRequest.history(historySnapshot, imagePlan, videoPlan)
+        private val imageFiles = OfficialImageFiles(settings, connect, cancelled::get) { connection = it }
         private val ownItems = mutableListOf<String>()
         private var usable = true
         private var started = false
@@ -214,6 +215,14 @@ class ResponsesModel internal constructor(
             }
             started = true
             usable = false
+            try {
+                advance(outputs, sink)
+            } catch (failure: Exception) {
+                imageFiles.closeAsync()
+                throw failure
+            }
+        }
+        private fun advance(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             outputs.forEach {
                 val item = JSONObject().put("type", "function_call_output").put("call_id", it.callId.value).put("output", it.output)
                 input.put(item); ownItems.add(item.toString())
@@ -236,7 +245,13 @@ class ResponsesModel internal constructor(
             // Video-only allowlist and exact history binding apply to the final merged payload
             // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.
             videoPlan?.validateRequest(settings, request, input)
-            val requestBytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
+            // Resolve on a small copy: never mutate the session's marker history between rounds.
+            val wireRequest = JSONObject(request.toString())
+            if (imagePlan != null && OfficialImageFiles.supported(settings) && backgroundResume == null) {
+                ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get, videoPlan).use { }
+            }
+            val uploaded = if (backgroundResume == null) imageFiles.resolve(wireRequest, imagePlan) else emptySet()
+            val requestBytes = ImageRequestPreflight.prepare(wireRequest, settings, imagePlan, cancelled::get, videoPlan, uploaded)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->
                 checkCancelled()
@@ -251,6 +266,7 @@ class ResponsesModel internal constructor(
             var configuringRequest = false
             var transportStarted = false
             var post: VideoPostRequest? = null
+            var completedPost = false
             try {
                 checkCancelled()
                 try { (localSink ?: deliver)(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan))) }
@@ -319,7 +335,8 @@ class ResponsesModel internal constructor(
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 checkCancelled()
                 configuringRequest = false
-                conn.outputStream.useProviderResource { it.write(requestBytes) }
+                conn.setFixedLengthStreamingMode(requestBytes.size.toLong())
+                conn.outputStream.useProviderResource { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
@@ -341,6 +358,7 @@ class ResponsesModel internal constructor(
                     else ResponsesStream.read(reader, cancelled::get, deliver)
                     checkCancelled()
                     acceptItems(items)
+                    completedPost = true
                     if (backgroundResume == null) deliver(ModelEvent.ProtocolOutput(ownItems.toList()))
                     resumeAllowed = false
                     checkCancelled()
@@ -355,6 +373,8 @@ class ResponsesModel internal constructor(
                     (classified as? ModelRequestException)?.failure !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)) resumeAllowed = false
                 throw classified
             } finally {
+                requestBytes.close()
+                if (!completedPost || pending.isEmpty()) imageFiles.closeAsync()
                 post?.invalidate()
                 synchronized(postLock) {
                     if (pendingVideoPost === post) pendingVideoPost = null
@@ -375,6 +395,7 @@ class ResponsesModel internal constructor(
             post?.invalidate()
             wait?.cancel()
             try { current?.disconnect() } catch (_: Exception) {}
+            imageFiles.closeAsync()
         }
     }
 }

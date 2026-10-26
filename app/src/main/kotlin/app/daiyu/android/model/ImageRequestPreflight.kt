@@ -38,17 +38,24 @@ internal object ImageRequestPreflight {
     /** Called after ALL request options, once per round and before connect. Transmit these bytes. */
     fun bytes(request: JSONObject, settings: ModelSettings, plan: FrozenMessageImagePlan?,
               isCancelled: () -> Boolean): ByteArray {
+        return prepare(request, settings, plan, isCancelled).use { body ->
+            val output = java.io.ByteArrayOutputStream()
+            body.writeTo(output, isCancelled)
+            output.toByteArray()
+        }
+    }
+
+    internal fun prepare(request: JSONObject, settings: ModelSettings, plan: FrozenMessageImagePlan?,
+        isCancelled: () -> Boolean, videos: app.daiyu.android.model.videos.FrozenMessageVideoPlan? = null,
+        uploaded: Set<String> = emptySet()): PreparedRequestBody {
         checkCancelled(isCancelled)
         if (plan?.hasImages == true || settings.hasModelOverrides) {
             if (settings.protocol != ProviderProtocol.GEMINI || request.has("model")) {
-                require(request.opt("model") == settings.model) { "Custom body cannot change the model bound to images or capability declarations" }
+                require(request.opt("model") == settings.model) { "Custom body cannot change the model bound to attachments" }
             }
         }
         MessagesRequest.validateObject(request, MessagesRequest.MAX_JSON_CONTAINER_DEPTH)
-        val bytes = request.toString().toByteArray(Charsets.UTF_8)
-        if (bytes.size > MAX_REQUEST_BYTES) throw ImageAttachmentException(ImageAttachmentFailure.TOO_LARGE)
-        checkCancelled(isCancelled)
-        return bytes
+        return PreparedRequestBody.prepare(request, plan?.media.orEmpty().filterNot { it.token in uploaded } + videos?.media.orEmpty(), isCancelled)
     }
 
     private fun checkCancelled(isCancelled: () -> Boolean) {

@@ -40,8 +40,16 @@ class VideoPostRequest internal constructor(
     history: List<Message>,
     val historyIdentity: Any,
     val postNumber: Int,
-    requestBytes: ByteArray,
+    val requestByteCount: Int,
+    val requestSha256: String,
 ) {
+    internal constructor(configuration: ModelSettings, videoPlan: FrozenMessageVideoPlan, history: List<Message>,
+        historyIdentity: Any, postNumber: Int, body: app.daiyu.android.model.PreparedRequestBody) :
+        this(configuration, videoPlan, history, historyIdentity, postNumber, body.size, body.sha256)
+    internal constructor(configuration: ModelSettings, videoPlan: FrozenMessageVideoPlan, history: List<Message>,
+        historyIdentity: Any, postNumber: Int, requestBytes: ByteArray) : this(configuration, videoPlan, history,
+        historyIdentity, postNumber, requestBytes.size, MessageDigest.getInstance("SHA-256").digest(requestBytes)
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) })
     val endpoint: String = configuration.requestEndpoint()
     val model: String = configuration.model
     val protocol: ProviderProtocol = configuration.protocol
@@ -50,9 +58,6 @@ class VideoPostRequest internal constructor(
             protocolItems = Collections.unmodifiableList(it.protocolItems.toList()),
             historySegments = emptyList())
     })
-    val requestByteCount: Int = requestBytes.size
-    val requestSha256: String = MessageDigest.getInstance("SHA-256").digest(requestBytes)
-        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
     private var active = true
 
     /** Includes credential, options, configured endpoint/path and every settings value, without

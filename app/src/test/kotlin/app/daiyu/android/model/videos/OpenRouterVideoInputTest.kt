@@ -76,8 +76,7 @@ class OpenRouterVideoInputTest {
         val ref = reference()
         val cap = grant()
         val plan = freeze(ref, cap)
-        // A frozen plan no longer reads any file, even if the source is later removed.
-        assertTrue(store.discardUnreferenced(owner, ref))
+        // Exact original content is frozen into a bounded disk POST before connection/approval.
         val conn = Connection(done)
         val events = mutableListOf<ModelEvent>()
         val session = ResponsesModel(settings, { conn }, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval)
@@ -310,7 +309,6 @@ class OpenRouterVideoInputTest {
             """{"temperature":0.25,"top_p":0.9,"max_output_tokens":512}"""))
         val ref = reference()
         val plan = freeze(ref, cap, config = config)
-        assertTrue(store.discardUnreferenced(owner, ref))
         val call = JSONObject().put("type", "function_call").put("id", "fc").put("call_id", "call")
             .put("name", "lookup").put("arguments", "{}")
         val reasoning = JSONObject().put("type", "reasoning").put("id", "reasoning")

@@ -84,7 +84,7 @@ class MessagesModel internal constructor(
             settings.requestOptions.sessionGateway.requireExecutable()
             SessionGateway.applyAnthropic(request, sessionContext)
             val sessionHeaders = SessionGateway.headers(endpoint, sessionContext)
-            val requestBytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
+            val requestBytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->
                 checkCancelled()
@@ -108,7 +108,8 @@ class MessagesModel internal constructor(
                 conn.setRequestProperty("Accept", "text/event-stream")
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 configuringRequest = false
-                conn.outputStream.useProviderResource { it.write(requestBytes) }
+                conn.setFixedLengthStreamingMode(requestBytes.size.toLong())
+                conn.outputStream.useProviderResource { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
@@ -146,6 +147,7 @@ class MessagesModel internal constructor(
                 checkCancelled()
                 throw providerTransportFailure(failure, configuringRequest)
             } finally {
+                requestBytes.close()
                 // Do not read or expose provider error bodies. Close any already available error stream.
                 try { ownedConnection?.errorStream?.close() } catch (_: Exception) {}
                 try { ownedConnection?.disconnect() } catch (_: Exception) {} finally { connection = null }

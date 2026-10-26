@@ -29,6 +29,7 @@ import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.workspace.PrivateWorkspaceFiles
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -56,6 +57,16 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
     var deleting by remember(files) { mutableStateOf<WorkspaceDelete?>(null) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
+    val transferred = remember(files) { AtomicLong() }
+    var transferBytes by remember(files) { mutableLongStateOf(0L) }
+    var transferTotal by remember(files) { mutableStateOf<Long?>(null) }
+    var transferCancellation by remember(files) { mutableStateOf<AtomicBoolean?>(null) }
+    LaunchedEffect(transferCancellation) {
+        while (transferCancellation != null) {
+            transferBytes = transferred.get()
+            delay(100)
+        }
+    }
     fun current() = visit.get() && parentVisit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun permitted(at: Long) = visit.get() && parentVisit.get() && epoch.get() == at
     fun load(directory: PrivateWorkspaceFiles.Entry? = listing?.directory, parent: Boolean = false, clearNotice: Boolean = true) {
@@ -96,32 +107,52 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                 val at = lifecycle.withResumed {
                     check(visit.get() && parentVisit.get() && pending === ticket && !busy && !sharedBusy())
                     pending = null; busy = true; deleting = null; readCancellation?.set(true); request = null
+                    transferred.set(0); transferBytes = 0; transferTotal = ticket.source?.size
+                    transferCancellation = AtomicBoolean(false)
                     Any().also { operation = it; request = it }
                     epoch.get()
                 }
+                val cancellation = checkNotNull(transferCancellation)
                 withContext(Dispatchers.IO) {
-                    fun cancelled() = !permitted(at)
+                    fun cancelled() = !permitted(at) || cancellation.get()
                     if (cancelled()) throw InterruptedException()
                     if (importing) {
-                        val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                            if (cursor.moveToFirst()) cursor.getString(0) else null
-                        } ?: "文件"
+                        val metadata = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) to
+                                (if (cursor.isNull(1)) null else cursor.getLong(1).takeIf { it >= 0 }) else null
+                        }
+                        withContext(Dispatchers.Main) {
+                            if (request === operation) transferTotal = metadata?.second
+                        }
+                        val name = metadata?.first ?: "文件"
                         files.importFile(checkNotNull(ticket.directory), name, {
                             if (cancelled()) throw InterruptedException()
                             checkNotNull(context.contentResolver.openInputStream(uri)) { "workspace_source_unavailable" }
-                        }, ::cancelled)
+                        }, ::cancelled, transferred::set)
                     } else files.exportFile(checkNotNull(ticket.source), {
                         if (cancelled()) throw InterruptedException()
                         checkNotNull(context.contentResolver.openOutputStream(uri, "wt")) { "workspace_destination_unavailable" }
-                    }, ::cancelled)
+                    }, ::cancelled, transferred::set)
                 }
                 if (current() && permitted(at) && request === operation) notice = if (importing) "文件已导入私有工作区" else "文件已导出"
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { if (current() && visit.get() && request === operation) notice = "操作未确认完成，请重新进入目录检查；不会自动重试" }
+            catch (failure: Exception) {
+                if (current() && visit.get() && request === operation) notice = when {
+                    transferCancellation?.get() == true || failure is InterruptedException ->
+                        if (importing) "已取消导入；未发布不完整文件" else "已取消导出；目标可能包含部分内容"
+                    generateSequence<Throwable>(failure) { it.cause }.any {
+                        it.message == "workspace_storage_full" ||
+                            it is android.system.ErrnoException && it.errno in setOf(android.system.OsConstants.ENOSPC,
+                                android.system.OsConstants.EDQUOT)
+                    } -> "存储空间不足，文件未完成传输；导入临时文件已清理"
+                    failure is SecurityException -> "文件访问授权已失效，请重新选择文件"
+                    else -> "文件传输失败；请刷新检查结果，不会自动重试"
+                }
+            }
             finally {
                 if (pending === ticket) pending = null
                 onOccupied(false)
-                if (operation != null) { busy = false; if (request === operation) request = null; if (current()) load(clearNotice = false) }
+                if (operation != null) { transferBytes = transferred.get(); transferCancellation = null; busy = false; if (request === operation) request = null; if (current()) load(clearNotice = false) }
             }
         }
     }
@@ -188,11 +219,22 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
     }, content = { Column {
         if (!compact) {
             SettingsSectionTitle("私有工作区")
-            SettingsNote("应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。")
+            SettingsNote("应用专属目录，与只读共享和 Linux 挂载分开。导入按可用存储空间处理，无固定单文件大小门槛；删除仅支持文件和空目录。")
             SettingsCard { SettingsRow("导入文件", tag = "workspace-private-import", onClick = importFile) }
         }
         notice?.let { SettingsNote(it) }
-        if (busy || request != null) SettingsNote("正在处理私有文件")
+        if (transferCancellation != null) {
+            val copied = Formatter.formatShortFileSize(context, transferBytes)
+            val total = transferTotal?.let { Formatter.formatShortFileSize(context, it) }
+            SettingsNote(if (total == null) "正在传输：$copied" else "正在传输：$copied / $total")
+            val cancellation = transferCancellation
+            SettingsRow("取消传输", tag = "workspace-private-cancel-transfer", onClick = {
+                if (current() && transferCancellation === cancellation) {
+                    cancellation?.set(true)
+                    notice = "正在取消，等待当前读写结束"
+                }
+            })
+        } else if (busy || request != null) SettingsNote("正在处理私有文件")
         if (listing == null && notice != null && !busy && request == null) SettingsCard {
             SettingsRow("重试读取目录", onClick = { load(null) }, tag = "workspace-private-retry")
         }

@@ -27,12 +27,32 @@ data class ImageDimensions(val mime: String, val width: Int, val height: Int)
 
 fun interface ImageInspector {
     fun inspect(bytes: ByteArray): ImageDimensions
+    fun inspect(file: java.io.File): ImageDimensions = inspect(file.readBytes())
 }
 
-/** All bytes are frozen before the host starts a request; consumers cannot mutate the snapshot. */
-class FrozenImageAttachment internal constructor(val attachment: ImageAttachment, bytes: ByteArray) {
-    private val content = bytes.copyOf()
-    fun bytes(): ByteArray = content.copyOf()
+/** References are immutable; each source open verifies the original before a POST is prepared. */
+class FrozenImageAttachment private constructor(val attachment: ImageAttachment,
+    private val source: () -> java.io.InputStream, private val file: java.io.File? = null) {
+    internal constructor(attachment: ImageAttachment, bytes: ByteArray) : this(attachment,
+        bytes.copyOf().let { frozen -> { frozen.inputStream() } }, null)
+    internal fun openSource(): java.io.InputStream = source()
+    internal fun dimensions(inspector: ImageInspector): ImageDimensions = if (file == null) inspector.inspect(bytes())
+        else { source().use { }; inspector.inspect(file) }
+    fun bytes(): ByteArray = source().use { input ->
+        val bytes = ByteArray(attachment.bytes)
+        var offset = 0
+        while (offset < bytes.size) {
+            val count = input.read(bytes, offset, bytes.size - offset)
+            if (count <= 0) throw ImageAttachmentException(ImageAttachmentFailure.CORRUPT)
+            offset += count
+        }
+        if (input.read() != -1) throw ImageAttachmentException(ImageAttachmentFailure.CORRUPT)
+        bytes
+    }
+    internal companion object {
+        fun source(attachment: ImageAttachment, file: java.io.File, open: () -> java.io.InputStream) =
+            FrozenImageAttachment(attachment, open, file)
+    }
 }
 
 data class ImageAttachmentLimits(

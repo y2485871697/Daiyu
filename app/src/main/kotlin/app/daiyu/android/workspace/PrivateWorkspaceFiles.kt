@@ -10,7 +10,8 @@ import java.io.OutputStream
 import java.util.UUID
 
 /** App-owned files only. Each operation walks pinned directory descriptors, never a SAF host path. */
-internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
+internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
+    private val availableBytes: (File) -> Long = { it.usableSpace }) {
     private val readOnly: Boolean get() = paths.readOnly
     constructor(context: Context) : this(PrivateWorkspacePaths(context.filesDir))
 
@@ -53,7 +54,10 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
     }
 
     fun importFile(directory: Entry, name: String, openInput: () -> InputStream,
-        cancelled: () -> Boolean = { false }): String {
+        cancelled: () -> Boolean = { false }): String = importFile(directory, name, openInput, cancelled, {})
+
+    fun importFile(directory: Entry, name: String, openInput: () -> InputStream,
+        cancelled: () -> Boolean, progress: (Long) -> Unit): String {
         check(!readOnly) { "workspace_read_only" }
         check(directory.directory) { "workspace_not_directory" }
         val cleaned = name.substringAfterLast('/').substringAfterLast('\\')
@@ -90,8 +94,8 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
                 } finally { Os.close(raw) }
                 val completed = ParcelFileDescriptor.AutoCloseOutputStream(held).use { destination ->
                     active(cancelled)
-                    openInput().use { source -> copy(source, destination, cancelled) }
-                    destination.fd.sync()
+                    openInput().use { source -> copy(source, destination, cancelled, progress, File(prefix)) }
+                    Os.fsync(destination.fd)
                     active(cancelled)
                     identity(Os.fstat(held.fileDescriptor)).also {
                         check(identity(Os.lstat(temporary)) == it) { "workspace_entry_changed" }
@@ -119,14 +123,18 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
         }
     }
 
-    fun exportFile(entry: Entry, openOutput: () -> OutputStream, cancelled: () -> Boolean = { false }) {
+    fun exportFile(entry: Entry, openOutput: () -> OutputStream, cancelled: () -> Boolean = { false }) =
+        exportFile(entry, openOutput, cancelled, {})
+
+    fun exportFile(entry: Entry, openOutput: () -> OutputStream, cancelled: () -> Boolean,
+        progress: (Long) -> Unit) {
         check(!readOnly) { "workspace_read_only" }
         check(!entry.directory && !entry.symbolicLink) { "workspace_not_file" }
         pinned(entry, cancelled) { descriptor, _ ->
             // Duplicate the pinned file: closing the stream must not close the walk's descriptor twice.
             ParcelFileDescriptor.AutoCloseInputStream(ParcelFileDescriptor.dup(descriptor.fileDescriptor)).use { input ->
                 active(cancelled)
-                openOutput().use { output -> copy(input, output, cancelled) }
+                openOutput().use { output -> copy(input, output, cancelled, progress) }
             }
         }
     }
@@ -185,16 +193,28 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
 
     private fun fdPath(fd: ParcelFileDescriptor) = "/proc/self/fd/${fd.fd}"
 
-    private fun copy(input: InputStream, output: OutputStream, cancelled: () -> Boolean) {
-        val buffer = ByteArray(64 * 1024); var total = 0L
+    private fun copy(input: InputStream, output: OutputStream, cancelled: () -> Boolean,
+        progress: (Long) -> Unit, destination: File? = null) {
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        progress(total)
         while (true) {
             active(cancelled)
-            val count = input.read(buffer)
+            var count = input.read(buffer)
             if (count < 0) { active(cancelled); return }
-            total += count
-            check(total <= MAX_FILE_BYTES) { "workspace_file_too_large" }
+            if (count == 0) {
+                val next = input.read()
+                if (next < 0) { active(cancelled); return }
+                buffer[0] = next.toByte(); count = 1
+            }
+            if (destination != null) {
+                val available = availableBytes(destination)
+                if (available > 0 && available < count) throw java.io.IOException("workspace_storage_full")
+            }
             active(cancelled)
             output.write(buffer, 0, count)
+            total = Math.addExact(total, count.toLong())
+            progress(total)
         }
     }
 
@@ -204,7 +224,6 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
 
     companion object {
         const val MAX_ENTRIES = 100
-        const val MAX_FILE_BYTES = 256L * 1024 * 1024
         private const val STAGING = ".workspace-import-"
         private val publicationLock = Any()
     }

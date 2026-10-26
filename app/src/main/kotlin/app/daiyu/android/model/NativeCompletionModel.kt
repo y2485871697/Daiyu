@@ -74,7 +74,7 @@ class NativeCompletionModel internal constructor(
             else require(!settings.requestOptions.sessionGateway.matches(settings.model, endpoint)) { "Gemini 不支持 OpenAI 会话网关请求字段" }
             ReasoningRequestPolicy.validate(request, settings.protocol, settings.reasoningOverride)
             val headers = SessionGateway.headers(endpoint, sessionContext)
-            val bytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
+            val bytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->
                 checkCancelled()
@@ -97,7 +97,8 @@ class NativeCompletionModel internal constructor(
                 conn.setRequestProperty("Accept", "text/event-stream")
                 headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 configuringRequest = false
-                conn.outputStream.useProviderResource { it.write(bytes) }
+                conn.setFixedLengthStreamingMode(bytes.size.toLong())
+                conn.outputStream.useProviderResource { bytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
@@ -124,6 +125,7 @@ class NativeCompletionModel internal constructor(
                 checkCancelled()
                 throw providerTransportFailure(failure, configuringRequest)
             } finally {
+                bytes.close()
                 try { owned?.errorStream?.close() } catch (_: Exception) {}
                 try { owned?.disconnect() } catch (_: Exception) {} finally { connection = null }
             }

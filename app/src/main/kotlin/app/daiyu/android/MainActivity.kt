@@ -745,6 +745,8 @@ class MainActivity : ComponentActivity() {
         var pickerAway = false
         var returned = false
         var uri: Uri? = null
+        var resultData: Intent? = null
+        var settling = false
     }
     private var chatReferencePick: ChatReferencePick? = null
     private val chatReferencePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -754,6 +756,7 @@ class MainActivity : ComponentActivity() {
             request.uri = if (request.live && result.resultCode == RESULT_OK) result.data?.let {
                 app.daiyu.android.platform.PlatformSettingsAccess.acceptedUri(it, request.tree)
             } else null
+            request.resultData = if (request.uri != null) result.data else null
             settleChatReference()
         }
     }
@@ -770,7 +773,7 @@ class MainActivity : ComponentActivity() {
         val request = chatReferencePick ?: return
         request.live = false; request.uri = null
         // Keep an unreturned slot reserved so its ActivityResult cannot enter a newer request.
-        if (request.returned) chatReferencePick = null
+        if (request.returned && !request.settling) chatReferencePick = null
     }
     private fun pickChatReference(tree: Boolean) {
         if (!generationResumed() || !voiceForeground || !chatReferenceAvailable() || chatReferencePick != null) return
@@ -784,20 +787,44 @@ class MainActivity : ComponentActivity() {
     }
     private fun settleChatReference() {
         val request = chatReferencePick ?: return
-        if (!request.returned) return
+        if (!request.returned || request.settling) return
         if (!request.live) { chatReferencePick = null; return }
         if (!generationResumed() || !voiceForeground) return
-        chatReferencePick = null
-        val uri = request.uri ?: return
-        if (!chatReferenceAvailable() || !chatReferenceMatches(request)) return
+        val uri = request.uri ?: run { chatReferencePick = null; return }
+        if (!chatReferenceAvailable() || !chatReferenceMatches(request)) { chatReferencePick = null; return }
         val raw = uri.toString()
-        if (raw.any { it.code < 0x20 || it.code == 0x7f }) return
-        val reference = "${if (request.tree) "目录" else "文件"}引用（未读取）：$raw"
-        val next = if (request.text.isEmpty()) reference else "${request.text}\n$reference"
-        updateDraft(next)
-        if (draft == next) {
-            selectionStart = next.length; selectionEnd = next.length; publishChat(rowsChanged = false)
-        } else toast("引用未加入；原草稿保留")
+        if (raw.any { it.code < 0x20 || it.code == 0x7f }) { chatReferencePick = null; return }
+        val data = request.resultData
+        request.settling = true
+        lifecycleScope.launch {
+            try {
+                val description = withContext(Dispatchers.IO) {
+                    if (data == null || !platformSaf.accept(data, request.tree)) return@withContext null
+                    try {
+                        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME,
+                            android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                            if (!cursor.moveToFirst()) null else {
+                                val name = cursor.getString(0).orEmpty().take(200).replace('\n', ' ').replace('\r', ' ')
+                                val size = if (cursor.isNull(1)) "大小未知" else "${cursor.getLong(1)} 字节"
+                                "$name（$size）"
+                            }
+                        } ?: "名称及大小未知"
+                    } catch (_: Exception) { "名称及大小未知" }
+                }
+                if (chatReferencePick !== request || !request.live || !generationResumed() || !voiceForeground ||
+                    !chatReferenceAvailable() || !chatReferenceMatches(request)) return@launch
+                if (description == null) { toast("文件只读授权未保存，请重新选择；原草稿保留"); return@launch }
+                val reference = "${if (request.tree) "目录" else "文件"}引用（未读取）：$raw"
+                val instructions = if (request.tree) "用 list_files 按需列举，勿自动读取全部文件。"
+                    else "用 file_metadata 查看元数据；用 read_text_file 按行或 query 检索，按 next_offset_bytes 续读；勿每轮展开全文。不支持的文档格式应明确说明。"
+                val details = "$reference\n附件信息（按需读取）：$description；$instructions"
+                val next = if (request.text.isEmpty()) details else "${request.text}\n$details"
+                updateDraft(next)
+                if (draft == next) {
+                    selectionStart = next.length; selectionEnd = next.length; publishChat(rowsChanged = false)
+                } else toast("引用未加入；原草稿保留")
+            } finally { if (chatReferencePick === request) chatReferencePick = null }
+        }
     }
     private var sidebarVisibleState by mutableStateOf(false)
     private var sidebarVisible: Boolean

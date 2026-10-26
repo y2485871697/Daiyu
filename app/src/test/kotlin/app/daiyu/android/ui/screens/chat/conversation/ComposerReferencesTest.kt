@@ -66,4 +66,14 @@ class ComposerReferencesTest {
         assertEquals("中文+目录", p.references.single().label)
         assertFalse(p.references.single().label.contains("content://"))
     }
+    @org.junit.Test fun metadataMovesAndRemovesWithItsReference() {
+        val reference = "文件引用（未读取）：content://fixture/document/one"
+        val details = "附件信息（按需读取）：large.log（12345678 字节）；使用 read_text_file 按需读取"
+        val source = "问题\n$reference\n$details"
+        val projected = ComposerReferences(source)
+        org.junit.Assert.assertEquals("问题", projected.text)
+        org.junit.Assert.assertTrue(projected.references.single().label.contains("large.log"))
+        org.junit.Assert.assertEquals("修改\n$reference\n$details", projected.edit("修改"))
+        org.junit.Assert.assertEquals("问题", projected.remove(projected.references.single()))
+    }
 }

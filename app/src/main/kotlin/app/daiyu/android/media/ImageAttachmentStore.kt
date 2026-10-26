@@ -99,8 +99,31 @@ class ImageAttachmentStore(
         if (references.sumOf { it.bytes.toLong() } > limits.maxDraftBytes) fail(ImageAttachmentFailure.TOO_LARGE)
         references.map {
             checkImageCancellation(isCancelled)
-            FrozenImageAttachment(it, read(owner, it))
+            FrozenImageAttachment.source(it, File(ownerDirectory(owner, create = false), it.id + ".image")) { synchronized(gate) { openVerified(owner, it, isCancelled) } }
+                .also { image -> image.openSource().use { } }
         }.also { checkImageCancellation(isCancelled) }
+    }
+
+    private fun openVerified(owner: ImageAttachmentOwner, attachment: ImageAttachment,
+        cancelled: () -> Boolean): java.io.FileInputStream {
+        verifyOwner(owner, attachment)
+        val directory = ownerDirectory(owner, create = false)
+        val metadata = File(directory, attachment.id + ".json")
+        if (!metadata.exists()) fail(ImageAttachmentFailure.MISSING)
+        if (decode(owner, metadata) != attachment) fail(ImageAttachmentFailure.CORRUPT)
+        val file = File(directory, attachment.id + ".image")
+        checkMediaPath(file)
+        if (!Files.isRegularFile(file.toPath(), NOFOLLOW_LINKS)) fail(ImageAttachmentFailure.MISSING)
+        val input = java.io.FileInputStream(file)
+        try {
+            if (input.channel.size() != attachment.bytes.toLong()) fail(ImageAttachmentFailure.CORRUPT)
+            copyVerifiedImage(input, object : java.io.OutputStream() {
+                override fun write(value: Int) {}
+                override fun write(buffer: ByteArray, offset: Int, length: Int) {}
+            }, attachment.bytes.toLong(), attachment.sha256, cancelled)
+            input.channel.position(0)
+            return input
+        } catch (failure: Exception) { input.close(); throw failure }
     }
 
     /** Draft-only deletion. Accepted history must use MessageImageAssetStore references. */

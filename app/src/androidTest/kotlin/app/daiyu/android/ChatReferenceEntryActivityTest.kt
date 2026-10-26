@@ -82,8 +82,12 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
         instrumentation.addMonitor(picker)
         try {
             attach(tree)
-            val expected = "$original\n${if (tree) "目录" else "文件"}引用（未读取）：${data.data}"
-            assertReferenceDraft(expected, original)
+            // This deliberately nonexistent provider cannot persist READ; do not create a dead attachment.
+            val expected = original
+            awaitControl("reference grant rejection settled") {
+                MainActivity::class.java.getDeclaredField("chatReferencePick").apply { isAccessible = true }.get(activity) == null
+            }
+            assertDraft(expected)
             assertSelection(original.length, original.length)
             assertEquals(1, launches.get())
             val reopened = ConversationDatabase(fixture.application)
@@ -95,7 +99,7 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
             }
             activity = recreateActivity(activity)
             awaitUniqueTag("chat-draft")
-            assertReferenceDraft(expected, original)
+            assertDraft(expected)
             assertEquals(settings, fixture.settings.load())
             assertEquals(messages, fixture.database.messages(conversation.id))
             assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
@@ -103,8 +107,8 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
             assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
         } finally { instrumentation.removeMonitor(picker) }
     }
-    fun testFileMenuAddsOnlyOneUnreadUriReferenceAndPersistsDraft() = picked(false)
-    fun testDirectoryMenuAddsOnlyOneUnreadUriReferenceAndPersistsDraft() = picked(true)
+    fun testFileMenuRejectsUriWithoutPersistableReadGrant() = picked(false)
+    fun testDirectoryMenuRejectsUriWithoutPersistableReadGrant() = picked(true)
 
     fun testCancelledMalformedAndWrongKindResultsPreserveDraftAndGrants() {
         prepare()
@@ -172,12 +176,15 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
         request.javaClass.getDeclaredField("uri").apply { isAccessible = true }.set(request, valid(tree).data)
         MainActivity::class.java.getDeclaredMethod("settleChatReference").apply { isAccessible = true }.invoke(activity)
     }
-    fun testResultBeforeResumedWaitsForFirstPickerHopThenAddsReference() {
+    fun testResultBeforeResumedWaitsAndRejectsMissingGrantReceipt() {
         prepare()
         lateinit var request: Any
         mainThread { request = pending(false) }
         realPauseResume(activity, atPause = { returned(request, false) })
-        assertReferenceDraft("$original\n文件引用（未读取）：${valid(false).data}", original)
+        awaitControl("missing grant receipt settled") {
+            MainActivity::class.java.getDeclaredField("chatReferencePick").apply { isAccessible = true }.get(activity) == null
+        }
+        assertDraft(original) // Seeded result has no original read-grant receipt, so it cannot attach.
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
     }
     fun testLaterPauseRevokesPendingResultAndUnreturnedSlotBlocksNewPicker() {

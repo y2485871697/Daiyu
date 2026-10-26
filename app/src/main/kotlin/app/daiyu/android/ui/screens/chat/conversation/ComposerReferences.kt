@@ -4,8 +4,10 @@ import java.net.URLDecoder
 
 /** Presentation of the existing literal-reference draft format. Does not resolve or read a URI. */
 internal class ComposerReferences(val source: String, composing: IntRange? = null) {
-    data class Reference(val line: Int, val kind: String, val value: String, val serialized: String) {
+    data class Reference(val line: Int, val kind: String, val value: String, val serialized: String,
+        val details: String? = null) {
         val label: String get() {
+            details?.let { return it.substringBefore('；').take(200) }
             val tail = value.trimEnd('/').substringAfterLast('/').substringAfterLast('\\')
             val decoded = runCatching { URLDecoder.decode(tail.replace("+", "%2B"), "UTF-8") }.getOrDefault(tail)
             return decoded.substringAfterLast(':').filterNot { it.isISOControl() }.take(120).ifBlank { kind }
@@ -22,9 +24,13 @@ internal class ComposerReferences(val source: String, composing: IntRange? = nul
         val kind = listOf("文件", "目录", "路径").firstOrNull { line.startsWith("${it}引用（未读取）：") }
             ?: return@mapIndexedNotNull null
         val value = line.substringAfter('：')
-        if (value.isBlank() || value.any { it.isISOControl() }) null else Reference(index, kind, value, line)
+        if (value.isBlank() || value.any { it.isISOControl() }) null else {
+            val metadata = lines.getOrNull(index + 1)?.takeIf { it.startsWith("附件信息（按需读取）：") }
+            Reference(index, kind, value, if (metadata == null) line else "$line\n$metadata",
+                metadata?.substringAfter('：'))
+        }
     }
-    private val referenceLines = references.map { it.line }.toSet()
+    private val referenceLines = references.flatMap { if (it.details == null) listOf(it.line) else listOf(it.line, it.line + 1) }.toSet()
     private val offsets: IntArray
     val text: String
 
@@ -64,5 +70,5 @@ internal class ComposerReferences(val source: String, composing: IntRange? = nul
             (if (body.isEmpty()) "" else "$body\n") + references.joinToString("\n") { it.serialized }
 
     fun remove(reference: Reference): String = if (reference !in references) source else
-        lines.filterIndexed { index, _ -> index != reference.line }.joinToString("\n")
+        lines.filterIndexed { index, _ -> index != reference.line && !(reference.details != null && index == reference.line + 1) }.joinToString("\n")
 }

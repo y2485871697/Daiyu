@@ -204,12 +204,13 @@ class ImageAttachmentStoreTest {
         assertTrue(store.freeze(owner, emptyList(), false).isEmpty())
     }
 
-    @Test fun frozenSnapshotIsIndependentOfDeletionAndMutableArrays() {
+    @Test fun frozenReferenceReadsOriginalAndRejectsDeletedSource() {
         val ref = add()
         val snapshot = store.freeze(owner, listOf(ref), true).single()
-        store.clear(owner)
         snapshot.bytes().fill(0)
         assertArrayEquals(bytes, snapshot.bytes())
+        store.clear(owner)
+        failure(ImageAttachmentFailure.MISSING) { snapshot.openSource() }
     }
 
     @Test fun duplicateInputAndCrossOwnerSnapshotsAreRejected() {

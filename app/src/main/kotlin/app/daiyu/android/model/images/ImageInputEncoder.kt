@@ -70,6 +70,43 @@ class ImageInputEncoder(
         return blocks
     }
 
+    internal fun streaming(protocol: ProviderProtocol, images: List<FrozenImageAttachment>,
+        supported: Boolean?, cancelled: () -> Boolean): Pair<List<JSONObject>, List<app.daiyu.android.model.StreamingMedia>> {
+        checkCancelled(cancelled)
+        if (protocol == ProviderProtocol.UNKNOWN) throw UnsupportedProviderException(protocol.wireName)
+        require(images.isEmpty() || protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS))
+        requireSupported(images.isNotEmpty(), supported)
+        checkMetadataLimits(images.map { it.attachment.bytes })
+        require(images.map { it.attachment.owner to it.attachment.id }.toSet().size == images.size)
+        val sources = mutableListOf<app.daiyu.android.model.StreamingMedia>()
+        val blocks = images.map { image ->
+            checkCancelled(cancelled)
+            val metadata = image.attachment
+            val actual = image.dimensions(inspector)
+            if (actual != app.daiyu.android.media.ImageDimensions(metadata.mime, metadata.width, metadata.height)) fail(ImageAttachmentFailure.CORRUPT)
+            if (metadata.mime !in SUPPORTED_MIMES) fail(ImageAttachmentFailure.UNSUPPORTED_IMAGE)
+            if (actual.width <= 0 || actual.height <= 0) fail(ImageAttachmentFailure.INVALID_IMAGE)
+            if (actual.width.toLong() * actual.height > limits.maxPixels) fail(ImageAttachmentFailure.TOO_LARGE)
+            if (protocol == ProviderProtocol.MESSAGES && (actual.width > MESSAGES_MAX_EDGE || actual.height > MESSAGES_MAX_EDGE ||
+                base64Length(metadata.bytes) > MESSAGES_MAX_BASE64_BYTES)) fail(ImageAttachmentFailure.TOO_LARGE)
+            val source = app.daiyu.android.model.StreamingMedia(metadata.bytes.toLong(), metadata.sha256, image::openSource)
+            // Validate even test/custom resolvers before creating a model session. Production sources
+            // also pin and verify their stored owner/manifest on every open.
+            source.writeBase64(object : java.io.OutputStream() { override fun write(value: Int) {}
+                override fun write(buffer: ByteArray, offset: Int, length: Int) {} }, cancelled)
+            sources += source
+            val data = "data:${metadata.mime};base64,${source.token}"
+            when (protocol) {
+                ProviderProtocol.RESPONSES -> JSONObject().put("type", "input_image").put("image_url", data)
+                ProviderProtocol.MESSAGES -> JSONObject().put("type", "image").put("source",
+                    JSONObject().put("type", "base64").put("media_type", metadata.mime).put("data", source.token))
+                ProviderProtocol.CHAT_COMPLETIONS -> JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", data))
+                else -> throw UnsupportedProviderException(protocol.wireName)
+            }
+        }
+        return blocks to sources
+    }
+
     /** Shared by history preflight and post-read encoding; uses this encoder's exact limits. */
     internal fun checkMetadataLimits(imageBytes: List<Int>) {
         if (imageBytes.size > limits.maxImages) fail(ImageAttachmentFailure.TOO_MANY)

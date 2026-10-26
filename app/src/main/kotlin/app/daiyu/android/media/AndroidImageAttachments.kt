@@ -13,6 +13,25 @@ import java.io.File
 import java.io.IOException
 
 class AndroidImageInspector : ImageInspector {
+    override fun inspect(file: File): ImageDimensions {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, options)
+        if (options.outWidth <= 0 || options.outHeight <= 0 || options.outMimeType == null) {
+            throw ImageAttachmentException(ImageAttachmentFailure.INVALID_IMAGE)
+        }
+        if (options.outMimeType !in ImageAttachmentStore.SUPPORTED_MIMES) {
+            throw ImageAttachmentException(ImageAttachmentFailure.UNSUPPORTED_IMAGE)
+        }
+        if (options.outWidth.toLong() * options.outHeight > 40_000_000) {
+            throw ImageAttachmentException(ImageAttachmentFailure.TOO_LARGE)
+        }
+        var sample = 1
+        while (maxOf(options.outWidth, options.outHeight).toLong() / sample > 128) sample *= 2
+        val probe = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+            ?: throw ImageAttachmentException(ImageAttachmentFailure.INVALID_IMAGE)
+        probe.recycle()
+        return ImageDimensions(options.outMimeType, options.outWidth, options.outHeight)
+    }
     override fun inspect(bytes: ByteArray): ImageDimensions {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)

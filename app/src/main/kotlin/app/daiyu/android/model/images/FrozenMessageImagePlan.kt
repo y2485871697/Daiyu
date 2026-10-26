@@ -26,6 +26,7 @@ class FrozenMessageImagePlan private constructor(
     private val protocol: ProviderProtocol,
     private val model: String,
     private val blocks: Map<Pair<Int, Int>, String>,
+    internal val media: List<app.daiyu.android.model.StreamingMedia>,
 ) : ModelImagePlan {
     internal fun estimateImageSizes(): Map<String, Pair<Int, Int>> = blocks.entries.associate { (position, raw) ->
         val image = (history[position.first].blocks[position.second] as MessageBlock.Image).reference
@@ -94,10 +95,10 @@ class FrozenMessageImagePlan private constructor(
                     if (block is MessageBlock.Image) positions.add(index to blockIndex)
                 }
             }
-            val encoded = encoder.encode(provider.protocol, frozen, provider.imageInputSupported, isCancelled = isCancelled)
+            val (encoded, media) = encoder.streaming(provider.protocol, frozen, provider.imageInputSupported, isCancelled)
             checkCancelled()
             return FrozenMessageImagePlan(expanded, provider.asModelSettings().requestEndpoint(), provider.protocol,
-                provider.model, positions.zip(encoded.map { it.toString() }).toMap())
+                provider.model, positions.zip(encoded.map { it.toString() }).toMap(), media)
         }
 
         internal fun snapshot(history: List<Message>): List<Message> = MessageHistory.expand(history).map {

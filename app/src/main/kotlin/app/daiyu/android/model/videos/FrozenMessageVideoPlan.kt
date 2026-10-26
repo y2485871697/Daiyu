@@ -10,7 +10,6 @@ import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.model.images.FrozenMessageImagePlan
 import app.daiyu.android.storage.ModelSettings
 import org.json.JSONObject
-import java.util.Base64
 
 /** A deliberately small Responses-only sidecar. References must be loaded from accepted message
  * rows, not drafts, previews, raw protocol JSON or a provider URI. Existing domain image/text
@@ -22,13 +21,14 @@ class MessageVideoInput(val owner: MessageVideoOwner, references: List<MessageVi
     override fun toString() = "MessageVideoInput(<references>)"
 }
 
-/** Immutable encoded original bytes bound to a complete expanded history AND one explicit grant.
- * No filesystem/provider IO occurs after freezing. Never persist this plan or its data URLs.
+/** Immutable original references bound to a complete expanded history AND one explicit grant.
+ * Each POST revalidates sources and freezes exact wire bytes before approval/network. Never persist markers.
  */
 class FrozenMessageVideoPlan private constructor(
     private val history: List<Message>,
     private val capability: OpenRouterVideoCapability,
     private val blocks: Map<Int, List<String>>,
+    internal val media: List<app.daiyu.android.model.StreamingMedia>,
 ) {
     internal fun validate(settings: ModelSettings, grant: OpenRouterVideoCapability?, messages: List<Message>) {
         require(grant === capability) { "Original video requires the same explicit capability" }
@@ -91,16 +91,18 @@ class FrozenMessageVideoPlan private constructor(
                 }
                 positions[index] = input.references
             }
+            val media = mutableListOf<app.daiyu.android.model.StreamingMedia>()
             val encoded = positions.mapValues { (_, references) -> references.map { ref ->
                 checkCancelled()
-                val original = store.readForModel(ref.owner, ref, capability.maxVideoBytes, isCancelled)
-                checkCancelled()
-                val data = Base64.getEncoder().encodeToString(original)
-                checkCancelled()
-                JSONObject().put("type", "input_video").put("video_url", "data:video/mp4;base64,$data").toString()
+                store.openOriginal(ref.owner, ref, isCancelled).use { }
+                val source = app.daiyu.android.model.StreamingMedia(ref.bytes, ref.sha256) {
+                    store.openOriginal(ref.owner, ref, isCancelled)
+                }
+                media += source
+                JSONObject().put("type", "input_video").put("video_url", "data:video/mp4;base64,${source.token}").toString()
             } }
             checkCancelled()
-            return FrozenMessageVideoPlan(expanded, capability, encoded)
+            return FrozenMessageVideoPlan(expanded, capability, encoded, media)
         }
     }
 }

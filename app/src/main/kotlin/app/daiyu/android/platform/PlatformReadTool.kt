@@ -17,7 +17,12 @@ enum class PlatformReadTool(val toolName: String, val capability: String, val de
         ArgumentField("tree_uri", ArgumentType.Text(2048, minimumLength = 1)),
         ArgumentField("query", ArgumentType.Text(128), false), limitField()))),
     FILE_METADATA("file_metadata", "platform.files.metadata.read", "Read metadata only for an existing explicitly granted content URI; no filesystem paths.", ToolSchema(listOf(uriField()))),
-    FILE_TEXT("read_text_file", "platform.files.text.read", "Read at most 8192 bytes of UTF-8 text from an explicitly granted content URI. No permission acquisition.", ToolSchema(listOf(uriField()))),
+    FILE_TEXT("read_text_file", "platform.files.text.read", "Read/search a UTF-8 document on demand from an explicitly read-granted content URI. Returns at most 8192 text bytes and scans at most 1 MiB plus 4 UTF-8 lookahead bytes per call. Seekable files jump to offset; non-seekable prefix discard is limited to 1 MiB. Continue with next_offset_bytes. If remaining_lines_to_skip is positive, pass it as skip_lines along with next_offset_bytes to continue locating the requested line; first_line_in_scan is relative to this scan. Search windows overlap to retain cross-boundary matches. Never loads the whole file or acquires permission.", ToolSchema(listOf(uriField(),
+        ArgumentField("offset_bytes", ArgumentType.Integer(0, Long.MAX_VALUE), false),
+        ArgumentField("start_line", ArgumentType.Integer(1, 1000000000), false),
+        ArgumentField("line_count", ArgumentType.Integer(1, 200), false),
+        ArgumentField("skip_lines", ArgumentType.Integer(0, 1000000000), false),
+        ArgumentField("query", ArgumentType.Text(128, minimumLength = 1), false)))),
     CALENDAR("calendar_events", "platform.calendar.read", "Read at most 50 calendar instances in an explicit interval no longer than 31 days.", ToolSchema(listOf(
         ArgumentField("start_ms", ArgumentType.Integer(0, 4102444800000L)),
         ArgumentField("end_ms", ArgumentType.Integer(1, 4102444800000L)), limitField()))),

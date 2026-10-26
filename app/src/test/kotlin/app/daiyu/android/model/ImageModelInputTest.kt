@@ -240,9 +240,11 @@ class ImageModelInputTest {
             assertEquals(listOf("first", "second"), resolver.owners.map { it.messageId })
             val items = history(protocol, history, frozen)
             assertEquals(3, items.length())
-            assertMixed(protocol, items.getJSONObject(0).getJSONArray("content"))
-            assertEquals("assistant", items.getJSONObject(1).getString("role"))
-            assertMixed(protocol, items.getJSONObject(2).getJSONArray("content"))
+            val wire = JSONObject(ImageRequestPreflight.bytes(body(settings(protocol), items), settings(protocol), frozen) { false }.toString(Charsets.UTF_8))
+            val serialized = wire.getJSONArray(if (protocol == ProviderProtocol.RESPONSES) "input" else "messages")
+            assertMixed(protocol, serialized.getJSONObject(0).getJSONArray("content"))
+            assertEquals("assistant", serialized.getJSONObject(1).getString("role"))
+            assertMixed(protocol, serialized.getJSONObject(2).getJSONArray("content"))
         }
     }
 
@@ -460,7 +462,7 @@ class ImageModelInputTest {
                 assertTrue(failure is IllegalArgumentException)
                 assertEquals("Raw protocol image input is not authorized", failure.message)
                 assertEquals(1, count)
-                assertTrue(delivered.any { it is ModelEvent.ToolReady })
+                assertFalse(delivered.any { it is ModelEvent.ToolReady })
                 assertFalse(delivered.any { it is ModelEvent.ProtocolOutput })
                 assertEquals("Responses session cannot be replayed",
                     rejected { session.next(listOf(ToolOutput(ToolCallId("call"), "ok"))) {} }.message)

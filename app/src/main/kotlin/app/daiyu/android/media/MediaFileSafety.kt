@@ -71,3 +71,26 @@ internal fun validateImageDimensions(value: ImageDimensions, limits: ImageAttach
 
 internal val IMAGE_ID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 internal val IMAGE_HASH = Regex("[0-9a-f]{64}")
+
+/** Bounded original copy, used for publication and stream-backed freezing. */
+internal fun copyVerifiedImage(input: java.io.InputStream, output: java.io.OutputStream,
+    bytes: Long, sha256: String, cancelled: () -> Boolean) {
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(64 * 1024)
+    var total = 0L
+    while (true) {
+        checkImageCancellation(cancelled)
+        var count = input.read(buffer)
+        if (count < 0) break
+        if (count == 0) {
+            val next = input.read(); if (next < 0) break
+            buffer[0] = next.toByte(); count = 1
+        }
+        total += count
+        if (total > bytes) throw ImageAttachmentException(ImageAttachmentFailure.CORRUPT)
+        digest.update(buffer, 0, count); output.write(buffer, 0, count)
+    }
+    val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+    if (total != bytes || actual != sha256) throw ImageAttachmentException(ImageAttachmentFailure.CORRUPT)
+    checkImageCancellation(cancelled)
+}

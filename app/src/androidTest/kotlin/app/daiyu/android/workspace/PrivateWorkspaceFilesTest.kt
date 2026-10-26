@@ -149,10 +149,9 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         val hidden = access.list()
         assertTrue(hidden.entries.isEmpty()); assertTrue(hidden.truncated)
     }
-    fun testActualImportByteLimitRemovesStagingAndDoesNotPublish() = fixture { files, access ->
+    fun testImportBeyondOld256MiBLimitStreamsAndPublishes() = fixture { files, access ->
         val root = access.list().directory
         val cap = 256L * 1024 * 1024
-        assertEquals(cap, PrivateWorkspaceFiles.MAX_FILE_BYTES)
         var supplied = 0L; var closed = false
         val input = object : java.io.InputStream() {
             override fun read(): Int {
@@ -169,11 +168,14 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
             }
             override fun close() { closed = true }
         }
-        try { access.importFile(root, "too-large.bin", { input }); fail("actual byte limit ignored") }
-        catch (error: IllegalStateException) { assertEquals("workspace_file_too_large", error.message) }
+        var progress = 0L
+        val name = access.importFile(root, "large.bin", { input }, { false }) { value ->
+            assertTrue(value >= progress); progress = value
+        }
         assertEquals(cap + 1, supplied); assertTrue(closed)
-        assertTrue(access.list().entries.isEmpty())
-        assertTrue(File(files, "workspace").list()!!.isEmpty())
+        assertEquals(cap + 1, progress)
+        assertEquals(cap + 1, File(files, "workspace/$name").length())
+        assertEquals(listOf(name), File(files, "workspace").list()!!.toList())
     }
     fun testStreamFailuresCleanImportStagingAndPreserveExportSource() = fixture { files, access ->
         val root = access.list().directory
@@ -292,4 +294,28 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         } finally { java.nio.file.Files.delete(link.toPath()) }
     }
 
+    fun testUnknownSpaceAndProgressCancellationRetainAtomicPublication() = fixture { files, _ ->
+        val access = PrivateWorkspaceFiles(PrivateWorkspacePaths(files), availableBytes = { 0L })
+        val root = access.list().directory
+        val cancel = AtomicBoolean(false)
+        var copied = 0L
+        try {
+            access.importFile(root, "cancel.bin", { ByteArray(128 * 1024).inputStream() }, cancel::get) {
+                copied = it; if (it >= 64 * 1024) cancel.set(true)
+            }
+            fail("cancel ignored")
+        } catch (_: InterruptedException) { }
+        assertEquals(64 * 1024L, copied)
+        assertTrue(File(files, "workspace").list()!!.isEmpty())
+        val name = access.importFile(access.list().directory, "ok.txt", { "ok".byteInputStream() })
+        assertEquals("ok", File(files, "workspace/$name").readText())
+    }
+    fun testPositiveInsufficientSpaceRejectsAndRemovesStaging() = fixture { files, _ ->
+        val access = PrivateWorkspaceFiles(PrivateWorkspacePaths(files), availableBytes = { 1L })
+        try {
+            access.importFile(access.list().directory, "full.bin", { ByteArray(32).inputStream() })
+            fail("space rejection ignored")
+        } catch (failure: java.io.IOException) { assertEquals("workspace_storage_full", failure.message) }
+        assertTrue(File(files, "workspace").list()!!.isEmpty())
+    }
 }

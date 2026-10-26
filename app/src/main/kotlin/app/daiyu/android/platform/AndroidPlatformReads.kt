@@ -66,7 +66,7 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
             PlatformReadTool.APPS -> success(apps(arguments, cancelled))
             PlatformReadTool.MEDIA -> DeviceQueries.media(app, args, cancelled)
             PlatformReadTool.FILE_METADATA -> fileMetadata(checkNotNull(uri), cancelled)
-            PlatformReadTool.FILE_TEXT -> success(fileText(checkNotNull(uri), cancelled))
+            PlatformReadTool.FILE_TEXT -> success(fileText(checkNotNull(uri), args, cancelled))
             PlatformReadTool.FILES -> DeviceQueries.files(app, args, cancelled)
             PlatformReadTool.CALENDAR -> DeviceQueries.calendar(app, args, cancelled)
             PlatformReadTool.CONTACTS -> DeviceQueries.contacts(app, args, cancelled)
@@ -166,28 +166,62 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
             .put("size_bytes", if (cursor.isNull(1)) JSONObject.NULL else cursor.getLong(1))
     }.apply { if (optBoolean("ok")) getJSONObject("data").put("scope", "explicit_content_uri_grant") }
 
-    private fun fileText(uri: Uri, cancelled: () -> Boolean): JSONObject {
+    private fun fileText(uri: Uri, arguments: JSONObject, cancelled: () -> Boolean): JSONObject {
         val mime = app.contentResolver.getType(uri) ?: throw Rejected("text_mime_required")
-        if (!mime.startsWith("text/")) throw Rejected("text_mime_required")
-        val bytes = app.contentResolver.openInputStream(uri)?.use { stream ->
-            val buffer = ByteArray(MAX_TEXT_BYTES + 1)
-            var count = 0
-            while (count < buffer.size) {
-                checkReadCancellation(cancelled)
-                val read = stream.read(buffer, count, buffer.size - count)
-                if (read < 0) break
-                if (read == 0) throw Rejected("unavailable")
-                count += read
+        val supported = mime.startsWith("text/") || mime in setOf("application/json", "application/xml",
+            "application/javascript", "application/x-yaml", "application/yaml", "application/sql", "application/x-ndjson")
+        if (!supported) throw Rejected("unsupported_document_format")
+        val offset = arguments.optLong("offset_bytes", 0)
+        val line = if (arguments.has("start_line")) arguments.getLong("start_line") else null
+        val query = if (arguments.has("query")) arguments.getString("query") else null
+        val result = app.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+            val duplicate = android.os.ParcelFileDescriptor.dup(descriptor.parcelFileDescriptor.fileDescriptor)
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(duplicate).use { original ->
+                val start = descriptor.startOffset
+                val length = descriptor.declaredLength.takeIf { it >= 0 }
+                var remaining = length
+                // AFD.createInputStream keeps an internal remaining-byte counter that cannot be
+                // reset by channel.position. Own a duplicate and bound this document slice ourselves.
+                fun position(target: Long): Boolean {
+                    if (length != null && target > length) throw Rejected("offset_beyond_eof")
+                    return try {
+                        original.channel.position(Math.addExact(start, target))
+                        remaining = length?.minus(target)
+                        true
+                    } catch (_: java.io.IOException) { false }
+                }
+                if (start > 0 && !position(0)) throw Rejected("unavailable")
+                val input = object : java.io.InputStream() {
+                    override fun read(): Int {
+                        if (remaining == 0L) return -1
+                        val next = original.read()
+                        if (next >= 0) remaining = remaining?.minus(1)
+                        return next
+                    }
+                    override fun read(buffer: ByteArray, at: Int, count: Int): Int {
+                        if (count == 0) return 0
+                        if (remaining == 0L) return -1
+                        val size = remaining?.let { minOf(it, count.toLong()).toInt() } ?: count
+                        val read = original.read(buffer, at, size)
+                        if (read > 0) remaining = remaining?.minus(read)
+                        return read
+                    }
+                }
+                try { DocumentTextWindow.read(input, offset, line, arguments.optInt("line_count", 200), query, cancelled,
+                    seek = ::position, skipLines = arguments.optLong("skip_lines", 0)) }
+                catch (_: java.nio.charset.CharacterCodingException) { throw Rejected("invalid_utf8") }
+                catch (error: IllegalArgumentException) {
+                    throw Rejected(if (error.message in setOf("binary_document", "non_seekable_offset_limit", "offset_beyond_eof"))
+                        checkNotNull(error.message) else "invalid_arguments")
+                }
             }
-            if (count > MAX_TEXT_BYTES) throw Rejected("file_too_large")
-            buffer.copyOf(count)
         } ?: throw Rejected("unavailable")
-        val text = try {
-            Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(bytes)).toString()
-        } catch (_: java.nio.charset.CharacterCodingException) { throw Rejected("invalid_utf8") }
         return JSONObject().put("scope", "explicit_content_uri_grant").put("mime_type", bounded(mime))
-            .put("text", text).put("size_bytes", bytes.size).put("truncated", false)
+            .put("text", result.text).put("offset_bytes", result.offset).put("next_offset_bytes", result.nextOffset)
+            .put("first_line_in_scan", result.firstLine).put("lines_returned", result.lines)
+            .put("remaining_lines_to_skip", result.remainingLines).put("scanned_bytes", result.scannedBytes)
+            .put("partial_line", result.partialLine).put("search_complete", query == null || !result.truncated)
+            .put("truncated", result.truncated).put("size_bytes", result.text.toByteArray(Charsets.UTF_8).size)
     }
 
     companion object {

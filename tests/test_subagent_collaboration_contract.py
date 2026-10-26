@@ -260,8 +260,9 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         binding = (SRC / 'delegation/SavedSubAgentRuntimeBindings.kt').read_text()
         create = binding.split('val original = ChildModelDefinition(', 1)[1]
         self.assertIn('runModel(binding.child)', create)
-        self.assertIn('frozen.acceptsModelHotUpdate(next)', create)
-        self.assertIn('check(latestConfig() == next)', create)
+        self.assertIn('child_profile_removed_or_role_changed', create)
+        self.assertNotIn('else original', create)
+        self.assertLess(create.index('val selected = latestModel(binding.profile.id)'), create.index('check(latestConfig() == next)'))
         self.assertNotIn('resolveSavedModel', create)
 
 

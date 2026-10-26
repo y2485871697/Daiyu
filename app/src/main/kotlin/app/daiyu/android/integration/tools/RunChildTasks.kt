@@ -11,7 +11,7 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
     profiles: Set<String>, private val currentModels: (() -> Map<String, ChildModelDefinition>)? = null,
     private val currentProfiles: (() -> Set<String>)? = null) : AutoCloseable {
     private val profiles = profiles.toSet()
-    init { require(this.profiles.isNotEmpty()) }
+    init { require(this.profiles.isNotEmpty() || currentProfiles != null) }
 
     fun tool(): RegisteredTool = object : RegisteredTool {
         override val definition = ToolDefinition(TOOL_NAME, 1,

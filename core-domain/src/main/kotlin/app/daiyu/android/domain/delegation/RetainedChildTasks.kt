@@ -29,7 +29,8 @@ data class RetainedChildTask(
     val stopRequested: Boolean,
     val settled: Boolean,
     val journalUnconfirmed: Boolean,
-    val pauseState: ChildTaskPauseState = ChildTaskPauseState.ACTIVE
+    val pauseState: ChildTaskPauseState = ChildTaskPauseState.ACTIVE,
+    val queueState: ChildTaskQueueState = ChildTaskQueueState.ACTIVE
 )
 
 internal class ChildTaskResources(
@@ -85,8 +86,8 @@ class ChildTaskBinding internal constructor(
 class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutMillis: Long = 120_000,
     private val maxRetainedTasks: Int = 64, private val usageRecorder: ChildUsageRecorder? = null,
     private val maxRequestsPerBinding: Int = 1024) : AutoCloseable {
-    private class Pool(val limit: Int) {
-        val permits = Semaphore(if (limit == 0) MAX_WORKERS else minOf(limit, MAX_WORKERS), true)
+    private class Pool(var limit: Int) {
+        val capacity = ChildModelPool(limit, MAX_WORKERS)
         var bindings = 0
     }
     private class Task(val binding: ChildTaskBinding, val request: ChildTaskRequest,
@@ -99,6 +100,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         var journalUnconfirmed = false
         var batch: ChildModelBatch? = null
         var admitting = false
+        var queueState = ChildTaskQueueState.ACTIVE
     }
     private val gate = Any()
     private val pools = mutableMapOf<String, Pool>()
@@ -129,7 +131,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         require(authorization.sessionId == session.sessionId && authorization.taskId == owner.runId.value)
         check(!seenOwners.containsKey(owner)) { "child_parent_already_bound" }
         val frozen = models.toMap()
-        require(frozen.isNotEmpty() && frozen.keys.all { it.isNotBlank() && it.length <= 200 })
+        require(frozen.keys.all { it.isNotBlank() && it.length <= 200 })
         val limits = frozen.values.groupBy { it.poolKey }.mapValues { (_, definitions) ->
             require(definitions.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
             definitions.first().parallelLimit
@@ -246,13 +248,31 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         return synchronized(gate) {
             val resources = binding.resources ?: return@synchronized false
             if (closed || !binding.accepting) return@synchronized false
-            require(limits.all { (key, limit) -> pools[key]?.limit?.let { it == limit } != false }) { "child_pool_limit_conflict" }
             limits.forEach { (key, limit) ->
                 if (resources.poolKeys.add(key)) pools.getOrPut(key) { Pool(limit) }.bindings++
             }
             resources.models = Collections.unmodifiableMap(frozen)
             true
         }
+    }
+
+    /** Durable configuration event, independent of parent admission or user pause state. */
+    fun reconcile(conversationId: String, limit: (String) -> Int?) {
+        val candidates = synchronized(gate) {
+            tasks.values.filter { it.initial.owner.conversationId == conversationId }
+        }
+        // Settings lookup and stop/transport cleanup stay outside the supervisor gate.
+        val changes = synchronized(gate) {
+            bindings.values.filter { it.owner.conversationId.value == conversationId }
+                .flatMap { it.resources?.poolKeys.orEmpty() }.distinct()
+        }.mapNotNull { key -> limit(key)?.let { key to it } }
+        changes.forEach { (key, size) ->
+            val pool = synchronized(gate) { pools[key]?.also { it.limit = size } }
+            pool?.capacity?.resize(size)
+        }
+        candidates.filter { !runCatching { it.definition.isValid() }.getOrDefault(true) }
+            .forEach { stop(it.binding, it.initial.owner) }
+        candidates.map { it.binding }.distinct().forEach(::notifyChanged)
     }
 
     fun command(binding: ChildTaskBinding, context: ToolExecutionContext, command: ChildTaskCommand): ChildTaskCommandReceipt {
@@ -535,7 +555,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         requireBinding(binding)
         return synchronized(gate) {
             (binding.recent.values + tasks.values.filter { it.binding === binding }.map {
-                RetainedChildTask(it.record, it.stopRequested, false, it.journalUnconfirmed, it.pause.snapshot())
+                RetainedChildTask(it.record, it.stopRequested, false, it.journalUnconfirmed, it.pause.snapshot(), it.queueState)
             }).sortedWith(compareBy({ it.record.owner.generation }, { it.record.index }))
         }
     }
@@ -594,9 +614,11 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 sharedPool = { selected -> synchronized(gate) {
                     check(!task.settled && task.binding.resources === resources)
                     val pool = pools.getOrPut(selected.poolKey) { Pool(selected.parallelLimit) }
-                    require(pool.limit == selected.parallelLimit) { "child_pool_limit_conflict" }
                     if (resources.poolKeys.add(selected.poolKey)) pool.bindings++
-                    pool.permits
+                    pool.capacity.lease { waiting ->
+                        synchronized(gate) { task.queueState = if (waiting) ChildTaskQueueState.PENDING else ChildTaskQueueState.ACTIVE }
+                        notifyChanged(task.binding)
+                    }
                 } })
             batch.bind(task.binding.owner, resources.session, resources.authorization)
             synchronized(gate) { task.batch = batch }

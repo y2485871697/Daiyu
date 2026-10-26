@@ -2332,7 +2332,7 @@ class MainActivity : ComponentActivity() {
                 }
                 val owner = collaborationOwner
                 ConversationCollaborationDialog(show = collaborationVisible, conversationId = owner,
-                    onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
+                    onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = backupBusy,
                     ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
                     repositoryFactory = { subAgentRepository }, modelSource = subAgentModelSource)
                 // Saved independently for the standalone composer or this conversation.

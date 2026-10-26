@@ -6,20 +6,27 @@ import org.junit.Test
 class SubAgentHotUpdatePolicyTest {
     private val original = ConversationSubAgentConfig(listOf(
         SubAgentProfile("stable", "Reviewer", "review", providerId = "provider", modelId = "old")))
-    @Test fun modelOnlyAndAdditiveOrBothAreCompatible() {
-        val model = original.copy(profiles = listOf(original.profiles.single().copy(modelId = "new")))
-        val extra = SubAgentProfile("additional", "Reviewer 2", "review", providerId = "provider", modelId = "other")
-        assertTrue(original.acceptsModelHotUpdate(model))
-        assertTrue(original.acceptsModelHotUpdate(original.copy(profiles = original.profiles + extra)))
-        assertTrue(original.acceptsModelHotUpdate(model.copy(profiles = model.profiles + extra)))
+    @Test fun everyNonDestructiveEditIsCompatible() {
+        val profile = original.profiles.single()
+        val pool = SubAgentParallelModel("provider", "old")
+        listOf(original.copy(enabled = false), original.copy(appliedPresetId = "preset", appliedPresetName = "name", presetApplicationToken = "token"),
+            original.copy(parallelLimits = mapOf(pool to 2)), original.copy(legacyParallelLimits = mapOf(pool.legacyKey() to 2)),
+            original.copy(profiles = listOf(profile.copy(name = "Renamed", enabled = false, modelId = "new", imageResolution = "high"))))
+            .forEach { assertTrue(it.toString(), original.acceptsModelHotUpdate(it)) }
+        val implementation = original.copy(profiles = listOf(profile.copy(role = "implementation")))
+        assertTrue(implementation.acceptsModelHotUpdate(implementation.copy(profiles = listOf(
+            implementation.profiles.single().copy(tier = SubAgentTaskTier.COMPLEX)))))
+        val two = original.copy(profiles = original.profiles + profile.copy(id = "second"))
+        assertTrue(two.acceptsModelHotUpdate(two.copy(profiles = two.profiles.reversed())))
     }
-    @Test fun removedDisabledOrRoleEditedProfilesDoNotRetargetAcceptedTasks() {
+    @Test fun additionsAndModelEditsDoNotRevokeExistingProfile() {
+        val changed = original.profiles.single().copy(modelId = "new")
+        val extra = changed.copy(id = "added")
+        assertTrue(original.acceptsModelHotUpdate(original.copy(profiles = listOf(changed, extra))))
+    }
+    @Test fun onlyRemovalRoleChangeAndDuplicateIdentityReject() {
         assertFalse(original.acceptsModelHotUpdate(original.copy(profiles = emptyList())))
-        assertFalse(original.acceptsModelHotUpdate(original.copy(enabled = false)))
         assertFalse(original.acceptsModelHotUpdate(original.copy(profiles = listOf(original.profiles.single().copy(role = "implementation")))))
-        assertFalse(original.acceptsModelHotUpdate(original.copy(profiles = listOf(original.profiles.single().copy(enabled = false)))))
-    }
-    @Test fun presetMetadataDoesNotChangeTaskIdentity() {
-        assertTrue(original.acceptsModelHotUpdate(original.copy(appliedPresetId = "preset", appliedPresetName = "name", presetApplicationToken = "token")))
+        assertFalse(original.acceptsModelHotUpdate(original.copy(profiles = original.profiles + original.profiles)))
     }
 }

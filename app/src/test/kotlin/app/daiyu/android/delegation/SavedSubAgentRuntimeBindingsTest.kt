@@ -55,10 +55,57 @@ class SavedSubAgentRuntimeBindingsTest {
         latest = config.copy(profiles = listOf(profile.copy(modelId = changed.id)),
             parallelLimits = mapOf(SubAgentParallelModel(provider.id, child.modelId) to 0))
         original.current().create()
-        assertEquals(child.modelId, captured.last().model)
+        assertEquals(changed.modelId, captured.last().model)
         latest = config.copy(profiles = listOf(profile.copy(role = "implementation")))
-        original.current().create()
-        assertEquals(child.modelId, captured.last().model)
+        assertThrows(IllegalStateException::class.java) { original.current().create() }
+    }
+
+    @Test fun newDispatchAndOldSelectionsShareTheSameStrictPolicy() {
+        val changed = child.copy(id = "new-record", modelId = "new-api-model")
+        val source = listOf(provider.copy(models = listOf(child, changed)))
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val resolve: (String, String) -> ModelSettings = { _, id ->
+            if (id == changed.id) saved.copy(model = changed.modelId) else saved
+        }
+        var latest = config
+        fun freezeNext() = bindings.freeze(owner, latest, source, resolve)
+        val prepared = bindings.freeze(owner, config, source, resolve,
+            latestConfig = { latest }, latestModel = { id -> freezeNext().getValue(id) },
+            latestModels = { freezeNext() })
+        val original = prepared.getValue(profile.id)
+        val extra = profile.copy(id = "added", name = "Added", modelId = changed.id)
+        for (allowed in listOf(
+            config.copy(profiles = listOf(profile.copy(modelId = changed.id))),
+            config.copy(profiles = config.profiles + extra),
+            config.copy(profiles = listOf(profile.copy(modelId = changed.id), extra))
+        )) {
+            latest = allowed
+            val dispatched = prepared.forNewRequests()
+            assertEquals(allowed.profiles.map { it.id }.toSet(), dispatched.keys)
+            dispatched.getValue(profile.id).create(); original.current().create()
+            assertEquals(captured[captured.size - 2].model, captured.last().model)
+        }
+        latest = config.copy(profiles = listOf(profile.copy(name = "Renamed", modelId = changed.id), extra),
+            parallelLimits = mapOf(SubAgentParallelModel(provider.id, changed.modelId) to 2), appliedPresetId = "preset")
+        assertEquals("Renamed", prepared.forNewRequests().getValue(profile.id).display?.agentName)
+        assertEquals(2, original.current().parallelLimit)
+        latest = config.copy(enabled = false)
+        assertTrue(prepared.forNewRequests().isEmpty())
+        // Old task selection is supplied independently of new-admission enabled flags.
+        latest = config.copy(profiles = listOf(extra))
+        assertEquals(setOf(extra.id), prepared.forNewRequests().keys)
+        assertThrows(IllegalStateException::class.java) { original.current() }
+    }
+
+    @Test fun originalLifetimeIsRecheckedAfterLatestResolverReturns() {
+        var valid = true
+        val prepared = SavedSubAgentRuntimeBindings().freeze(owner, config, listOf(provider), { _, _ -> saved },
+            latestConfig = { config }, latestModel = {
+                valid = false
+                app.daiyu.android.domain.delegation.ChildModelDefinition("replacement", 1) { error("must not open") }
+            }, profileCurrent = { valid })
+        assertThrows(IllegalStateException::class.java) { prepared.getValue(profile.id).current() }
     }
 
     @Test fun configurationRaceRejectsBeforeCreatingAnObsoleteModel() {
@@ -80,13 +127,45 @@ class SavedSubAgentRuntimeBindingsTest {
         assertTrue(captured.isEmpty())
     }
 
+    @Test fun configurationRaceCannotAdmitAnUncheckedModelOrProfileSet() {
+        var latest = config.copy(profiles = listOf(profile.copy(modelId = "new-record")))
+        val changed = child.copy(id = "new-record", modelId = "new-api-model")
+        val source = listOf(provider.copy(models = listOf(child, changed)))
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val resolve: (String, String) -> ModelSettings = { _, id ->
+            if (id == changed.id) saved.copy(model = changed.modelId) else saved
+        }
+        val prepared = bindings.freeze(owner, config, source, resolve,
+            latestConfig = { latest }, latestModel = { id ->
+                val selected = bindings.freeze(owner, latest, source, resolve).getValue(id)
+                latest = latest.copy(enabled = false)
+                selected
+            }, latestModels = {
+                val selected = bindings.freeze(owner, latest, source, resolve)
+                latest = latest.copy(appliedPresetId = "preset")
+                selected
+            })
+        assertThrows(IllegalStateException::class.java) { prepared.getValue(profile.id).current().create() }
+        assertTrue(captured.isEmpty())
+        latest = config.copy(profiles = listOf(profile.copy(modelId = changed.id)))
+        assertThrows(IllegalStateException::class.java) { prepared.forNewRequests() }
+        assertTrue(captured.isEmpty())
+    }
+
+    @Test fun disabledAdmissionReturnsEmptyWithoutReadingCredentials() {
+        val bindings = SavedSubAgentRuntimeBindings()
+        listOf(config.copy(enabled = false), config.copy(profiles = emptyList()),
+            config.copy(profiles = listOf(profile.copy(enabled = false)))).forEach { selection ->
+            assertTrue(bindings.freeze(owner, selection, listOf(provider), { _, _ -> error("credentials must not be read") }).isEmpty())
+        }
+    }
+
     @Test fun unavailableSelectionsAndMediaRejectBeforeReadingCredentials() {
         var reads = 0
         val bindings = SavedSubAgentRuntimeBindings()
         val resolver: (String, String) -> ModelSettings = { _, _ -> reads++; saved }
         for ((configured, source) in listOf(
-            config.copy(enabled = false) to provider,
-            config.copy(profiles = emptyList()) to provider,
             config to provider.copy(id = "other"),
             config to provider.copy(isEnabled = false),
             config to provider.copy(models = emptyList()),

@@ -32,6 +32,12 @@ class SubAgentStatusRowsTest {
         assertEquals("状态未确认", subAgentStatusRows(listOf(task), listOf(live.copy(journalUnconfirmed = true))).single().status)
         assertEquals("停止中", subAgentStatusRows(listOf(task), listOf(live.copy(stopRequested = true))).single().status)
     }
+    @Test fun poolQueueIsVisibleWithoutReplacingTheUsersPauseState() {
+        val task = task().copy(status = ChildTaskStatus.RUNNING)
+        val live = RetainedChildTask(task, false, false, false, queueState = ChildTaskQueueState.PENDING)
+        assertEquals("排队中", subAgentStatusRows(listOf(task), listOf(live)).single().status)
+        assertEquals("已暂停", subAgentStatusRows(listOf(task), listOf(live.copy(pauseState = ChildTaskPauseState.PAUSED))).single().status)
+    }
     @Test fun historicalUnknownNeverBecomesRunningAndMissingModelIsNotGuessed() {
         val old = task().copy(status = ChildTaskStatus.UNKNOWN, display = null)
         val row = subAgentStatusRows(listOf(old), emptyList()).single()

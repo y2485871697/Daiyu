@@ -3,6 +3,8 @@ package app.daiyu.android.domain.delegation
 /** Live process state, deliberately not a durable ChildTaskStatus or replay permission. */
 enum class ChildTaskPauseState { ACTIVE, PENDING, PAUSED }
 
+enum class ChildTaskQueueState { ACTIVE, PENDING }
+
 /** PENDING is only intent; PAUSED acknowledges a resumable boundary, never an in-flight read. */
 enum class ChildTaskControlReceipt { PENDING, PAUSED, RESUMED, STALE }
 
@@ -15,6 +17,18 @@ internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
     private var ended = false
     private var pausedAt = 0L
     private var pausedTotal = 0L
+    private var poolWaiting = false
+    private var excludedAt = 0L
+    private var excluded = 0L
+    private fun updateExcluded() {
+        val waiting = poolWaiting || state == ChildTaskPauseState.PAUSED
+        if (waiting && excludedAt == 0L) excludedAt = System.nanoTime()
+        if (!waiting && excludedAt != 0L) { excluded += System.nanoTime() - excludedAt; excludedAt = 0L }
+    }
+    fun schedulingBoundary(waiting: Boolean) = synchronized(gate) { poolWaiting = waiting; updateExcluded() }
+    fun excludedNanos(): Long = synchronized(gate) {
+        excluded + if (excludedAt != 0L) System.nanoTime() - excludedAt else 0L
+    }
 
     fun snapshot(): ChildTaskPauseState = synchronized(gate) { state }
 
@@ -29,6 +43,7 @@ internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
         if (ended) return@synchronized ChildTaskControlReceipt.STALE
         endPause()
         state = ChildTaskPauseState.ACTIVE
+        updateExcluded()
         gate.notifyAll()
         ChildTaskControlReceipt.RESUMED
     }
@@ -37,6 +52,7 @@ internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
         ended = true
         endPause()
         state = ChildTaskPauseState.ACTIVE
+        updateExcluded()
         gate.notifyAll()
     }
 
@@ -46,7 +62,7 @@ internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
     }
 
     /** Called only before the first open, or after a failed read on a resumable SAME session. */
-    fun awaitBoundary(requireRequest: Boolean = false): Boolean {
+    fun awaitBoundary(requireRequest: Boolean = false, boundary: () -> Unit = {}): Boolean {
         var claimed = false
         while (true) {
             val changed = synchronized(gate) {
@@ -55,12 +71,14 @@ internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
                 if (state == ChildTaskPauseState.PENDING) {
                     state = ChildTaskPauseState.PAUSED
                     pausedAt = System.nanoTime()
+                    updateExcluded()
                     true
                 } else false
             }
             if (changed) runCatching(onChanged)
+            boundary()
             synchronized(gate) {
-                while (!ended && state == ChildTaskPauseState.PAUSED) gate.wait()
+                if (!ended && state == ChildTaskPauseState.PAUSED) gate.wait(25)
                 if (ended) return false
                 if (state == ChildTaskPauseState.ACTIVE) return true
                 // A new pause raced the resume before this worker left its boundary.

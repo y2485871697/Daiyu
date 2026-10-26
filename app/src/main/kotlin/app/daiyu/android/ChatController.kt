@@ -1484,6 +1484,21 @@ class ChatController internal constructor(private val application:Application,
     }
     private val toolLedger = ToolLedger(SQLiteToolLedgerStore(database))
     private val childPreferences by lazy { ConversationSubAgentPreferences(application.getSharedPreferences("subagent_configuration", 0)) }
+    private val childModelBatches = java.util.WeakHashMap<ChildModelBatch, String>()
+    private val childConfigurationWorker = Executors.newSingleThreadExecutor { action ->
+        Thread(action, "child-configuration-control").apply { isDaemon = true }
+    }
+    private val childConfigurationObserver = childPreferences.observeChanges { owner, _ ->
+        if (owner is SubAgentConfigKey.Conversation) {
+            runCatching { childConfigurationWorker.execute {
+                val supervisor = synchronized(this) { if (closed) null else childSupervisor } ?: return@execute
+                val current = runCatching { childPreferences.snapshot(owner) }.getOrNull()
+                supervisor.reconcile(owner.value) { pool -> current?.parallelLimitForPool(owner, pool) }
+                val batches = synchronized(this) { childModelBatches.entries.filter { it.value == owner.value }.map { it.key } }
+                batches.forEach { batch -> batch.configurationChanged { pool -> current?.parallelLimitForPool(owner, pool) } }
+            } }
+        }
+    }
     private fun conversationExists(id: ConversationId): Boolean = database.readableDatabase.rawQuery(
         "SELECT 1 FROM conversations WHERE id=?", arrayOf(id.value)).use { it.moveToFirst() }
     private val childBindings = SavedSubAgentRuntimeBindings {
@@ -1506,14 +1521,19 @@ class ChatController internal constructor(private val application:Application,
         profileId: String? = null, runModel: (ProviderSnapshot) -> ModelPort): FrozenSubAgentModels {
         val ownerState = childPreferences.ownerState(key)
         val config = childPreferences.snapshot(key)
+        val lifetimes = config.profiles.associate { it.id to childPreferences.profileLifetime(key, it.id) }
         val registryRevision = providers.snapshot().revision
-        val selection = if (profileId == null) config else config.copy(profiles = config.profiles.filter { it.id == profileId })
-        val catalogRevisions = selection.profiles.filter { it.enabled }.map { it.providerId }.distinct().associateWith { slot ->
+        val selection = if (profileId == null) config else config.copy(enabled = true,
+            profiles = config.profiles.filter { it.id == profileId }.map { it.copy(enabled = true) })
+        check(profileId == null || selection.profiles.size == 1) { "child_profile_removed_or_role_changed" }
+        val catalogRevisions = selection.profiles.filter { selection.enabled && it.enabled }.map { it.providerId }.distinct().associateWith { slot ->
             providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it } }
         }
         val bindingsCurrent = {
             conversationExists(ConversationId(key.value)) && childPreferences.ownerState(key) == ownerState &&
-                childPreferences.snapshot(key) == config && providers.snapshot().revision == registryRevision &&
+                childPreferences.snapshot(key) == config &&
+                lifetimes.all { (id, lifetime) -> childPreferences.profileLifetime(key, id) == lifetime } &&
+                providers.snapshot().revision == registryRevision &&
                 catalogRevisions.all { (slot, revision) ->
                     providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it == revision } }
                 }
@@ -1521,7 +1541,9 @@ class ChatController internal constructor(private val application:Application,
         return childBindings.freeze(key, selection, savedSubAgentProviders(), ::readSavedChildProviderModel, bindingsCurrent, runModel,
             latestConfig = if (hotUpdates) ({ childPreferences.snapshot(key) }) else null,
             latestModel = if (hotUpdates) ({ id -> freezeSavedChildModels(key, hotUpdates = false,
-                profileId = id, runModel = runModel).getValue(id) }) else null)
+                profileId = id, runModel = runModel).getValue(id) }) else null,
+            latestModels = if (hotUpdates) ({ freezeSavedChildModels(key, runModel = runModel) }) else null,
+            profileCurrent = { id -> childPreferences.profileLifetime(key, id) == lifetimes[id] })
     }
     internal fun savedSubAgentProviders(): List<SubAgentProvider> {
         check(Looper.myLooper() != Looper.getMainLooper())
@@ -1642,7 +1664,10 @@ class ChatController internal constructor(private val application:Application,
                 listOf(MessageBlock.Text("child-command", "子任务${command.kind.name}；来源 ${command.source.owner.childRunId}\n${command.instruction}")), RunStatus.COMPLETED, createdAt = acceptedAt)
             val initial = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING, createdAt = acceptedAt)
             database.send(user, initial, expectedAssistantId = frozenAssistantId, preserveDraft = true, replyIdentity = replyIdentity)
-            return ChildTaskCommandHost.run(initial, command, checkNotNull(childSupervisor), models, database, runtime,
+            val supervisor = checkNotNull(childSupervisor)
+            val currentConfiguration = childPreferences.snapshot(key)
+            supervisor.reconcile(conversation.value) { pool -> currentConfiguration.parallelLimitForPool(key, pool) }
+            return ChildTaskCommandHost.run(initial, command, supervisor, models, database, runtime,
                 cancelled = { preparationCancelled(token) }, onChanged = ::backgroundTasksChanged,
                 retain = { tasks -> synchronized(this) {
                     check(!closed && !preparationCancelled(token))
@@ -3229,26 +3254,21 @@ class ChatController internal constructor(private val application:Application,
         }
         val conversationId=platformAction?.conversationId ?: mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val currentChildProfiles: () -> Set<String> = {
+        val childPreparation = if (!withChildren) null else try {
             val key = SubAgentConfigKey.Conversation(conversationId.value)
-            val current = childPreferences.snapshot(key)
-            if (!current.enabled) emptySet() else current.profiles.filter { it.enabled }.map { it.id }.toSet()
-        }
-        val currentChildModels: () -> FrozenSubAgentModels = {
-            val childConversation = conversationId
-            val key = SubAgentConfigKey.Conversation(childConversation.value)
             freezeSavedChildModels(key) { provider ->
-                val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(childConversation))
+                val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversationId))
                     ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                 app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
             }
-        }
-        val childPreparation = if (!withChildren) null else try {
-            currentChildModels()
         } catch (_:Exception) {
             problem="子模型配置不可用、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
         }
         val childModels: Map<String, ChildModelDefinition> = childPreparation ?: emptyMap()
+        val currentChildModels: () -> Map<String, ChildModelDefinition> = {
+            childPreparation?.forNewRequests() ?: emptyMap()
+        }
+        val currentChildProfiles: () -> Set<String> = { currentChildModels().keys }
         val interactiveSnapshot = interactiveMode.snapshot()
         val frozenProvider = try { freezePreparationProvider(token) } catch (_: CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
@@ -3492,10 +3512,12 @@ class ChatController internal constructor(private val application:Application,
                 },
                 resume = ::resumeChildTask, pause = ::pauseChildTask, stop = ::stopChildTask,
                 currentProfiles = currentChildProfiles)
-            val children = if (childModels.isEmpty()) null else RunChildModels(
+            val children = if (!withChildren) null else RunChildModels(
                 ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks,
                     usageRecorder = checkNotNull(runtimeStore).childUsage,
-                    currentModels = currentChildModels), childModels.keys, currentProfiles = currentChildProfiles)
+                    currentModels = currentChildModels).also { batch ->
+                    synchronized(this) { childModelBatches[batch] = conversationId.value }
+                }, childModels.keys, currentProfiles = currentChildProfiles)
             preparingChildren = children
             val devices = RunDeviceResources(application, resultPolicy = platformSnapshot.resultPolicy)
             preparingDevices = devices
@@ -3521,12 +3543,16 @@ class ChatController internal constructor(private val application:Application,
                     (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
-                if(childModels.isEmpty()) null else { owner, grants, authorization ->
+                if(!withChildren) null else { owner, grants, authorization ->
+                    val admittedModels = currentChildModels()
+                    val supervisor = checkNotNull(childSupervisor)
+                    val ownerKey = SubAgentConfigKey.Conversation(conversationId.value)
+                    val currentConfiguration = childPreferences.snapshot(ownerKey)
+                    supervisor.reconcile(conversationId.value) { pool -> currentConfiguration.parallelLimitForPool(ownerKey, pool) }
                     synchronized(this) {
                         check(!closed)
-                        val supervisor=checkNotNull(childSupervisor)
-                        val binding=supervisor.bind(owner,grants,authorization,childModels,::backgroundTasksChanged)
-                        RunChildTasks(supervisor, binding, childModels.keys, currentChildModels, currentChildProfiles).also { tasks ->
+                        val binding=supervisor.bind(owner,grants,authorization,admittedModels,::backgroundTasksChanged)
+                        RunChildTasks(supervisor, binding, admittedModels.keys, currentChildModels, currentChildProfiles).also { tasks ->
                             backgroundRuns[run] = tasks
                             resources?.takeIf { it.initial.runId == run && it.childrenPauseRequested }?.let { lifetime ->
                                 lifetime.pausedChildren = ChildPauseCapture(tasks, tasks.pauseGroup())
@@ -4794,6 +4820,8 @@ class ChatController internal constructor(private val application:Application,
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
     }
     internal fun close() {
+        childConfigurationObserver.close()
+        childConfigurationWorker.shutdown()
         stopBrowserChildren()
         synchronized(this) { generationEntry }?.let { entry ->
             if (!entry.submitted) abandonGeneration(entry) else entry.session?.revokeAdmission()

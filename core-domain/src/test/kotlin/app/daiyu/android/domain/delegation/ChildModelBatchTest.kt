@@ -224,6 +224,33 @@ class ChildModelBatchTest {
         } finally { batch.close() }
     }
 
+    @Test fun revokingOneProfileDoesNotCancelItsUnaffectedBatchSibling() {
+        val records = Records(); val valid = java.util.concurrent.atomic.AtomicBoolean(true)
+        val entered = CountDownLatch(2); val cancelled = CountDownLatch(1); val finish = CountDownLatch(1)
+        val bad = object : ModelPort {
+            override fun open(history: List<Message>): ModelSession = object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    entered.countDown(); check(cancelled.await(5, TimeUnit.SECONDS)); throw InterruptedException()
+                }
+                override fun cancel() { cancelled.countDown() }
+            }
+        }
+        val good = port { _, sink -> entered.countDown(); check(finish.await(5, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("t", "kept")) }
+        val batch = bind(ChildModelBatch(mapOf(
+            "bad" to ChildModelDefinition("a", 1, null, null, "old", valid = valid::get) { bad },
+            "good" to ChildModelDefinition("b", 1) { good }), store = records))
+        val result = AtomicReference<ExecutionReceipt>(); val worker = Thread {
+            result.set(batch.execute(context(), listOf(ChildModelTask("bad", "old"), ChildModelTask("good", "good"))))
+        }
+        try {
+            worker.start(); assertTrue(entered.await(5, TimeUnit.SECONDS)); valid.set(false)
+            batch.configurationChanged { null }; assertTrue(cancelled.await(5, TimeUnit.SECONDS))
+            assertTrue(worker.isAlive); finish.countDown(); worker.join(5000); assertFalse(worker.isAlive)
+            assertTrue(result.get() is ExecutionReceipt.Unknown)
+            assertEquals("kept", records.list(parent.conversationId.value).single { it.profileId == "good" }.text)
+        } finally { finish.countDown(); cancelled.countDown(); batch.close(); worker.join(5000) }
+    }
+
     @Test fun failedSiblingCannotEraseAlreadyCommittedChildResult() {
         val records = Records()
         val good = port { _, sink -> sink(ModelEvent.TextFinal("t", "retained answer")) }

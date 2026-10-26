@@ -52,6 +52,19 @@ internal data class ConversationSubAgentConfig(
         require(parallelLimits.values.all { it >= 0 })
         require(legacyParallelLimits.all { (key, limit) -> key.matches(Regex("agent_model_parallel_[0-9a-f]{64}")) && limit >= 0 })
     }
+    fun parallelLimitForPool(owner: SubAgentConfigKey.Conversation, key: String): Int? {
+        val prefix = "subagent:v1:c:" + Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(owner.value.toByteArray(Charsets.UTF_8)) + ":"
+        if (!key.startsWith(prefix)) return null
+        val parts = key.removePrefix(prefix).split(':')
+        if (parts.size != 2) return null
+        return runCatching {
+            val provider = String(Base64.getUrlDecoder().decode(parts[0]), Charsets.UTF_8)
+            val model = String(Base64.getUrlDecoder().decode(parts[1]), Charsets.UTF_8)
+            val identity = SubAgentParallelModel(provider, model)
+            if (poolKey(owner, identity) == key) parallelLimit(identity) else null
+        }.getOrNull()
+    }
     fun poolKey(owner: SubAgentConfigKey, model: SubAgentParallelModel): String =
         "subagent:v1:" + when (owner) {
             is SubAgentConfigKey.Conversation -> "c:"
@@ -79,6 +92,8 @@ internal class ConversationSubAgentPreferences(
             val changes = MutableStateFlow(0L)
             val owners = mutableMapOf<SubAgentConfigKey, MutableStateFlow<Long>>()
             var pending: Map<String, Any?>? = null
+            val lifetimes = mutableMapOf<Pair<SubAgentConfigKey, String>, Long>()
+            val observers = linkedSetOf<(SubAgentConfigKey, ConversationSubAgentConfig?) -> Unit>()
         }
         private val states = java.util.WeakHashMap<SharedPreferences, SharedState>()
         private fun stateFor(preferences: SharedPreferences): SharedState = synchronized(lock) { states.getOrPut(preferences) { SharedState() } }
@@ -89,6 +104,14 @@ internal class ConversationSubAgentPreferences(
     }
     private val state = stateFor(preferences)
     val revision: StateFlow<Long> get() = state.changes
+    /** Receives every durable owner revision, including transient removals before a later edit. */
+    fun observeChanges(observer: (SubAgentConfigKey, ConversationSubAgentConfig?) -> Unit): AutoCloseable {
+        synchronized(lock) { state.observers.add(observer) }
+        return AutoCloseable { synchronized(lock) { state.observers.remove(observer) } }
+    }
+    fun profileLifetime(owner: SubAgentConfigKey, profile: String): Long = synchronized(lock) {
+        state.lifetimes[owner to profile] ?: 0L
+    }
     fun revision(owner: SubAgentConfigKey): StateFlow<Long> = synchronized(lock) { state.owners.getOrPut(owner) { MutableStateFlow(0L) } }
     data class OwnerState(val revision: Long, val exists: Boolean)
     fun ownerState(owner: SubAgentConfigKey): OwnerState = synchronized(lock) {
@@ -133,6 +156,7 @@ internal class ConversationSubAgentPreferences(
         ensureClean()
         val values = preferences.all
         val old = changes.keys.associateWith { name -> values[name].let { if (it is Set<*>) it.toSet() else it } }
+        val previous = owners.distinct().associateWith { owner -> stored(key(owner))?.let(::decode) }
         try {
             val edit = preferences.edit()
             changes.forEach { (name, value) -> if (value == null) edit.remove(name) else edit.putString(name, value) }
@@ -145,6 +169,16 @@ internal class ConversationSubAgentPreferences(
         }
         owners.distinct().forEach { owner -> val flow = state.owners.getOrPut(owner) { MutableStateFlow(0L) }; flow.value = flow.value + 1 }
         state.changes.value = state.changes.value + 1
+        owners.distinct().forEach { owner ->
+            val configuration = stored(key(owner))?.let(::decode)?.detached()
+            previous[owner]?.profiles?.filter { oldProfile ->
+                configuration?.profiles?.singleOrNull { it.id == oldProfile.id }?.role != oldProfile.role
+            }?.forEach { profile ->
+                val identity = owner to profile.id
+                state.lifetimes[identity] = (state.lifetimes[identity] ?: 0L) + 1
+            }
+            state.observers.toList().forEach { observer -> runCatching { observer(owner, configuration) } }
+        }
     }
     fun isConfigurationResetComplete(): Boolean = synchronized(lock) {
         stored(RESET_MARKER_KEY)?.let { require(it == "1") { "Invalid sub-agent reset marker" }; true } ?: false

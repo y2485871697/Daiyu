@@ -261,6 +261,8 @@ private fun TaskRecordCard(record: ChildTaskRecord, live: RetainedChildTask?, en
                 ChildTaskPauseState.PAUSED -> Text(stringResource(R.string.business_task_paused))
                 else -> Unit
             }
+            if (live?.queueState == app.daiyu.android.domain.delegation.ChildTaskQueueState.PENDING)
+                Text("并行限额排队中")
             Text(stringResource(R.string.business_task_parent, record.owner.parentRunId),
                 style = MiuixTheme.textStyles.footnote1)
             SelectionContainer {

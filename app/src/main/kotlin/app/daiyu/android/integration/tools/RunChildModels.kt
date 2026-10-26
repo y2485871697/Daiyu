@@ -9,7 +9,7 @@ import app.daiyu.android.domain.tools.*
 internal class RunChildModels(private val batch: ChildModelBatch, profiles: Set<String>,
     private val currentProfiles: (() -> Set<String>)? = null) : AutoCloseable {
     private val profiles = profiles.toSet()
-    init { require(this.profiles.isNotEmpty()) }
+    init { require(this.profiles.isNotEmpty() || currentProfiles != null) }
 
     fun bind(owner: RunExecutionOwner, capabilities: SessionCapabilities, authorization: TaskAuthorization) =
         batch.bind(owner, capabilities, authorization)

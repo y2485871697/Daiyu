@@ -8,8 +8,10 @@ import app.daiyu.android.storage.ModelSettings
 
 internal class FrozenSubAgentModels(
     definitions: Map<String, ChildModelDefinition>, private val current: () -> Boolean,
+    private val latest: (() -> FrozenSubAgentModels)? = null,
 ) : Map<String, ChildModelDefinition> by definitions {
     fun isCurrent(): Boolean = current()
+    fun forNewRequests(): FrozenSubAgentModels = latest?.invoke() ?: this
 }
 
 /** Admission is frozen; compatible model edits are resolved only at a new request boundary. */
@@ -24,16 +26,16 @@ internal class SavedSubAgentRuntimeBindings(
         bindingsCurrent: () -> Boolean = { true },
         runModel: (ProviderSnapshot) -> ModelPort = createModel,
         latestConfig: (() -> ConversationSubAgentConfig)? = null,
-        latestModel: ((String) -> ChildModelDefinition)? = null): FrozenSubAgentModels {
+        latestModel: ((String) -> ChildModelDefinition)? = null,
+        latestModels: (() -> FrozenSubAgentModels)? = null,
+        profileCurrent: (String) -> Boolean = { true }): FrozenSubAgentModels {
         val frozen = config.detached(); frozen.validate()
-        require(frozen.enabled) { "Sub-agent configuration is disabled" }
-        val enabled = frozen.profiles.filter { it.enabled }
-        require(enabled.isNotEmpty()) { "No enabled child profiles" }
+        val enabled = if (frozen.enabled) frozen.profiles.filter { it.enabled } else emptyList()
         val selected = enabled.map { profile ->
             val provider = requireNotNull(providers.singleOrNull { it.id == profile.providerId && it.isEnabled }) {
                 "Saved child provider is unavailable"
             }
-            require(profile.role == "review" && profile.imageResolution == null) { "Only text children are supported" }
+            require(profile.role == "review") { "Only text children are supported" }
             val model = requireNotNull(provider.models.singleOrNull { it.id == profile.modelId && it.isEnabled }) {
                 "Saved child model is unavailable"
             }
@@ -65,18 +67,24 @@ internal class SavedSubAgentRuntimeBindings(
             val model = SubAgentParallelModel(binding.profile.providerId, binding.child.model)
             val display = ChildTaskDisplay(binding.profile.name, binding.child.model, binding.modelName)
             val original = ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model), display,
-                latest = null, selection = binding.child) { runModel(binding.child) }
+                latest = null, selection = binding.child, valid = { profileCurrent(binding.profile.id) }) { runModel(binding.child) }
             binding.profile.id to if (latestConfig == null || latestModel == null) original else
                 ChildModelDefinition(original.poolKey, original.parallelLimit, display,
                     latest = {
                         val next = latestConfig()
-                        if (frozen.acceptsModelHotUpdate(next) && next.parallelLimit(model) == original.parallelLimit) {
-                            val selected = latestModel(binding.profile.id)
-                            check(latestConfig() == next) { "child_model_configuration_changed" }
-                            selected
-                        } else original
-                    }, selection = binding.child) { runModel(binding.child) }
+                        check(next.profiles.singleOrNull { it.id == binding.profile.id }?.role == binding.profile.role) {
+                            "child_profile_removed_or_role_changed"
+                        }
+                        val selected = latestModel(binding.profile.id)
+                        check(latestConfig() == next) { "child_model_configuration_changed" }
+                        selected
+                    }, selection = binding.child, valid = { profileCurrent(binding.profile.id) }) { runModel(binding.child) }
         }
-        return FrozenSubAgentModels(definitions, current)
+        return FrozenSubAgentModels(definitions, current, latest = if (latestConfig == null || latestModels == null) null else ({
+            val next = latestConfig()
+            val selected = latestModels()
+            check(latestConfig() == next) { "child_model_configuration_changed" }
+            selected
+        }))
     }
 }

@@ -36,14 +36,32 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("checkNotNull(permit).release(); acquired = false",text)
         self.assertIn("if (!workerFinished || !cleanupFinished || itemReleased) false",text)
         self.assertIn("(transport as ResumableModelSession).resume(attemptSink)",text)
-    def test_compatible_edits_preserve_old_ids_and_structural_changes_keep_snapshot(self):
+    def test_non_destructive_edits_hot_apply_and_destructive_edits_revoke(self):
         text = (APP / "delegation/SubAgentHotUpdatePolicy.kt").read_text()
         self.assertIn("profiles.all",text); self.assertIn("it.id == previous.id",text)
-        self.assertIn("previous.copy(providerId = current.providerId, modelId = current.modelId",text)
+        self.assertIn("?.role == previous.role",text)
         binding = (APP / "delegation/SavedSubAgentRuntimeBindings.kt").read_text()
-        self.assertIn("frozen.acceptsModelHotUpdate(next) && next.parallelLimit(model) == original.parallelLimit",binding)
+        self.assertNotIn("next.parallelLimit(model) == original.parallelLimit",binding)
+        self.assertIn("profileCurrent(binding.profile.id)",binding)
         self.assertIn("val selected = latestModel(binding.profile.id)",binding)
         self.assertIn('check(latestConfig() == next) { "child_model_configuration_changed" }',binding)
+    def test_configuration_events_keep_destructive_epoch_and_independent_control_lane(self):
+        prefs = (APP / "delegation/ConversationSubAgentPreferences.kt").read_text()
+        transaction = prefs.split("private fun transaction(", 1)[1].split("fun isConfigurationResetComplete", 1)[0]
+        self.assertLess(transaction.index("check(edit.commit())"), transaction.index("state.lifetimes[identity]"))
+        self.assertIn("?.role != oldProfile.role", transaction)
+        controller = (APP / "ChatController.kt").read_text()
+        observer = controller.split("private val childConfigurationObserver", 1)[1].split("private fun conversationExists", 1)[0]
+        self.assertIn("childConfigurationWorker.execute", observer)
+        self.assertIn("supervisor.reconcile(owner.value)", observer)
+        self.assertIn("batch.configurationChanged", observer)
+        self.assertIn("profileCurrent = { id -> childPreferences.profileLifetime", controller)
+        retained = (DOMAIN / "RetainedChildTasks.kt").read_text()
+        reconcile = retained.split("fun reconcile(", 1)[1].split("fun command(", 1)[0]
+        self.assertIn("bindings.values.filter", reconcile)
+        self.assertIn("it.definition.isValid()", reconcile)
+        self.assertIn("stop(it.binding, it.initial.owner)", reconcile)
+
     def test_history_access_is_registered_independently_of_new_configuration(self):
         text = (APP / "integration/tools/RunChildTaskAccess.kt").read_text()
         for name in ["inspect_child_tasks", "get_child_task", "control_child_task"]: self.assertIn(name,text)
@@ -76,3 +94,20 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
     def test_transferred_browser_preparation_cannot_stop_owned_child(self):
         text = (APP / "ControllerBrowserPreparation.kt").read_text().split("fun cancel()",1)[1].split("fun retryCleanup",1)[0]
         self.assertLess(text.index("phase == State.TRANSFERRED"), text.index("child?.close()"))
+
+    def test_new_dispatch_and_continue_share_hot_update_without_stale_fallback(self):
+        policy = (APP / "delegation/SubAgentHotUpdatePolicy.kt").read_text()
+        self.assertIn("?.role == previous.role", policy)
+        bindings = (APP / "delegation/SavedSubAgentRuntimeBindings.kt").read_text()
+        self.assertIn("fun forNewRequests()", bindings)
+        self.assertIn("val selected = latestModels()", bindings)
+        self.assertNotIn("else prepared", bindings)
+        self.assertIn('check(latestConfig() == next)', bindings)
+        controller = (APP / "ChatController.kt").read_text()
+        callbacks = controller.split("val childPreparation = if (!withChildren)", 1)[1].split("val interactiveSnapshot =", 1)[0]
+        self.assertIn("childPreparation?.forNewRequests() ?: emptyMap()", callbacks)
+        self.assertIn("currentChildProfiles: () -> Set<String> = { currentChildModels().keys }", callbacks)
+        choice = controller.split("internal fun finishChildStopChoice(", 1)[1].split("private fun capturePausedChildren", 1)[0]
+        self.assertIn("capture.tasks.resumeGroup(capture.group)", choice)
+        self.assertNotIn("configure(", choice)
+        self.assertNotIn("hotUpdates = false", choice)

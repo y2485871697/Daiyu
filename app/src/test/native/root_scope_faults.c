@@ -36,7 +36,14 @@ static int fake_open(const char *path,int flags,...) {
 }
 static int fake_openat(int parent,const char *path,int flags,...) {
     if(fail_open && !strncmp(path,"daiyu-",6)) { fail_open=0; errno=EMFILE; return -1; }
-    return openat(parent,path,flags);
+    mode_t mode=0;
+    if((flags&O_CREAT) || (flags&O_TMPFILE)==O_TMPFILE) {
+        va_list arguments;
+        va_start(arguments,flags);
+        mode=va_arg(arguments,mode_t);
+        va_end(arguments);
+    }
+    return openat(parent,path,flags,mode);
 }
 static int fake_fstat(int fd,struct stat *value) {
     if(fail_stat) { fail_stat=0; errno=EIO; return -1; }

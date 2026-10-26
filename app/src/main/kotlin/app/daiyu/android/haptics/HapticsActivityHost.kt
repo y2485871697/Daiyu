@@ -12,7 +12,7 @@ import app.daiyu.android.domain.ModelEvent
 
 /** Activity-owned capabilities; the runtime/store remain Application-owned.
  * A page change is not run completion. Conversation replacement and destruction revoke observers
- * before their binding. There are no frame timers and no calls to visibleAdvance here.
+ * before their binding. Only the renderer may report actual visible reveal growth.
  */
 internal class HapticsActivityHost(
     val runtime: HapticsRuntime,
@@ -42,11 +42,8 @@ internal class HapticsActivityHost(
         lifecycleOwner.lifecycle.addObserver(this)
     }
 
-    /** chatVisible is a conservative suppression gate, NOT evidence of revealed text growth.
-     * PENDING: the renderer exposes neither a visible-item/reveal callback nor a typewriter clock.
-     * While that chat surface is shown, suppress network-driven foreground ticks. When hidden or
-     * paused, the existing observer supplies genuine background text/tool events. Do not substitute
-     * publishChat, recomposition, scrolling, elapsed time or Activity resume for visibleAdvance.
+    /** Suppress duplicate network ticks on the chat surface. Visible reveal growth arrives through
+     * revealAdvance; hidden/paused hosts retain the existing background text/tool event path.
      */
     fun sync(conversationId: String?, chatVisible: Boolean, settingsVisible: Boolean) {
         checkMain()
@@ -66,6 +63,18 @@ internal class HapticsActivityHost(
             // Sharing the conversation avoids stealing the active run's engine arbitration.
             settingsOwner = HapticsHostBinding(runtime, view, lifecycleOwner,
                 conversationId ?: "haptics-settings").also { it.setVisibleOutput(false) }
+        }
+    }
+
+    /** Renderer-only capability. The host rechecks the exact message; this binding fences re-entry.
+     * It does not revive a runner: normal completion may still have visible reveal left to drain.
+     */
+    fun revealAdvance(conversationId: String?): () -> Unit {
+        checkMain()
+        val owner = chat?.takeIf { it.binding.conversationId == conversationId }
+        return {
+            checkMain()
+            if (!closed && owner != null && chat === owner) owner.binding.feedback.visibleAdvance()
         }
     }
 

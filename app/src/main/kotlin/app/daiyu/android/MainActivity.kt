@@ -2407,6 +2407,9 @@ class MainActivity : ComponentActivity() {
     private fun chatActions(): ChatScreenActions {
         val renderedOwner = controlOwner
         val renderedConversation = chatState.conversationKey
+        val renderedRevealOwner = controller.active?.takeIf { it.conversationId.value == renderedConversation }
+        val renderedRevealTurns = chatState.turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
+        val renderedRevealAdvance = hapticsHost?.revealAdvance(renderedConversation)
         val renderedEditorGeneration = editorGeneration
         val renderedContextEntryEpoch = contextManagementEntryEpoch
         val renderedDraftRevision = draftRevision
@@ -2514,6 +2517,19 @@ class MainActivity : ComponentActivity() {
         return ChatScreenActions(
         onCycleGptSpeed = { cycleChatGptSpeed(renderedSpeed, renderedSpeedConversation) },
         onVisibleCompleted = completionReadAction(),
+        onVisibleTextAdvance = { key ->
+            val active = controller.active
+            val turn = renderedRevealTurns[key]
+            val live = active != null && renderedRevealOwner != null && active.id == renderedRevealOwner.id &&
+                active.runId == renderedRevealOwner.runId && active.conversationId == renderedRevealOwner.conversationId &&
+                active.id.value == turn?.ownerMessageId && active.status == RunStatus.RUNNING && controller.isRunUnfenced(active)
+            val completedDrain = active == null && turn?.status == RunStatus.COMPLETED
+            if (activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration &&
+                turn != null && (live || completedDrain)) {
+                renderedRevealAdvance?.invoke()
+            }
+        },
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onMore = { if (currentChat()) refreshAutomaticCompression() },
         onVoice = voice@{

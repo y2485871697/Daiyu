@@ -122,11 +122,43 @@ class HapticsActivityHostTest : InstrumentationTestCase() {
         assertEquals(HapticDelivery.PLAYED, next.feedback.touch())
     }
 
+    fun testRendererCapabilityUsesHostFeedbackAfterRunSessionEnds() = withHost { f ->
+        f.sync()
+        val run = f.bindings.single().beginRun("r", "m")
+        val reveal = f.host.revealAdvance("c")
+        run.stop()
+        val sessions = f.ports.size
+        reveal()
+        assertTrue(run.ended)
+        assertEquals(sessions, f.ports.size)
+        assertEquals(1, f.ports.first().plays)
+        assertEquals(0, f.ports.last().plays)
+        assertEquals(1, f.ports.sumOf { it.plays })
+        f.afterDrain = {
+            assertTrue(f.store.write(HapticSettings(generation = false)))
+            reveal()
+            assertEquals(1, f.ports.sumOf { it.plays })
+        }
+    }
+
+    fun testRendererCapabilityRejectsWrongConversationReentryAndDestroy() = withHost { f ->
+        f.sync()
+        val stale = f.host.revealAdvance("c")
+        val wrong = f.host.revealAdvance("other")
+        wrong()
+        f.sync("other"); f.sync("c")
+        stale()
+        assertEquals(0, f.ports.sumOf { it.plays })
+        val current = f.host.revealAdvance("c")
+        f.host.close(); current()
+        assertEquals(0, f.ports.sumOf { it.plays })
+    }
+
     fun testVisibleSurfaceAndSyncNeverInventRevealTicks() = withHost { f ->
         f.sync()
         val run = f.bindings.single().beginRun("r", "m")
         repeat(5) { f.sync(); run.output(1) }
-        // Actual visible advance is pending; snapshots only enter the background path, which
+        // Without an actual renderer frame, snapshots only enter the background path, which
         // the visible surface suppresses. Neither mounting nor resuming emits a reveal tick.
         f.lifecycle.registry.currentState = Lifecycle.State.STARTED
         f.lifecycle.registry.currentState = Lifecycle.State.RESUMED

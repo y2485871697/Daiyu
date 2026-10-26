@@ -107,8 +107,9 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         return next
     }
 
-    fun advance(expected: MarkdownTypingTarget, frameNanos: Long): Int {
+    fun advance(expected: MarkdownTypingTarget, frameNanos: Long, onAdvance: () -> Unit = {}): Int {
         if (target !== expected) return expected.start
+        val previous = position.toInt()
         if (lastFrame == 0L) lastFrame = frameNanos
         val elapsed = ((frameNanos - lastFrame).coerceAtLeast(0L) / 1_000_000_000.0).coerceAtMost(0.05)
         lastFrame = frameNanos
@@ -121,6 +122,8 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
             position = drainPosition + (expected.total - drainPosition) * fraction
         }
         if (position >= expected.total && expected.terminal) closed = true
-        return position.toInt().coerceIn(0, expected.total)
+        val shown = position.toInt().coerceIn(0, expected.total)
+        if (shown > previous) onAdvance()
+        return shown
     }
 }

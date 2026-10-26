@@ -274,6 +274,15 @@ internal fun ChatMessageList(
                             AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent,
                                 speaking = speechMessageId == turn.listKey || speechMessageId == turn.id,
                                 revealResetEpoch = revealResetEpoch,
+                                onVisibleAdvance = {
+                                    val layout = listState.layoutInfo
+                                    val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
+                                    if (scrollResumed && turn.status in setOf(RunStatus.RUNNING, RunStatus.COMPLETED) &&
+                                        layout.visibleItemsInfo.any { it.key == turn.listKey && it.size > 0 &&
+                                            it.offset < visibleBottom && it.offset + it.size > layout.viewportStartOffset }) {
+                                        actions.onVisibleTextAdvance(turn.listKey)
+                                    }
+                                },
                                 onRevealSettled = { settled ->
                                     if (settled) revealedTurns[turn.listKey] = turn else revealedTurns.remove(turn.listKey)
                                 }) { ready ->
@@ -344,6 +353,7 @@ internal fun AssistantTurn(
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     speaking: Boolean = false,
     revealResetEpoch: Long = 0L,
+    onVisibleAdvance: () -> Unit = {},
     onRevealSettled: (Boolean) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
 ) = key(turn.listKey) {
@@ -352,7 +362,7 @@ internal fun AssistantTurn(
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { it.text }
     }
     val projection = rememberMarkdownProjection(sources)
-    val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch)
+    val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance)
     var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { mutableStateOf(false) }
     val initialBodyPending = sources.any { it.isNotBlank() } && projection == null && !hasProjectedBody
     SideEffect { if (projection != null && sources.any { it.isNotBlank() }) hasProjectedBody = true }

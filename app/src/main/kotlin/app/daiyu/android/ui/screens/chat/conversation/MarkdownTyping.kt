@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import app.daiyu.android.domain.RunStatus
 
@@ -18,7 +19,9 @@ internal fun rememberMarkdownReveal(
     turn: ChatTurnUi.Assistant,
     projection: MarkdownProjection?,
     resetEpoch: Long = 0L,
+    onVisibleAdvance: () -> Unit = {},
 ): MarkdownReveal {
+    val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val parser = LocalMarkdownParser.current
     val identity = MarkdownParserIdentity(parser)
     val sources = remember(turn.content, turn.finalText) {
@@ -46,7 +49,7 @@ internal fun rememberMarkdownReveal(
         var shown = current.start
         value = MarkdownTypingFrame(current, shown)
         while (shown < current.total) {
-            shown = withFrameNanos { motion.advance(current, it) }
+            shown = withFrameNanos { motion.advance(current, it) { currentAdvance() } }
             value = MarkdownTypingFrame(current, shown)
         }
     }

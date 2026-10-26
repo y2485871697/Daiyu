@@ -335,14 +335,17 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-output-meta").assertTextEquals("1 行 · 成功")
             ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assert(
                 SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsActions.OnClick))
-            ui.onNodeWithTag("tool-output-close").assertHasClickAction()
+            ui.onNodeWithTag("tool-output-close", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithTag("tool-output-copy").assertHasClickAction().performClick()
             ui.onNodeWithText("已复制").assertExists()
             mainThread {
                 val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 assertEquals(body, manager.primaryClip!!.getItemAt(0).text.toString())
             }
-            ui.onNodeWithTag("tool-output-close").performClick()
+            ui.onNodeWithTag("tool-output-content", useUnmergedTree = true).performClick()
+            ui.onNodeWithTag("tool-output-dialog").assertExists()
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.waitForIdle()
             ui.onNodeWithText(body).assertDoesNotExist()
             assertEquals(0, executions)
         }

@@ -177,7 +177,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
     }
     if (expanded) CompositionLocalProvider(LocalToolOutputContext provides null) {
         ToolOutputDialog(ToolDisclosureUi(block.language, block.text, code = true),
-            onDismiss = { expanded = false }, showCloseButton = false)
+            onDismiss = { expanded = false })
     }
 }
 

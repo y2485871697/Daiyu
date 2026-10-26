@@ -57,14 +57,15 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn("MarkdownBlocks(block.blocks, openLink, visible, generationComplete)", self.markdown)
         self.assertIn("MarkdownBlocks(item.blocks, openLink, itemVisible, generationComplete)", self.markdown)
 
-    def test_expansion_reuses_exact_output_dialog_but_only_hides_its_own_x(self):
+    def test_expansion_reuses_shared_output_dialog_without_a_close_cross(self):
         for token in ["LocalToolOutputContext provides null", "ToolDisclosureUi(block.language, block.text, code = true)",
-                      "showCloseButton = false"]:
+                      "onDismiss = { expanded = false }"]:
             self.assertIn(token, self.code)
         dialog = (BASE / "ToolOutputDialog.kt").read_text()
-        self.assertIn("showCloseButton: Boolean = true", dialog)
-        self.assertIn("if (showCloseButton) Box", dialog)
-        self.assertIn('testTag("tool-output-close")', dialog)
+        self.assertNotIn("showCloseButton", self.code)
+        self.assertNotIn("showCloseButton", dialog)
+        self.assertNotIn('testTag("tool-output-close")', dialog)
+        self.assertNotIn("DaiyuIcons.Close", dialog)
         self.assertIn("clipboard.setText(AnnotatedString(document.text))", dialog)
 
     def test_download_freezes_code_and_writes_only_utf8_to_selected_document(self):

@@ -56,6 +56,16 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn('ToolDisclosureUi("原始回执"', rich)
         self.assertNotIn('ToolDisclosureUi("调用回执"', rich)
 
+    def test_full_output_removes_close_cross_but_keeps_content_copy_and_shared_dismiss(self):
+        dialog = (CHAT / "ToolOutputDialog.kt").read_text()
+        for token in ['tool-output-close', '关闭完整输出', 'DaiyuIcons.Close', 'showCloseButton']:
+            self.assertNotIn(token, dialog)
+        for token in ['PreviewDialog(onDismiss,', 'Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp))',
+                      'SelectionContainer(Modifier.weight(1f, fill = false))', 'detectTapGestures { }',
+                      'testTag("tool-output-meta")', 'testTag("tool-output-text")', 'testTag("tool-output-copy")',
+                      'clipboard.setText(AnnotatedString(document.text))', 'Text("复制全文"']:
+            self.assertIn(token, dialog)
+
     def test_output_preview_uses_overlay_and_shared_dialog(self):
         content = (CHAT / "ToolCategoryContent.kt").read_text()
         self.assertIn("if (tappable) Box(surface", content)

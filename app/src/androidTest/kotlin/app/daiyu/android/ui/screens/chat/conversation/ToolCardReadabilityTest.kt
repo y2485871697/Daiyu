@@ -265,9 +265,14 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-document:标准输出").performClick()
             val full = ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(output)
             assertEquals(13.sp, layout(full).layoutInput.style.fontSize)
-            assertTarget("tool-output-close", 1f, minimumWidth = true, reveal = false)
+            ui.onNodeWithTag("tool-output-close", useUnmergedTree = true).assertDoesNotExist()
             assertTarget("tool-output-copy", 1f, minimumWidth = true, reveal = false)
-            ui.onNodeWithTag("tool-output-close").performClick()
+            ui.onNodeWithTag("tool-output-content", useUnmergedTree = true).performClick()
+            ui.onNodeWithTag("tool-output-dialog").assertExists()
+            ui.onNodeWithTag("preview-dialog-scrim", useUnmergedTree = true).performTouchInput {
+                click(topLeft + androidx.compose.ui.geometry.Offset(2f, 2f))
+            }
+            ui.waitForIdle()
             ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
         }
         assertEquals(0, actionCount)

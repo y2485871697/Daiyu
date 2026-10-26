@@ -68,7 +68,7 @@ internal fun toolDocumentTitle(title: String): String = when (title) {
 }
 
 @Composable
-internal fun ToolOutputDialog(document: ToolDisclosureUi, showCloseButton: Boolean = true, onDismiss: () -> Unit) {
+internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit) {
     val owner = LocalToolOutputContext.current
     val dark = conversationColors().dark
     val colors = toolOutputColors(dark)
@@ -87,15 +87,9 @@ internal fun ToolOutputDialog(document: ToolDisclosureUi, showCloseButton: Boole
             .heightIn(max = viewportHeight * .82f).shadow(18.dp, shape, ambientColor = Color(0x38171126), spotColor = Color(0x38171126)).clip(shape).background(colors.card)
             .border(1.dp, colors.line, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("tool-output-dialog"),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(title, fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold, color = colors.text)
-                    Text(meta, Modifier.testTag("tool-output-meta"), fontSize = 12.sp, lineHeight = 18.sp, color = colors.muted)
-                }
-                if (showCloseButton) Box(Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
-                    .background(if (dark) buttonSurface else Color.Transparent).testTag("tool-output-close").conversationClickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
-                    Icon(DaiyuIcons.Close, "关闭完整输出", Modifier.size(18.dp), tint = if (dark) buttonText else colors.text)
-                }
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold, color = colors.text)
+                Text(meta, Modifier.testTag("tool-output-meta"), fontSize = 12.sp, lineHeight = 18.sp, color = colors.muted)
             }
             val contentShape = RoundedCornerShape(10.dp)
             SelectionContainer(Modifier.weight(1f, fill = false)) {

@@ -87,13 +87,18 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         node("voice-account-open").assertExists()
         assertEquals(0, fixture.opens.get())
     }
-    fun testRecognitionHomeKeepsOfflineInInputGroupAndMethodInSeparateCard() {
+    fun testRecognitionHomeOmitsExtraOfflineEntryAndKeepsAlignedCards() {
         systemProfiles(); enter()
         node("voice-input-enable").assert(hasAnyAncestor(hasTestTag("voice-recognition-input-card")))
-        reveal("voice-offline-settings", "语音设置")
-            .assert(hasAnyAncestor(hasTestTag("voice-recognition-input-card"))).performClick()
-        node("offline-speech-settings").assertExists()
-        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
+        node("voice-offline-settings").assertDoesNotExist()
+        ui.onAllNodesWithText("离线语音", substring = false).assertCountEquals(0)
+        val inputBounds = node("voice-recognition-input-card").fetchSemanticsNode().boundsInRoot
+        val packBounds = reveal("voice-offline-pack-card", "语音设置").fetchSemanticsNode().boundsInRoot
+        val methodBounds = reveal("voice-recognition-method-card", "语音设置").fetchSemanticsNode().boundsInRoot
+        for (bounds in listOf(packBounds, methodBounds)) {
+            assertEquals(inputBounds.left, bounds.left, 1f)
+            assertEquals(inputBounds.right, bounds.right, 1f)
+        }
         reveal("voice-recognition-method", "语音设置")
             .assert(hasAnyAncestor(hasTestTag("voice-recognition-method-card"))).performClick()
         node("voice-section-select").assertDoesNotExist()
@@ -483,6 +488,42 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         awaitNodeWindowFocus(node("settings-field:AK").assertIsDisplayed())
         dismissIme()
         awaitImeFrame(node("settings-field:AK"), visible = false)
+        val credentialGroup = hasAnyAncestor(hasTestTag("voice-sync-credentials-card"))
+        for (key in listOf("AK", "SK")) {
+            node("settings-field:$key").assert(credentialGroup)
+                .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            node("settings-secret-visibility:$key").assertContentDescriptionEquals("显示密钥")
+            ui.onAllNodesWithText("显示密钥", substring = false).assertCountEquals(0)
+        }
+        val cardBounds = node("voice-sync-credentials-card").fetchSemanticsNode().boundsInRoot
+        for (tag in listOf("voice-sync-project-card", "voice-sync-read-card", "voice-sync-storage-card", "voice-sync-console-card")) {
+            val bounds = reveal(tag, "同步音色名额").fetchSemanticsNode().boundsInRoot
+            assertEquals(cardBounds.left, bounds.left, 1f)
+            assertEquals(cardBounds.right, bounds.right, 1f)
+        }
+        for ((title, tag) in listOf(
+            "当前项目" to "project", "获取项目列表" to "project", "手动填写项目（备用）" to "project",
+            "读取我的名额" to "read", "保存账户信息" to "storage", "清除已记住的信息" to "storage",
+            "打开火山访问密钥管理" to "console",
+        )) {
+            reveal("settings-row:$title", "同步音色名额")
+                .assert(hasAnyAncestor(hasTestTag("voice-sync-$tag-card")))
+        }
+        ui.onAllNodesWithText("AK / SK 与语音 API Key 不同。", substring = true).assertCountEquals(0)
+        ui.onAllNodesWithText("修改后请点击保存账户信息", substring = true).assertCountEquals(0)
+        reveal("settings-field:AK", "同步音色名额").performTextReplacement("synthetic-ak-draft")
+        awaitImeFrame(node("settings-field:AK"), visible = true)
+        dismissIme(); awaitImeFrame(node("settings-field:AK"), visible = false)
+        node("settings-secret-visibility:AK").performClick()
+        node("settings-field:AK").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Password))
+        node("settings-field:SK").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        awaitImeFrame(node("settings-field:AK"), visible = true)
+        dismissIme(); awaitImeFrame(node("settings-field:AK"), visible = false)
+        node("settings-secret-visibility:AK").assertContentDescriptionEquals("隐藏密钥").performClick()
+        node("settings-field:AK").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        node("settings-field:AK").assertTextContains("synthetic-ak-draft")
+        awaitImeFrame(node("settings-field:AK"), visible = true)
+        dismissIme(); awaitImeFrame(node("settings-field:AK"), visible = false)
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
         awaitUniqueTag("page:我的声音")
         awaitNodeWindowFocus(node("voice-account-add").assertIsDisplayed())

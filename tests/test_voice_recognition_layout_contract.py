@@ -32,16 +32,39 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         self.assertIn('choosingSection = !choosingSection', selector)
         self.assertIn('leavePage {', selector)
 
-    def test_home_uses_one_input_group_and_separate_download_and_method_cards(self):
+    def test_home_omits_extra_offline_entry_and_keeps_download_and_method_cards(self):
         home = self.panel.split('"RECOGNITION" -> {', 1)[1].split('"READ_ALOUD", "CONVERSATION" ->', 1)[0]
         group = body(home, 'SettingsCard(Modifier.testTag("voice-recognition-input-card"))')
         self.assertIn('tag = "voice-input-enable"', group)
-        self.assertIn('tag = "voice-offline-settings"', group)
-        self.assertIn('child = "OFFLINE"', group)
+        self.assertNotIn('tag = "voice-offline-settings"', home)
+        self.assertNotIn('SettingsRow("离线语音"', home)
+        self.assertNotIn('child = "OFFLINE"', home)
+        self.assertIn('switchFeature("input", it) { inputEnabled = it }', group)
         self.assertNotIn('OfflineSpeechPackCard(', group)
         self.assertLess(home.index('voice-recognition-input-card'), home.index('OfflineSpeechPackCard('))
         self.assertLess(home.index('OfflineSpeechPackCard('), home.index('voice-recognition-method-card'))
         self.assertIn('SettingsCard(Modifier.testTag("voice-recognition-method-card"))', home)
+
+    def test_download_card_reuses_same_settings_card_without_extra_wrapper(self):
+        offline = (SRC / "ui/screens/settings/OfflineSpeechSettingsScreen.kt").read_text()
+        card = body(offline, 'internal fun OfflineSpeechPackCard(')
+        self.assertIn('SettingsCard(Modifier.testTag("voice-offline-pack-card"))', card)
+        self.assertEqual(1, card.count('SettingsCard('))
+        self.assertNotIn('VoiceSettingsCard', card)
+        self.assertNotIn('.background(', card)
+        self.assertNotIn('.clip(', card)
+        self.assertIn('owner() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)', card)
+        self.assertIn('if (pack.checking || pack.ready) null', card)
+        self.assertIn('OfflineSpeechPack.cancelDownload()', card)
+        self.assertIn('if (canAct()) OfflineSpeechPack.download(context)', card)
+        self.assertIn('onDismiss = { confirm = false }', card)
+
+    def test_home_keeps_download_owner_and_ready_gated_offline_dictation(self):
+        home = self.panel.split('"RECOGNITION" -> {', 1)[1].split('"READ_ALOUD", "CONVERSATION" ->', 1)[0]
+        self.assertEqual(1, home.count('OfflineSpeechPackCard(context, ::current)'))
+        self.assertIn('if (pack.ready && draft.dictation != "DOUBAO")', home)
+        self.assertIn('SettingsSwitchRow("离线听写", pack.enabled,', home)
+        self.assertIn('if (current()) OfflineSpeechPack.setEnabled(context, it)', home)
 
     def test_asr_has_its_own_title_without_home_selector(self):
         self.assertIn('"ASR" -> "识别方式"', self.panel)

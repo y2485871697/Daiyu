@@ -26,7 +26,7 @@ internal fun OfflineSpeechPackCard(context: Context, ownerCurrent: () -> Boolean
     var confirm by remember { mutableStateOf(false) }
     val owner by rememberUpdatedState(ownerCurrent)
     fun canAct() = owner() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-    SettingsCard {
+    SettingsCard(Modifier.testTag("voice-offline-pack-card")) {
         SettingsRow(when { pack.downloading -> "取消下载"; pack.ready -> "语音包已就绪"; else -> "下载语音包" },
             tag = if (pack.downloading) "offline-speech-cancel-download" else "offline-speech-download",
             summary = when {

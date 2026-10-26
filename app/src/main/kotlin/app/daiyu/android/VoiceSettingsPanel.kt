@@ -392,9 +392,6 @@ internal fun VoiceSettingsPanel(
                             item { SettingsCard(Modifier.testTag("voice-recognition-input-card")) {
                                 SettingsSwitchRow("启用语音转文字", inputEnabled, busy = busy, tag = "voice-input-enable",
                                     summary = "点击聊天输入框的语音按钮，把说话变成文字。") { switchFeature("input", it) { inputEnabled = it } }
-                                SettingsRow("离线语音", tag = "voice-offline-settings", showChevron = true, onClick = if (busy) null else ({
-                                    if (current() && !busy && stopAudio()) { invalidatePicker(); child = "OFFLINE" }
-                                }))
                             } }
                             item { OfflineSpeechPackCard(context, ::current) }
                             item { SettingsCard(Modifier.testTag("voice-recognition-method-card")) { SettingsRow("识别方式", tag = "voice-recognition-method",

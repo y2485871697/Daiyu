@@ -12,30 +12,34 @@ class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
         node("settings-search").assertDoesNotExist()
         reveal("settings-row:$title", "设置").performClick()
     }
-    fun testOfflineSpeechIsReachableFromVoiceSettingsWithoutEnablingOrDownloading() {
+    fun testVoiceSettingsOmitsExtraOfflineEntryWithoutEnablingOrDownloading() {
         setDraft("offline settings unsent")
         val before = fixture.database.exportBackup()
         val packBefore = OfflineSpeechPack.state.value
         openSettings(); entry("voice")
-        node("voice-offline-settings").scrollToVisible().performClick()
-        node("offline-speech-settings").assertExists()
+        node("voice-offline-settings").assertDoesNotExist()
+        reveal("voice-offline-pack-card", "语音设置").assertExists()
+        reveal("voice-recognition-method", "语音设置").assertExists()
+        node("offline-speech-settings").assertDoesNotExist()
         assertEquals(packBefore.enabled, OfflineSpeechPack.state.value.enabled)
         assertEquals(packBefore.downloading, OfflineSpeechPack.state.value.downloading)
         assertEquals(before, fixture.database.exportBackup()); assertEquals(0, fixture.opens.get())
-        backToPage(activity, "voice-settings")
         backToPage(activity, "page:设置"); backToChat(activity)
         assertDraft("offline settings unsent")
     }
-    fun testPausedOfflineSettingsClickCannotNavigate() {
-        setDraft("paused offline settings unsent")
+    fun testPausedRecognitionMethodClickCannotNavigate() {
+        setDraft("paused recognition settings unsent")
         val before = fixture.database.exportBackup()
         openSettings(); entry("voice")
-        val click = checkNotNull(node("voice-offline-settings").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val click = checkNotNull(reveal("voice-recognition-method", "语音设置").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         realPauseResume(activity, atPause = { click() })
-        node("voice-settings").assertExists(); node("offline-speech-settings").assertDoesNotExist()
+        node("voice-settings").assertExists()
+        node("voice-section-select").assertTextContains("语音识别")
+        node("settings-radio:本机识别").assertDoesNotExist()
+        node("offline-speech-settings").assertDoesNotExist()
         assertEquals(before, fixture.database.exportBackup()); assertEquals(0, fixture.opens.get())
         backToPage(activity, "page:设置"); backToChat(activity)
-        assertDraft("paused offline settings unsent")
+        assertDraft("paused recognition settings unsent")
     }
     fun testDuplicateEntriesAreHiddenAndGesturePreferencesRemain() {
         assertFalse(SettingsCatalog.entries.any { it.id in setOf("permission_check", "accessibility_keep") })

@@ -274,11 +274,14 @@ internal fun VoiceAccountPanel(
                 SettingsNote("声音复刻账户独立保存；API Key 与音色名额须属于同一项目。")
                 VoiceSettingsCard { SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") }) }
             }
-            if (page == "SYNC") item {
-                SettingsNote("AK / SK 与语音 API Key 不同。此处只读取名额，不购买、不训练。项目列表不能判断语音 Key 的归属，请选择同一项目。")
-                VoiceSettingsCard {
-                    AccountField("AK", ak, busy, true) { ak = it; sk = ""; projects = emptyList(); confirmation = null }
-                    AccountField("SK", sk, busy, true) { sk = it; projects = emptyList(); confirmation = null }
+            if (page == "SYNC") {
+                item { SettingsCard(Modifier.testTag("voice-sync-credentials-card")) {
+                    SettingsTextField("AK", ak, { ak = it; sk = ""; projects = emptyList(); confirmation = null },
+                        password = true, enabled = !busy, compact = true)
+                    SettingsTextField("SK", sk, { sk = it; projects = emptyList(); confirmation = null },
+                        password = true, enabled = !busy, compact = true)
+                } }
+                item { SettingsCard(Modifier.testTag("voice-sync-project-card")) {
                     SettingsRow("当前项目", summary = project, showChevron = true, onClick = if (busy || projects.isEmpty()) null else ({ projectPicker = true }))
                     SettingsRow(if (projects.isEmpty()) "获取项目列表" else "刷新项目列表", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
                         val a = ak; val s = sk
@@ -286,6 +289,8 @@ internal fun VoiceAccountPanel(
                     }))
                     SettingsRow("手动填写项目（备用）", showChevron = true, onClick = if (busy) null else ({ projectManual = !projectManual }))
                     if (projectManual) AccountField("项目名称", project, busy) { project = it; confirmation = null }
+                } }
+                item { SettingsCard(Modifier.testTag("voice-sync-read-card")) {
                     SettingsRow("读取我的名额", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
                         val a = ak; val s = sk; val p = project
                         ask("查询项目 $p 的槽位；已制作槽位将用当前语音 Key 校验，不制作、不合成") {
@@ -293,6 +298,8 @@ internal fun VoiceAccountPanel(
                             notice = if (count == 0) "本项目未找到名额；请核对项目与语音 API Key。" else "已同步 $count 个名额；未使用的名额在制作声音时选择。"
                         }
                     }))
+                } }
+                item { SettingsCard(Modifier.testTag("voice-sync-storage-card")) {
                     SettingsRow("保存账户信息", showChevron = true, onClick = if (account == null || busy || !current() || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
                         val a = ak; val s = sk; val p = project
                         execute { withContext(Dispatchers.IO) { resources.preferences.save(account!!.fingerprint, a, s, p) }; notice = "账户信息已加密保存在本机" }
@@ -303,9 +310,10 @@ internal fun VoiceAccountPanel(
                             ak = ""; sk = ""; project = "default"; projects = emptyList(); notice = "已清除本机账户信息"
                         }
                     }))
-                }
-                SettingsNote("修改后请点击保存账户信息；返回其它子页会保留本次输入。AK / SK 须配对，凭据按语音账户加密保存。")
-                VoiceSettingsCard { SettingsRow("打开火山访问密钥管理", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/iam/keymanage/") }) }
+                } }
+                item { SettingsCard(Modifier.testTag("voice-sync-console-card")) {
+                    SettingsRow("打开火山访问密钥管理", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/iam/keymanage/") })
+                } }
             }
             if (page == "CREATE") item {
                 SettingsSectionTitle("${step + 1} / 3")

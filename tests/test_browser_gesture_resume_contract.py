@@ -56,3 +56,14 @@ class BrowserGestureResumeContractTest(unittest.TestCase):
         self.assertIn('view.scrollY > 0', scroll)
         self.assertIn('swipeDown()', scroll)
         self.assertIn('assertEquals(0, dismissals)', scroll)
+
+    def test_native_webview_swipes_use_real_input_timestamps_and_full_pointer_lifecycle(self):
+        source = (ANDROID / 'BrowserScrollGestureActivityTest.kt').read_text()
+        for token in ('view.getLocationOnScreen(location)', 'SystemClock.uptimeMillis()',
+                      'InputDevice.SOURCE_TOUCHSCREEN', 'injectInputEvent(event, true)',
+                      'MotionEvent.ACTION_DOWN', 'MotionEvent.ACTION_MOVE',
+                      'MotionEvent.ACTION_UP', 'MotionEvent.ACTION_CANCEL', 'event.recycle()',
+                      'SystemClock.sleep(minOf(16L, remaining))', 'elapsed.toFloat() / durationMillis', 'swipeDown(durationMillis = 100L)',
+                      'view.scrollY < down', 'assertEquals(before, container.fetchSemanticsNode().boundsInRoot)'):
+            self.assertIn(token, source)
+        self.assertNotIn('performTouchInput', source)

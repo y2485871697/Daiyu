@@ -77,5 +77,15 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('controller.timelineVersion != revision || editorGeneration != generation', activity)
         self.assertLess(activity.index('timelineRead = null', activity.index('finally')), activity.index('refreshTimeline()', activity.index('finally')))
 
+    def test_dialog_native_frame_reads_captured_nodes_without_main_thread_test_synchronization(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatTimelineDividerTest.kt').read_text()
+        body = test.split('val (windowBounds, cardBounds, safeBounds) = awaitStableWindowFrame(view) {', 1)[1].split('val blankBottom', 1)[0]
+        self.assertNotIn('fetchSemanticsNode()', body)
+        self.assertIn('viewportNode.boundsInRoot', body)
+        self.assertIn('cardNode.boundsInRoot', body)
+        self.assertIn('cardNode.layoutInfo.coordinates.isAttached', body)
+        self.assertIn('viewport.performTouchInput { click(outside - windowBounds.topLeft) }', test)
+        self.assertIn('assertEquals(1, dismissals)', test)
+
 if __name__ == '__main__':
     unittest.main()

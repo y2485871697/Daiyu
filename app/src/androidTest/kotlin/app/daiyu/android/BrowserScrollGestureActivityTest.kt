@@ -1,5 +1,8 @@
 package app.daiyu.android
 
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -74,6 +77,52 @@ class BrowserScrollGestureActivityTest : WiredActivityTestCase() {
         awaitControl("local page loaded and laid out") { loaded && view.height > 0 && view.contentHeight >= height }
     }
 
+    private fun swipeUp() = swipeWebView(downward = false)
+    private fun swipeDown(durationMillis: Long = 200L) = swipeWebView(downward = true, durationMillis = durationMillis)
+
+    private fun swipeWebView(downward: Boolean, durationMillis: Long = 200L) {
+        val location = IntArray(2)
+        var x = 0f
+        var startY = 0f
+        var endY = 0f
+        mainThread {
+            check(view.isAttachedToWindow && view.hasWindowFocus() && view.width > 0 && view.height > 0)
+            view.getLocationOnScreen(location)
+            x = location[0] + view.width * 0.5f
+            startY = location[1] + view.height * if (downward) 0.2f else 0.8f
+            endY = location[1] + view.height * if (downward) 0.8f else 0.2f
+        }
+        // Native WebView input uses real uptime, not Compose's batched virtual event times.
+        val downTime = SystemClock.uptimeMillis()
+        fun inject(action: Int, y: Float) {
+            val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
+            try {
+                event.source = InputDevice.SOURCE_TOUCHSCREEN
+                check(instrumentation.uiAutomation.injectInputEvent(event, true)) { "WebView touch injection rejected: $action" }
+            } finally { event.recycle() }
+        }
+        var pressed = false
+        var y = startY
+        try {
+            inject(MotionEvent.ACTION_DOWN, y)
+            pressed = true
+            while (true) {
+                val remaining = downTime + durationMillis - SystemClock.uptimeMillis()
+                if (remaining > 0L) SystemClock.sleep(minOf(16L, remaining))
+                val elapsed = (SystemClock.uptimeMillis() - downTime).coerceAtMost(durationMillis)
+                y = startY + (endY - startY) * elapsed.toFloat() / durationMillis
+                inject(MotionEvent.ACTION_MOVE, y)
+                if (elapsed == durationMillis) break
+            }
+            inject(MotionEvent.ACTION_UP, endY)
+            pressed = false
+            android.util.Log.i("DaiyuBrowserScroll", "touch x=$x y=$startY->$endY down=$downTime up=${SystemClock.uptimeMillis()} duration=$durationMillis")
+        } catch (failure: Throwable) {
+            if (pressed) runCatching { inject(MotionEvent.ACTION_CANCEL, y) }.exceptionOrNull()?.let { failure.addSuppressed(it) }
+            throw failure
+        }
+    }
+
     private fun awaitSettledScrollY(label: String, reached: () -> Boolean = { true }): Int {
         val samples = java.util.ArrayDeque<String>(64)
         val started = android.os.SystemClock.uptimeMillis()
@@ -106,15 +155,15 @@ class BrowserScrollGestureActivityTest : WiredActivityTestCase() {
         show(20_000)
         val container = node("browser-visual-container")
         val before = container.fetchSemanticsNode().boundsInRoot
-        container.performTouchInput { swipeUp() }
+        swipeUp()
         val down = awaitSettledScrollY("real WebView scrolled down") { view.scrollY > 0 }
         assertTrue("real WebView scrolled down: settled=$down", down > 0)
-        container.performTouchInput { swipeDown() }
+        swipeDown()
         val up = awaitSettledScrollY("real WebView scrolled back up from $down") { view.scrollY < down }
         assertTrue("real WebView scrolled back up: down=$down up=$up", up < down)
         mainThread { view.scrollTo(0, 0) }
         awaitSettledScrollY("top setup") { view.scrollY == 0 }
-        container.performTouchInput { swipeDown() }
+        swipeDown()
         awaitSettledScrollY("downward gesture at page top") { view.scrollY == 0 }
         mainThread {
             assertEquals(0, view.scrollY)
@@ -129,7 +178,7 @@ class BrowserScrollGestureActivityTest : WiredActivityTestCase() {
 
     fun testShortPageDownwardFlingDoesNotDismissBrowser() {
         show(100)
-        node("browser-visual-container").performTouchInput { swipeDown(durationMillis = 100) }
+        swipeDown(durationMillis = 100L)
         awaitVisualIdle()
         node("browser-visual-page").assertIsDisplayed()
         mainThread { assertEquals(0, dismissals); assertEquals(0, view.scrollY) }

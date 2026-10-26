@@ -75,6 +75,15 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         play = main.split('fun play(value: FrozenVoiceSpeech)', 1)[1].split('val config = frozen.configuration', 1)[0]
         self.assertLess(play.index('messageSpeechAttempt++'), play.index('speechHost.speak(expectedOwner, id, text)'))
 
+    def test_animation_pixel_regression_waits_for_real_draw_before_each_capture(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageSpeechButtonTest.kt').read_text()
+        body = test.split('fun testSpeakerWavesAnimateInsideUnchangedHitTarget()', 1)[1]
+        self.assertEqual(2, body.count('captureScreenNode(waves).toPixelMap()'))
+        self.assertNotIn('captureToImage()', body)
+        self.assertIn('ui.mainClock.advanceTimeBy(600)', body)
+        self.assertIn('assertEquals(beforeBounds, button.fetchSemanticsNode().boundsInRoot)', body)
+        self.assertIn('changed > 0', body)
+
 
 if __name__ == '__main__':
     unittest.main()

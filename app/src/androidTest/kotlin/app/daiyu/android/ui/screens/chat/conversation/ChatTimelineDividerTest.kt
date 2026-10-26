@@ -57,8 +57,12 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
                 androidx.core.view.WindowInsetsCompat.Type.systemBars() or
                     androidx.core.view.WindowInsetsCompat.Type.displayCutout()
             ) ?: return@awaitStableWindowFrame null
-            val window = viewport.fetchSemanticsNode().boundsInRoot
-            Triple(window, details.fetchSemanticsNode().boundsInRoot, androidx.compose.ui.geometry.Rect(
+            if (!viewportNode.layoutInfo.isPlaced || !cardNode.layoutInfo.isPlaced ||
+                !viewportNode.layoutInfo.coordinates.isAttached || !cardNode.layoutInfo.coordinates.isAttached) {
+                return@awaitStableWindowFrame null
+            }
+            val window = viewportNode.boundsInRoot
+            Triple(window, cardNode.boundsInRoot, androidx.compose.ui.geometry.Rect(
                 window.left + bars.left, window.top + bars.top,
                 window.right - bars.right, window.bottom - bars.bottom
             ))

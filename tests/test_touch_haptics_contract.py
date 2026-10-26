@@ -102,6 +102,28 @@ class TouchHapticsContractTest(unittest.TestCase):
         for file in (SRC / "ui/screens/chat/conversation").glob("Tool*Dialog.kt"):
             self.assertNotIn(".conversationClickable {}", file.read_text())
 
+    def test_preview_outside_dismiss_is_silent_without_disabling_content_feedback(self):
+        text = (SRC / "ui/components/PreviewDialog.kt").read_text()
+        scrim = text.split('testTag("preview-dialog-scrim")', 1)[1].split("CompositionLocalProvider", 1)[0]
+        self.assertIn(".clickable(enabled = dismissEnabled", scrim)
+        self.assertIn("clickFeedback = false", scrim)
+        self.assertIn("motion?.requestDismiss(BottomSheetDismissSource.Outside) ?: onOutsideDismiss()", scrim)
+        self.assertNotIn("TouchHaptics", text)
+        self.assertNotIn("LocalHapticFeedback", text)
+        modifiers = (HAPTICS / "HapticModifiers.kt").read_text()
+        self.assertIn("clickFeedback: Boolean = true", modifiers)
+        self.assertIn("onClick = if (clickFeedback) hapticClick(enabled, onClick) else onClick", modifiers)
+
+    def test_choice_outside_dismiss_is_silent_but_options_and_cancel_keep_feedback(self):
+        text = (SRC / "ui/components/DaiyuDialogs.kt").read_text()
+        scrim = text.split('testTag("choice-sheet-viewport")', 1)[1].split(".windowInsetsPadding", 1)[0]
+        self.assertIn("clickFeedback = false", scrim)
+        self.assertIn("onClick = onDismiss", scrim)
+        option = text.split('testTag("prompt-choice:$index").fillMaxWidth()', 1)[1].split("contentAlignment", 1)[0]
+        self.assertIn(".clickable(onClick = select)", option)
+        self.assertNotIn("clickFeedback = false", option)
+        self.assertIn('TextButton(text = "取消", onClick = onDismiss', text)
+
     def test_custom_semantics_links_and_slider_accessibility_are_covered(self):
         for file in ("ui/screens/settings/SettingsUiComponents.kt", "ui/screens/settings/WorkspaceSettingsScreen.kt", "ui/screens/settings/IconAppearanceEditor.kt", "ui/PlatformActionApprovalHost.kt", "ui/screens/chat/conversation/MessageMarkdown.kt"):
             text = (SRC / file).read_text()

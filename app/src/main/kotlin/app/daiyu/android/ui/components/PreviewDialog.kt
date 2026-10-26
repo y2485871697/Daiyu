@@ -36,7 +36,8 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
                 Box(Modifier.matchParentSize().testTag("preview-dialog-scrim")
                     .then(if (scrimBlurRadius > 0f) Modifier.previewGlassBlur(androidx.compose.ui.graphics.RectangleShape, radius = scrimBlurRadius, saturation = 1f) else Modifier)
                     .dialogDimBackground(scrimColor ?: Color(if (colors.dark) 0x55000000 else 0x2620172d), animate = bottomSheet)
-                    .clickable(enabled = dismissEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {
+                    .clickable(enabled = dismissEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null,
+                        clickFeedback = false, onClick = {
                         if (dismissEnabled) motion?.requestDismiss(BottomSheetDismissSource.Outside) ?: onOutsideDismiss()
                     }))
                 CompositionLocalProvider(LocalDensity provides density) {

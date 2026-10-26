@@ -155,6 +155,7 @@ internal fun DaiyuChoiceSheet(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
+                    clickFeedback = false,
                     onClick = onDismiss,
                 ).windowInsetsPadding(WindowInsets.safeDrawing)
                 .imePadding(),

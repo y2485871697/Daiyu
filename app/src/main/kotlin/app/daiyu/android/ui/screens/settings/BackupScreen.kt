@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.icons.DaiyuIcons
 
 /** The host owns document pickers, import confirmation, restore authorization and operation state. */
@@ -27,6 +28,7 @@ internal fun BackupScreen(
     errorText: String? = null,
     engineeringUi: Boolean = false,
     onImport: () -> Unit = onImportComplete,
+    onExport: (includeLinux: Boolean) -> Unit = { onExportComplete() },
 ) {
     var includeFullLinuxEnvironment by rememberSaveable { mutableStateOf(false) }
     SettingsScaffoldPage(title = "备份与导入", onBack = onBack, modifier = modifier) {
@@ -35,13 +37,17 @@ internal fun BackupScreen(
             if (!statusText.isNullOrBlank()) SettingsNote(statusText)
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)
         }
-        item(key = "backup_actions") {
-            SettingsCard {
+        item(key = "backup_options") {
+            SettingsCard(Modifier.testTag("backup-options-card")) {
                 SettingsSwitchRow("包含完整 Linux 环境", checked = includeFullLinuxEnvironment, enabled = !busy,
                     tag = "backup-include-full-linux") { includeFullLinuxEnvironment = it }
-                SettingsRow("导出数据", summary = if (busy) "处理中，请稍候" else "保存当前数据备份", tag = "backup-export", showChevron = true, onClick = if (busy) null else onExportComplete,
+            }
+        }
+        item(key = "backup_actions") {
+            SettingsCard(Modifier.testTag("backup-actions-card")) {
+                SettingsRow("导出数据", tag = "backup-export", showChevron = true, onClick = if (busy) null else ({ onExport(includeFullLinuxEnvironment) }),
                     leading = { SettingsIcon(DaiyuIcons.Export) })
-                SettingsRow("导入数据", summary = if (busy) "处理中，请稍候" else "从备份文件恢复数据", tag = "backup-import", showChevron = true, onClick = if (busy) null else onImport,
+                SettingsRow("导入数据", tag = "backup-import", showChevron = true, onClick = if (busy) null else onImport,
                     leading = { SettingsIcon(DaiyuIcons.Import) })
             }
         }

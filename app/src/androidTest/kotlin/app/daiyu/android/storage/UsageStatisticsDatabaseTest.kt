@@ -16,7 +16,7 @@ class UsageStatisticsDatabaseTest : InstrumentationTestCase() {
         db.beginTransaction(); return try { action().also { db.setTransactionSuccessful() } } finally { db.endTransaction() }
     }
     private fun create(db: SQLiteDatabase, id: String, at: Long) = tx(db) {
-        db.execSQL("INSERT INTO conversations VALUES(?,?)", arrayOf(id, at))
+        db.execSQL("INSERT INTO conversations VALUES(?,?)", arrayOf<Any>(id, at))
         UsageStatisticsStore.created(db, id, at)
     }
     private fun record(db: SQLiteDatabase, id: String, input: Long, output: Long) = tx(db) {

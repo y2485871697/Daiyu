@@ -79,6 +79,19 @@ class LinuxSettingsApplication private constructor(
         return freezeTerminalLaunchOnWorker(reference, tempDirectory, hostWorkingDirectory, workspace)
     }
 
+    internal fun <T> withSelectedRootfsBackup(pack: (LinuxInstallation) -> T): T {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "linux_backup_worker_required" }
+        val reference = terminalSelection.status().selected ?: error("linux_environment_not_selected")
+        val handle = admission.freeze(reference) {
+            requireWorkspaceGenerationUnchanged(reference)
+            val mode = checkNotNull(executionModes[reference])
+            check(mode != LinuxExecutionMode.CHROOT || allowChroot()) { "linux_backup_root_required" }
+            LinuxRuntimePlatform.requireSupported(mode)
+            terminalSelection.acquireSelectedRootfsBackup(reference)
+        }
+        return handle.use { pack(it.installation) }
+    }
+
     /** Approved startup snapshots only. Pure inspection: no selection, mkdir or installation. */
     internal fun workspaceRootsOnWorker(): List<LinuxInstallation> {
         check(Looper.myLooper() != Looper.getMainLooper()) { "terminal_freeze_requires_worker" }
@@ -125,6 +138,7 @@ class LinuxSettingsApplication private constructor(
         ): LinuxSettingsApplication {
             val runningMode = AndroidRunningModeStore.get(context)
             val allowChroot = { runningMode.mode.value == RunningMode.ROOT }
+            val rootfsAccess = LinuxRootfsBackupAccess.forFiles(context.filesDir)
             val snapshot = catalog.load()
             val modes = snapshot.associate { LinuxGenerationRef(it.environmentId, it.generation) to it.executionMode }
             val admission = LinuxSettingsAdmission(snapshot.filter { LinuxRuntimePlatform.unavailableReason(it.executionMode) == null }
@@ -137,7 +151,7 @@ class LinuxSettingsApplication private constructor(
             val settings = LinuxSettingsController(access, admission, startupEntries = snapshot, installation = installation,
                 chrootInstallation = chrootInstallation, allowChroot = allowChroot)
             val selection = TerminalTrustedLinuxSelection(File(context.filesDir, "user-terminal/linux-selection"), snapshot,
-                chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations"))
+                chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations"), rootfsAccess = rootfsAccess)
             val inspector = LinuxEnvironmentStore(File(context.filesDir, "user-terminal/linux-selection"),
                 TerminalDurability::syncDirectory, ::strictLinuxFileKey,
                 File(context.filesDir.canonicalFile, "linux-chroot-installations"), initializeDirectory = false)

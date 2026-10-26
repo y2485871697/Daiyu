@@ -23,7 +23,7 @@ class MessageSpeechButtonTest : WiredActivityTestCase() {
     private fun mountBar() {
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Box(Modifier.width(320.dp)) {
                         MessageActionBar("answer", ChatScreenActions(onSpeak = {
                             clicks += it
@@ -57,7 +57,7 @@ class MessageSpeechButtonTest : WiredActivityTestCase() {
     fun testOnlyMatchingMessageUsesAnimatedSpeakerAndClearsWithProjection() {
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     DaiyuChatScreen(ChatScreenState("朗读回归", turns = listOf(
                         ChatTurnUi.Assistant("first", finalText = "第一条回答"),
                         ChatTurnUi.Assistant("second", finalText = "第二条回答"))), ChatScreenActions(),

@@ -1507,12 +1507,14 @@ class MainActivity : ComponentActivity() {
     private var pendingBackupRequest: Int? = null
     private var backupExportPageOwner by mutableStateOf<Any>(Any())
     private var pendingBackupExportOwner: Any? = null
+    private var pendingBackupIncludeLinux = false
     private var backupExportPickerHopPending = false
     private fun backupExportPageCurrent(owner: Any?) = owner != null && backupExportPageOwner === owner &&
         activityUsable() && retainedPage == "backup"
     private fun revokeBackupExportPage() {
         backupExportPageOwner = Any()
         pendingBackupExportOwner = null
+        pendingBackupIncludeLinux = false
         backupExportPickerHopPending = false
         // Keep the outstanding request slot until its result is consumed.
     }
@@ -2160,6 +2162,9 @@ class MainActivity : ComponentActivity() {
                         BackupScreen(
                         engineeringUi = engineeringUi,
                         onImport = { backupGuard { pickBackupAuto() } },
+                        onExport = { includeLinux -> if (backupExportPageCurrent(exportOwner)) backupGuard {
+                            pickBackup(true, true, includeLinux)
+                        } },
                         onBack = { if (activityUsable() && retainedPage == "backup") retainedPage = "settings" },
                         onExportCompact = { if (backupExportPageCurrent(exportOwner)) backupGuard { pickBackup(true, false) } },
                         onExportComplete = { if (backupExportPageCurrent(exportOwner)) backupGuard { pickBackup(true, true) } },
@@ -6445,7 +6450,7 @@ class MainActivity : ComponentActivity() {
     private fun openedBackupUri(open: Intent): Uri {
         val uri = open.data
         require(uri != null && uri.scheme == "content" && !uri.authority.isNullOrBlank() &&
-            uri.toString().length <= 8192 && open.type == "application/json") { "请选择content类型的JSON备份文件（URI不超过8192字符）" }
+            uri.toString().length <= 8192 && open.type in setOf("application/json", "application/zip")) { "请选择content类型的JSON或ZIP备份文件（URI不超过8192字符）" }
         require(open.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0) { "备份文件未授予读取权限；请重新选择文件" }
         return uri
     }
@@ -6527,6 +6532,7 @@ class MainActivity : ComponentActivity() {
         backupImportVisit = visit
         prompt = ConfirmPrompt("导入备份",
             "将识别所选文件。代鱼备份会添加聊天记录，不覆盖现有记录；" +
+                "若包含 Linux 环境，将恢复到独立目录，不覆盖当前环境，也不自动授权运行；chroot 恢复需要 Root。" +
                 "若包含可恢复的模型配置，将另行确认。" +
                 "旧版格式会转入兼容资料库流程，不直接成为当前聊天记录。",
             "导入", action = {
@@ -6552,28 +6558,53 @@ class MainActivity : ComponentActivity() {
         backupGuard {
             if (result.outcome.kind == app.daiyu.android.backup.BackupImportSource.Kind.LEGACY) {
                 openLegacyLibrary(); legacyPage?.requestSource()?.result(result.uri)
-            } else if (result.outcome.hasConfiguration) {
-                previewConfigurationRestore()
-                if (configurationRestorePreview?.plan?.isNoOp == false) confirmConfigurationRestore()
+            } else {
+                val candidate = result.outcome.linux
+                if (candidate == null) offerImportedConfiguration(result.outcome.hasConfiguration)
+                else {
+                    val installation = candidate.installation
+                    val owner = backupExportPageOwner
+                    prompt = ConfirmPrompt("批准恢复的 Linux 环境？",
+                        "发行版：${installation.distribution}\n运行方式：${installation.executionMode.wire}\n" +
+                            "恢复目录：${installation.rootfs.path}\n" +
+                            "只使用本机安装包内的运行组件，不恢复外部共享目录授权。批准后，下次启动可选择此环境；不会切换或运行当前环境。",
+                        "批准", action = {
+                            if (backupExportPageCurrent(owner)) backupGuard {
+                                controller.approveRestoredLinux(candidate) { success ->
+                                    if (success && backupExportPageCurrent(owner))
+                                        backupGuard { offerImportedConfiguration(result.outcome.hasConfiguration) }
+                                }
+                            }
+                        }, backup = true)
+                }
             }
         }
     }
-    @Suppress("DEPRECATION") private fun pickBackup(exporting: Boolean, complete: Boolean) {
+    private fun offerImportedConfiguration(hasConfiguration: Boolean) {
+        if (hasConfiguration) {
+            previewConfigurationRestore()
+            if (configurationRestorePreview?.plan?.isNoOp == false) confirmConfigurationRestore()
+        }
+    }
+    @Suppress("DEPRECATION") private fun pickBackup(exporting: Boolean, complete: Boolean, includeLinux: Boolean = false) {
         checkBackupAvailable(); check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
         val owner = if (exporting) backupExportPageOwner.also {
             check(backupExportPageCurrent(it) && generationResumed()) { "备份页面已变化；请重新选择导出" }
         } else null
         val code = if (complete) { if (exporting) 103 else 104 } else { if (exporting) 101 else 102 }
+        require(!includeLinux || exporting && complete)
         pendingBackupRequest = code
+        pendingBackupIncludeLinux = includeLinux
         pendingBackupExportOwner = owner
         backupExportPickerHopPending = exporting
         try {
             startActivityForResult(Intent(if (exporting) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"
-                if (exporting) putExtra(Intent.EXTRA_TITLE, if (complete) "daiyu-complete.json" else "daiyu-text.json")
+                addCategory(Intent.CATEGORY_OPENABLE); type = if (includeLinux) "application/zip" else "application/json"
+                if (exporting) putExtra(Intent.EXTRA_TITLE, if (includeLinux) "daiyu-linux-backup.zip"
+                    else if (complete) "daiyu-complete.json" else "daiyu-text.json")
             }, code)
         } catch (failure: Exception) {
-            pendingBackupRequest = null; pendingBackupExportOwner = null; backupExportPickerHopPending = false
+            pendingBackupRequest = null; pendingBackupExportOwner = null; pendingBackupIncludeLinux = false; backupExportPickerHopPending = false
             throw failure
         }
     }
@@ -6641,6 +6672,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (requestCode !in setOf(101, 102, 103, 104, 105, 106, 107) || pendingBackupRequest != requestCode) return
+        val includeLinux = pendingBackupIncludeLinux.also { pendingBackupIncludeLinux = false }
         val exportOwner = if (requestCode == 101 || requestCode == 103) pendingBackupExportOwner.also {
             pendingBackupExportOwner = null; backupExportPickerHopPending = false
         } else null
@@ -6678,7 +6710,7 @@ class MainActivity : ComponentActivity() {
             require(uri.scheme == "content") { "文件选择未返回content URI；原数据保留，请重新选择" }
             if (requestCode == 101 || requestCode == 103) {
                 check(backupExportPageCurrent(exportOwner)) { "备份页面已变化；本次导出已失效，请重新选择" }
-                controller.exportUserBackup(uri, complete)
+                controller.exportUserBackup(uri, complete, includeLinux = includeLinux)
             }
             else if (requestCode == 107) {
                 val visit = backupImportVisit

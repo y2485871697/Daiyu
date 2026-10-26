@@ -56,6 +56,7 @@ static int positive(const char *s) {
     return *s && !*end && n>0 && n<=1000 ? (int)n : -1;
 }
 #include "daiyu_root_scope.h"
+#include "daiyu_rootfs_backup.h"
 /* Called only before root_create(), when no scope or guest can exist. */
 static int root_pre_scope_failure(int result) {
     if(root_mode && signal(SIGPIPE,SIG_IGN)!=SIG_ERR) {
@@ -65,6 +66,8 @@ static int root_pre_scope_failure(int result) {
     return result;
 }
 int main(int argc, char **argv) {
+    int backup_result = rootfs_backup_main(argc, argv);
+    if (backup_result >= 0) return backup_result;
     /* Read the actual inherited slave, without requiring a platform stty applet. */
     if(argc==2 && !strcmp(argv[1],"--probe-tty")) {
         struct winsize observed;

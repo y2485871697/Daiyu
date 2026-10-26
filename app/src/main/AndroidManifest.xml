@@ -86,6 +86,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" android:mimeType="application/json" />
+                <data android:scheme="content" android:mimeType="application/zip" />
             </intent-filter>
         </activity>
         <!-- Task17IconManifest.fragment("app.daiyu.android"): 8 x 8 original cat icons.

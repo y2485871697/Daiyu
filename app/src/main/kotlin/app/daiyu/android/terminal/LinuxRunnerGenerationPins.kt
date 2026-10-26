@@ -41,7 +41,8 @@ internal class LinuxRunnerGenerationPins(
         action()
     }
 
-    fun claim(generation: LinuxGenerationRef, identities: List<String>, stillCurrent: () -> Unit): Pin = admitted {
+    fun claim(generation: LinuxGenerationRef, identities: List<String>, requireEmpty: Boolean = false,
+        stillCurrent: () -> Unit): Pin = admitted(requireEmpty = requireEmpty) {
         check(guard.known.size < MAX_PINS) { "linux_runner_pin_limit" }
         stillCurrent()
         val id = PREFIX + UUID.randomUUID().toString().replace("-", "")

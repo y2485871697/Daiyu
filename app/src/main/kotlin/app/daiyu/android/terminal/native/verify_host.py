@@ -121,5 +121,7 @@ tests.extend(['proc mount creates missing directory through pinned fd with fixed
     'pre-fork scope removal retries EINTR',
     'final drain identity check retries EINTR','final drain removal retries EINTR','failed scope removal reports S/E without drain',
     'pre-hello launch failure sends S/E/D and removes scope'])
+from verify_rootfs_backup import verify
+record['rootfs_backup'] = verify(helper, out)
 record['tests']=tests
 (out/'check.json').write_text(json.dumps(record,indent=2));print(json.dumps({k:record[k] for k in ['CHECK_ID','tests','exit_code']},indent=2))

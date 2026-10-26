@@ -1,4 +1,4 @@
-"""Source contracts for the requested frontend-only Linux backup switch."""
+"""Source contracts for the Linux backup option and production parameter wiring."""
 from pathlib import Path
 import unittest
 
@@ -12,14 +12,15 @@ class BackupLinuxOptionContractTest(unittest.TestCase):
         cls.source = SCREEN.read_text()
         cls.row = cls.source.split('SettingsSwitchRow(', 1)[1].split('SettingsRow("导出数据"', 1)[0]
 
-    def test_option_is_in_action_card_immediately_above_export_and_import(self):
-        card = self.source.index('SettingsCard {')
-        option = self.source.index('SettingsSwitchRow("包含完整 Linux 环境"')
-        export = self.source.index('SettingsRow("导出数据"')
-        importing = self.source.index('SettingsRow("导入数据"')
-        self.assertLess(card, option)
-        self.assertLess(option, export)
-        self.assertLess(export, importing)
+    def test_option_is_in_separate_card_above_data_actions(self):
+        options = self.source.split('item(key = "backup_options")', 1)[1].split('item(key = "backup_actions")', 1)[0]
+        actions = self.source.split('item(key = "backup_actions")', 1)[1]
+        self.assertIn('testTag("backup-options-card")', options)
+        self.assertIn('SettingsSwitchRow("包含完整 Linux 环境"', options)
+        self.assertNotIn('SettingsRow("导出数据"', options)
+        self.assertIn('testTag("backup-actions-card")', actions)
+        self.assertNotIn('SettingsSwitchRow(', actions)
+        self.assertLess(actions.index('SettingsRow("导出数据"'), actions.index('SettingsRow("导入数据"'))
         self.assertEqual(1, self.source.count('SettingsSwitchRow('))
 
     def test_option_has_only_title_and_switch_without_description(self):
@@ -42,7 +43,7 @@ class BackupLinuxOptionContractTest(unittest.TestCase):
         export = self.source.split('SettingsRow("导出数据"', 1)[1].split('SettingsRow("导入数据"', 1)[0]
         importing = self.source.split('SettingsRow("导入数据"', 1)[1]
         self.assertIn('tag = "backup-export"', export)
-        self.assertIn('onClick = if (busy) null else onExportComplete', export)
+        self.assertIn('onClick = if (busy) null else ({ onExport(includeFullLinuxEnvironment) })', export)
         self.assertIn('tag = "backup-import"', importing)
         self.assertIn('onClick = if (busy) null else onImport', importing)
         if 'showChevron =' in self.source:
@@ -53,11 +54,25 @@ class BackupLinuxOptionContractTest(unittest.TestCase):
         self.assertNotIn('onImport(', self.row)
 
     def test_no_backend_or_host_scope_is_added_to_page(self):
-        self.assertIn('onExportComplete: () -> Unit', self.source)
+        self.assertIn('onExport: (includeLinux: Boolean) -> Unit', self.source)
         self.assertNotIn('includeFullLinuxEnvironment:', self.source)
         self.assertNotIn('NeutralBackupService', self.source)
         self.assertNotIn('LinuxEnvironment', self.source.replace('includeFullLinuxEnvironment', 'localOption'))
         self.assertNotIn('java.io.', self.source)
+
+    def test_export_request_captures_the_option_and_routes_zip(self):
+        main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        controller = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ChatController.kt').read_text()
+        self.assertIn('pickBackup(true, true, includeLinux)', main)
+        self.assertIn('pendingBackupIncludeLinux=includeLinux', main.replace(' ', ''))
+        self.assertIn('includeLinux = includeLinux', main)
+        self.assertIn('"application/zip"', main)
+        self.assertIn('"daiyu-linux-backup.zip"', main)
+        self.assertIn('host.withSelectedRootfsBackup', controller)
+        self.assertIn('FullBackupArchive.prepare', controller)
+        self.assertIn('FullBackupArchive.read', controller)
+        self.assertIn('LinuxBackupRestore(application).prepare', controller)
+        self.assertIn('approveRestoredLinux(candidate)', main)
 
     def test_android_regressions_cover_order_no_description_and_zero_data_actions(self):
         tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/BackupScreenTest.kt').read_text()

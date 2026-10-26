@@ -38,7 +38,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         @Volatile var pipe: ImportPipe? = null
         fun file(uri:Uri)=File(directory,uri.lastPathSegment ?: error("missing document"))
         override fun onCreate()=true
-        override fun getType(uri:Uri)="application/json"
+        override fun getType(uri:Uri)=if (uri.lastPathSegment?.endsWith(".zip") == true) "application/zip" else "application/json"
         override fun openFile(uri:Uri,mode:String):ParcelFileDescriptor {
             opens.incrementAndGet()
             if(deny) throw SecurityException("test revoked grant")
@@ -217,17 +217,22 @@ class BackupActivityTest:ComposeActivityTestCase() {
         assertEquals(0,modelCalls.get())
     }
     /** Monitor returns a platform ActivityResult to the actual startActivityForResult call. */
-    private fun picker(code:Int,result:Int=Activity.RESULT_OK,uri:Uri?=null,beforeReturn:()->Unit={}) {
+    private fun pendingLinux(): Boolean = MainActivity::class.java.getDeclaredField("pendingBackupIncludeLinux")
+        .apply { isAccessible = true }.getBoolean(activity)
+    private fun picker(code:Int,result:Int=Activity.RESULT_OK,uri:Uri?=null,includeLinux:Boolean=false,beforeReturn:()->Unit={}) {
         val actualCode = when (code) { 101, 103 -> 103; 102, 104, 107 -> 107; else -> error("unsupported backup action") }
         val exporting = actualCode == 103
         val observed=CountDownLatch(1)
         val monitor=object:Instrumentation.ActivityMonitor() {
             override fun onStartActivity(intent:Intent):Instrumentation.ActivityResult? {
                 assertEquals(if(exporting) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT,intent.action)
-                assertEquals(if (exporting) "application/json" else "*/*", intent.type)
+                assertEquals(if (exporting) { if (includeLinux) "application/zip" else "application/json" } else "*/*", intent.type)
                 assertTrue(intent.hasCategory(Intent.CATEGORY_OPENABLE))
                 assertEquals(actualCode,pending())
-                if(exporting) assertEquals("daiyu-complete.json",intent.getStringExtra(Intent.EXTRA_TITLE))
+                if(exporting) {
+                    assertEquals(if (includeLinux) "daiyu-linux-backup.zip" else "daiyu-complete.json",intent.getStringExtra(Intent.EXTRA_TITLE))
+                    assertEquals(includeLinux, pendingLinux())
+                }
                 else assertEquals(listOf("application/json", "application/zip", "application/octet-stream", "text/plain"),
                     intent.getStringArrayExtra(Intent.EXTRA_MIME_TYPES)?.toList())
                 beforeReturn();observed.countDown()
@@ -237,12 +242,35 @@ class BackupActivityTest:ComposeActivityTestCase() {
         instrumentation.addMonitor(monitor)
         try {
             click("备份与导入")
+            if (exporting) {
+                val option = node("backup-include-full-linux")
+                val checked = option.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] == androidx.compose.ui.state.ToggleableState.On
+                if (checked != includeLinux) option.performClick()
+            }
             node(if (exporting) "backup-export" else "backup-import").performClick()
             assertTrue("SAF launch not observed",observed.await(5,TimeUnit.SECONDS))
             instrumentation.waitForIdleSync()
-            main {assertNull("request must be consumed at callback",pending())}
+            main {assertNull("request must be consumed at callback",pending()); assertFalse(pendingLinux())}
         } finally {instrumentation.removeMonitor(monitor)}
     }
+    fun testLinuxPickerUsesZipAndDoesNotOpenTargetWhenNoEnvironmentIsAvailable() {
+        start(); val before = controller.database.exportBackup()
+        val output = Uri.parse("content://activity-backup/linux.zip")
+        picker(103, uri = output, includeLinux = true)
+        awaitState { !controller.dataBusy && controller.dataNotice != null }
+        assertEquals("请先在 Linux 设置选择可用环境，再导出完整环境", controller.dataNotice)
+        assertEquals(0, provider.opens.get())
+        assertFalse(provider.file(output).exists())
+        unchanged(before)
+    }
+    fun testCanceledLinuxPickerClearsTheCapturedOptionWithoutOpeningTarget() {
+        start(); val before = controller.database.exportBackup()
+        picker(103, Activity.RESULT_CANCELED, completeUri, includeLinux = true)
+        assertFalse(pendingLinux())
+        assertEquals(0, provider.opens.get())
+        unchanged(before)
+    }
+
     fun testBothProductPickerRequestsCanceledAndMissingUriDoNoWork() {
         start();val before=controller.database.exportBackup()
         for(code in listOf(103,107)) {
@@ -675,7 +703,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
         assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get())
     }
-    fun testManifestOnlyResolvesContentJsonView() {
+    fun testManifestOnlyResolvesContentJsonOrZipView() {
         val pm=instrumentation.targetContext.packageManager
         val component=android.content.ComponentName(instrumentation.targetContext,MainActivity::class.java)
         assertEquals(android.content.pm.ActivityInfo.LAUNCH_SINGLE_TOP,pm.getActivityInfo(component,0).launchMode)
@@ -687,6 +715,9 @@ class BackupActivityTest:ComposeActivityTestCase() {
             }
         }
         assertTrue(resolves("content://activity-backup/text.json","application/json"))
+        assertTrue(resolves("content://activity-backup/full.zip","application/zip"))
+        assertFalse(resolves("file:///full.zip","application/zip"))
+        assertFalse(resolves("https://example.invalid/full.zip","application/zip"))
         assertFalse(resolves("file:///text.json","application/json"))
         assertFalse(resolves("https://example.invalid/text.json","application/json"))
         assertFalse(resolves("content://activity-backup/text.json","text/plain"))

@@ -4554,24 +4554,71 @@ class ChatController internal constructor(private val application:Application,
             }
         })
     }
-    internal fun exportUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
-        dataTask(work={
-            if(complete) {
-                val state = providers.snapshot()
-                val configuration = state.activeSlotId?.let { slot ->
-                    providers.withEditor(ProviderEditorSlot(slot, state.revision)) { it.nonSecretConfiguration() }
-                }.orEmpty()
-                neutralBackup.prepareExport(configuration).use { prepared ->
-                    resolver.openOutputStream(uri,"wt")?.use { prepared.writeTo(it) }
-                        ?: throw java.io.IOException("无法打开目标")
+    internal fun exportUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver,
+        includeLinux: Boolean = false) {
+        require(!includeLinux || complete) { "linux_backup_requires_complete" }
+        dataTaskWithProgress(initialStatus = "正在准备导出", work = { report ->
+            var cleanupProblem = false
+            val owned = mutableListOf<java.io.Closeable>()
+            var linuxFile: File? = null
+            var failure: Throwable? = null
+            val notice: String
+            try {
+                if (complete) {
+                    val state = providers.snapshot()
+                    val configuration = state.activeSlotId?.let { slot ->
+                        providers.withEditor(ProviderEditorSlot(slot, state.revision)) { it.nonSecretConfiguration() }
+                    }.orEmpty()
+                    val prepared = neutralBackup.prepareExport(configuration, onStage = { report(it, true) })
+                    owned += prepared
+                    if (includeLinux) {
+                        val host = ((application as? ChatApplication)?.terminalProvider?.state?.value as?
+                            app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
+                            ?: error("linux_backup_environment_not_ready")
+                        val part = File.createTempFile("linux-backup-", ".gz", application.cacheDir).also { linuxFile = it }
+                        val metadata = host.withSelectedRootfsBackup { installation ->
+                            report("正在备份 Linux 环境", true)
+                            app.daiyu.android.terminal.LinuxBackupProcess(application).pack(installation.rootfs, installation.executionMode, part) {
+                                report("正在备份 Linux 环境：已读取 $it 字节", false)
+                            }
+                            org.json.JSONObject().put("distribution", installation.distribution)
+                                .put("mode", installation.executionMode.wire)
+                                .put("abi", app.daiyu.android.terminal.LinuxRuntimePlatform.requireSupported(installation.executionMode))
+                                .put("host_uid", android.os.Process.myUid()).put("host_gid", android.system.Os.getgid())
+                        }
+                        report("正在校验完整备份", true)
+                        val archive = app.daiyu.android.backup.FullBackupArchive.prepare(application.cacheDir, prepared.file, part, metadata)
+                        owned += archive
+                        report("正在写入备份文件", true)
+                        resolver.openOutputStream(uri, "wt")?.use { target -> archive.writeTo(target) {
+                            report("正在写入备份：已写入 $it 字节", false)
+                        } } ?: throw java.io.IOException("无法打开目标")
+                    } else {
+                        report("正在写入备份文件", true)
+                        resolver.openOutputStream(uri, "wt")?.use { target -> prepared.writeTo(target) {
+                            report("正在写入备份：已写入 $it 字节", false)
+                        } } ?: throw java.io.IOException("无法打开目标")
+                    }
+                } else {
+                    val text = database.exportBackup()
+                    report("正在写入文本备份", true)
+                    resolver.openOutputStream(uri, "wt")?.use { target ->
+                        target.writer(Charsets.UTF_8).apply { write(text); flush() }
+                    } ?: throw java.io.IOException("无法打开目标")
                 }
-            } else {
-                val text=database.exportBackup()
-                resolver.openOutputStream(uri,"wt")?.use { target -> target.writer(Charsets.UTF_8).apply { write(text); flush() } }
-                    ?: throw java.io.IOException("无法打开目标")
+                notice = if (includeLinux) "数据与 Linux 环境已导出；不含外部共享目录，请妥善保管"
+                    else if (complete) "完整中立备份已导出；不含 Linux 环境、凭据或系统授权，请妥善保管"
+                    else "纯文本兼容备份已导出；不含附件、归档与分支元数据"
+            } catch (caught: Throwable) { failure = caught; throw caught }
+            finally {
+                owned.asReversed().forEach { resource ->
+                    try { resource.close() } catch (cleanup: Throwable) {
+                        if (failure != null) failure.addSuppressed(cleanup) else cleanupProblem = true
+                    }
+                }
+                if (linuxFile?.let { it.exists() && !it.delete() } == true) cleanupProblem = true
             }
-            if(complete) "完整中立备份已导出；不含凭据或系统授权，请妥善保管"
-            else "纯文本兼容备份已导出；不含附件、归档与分支元数据"
+            if (cleanupProblem) "$notice；暂存文件清理未完成" else notice
         })
     }
     internal fun exportConversationBackup(uri:Uri,conversationId:ConversationId,resolver:android.content.ContentResolver=application.contentResolver) {
@@ -4590,7 +4637,15 @@ class ChatController internal constructor(private val application:Application,
         })
     }
     internal data class BackupImportOutcome(val kind: app.daiyu.android.backup.BackupImportSource.Kind,
-        val hasConfiguration: Boolean = false)
+        val hasConfiguration: Boolean = false,
+        val linux: app.daiyu.android.terminal.LinuxBackupRestore.Candidate? = null)
+    internal fun approveRestoredLinux(candidate: app.daiyu.android.terminal.LinuxBackupRestore.Candidate,
+        completed: (Boolean) -> Unit = {}) {
+        dataTask(completed = completed, work = {
+            kotlinx.coroutines.runBlocking { app.daiyu.android.terminal.LinuxBackupRestore(application).approve(candidate) }
+            "恢复的 Linux 环境已批准；下次启动应用后可在 Linux 设置选择，当前环境未改变"
+        })
+    }
     internal fun importUserBackupAuto(uri: Uri,
         resolver: android.content.ContentResolver = application.contentResolver,
         completed: (BackupImportOutcome?) -> Unit = {}) {
@@ -4611,6 +4666,24 @@ class ChatController internal constructor(private val application:Application,
                 if (source.kind == app.daiyu.android.backup.BackupImportSource.Kind.LEGACY) {
                     outcome = BackupImportOutcome(source.kind)
                     notice = "已识别旧版备份；请在资料库预览并确认导入"
+                } else if (source.kind == app.daiyu.android.backup.BackupImportSource.Kind.ARCHIVE) {
+                    report("正在核验数据与 Linux 备份", true)
+                    app.daiyu.android.backup.FullBackupArchive.read(source.file, application.cacheDir) {
+                        report("正在校验备份：已读取 $it 字节", false)
+                    }.use { archive ->
+                        report("正在核验聊天与附件数据", true)
+                        archive.data.inputStream().use { neutralBackup.preflight(it) }
+                        report("正在恢复独立 Linux 环境", true)
+                        app.daiyu.android.terminal.LinuxBackupRestore(application).prepare(archive.id,
+                            archive.manifest.getJSONObject("environment"), archive.linux) {
+                            report("正在恢复 Linux 环境：已读取 $it 字节", false)
+                        }.use { prepared ->
+                            val linux = prepared.publish()
+                            val result = importUserBackupContent(true, { archive.data.inputStream() }, onStage = { report(it, true) })
+                            notice = result.first + "；Linux 环境已恢复到独立目录，尚未授权执行"
+                            outcome = BackupImportOutcome(source.kind, result.second, linux)
+                        }
+                    }
                 } else {
                     val result = importUserBackupContent(source.kind == app.daiyu.android.backup.BackupImportSource.Kind.COMPLETE,
                         source::open, onStage = { report(it, true) })
@@ -4755,7 +4828,18 @@ class ChatController internal constructor(private val application:Application,
                     is java.nio.charset.CharacterCodingException -> "导入失败；备份不是有效UTF-8文本。原会话保留，未执行历史请求"
                     is java.io.IOException -> if(importing) "导入失败；读取备份或写入附件失败。原会话保留，未执行历史请求"
                         else "导出失败；读取附件或写入目标失败。目标文件可能不完整，请勿作为有效备份；原会话保留"
-                    else -> value
+                    else -> when (failure.message) {
+                        "linux_backup_root_required" -> "完整 chroot 备份或恢复需要应用 Root 模式及实际 Root 授权；当前数据未覆盖"
+                        "linux_backup_environment_not_ready", "linux_environment_not_selected" -> "请先在 Linux 设置选择可用环境，再导出完整环境"
+                        "linux_backup_mounted_directory" -> "Linux 目录包含挂载点；为避免打包外部数据，本次备份已停止"
+                        "linux_backup_permission_denied" -> "Linux 文件权限不足；本次未生成完整备份，请检查 Root 授权"
+                        "linux_backup_native_failed", "linux_restore_receipt_missing" -> "Linux 文件打包或恢复未完成；原环境保持不变，请勿使用不完整的导出文件"
+                        "linux_restore_abi_mismatch" -> "备份的 Linux 架构与本机不一致；未恢复环境"
+                        "linux_rootfs_in_use", "linux_rootfs_unknown", "linux_environment_in_use", "linux_runner_generation_unknown" -> "Linux 环境仍被任务使用或上次执行尚未确认结束；请结束原任务后再备份"
+                        "backup_archive_checksum" -> "备份内容校验失败；未恢复 Linux 环境"
+                        "备份来源已变化；未自动重试" -> "导出期间源数据发生变化；未自动重试，请重新导出"
+                        else -> value
+                    }
                 }
             }
             finally {

@@ -187,7 +187,8 @@ dependencies {
 val hostPty=layout.buildDirectory.file("host-pty/daiyu_pty")
 val compileHostPty=tasks.register<Exec>("compileHostPty") {
     val source=layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_pty.c")
-    inputs.files(source, layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_root_scope.h"))
+    inputs.files(source, layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_root_scope.h"),
+        layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_rootfs_backup.h"))
     outputs.file(hostPty)
     doFirst {hostPty.get().asFile.parentFile.mkdirs()}
     commandLine("cc","-std=c11","-Wall","-Wextra","-Werror","-O2",source.asFile.absolutePath,
@@ -197,7 +198,8 @@ val hostRootScopeFaults=layout.buildDirectory.file("host-pty/root_scope_faults")
 val compileHostRootScopeFaults=tasks.register<Exec>("compileHostRootScopeFaults") {
     val source=layout.projectDirectory.file("src/test/native/root_scope_faults.c")
     inputs.files(source, layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_pty.c"),
-        layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_root_scope.h"))
+        layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_root_scope.h"),
+        layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_rootfs_backup.h"))
     outputs.file(hostRootScopeFaults)
     doFirst {hostRootScopeFaults.get().asFile.parentFile.mkdirs()}
     commandLine("cc","-std=c11","-Wall","-Wextra","-Werror","-O2",source.asFile.absolutePath,
@@ -207,7 +209,8 @@ val verifyHostPty=tasks.register<Exec>("verifyHostPty") {
     val verifier=layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/verify_host.py")
     val report=layout.buildDirectory.dir("reports/host-pty")
     dependsOn(compileHostPty,compileHostRootScopeFaults)
-    inputs.files(verifier,hostPty,hostRootScopeFaults)
+    inputs.files(verifier,hostPty,hostRootScopeFaults,
+        layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/verify_rootfs_backup.py"))
     outputs.dir(report)
     commandLine("python3",verifier.asFile.absolutePath,hostPty.get().asFile.absolutePath,
         report.get().asFile.absolutePath)

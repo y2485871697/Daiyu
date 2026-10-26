@@ -37,13 +37,15 @@ class SettingsCopyCleanupContractTest(unittest.TestCase):
                      "selected = draft == value", "saveSelection(value)", "if (failed) item", "if (busy) item"):
             self.assertIn(text, screen)
 
-    def test_backup_intro_removed_without_removing_feedback_or_action_summaries(self):
+    def test_backup_static_copy_removed_without_removing_dynamic_feedback(self):
         screen = source("ui/screens/settings/BackupScreen.kt")
         self.assertNotIn("备份文件可能包含个人数据，请妥善保管。导入前请确认来源可信。", screen)
         for text in ('if (busy) SettingsNote("处理中")', "SettingsNote(statusText)",
-                     "SettingsNote(errorText, error = true)", '"包含完整 Linux 环境"',
-                     '"保存当前数据备份"', '"从备份文件恢复数据"'):
+                     "SettingsNote(errorText, error = true)", '"包含完整 Linux 环境"'):
             self.assertIn(text, screen)
+
+        self.assertNotIn("保存当前数据备份", screen)
+        self.assertNotIn("从备份文件恢复数据", screen)
 
     def test_model_usage_empty_hint_removed_without_hiding_filter_empty_feedback(self):
         screen = source("ui/screens/stats/UsageStatsScreen.kt")

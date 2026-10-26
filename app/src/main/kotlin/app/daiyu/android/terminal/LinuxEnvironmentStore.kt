@@ -42,7 +42,8 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
     private val chrootRoot: File? = null,
     private val initializeDirectory: Boolean = true,
-    private val trustedInstallation: LinuxInstallation? = null) {
+    private val trustedInstallation: LinuxInstallation? = null,
+    private val rootfsAccess: LinuxRootfsBackupAccess? = null) {
     constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
     internal constructor(directory: File, directorySync: (File) -> Unit, fileKey: (java.nio.file.Path) -> Any?) :
         this(directory, directorySync, fileKey, null)
@@ -117,8 +118,9 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
                 "linux_generation_mismatch"
             }
             val identities = validate(installation)
+            val rootAccess = rootfsAccess?.acquire(installation, identities)
             shared.leases++
-            Lease(installation, identities)
+            Lease(installation, identities, rootAccess)
         } }
     } catch (unknown: LinuxRunnerGenerationUnknown) {
         // A missing filesystem identity is a broken installation, not an unknown runner.
@@ -141,8 +143,10 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         }
     }
 
-    inner class Lease internal constructor(private val installation: LinuxInstallation, private val identities: List<String>) : AutoCloseable {
+    inner class Lease internal constructor(private val installation: LinuxInstallation, private val identities: List<String>,
+        private val rootAccess: AutoCloseable?) : AutoCloseable {
         private var closed = false
+        private var executionClaimed = false
         val executionMode: LinuxExecutionMode get() = synchronized(control) {
             check(!closed) { "linux_environment_lease_closed" }
             installation.executionMode
@@ -204,15 +208,40 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
                 workingDirectory = cwd, linux = backend(tempDirectory, workspace))
         }
         internal fun claimExecution(): AutoCloseable = synchronized(control) {
+            check(!executionClaimed) { "linux_execution_already_claimed" }
             check(!closed) { "linux_environment_lease_closed" }
             val pin = runnerPins.claim(LinuxGenerationRef(installation.environmentId, installation.generation), identities) {
                 check(load() == installation) { "linux_selection_changed" }
                 check(validate(installation) == identities) { "linux_installation_changed" }
             }
-            AutoCloseable { pin.settleAfterTermination(); close() }
+            executionClaimed = true
+            AutoCloseable { synchronized(control) {
+                if (!closed) { pin.settleAfterTermination(); finishLease() }
+            } }
+        }
+        private fun finishLease() {
+            rootAccess?.close()
+            closed = true
+            shared.leases--
         }
         override fun close() = synchronized(control) {
-            if (!closed) { closed = true; shared.leases-- }
+            if (!closed && !executionClaimed) finishLease()
+        }
+    }
+
+    internal class BackupHandle(val installation: LinuxInstallation, private val release: () -> Unit) : AutoCloseable {
+        override fun close() = release()
+    }
+    internal fun acquireRootfsBackup(expected: LinuxInstallation): BackupHandle = synchronized(control) {
+        runnerPins.admitted(requireEmpty = true) {
+            check(load() == expected) { "linux_selection_changed" }
+            val identities = validate(expected)
+            val token = checkNotNull(rootfsAccess) { "linux_rootfs_unknown" }.acquire(expected, identities, export = true)
+            shared.leases++
+            var closed = false
+            BackupHandle(expected) { synchronized(control) {
+                if (!closed) { token.close(); shared.leases--; closed = true }
+            } }
         }
     }
 

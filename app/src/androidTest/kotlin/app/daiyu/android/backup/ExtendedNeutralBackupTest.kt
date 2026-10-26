@@ -273,12 +273,12 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
         val branch = ProductionConversationBranch(source.db, PrivateBlobs(source.context),
             DatabaseTransactions { source.db.writableDatabase }, null, null, { false })
         try {
-            branch.branch(owner, through, { }) { _, mapped ->
+            branch.branch(owner, through, authorize = {}, copyImages = { _, mapped ->
                 copied = true
                 assertEquals(g.reference, SQLiteGenerationOutputStore({ source.db.writableDatabase },
                     GenerationAssetOwner("offline-account", g.binding), g.media).register(g.attempt, g.reference.receipt))
                 mapped
-            }
+            })
             fail("late original registration must not be omitted by a text-only branch")
         } catch (failure: IllegalArgumentException) {
             assertTrue(failure.message.orEmpty().contains("静态生成原件复制能力未接入"))

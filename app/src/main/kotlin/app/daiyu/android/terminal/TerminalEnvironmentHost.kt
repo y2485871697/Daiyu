@@ -397,7 +397,8 @@ private class AndroidTerminalEnvironmentBackend(
     // Lazy properties are first resolved on the worker, not on page construction.
     private val root by lazy { File(context.filesDir, "user-terminal") }
     private val selection by lazy { TerminalTrustedLinuxSelection(File(root, "linux-selection"), installations,
-        chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations")) }
+        chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations"),
+        rootfsAccess = LinuxRootfsBackupAccess.forFiles(context.filesDir)) }
 
     override fun linuxStatus(): TerminalLinuxState = selection.status()
 
@@ -461,9 +462,10 @@ internal class TerminalTrustedLinuxSelection(
     private val directorySync: (File) -> Unit = TerminalDurability::syncDirectory,
     private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
     private val chrootRoot: File? = null,
+    private val rootfsAccess: LinuxRootfsBackupAccess? = null,
 ) {
     private val installations = installations.map { it.copy(sharedMounts = it.sharedMounts.toMap()) }
-    private val store by lazy { LinuxEnvironmentStore(directory, directorySync, fileKey, chrootRoot) }
+    private val store by lazy { LinuxEnvironmentStore(directory, directorySync, fileKey, chrootRoot, rootfsAccess = rootfsAccess) }
     private val choices get() = installations.map {
         TerminalLinuxChoice(LinuxGenerationRef(it.environmentId, it.generation), it.distribution, it.executionMode)
     }
@@ -513,12 +515,15 @@ internal class TerminalTrustedLinuxSelection(
             .joinToString("") { "%02x".format(it.toInt() and 255) }
         val generationDirectory = File(directory.parentFile, "workspace-generations/$id")
         val store = LinuxEnvironmentStore(generationDirectory, directorySync, fileKey, chrootRoot,
-            trustedInstallation = installation)
+            trustedInstallation = installation, rootfsAccess = rootfsAccess)
         return store.acquire(reference).use { lease ->
             lease.assertMatches(installation)
             action(store)
         }
     }
+
+    fun acquireSelectedRootfsBackup(reference: LinuxGenerationRef): LinuxEnvironmentStore.BackupHandle =
+        store.acquireRootfsBackup(trusted(reference))
 
     private fun trusted(reference: LinuxGenerationRef): LinuxInstallation = installations.single {
         it.environmentId == reference.environmentId && it.generation == reference.generation

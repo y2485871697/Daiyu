@@ -141,18 +141,29 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         prepareExport(configuration, conversationId).use { it.file.readText(Charsets.UTF_8) }
 
     internal class PreparedExport internal constructor(private val spool: BackupPackageSpool, internal val file: java.io.File) : java.io.Closeable {
-        fun writeTo(target: java.io.OutputStream) = file.inputStream().use { it.copyTo(target) }
+        fun writeTo(target: java.io.OutputStream, progress: (Long) -> Unit = {}) {
+            file.inputStream().use { input ->
+                val buffer = ByteArray(65536); var total = 0L
+                while (true) {
+                    val count = input.read(buffer); if (count < 0) break
+                    check(count > 0); target.write(buffer, 0, count); total += count; progress(total)
+                }
+            }
+        }
         override fun close() = spool.close()
     }
-    internal fun prepareExport(configuration: Map<String, Any?>? = null, conversationId: ConversationId? = null): PreparedExport {
+    internal fun prepareExport(configuration: Map<String, Any?>? = null, conversationId: ConversationId? = null,
+        onStage: (String) -> Unit = {}): PreparedExport {
         val spool = BackupPackageSpool(blobs.backupStagingParent)
-        try { return prepareExport(if (conversationId == null) configuration else emptyMap(), conversationId, spool) }
+        try { return prepareExport(if (conversationId == null) configuration else emptyMap(), conversationId, spool, onStage) }
         catch (failure: Throwable) {
             try { spool.close() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
             throw failure
         }
     }
-    private fun prepareExport(configuration: Map<String, Any?>?, conversationId: ConversationId?, spool: BackupPackageSpool): PreparedExport {
+    private fun prepareExport(configuration: Map<String, Any?>?, conversationId: ConversationId?, spool: BackupPackageSpool,
+        onStage: (String) -> Unit): PreparedExport {
+        onStage("正在准备聊天记录")
         check(!transactions.database().inTransaction()) { "完整备份原件读取不能在外层SQL事务内" }
         val capture = captureExport(configuration, conversationId)
         // T1 is fully released before any original reader/fence is acquired.
@@ -162,6 +173,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val archives = tables.getJSONArray("context_archives"); val assets = tables.getJSONArray("neutral_assets")
         repeat(archives.length()) { hashes.add(archives.getJSONObject(it).getString("blob_hash")) }
         repeat(assets.length()) { hashes.add(assets.getJSONObject(it).getString("blob_hash")) }
+        onStage("正在核验附件和原件")
         val originals = spool.bytes
         fun include(hash: String, bytes: ByteArray) = spool.include(hash, bytes)
         hashes.sorted().forEach { hash -> include(hash, blobs.read(hash)) }
@@ -224,6 +236,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         }
         capture.static.forEach { include(it.source.sha256, staticGenerationOriginal(it)) }
         // Full scalar collection CAS, including insert/delete and inert runtime v4 observations.
+        onStage("正在核对备份快照")
         check(captureExport(configuration, conversationId).signature() == capture.signature()) { "备份来源已变化；未自动重试" }
         val contents = JSONArray()
         originals.keys.sorted().forEach { hash -> contents.put(JSONObject().put("sha256", hash)
@@ -238,6 +251,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val inventory = inventory(payload)
         payload.put("inventory", inventoryJson(inventory))
         validatePayload(8, "export-validation", payload, originals)
+        onStage("正在生成备份文件")
         return PreparedExport(spool, spool.write(8, payload))
     }
     fun preflight(text: String): BackupInventory {

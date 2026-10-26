@@ -5,8 +5,8 @@ import java.io.FileOutputStream
 import java.io.InputStream
 
 /** One read of an untrusted provider, closed before any database or asset publication. */
-internal class BackupImportSource private constructor(private val file: File, val kind: Kind) {
-    enum class Kind { COMPLETE, TEXT, LEGACY }
+internal class BackupImportSource private constructor(internal val file: File, val kind: Kind) {
+    enum class Kind { COMPLETE, TEXT, LEGACY, ARCHIVE }
     fun open(): InputStream = file.inputStream()
     fun delete(): Boolean = !file.exists() || file.delete()
 
@@ -19,7 +19,19 @@ internal class BackupImportSource private constructor(private val file: File, va
             val file = File.createTempFile("backup-import-", ".stage", parent)
             try {
                 onBytesRead(0L)
-                open().use { source ->
+                open().use { raw ->
+                    val source = java.io.PushbackInputStream(raw, 4)
+                    val prefix = ByteArray(4)
+                    var prefixSize = 0
+                    while (prefixSize < prefix.size) {
+                        val count = source.read(prefix, prefixSize, prefix.size - prefixSize)
+                        if (count < 0) break
+                        require(count > 0)
+                        prefixSize += count
+                    }
+                    source.unread(prefix, 0, prefixSize)
+                    val limit = if (prefixSize >= 2 && prefix[0] == 'P'.code.toByte() && prefix[1] == 'K'.code.toByte())
+                        FullBackupArchive.MAX_ARCHIVE else MAX_BYTES
                     FileOutputStream(file).use { target ->
                         val block = ByteArray(8192)
                         var total = 0L
@@ -27,13 +39,13 @@ internal class BackupImportSource private constructor(private val file: File, va
                             val count = source.read(block)
                             if (count < 0) break
                             if (count > 0) onBytesRead(total + count)
-                            require(count > 0 && total + count <= MAX_BYTES) { "备份文件超出大小限制或无法读取" }
+                            require(count > 0 && total + count <= limit) { "备份文件超出大小限制或无法读取" }
                             target.write(block, 0, count); total += count
                         }
                     }
                 }
                 val zip = file.inputStream().use { it.read() == 'P'.code && it.read() == 'K'.code }
-                val kind = if (zip) Kind.LEGACY else when (file.inputStream().use { BackupPackageSpool.detectFormat(it) }) {
+                val kind = if (zip) { if (FullBackupArchive.recognizes(file)) Kind.ARCHIVE else Kind.LEGACY } else when (file.inputStream().use { BackupPackageSpool.detectFormat(it) }) {
                     "daiyu-neutral-complete" -> Kind.COMPLETE
                     "daiyu-neutral-text" -> Kind.TEXT
                     "eta-backup", "eta-conversation" -> Kind.LEGACY

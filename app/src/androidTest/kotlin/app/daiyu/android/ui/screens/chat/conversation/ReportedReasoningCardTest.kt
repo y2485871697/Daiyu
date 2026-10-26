@@ -1,6 +1,11 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -86,7 +91,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.mainClock.advanceTimeBy(200)
         ui.onNodeWithText("1.2 秒").assertExists()
         ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
-        ui.mainClock.advanceTimeBy(32)
+        ui.mainClock.advanceTimeBy(300)
         ui.onNodeWithText("live summary").assertDoesNotExist()
         mainThread { mounted = false; now = 2_000_000_000L }
         ui.mainClock.advanceTimeBy(32)
@@ -130,6 +135,99 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.waitForIdle()
         ui.onNodeWithText("summary").assertIsDisplayed()
         ui.onNodeWithTag("reported-reasoning-duration:manual").assertDoesNotExist()
+    }
+
+
+    fun testDisclosureAnimatesBothDirectionsAndKeepsBodyUntilExitFinishes() {
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Column(Modifier.width(300.dp)) {
+                        ReportedReasoningCard("motion", listOf(ReportedReasoning("r", "first line\nsecond line\nthird line")))
+                        Text("answer below reasoning")
+                    }
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            val card = ui.onNodeWithTag("reported-reasoning:motion")
+            val answer = ui.onNodeWithText("answer below reasoning")
+            val collapsedHeight = card.getUnclippedBoundsInRoot().height
+            val collapsedAnswerTop = answer.getUnclippedBoundsInRoot().top
+
+            ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
+            ui.mainClock.advanceTimeBy(80)
+            val openingHeight = card.getUnclippedBoundsInRoot().height
+            val openingAnswerTop = answer.getUnclippedBoundsInRoot().top
+            ui.mainClock.advanceTimeBy(300)
+            val expandedHeight = card.getUnclippedBoundsInRoot().height
+            val expandedAnswerTop = answer.getUnclippedBoundsInRoot().top
+            assertTrue(openingHeight > collapsedHeight + 1.dp)
+            assertTrue(openingHeight < expandedHeight - 1.dp)
+            assertTrue(openingAnswerTop > collapsedAnswerTop + 1.dp)
+            assertTrue(openingAnswerTop < expandedAnswerTop - 1.dp)
+            ui.onNodeWithText("first line\nsecond line\nthird line").assertIsDisplayed()
+
+            ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
+            ui.mainClock.advanceTimeBy(80)
+            val closingHeight = card.getUnclippedBoundsInRoot().height
+            val closingAnswerTop = answer.getUnclippedBoundsInRoot().top
+            assertTrue(closingHeight > collapsedHeight + 1.dp)
+            assertTrue(closingHeight < expandedHeight - 1.dp)
+            assertTrue(closingAnswerTop > collapsedAnswerTop + 1.dp)
+            assertTrue(closingAnswerTop < expandedAnswerTop - 1.dp)
+            ui.onNodeWithText("first line\nsecond line\nthird line").assertExists()
+            ui.mainClock.advanceTimeBy(300)
+            assertTrue(kotlin.math.abs(card.getUnclippedBoundsInRoot().height.value - collapsedHeight.value) <= 1f)
+            assertTrue(kotlin.math.abs(answer.getUnclippedBoundsInRoot().top.value - collapsedAnswerTop.value) <= 1f)
+            ui.onNodeWithText("first line\nsecond line\nthird line").assertDoesNotExist()
+            answer.assertIsDisplayed()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testDisclosureReversesFromCurrentFrameAndKeepsLatestSummary() {
+        ui.mainClock.autoAdvance = false
+        var reported by mutableStateOf(listOf(ReportedReasoning("r", "first line\nsecond line\nthird line")))
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Column(Modifier.width(300.dp)) {
+                        ReportedReasoningCard("reverse", reported)
+                    }
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            val card = ui.onNodeWithTag("reported-reasoning:reverse")
+            val collapsedHeight = card.getUnclippedBoundsInRoot().height
+            ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
+            ui.mainClock.advanceTimeBy(80)
+            val openingHeight = card.getUnclippedBoundsInRoot().height
+            assertTrue(openingHeight > collapsedHeight + 1.dp)
+            ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
+            ui.mainClock.advanceTimeBy(32)
+            val reversedHeight = card.getUnclippedBoundsInRoot().height
+            assertTrue(reversedHeight > collapsedHeight + 1.dp)
+            assertTrue(reversedHeight <= openingHeight + 1.dp)
+            ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
+            mainThread { reported = listOf(ReportedReasoning("r", "updated line\nsecond line\nthird line")) }
+            ui.mainClock.advanceTimeBy(32)
+            val reopeningHeight = card.getUnclippedBoundsInRoot().height
+            assertTrue(reopeningHeight >= reversedHeight - 1.dp)
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("updated line\nsecond line\nthird line").assertIsDisplayed()
+            ui.onNodeWithText("first line\nsecond line\nthird line").assertDoesNotExist()
+            val expandedHeight = card.getUnclippedBoundsInRoot().height
+            assertTrue(expandedHeight > openingHeight + 1.dp)
+            assertTrue(expandedHeight > reopeningHeight + 1.dp)
+            ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("updated line\nsecond line\nthird line").assertDoesNotExist()
+            assertTrue(kotlin.math.abs(card.getUnclippedBoundsInRoot().height.value - collapsedHeight.value) <= 1f)
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
     }
 
 }

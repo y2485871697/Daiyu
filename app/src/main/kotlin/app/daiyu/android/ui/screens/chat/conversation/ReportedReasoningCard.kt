@@ -1,5 +1,13 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +43,8 @@ import app.daiyu.android.ui.icons.ChatPreviewIcons
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+private const val ReasoningDisclosureDurationMillis = 220
+
 /** Independent disclosure: collapse never hides or rewrites the answer, images or tool card. */
 @Composable
 internal fun ReportedReasoningCard(
@@ -50,6 +60,11 @@ internal fun ReportedReasoningCard(
     val isThinking = allowLiveTiming && visible.any { it.activeSinceNanos != null }
     var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
     val expanded = expandedOverride ?: isThinking
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
+        label = "reported-reasoning-chevron"
+    )
     Column(Modifier.fillMaxWidth().testTag("reported-reasoning:$ownerKey")
         .clip(shape).border(1.dp, colors.line, shape).background(colors.surface)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 35.dp)
@@ -63,16 +78,29 @@ internal fun ReportedReasoningCard(
             ReasoningElapsedTime(ownerKey, visible, isThinking, nanoTime)
             Icon(ChatPreviewIcons.Chevron,
                 if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
-                Modifier.size(10.dp).rotate(if (expanded) 180f else 0f), tint = colors.muted)
+                Modifier.size(10.dp).rotate(chevronRotation), tint = colors.muted)
         }
-        if (expanded && visible.any { it.text.isNotBlank() }) {
-            HorizontalDivider(thickness = 1.dp, color = colors.line)
-            Column(Modifier.padding(start = 11.dp, end = 11.dp, top = 8.dp, bottom = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                SelectionContainer {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        visible.filter { it.text.isNotBlank() }.forEach { Text(it.text, color = colors.muted,
-                            style = MiuixTheme.textStyles.body2.copy(fontSize = 16.sp, lineHeight = 26.sp)) }
+        AnimatedVisibility(
+            visible = expanded && visible.any { it.text.isNotBlank() },
+            modifier = Modifier.fillMaxWidth(),
+            enter = expandVertically(
+                animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
+                expandFrom = Alignment.Top
+            ) + fadeIn(tween(ReasoningDisclosureDurationMillis)),
+            exit = shrinkVertically(
+                animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
+                shrinkTowards = Alignment.Top
+            ) + fadeOut(tween(ReasoningDisclosureDurationMillis))
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                HorizontalDivider(thickness = 1.dp, color = colors.line)
+                Column(Modifier.padding(start = 11.dp, end = 11.dp, top = 8.dp, bottom = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SelectionContainer {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            visible.filter { it.text.isNotBlank() }.forEach { Text(it.text, color = colors.muted,
+                                style = MiuixTheme.textStyles.body2.copy(fontSize = 16.sp, lineHeight = 26.sp)) }
+                        }
                     }
                 }
             }

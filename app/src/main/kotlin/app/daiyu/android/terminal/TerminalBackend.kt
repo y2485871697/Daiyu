@@ -1,6 +1,7 @@
 package app.daiyu.android.terminal
 
 import android.content.Context
+import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -30,11 +31,18 @@ data class LinuxBackend(
 /** Fixed host transport for an explicitly selected installation, never model argv. */
 @ConsistentCopyVisibility
 data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, internal val identityProbe: Boolean = false,
-    val guestWorkingDirectory: String = "/") {
+    val guestWorkingDirectory: String = "/",
+    val workspaceSource: File? = null, val command: String? = null,
+    val workspaceIdentity: RootWorkspaceIdentity? = workspaceSource?.let(RootWorkspaceIdentity::capture)) {
     init {
         require(rootfs.isAbsolute && rootfs == rootfs.canonicalFile && rootfs.isDirectory)
         require(su.isAbsolute && su.toPath().normalize() == su.toPath() && su.isFile)
         LinuxPathSyntax.guest(guestWorkingDirectory)
+        require(workspaceSource == null || (workspaceSource.isAbsolute && workspaceSource == workspaceSource.canonicalFile &&
+            workspaceSource.isDirectory && guestWorkingDirectory == "/workspace")) { "linux_chroot_workspace_invalid" }
+        require((workspaceSource == null) == (workspaceIdentity == null)) { "linux_chroot_workspace_identity_required" }
+        require(command == null || (command.isNotBlank() && command.length <= 32768 && '\u0000' !in command))
+        require(!identityProbe || (workspaceSource == null && command == null))
         require(!identityProbe || guestWorkingDirectory == "/") { "linux_chroot_probe_cwd_not_supported" }
     }
     companion object {
@@ -49,8 +57,14 @@ data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, 
             files.forEach { trustedTransportIdentity(it) }
         }
     }
+    fun binding(): JSONObject = JSONObject().put("protocol", "DPTY2").put("rootfs", rootfs.path)
+        .put("su", su.path).put("guest_cwd", guestWorkingDirectory).put("identity_probe", identityProbe)
+        .put("workspace_source", workspaceSource?.path ?: JSONObject.NULL)
+        .put("workspace_device", workspaceIdentity?.device).put("workspace_inode", workspaceIdentity?.inode)
+        .put("command", command ?: JSONObject.NULL)
     internal fun guestArgv(): List<String> = listOf("/system/bin/chroot", rootfs.path, "/bin/sh") + when {
         identityProbe -> listOf("-c", "id -u")
+        command != null -> listOf("-c", "cd -- \"\$1\" && exec /bin/sh -c \"\$2\"", "daiyu-command", guestWorkingDirectory, command)
         guestWorkingDirectory == "/" -> emptyList()
         // Fixed bridge: cwd is a positional argument, never shell source. RootScope still owns
         // the cgroup, private procfs mount and D/launcher-exit termination protocol.
@@ -77,7 +91,8 @@ internal class BackendProbeCleanup(private val process: Process, private val rea
 }
 internal data class SelectedBackend(val name: String, val uid: Int, val root: Boolean,
     val shell: List<String>, val environment: Map<String, String>, val cwd: File, val daemonSupported: Boolean,
-    val environmentId: String = name, val guestCwd: String? = null, val sharedMounts: Map<String,String> = emptyMap()) {
+    val environmentId: String = name, val guestCwd: String? = null, val sharedMounts: Map<String,String> = emptyMap(),
+    val rootScope: RootScopeLaunch? = null) {
     fun builder(argv: List<String> = shell): ProcessBuilder = ProcessBuilder(argv).directory(cwd).apply {
         environment().clear(); environment().putAll(this@SelectedBackend.environment)
     }
@@ -95,6 +110,7 @@ internal object BackendSelection {
             "linux" -> config.linux?.let { linux ->
                 linux.shellArgv.firstOrNull()?.let { paths += File(it) }
                 paths += linux.sharedMounts.keys.map(::File)
+                linux.rootScope?.let { root -> paths += RootScopeLaunch.requireTrustedTransport(); paths += root.rootfs }
             }
         }
         return try {
@@ -107,10 +123,9 @@ internal object BackendSelection {
     }
 
     fun select(context: Context, config: TerminalConfiguration): SelectedBackend {
-        if (config.backend == "linux" && config.linux?.rootScope != null) {
-            throw BackendUnavailable("linux_chroot_command_jobs_not_supported")
-        }
-        if (config.backend == "linux") LinuxRuntimePlatform.unavailableReason()?.let { throw BackendUnavailable(it) }
+        if (config.backend == "linux") LinuxRuntimePlatform.unavailableReason(
+            if (config.linux?.rootScope != null) LinuxExecutionMode.CHROOT else LinuxExecutionMode.PROOT
+        )?.let { throw BackendUnavailable(it) }
         // Owner configuration is still bounded; launcher selection remains explicit, never replaced.
         fun validEnvironment(values:Map<String,String>)=values.size<=128 && values.all { (k,v) ->
             k.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,127}")) && v.length<=8192 && !v.contains('\u0000')
@@ -154,6 +169,16 @@ internal object BackendSelection {
                             !host.startsWith("/") || !validGuestPath(guest) || !validHostDirectory(host)
                     })
                     throw BackendUnavailable("linux_configuration_invalid")
+                linux.rootScope?.let { root ->
+                    if (linux.shellArgv != root.guestArgv() || linux.expectedUid != 0 ||
+                        linux.guestWorkingDirectory != root.guestWorkingDirectory ||
+                        linux.sharedMounts != root.workspaceSource?.let { mapOf(it.path to "/workspace") }.orEmpty())
+                        throw BackendUnavailable("linux_chroot_launch_mismatch")
+                    RootScopeLaunch.requireTrustedTransport()
+                    // Native root scope checks actual uid/euid before any guest is forked.
+                    return SelectedBackend("linux:${linux.label}", 0, true, linux.shellArgv.toList(), selectedEnv, cwd, true,
+                        linux.environmentId, linux.guestWorkingDirectory, linux.sharedMounts.toMap(), root)
+                }
                 // identityArgv is advisory only; probe through the SAME selected launcher/shell as commands.
                 val quotedCwd = "'" + linux.guestWorkingDirectory.replace("'", "'\\''") + "'"
                 val uid = probeUid(linux.shellArgv.toList() + listOf("-c", "cd -- $quotedCwd && id -u"), selectedEnv, cwd, "linux_backend_unavailable")

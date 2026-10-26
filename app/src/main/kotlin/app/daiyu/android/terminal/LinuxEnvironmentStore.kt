@@ -175,9 +175,10 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
             val environment = mapOf("HOME" to "/root", "TMPDIR" to "/tmp", "TERM" to "xterm-256color",
                 "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
             if (installation.executionMode == LinuxExecutionMode.CHROOT) {
-                val launch = RootScopeLaunch(installation.rootfs, File("/system/bin/su"), guestWorkingDirectory = guestCwd)
+                val launch = RootScopeLaunch(installation.rootfs, File("/system/bin/su"), guestWorkingDirectory = guestCwd,
+                    workspaceSource = workspace?.takeIf { it.bindWorkspace }?.hostDirectory)
                 LinuxBackend(installation.distribution, launch.guestArgv(), identityArgv = emptyList(), environment = environment, expectedUid = 0,
-                    environmentId = "${installation.environmentId}:${installation.generation}", guestWorkingDirectory = guestCwd, rootScope = launch)
+                    environmentId = "${installation.environmentId}:${installation.generation}", guestWorkingDirectory = guestCwd, sharedMounts = mounts.toMap(), rootScope = launch)
             } else {
                 val helpers = installation.requireProotFiles()
                 val binds = mounts.entries.sortedBy { it.key }.flatMap { (host, guest) -> listOf("-b", "$host:$guest") }

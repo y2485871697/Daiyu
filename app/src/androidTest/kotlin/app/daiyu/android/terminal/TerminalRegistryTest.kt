@@ -458,4 +458,74 @@ class TerminalRegistryTest:InstrumentationTestCase() {
         } finally { release.countDown(); first?.close(); root.deleteRecursively() }
     }
 
+    private fun rootRegistry(root: File): TerminalRegistry {
+        val su = File(root, "su").apply { writeText("fixture; never executed"); setExecutable(true) }
+        val rootfs = File(root, "rootfs").apply { mkdir() }
+        val scope = RootScopeLaunch(rootfs.canonicalFile, su.canonicalFile)
+        return fakeRegistry(isolatedContext(root), UUID.randomUUID().toString()).apply {
+            backendOverride = SelectedBackend("linux:fixture", 0, true, scope.guestArgv(), emptyMap(), root, true,
+                rootScope = scope)
+            startProcess = { throw AssertionError("root command must not use plain builder") }
+            daemonExecutable = { throw AssertionError("root daemon must not use Android setsid") }
+        }
+    }
+    fun testChrootSyncAsyncAndDaemonUseOnlyRootScopeTransport() {
+        for (mode in listOf("sync", "async", "daemon")) {
+            val root = File(instrumentation.targetContext.cacheDir, UUID.randomUUID().toString()).apply { mkdirs() }
+            val registry = rootRegistry(root)
+            var starts = 0
+            try {
+                registry.startRootProcess = { selected, command, _ ->
+                    starts++; assertNotNull(selected.rootScope); assertEquals("printf test", command); FakeProcess()
+                }
+                val session = open(registry)
+                val args = command(session, mode = mode)
+                val result = registry.execute("terminal_exec", args)
+                assertTrue(result.has("job_id")); assertTrue(result.getBoolean("host_root"))
+                assertEquals(result.getString("job_id"), registry.execute("terminal_exec", args).getString("job_id"))
+                assertEquals(1, starts)
+            } finally { registry.close(); root.deleteRecursively() }
+        }
+    }
+    fun testChrootStartupCleanupRetainedAfterNoProcessReturned() {
+        val root = File(instrumentation.targetContext.cacheDir, UUID.randomUUID().toString()).apply { mkdirs() }
+        val registry = rootRegistry(root)
+        var drained = false
+        try {
+            registry.startRootProcess = { _, _, _ ->
+                throw PtyStartupFailure("fixture", PtyStartupCleanup(FakeProcess(), {}, { drained }))
+            }
+            val result = registry.execute("terminal_exec", command(open(registry)))
+            assertEquals("unknown", result.getString("execution"))
+            assertEquals("pty_startup_unknown_not_replayed", result.getString("error"))
+            registry.close()
+            assertFalse(registry.awaitOrdinaryTermination(20))
+            drained = true
+            assertTrue(registry.awaitOrdinaryTermination(2000))
+        } finally { drained = true; registry.close(); root.deleteRecursively() }
+    }
+    fun testChrootDrainWithoutLeaderStatusKeepsExitUnknownAndQueriesReadable() {
+        val root = File(instrumentation.targetContext.cacheDir, UUID.randomUUID().toString()).apply { mkdirs() }
+        val registry = rootRegistry(root)
+        val scope = "daiyu-" + "d".repeat(32)
+        fun frame(type: Char, text: String): ByteArray = ByteArrayOutputStream().also {
+            val bytes = text.toByteArray()
+            java.io.DataOutputStream(it).apply { writeByte(type.code); writeInt(bytes.size); write(bytes) }
+        }.toByteArray()
+        val bytes = frame('S', scope) + frame('H', "DPTY2") +
+            frame('D', "DROOT1 scope=$scope kill=1 populated=0 reaped=1 removed=1")
+        val process = RootScopeCommandProcess(PtySession(FakeProcess(ByteArrayInputStream(bytes)),
+            OperationJournal(File(root, "pty"), "command"), true))
+        try {
+            registry.startRootProcess = { _, _, _ -> process }
+            val id = registry.execute("terminal_exec", command(open(registry))).getString("job_id")
+            assertTrue(process.waitFor(2000, TimeUnit.MILLISECONDS))
+            val page = registry.inspectJob(id)
+            assertTrue(page.isNull("exit_code")); assertEquals("unknown", page.getString("execution"))
+            assertTrue(page.getBoolean("scope_drain_confirmed"))
+            assertTrue(registry.stopOwnedJob(id).getBoolean("stopped"))
+            registry.close(); assertTrue(registry.awaitOrdinaryTermination(2000))
+        } finally { registry.close(); root.deleteRecursively() }
+    }
+
 }

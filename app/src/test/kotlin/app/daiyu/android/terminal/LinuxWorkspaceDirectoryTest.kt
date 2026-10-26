@@ -115,9 +115,25 @@ class LinuxWorkspaceDirectoryTest {
             "cd -- \"\$1\" && exec /bin/sh", "daiyu-workspace", cwd), launch.guestArgv())
     }
 
-    @Test fun chrootPrivateBindIsExplicitlyRejectedWithoutTransportOrMounts() = fixture { root, spec, _ ->
+    @Test fun chrootPrivateBindUsesFrozenSourceAndFixedGuestTarget() = fixture { root, spec, _ ->
         val workspace = LinuxWorkspaceDirectory(root, "/workspace", true)
-        try { workspace.validateFor(spec.copy(executionMode = LinuxExecutionMode.CHROOT)); fail("private chroot bind accepted") }
-        catch (failure: IllegalStateException) { assertEquals("linux_chroot_private_workspace_bind_not_supported", failure.message) }
+        assertEquals(listOf(root), workspace.validateFor(spec.copy(executionMode = LinuxExecutionMode.CHROOT)))
+        val launch = RootScopeLaunch(spec.rootfs, requireNotNull(spec.proot), guestWorkingDirectory = "/workspace",
+            workspaceSource = root, workspaceIdentity = RootWorkspaceIdentity(7, 11))
+        assertEquals(root, launch.workspaceSource)
+        assertEquals("/workspace", launch.guestWorkingDirectory)
+        assertEquals(11, launch.binding().getLong("workspace_inode"))
+        assertFalse(launch.guestArgv().contains(root.path))
+        try { workspace.copy(guestDirectory = "/other").validateFor(spec); fail("arbitrary bind target accepted") }
+        catch (_: IllegalArgumentException) { }
+    }
+
+    @Test fun chrootCommandAndCwdRemainSeparatePositionalArguments() = fixture { _, spec, _ ->
+        val cwd = "/a 'quoted' $(literal)"
+        val command = "printf '%s' \"a; $(literal)\"\nexit 7"
+        val launch = RootScopeLaunch(spec.rootfs, requireNotNull(spec.proot), guestWorkingDirectory = cwd, command = command)
+        val args = launch.guestArgv()
+        assertEquals(listOf("daiyu-command", cwd, command), args.takeLast(3))
+        assertEquals("cd -- \"\$1\" && exec /bin/sh -c \"\$2\"", args[4])
     }
 }

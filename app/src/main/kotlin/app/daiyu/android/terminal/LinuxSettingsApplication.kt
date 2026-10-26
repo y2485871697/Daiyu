@@ -76,8 +76,6 @@ class LinuxSettingsApplication private constructor(
         reference: LinuxGenerationRef? = null): TerminalPtyLaunch.Linux? {
         check(Looper.myLooper() != Looper.getMainLooper()) { "terminal_freeze_requires_worker" }
         val reference = reference ?: terminalSelection.status().selected ?: return null
-        // Chroot command jobs have no owned-process transport yet. Never fall back to Android.
-        if (executionModes[reference] != LinuxExecutionMode.PROOT) return null
         return freezeTerminalLaunchOnWorker(reference, tempDirectory, hostWorkingDirectory, workspace)
     }
 

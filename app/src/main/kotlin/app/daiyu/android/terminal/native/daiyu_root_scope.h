@@ -114,19 +114,68 @@ static int root_enter(void) {
     return 0;
 }
 /* Only the fixed chroot transport calls this, after root_enter made mounts private. */
-static int root_mount_proc(const char *rootfs) {
-    int rootfd=open(rootfs,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
-    if(rootfd<0) return -1;
+static int root_mount_proc(int rootfd) {
     if(mkdirat(rootfd,"proc",0555)<0 && errno!=EEXIST) {
-        int saved=errno; close(rootfd); errno=saved; return -1;
+        return -1;
     }
     int procfd=openat(rootfd,"proc",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
-    int saved=errno; close(rootfd); errno=saved;
+    int saved;
     if(procfd<0) return -1;
     char target[64];
     snprintf(target,sizeof(target),"/proc/self/fd/%d",procfd);
     int result=mount("proc",target,"proc",MS_NOSUID|MS_NODEV|MS_NOEXEC,NULL);
     saved=errno; close(procfd); errno=saved;
+    return result;
+}
+/* Pin every component. Mounting through FDs cannot follow guest/source symlinks. */
+static int root_open_directory(const char *path) {
+    if(!path || path[0]!='/' || strlen(path)>4096) { errno=EINVAL; return -1; }
+    int fd=open("/",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+    if(fd<0) return -1;
+    const char *part=path+1;
+    while(*part) {
+        const char *end=strchr(part,'/');
+        size_t size=end ? (size_t)(end-part) : strlen(part);
+        if(!size || size>255 || (size==1 && part[0]=='.') || (size==2 && !strncmp(part,"..",2))) {
+            close(fd); errno=EINVAL; return -1;
+        }
+        char name[256]; memcpy(name,part,size); name[size]=0;
+        int next=openat(fd,name,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW),saved=errno;
+        close(fd); fd=next; errno=saved;
+        if(fd<0) return -1;
+        if(!end) break;
+        part=end+1;
+        if(!*part) { close(fd); errno=EINVAL; return -1; }
+    }
+    return fd;
+}
+/* Called only after root_enter() made this child's mount namespace private. */
+static int root_identity_number(const char *text,uint64_t *value) {
+    if(!text || !*text) { errno=EINVAL; return -1; }
+    for(const char *p=text;*p;p++) if(*p<'0' || *p>'9') { errno=EINVAL; return -1; }
+    char *end; errno=0;
+    unsigned long long result=strtoull(text,&end,10);
+    if(errno || *end) { if(!errno) errno=EINVAL; return -1; }
+    *value=(uint64_t)result; return 0;
+}
+static int root_mount_workspace(int rootfd,const char *source,uint64_t device,uint64_t inode) {
+    int sourcefd=root_open_directory(source);
+    if(sourcefd<0) return -1;
+    int targetfd=-1,result=-1,saved;
+    struct stat identity;
+    if(fstat(sourcefd,&identity)<0) goto done;
+    if((uint64_t)identity.st_dev!=device || (uint64_t)identity.st_ino!=inode) { errno=ESTALE; goto done; }
+    if(mkdirat(rootfd,"workspace",0700)<0 && errno!=EEXIST) goto done;
+    targetfd=openat(rootfd,"workspace",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+    if(targetfd<0) goto done;
+    char from[64],to[64];
+    snprintf(from,sizeof(from),"/proc/self/fd/%d",sourcefd);
+    snprintf(to,sizeof(to),"/proc/self/fd/%d",targetfd);
+    result=mount(from,to,NULL,MS_BIND,NULL);
+done:
+    saved=errno;
+    if(targetfd>=0) close(targetfd);
+    close(sourcefd); errno=saved;
     return result;
 }
 static int root_populated(void) {

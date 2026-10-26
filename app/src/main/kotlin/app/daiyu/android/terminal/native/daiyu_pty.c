@@ -77,9 +77,20 @@ int main(int argc, char **argv) {
         if(getuid()!=0 || geteuid()!=0) return root_pre_scope_failure(77);
         --argc; ++argv;
     }
-    if(argc<5 || strcmp(argv[3],"--") || argv[4][0]!='/') return root_pre_scope_failure(64);
-    if(root_mode && (argc<7 || strcmp(argv[4],"/system/bin/chroot") ||
-        argv[5][0]!='/' || strcmp(argv[6],"/bin/sh"))) return root_pre_scope_failure(64);
+    const char *workspace=NULL;
+    uint64_t workspace_dev=0,workspace_ino=0;
+    int separator=3,command_mode=0;
+    if(root_mode && argc>3 && !strcmp(argv[3],"--workspace")) {
+        if(argc<8) return root_pre_scope_failure(64);
+        workspace=argv[4]; separator=7;
+        if(workspace[0]!='/' || root_identity_number(argv[5],&workspace_dev)<0 ||
+            root_identity_number(argv[6],&workspace_ino)<0) return root_pre_scope_failure(64);
+    }
+    if(root_mode && argc>separator && !strcmp(argv[separator],"--command")) { command_mode=1; separator++; }
+    int command_at=separator+1;
+    if(argc<=command_at || strcmp(argv[separator],"--") || argv[command_at][0]!='/') return root_pre_scope_failure(64);
+    if(root_mode && (argc<=command_at+2 || strcmp(argv[command_at],"/system/bin/chroot") ||
+        argv[command_at+1][0]!='/' || strcmp(argv[command_at+2],"/bin/sh"))) return root_pre_scope_failure(64);
     int rows=positive(argv[1]), cols=positive(argv[2]);
     if(rows<0 || cols<0) return root_pre_scope_failure(64);
     pid_t parent=getppid();
@@ -111,15 +122,27 @@ int main(int argc, char **argv) {
             signal(SIGTERM,SIG_DFL); signal(SIGHUP,SIG_DFL); signal(SIGINT,SIG_DFL);
             if(prctl(PR_SET_PDEATHSIG,SIGKILL)<0) goto child_error;
             if(getppid()!=supervisor || interrupted) { errno=ECANCELED; goto child_error; }
-            if(root_enter()<0 || root_mount_proc(argv[5])<0) goto child_error;
+            if(root_enter()<0) goto child_error;
+            int rootfd=root_open_directory(argv[command_at+1]);
+            if(rootfd<0) goto child_error;
+            if(workspace && root_mount_workspace(rootfd,workspace,workspace_dev,workspace_ino)<0) goto child_error;
+            if(root_mount_proc(rootfd)<0 || fchdir(rootfd)<0) goto child_error;
+            close(rootfd);
+            /* chroot resolves this pinned cwd, not a path that can be renamed after mount. */
+            argv[command_at+1]=".";
         }
         if(setsid()<0) goto child_error;
         int slave=open(slave_name,O_RDWR|O_NOCTTY);
         if(slave<0 || ioctl(slave,TIOCSCTTY,0)<0) goto child_error;
         for(int fd=0;fd<3;fd++) if(dup2(slave,fd)<0) goto child_error;
         if(slave>2) close(slave);
+        if(command_mode) {
+            int input=open("/dev/null",O_RDONLY|O_CLOEXEC);
+            if(input<0 || dup2(input,STDIN_FILENO)<0) goto child_error;
+            if(input>2) close(input);
+        }
         signal(SIGPIPE,SIG_DFL); signal(SIGTERM,SIG_DFL); signal(SIGHUP,SIG_DFL); signal(SIGINT,SIG_DFL);
-        execv(argv[4],argv+4);
+        execv(argv[command_at],argv+command_at);
 child_error:
         saved=errno;
         (void)!write(exec_error[1],&saved,sizeof(saved));

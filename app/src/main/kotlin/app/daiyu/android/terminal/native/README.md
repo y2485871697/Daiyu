@@ -127,3 +127,34 @@ never mounts into the host namespace. No PID namespace is created: guest procfs
 is not a promise to hide host processes. Private mounts disappear with their
 namespace references; the D receipt continues to prove owned-process drain,
 not an additional explicit-unmount guarantee.
+
+
+### Conversation workspace and fixed commands
+
+The trusted root-scope form is:
+
+```text
+daiyu_pty --root-scope ROWS COLS [--workspace HOST DEV INO] [--command] -- /system/bin/chroot ROOTFS /bin/sh [fixed bridge arguments]
+```
+
+`--workspace` binds exactly one frozen private directory to `/workspace`, only
+inside the child's private mount namespace. Source components reject symlinks;
+source `fstat` must match the approved device/inode. Workspace/proc targets use
+one pinned rootfs directory descriptor. The child then `fchdir`s to that root
+and internally passes `.` to the fixed chroot executable, avoiding another
+absolute-path lookup after mounting. No global host bind or unconditional host
+unmount is introduced.
+
+`--command` provides host `/dev/null` on guest stdin (EOF); stdout/stderr remain
+PTY output. Command/cwd are separate positional arguments to a fixed shell
+bridge, never directory text interpolated as shell source. Root command jobs
+use the same DPTY2 ownership protocol: `X` carries a known guest exit status;
+`D` plus original launcher exit and protocol-reader EOF establish physical
+cleanup. A clean `D` without `X` settles resources while keeping the command
+exit code unknown. Truncation is propagated to job logs.
+
+Chroot daemon jobs retain both their Linux generation and conversation workspace
+until the original root scope and output pump finish. Closing the run preserves
+an approved daemon; explicit stop closes its original control pipe, never kills
+a reconstructed bare PID. Host fault/protocol tests do not establish Android
+SELinux or real-device mount/ABI compatibility.

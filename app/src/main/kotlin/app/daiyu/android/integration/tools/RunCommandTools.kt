@@ -69,6 +69,7 @@ internal class RunCommandTools(
             .put("linux_env", JSONObject(backend?.environment?.toSortedMap().orEmpty()))
             .put("guest_cwd", backend?.guestWorkingDirectory)
             .put("mounts", JSONObject(backend?.sharedMounts?.toSortedMap().orEmpty()))
+            .put("root_scope", backend?.rootScope?.binding() ?: JSONObject.NULL)
             .put("generation", if (environment == "linux") linux?.expected?.generation else null)
         return MessageDigest.getInstance("SHA-256").digest(frozen.toString().toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 255) }
@@ -97,7 +98,7 @@ internal class RunCommandTools(
             val effect = WriteEffect("terminal.command", "exec", target(environment, timeout),
                 java.util.Base64.getEncoder().encodeToString(command.toByteArray(Charsets.UTF_8)))
             val config = configuration(environment)
-            val disclosure = "环境：$environment\n身份：${if (environment == "android") "Android 应用 UID（非 Root）" else "所选 Linux（不回退 Android）"}\n" +
+            val disclosure = "环境：$environment\n身份：${if (environment == "android") "Android 应用 UID（非 Root）" else if (config?.linux?.rootScope != null) "chroot / Host Root（独立进程域，不回退 Android）" else "PRoot / Android 应用 UID（不回退 Android）"}\n" +
                 "工作目录：${config?.linux?.guestWorkingDirectory ?: config?.workingDirectory?.path}\n" +
                 "环境变量：${config?.linux?.environment.orEmpty() + config?.environment.orEmpty()}\n" +
                 "共享映射：${config?.linux?.sharedMounts.orEmpty()}\n等待上限：${timeout}ms\n\n完整命令：\n$command"

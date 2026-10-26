@@ -64,7 +64,7 @@ class LinuxPtySession private constructor(
                     checkNotNull(configuration.workingDirectory), journalDirectory, sessionScope, rows, columns)
             } else {
                 check(!configuration.root && backend.shellArgv == root.guestArgv()) { "linux_chroot_launch_mismatch" }
-                check(backend.guestWorkingDirectory == root.guestWorkingDirectory && backend.sharedMounts.isEmpty()) { "linux_chroot_mapping_not_supported" }
+                check(backend.guestWorkingDirectory == root.guestWorkingDirectory && backend.sharedMounts == root.workspaceSource?.let { mapOf(it.path to "/workspace") }.orEmpty()) { "linux_chroot_mapping_not_supported" }
                 PtyRunSession.openRootScope(owner, helper, root, backend.environment + configuration.environment,
                     checkNotNull(configuration.workingDirectory), journalDirectory, sessionScope, rows, columns)
             }

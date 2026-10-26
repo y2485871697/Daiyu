@@ -296,4 +296,37 @@ class TerminalJobSessionTest {
         assertEquals(0, pinCount(root)); store.clearSelection()
     }
 
+    @Test fun daemonRetainsWorkspaceUntilOriginalJobDrain() {
+        val root = java.nio.file.Files.createTempDirectory("chroot-daemon-pins-").toFile().canonicalFile
+        val workspaceCloses = AtomicInteger()
+        val jobExited = java.util.concurrent.atomic.AtomicBoolean(false)
+        val observed = CountDownLatch(1)
+        val backend = object : TerminalJobTransport {
+            override fun execute(name: String, arguments: JSONObject) = if (name == "terminal_open")
+                JSONObject().put("ok", true).put("session_id", "s") else
+                JSONObject().put("ok", true).put("execution", "unknown").put("job_id", "11111111-1111-1111-1111-111111111111")
+            override fun inspect(id: String) = JSONObject().put("ok", true)
+            override fun stop(id: String) = JSONObject().put("ok", true)
+            override fun close() { }
+            override fun awaitOrdinaryTermination(timeoutMillis: Long) = true
+            override fun awaitJobTermination(id: String, timeoutMillis: Long): Boolean { observed.countDown(); return jobExited.get() }
+        }
+        val launch = TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), root)
+        val plan = TerminalJobPlan(message.conversationId, message.runId, launch, "cat; printf fixed", "daemon",
+            AutoCloseable { workspaceCloses.incrementAndGet() })
+        try {
+            val f = Fixture(suppliedPlan = plan, create = { backend })
+            assertTrue(f.call() is DispatchOutcome.Unknown)
+            assertTrue(f.close() is RunCatalogCloseResult.Drained)
+            assertTrue(observed.await(2000, TimeUnit.MILLISECONDS))
+            assertEquals(0, workspaceCloses.get())
+            jobExited.set(true)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            while (workspaceCloses.get() == 0 && System.nanoTime() < deadline) Thread.sleep(10)
+            assertEquals(1, workspaceCloses.get())
+            assertTrue(f.session.awaitCloseOnWorker(1000))
+            assertEquals(1, workspaceCloses.get())
+        } finally { jobExited.set(true); root.deleteRecursively() }
+    }
+
 }

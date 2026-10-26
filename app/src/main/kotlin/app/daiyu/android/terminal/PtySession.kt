@@ -21,6 +21,7 @@ class PtySession internal constructor(
     private var execErrorSeen = false
     @Volatile private var execErrno: Int? = null
     private var truncationSeen = false
+    private var transportTruncated = false
     @Volatile private var nativeScope: String? = null
     @Volatile private var rootDrained = false
     @Volatile private var protocolBroken = false
@@ -123,7 +124,8 @@ class PtySession internal constructor(
         uiOutput.forEach { output.write(it) }
         uiOutput.clear(); uiBytes = 0
         status.put("stdout_base64", java.util.Base64.getEncoder().encodeToString(output.toByteArray()))
-            .put("ui_dropped", uiDropped).put("log_truncated", uiDropped)
+            .put("ui_dropped", uiDropped).put("transport_truncated", transportTruncated)
+            .put("log_truncated", uiDropped || transportTruncated)
         uiDropped = false
         status
     }
@@ -192,7 +194,7 @@ class PtySession internal constructor(
                                 check(!truncationSeen && !execErrorSeen && waitStatus == null)
                                 truncationSeen = true
                             }
-                            synchronized(lock) { truncated = true }
+                            synchronized(lock) { truncated = true; transportTruncated = true }
                         }
                         'X' -> {
                             check(started && length == 4 && waitStatus == null && (!rootScoped || !execErrorSeen))
@@ -289,7 +291,7 @@ class PtySession internal constructor(
             val frozenEnvironment = environment.toMap()
             require(helper.isAbsolute && helper.isFile && helper.canExecute()) { "pty_native_unavailable" }
             require(frozenArgv.isNotEmpty() && frozenArgv.first().startsWith('/') && frozenArgv.size <= 128 &&
-                frozenArgv.all { it.isNotEmpty() && it.length <= 8192 && '\u0000' !in it })
+                frozenArgv.all { it.isNotEmpty() && it.length <= (if (rootScope?.command != null) 32768 else 8192) && '\u0000' !in it })
             require(cwd.isAbsolute && cwd.isDirectory && rows in 1..1000 && columns in 1..1000)
             require(frozenEnvironment.size <= 128 && frozenEnvironment.all { (key, value) ->
                 key.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,127}")) && value.length <= 8192 && '\u0000' !in value })
@@ -314,6 +316,8 @@ class PtySession internal constructor(
             if (rootScope != null) {
                 args.put("protocol", "DPTY2").put("root_scope", true)
                     .put("rootfs", rootScope.rootfs.path).put("su", rootScope.su.path)
+                    .put("workspace_source", rootScope.workspaceSource?.path ?: JSONObject.NULL)
+                    .put("workspace_device", rootScope.workspaceIdentity?.device).put("workspace_inode", rootScope.workspaceIdentity?.inode)
             }
             val result = try { journal.once("open", "pty_open", args) {
                 try {
@@ -321,7 +325,11 @@ class PtySession internal constructor(
                     val helperArgv = if (rootScope == null) {
                         listOf(helper.path, rows.toString(), columns.toString(), "--") + frozenArgv
                     } else {
-                        listOf(helper.path, "--root-scope", rows.toString(), columns.toString(), "--") + rootScope.guestArgv()
+                        listOf(helper.path, "--root-scope", rows.toString(), columns.toString()) +
+                            rootScope.workspaceSource?.let { listOf("--workspace", it.path,
+                                checkNotNull(rootScope.workspaceIdentity).device.toULong().toString(),
+                                rootScope.workspaceIdentity.inode.toULong().toString()) }.orEmpty() +
+                            (if (rootScope.command == null) emptyList() else listOf("--command")) + listOf("--") + rootScope.guestArgv()
                     }
                     val command = if (rootScope == null) helperArgv else
                         listOf(rootScope.su.path, "-c", "exec " +

@@ -97,7 +97,15 @@ finally:
     if p.poll() is None:p.kill()
     p.wait(timeout=3)
 faults=subprocess.run([str(helper.with_name('root_scope_faults'))],check=True,capture_output=True,text=True,timeout=5)
-assert faults.stdout.strip()=='root_scope_faults: 20 passed',faults.stdout
+assert faults.stdout.strip()=='root_scope_faults: 36 passed',faults.stdout
+record['root_scope_faults']={'passed':36,'stdout':faults.stdout.strip()}
+tests.extend(['workspace bind creates fixed target and reuses existing directory',
+    'workspace bind verifies frozen source device and inode',
+    'workspace bind refusal preserves errno',
+    'workspace target symlink and regular file refused',
+    'workspace source final and intermediate symlink refused',
+    'workspace source regular file, relative and dot component refused',
+    'workspace identity accepts uint64 maximum; refuses overflow, negative, trailing text and empty input'])
 tests.extend(['proc mount creates missing directory through pinned fd with fixed flags',
     'existing real proc directory is accepted', 'proc mount refusal preserves errno',
     'proc symlink is rejected before mount', 'proc regular file is rejected before mount',

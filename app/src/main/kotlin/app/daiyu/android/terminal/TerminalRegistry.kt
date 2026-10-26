@@ -28,6 +28,9 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     // Fault seams for deterministic tests; not schema/model configurable.
     internal var backendOverride:SelectedBackend?=null
     internal var startProcess:(ProcessBuilder)->Process={ it.start() }
+    internal var startRootProcess: (SelectedBackend, String, String) -> Process = { backend, command, id ->
+        RootScopeCommandProcess.open(this.context, backend, command, id)
+    }
     internal var beforeJobSave:(()->Unit)?=null
     internal var processStartReader: (Long) -> String? = { processStart(it) }
     internal var processPidReader: (Process) -> Long = { processPid(it) }
@@ -58,7 +61,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                 .put("argv", JSONArray(linux.shellArgv)).put("identity_argv", JSONArray(linux.identityArgv))
                 .put("environment", JSONObject(linux.environment)).put("uid", linux.expectedUid)
                 .put("daemon", linux.daemonSupported).put("cwd", linux.guestWorkingDirectory)
-                .put("mounts", JSONObject(linux.sharedMounts))
+                .put("mounts", JSONObject(linux.sharedMounts)).put("root_scope", linux.rootScope?.binding() ?: JSONObject.NULL)
         } ?: JSONObject.NULL)
 
     val schemas:JSONArray get()=JSONArray().apply {
@@ -152,7 +155,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         val mode=args.optString("mode","sync"); require(mode in setOf("sync","async","daemon"))
         val timeout=args.optLong("timeout_ms",30000); require(timeout in 1..120000)
         val b=backend()
-        val argv=if(mode=="daemon") {
+        val argv=if(mode=="daemon" && b.rootScope == null) {
             if(!b.daemonSupported) return error("daemon_not_supported_by_backend")
             val executable=daemonExecutable() ?: return error("daemon_detach_unavailable")
             if(b.name!="android" || b.root) return error("daemon_detach_not_supported_for_selected_identity")
@@ -189,7 +192,15 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                 return error("backend_path_changed_not_executed").put("job_id", id)
             }
             val startedAt=System.nanoTime()
-            val process=try { startProcess(b.builder(argv).redirectErrorStream(true).redirectInput(job.script)) }
+            val process=try {
+                if (b.rootScope != null) startRootProcess(b, command, id)
+                else startProcess(b.builder(argv).redirectErrorStream(true).redirectInput(job.script))
+            } catch (failure: PtyStartupFailure) {
+                job.startupCleanup = failure.cleanup
+                job.unknown = true; job.state = "startup_unknown"
+                saveJob(job)
+                return dispatchedError(job, "pty_startup_unknown_not_replayed")
+            }
             catch(_:Exception) { job.state="start_failed"; saveJob(job); return error("process_start_failed").put("job_id",id) }
             val pid=try { processPidReader(process) } catch(_:Exception) { -1L } catch(_:LinkageError) { -1L }
             val start=if (pid > 0L) try { processStartReader(pid) } catch(_:Exception) { null } else null
@@ -211,7 +222,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             return page(job,0,16384).put("ok",completed).put("execution",if(completed && !job.unknown && job.outputComplete) "executed" else "unknown")
                 .apply { if(!completed) put("error","timeout_outcome_unknown_not_replayed") }
         } catch(_:Exception) {
-            if(job.handle!=null) { job.unknown=true; return dispatchedError(job,"command_delivery_unknown_not_replayed") }
+            if(job.handle!=null || job.startupCleanup!=null) { job.unknown=true; return dispatchedError(job,"command_delivery_unknown_not_replayed") }
             // No Process was returned: retain the journal, but allow this original registry to drain.
             job.state = "start_failed"
             return error("job_preparation_failed_not_dispatched").put("job_id",id)
@@ -234,7 +245,10 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                     }
                 } }
             } catch(_:Exception) { job.unknown=true }
-            finally { job.script.delete(); job.outputComplete=true }
+            finally {
+                if (process is RootScopeCommandProcess && process.outputTruncated) job.truncated = true
+                job.script.delete(); job.outputComplete=true
+            }
         }.apply { isDaemon=true; name="terminal-log-${job.id}"; start() }
     }
     private fun poll(args:JSONObject):JSONObject {
@@ -250,14 +264,17 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     }
     private fun page(job:Job,offset:Long,limit:Int):JSONObject {
         val process=job.handle?.process; val running=process?.isAlive ?: false
+        val exitCode = if (process == null || running) null else if (process is RootScopeCommandProcess)
+            process.exitCodeOrNull() else process.exitValue()
         return readLog(job.log,offset,limit).put("job_id",job.id).put("backend",job.backend.name).put("uid",job.backend.uid).put("root",job.backend.root)
             .put("host_uid",android.os.Process.myUid()).put("host_root",job.backend.root)
             .put("guest_uid",if(job.backend.name.startsWith("linux:")) job.backend.uid else JSONObject.NULL)
             .put("environment_id",job.backend.environmentId).put("mode",job.mode)
             .put("lifetime",if(job.mode=="daemon") "independent_of_registry_only_while_same_app_process_lives" else "session")
             .put("state",if(process==null) job.state else if(running) "running" else "exited")
-            .put("exit_code",if(process==null || running) JSONObject.NULL else process.exitValue())
-            .put("execution",if(process==null) (if(job.state in setOf("start_failed", "cancelled_before_dispatch")) "not_executed" else "unknown") else if(running || job.unknown || !job.outputComplete) "unknown" else "executed")
+            .put("exit_code",exitCode ?: JSONObject.NULL)
+            .put("scope_drain_confirmed", process is RootScopeCommandProcess && !running)
+            .put("execution",if(process==null) (if(job.state in setOf("start_failed", "cancelled_before_dispatch")) "not_executed" else "unknown") else if(running || exitCode == null || job.unknown || !job.outputComplete) "unknown" else "executed")
             .put("stderr_merged",true).put("log_truncated",job.truncated).put("output_complete",job.outputComplete)
     }
     private fun readLog(file:File,offset:Long,limit:Int):JSONObject {
@@ -272,6 +289,12 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     private fun stop(id:String):JSONObject {
         val job=synchronized(jobs) { jobs[id] } ?: return error("owner_process_handle_unavailable_not_stopped")
         if(!owns(job)) return error("job_not_owned_by_conversation_or_run")
+        job.startupCleanup?.let { cleanup ->
+            job.cancelRequested = true
+            cleanup.requestClose()
+            return page(job, 0, 16384).put("stopped", cleanup.awaitTermination(1500))
+                .put("stop_scope", "owned_root_scope")
+        }
         val handle=synchronized(job) {
             job.cancelRequested = true
             job.handle
@@ -279,15 +302,17 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             .put("job_id",id).put("state",job.state).put("stop_requested",true).put("stopped",false)
         if (!signalOwned(job, handle)) return error("process_owner_unverified_not_stopped").put("execution", "unknown").put("job_id", id)
         val exited=handle.process.waitFor(1500,TimeUnit.MILLISECONDS)
-        return page(job,0,16384).put("stopped",exited).put("stop_scope","owned_shell_only; descendants not claimed stopped")
+        return page(job,0,16384).put("stopped",exited).put("stop_scope", if(handle.process is RootScopeCommandProcess) "owned_root_scope" else "owned_shell_only; descendants not claimed stopped")
     }
     private fun signalOwned(job: Job, handle: OwnedProcess): Boolean {
         if (!handle.process.isAlive) return true
+        if (handle.process is RootScopeCommandProcess) { handle.process.destroy(); return true }
         if (handle.start==null || processStartReader(handle.pid)!=handle.start) { job.unknown=true; return false }
         handle.process.destroy()
         return true
     }
     private fun applyCancellation(job: Job) {
+        if (job.cancelRequested) job.startupCleanup?.let { runCatching { it.requestClose() } }
         val handle=synchronized(job) { if (job.cancelRequested) job.handle else null } ?: return
         job.unknown=true
         signalOwned(job, handle)
@@ -338,7 +363,11 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         for (job in ordinary) {
             val handle = job.handle
             if (handle == null) {
-                if (job.state !in setOf("start_failed", "cancelled_before_dispatch")) return false
+                val cleanup = job.startupCleanup
+                if (cleanup != null) {
+                    val remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+                    if (remaining <= 0 || !cleanup.awaitTermination(remaining.coerceAtMost(30_000))) return false
+                } else if (job.state !in setOf("start_failed", "cancelled_before_dispatch")) return false
                 continue
             }
             val remaining = deadline - System.nanoTime()
@@ -357,7 +386,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         require(timeoutMillis in 1..30000)
         if (synchronized(dispatchLifecycle) { !closed || activeDispatches != 0 }) return false
         val job = synchronized(jobs) { jobs[id]?.takeIf { owns(it) && it.scope == scope } } ?: return false
-        val handle = job.handle ?: return job.state in setOf("start_failed", "cancelled_before_dispatch")
+        val handle = job.handle ?: return job.startupCleanup?.awaitTermination(timeoutMillis)
+            ?: (job.state in setOf("start_failed", "cancelled_before_dispatch"))
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
         if (handle.process.isAlive && !handle.process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) return false
         val reader = job.reader ?: return false
@@ -450,6 +480,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     private class Job(val id:String,val scope:String,val owner:String,val session:String,val mode:String,val command:String,val backend:SelectedBackend,val log:File,val script:File) {
         @Volatile var cancelRequested=false
         @Volatile var handle:OwnedProcess?=null
+        @Volatile var startupCleanup:PtyStartupCleanup?=null
         @Volatile var state="pending"
         @Volatile var unknown=false
         @Volatile var truncated=false

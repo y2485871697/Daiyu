@@ -23,7 +23,7 @@ class PtyRootScopeProtocolTest {
         private val input = ByteArrayInputStream(bytes)
         private val output = ByteArrayOutputStream()
         var destroys = 0
-        override fun getInputStream() = input
+        override fun getInputStream(): java.io.InputStream = input
         override fun getOutputStream() = output
         override fun getErrorStream() = ByteArrayInputStream(ByteArray(0))
         override fun waitFor() = 0
@@ -118,6 +118,47 @@ class PtyRootScopeProtocolTest {
             assertFalse(checkNotNull(captured).environment().containsKey("LANG"))
             assertTrue(session.awaitTermination(2_000))
         } finally { session.close(); root.deleteRecursively() }
+    }
+
+    @Test fun rootWorkspaceAndCommandFlagsPreserveExactQuotedArguments() {
+        val root = Files.createTempDirectory("pty-root-workspace-").toFile().canonicalFile
+        val helper = root.resolve("helper").apply { writeText("fixture"); setExecutable(true) }
+        val su = root.resolve("su").apply { writeText("fixture"); setExecutable(true) }
+        val workspace = root.resolve("source with ' and $(literal)").apply { mkdir() }
+        val launch = RootScopeLaunch(root.resolve("rootfs").apply { mkdir() }, su,
+            guestWorkingDirectory = "/workspace", workspaceSource = workspace, command = "cat; exit 7",
+            workspaceIdentity = RootWorkspaceIdentity(7, 11))
+        var captured: ProcessBuilder? = null
+        val session = PtySession.openBound(helper, launch.guestArgv(), mapOf("PATH" to "/usr/bin:/bin"), root,
+            root.resolve("journal"), "workspace", 24, 80, null,
+            startProcess = { builder -> captured = builder; EndedProcess(hello() + status() + drain()) },
+            createJournal = { directory, scope, binding -> hostJournal(directory, scope, binding = binding) }, rootScope = launch)
+        try {
+            fun quote(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
+            val command = checkNotNull(captured).command()[2]
+            assertTrue(command.contains(listOf("--workspace", workspace.path, "7", "11", "--command", "--")
+                .joinToString(" ") { quote(it) }))
+            assertTrue(command.endsWith(launch.guestArgv().joinToString(" ") { quote(it) }))
+            assertTrue(session.awaitTermination(2000))
+        } finally { session.close(); root.deleteRecursively() }
+    }
+
+    @Test fun nativeTruncationSurvivesIncrementalConsumptionWithoutUiDrop() {
+        val root = Files.createTempDirectory("pty-root-truncated-").toFile()
+        val pipe = java.io.PipedInputStream()
+        val feed = java.io.PipedOutputStream(pipe)
+        val process = object : EndedProcess(ByteArray(0)) { override fun getInputStream(): java.io.InputStream = pipe }
+        val session = PtySession(process, hostJournal(root, "truncated"), true)
+        try {
+            feed.write(hello()); feed.flush()
+            session.readAvailable()
+            feed.write(frame('T', ByteArray(0)) + status() + drain()); feed.close()
+            assertTrue(session.awaitTermination(2000))
+            val result = session.readAvailable()
+            assertFalse(result.getBoolean("ui_dropped"))
+            assertTrue(result.getBoolean("transport_truncated"))
+            assertTrue(result.getBoolean("log_truncated"))
+        } finally { feed.close(); session.close(); root.deleteRecursively() }
     }
 
     @Test fun rootConstructionCleanupNeverFallsBackToLauncherExit() {

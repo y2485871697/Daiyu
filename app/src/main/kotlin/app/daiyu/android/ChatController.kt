@@ -2760,7 +2760,6 @@ class ChatController internal constructor(private val application:Application,
         }
         try {
             require(mode in setOf("async", "daemon"))
-            require(mode != "daemon" || linux == null) { "linux_daemon_not_supported" }
             val (profile, provider) = terminalConfiguration(conversation, freezePreparationProvider(token))
             val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
             check(assistantStore.read(profile.id) == profile)
@@ -3656,8 +3655,7 @@ class ChatController internal constructor(private val application:Application,
                     val reference = workspace.resolved.rootfs?.let { app.daiyu.android.terminal.LinuxGenerationRef(it.environmentId, it.generation) }
                         ?: host?.terminalOwner?.host?.state?.value?.linux?.selected
                     val commandLinux = host?.workspaceRootsOnWorker()?.firstOrNull {
-                        it.environmentId == reference?.environmentId && it.generation == reference?.generation &&
-                            it.executionMode == app.daiyu.android.terminal.LinuxExecutionMode.PROOT
+                        it.environmentId == reference?.environmentId && it.generation == reference?.generation
                     }
                     val launch = if (host == null || reference == null || commandLinux == null) null else
                         host.freezeTerminalLaunchOnWorker(reference, application.cacheDir, workspace.resolved.hostDirectory,

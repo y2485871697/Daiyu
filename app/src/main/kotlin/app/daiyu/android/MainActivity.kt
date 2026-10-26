@@ -3303,13 +3303,14 @@ class MainActivity : ComponentActivity() {
         val plan = pending.plan
         val config = plan.configuration
         val linux = config.linux
-        androidx.compose.material3.Text("冻结固定命令：${plan.mode}；启动时通过同一后端执行 id -u 身份探针，不自动提权。\nconversation=${plan.conversationId.value}\nrun=${plan.runId.value}\n" +
-            "backend=${config.backend} · Android host UID=${android.os.Process.myUid()} · host root=false\n" +
+        androidx.compose.material3.Text("冻结固定命令：${plan.mode}；${if (linux?.rootScope != null) "启动时由受管 helper 核验 Root 身份" else "启动时通过同一后端执行 id -u 身份探针，不自动提权"}。\nconversation=${plan.conversationId.value}\nrun=${plan.runId.value}\n" +
+            "backend=${config.backend} · Android host UID=${android.os.Process.myUid()} · host root=${linux?.rootScope != null}\n" +
             "guest UID=${linux?.expectedUid ?: "不适用"} · environment=${linux?.environmentId ?: "android-app"}\n" +
             "host cwd=${config.workingDirectory}\nguest cwd=${linux?.guestWorkingDirectory ?: "不适用"}\n" +
             "argv=${org.json.JSONArray(linux?.shellArgv ?: listOf("/system/bin/sh"))}\n" +
             "env=${org.json.JSONObject(linux?.environment.orEmpty() + config.environment)}\n" +
-            "shared=${org.json.JSONObject(linux?.sharedMounts.orEmpty())}\n精确命令（脚本末尾另补换行）：\n${plan.command}")
+            "shared=${org.json.JSONObject(linux?.sharedMounts.orEmpty())}\n" +
+            "身份：${if (linux?.rootScope != null) "chroot / Host Root（独立进程域）" else "Android 应用 UID（非 Host Root）"}\n精确命令：\n${plan.command}")
         if (!editor.confirmed) app.daiyu.android.ui.haptics.material.Button(modifier = Modifier.testTag("terminal-job-confirm"), onClick = {
             if (terminalEditorCurrent(editor) && editor.jobPreparation === pending) {
                 if (controller.confirmTerminalJob(pending, terminalDraft())) editor.confirmed = true

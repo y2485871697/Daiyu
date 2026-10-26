@@ -75,8 +75,14 @@ static int fake_unlinkat(int parent,const char *path,int flags) {
     close(directory); return unlinkat(parent,path,flags);
 }
 static int fake_mount(const char *source,const char *target,const char *type,unsigned long flags,const void *data) {
-    assert(proc_test && !strcmp(source,"proc") && !strcmp(type,"proc") && data==NULL);
-    assert(flags==(MS_NOSUID|MS_NODEV|MS_NOEXEC));
+    assert(proc_test && data==NULL);
+    if(type) { assert(!strcmp(source,"proc") && !strcmp(type,"proc")); assert(flags==(MS_NOSUID|MS_NODEV|MS_NOEXEC)); }
+    else {
+        assert(flags==MS_BIND);
+        int sourcefd=-1; struct stat source_value;
+        assert(sscanf(source,"/proc/self/fd/%d",&sourcefd)==1 && sourcefd>=0);
+        assert(fstat(sourcefd,&source_value)==0 && S_ISDIR(source_value.st_mode));
+    }
     int fd=-1; assert(sscanf(target,"/proc/self/fd/%d",&fd)==1 && fd>=0);
     struct stat value; assert(fstat(fd,&value)==0 && S_ISDIR(value.st_mode));
     mount_calls++;
@@ -170,17 +176,60 @@ static void proc_mount_faults(void) {
     char root[]="/tmp/daiyu-proc-test-XXXXXX"; assert(mkdtemp(root));
     char proc[256]; snprintf(proc,sizeof(proc),"%s/proc",root);
     proc_test=1; mount_calls=0;
-    assert(root_mount_proc(root)==0 && mount_calls==1);
-    assert(root_mount_proc(root)==0 && mount_calls==2);
-    mount_failure=1; assert(root_mount_proc(root)<0 && errno==EPERM && mount_calls==3);
+    int rootfd=root_open_directory(root); assert(rootfd>=0);
+    assert(root_mount_proc(rootfd)==0 && mount_calls==1);
+    assert(root_mount_proc(rootfd)==0 && mount_calls==2);
+    mount_failure=1; assert(root_mount_proc(rootfd)<0 && errno==EPERM && mount_calls==3);
     mount_failure=0; assert(rmdir(proc)==0);
     assert(symlink("/tmp",proc)==0);
-    assert(root_mount_proc(root)<0 && mount_calls==3); assert(unlink(proc)==0);
+    assert(root_mount_proc(rootfd)<0 && mount_calls==3); assert(unlink(proc)==0);
     int fd=open(proc,O_CREAT|O_WRONLY,0600); assert(fd>=0); close(fd);
-    assert(root_mount_proc(root)<0 && mount_calls==3); assert(unlink(proc)==0);
-    assert(rmdir(root)==0); proc_test=0;
+    assert(root_mount_proc(rootfd)<0 && mount_calls==3); assert(unlink(proc)==0);
+    close(rootfd); assert(rmdir(root)==0); proc_test=0;
+}
+static int workspace_mount_faults(void) {
+    int tests=0;
+    char root[]="/tmp/daiyu-workspace-test-XXXXXX"; assert(mkdtemp(root));
+    char source[256],target[256],link[256],nested[256],file[256],dots[256];
+    snprintf(source,sizeof(source),"%s/source",root); assert(mkdir(source,0700)==0);
+    snprintf(target,sizeof(target),"%s/workspace",root);
+    snprintf(link,sizeof(link),"%s/link",root);
+    snprintf(nested,sizeof(nested),"%s/link/nested",root);
+    snprintf(file,sizeof(file),"%s/file",root);
+    snprintf(dots,sizeof(dots),"%s/./source",root);
+    struct stat identity; assert(stat(source,&identity)==0);
+    proc_test=1; mount_calls=0;
+    int rootfd=root_open_directory(root); assert(rootfd>=0);
+#define WORKSPACE_CHECK(expression) do { assert(expression); tests++; } while(0)
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,source,identity.st_dev,identity.st_ino)==0 && mount_calls==1);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,source,identity.st_dev,identity.st_ino)==0 && mount_calls==2);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,source,identity.st_dev,identity.st_ino+1)<0 && errno==ESTALE && mount_calls==2);
+    mount_failure=1;
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,source,identity.st_dev,identity.st_ino)<0 && errno==EPERM && mount_calls==3);
+    mount_failure=0; assert(rmdir(target)==0); assert(symlink(source,target)==0);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,source,identity.st_dev,identity.st_ino)<0 && mount_calls==3);
+    assert(unlink(target)==0); int fd=open(target,O_CREAT|O_WRONLY,0600); assert(fd>=0); close(fd);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,source,identity.st_dev,identity.st_ino)<0 && mount_calls==3);
+    assert(unlink(target)==0); assert(symlink(source,link)==0);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,link,identity.st_dev,identity.st_ino)<0 && mount_calls==3);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,nested,identity.st_dev,identity.st_ino)<0 && mount_calls==3);
+    fd=open(file,O_CREAT|O_WRONLY,0600); assert(fd>=0); close(fd);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,file,identity.st_dev,identity.st_ino)<0 && mount_calls==3);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,"relative",identity.st_dev,identity.st_ino)<0 && errno==EINVAL && mount_calls==3);
+    WORKSPACE_CHECK(root_mount_workspace(rootfd,dots,identity.st_dev,identity.st_ino)<0 && errno==EINVAL && mount_calls==3);
+    uint64_t number=0;
+    WORKSPACE_CHECK(root_identity_number("18446744073709551615",&number)==0 && number==UINT64_MAX);
+    WORKSPACE_CHECK(root_identity_number("18446744073709551616",&number)<0 && errno==ERANGE);
+    WORKSPACE_CHECK(root_identity_number("-1",&number)<0 && errno==EINVAL);
+    WORKSPACE_CHECK(root_identity_number("1x",&number)<0 && errno==EINVAL);
+    WORKSPACE_CHECK(root_identity_number("",&number)<0 && errno==EINVAL);
+#undef WORKSPACE_CHECK
+    close(rootfd);
+    assert(unlink(link)==0 && unlink(file)==0 && rmdir(source)==0 && rmdir(root)==0);
+    proc_test=0; return tests;
 }
 int main(void) {
+    int workspace_tests=workspace_mount_faults();
     proc_mount_faults();
     pre_scope_failures();
     strcpy(fake_parent,"/tmp/daiyu-root-scope-test-XXXXXX");
@@ -219,5 +268,5 @@ int main(void) {
     }
     assert(dup2(saved_stdout,STDOUT_FILENO)>=0); close(saved_stdout); close(output[0]);
     assert(rmdir(fake_parent)==0);
-    puts("root_scope_faults: 20 passed"); return 0;
+    printf("root_scope_faults: %d passed\n",20+workspace_tests); return 0;
 }

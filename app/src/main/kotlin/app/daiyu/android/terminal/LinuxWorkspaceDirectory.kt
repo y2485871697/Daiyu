@@ -32,7 +32,6 @@ internal fun LinuxWorkspaceDirectory.validateFor(installation: LinuxInstallation
     require(hostDirectory == hostDirectory.canonicalFile && hostDirectory.isDirectory) { "linux_workspace_host_invalid" }
     if (bindWorkspace) {
         require(guestDirectory == "/workspace") { "linux_workspace_bind_target_invalid" }
-        check(installation.executionMode != LinuxExecutionMode.CHROOT) { "linux_chroot_private_workspace_bind_not_supported" }
         val shell = File(installation.rootfs, "bin/sh").canonicalFile.toPath()
         val target = File(installation.rootfs.canonicalFile, "workspace").toPath()
         require(!shell.startsWith(target)) { "linux_bind_overrides_shell" }

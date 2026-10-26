@@ -39,7 +39,7 @@ internal class TerminalJobPlan(
         require(command.isNotBlank() && command.length <= 32768 && '\u0000' !in command)
         require(String(command.toByteArray(Charsets.UTF_8), Charsets.UTF_8) == command)
         require(!configuration.root)
-        require(mode != "daemon" || launch is TerminalPtyLaunch.Android) { "linux_daemon_not_supported" }
+        require(mode != "daemon" || launch is TerminalPtyLaunch.Android || (launch as? TerminalPtyLaunch.Linux)?.rootScope != null) { "linux_daemon_not_supported" }
         val backend = configuration.linux
         val description = JSONObject().put("conversation", conversationId.value).put("run", runId.value)
             .put("backend", configuration.backend).put("cwd", configuration.workingDirectory?.path)
@@ -48,6 +48,7 @@ internal class TerminalJobPlan(
             .put("linux_environment", JSONObject(backend?.environment?.toSortedMap().orEmpty()))
             .put("guest_cwd", backend?.guestWorkingDirectory)
             .put("mounts", JSONObject(backend?.sharedMounts?.toSortedMap().orEmpty()))
+            .put("root_scope", backend?.rootScope?.binding() ?: JSONObject.NULL)
         val target = MessageDigest.getInstance("SHA-256").digest(description.toString().toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 255) }
         effect = WriteEffect("terminal.job", "start", target, "$mode:" +
@@ -81,6 +82,7 @@ internal class TerminalJobSession private constructor(
     private var closed = false
     private var active = false
     private var attempted = false
+    private var definitelyNotStarted = false
     private var unknown = false
     private var creationUnconfirmed = false
     private var stopPending = 0
@@ -111,7 +113,7 @@ internal class TerminalJobSession private constructor(
         val schema = ToolSchema(emptyList())
         fun tool(name: String, write: Boolean) = object : RegisteredTool {
             override val definition = app.daiyu.android.domain.tools.ToolDefinition(name, 1,
-                if (write) "启动本次精确批准的固定命令job；async/daemon派发后UNKNOWN不重发，凭原job查询。daemon仅Android应用身份、setsid、同app进程。"
+                if (write) "启动本次精确批准的固定命令job；async/daemon派发后UNKNOWN不重发，凭原job查询。daemon支持Android应用身份setsid或chroot独立root scope；仅同app进程保留句柄。"
                 else "读取原job首个16KiB日志及真实状态，不执行、不重放、不猜测退出。",
                 CAPABILITY, if (write) ToolEffect.WRITE else ToolEffect.READ_ONLY, schema)
             override fun prepare(arguments: ToolArguments): PreparedTool = PreparedTool.contextual(
@@ -145,7 +147,7 @@ internal class TerminalJobSession private constructor(
             factoryEntered = true
             val transport = create()
             val late = synchronized(lock) { backend = transport; closed }
-            if (late) { stopTransport(transport); return ExecutionReceipt.NotExecuted("terminal_job_cancelled_before_open") }
+            if (late) { synchronized(lock) { definitelyNotStarted = true }; stopTransport(transport); return ExecutionReceipt.NotExecuted("terminal_job_cancelled_before_open") }
             val opened = transport.execute("terminal_open", JSONObject().put("request_id", "open"))
             if (!opened.optBoolean("ok")) return receipt(opened)
             val raw = transport.execute("terminal_exec", JSONObject().put("request_id", "command")
@@ -153,18 +155,24 @@ internal class TerminalJobSession private constructor(
             synchronized(lock) { job = raw.optString("job_id").takeIf { it.matches(Regex("[a-f0-9-]{36}")) } }
             return receipt(raw)
         } catch (failure: TerminalJobNotStarted) {
+            synchronized(lock) { definitelyNotStarted = true }
             if (failure.cause is InterruptedException) Thread.currentThread().interrupt()
             return ExecutionReceipt.NotExecuted("terminal_job_backend_not_started")
         } catch (failure: Exception) {
             if (failure is InterruptedException) Thread.currentThread().interrupt()
-            synchronized(lock) { if (factoryEntered && backend == null && failure !is TerminalJobNotStarted) creationUnconfirmed = true }
+            synchronized(lock) {
+                if (!factoryEntered) definitelyNotStarted = true
+                else if (backend == null) creationUnconfirmed = true
+            }
             markUnknown()
             return ExecutionReceipt.Unknown("terminal_job_start_unconfirmed_no_resend")
         } finally { synchronized(lock) { active = false } }
     }
     private fun receipt(raw: JSONObject): ExecutionReceipt {
-        if (raw.optString("execution") == "not_executed")
+        if (raw.optString("execution") == "not_executed") {
+            synchronized(lock) { definitelyNotStarted = true }
             return ExecutionReceipt.NotExecuted(raw.optString("error", "terminal_job_not_dispatched"))
+        }
         markUnknown()
         return ExecutionReceipt.Unknown("terminal_job_dispatched_or_unconfirmed:${jobId ?: "no_handle"}")
     }
@@ -232,9 +240,11 @@ internal class TerminalJobSession private constructor(
                 val remaining = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
                 if (remaining <= 0 || !owned.awaitOrdinaryTermination(remaining.coerceAtMost(30000))) return false
             }
-            (plan.launch as? TerminalPtyLaunch.Linux)?.release()
             val daemon = synchronized(lock) { job }
-            if (plan.mode != "daemon" || !attempted) plan.releaseWorkspace()
+            if (plan.mode != "daemon" || synchronized(lock) { !attempted || definitelyNotStarted }) {
+                (plan.launch as? TerminalPtyLaunch.Linux)?.release()
+                plan.releaseWorkspace()
+            }
             else if (daemon != null && owned != null) {
                 val observe = synchronized(lock) {
                     if (workspaceObservationStarted) false else { workspaceObservationStarted = true; true }
@@ -242,6 +252,7 @@ internal class TerminalJobSession private constructor(
                 if (observe) Thread({
                     try {
                         while (!owned.awaitJobTermination(daemon, 30_000)) Thread.sleep(1000)
+                        (plan.launch as? TerminalPtyLaunch.Linux)?.release()
                         plan.releaseWorkspace()
                     } catch (_: Exception) { /* Unconfirmed daemon retains its workspace pin. */ }
                 }, "terminal-daemon-workspace").apply { isDaemon = true; start() }

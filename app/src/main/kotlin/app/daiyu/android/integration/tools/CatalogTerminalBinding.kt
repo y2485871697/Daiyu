@@ -51,7 +51,6 @@ internal sealed interface TerminalPtyLaunch {
         val executionMode get() = if (rootScope == null) app.daiyu.android.terminal.LinuxExecutionMode.PROOT else app.daiyu.android.terminal.LinuxExecutionMode.CHROOT
         internal fun commandConfiguration(): TerminalConfiguration {
             val current = lease.configuration(tempDirectory, hostWorkingDirectory, workspace)
-            check(rootScope == null && current.linux?.rootScope == null) { "linux_chroot_command_jobs_not_supported" }
             return current
         }
         internal fun revalidate() {
@@ -159,7 +158,7 @@ internal class TerminalPtyPlan(
                 val environment = digest(*launch.environment.toSortedMap().flatMap { listOf(it.key, it.value) }.toTypedArray())
                 val root = launch.rootScope
                 if (root == null) digest(argv, environment)
-                else digest("linux-chroot-root-scope-v1", argv, environment, root.rootfs.path, root.su.path)
+                else digest("linux-chroot-root-scope-v2", argv, environment, root.binding().toString())
             }
         }
         val target = digest(conversationId.value, sessionId, runId, environmentId, generation,

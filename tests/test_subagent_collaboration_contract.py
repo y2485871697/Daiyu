@@ -67,6 +67,37 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
                          'assertEquals(0, fixture.opens.get())'):
             self.assertIn(required, test)
 
+    def test_empty_pages_roundtrip_regression_samples_both_buttons_in_one_frame(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/BottomSheetEdgeActivityTest.kt').read_text()
+        name = 'fun testEmptyCollaborationPagesKeepFooterGeometryWhenSwitchingBackAndForth()'
+        self.assertIn(name, source)
+        test = source.split(name, 1)[1].split('fun testAssistantUsageChoiceAndModelEditorShareFloatingInsets()', 1)[0]
+        for required in ('listOf(false, true)', 'listOf(1f, .8f)', 'fontScale = 1.3f',
+                         'for (hasPreset in listOf(false, true))', 'repository.addPreset("空组")',
+                         '"应用子代理组空组"', '"subagent-no-presets"',
+                         'footerFrame("使用当前配置")', 'footerFrame("切换子代理组")', 'repeat(2)',
+                         'assertTrue(repository.snapshot(owner).profiles.isEmpty())',
+                         'assertEquals(preset?.id, repository.snapshot(owner).appliedPresetId)',
+                         'assertEquals(beforeOpen, prefs.all)', 'assertEquals(beforeNavigation, prefs.all)',
+                         'assertEquals(1, dismissals)', 'assertEquals(0, fixture.opens.get())',
+                         'px(48), secondary.height', 'secondary.height, done.height',
+                         'secondary.width, done.width', 'secondary.bottom, done.bottom',
+                         'px(16), surface.bottom - done.bottom', 'px(12), done.left - secondary.right',
+                         'px(16), surface.bottom - footer.bottom', 'footer.bottom, done.bottom',
+                         'node("subagent-collaboration-footer")', 'return listOf(surface, footer, secondary, done)',
+                         'ui.onNodeWithText(secondaryLabel).assertIsEnabled().assertHasClickAction()',
+                         'node("subagent-collaboration-done").assertIsEnabled().assertHasClickAction()',
+                         'awaitNodeWindowFocus(done)', 'body.bottom <= secondary.top'):
+            self.assertIn(required, test)
+        lookup, sample = test.split('val bounds = awaitStableWindowFrame((root as ViewRootForTest).view) {', 1)
+        sample = sample.split('val (surface, body, footer, secondary, done) = bounds', 1)[0]
+        self.assertIn('nodes.forEach { assertSame(root, it.root) }', lookup)
+        self.assertIn('!it.layoutInfo.isPlaced || !it.layoutInfo.coordinates.isAttached', sample)
+        self.assertIn('nodes.map { rawBounds(it) }', sample)
+        self.assertNotIn('fetchSemanticsNode', sample)
+        self.assertNotIn('Thread.sleep', test)
+        self.assertNotIn('SystemClock.sleep', test)
+
     def test_speed_cycles_inline_and_draft_remains_uncommitted(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
         speed = form.split('if (canEditSpeed) SubAgentSettingRow("GPT 速度"', 1)[1].split('SubAgentSettingRow("职责"', 1)[0]

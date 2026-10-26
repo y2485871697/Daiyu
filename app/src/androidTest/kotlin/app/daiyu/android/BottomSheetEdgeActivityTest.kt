@@ -13,6 +13,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.test.*
@@ -280,6 +282,93 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                     assertEquals(before, prefs.all)
                 } finally { prefs.edit().clear().commit() }
             }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testEmptyCollaborationPagesKeepFooterGeometryWhenSwitchingBackAndForth() {
+        fun footerFrame(secondaryLabel: String): List<Rect> {
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithText(secondaryLabel).fetchSemanticsNodes().singleOrNull()
+                    ?.config?.contains(SemanticsProperties.Disabled) == false
+            }
+            val nodes = listOf(node("conversation-agent-sheet"), node("subagent-collaboration-body"),
+                node("subagent-collaboration-footer"),
+                ui.onNodeWithText(secondaryLabel).assertIsEnabled().assertHasClickAction(),
+                node("subagent-collaboration-done").assertIsEnabled().assertHasClickAction())
+                .map { it.assertIsDisplayed().fetchSemanticsNode() }
+            val root = nodes.first().root
+            nodes.forEach { assertSame(root, it.root) }
+            val bounds = awaitStableWindowFrame((root as ViewRootForTest).view) {
+                if (nodes.any { !it.layoutInfo.isPlaced || !it.layoutInfo.coordinates.isAttached }) null
+                else nodes.map { rawBounds(it) }.takeIf { sampled -> sampled.none { it.isEmpty } }
+            }
+            val (surface, body, footer, secondary, done) = bounds
+            fun px(value: Int) = with(nodes.first().layoutInfo.density) { value.dp.toPx() }
+            assertEquals("Both buttons remain 48dp tall", px(48), secondary.height, 1.5f)
+            assertEquals(secondary.height, done.height, 1f)
+            assertEquals("Both buttons remain equally wide", secondary.width, done.width, 1f)
+            assertEquals("Button bottoms align", secondary.bottom, done.bottom, 1f)
+            assertEquals("Footer keeps the original bottom inset", px(16), surface.bottom - done.bottom, 1.5f)
+            assertEquals("Footer container stays pinned at the bottom", px(16), surface.bottom - footer.bottom, 1.5f)
+            assertEquals("Buttons reach the footer bottom", footer.bottom, done.bottom, 1f)
+            assertEquals("Secondary button keeps the left inset", px(20), secondary.left - surface.left, 1.5f)
+            assertEquals("Done button keeps the right inset", px(20), surface.right - done.right, 1.5f)
+            assertEquals("The button gap stays 12dp", px(12), done.left - secondary.right, 1.5f)
+            assertTrue("Only the body scrolls above the buttons", body.bottom <= secondary.top)
+            return listOf(surface, footer, secondary, done)
+        }
+        fun assertSameFooter(expected: List<Rect>, actual: List<Rect>) {
+            expected.zip(actual).forEach { (before, after) ->
+                assertEquals(before.left, after.left, 1f)
+                assertEquals(before.top, after.top, 1f)
+                assertEquals(before.right, after.right, 1f)
+                assertEquals(before.bottom, after.bottom, 1f)
+            }
+        }
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) for (hasPreset in listOf(false, true)) {
+            val prefs = instrumentation.targetContext.getSharedPreferences("collaboration-roundtrip-${UUID.randomUUID()}", 0)
+            try {
+                val repository = ConversationSubAgentPreferences(prefs)
+                val owner = SubAgentConfigKey.Conversation("roundtrip-${UUID.randomUUID()}")
+                repository.createConversation(owner)
+                val preset = if (hasPreset) repository.addPreset("空组") else null
+                val beforeOpen = prefs.all.toMap()
+                show(dark, scale, fontScale = 1.3f) { dismiss ->
+                    ConversationCollaborationDialog(true, owner.value, dismiss, repositoryFactory = { repository })
+                }
+                if (preset == null) awaitUniqueTag("subagent-no-presets")
+                else ui.onNodeWithContentDescription("应用子代理组空组").assertIsDisplayed()
+                awaitDialogEnter(node("conversation-agent-sheet"))
+                val expected = footerFrame("使用当前配置")
+                assertEquals(beforeOpen, prefs.all)
+                if (preset == null) ui.onNodeWithText("使用当前配置").performClick()
+                else ui.onNodeWithContentDescription("应用子代理组空组").performClick()
+                awaitUniqueTag("subagent-collaboration-add-row")
+                assertSameFooter(expected, footerFrame("切换子代理组"))
+                assertTrue(repository.snapshot(owner).profiles.isEmpty())
+                assertEquals(preset?.id, repository.snapshot(owner).appliedPresetId)
+                if (preset == null) assertEquals(beforeOpen, prefs.all)
+                val beforeNavigation = prefs.all.toMap()
+                repeat(2) {
+                    ui.onNodeWithText("切换子代理组").performClick()
+                    assertSameFooter(expected, footerFrame("使用当前配置"))
+                    assertEquals(beforeNavigation, prefs.all)
+                    ui.onNodeWithText("使用当前配置").performClick()
+                    awaitUniqueTag("subagent-collaboration-add-row")
+                    assertSameFooter(expected, footerFrame("切换子代理组"))
+                    assertEquals(beforeNavigation, prefs.all)
+                }
+                val done = node("subagent-collaboration-done")
+                awaitNodeWindowFocus(done)
+                done.assertIsDisplayed().assertIsEnabled().performClick()
+                ui.waitUntil(5_000) {
+                    ui.onAllNodesWithTag("subagent-collaboration-card")
+                        .fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+                }
+                assertEquals(1, dismissals)
+                assertEquals(beforeNavigation, prefs.all)
+            } finally { prefs.edit().clear().commit() }
         }
         assertEquals(0, fixture.opens.get())
     }

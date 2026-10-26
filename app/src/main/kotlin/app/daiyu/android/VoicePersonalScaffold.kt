@@ -22,7 +22,7 @@ import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.settings.SettingsCard
 import app.daiyu.android.ui.screens.settings.SettingsRow
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 
 @Composable
 internal fun VoicePersonalScaffold(
@@ -33,6 +33,7 @@ internal fun VoicePersonalScaffold(
     onSettings: (() -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
+    val colors = assistantPreviewPalette()
     Box(Modifier.fillMaxSize().testTag("voice-account")) {
         MiuixScaffoldPage(title, onBack, compactTitle = true, actions = {
             if (onSettings != null) IconButton(onClick = onSettings, enabled = enabled,
@@ -47,8 +48,8 @@ internal fun VoicePersonalScaffold(
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding()
                 .padding(24.dp).testTag("voice-account-add"),
             minHeight = 56.dp, minWidth = 56.dp, cornerRadius = 18.dp,
-            backgroundColor = MiuixTheme.colorScheme.primary) {
-            DaiyuIcon(DaiyuIcons.Add, "添加声音", tint = MiuixTheme.colorScheme.onPrimary)
+            backgroundColor = colors.primary) {
+            DaiyuIcon(DaiyuIcons.Add, "添加声音", tint = colors.onPrimary)
         }
     }
 }
@@ -67,8 +68,7 @@ internal fun VoicePersonalEmptyPage(isCurrent: () -> Boolean, onConfigure: () ->
             }
         }
     }
-    if (menu) VoiceChoiceDialog("声音设置",
-        listOf("ACCOUNT" to "声音复刻账户", "SYNC" to "同步音色名额"), "",
+    if (menu) VoiceAccountSettingsSheet(
         onSelect = { if (isCurrent() && it == "ACCOUNT") { menu = false; onConfigure() } },
         onDismiss = { menu = false }, isEnabled = { it == "ACCOUNT" && isCurrent() })
 }

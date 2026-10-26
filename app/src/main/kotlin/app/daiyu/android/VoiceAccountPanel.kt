@@ -389,10 +389,10 @@ internal fun VoiceAccountPanel(
             if (notice.isNotBlank()) item { SettingsNote(notice) }
             previewState.error?.let { value -> item { SettingsNote(value, error = true) } }
         }
-        if (menu) VoiceChoiceDialog("声音设置", listOf("ACCOUNT" to "声音复刻账户", "SYNC" to "同步音色名额"), "",
-            onSelect = { navigate(it) }, onDismiss = { menu = false })
-        if (addMenu) VoiceChoiceDialog("添加声音", listOf("CREATE" to "用录音制作声音", "IMPORT" to "导入已有声音"), "",
-            onSelect = { beginFlow(it) }, onDismiss = { addMenu = false })
+        if (menu) VoiceAccountSettingsSheet(
+            onSelect = { navigate(it) }, onDismiss = { menu = false }, isEnabled = { !busy && current() })
+        if (addMenu) VoiceAddSheet(
+            onSelect = { beginFlow(it) }, onDismiss = { addMenu = false }, isEnabled = { !busy && current() })
         if (projectPicker) ChatSelectionSheet("选择项目", onDismiss = { projectPicker = false },
             showCloseButton = false, titleFontSize = 20.sp) {
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {

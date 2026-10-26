@@ -95,7 +95,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertNotIn('ProductionVoiceAccountPage(', empty_route)
         empty = source('VoicePersonalScaffold.kt').split('internal fun VoicePersonalEmptyPage(', 1)[1]
         for marker in ('"我的声音"', '"还没有声音"', '"先配置账户，再添加自己的声音。"',
-                       '"voice-account-configure"', '"声音复刻账户"', '"同步音色名额"',
+                       '"voice-account-configure"', 'VoiceAccountSettingsSheet(',
                        'isEnabled = { it == "ACCOUNT" && isCurrent() }'):
             self.assertIn(marker, empty)
         self.assertNotIn('runtime.', empty)
@@ -107,17 +107,20 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
 
     def test_doubao_add_is_bottom_end_and_home_keeps_settings_menu(self):
         scaffold = source('VoicePersonalScaffold.kt').split('internal fun VoicePersonalEmptyPage(', 1)[0]
-        self.assertIn('MiuixScaffoldPage(title, onBack, actions = {', scaffold)
+        self.assertIn('MiuixScaffoldPage(title, onBack, compactTitle = true, actions = {', scaffold)
         self.assertIn('testTag("voice-account-menu")', scaffold)
         self.assertIn('DaiyuIcon(DaiyuIcons.Settings, "声音设置")', scaffold)
         actions, bottom = scaffold.split('if (onAdd != null) IconButton', 1)
         self.assertNotIn('testTag("voice-account-add")', actions)
         for marker in ('Alignment.BottomEnd', '.navigationBarsPadding()', 'testTag("voice-account-add")',
-                       'minHeight = 56.dp, minWidth = 56.dp', 'MiuixTheme.colorScheme.primary'):
+                       'minHeight = 56.dp, minWidth = 56.dp', 'backgroundColor = colors.primary'):
             self.assertIn(marker, bottom)
         leaf = source('VoiceAccountPanel.kt')
         self.assertIn('VoicePersonalScaffold(title, ::back', leaf)
-        self.assertIn('"CREATE" to "用录音制作声音", "IMPORT" to "导入已有声音"', leaf)
+        self.assertIn('if (addMenu) VoiceAddSheet(', leaf)
+        menu = source('VoicePersonalMenus.kt')
+        self.assertIn('VoiceActionItem("CREATE", "用录音制作声音", DaiyuIcons.Voice)', menu)
+        self.assertIn('VoiceActionItem("IMPORT", "导入已有声音", DaiyuIcons.File)', menu)
         self.assertIn('if (page == "LIST")', leaf)
 
     def test_saved_doubao_account_editor_uses_eye_pill_and_returns_real_new_snapshot(self):

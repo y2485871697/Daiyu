@@ -12,7 +12,7 @@ class ProviderBodyCompactContractTest(unittest.TestCase):
         self.assertIn("minLines = if (multiline && !embedded) 4 else 1", field)
         self.assertIn("singleLine = !multiline", field)
         self.assertIn("maxLines = if (multiline) 8 else 1", field)
-        self.assertIn("Modifier.heightIn(min = 48.dp)", field)
+        self.assertIn(".heightIn(min = 48.dp)", field)
         self.assertNotIn("requiredHeight(", field)
 
     def test_json_keeps_multiline_and_uses_the_embedded_field(self):

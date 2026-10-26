@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.conversation
 
+import androidx.compose.ui.semantics.contentDescription
+
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
 
@@ -63,12 +65,12 @@ internal fun ChildTaskCommandDialog(source: ChildTaskRecord, kind: ChildTaskComm
                 if (risk) Text("重要：旧请求可能已经执行或已计费，即使没有结果或请求停止也不能撤销。新派可能重复执行及产生重复费用；仅本次确认允许新请求。",
                     modifier = Modifier.testTag("child-command-execution-warning"))
                 if (source.status == ChildTaskStatus.NOT_EXECUTED) Text("旧任务明确未执行；本次操作明确派发一个新请求。")
-                OutlinedTextField(profile, { if (!busy && !consumed) profile = it }, label = { Text("已绑定的子模型配置 ID") }, enabled = !busy && !consumed,
+                OutlinedTextField(profile, { if (!busy && !consumed) profile = it }, placeholder = { Text("已绑定的子模型配置 ID") }, enabled = !busy && !consumed,
                     colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                    modifier = Modifier.managedInput(),
+                    modifier = Modifier.managedInput().semantics { contentDescription = "已绑定的子模型配置 ID" },
                 )
-                OutlinedTextField(instruction, { if (!busy && !consumed) instruction = it }, label = { Text("本次指令") }, enabled = !busy && !consumed,
-                    modifier = Modifier.managedInput().testTag("child-command-instruction"),
+                OutlinedTextField(instruction, { if (!busy && !consumed) instruction = it }, placeholder = { Text("本次指令") }, enabled = !busy && !consumed,
+                    modifier = Modifier.managedInput().testTag("child-command-instruction").semantics { contentDescription = "本次指令" },
                     colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
                 )
             }

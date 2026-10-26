@@ -1,5 +1,9 @@
 package app.daiyu.android.ui
 
+import androidx.compose.ui.semantics.semantics
+
+import androidx.compose.ui.semantics.contentDescription
+
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
 
@@ -104,22 +108,22 @@ internal fun GenerationApprovalHost(
                 Text("${if (form.profileId == profile.id) "已选择：" else "选择："}${profile.label} · ${profile.protocol.name}")
             }
         }
-        OutlinedTextField(form.prompt, { edit(form.copy(prompt = it)) }, label = { Text("原始 prompt（不改写）") },
-            modifier = Modifier.managedInput().fillMaxWidth(),
+        OutlinedTextField(form.prompt, { edit(form.copy(prompt = it)) }, placeholder = { Text("原始 prompt") }, supportingText = { Text("不改写") },
+            modifier = Modifier.managedInput().semantics { contentDescription = "原始 prompt（不改写）" }.fillMaxWidth(),
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
         )
-        OutlinedTextField(form.size, { edit(form.copy(size = it)) }, label = { Text("size（原值；当前客户端不支持，非空将阻止确认）") },
-            modifier = Modifier.managedInput().fillMaxWidth(),
+        OutlinedTextField(form.size, { edit(form.copy(size = it)) }, placeholder = { Text("size") }, supportingText = { Text("原值；当前客户端不支持，非空将阻止确认") },
+            modifier = Modifier.managedInput().semantics { contentDescription = "size（原值；当前客户端不支持，非空将阻止确认）" }.fillMaxWidth(),
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
         )
-        OutlinedTextField(form.duration, { edit(form.copy(duration = it)) }, label = { Text("视频 duration（原值；当前不支持）") },
-            modifier = Modifier.managedInput().fillMaxWidth(),
+        OutlinedTextField(form.duration, { edit(form.copy(duration = it)) }, placeholder = { Text("视频 duration") }, supportingText = { Text("原值；当前不支持") },
+            modifier = Modifier.managedInput().semantics { contentDescription = "视频 duration（原值；当前不支持）" }.fillMaxWidth(),
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
         )
-        OutlinedTextField(form.maxPolls, { edit(form.copy(maxPolls = it)) }, label = { Text("maxPolls：0–32，仅轮询原任务，不重发 POST") },
+        OutlinedTextField(form.maxPolls, { edit(form.copy(maxPolls = it)) }, placeholder = { Text("maxPolls") }, supportingText = { Text("0–32，仅轮询原任务，不重发 POST") },
             singleLine = true,
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            modifier = Modifier.managedInput(),
+            modifier = Modifier.managedInput().semantics { contentDescription = "maxPolls：0–32，仅轮询原任务，不重发 POST" },
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onPickReference) { Text("选择原图 / 视频参考图") }

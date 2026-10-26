@@ -167,7 +167,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             ui.onNodeWithContentDescription("返回").assertHasClickAction()
             tagged("assistant-edit-name").scrollToVisible()
             assertType(text(R.string.assistant_editor_title), 18.sp, 26.sp)
-            assertType(text(R.string.assistant_editor_name), 13.sp, 20.sp)
+            tagged("assistant-edit-name").assertContentDescriptionEquals(text(R.string.assistant_editor_name))
             assertType("Visual editor", 14.sp, 21.sp, "assistant-edit-name")
             tagged("assistant-edit-description").assert(SemanticsMatcher.keyIsDefined(SemanticsActions.SetText))
             tagged("assistant-edit-avatar").assertHasClickAction()
@@ -187,7 +187,8 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             assertEquals(36f, dp(toggle.width), .6f)
             assertEquals(22f, dp(toggle.height), .6f)
             tagged("assistant-edit-memory").scrollToVisible().assertIsDisplayed()
-            assertType(text(R.string.assistant_memory_content), 13.sp, 20.sp)
+            tagged("assistant-edit-memory").assertContentDescriptionEquals(text(R.string.assistant_memory_content))
+            assertType("Original memory", 14.sp, 21.sp, "assistant-edit-memory")
             assertEquals(footer, tagged("assistant-sheet-footer").fetchSemanticsNode().boundsInRoot)
             assertEquals(0, writes.get())
             assertEquals(0, saved.get())
@@ -195,6 +196,35 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             assertEquals(1, closed.get())
             assertEquals(0, writes.get())
         }
+    }
+
+    fun testEditorFieldTitlesUseBodySizedPlaceholdersAfterClearingAndDisappearAfterRestoring() {
+        show()
+        for ((tag, titleId, original) in listOf(
+            Triple("assistant-edit-name", R.string.assistant_editor_name, "Visual editor"),
+            Triple("assistant-edit-description", R.string.assistant_description, ""),
+            Triple("assistant-edit-prompt", R.string.assistant_system_prompt, "Original prompt"),
+            Triple("assistant-edit-memory", R.string.assistant_memory_content, "Original memory"),
+        )) {
+            val title = text(titleId)
+            val field = tagged(tag).scrollToVisible().assertContentDescriptionEquals(title)
+            val placeholder = ui.onNode(hasText(title) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+            field.performTextReplacement("")
+            awaitVisualIdle()
+            field.assertEditableText("").assertContentDescriptionEquals(title)
+            placeholder.assertIsDisplayed()
+            val layouts = mutableListOf<TextLayoutResult>()
+            placeholder.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            assertEquals(14.sp, layouts.single().layoutInput.style.fontSize)
+            assertEquals(21.sp, layouts.single().layoutInput.style.lineHeight)
+            field.performTextReplacement("entered")
+            awaitVisualIdle()
+            placeholder.assertDoesNotExist()
+            field.assertEditableText("entered").assertContentDescriptionEquals(title)
+            field.performTextReplacement(original)
+        }
+        assertEquals(0, writes.get())
+        assertEquals(0, saved.get())
     }
 
     private fun assertSwitchThumbGeometry(tag: String, checked: Boolean,

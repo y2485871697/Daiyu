@@ -1,5 +1,9 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.ui.semantics.semantics
+
+import androidx.compose.ui.semantics.contentDescription
+
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,8 +51,8 @@ internal fun SubAgentParallelLimitRow(profile: SubAgentProfile, config: SubAgent
             AlertDialog(onDismissRequest = { open = false }, title = { Text("${profile.name} · 并行上限") },
                 text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("${config.providerName} · ${config.modelDisplayName.ifBlank { config.model }}")
-                    OutlinedTextField(value, { if (currentUsable) value = it }, label = { Text("0 为不限，或输入正整数") },
-                        modifier = Modifier.managedInput().fillMaxWidth(), singleLine = true, isError = number == null, enabled = usable,
+                    OutlinedTextField(value, { if (currentUsable) value = it }, placeholder = { Text("0 为不限，或输入正整数") },
+                        modifier = Modifier.managedInput().fillMaxWidth().semantics { contentDescription = "0 为不限，或输入正整数" }, singleLine = true, isError = number == null, enabled = usable,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
                     )

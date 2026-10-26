@@ -1,5 +1,7 @@
 package app.daiyu.android.ui
 
+import androidx.compose.ui.semantics.contentDescription
+
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
 
@@ -76,37 +78,37 @@ import org.json.JSONObject
             val editable = enabled && preview == null
             when (selected) {
                 PlatformActionKind.ALARM -> {
-                    OutlinedTextField(first, { first = it }, enabled = editable, label = { Text("小时 0–23（本地时间）") },
+                    OutlinedTextField(first, { first = it }, enabled = editable, placeholder = { Text("小时") }, supportingText = { Text("0–23（本地时间）") },
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                        modifier = Modifier.managedInput(),
+                        modifier = Modifier.managedInput().semantics { contentDescription = "小时 0–23（本地时间）" },
                     )
-                    OutlinedTextField(second, { second = it }, enabled = editable, label = { Text("分钟 0–59") },
+                    OutlinedTextField(second, { second = it }, enabled = editable, placeholder = { Text("分钟") }, supportingText = { Text("0–59") },
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                        modifier = Modifier.managedInput(),
+                        modifier = Modifier.managedInput().semantics { contentDescription = "分钟 0–59" },
                     )
-                    OutlinedTextField(label, { label = it }, enabled = editable, label = { Text("闹钟标签") },
+                    OutlinedTextField(label, { label = it }, enabled = editable, placeholder = { Text("闹钟标签") },
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                        modifier = Modifier.managedInput(),
+                        modifier = Modifier.managedInput().semantics { contentDescription = "闹钟标签" },
                     )
                     Text("交给系统默认时钟处理；下一次该时间，无重复日期。提交不等于已设定。")
                 }
                 PlatformActionKind.TIMER -> {
-                    OutlinedTextField(first, { first = it }, enabled = editable, label = { Text("计时秒数 1–86400") },
+                    OutlinedTextField(first, { first = it }, enabled = editable, placeholder = { Text("计时秒数") }, supportingText = { Text("1–86400") },
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                        modifier = Modifier.managedInput(),
+                        modifier = Modifier.managedInput().semantics { contentDescription = "计时秒数 1–86400" },
                     )
-                    OutlinedTextField(label, { label = it }, enabled = editable, label = { Text("计时器标签") },
+                    OutlinedTextField(label, { label = it }, enabled = editable, placeholder = { Text("计时器标签") },
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                        modifier = Modifier.managedInput(),
+                        modifier = Modifier.managedInput().semantics { contentDescription = "计时器标签" },
                     )
                 }
                 PlatformActionKind.VOLUME -> {
                     Row { listOf("music" to "媒体", "alarm" to "闹钟").forEach { (value, title) ->
                         TextButton(enabled = editable, onClick = { stream = value }) { Text(if (stream == value) "已选$title" else title) }
                     } }
-                    OutlinedTextField(first, { first = it }, enabled = editable, label = { Text("绝对音量级数（非百分比；须在设备实际范围内）") },
+                    OutlinedTextField(first, { first = it }, enabled = editable, placeholder = { Text("绝对音量级数") }, supportingText = { Text("非百分比；须在设备实际范围内") },
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                        modifier = Modifier.managedInput(),
+                        modifier = Modifier.managedInput().semantics { contentDescription = "绝对音量级数（非百分比；须在设备实际范围内）" },
                     )
                     Text("只有读回实际级数与批准值相同才确认；不申请勿扰访问，不调整铃声策略。")
                 }

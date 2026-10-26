@@ -163,17 +163,17 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
             self.assertNotIn(removed, chat)
         self.assertIn('daiyuIconColor(icon)', legacy)
 
-    def test_new_form_keeps_sheet_centered_title_and_transparent_floating_labels(self):
+    def test_new_form_keeps_sheet_centered_title_and_transparent_placeholder_fields(self):
         form = (UI / 'subagent/ConversationAgentForm.kt').read_text()
         self.assertIn('ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight))', form)
         self.assertIn('ConversationAgentHandle()', form)
         self.assertIn('textAlign = TextAlign.Center', form)
         field = form.split('@Composable internal fun ConversationAgentField', 1)[1]
-        self.assertIn('Box(Modifier.fillMaxWidth().padding(top = halfLabelHeight, bottom = 8.dp))', field)
-        self.assertIn('.offset(y = -halfLabelHeight)', field)
-        self.assertIn('.onSizeChanged { labelSize = it }', field)
-        self.assertIn('clipOp = ClipOp.Difference', field)
-        self.assertIn('LocalLayoutDirection.current == LayoutDirection.Rtl', field)
+        self.assertIn('Box(Modifier.fillMaxWidth().padding(bottom = 8.dp))', field)
+        self.assertIn('if (value.isEmpty()) Text(label, style = textStyle', field)
+        self.assertIn('.semantics { contentDescription = label }', field)
+        self.assertNotIn('halfLabelHeight', field)
+        self.assertNotIn('labelSize', field)
         self.assertIn('cursorBrush = imeCursorBrush(colors.accent)', field)
         self.assertIn('enabled = enabled, singleLine = true, keyboardOptions = keyboardOptions', field)
         self.assertNotIn('.background(', field)
@@ -210,8 +210,8 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('drawRoundRect(colors.line', field)
         self.assertNotIn('colors.field', field)
         self.assertNotIn('.background(', field)
-        self.assertIn('clipOp = ClipOp.Difference', field)
-        self.assertIn('LocalLayoutDirection.current == LayoutDirection.Rtl', field)
+        self.assertNotIn('clipOp = ClipOp.Difference', field)
+        self.assertIn('textAlign = TextAlign.Start', field)
 
     def test_form_and_footer_use_available_space_not_fixed_footer_budget(self):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
@@ -224,7 +224,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         field = (UI / 'subagent/ConversationAgentForm.kt').read_text()
         self.assertIn('.heightIn(min = 48.dp)', field)
         self.assertNotIn('drawRoundRect(colors.field', field)
-        self.assertIn('clipOp = ClipOp.Difference', field)
+        self.assertNotIn('clipOp = ClipOp.Difference', field)
 
     def test_chat_speed_is_a_compact_tag_without_shrinking_settings_controls(self):
         speed = (UI / 'SubAgentGptSpeedButton.kt').read_text()

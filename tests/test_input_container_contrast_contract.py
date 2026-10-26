@@ -25,7 +25,7 @@ class InputContainerContrastContractTest(unittest.TestCase):
         self.assertNotIn(".background(MiuixTheme.colorScheme.surfaceVariant)", field)
         self.assertIn("minLines = if (multiline && !embedded) 4 else 1", field)
         self.assertIn("maxLines = if (multiline) 8 else 1", field)
-        self.assertIn("Modifier.heightIn(min = 48.dp)", field)
+        self.assertIn(".heightIn(min = 48.dp)", field)
 
     def test_compact_dialogs_share_the_fill_without_changing_input_behaviour(self):
         source = (UI / "components/CompactDialogTextField.kt").read_text()

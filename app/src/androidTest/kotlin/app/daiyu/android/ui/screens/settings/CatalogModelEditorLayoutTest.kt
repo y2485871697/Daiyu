@@ -95,6 +95,27 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         }
     }
 
+    fun testModelFieldTitlesArePlaceholdersAndDoNotFloatAfterTyping() {
+        show(isNew = true, canDelete = false, initial = CatalogModelEdit("", "", ""))
+        open()
+        for ((label, value) in listOf("展示名称" to "新模型", "Model ID" to "placeholder-model", "上下文窗口（tokens）" to "8192")) {
+            val field = revealEditor("settings-field:$label").assertContentDescriptionEquals(label)
+            ui.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+            field.performClick()
+            awaitVisualIdle()
+            ui.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+            field.performTextReplacement(value)
+            awaitVisualIdle()
+            field.assertEditableText(value).assertContentDescriptionEquals(label)
+            ui.onAllNodesWithText(label, useUnmergedTree = true).assertCountEquals(0)
+            field.performTextReplacement("")
+            awaitVisualIdle()
+            ui.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+        }
+        assertEquals(0, saves)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testThreeButtonsAndFieldsShareContentEdgesWithFixedFooter() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(dark, scale, fontScale = 1.3f)

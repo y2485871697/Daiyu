@@ -1,5 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.ui.semantics.semantics
+
+import androidx.compose.ui.semantics.contentDescription
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,8 +16,8 @@ internal fun InlineMessageEdit(actions: ChatScreenActions) {
     Column {
         androidx.compose.material3.OutlinedTextField(
             value = actions.editingMessageText, onValueChange = actions.onMessageEditText,
-            modifier = Modifier.fillMaxWidth().testTag("message-inline-editor"),
-            label = { androidx.compose.material3.Text("编辑消息") },
+            modifier = Modifier.fillMaxWidth().testTag("message-inline-editor").semantics { contentDescription = "编辑消息" },
+            placeholder = { androidx.compose.material3.Text("编辑消息") },
             supportingText = { androidx.compose.material3.Text("保存后将重新生成，并删除后续内容及失效摘要") })
         Row {
             app.daiyu.android.ui.haptics.material.TextButton(onClick = actions.onCancelMessageEdit,

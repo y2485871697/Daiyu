@@ -28,7 +28,7 @@ internal fun etaInputContainerColor(): Color {
     return colors.surfaceContainerHigh
 }
 
-/** Rounded, softly filled form field. Floating labels remain on the top outline. */
+/** Rounded, softly filled form field with an in-field placeholder. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun EtaFormTextField(
@@ -60,7 +60,7 @@ internal fun EtaFormTextField(
                     .semantics { contentDescription = hint },
                 shape = RoundedCornerShape(EtaInputCornerRadius),
                 textStyle = MiuixTheme.textStyles.body1,
-                label = { Text(hint) },
+                placeholder = { Text(hint, style = MiuixTheme.textStyles.body1) },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = container,
                     unfocusedContainerColor = container,
@@ -73,9 +73,9 @@ internal fun EtaFormTextField(
                     focusedBorderColor = colors.primary.copy(alpha = 0.65f),
                     unfocusedBorderColor = colors.outline.copy(alpha = 0.30f),
                     disabledBorderColor = colors.outline.copy(alpha = 0.15f),
-                    focusedLabelColor = colors.primary,
-                    unfocusedLabelColor = colors.onSurfaceVariantSummary,
-                    disabledLabelColor = colors.onSurfaceVariantSummary.copy(alpha = 0.38f),
+                    focusedPlaceholderColor = colors.onSurfaceVariantSummary,
+                    unfocusedPlaceholderColor = colors.onSurfaceVariantSummary,
+                    disabledPlaceholderColor = colors.onSurfaceVariantSummary.copy(alpha = 0.38f),
                 ))
         }
     }

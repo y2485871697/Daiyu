@@ -172,7 +172,6 @@ fun AssistantEditScreen(
                 fieldModifier = Modifier.testTag("assistant-edit-name"))
             AssistantPreviewField(description, { if (session.isActive && !saving) description = it },
                 stringResource(R.string.assistant_description), enabled = !saving,
-                placeholder = stringResource(R.string.assistant_description_placeholder),
                 fieldModifier = Modifier.testTag("assistant-edit-description"))
             AssistantPreviewField(prompt, { if (session.isActive && !saving) prompt = it },
                 stringResource(R.string.assistant_system_prompt), enabled = !saving, singleLine = false,
@@ -224,8 +223,7 @@ fun AssistantEditScreen(
                     if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
                 }, stringResource(R.string.assistant_memory_content), enabled = !saving, singleLine = false,
                     minHeight = 90.dp, maxHeight = 180.dp, bottomSpacing = 0.dp,
-                    fieldModifier = Modifier.testTag("assistant-edit-memory").isolateEditorScroll(scrollIsolation),
-                    placeholder = stringResource(R.string.assistant_memory_placeholder))
+                    fieldModifier = Modifier.testTag("assistant-edit-memory").isolateEditorScroll(scrollIsolation))
                 Text(stringResource(if (memoryEnabled) R.string.assistant_enabled else R.string.assistant_disabled),
                     color = colors.muted, fontSize = (11f * s).sp, lineHeight = (17f * s).sp,
                     modifier = Modifier.padding(start = 2.dp * s, end = 2.dp * s, top = 7.dp * s))

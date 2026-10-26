@@ -42,7 +42,6 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import app.daiyu.android.ui.haptics.miuix.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -219,15 +218,8 @@ internal fun SettingsTextField(
             secretVisible = !secretVisible
         }
     }
-    val labelContent: @Composable () -> Unit = {
-        Text(label, style = if (compact) MiuixTheme.textStyles.body2.copy(fontSize = 12.sp, lineHeight = 16.sp) else MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-    }
     val visibilityButton: @Composable () -> Unit = {
-        if (!compact) TextButton(
-            text = if (secretVisible) "隐藏$secretLabel" else "显示$secretLabel",
-            enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = toggleSecret,
-        ) else app.daiyu.android.ui.haptics.material.IconButton(
+        app.daiyu.android.ui.haptics.material.IconButton(
             enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = toggleSecret,
         ) {
             androidx.compose.material3.Icon(
@@ -258,13 +250,11 @@ internal fun SettingsTextField(
                 keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
                 modifier = Modifier.managedInput().testTag(tag).fillMaxWidth()
                     .focusRequester(focusRequester).onFocusChanged { fieldFocused = it.isFocused }
-                    .then(if (embedded) Modifier.padding(vertical = 12.dp) else Modifier)
-                    .then(if (compact) Modifier else Modifier.clip(RoundedCornerShape(12.dp))
-                        .background(container).padding(14.dp))
+                    .padding(vertical = 12.dp)
                     .semantics { contentDescription = label },
                 decorationBox = { editor ->
                     Box(contentAlignment = Alignment.CenterStart) {
-                        if (value.isEmpty()) Text(hint.ifEmpty { if (embedded) label else "" }, style = MiuixTheme.textStyles.body1,
+                        if (value.isEmpty()) Text(hint.ifEmpty { label }, style = MiuixTheme.textStyles.body1,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                         editor()
                     }
@@ -276,22 +266,17 @@ internal fun SettingsTextField(
             .then(if (embedded) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
             .clip(RoundedCornerShape(16.dp)).background(container)
             .padding(start = if (embedded) 12.dp else 16.dp,
-                end = if (embedded && password) 0.dp else if (embedded) 12.dp else 16.dp,
-                top = if (embedded) 0.dp else 6.dp, bottom = if (embedded) 0.dp else 6.dp)
-            .then(if (embedded) Modifier.heightIn(min = 48.dp) else Modifier), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                if (!embedded) labelContent()
-                field()
-            }
+                end = if (password) 0.dp else if (embedded) 12.dp else 16.dp)
+            .heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { field() }
             if (password) visibilityButton()
         }
     } else {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { labelContent() }
-                if (password) visibilityButton()
-            }
-            field()
+        Row(Modifier.managedInput().testTag("$tag-container").fillMaxWidth().padding(16.dp)
+            .clip(RoundedCornerShape(12.dp)).background(container).heightIn(min = 48.dp)
+            .padding(start = 14.dp, end = if (password) 0.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { field() }
+            if (password) visibilityButton()
         }
     }
 }

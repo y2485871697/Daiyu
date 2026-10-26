@@ -45,8 +45,6 @@ import app.daiyu.android.ui.components.previewGlassBlur
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -217,7 +215,7 @@ internal fun AssistantPreviewField(
     minHeight: Dp = Dp.Unspecified,
     maxHeight: Dp = Dp.Unspecified,
     bottomSpacing: Dp = 13.dp,
-    placeholder: String = label,
+    placeholder: String = "",
     readOnly: Boolean = false,
     labelAction: (@Composable () -> Unit)? = null,
 ) {
@@ -228,15 +226,16 @@ internal fun AssistantPreviewField(
         lineHeight = (21f * s).sp,
         fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default)
     Column(modifier.padding(bottom = bottomSpacing)) {
-        if (labelAction != null) Row(Modifier.fillMaxWidth().padding(bottom = 5.dp * s),
-            horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            labelAction()
+        if (label.isNotBlank()) Row(Modifier.fillMaxWidth().padding(bottom = 5.dp * s),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = colors.text, fontSize = (13f * s).sp, lineHeight = (20f * s).sp,
+                modifier = Modifier.weight(1f))
+            labelAction?.invoke()
         }
         BasicTextField(value, onValueChange, enabled = enabled, readOnly = readOnly,
             singleLine = singleLine, minLines = minLines, maxLines = maxLines,
             textStyle = textStyle, cursorBrush = imeCursorBrush(colors.accent),
             modifier = fieldModifier.managedInput().fillMaxWidth().heightIn(min = minHeight, max = maxHeight).onFocusChanged { focused = it.isFocused }
-                .semantics { contentDescription = label }
                 .clip(RoundedCornerShape(11.dp * s)).background(colors.fieldBackground)
                 .border(1.dp, if (focused) colors.accent else colors.line, RoundedCornerShape(11.dp * s)),
             decorationBox = { innerTextField ->

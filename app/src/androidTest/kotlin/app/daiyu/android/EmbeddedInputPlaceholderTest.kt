@@ -53,7 +53,7 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
                                 Kind.ASSISTANT -> AssistantPreviewField(value, { value = it }, label, enabled = enabled,
                                     fieldModifier = Modifier.testTag(tag(kind)), minHeight = 48.dp)
                                 else -> SettingsTextField(label, value, { value = it }, password = secret,
-                                    compact = kind == Kind.COMPACT || kind == Kind.EMBEDDED,
+                                    compact = kind in listOf(Kind.COMPACT, Kind.EMBEDDED, Kind.MULTILINE),
                                     embedded = kind == Kind.EMBEDDED, multiline = kind == Kind.MULTILINE,
                                     enabled = enabled, tag = tag(kind))
                             }
@@ -74,8 +74,8 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
             placeholder.right <= frame.right + 1f && placeholder.top >= frame.top - 1f && placeholder.bottom <= frame.bottom + 1f)
     }
 
-    fun testSharedFieldsShowTheirTitleOnlyWhileEmptyIncludingFocusedAndWhitespaceValues() {
-        for (kind in Kind.entries) {
+    fun testOnlyInternallyStackedTitlesBecomePlaceholdersIncludingFocusedAndWhitespaceValues() {
+        for (kind in listOf(Kind.COMPACT, Kind.EMBEDDED, Kind.MULTILINE)) {
             show(kind)
             assertPlaceholderInside(kind)
             field(kind).performClick()
@@ -102,7 +102,7 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
 
     fun testDisabledEmptyPlaceholdersRemainInsideTheirFieldAtLargeFontInBothThemesAndDirections() {
         for (dark in listOf(false, true)) for (direction in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
-            for (kind in Kind.entries) {
+            for (kind in listOf(Kind.COMPACT, Kind.EMBEDDED, Kind.MULTILINE)) {
                 show(kind, dark, direction, fontScale = 1.3f, enabled = false)
                 assertPlaceholderInside(kind)
                 field(kind).assertIsNotEnabled().performTouchInput { click() }
@@ -111,6 +111,23 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
                 assertPlaceholderInside(kind)
             }
         }
+    }
+
+    fun testExternalTitlesAndNotchedLabelsRemainVisibleAfterTyping() {
+        for (kind in listOf(Kind.REGULAR, Kind.ETA, Kind.SUBAGENT, Kind.ASSISTANT)) {
+            show(kind)
+            ui.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+            field(kind).performTextReplacement("entered")
+            awaitVisualIdle()
+            field(kind).assertEditableText("entered")
+            val titleBounds = ui.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            if (kind == Kind.REGULAR || kind == Kind.ASSISTANT) {
+                val editorBounds = field(kind).fetchSemanticsNode().boundsInRoot
+                assertTrue("independent title stays outside $kind", titleBounds.bottom <= editorBounds.top + 1f)
+            }
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testPasswordEyesStayInsideAllSettingsVariantsAndKeepSelectionOnToggle() {
@@ -137,7 +154,7 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
         }
     }
 
-    fun testAssistantLabelActionSurvivesEnteredValuesAndAnEmptyLabel() {
+    fun testAssistantExternalTitleAndOriginalLabelActionVisibilityRemainUnchanged() {
         var title by mutableStateOf("动作字段")
         var clicks = 0
         mainThread {
@@ -155,10 +172,10 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
         }
         ui.onNodeWithTag("field-action").assertIsDisplayed().performClick()
         ui.onNodeWithTag("action-field").performTextReplacement("entered")
-        ui.onNodeWithText("动作字段", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithText("动作字段", useUnmergedTree = true).assertIsDisplayed()
         ui.onNodeWithTag("field-action").assertIsDisplayed().performClick()
         mainThread { title = "" }
-        ui.onNodeWithTag("field-action").assertIsDisplayed().performClick()
-        assertEquals(3, clicks)
+        ui.onNodeWithTag("field-action").assertDoesNotExist()
+        assertEquals(2, clicks)
     }
 }

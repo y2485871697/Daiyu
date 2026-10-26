@@ -1,9 +1,5 @@
 package app.daiyu.android.ui
 
-import androidx.compose.ui.semantics.semantics
-
-import androidx.compose.ui.semantics.contentDescription
-
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
 
@@ -69,19 +65,19 @@ internal fun ShizukuApprovalHost(
         }
         if (enabled) {
             Text("普通发送及图片发送不会获得此授权。须先在 Shizuku 设置页明确授权系统访问；此处不会自动请求权限或执行探测命令。")
-            OutlinedTextField(uid, { uid = it }, placeholder = { Text("精确 UID") }, supportingText = { Text("0 或 2000（必选，无默认值）") },
+            OutlinedTextField(uid, { uid = it }, label = { Text("精确 UID：0 或 2000（必选，无默认值）") },
                 enabled = preview == null, singleLine = true,
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                modifier = Modifier.managedInput().semantics { contentDescription = "精确 UID：0 或 2000（必选，无默认值）" },
+                modifier = Modifier.managedInput(),
             )
-            OutlinedTextField(command, { command = it }, placeholder = { Text("本次精确 shell 命令") },
-                enabled = preview == null, modifier = Modifier.managedInput().semantics { contentDescription = "本次精确 shell 命令" }.fillMaxWidth(),
+            OutlinedTextField(command, { command = it }, label = { Text("本次精确 shell 命令") },
+                enabled = preview == null, modifier = Modifier.managedInput().fillMaxWidth(),
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
             )
-            OutlinedTextField(timeout, { timeout = it }, placeholder = { Text("超时毫秒") }, supportingText = { Text("1–120000") },
+            OutlinedTextField(timeout, { timeout = it }, label = { Text("超时毫秒（1–120000）") },
                 enabled = preview == null, singleLine = true,
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                modifier = Modifier.managedInput().semantics { contentDescription = "超时毫秒（1–120000）" },
+                modifier = Modifier.managedInput(),
             )
             Button(enabled = preview == null && text.isNotBlank(), onClick = {
                 val prepared = controller.prepareShizukuSend(conversation, text, command, uid, timeout)

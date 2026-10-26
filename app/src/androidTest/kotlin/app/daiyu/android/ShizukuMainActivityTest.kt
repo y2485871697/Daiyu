@@ -35,9 +35,9 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         if (seedDraft) setDraft(text) else assertDraft(text)
         node("shizuku-text-entry").performClick()
         enableTextApproval()
-        panelNode(hasSetTextAction() and hasContentDescription("精确 UID：0 或 2000（必选，无默认值）")).performTextReplacement("2000")
-        panelNode(hasSetTextAction() and hasContentDescription("本次精确 shell 命令")).performTextReplacement(command)
-        panelNode(hasSetTextAction() and hasContentDescription("超时毫秒（1–120000）")).performTextReplacement("1234")
+        panelNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）")).performTextReplacement("2000")
+        panelNode(hasSetTextAction() and hasText("本次精确 shell 命令")).performTextReplacement(command)
+        panelNode(hasSetTextAction() and hasText("超时毫秒（1–120000）")).performTextReplacement("1234")
     }
 
     private fun preview(seedDraft: Boolean = true): ControllerShizukuPreparation {
@@ -66,9 +66,9 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         setDraft(text)
         node("shizuku-text-entry").assertIsEnabled().performClick()
         assertNull(fixture.controller.shizukuPreparation())
-        ui.onNodeWithContentDescription("本次精确 shell 命令").assertDoesNotExist()
+        ui.onNodeWithText("本次精确 shell 命令").assertDoesNotExist()
         enableTextApproval()
-        panelNode(hasSetTextAction() and hasContentDescription("本次精确 shell 命令")).performTextReplacement(command)
+        panelNode(hasSetTextAction() and hasText("本次精确 shell 命令")).performTextReplacement(command)
         // Even with valid text/command/timeout, no UID was selected.
         panelNode(hasText("预览命令及本次运行") and hasClickAction()).performClick()
         assertNull(fixture.controller.shizukuPreparation())

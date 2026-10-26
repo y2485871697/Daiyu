@@ -190,6 +190,7 @@ internal fun SettingsTextField(
     embedded: Boolean = false,
 ) {
     val container = etaInputContainerColor()
+    val placeholder = hint.ifEmpty { if (compact || embedded) label else "" }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var secretVisible by remember(password) { mutableStateOf(false) }
     var editorValue by remember { mutableStateOf(TextFieldValue(value)) }
@@ -254,7 +255,7 @@ internal fun SettingsTextField(
                     .semantics { contentDescription = label },
                 decorationBox = { editor ->
                     Box(contentAlignment = Alignment.CenterStart) {
-                        if (value.isEmpty()) Text(hint.ifEmpty { label }, style = MiuixTheme.textStyles.body1,
+                        if (value.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, style = MiuixTheme.textStyles.body1,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                         editor()
                     }
@@ -272,11 +273,15 @@ internal fun SettingsTextField(
             if (password) visibilityButton()
         }
     } else {
-        Row(Modifier.managedInput().testTag("$tag-container").fillMaxWidth().padding(16.dp)
-            .clip(RoundedCornerShape(12.dp)).background(container).heightIn(min = 48.dp)
-            .padding(start = 14.dp, end = if (password) 0.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { field() }
-            if (password) visibilityButton()
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            Row(Modifier.managedInput().testTag("$tag-container").fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(container).heightIn(min = 48.dp)
+                .padding(start = 14.dp, end = if (password) 0.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { field() }
+                if (password) visibilityButton()
+            }
         }
     }
 }

@@ -150,8 +150,8 @@ internal fun SkillManagementScreen(
                 if (engineeringUi) Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("从公开 GitHub 仓库安装", color = colors.onSurface)
                     OutlinedTextField(value = controller.url, onValueChange = { controller.url = it },
-                        enabled = !controller.busy, placeholder = { Text("https://github.com/owner/repo") }, singleLine = true,
-                        modifier = Modifier.managedInput().fillMaxWidth().testTag("skills-install-url").semantics { contentDescription = "https://github.com/owner/repo" },
+                        enabled = !controller.busy, label = { Text("https://github.com/owner/repo") }, singleLine = true,
+                        modifier = Modifier.managedInput().fillMaxWidth().testTag("skills-install-url"),
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
                     )
                     SkillActionButton("检查仓库", controller::inspect, primary = true,

@@ -430,7 +430,7 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
                 ui.onNodeWithText("子代理配置").assertIsDisplayed()
                 assertEquals(data.profile, data.repository.snapshot(data.editor.owner).profiles.single())
             }
-            ui.onNodeWithTag("subagent-field:并行上限（0 为不限）").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("并行上限（0 为不限）").scrollToVisible().assertIsDisplayed()
             val windowAfter = windowFrame()
             val after = actions.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             val geometry = "dark=$dark fontScale=$fontScale window=$windowBefore->$windowAfter actions=$actionsBefore->$after"

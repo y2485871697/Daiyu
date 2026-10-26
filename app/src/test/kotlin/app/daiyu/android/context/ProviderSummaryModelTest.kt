@@ -504,6 +504,126 @@ class ProviderSummaryModelTest {
         }.failure)
     }
 
+    private fun codexConfiguration(): SummaryProviderConfiguration {
+        val source = configuration(ProviderProtocol.RESPONSES)
+        val oauth = app.daiyu.android.model.oauth.CodexAuth(java.util.UUID.randomUUID().toString())
+        val settings = source.provider.asModelSettings().copy(
+            endpoint = app.daiyu.android.model.oauth.CodexOAuthProtocol.BASE_URL,
+            responsesPath = "/responses", apiKey = "", oauth = oauth)
+        return source.copy(provider = settings.requestSnapshot())
+    }
+    private fun codexResolver(config: SummaryProviderConfiguration, wire: Connection,
+        deadline: ManualDeadline = ManualDeadline(),
+        headers: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = {
+            assertEquals(config.provider.oauth, it)
+            mapOf("Authorization" to "Bearer synthetic-oauth", "ChatGPT-Account-ID" to "synthetic-account")
+        }) = ProviderSummaryModelResolver({ config }, { url ->
+            assertEquals(app.daiyu.android.model.oauth.CodexOAuthProtocol.BASE_URL + "/responses", url.toString())
+            wire
+        }, deadline, oauthHeaders = headers)
+
+    @Test fun oauthSummaryUsesTheFrozenLoginAndCodexWirePolicyWithoutAnApiKey() {
+        val config = codexConfiguration()
+        var resolutions = 0
+        val wire = Connection(success(ProviderProtocol.RESPONSES))
+        val bound = codexResolver(config, wire, headers = { auth ->
+            resolutions++; assertEquals(config.provider.oauth, auth)
+            mapOf("Authorization" to "Bearer synthetic-oauth", "ChatGPT-Account-ID" to "synthetic-account")
+        }).resolve(binding)!!
+        assertEquals(0, resolutions); assertEquals(0, wire.posts)
+        assertEquals("最终事实摘要", ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()))
+        val body = wire.json()
+        assertEquals(1, resolutions); assertEquals(1, wire.posts)
+        assertEquals("Bearer synthetic-oauth", wire.getRequestProperty("Authorization"))
+        assertEquals("synthetic-account", wire.getRequestProperty("ChatGPT-Account-ID"))
+        assertFalse(body.has("max_output_tokens")); assertFalse(body.getBoolean("store"))
+        assertFalse(body.has("tools")); assertFalse(body.has("tool_choice"))
+        assertTrue(body.getString("instructions").contains("只生成历史摘要"))
+        assertEquals("medium", body.getJSONObject("reasoning").getString("effort"))
+        assertEquals("", config.provider.apiKey)
+        assertTrue(config.provider.batteryEnabled && config.provider.deviceStatusEnabled)
+        assertTrue(wire.disconnected)
+    }
+
+    @Test fun oauthSummaryRejectsOversizedStreamingOrTerminalTextAndDisconnectsWithoutPublishing() {
+        val longText = "中".repeat(100)
+        val terminal = JSONObject().put("type", "message").put("role", "assistant").put("id", "final")
+            .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", longText)))
+        val completed = frames(event("response.completed", "response" to JSONObject().put("status", "completed")
+            .put("output", JSONArray().put(terminal))))
+        val streamed = frames(event("response.output_text.delta", "item_id" to "large", "delta" to longText))
+        for (body in listOf(streamed, completed)) {
+            val wire = Connection(body); val bound = codexResolver(codexConfiguration(), wire).resolve(binding)!!
+            val session = bound.transport.openWithoutTools(request(), bound.startDeadline())
+            val published = mutableListOf<ModelEvent>()
+            try { session.next(emptyList(), published::add); fail("oversized summary accepted") }
+            catch (failure: IllegalArgumentException) { assertTrue(failure.message!!.contains("超过本地预算")) }
+            assertTrue(published.isEmpty()); assertTrue(wire.disconnected); assertEquals(1, wire.posts)
+            try { session.next(emptyList(), published::add); fail("must not retry") } catch (_: IllegalStateException) {}
+            assertEquals(1, wire.posts)
+        }
+    }
+
+    @Test fun oauthSummaryChecksReportedOutputIncludingHiddenReasoningWithoutLosingUsage() {
+        val config = codexConfiguration()
+        val body = success(ProviderProtocol.RESPONSES).replace("\"status\":\"completed\"", "\"usage\":{\"input_tokens\":12,\"output_tokens\":257},\"status\":\"completed\"")
+        val wire = Connection(body); var observed: ModelEvent.Usage? = null
+        val usage = BoundSummaryUsagePort("owner", {}, { observed = it })
+        val bound = codexResolver(config, wire).resolve(binding, usage)!!
+        try { ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()); fail("hidden output exceeded") }
+        catch (_: IllegalArgumentException) {}
+        assertEquals(257L, observed!!.outputTokens); assertTrue(wire.disconnected)
+    }
+
+    @Test fun oauthSummaryCountsTerminalOnlyReasoningAndAuthoritativeBodyTogether() {
+        for (reasoning in listOf("r".repeat(257), "r".repeat(250))) {
+            val output = JSONArray().put(JSONObject().put("type", "reasoning").put("id", "reason")
+                .put("summary", JSONArray().put(JSONObject().put("type", "summary_text").put("text", reasoning))))
+                .put(JSONObject().put("type", "message").put("id", "answer").put("role", "assistant")
+                    .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", "最终事实摘要"))))
+            val wire = Connection(frames(event("response.completed", "response" to JSONObject().put("status", "completed").put("output", output))))
+            val bound = codexResolver(codexConfiguration(), wire).resolve(binding)!!
+            try { ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()); fail("terminal reasoning exceeded") }
+            catch (failure: IllegalArgumentException) { assertTrue(failure.message!!.contains("超过本地预算")) }
+            assertEquals(1, wire.posts); assertTrue(wire.disconnected)
+        }
+    }
+
+    @Test fun oauthSummaryRejectsToolsIncompleteAndEmptyTerminalsWithoutFallbackOrRetry() {
+        for (body in listOf(tool(ProviderProtocol.RESPONSES), partialResponse(),
+            frames(event("response.completed", "response" to JSONObject().put("status", "completed").put("output", JSONArray()))))) {
+            val wire = Connection(body); val bound = codexResolver(codexConfiguration(), wire).resolve(binding)!!
+            try { ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()); fail("invalid summary") }
+            catch (_: Exception) {}
+            assertTrue(wire.disconnected); assertEquals(1, wire.posts)
+        }
+        val wire = Connection("", status = 401)
+        val bound = codexResolver(codexConfiguration(), wire).resolve(binding)!!
+        try { ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()); fail("401 accepted") }
+        catch (failure: ModelRequestException) { assertEquals(ModelFailure.AUTHENTICATION, failure.failure) }
+        assertEquals(1, wire.posts)
+    }
+
+    @Test fun oauthSummaryCancellationWhileResolvingCredentialsNeverConnectsTheModel() {
+        val config = codexConfiguration(); val entered = CountDownLatch(1); val released = CountDownLatch(1)
+        val cancellation = ContextPreparationCancellation(); val failure = AtomicReference<Throwable?>(); var connections = 0
+        val resolver = ProviderSummaryModelResolver({ config }, { connections++; Connection(success(ProviderProtocol.RESPONSES)) },
+            ManualDeadline(), oauthHeaders = { entered.countDown(); assertTrue(released.await(5, TimeUnit.SECONDS)); emptyMap() })
+        val bound = resolver.resolve(binding)!!
+        val thread = Thread { try { ModelContextSummarizer(bound, cancellation).summarize(input()) }
+            catch (caught: Throwable) { failure.set(caught) } }
+        thread.start(); assertTrue(entered.await(5, TimeUnit.SECONDS)); cancellation.cancel(); released.countDown(); thread.join(5000)
+        assertFalse(thread.isAlive); assertTrue(failure.get() is CancellationException); assertEquals(0, connections)
+    }
+
+    @Test fun oauthSummaryDeadlineStillAbortsTheRealSession() {
+        val clock = ManualDeadline(); val wire = Connection(success(ProviderProtocol.RESPONSES), onRead = { clock.expire() })
+        val bound = codexResolver(codexConfiguration(), wire, clock).resolve(binding)!!
+        try { ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()); fail("expired summary") }
+        catch (failure: ModelRequestException) { assertEquals(ModelFailure.TIMEOUT, failure.failure) }
+        assertTrue(wire.disconnected); assertEquals(1, wire.posts)
+    }
+
     private class ManualDeadline : SummaryDeadlineScheduler {
         @Volatile var nowNanos = 0L
         override fun nanoTime(): Long = nowNanos
@@ -571,8 +691,8 @@ class ProviderSummaryModelTest {
         event("message_delta", "delta" to JSONObject().put("stop_reason", reason))) +
             if (terminal) frames(event("message_stop")) else ""
     private fun tool(protocol: ProviderProtocol): String = if (protocol == ProviderProtocol.RESPONSES)
-        frames(event("response.output_item.done", "item" to event("function_call", "call_id" to "call",
-            "name" to "forbidden", "arguments" to "{}")))
+        frames(event("response.completed", "response" to JSONObject().put("status", "completed").put("output", JSONArray().put(
+            event("function_call", "id" to "tool-item", "call_id" to "call", "name" to "forbidden", "arguments" to "{}")))))
     else frames(
         event("message_start", "message" to JSONObject().put("id", "msg").put("role", "assistant").put("content", JSONArray())),
         event("content_block_start", "index" to 0, "content_block" to event("tool_use", "id" to "call", "name" to "forbidden", "input" to JSONObject())),

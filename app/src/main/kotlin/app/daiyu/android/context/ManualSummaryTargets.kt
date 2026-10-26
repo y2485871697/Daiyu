@@ -72,10 +72,10 @@ internal object ManualSummaryTargets {
         return record.settings.applyTo(metadata, record.id)
     }
 
-    private fun forSummary(settings: ModelSettings, requested: ProviderProtocol): ModelSettings {
+    internal fun forSummary(settings: ModelSettings, requested: ProviderProtocol): ModelSettings {
         require(settings.protocol in setOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES,
             ProviderProtocol.MESSAGES)) { "摘要模型尚不支持 ${settings.protocol.wireName}" }
-        val effective = if (settings.protocol == ProviderProtocol.MESSAGES || settings.requestOptions.codex)
+        val effective = if (settings.protocol == ProviderProtocol.MESSAGES || settings.requestOptions.codex || settings.oauth != null)
             settings.protocol else requested
         if (effective == settings.protocol) return settings
         require(effective in selectable)

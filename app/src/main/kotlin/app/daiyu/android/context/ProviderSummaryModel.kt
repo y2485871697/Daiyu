@@ -13,7 +13,7 @@ import javax.net.ssl.HttpsURLConnection
 
 /** One explicit registry entry, independent of the main model. All token counts are supplied by
  * the host for this exact provider/model: no name-based capability or default context window.
- * maxOutputTokens is the wire cap; reasoningReserveTokens is an additional conservative reserve.
+ * maxOutputTokens is the wire cap, or Codex local accepted-text budget; reasoningReserveTokens is an additional conservative reserve.
  * inputBudgetTokens includes the summarizer's complete evidence/instruction envelope.
  * providerOverheadTokens must also cover the native instruction channel and provider framing;
  * the known native instruction byte estimate is enforced, not silently charged to user input. */
@@ -56,6 +56,7 @@ class ProviderSummaryModelResolver internal constructor(
     private val connect: (URL) -> HttpsURLConnection,
     private val deadlines: SummaryDeadlineScheduler,
     private val usagePort: BoundSummaryUsagePort? = null,
+    private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
 ) : SummaryModelResolver {
     constructor(lookup: (SummaryModelBinding) -> SummaryProviderConfiguration?) : this(
         lookup, { it.openConnection() as HttpsURLConnection }, SystemSummaryDeadlines)
@@ -68,11 +69,11 @@ class ProviderSummaryModelResolver internal constructor(
     override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
         val configuration = lookup(binding) ?: return null
         require(configuration.binding == binding) { "摘要模型绑定不匹配；未回退主模型" }
-        val adapter = ProviderSummaryModelPort(configuration, connect, deadlines, usage)
+        val adapter = ProviderSummaryModelPort(configuration, connect, deadlines, usage, oauthHeaders)
         return BoundSummaryModel(binding, adapter, configuration.contextWindowTokens, configuration.inputBudgetTokens,
             startDeadline = { SummaryRequestDeadline(configuration.deadlineMillis, deadlines::nanoTime) },
             displayIdentity = app.daiyu.android.timeline.SummaryModelIdentity(binding.providerId, configuration.apiModel, configuration.provider.protocol.name)).also { bound ->
-                bound.rebind = { fresh -> requireNotNull(ProviderSummaryModelResolver({ configuration }, connect, deadlines).resolve(binding, fresh)) }
+                bound.rebind = { fresh -> requireNotNull(ProviderSummaryModelResolver({ configuration }, connect, deadlines, oauthHeaders = oauthHeaders).resolve(binding, fresh)) }
             }
     }
 }
@@ -105,6 +106,7 @@ internal class ProviderSummaryModelPort(
     private val connect: (URL) -> HttpsURLConnection,
     private val deadlines: SummaryDeadlineScheduler,
     private val usagePort: BoundSummaryUsagePort? = null,
+    private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
 ) : ModelPort, SummaryModelTransport {
     // Legacy direct callers still get a deadline before any adapter preparation.
     override fun open(history: List<Message>): ModelSession = openWithoutTools(history,
@@ -134,20 +136,21 @@ internal class ProviderSummaryModelPort(
             port.claim() // A bound host request/attempt cannot silently open another POST.
         }
         val provider = SummaryProviderFactory.create(configuration.provider, configuration.maxOutputTokens,
-            INSTRUCTIONS) { url ->
+            INSTRUCTIONS, connect = { url ->
             // Provider serialization also consumes preparation time. Never connect after it expires,
             // even if the timer thread is delayed; close a connection returned too late as well.
             deadline.check()
             val connection = connect(url)
             try { deadline.check(); connection }
             catch (failure: Exception) { runCatching { connection.disconnect() }; throw failure }
-        }
+        }, oauthHeaders = oauthHeaders)
         deadline.check()
         val session = app.daiyu.android.model.usage.UsageRecorder.wrap(provider, configuration.provider,
             usagePort?.conversationId ?: frozen.first().conversationId.value).open(frozen, emptyList<ToolDefinition>())
         try {
             deadline.check()
-            return TerminalSession(session, configuration.provider.protocol, deadline, deadlines, usagePort)
+            return TerminalSession(session, configuration.provider.protocol, deadline, deadlines, usagePort,
+                if (configuration.provider.oauth != null) SummaryOutputBudget(configuration.maxOutputTokens) else null)
         } catch (failure: Exception) {
             runCatching { session.cancel() }
             throw failure
@@ -169,6 +172,7 @@ private class TerminalSession(
     private val deadline: SummaryRequestDeadline,
     private val deadlines: SummaryDeadlineScheduler,
     private val usagePort: BoundSummaryUsagePort?,
+    private val outputBudget: SummaryOutputBudget?,
 ) : ModelSession {
     private val started = AtomicBoolean(false)
     private val cancelled = AtomicBoolean(false)
@@ -198,17 +202,20 @@ private class TerminalSession(
             var terminal: List<String>? = null
             delegate.next(emptyList()) { event ->
                 checkLive()
+                if (event is ModelEvent.Usage) usagePort?.observe(event)
+                outputBudget?.observe(event)
                 when (event) {
                     is ModelEvent.ToolReady -> error("摘要模型请求了工具；未执行，保留原文")
                     is ModelEvent.ProtocolOutput -> terminal = event.items.toList()
                     // Usage is not summary prose. An explicitly host-bound port can persist it
                     // under the admitted parent request/attempt, including corrections to null.
-                    is ModelEvent.Usage -> usagePort?.observe(event)
+                    is ModelEvent.Usage -> Unit
                     else -> Unit
                 }
             }
             checkLive()
             val texts = terminalText(terminal ?: throw ModelRequestException(ModelFailure.PROTOCOL))
+            outputBudget?.validateTerminal(texts)
             texts.forEachIndexed { index, text ->
                 checkLive()
                 sink(ModelEvent.TextFinal("summary-$index", text))
@@ -233,6 +240,14 @@ private class TerminalSession(
                     val type = item.getString("type")
                     check(type != "function_call") { "摘要禁止工具" }
                     if (type !in setOf("message", "reasoning")) throw ModelRequestException(ModelFailure.PROTOCOL)
+                    if (type == "reasoning" && outputBudget != null) {
+                        val summary = item.optJSONArray("summary")
+                        val text = if (summary == null) "" else (0 until summary.length()).joinToString("") { index ->
+                            val part = summary.getJSONObject(index)
+                            if (part.optString("type") == "summary_text") part.getString("text") else ""
+                        }
+                        outputBudget.observe(ModelEvent.ReasoningFinal(item.optString("id"), text))
+                    }
                     if (type == "message") {
                         if (item.optString("role") != "assistant" || item.optString("status", "completed") != "completed")
                             throw ModelRequestException(ModelFailure.PROTOCOL)

@@ -48,7 +48,8 @@ internal object CatalogSummaryExecutionPolicy {
 
 internal fun catalogSummaryConfiguration(context: Context, binding: SummaryModelBinding): SummaryProviderConfiguration {
     val target = requireNotNull(CatalogSummaryBindings.decode(binding))
-    return CatalogSummaryExecutionPolicy.configuration(binding, ProviderRepository(context).freezeCatalog(target).settings)
+    return CatalogSummaryExecutionPolicy.configuration(binding,
+        CatalogSummaryExecutionPolicy.summarySettings(ProviderRepository(context).freezeCatalog(target).settings))
 }
 
 internal fun catalogSummaryDescriptor(context: Context, binding: SummaryModelBinding): SummaryProfileDescriptor {
@@ -66,5 +67,5 @@ internal fun catalogSummaryConfiguration(context: Context, expected: SummaryProf
     val frozen = ProviderRepository(context).freezeCatalog(target) { endpoint ->
         if (catalogSummaryDescriptor(expected.binding, endpoint) != expected) throw SummaryProfileChangedException()
     }
-    return CatalogSummaryExecutionPolicy.configuration(expected.binding, frozen.settings)
+    return CatalogSummaryExecutionPolicy.configuration(expected.binding, CatalogSummaryExecutionPolicy.summarySettings(frozen.settings))
 }

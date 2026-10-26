@@ -24,12 +24,13 @@ class ResponsesModel internal constructor(
     private val videoPostApprovalProvider: VideoPostApprovalProvider? = null,
     private val sessionContext: SessionGatewayContext? = null,
     private val backgroundResume: app.daiyu.android.model.reconnect.FrozenResponsesBackground? = null,
+    private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
 ) : ModelPort {
     /** Preserve the assembled model/media/approval context; never bypass its approved open. */
     fun withBackgroundResume(capability: app.daiyu.android.model.reconnect.FrozenResponsesBackground): ResponsesModel {
         capability.requireMatches(settings)
         return ResponsesModel(settings, connect, imageInputSupported, assistantInstructions,
-            videoInputCapability, videoPostApprovalProvider, sessionContext, capability)
+            videoInputCapability, videoPostApprovalProvider, sessionContext, capability, oauthHeaders)
     }
     private fun exposed(session: Session): ModelSession = if (backgroundResume != null) session else object : ModelSession {
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = session.next(outputs, sink)
@@ -49,10 +50,10 @@ class ResponsesModel internal constructor(
     })
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, null, assistantInstructions,
-            sessionContext = sessionContext, backgroundResume = backgroundResume))
+            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions,
-            sessionContext = sessionContext, backgroundResume = backgroundResume))
+            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders))
 
     /** Explicit OpenRouter extension only. Generic ModelPort/ModelFactory paths remain unchanged.
      * Pass the same run-local capability used to freeze videos to this model's constructor.
@@ -62,7 +63,7 @@ class ResponsesModel internal constructor(
     fun open(history: List<Message>, definitions: List<ToolDefinition>, videos: FrozenMessageVideoPlan,
              images: ModelImagePlan? = null): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images,
-            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext, backgroundResume))
+            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext, backgroundResume, oauthHeaders))
 
     private class Session(
         private val settings: ModelSettings,
@@ -77,6 +78,7 @@ class ResponsesModel internal constructor(
         private val videoPostApprovalProvider: VideoPostApprovalProvider? = null,
         private val sessionContext: SessionGatewayContext? = null,
         private val backgroundResume: app.daiyu.android.model.reconnect.FrozenResponsesBackground? = null,
+        private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String>,
     ) : CheckpointedResumableModelSession {
         private var decoder = ResponsesStream.State()
         private var resumeAllowed = false
@@ -191,7 +193,7 @@ class ResponsesModel internal constructor(
         private fun authHeaders(): Map<String, String> {
             settings.validateConnection()
             val result = if (settings.oauth == null) mapOf("Authorization" to "Bearer ${settings.apiKey}")
-            else try { app.daiyu.android.model.oauth.CodexOAuthRuntime.headers(settings.oauth) }
+            else try { oauthHeaders(settings.oauth) }
                 catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
                 catch (_: Exception) { throw ModelRequestException(ModelFailure.AUTHENTICATION) }
             checkCancelled()

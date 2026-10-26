@@ -143,7 +143,7 @@ internal fun ModelSettingsScreen(
                 if (draft.oauth == null) SettingsTextField("API Key", draft.apiKey, { key ->
                     changeDraft(draft.copy(apiKey = key))
                 }, password = true, enabled = enabled, compact = true)
-                else SettingsNote("认证方式：OAuth · OpenAI Codex；令牌在发送前自动刷新。Codex 不支持关闭思考，关闭／默认按 medium 发送；登录失效时请重新添加 OAuth 提供商。自动压缩需选择独立 API Key 摘要模型或明确关闭；Codex 不支持后台断流恢复。")
+                else SettingsNote("认证方式：OAuth · OpenAI Codex；令牌在发送前自动刷新。Codex 不支持关闭思考，关闭／默认按 medium 发送；登录失效时请重新添加 OAuth 提供商。自动压缩可使用当前 OAuth 模型；摘要在本地限长并保留总时限。Codex 不支持后台断流恢复。")
                 if (!speechOnly) ProviderProtocolFields(draft, enabled && draft.oauth == null, changeDraft)
                 if (credentialUnavailable) SettingsNote("密钥失效，请重输", error = true)
                 if (draft.savedProtocol == ProviderProtocol.UNKNOWN) SettingsNote("协议无效，请重选", error = true)

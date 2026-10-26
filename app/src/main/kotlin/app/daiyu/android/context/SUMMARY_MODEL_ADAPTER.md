@@ -9,7 +9,7 @@ wire-name mapping and must exactly match the immutable `ProviderSnapshot.model`.
 The host still owns credential authorization and obtaining the registry entry.
 
 Every `SummaryProviderConfiguration` supplies a known context window, exact input
-budget, wire output cap, additional reasoning reserve, provider/native-instruction
+budget, wire output cap (or Codex local acceptance cap), additional reasoning reserve, provider/native-instruction
 overhead, and total request deadline. The equality checked is:
 
 ```
@@ -25,7 +25,17 @@ against that input budget. No new cut-selection/compression algorithm is introdu
 
 The independent `SummaryProviderFactory` uses the existing `ResponsesModel` and
 `MessagesModel` constructors with copied settings, native `instructions`/`system`,
-and fixed `max_output_tokens`/`max_tokens`. The adapter always calls the explicit
+and fixed `max_output_tokens`/`max_tokens` for API Key providers. Codex OAuth uses the
+same frozen login reference and per-POST credential resolver, with no second API Key;
+its request omits the unsupported `max_output_tokens`. OAuth summaries enforce the
+configured output limit locally: visible prose plus visible reasoning are conservatively
+bounded in UTF-8 bytes, and reported total output tokens are checked when supplied.
+Missing usage stays unknown; encrypted reasoning is not counted as visible prose.
+Exceeding either limit cancels the request and rejects the whole summary, never truncates
+it into an accepted result. This does not impose a server generation or billing cap;
+the existing total deadline and final capacity checks remain in force.
+
+The adapter always calls the explicit
 empty-tool-definition overload. Provider tool flags do not authorize summary tools.
 For the summary request only, custom-body options are restricted to scalar
 `temperature`, `top_p`, and the protocol-validated `service_tier`. Model, output or

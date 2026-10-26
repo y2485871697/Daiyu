@@ -20,6 +20,9 @@ class CatalogSummaryExecutionPolicyTest {
         val snapshot = settings.requestSnapshot()
         val result = CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, 32000)
         assertEquals(snapshot.endpoint, result.provider.endpoint)
+            assertFalse(result.provider.requestOptions.openAiWebSearchEnabled)
+            assertFalse(result.provider.requestOptions.customBody.contains("reasoning"))
+            assertTrue(snapshot.requestOptions.customBody.contains("reasoning"))
         assertEquals(snapshot.protocol, result.provider.protocol)
         assertEquals(snapshot.model, result.provider.model)
         assertEquals(snapshot.apiKey, result.provider.apiKey)
@@ -29,6 +32,23 @@ class CatalogSummaryExecutionPolicyTest {
         val body = org.json.JSONObject(result.provider.requestOptions.customBody)
         assertEquals(setOf("temperature"), body.keys().asSequence().toSet())
         assertTrue(snapshot.requestOptions.customBody.contains("reasoning"))
+    }
+
+    @Test fun oauthChatAndExplicitCatalogSummaryKeepTheSameCredentialReferenceWithoutApiKey() {
+        val auth = app.daiyu.android.model.oauth.CodexAuth(java.util.UUID.randomUUID().toString())
+        val settings = settings().copy(endpoint = app.daiyu.android.model.oauth.CodexOAuthProtocol.BASE_URL,
+            responsesPath = "/responses", apiKey = "", oauth = auth, requestOptions = ProviderRequestOptions(
+                customBody = """{"reasoning":{"effort":"high"},"max_output_tokens":9000}""", openAiWebSearchEnabled = true))
+        val snapshot = settings.requestSnapshot()
+        for (result in listOf(CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, 32000),
+            CatalogSummaryExecutionPolicy.configuration(binding, CatalogSummaryExecutionPolicy.summarySettings(settings)))) {
+            assertEquals(auth, result.provider.oauth); assertEquals("", result.provider.apiKey)
+            assertEquals(snapshot.endpoint, result.provider.endpoint)
+            assertFalse(result.provider.requestOptions.openAiWebSearchEnabled)
+            assertFalse(result.provider.requestOptions.customBody.contains("reasoning"))
+            assertTrue(snapshot.requestOptions.customBody.contains("reasoning"))
+            assertEquals(CatalogSummaryExecutionPolicy.OUTPUT_CAP_TOKENS, result.maxOutputTokens)
+        }
     }
 
     @Test fun defaultSummaryPreservesTheFrozenEffectiveWireModel() {

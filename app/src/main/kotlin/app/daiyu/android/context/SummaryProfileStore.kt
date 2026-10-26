@@ -136,7 +136,7 @@ class SummaryProfileStore internal constructor(
         val metadata = metadata(binding)
         val provider = try { loadModel() }
             catch (_: Exception) { unavailable(SummaryProfileUnavailableReason.CREDENTIAL_UNAVAILABLE) }
-        if (provider.apiKey.isBlank()) unavailable(SummaryProfileUnavailableReason.CREDENTIAL_UNAVAILABLE)
+        if (provider.apiKey.isBlank() && provider.oauth == null) unavailable(SummaryProfileUnavailableReason.CREDENTIAL_UNAVAILABLE)
         if (providerIdentity(provider) != metadata.identity) unavailable(SummaryProfileUnavailableReason.BINDING_MISMATCH)
         metadata.descriptor?.let {
             if (provider.requestEndpoint() != it.endpoint || provider.model != it.apiModel)
@@ -199,7 +199,8 @@ class SummaryProfileStore internal constructor(
 
         private fun unavailable(reason: SummaryProfileUnavailableReason): Nothing = throw SummaryProfileUnavailableException(reason)
         private fun providerIdentity(provider: ModelSettings): String {
-            val canonical = JSONObject().put("endpoint", provider.endpoint).put("model", provider.model)
+            val canonical = JSONObject().apply { provider.oauth?.let { put("oauth-reference", it.id) } }
+                .put("endpoint", provider.endpoint).put("model", provider.model)
                 .put("protocol", provider.protocol.wireName).put("responsesPath", provider.responsesPath)
                 .put("options", provider.requestOptions.encode())
                 .put("battery", provider.batteryEnabled).put("deviceStatus", provider.deviceStatusEnabled).toString()

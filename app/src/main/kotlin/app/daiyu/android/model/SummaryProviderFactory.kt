@@ -17,7 +17,6 @@ internal object SummaryProviderFactory {
 
     private fun validatedCustomBody(snapshot: ProviderSnapshot): JSONObject {
         snapshot.asModelSettings().validate()
-        require(snapshot.oauth == null) { "Codex OAuth 不支持摘要所需的 max_output_tokens 上限，请选择 API Key 摘要模型" }
         require(snapshot.protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)) {
             "摘要模型尚不支持 ${snapshot.protocol.wireName}；仅支持 Responses/Messages/Chat Completions"
         }
@@ -39,17 +38,20 @@ internal object SummaryProviderFactory {
     }
 
     fun create(snapshot: ProviderSnapshot, maxOutputTokens: Int, instructions: String,
-        connect: (URL) -> HttpsURLConnection): ModelPort {
+        oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
+        connect: (URL) -> HttpsURLConnection,
+    ): ModelPort {
         require(maxOutputTokens > 0 && instructions.isNotBlank())
         val body = validatedCustomBody(snapshot)
         val options = snapshot.requestOptions
-        body.put(if (snapshot.protocol == ProviderProtocol.RESPONSES) "max_output_tokens" else "max_tokens",
+        // Codex rejects the wire cap; its summary adapter enforces local output and deadline limits.
+        if (snapshot.oauth == null) body.put(if (snapshot.protocol == ProviderProtocol.RESPONSES) "max_output_tokens" else "max_tokens",
             maxOutputTokens)
         val settings = snapshot.asModelSettings().copy(batteryEnabled = false, deviceStatusEnabled = false,
             requestOptions = options.copy(customBody = body.toString(), openAiWebSearchEnabled = false))
         settings.validate()
         return when (snapshot.protocol) {
-            ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, instructions)
+            ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, instructions, oauthHeaders = oauthHeaders)
             ProviderProtocol.MESSAGES -> MessagesModel(settings, maxOutputTokens, connect, null, instructions)
             ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionModel(settings, connect, instructions, null)
             ProviderProtocol.GEMINI -> throw IllegalArgumentException("摘要模型尚不支持 ${snapshot.protocol.wireName}")

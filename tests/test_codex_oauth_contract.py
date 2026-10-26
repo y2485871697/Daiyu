@@ -31,8 +31,13 @@ class OAuthContract(unittest.TestCase):
  def test_save_pause_lifetime_and_no_stub_oauth(self):
   s=read('ui/screens/settings/ProviderManagementRoute.kt');self.assertIn('newProvider.registration.beginSave()',s);self.assertIn('newProvider.registration.finishSave()',s);self.assertIn('newProvider.registration.registered(added.slotId)',s)
   onpause=s.split('if (event == Lifecycle.Event.ON_PAUSE)',1)[1].split('else if (event == Lifecycle.Event.ON_RESUME)',1)[0];self.assertNotIn('creating?.revoke()',onpause)
- def test_summary_remains_key_only_and_gateway_accepts_oauth(self):
-  self.assertIn('require(snapshot.oauth == null)',read('model/SummaryProviderFactory.kt'))
+ def test_summary_accepts_oauth_and_keeps_api_key_wire_cap(self):
+  s=read('model/SummaryProviderFactory.kt');self.assertNotIn('require(snapshot.oauth == null)',s)
+  self.assertIn('if (snapshot.oauth == null) body.put(',s)
+  self.assertIn('provider.apiKey.isBlank() && provider.oauth == null',read('context/SummaryProfileStore.kt'))
+  self.assertIn('outputBudget?.validateTerminal(texts)',read('context/ProviderSummaryModel.kt'))
+  self.assertIn('settings.requestOptions.codex || settings.oauth != null',read('context/ManualSummaryTargets.kt'))
+  self.assertIn('summarySettings(frozen.settings)',read('context/CatalogSummaryExecutionPolicy.kt'))
   self.assertIn('editing.settings.oauth != null || editing.settings.apiKey.isNotBlank()',read('MainActivity.kt'))
 if __name__ == '__main__':
  unittest.main()

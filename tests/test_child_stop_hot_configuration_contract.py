@@ -42,7 +42,8 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("previous.copy(providerId = current.providerId, modelId = current.modelId",text)
         binding = (APP / "delegation/SavedSubAgentRuntimeBindings.kt").read_text()
         self.assertIn("frozen.acceptsModelHotUpdate(next) && next.parallelLimit(model) == original.parallelLimit",binding)
-        self.assertIn("latestModel(binding.profile.id) else original",binding)
+        self.assertIn("val selected = latestModel(binding.profile.id)",binding)
+        self.assertIn('check(latestConfig() == next) { "child_model_configuration_changed" }',binding)
     def test_history_access_is_registered_independently_of_new_configuration(self):
         text = (APP / "integration/tools/RunChildTaskAccess.kt").read_text()
         for name in ["inspect_child_tasks", "get_child_task", "control_child_task"]: self.assertIn(name,text)
@@ -53,6 +54,12 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertNotIn("enqueue(",text)
         catalog = (APP / "integration/tools/RunCatalogTools.kt").read_text()
         self.assertIn("childTaskAccess?.tools()?.forEach { registry.register(it) }",catalog)
+    def test_runtime_store_forwards_actual_selection_through_owner_guard(self):
+        text = (APP / "storage/SQLiteRuntimeStore.kt").read_text()
+        wrapper = text.split("internal val childTasks: ChildTaskStore = object : ChildTaskStore", 1)[1].split("@Synchronized private fun <T> childAccess", 1)[0]
+        self.assertIn("override fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?)", wrapper)
+        self.assertIn("childAccess { childStore.selected(task, display) }", wrapper)
+
     def test_browser_pause_never_cancels_or_replays_tools(self):
         text = (DOMAIN / "ToolEnabledChildRun.kt").read_text()
         pause = text.split("fun pause(): ChildTaskControlReceipt",1)[1].split("fun resume()",1)[0]

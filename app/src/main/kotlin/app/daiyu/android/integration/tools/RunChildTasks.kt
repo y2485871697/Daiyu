@@ -57,7 +57,8 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
         currentModels?.let { supervisor.configure(binding, it()) } ?: true
     } catch (_: Exception) { false }
 
-    fun command(invocation: ToolInvocation, command: ChildTaskCommand) = supervisor.command(binding, invocation, command)
+    fun command(invocation: ToolInvocation, command: ChildTaskCommand) =
+        supervisor.command(binding, invocation, command, prepareAdmission = ::refreshModels)
 
     fun commandTool(): RegisteredTool = object : RegisteredTool {
         override val definition = ToolDefinition("direct_child_task", 1,

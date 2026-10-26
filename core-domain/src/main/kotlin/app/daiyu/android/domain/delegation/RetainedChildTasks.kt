@@ -226,8 +226,12 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         synchronized(gate) {
             if (closed || task.stopRequested || task.settled) return
             progress[task.initial.owner] = text
-            while (progress.size > maxRetainedTasks) progress.remove(progress.keys.first())
+            while (progress.size > maxRetainedTasks) {
+                val oldest = progress.keys.firstOrNull { tasks[it.childRunId]?.initial?.owner != it } ?: break
+                progress.remove(oldest)
+            }
         }
+        notifyChanged(task.binding)
     }
 
     /** New admissions use the current group; accepted tasks retain their own definitions. */
@@ -261,11 +265,13 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     }
 
     /** Trusted host entry; a sealed binding is never reopened, including for historical sources. */
-    fun command(binding: ChildTaskBinding, invocation: ToolInvocation, command: ChildTaskCommand): ChildTaskCommandReceipt =
-        commandInternal(binding, invocation, command)
+    fun command(binding: ChildTaskBinding, invocation: ToolInvocation, command: ChildTaskCommand,
+        prepareAdmission: () -> Boolean = { true }): ChildTaskCommandReceipt =
+        commandInternal(binding, invocation, command, prepareAdmission = prepareAdmission)
 
     private fun commandInternal(binding: ChildTaskBinding, invocation: ToolInvocation, command: ChildTaskCommand,
-        modelCall: Boolean = false, cancelled: () -> Boolean = { false }): ChildTaskCommandReceipt {
+        modelCall: Boolean = false, cancelled: () -> Boolean = { false },
+        prepareAdmission: () -> Boolean = { true }): ChildTaskCommandReceipt {
         requireBinding(binding)
         val fingerprint = command.fingerprint()
         val request: ChildTaskCommandRequest
@@ -293,6 +299,9 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             synchronized(gate) {
                 if (request.attempted) return request.receipt
                     ?: ChildTaskCommandReceipt.Unconfirmed("child_command_unconfirmed")
+            }
+            if (!prepareAdmission()) return ChildTaskCommandReceipt.Rejected("child_model_configuration_unavailable")
+            synchronized(gate) {
                 val resources = binding.resources ?: return ChildTaskCommandReceipt.Rejected("child_binding_closed")
                 if (closed || !binding.accepting) return ChildTaskCommandReceipt.Rejected("child_binding_closed")
                 if (command.source.owner.conversationId != binding.owner.conversationId.value || command.profileId !in resources.models)
@@ -497,6 +506,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             val task = tasks[owner.childRunId]?.takeIf { it.binding === binding && it.initial.owner == owner }
             if (task == null) return if (binding.recent[owner.childRunId]?.record?.owner == owner)
                 ChildTaskStop.ALREADY_SETTLED else ChildTaskStop.NOT_FOUND
+            if (task.record.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
+                return ChildTaskStop.ALREADY_SETTLED
             binding.pauseGroup?.let { it.members.remove(owner); it.manual.add(owner) }
             task.stopRequested = true
             task.pause.terminate()

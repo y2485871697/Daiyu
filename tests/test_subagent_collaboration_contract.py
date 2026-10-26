@@ -261,7 +261,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         create = binding.split('val original = ChildModelDefinition(', 1)[1]
         self.assertIn('runModel(binding.child)', create)
         self.assertIn('frozen.acceptsModelHotUpdate(next)', create)
-        self.assertIn('latestModel(binding.profile.id) else original', create)
+        self.assertIn('check(latestConfig() == next)', create)
         self.assertNotIn('resolveSavedModel', create)
 
 

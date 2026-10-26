@@ -60,6 +60,87 @@ class ChildTaskHotConfigurationTest {
         val done = CountDownLatch(1); supervisor.closeWhenIdle { done.countDown() }
         assertTrue(done.await(5, TimeUnit.SECONDS))
     }
+    @Test fun acceptedProgressNotifiesBindingBeforeTerminal() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
+        val entered = CountDownLatch(1); val emit = CountDownLatch(1); val emitted = CountDownLatch(1)
+        val release = CountDownLatch(1); val notified = CountDownLatch(1)
+        val active = AtomicReference<ChildRunOwner>()
+        val port = object : ModelPort {
+            override fun open(history: List<Message>): ModelSession = object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    entered.countDown(); check(emit.await(5, TimeUnit.SECONDS))
+                    sink(ModelEvent.TextDelta("text", "partial")); emitted.countDown()
+                    check(release.await(5, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("text", "done"))
+                }
+                override fun cancel() {}
+            }
+        }
+        val binding = supervisor.bind(parent.owner, parent.caps, parent.auth,
+            mapOf("p" to ChildModelDefinition("pool", 1) { port }), onChanged = {
+                active.get()?.let { if (supervisor.progress(it) == "partial") notified.countDown() }
+            })
+        try {
+            val task = (supervisor.submit(binding, parent.context("one"), listOf(ChildModelTask("p", "task"))) as ChildTaskAdmission.Accepted).tasks.single()
+            active.set(task.owner); assertTrue(entered.await(5, TimeUnit.SECONDS)); emit.countDown()
+            assertTrue(emitted.await(5, TimeUnit.SECONDS))
+            assertTrue("accepted progress must publish before terminal", notified.await(1, TimeUnit.SECONDS))
+            assertFalse(supervisor.snapshots(binding).single().settled)
+        } finally { emit.countDown(); release.countDown(); close(supervisor) }
+    }
+
+    @Test fun activeProgressSurvivesSequentialCompletedTaskEviction() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal, maxRetainedTasks = 2); val parent = Parent()
+        val release = CountDownLatch(1); val entered = CountDownLatch(1)
+        val held = object : ModelPort {
+            override fun open(history: List<Message>): ModelSession = object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    sink(ModelEvent.TextDelta("text", "partial")); entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("text", "done"))
+                }
+                override fun cancel() {}
+            }
+        }
+        val opens = AtomicInteger()
+        val binding = supervisor.bind(parent.owner, parent.caps, parent.auth, mapOf(
+            "held" to ChildModelDefinition("held", 1) { held },
+            "other" to ChildModelDefinition("other", 1) { answer(opens, "done") }))
+        try {
+            val task = (supervisor.submit(binding, parent.context("held"), listOf(ChildModelTask("held", "task"))) as ChildTaskAdmission.Accepted).tasks.single()
+            assertTrue(entered.await(5, TimeUnit.SECONDS)); assertEquals("partial", supervisor.progress(task.owner))
+            assertEquals(ChildTaskControlReceipt.PENDING, supervisor.pause(binding, task.owner))
+            repeat(3) { index ->
+                val next = (supervisor.submit(binding, parent.context("other-$index"), listOf(ChildModelTask("other", "task"))) as ChildTaskAdmission.Accepted).tasks.single()
+                await { supervisor.snapshots(binding).any { it.record.owner == next.owner && it.settled } }
+                assertEquals("live progress must not be evicted by completed tasks", "partial", supervisor.progress(task.owner))
+                assertEquals(ChildTaskPauseState.PENDING, supervisor.snapshots(binding).single { it.record.owner == task.owner }.pauseState)
+            }
+            assertEquals(3, opens.get()); assertEquals(4, journal.enqueues.get())
+        } finally { release.countDown(); close(supervisor) }
+    }
+
+    @Test fun stoppingTerminalTaskDoesNotChangeIntentOrReleaseCleanupPin() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
+        val cancelling = CountDownLatch(1); val release = CountDownLatch(1); val cancelled = AtomicInteger()
+        val port = object : ModelPort {
+            override fun open(history: List<Message>): ModelSession = object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { sink(ModelEvent.TextFinal("text", "done")) }
+                override fun cancel() { cancelled.incrementAndGet(); cancelling.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            }
+        }
+        val binding = supervisor.bind(parent.owner, parent.caps, parent.auth, mapOf("p" to ChildModelDefinition("pool", 1) { port }))
+        try {
+            val task = (supervisor.submit(binding, parent.context("one"), listOf(ChildModelTask("p", "task"))) as ChildTaskAdmission.Accepted).tasks.single()
+            assertTrue(cancelling.await(5, TimeUnit.SECONDS))
+            await { supervisor.snapshots(binding).single().record.status == ChildTaskStatus.COMPLETED }
+            assertEquals(ChildTaskStop.ALREADY_SETTLED, supervisor.stop(binding, task.owner))
+            val snapshot = supervisor.snapshots(binding).single()
+            assertFalse(snapshot.stopRequested); assertFalse(snapshot.settled)
+            assertEquals(1, cancelled.get())
+        } finally { release.countDown(); close(supervisor) }
+        assertTrue(supervisor.snapshots(binding).single().settled)
+        assertEquals(1, cancelled.get())
+    }
+
     @Test fun preOpenPauseSwitchesModelAndPoolWithoutReadmittingTask() {
         val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
         val oldOpens = AtomicInteger(); val newOpens = AtomicInteger()
@@ -125,6 +206,69 @@ class ChildTaskHotConfigurationTest {
             assertEquals(1, a.get()); assertEquals(1, b.get()); assertEquals(2, journal.enqueues.get())
         } finally { close(supervisor) }
     }
+    @Test fun continueChoiceAllowsLaterModelChangeWithoutReadmissionOrAnotherPause() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
+        val oldOpens = AtomicInteger(); val newOpens = AtomicInteger()
+        val creating = CountDownLatch(1); val release = CountDownLatch(1)
+        val old = ChildModelDefinition("a", 1) {
+            creating.countDown(); check(release.await(5, TimeUnit.SECONDS)); answer(oldOpens, "old")
+        }
+        val chosen = AtomicReference(old)
+        val dynamic = ChildModelDefinition("a", 1, null, { chosen.get() }, "a") { answer(oldOpens, "old") }
+        val binding = supervisor.bind(parent.owner, parent.caps, parent.auth, mapOf("p" to dynamic))
+        val captured = AtomicReference<ChildTaskPauseGroup>()
+        journal.onStarted = { captured.set(supervisor.pauseGroup(binding)) }
+        val task = (supervisor.submit(binding, parent.context("one"), listOf(ChildModelTask("p", "task"))) as ChildTaskAdmission.Accepted).tasks.single()
+        try {
+            await { supervisor.snapshots(binding).single().pauseState == ChildTaskPauseState.PAUSED }
+            supervisor.finishParent(binding)
+            assertTrue(supervisor.resumeGroup(captured.get()))
+            assertTrue(creating.await(5, TimeUnit.SECONDS))
+            assertEquals(ChildTaskPauseState.ACTIVE, supervisor.snapshots(binding).single().pauseState)
+            chosen.set(ChildModelDefinition("b", 1) { answer(newOpens, "new") })
+            release.countDown()
+            await { supervisor.snapshots(binding).single().settled }
+            assertEquals(task.owner, journal.get(task.owner)?.owner)
+            assertEquals("new", journal.get(task.owner)?.text)
+            assertEquals(0, oldOpens.get()); assertEquals(1, newOpens.get()); assertEquals(1, journal.enqueues.get())
+        } finally { release.countDown(); close(supervisor) }
+    }
+
+    @Test fun continueAfterResumablePauseKeepsTheSentRequestOnItsOriginalTransport() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
+        val entered = CountDownLatch(1); val failRead = CountDownLatch(1)
+        val opens = AtomicInteger(); val nexts = AtomicInteger(); val resumes = AtomicInteger(); val newOpens = AtomicInteger()
+        val port = ModelPort {
+            opens.incrementAndGet()
+            object : ResumableModelSession {
+                override val canResume = true
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    nexts.incrementAndGet(); sink(ModelEvent.TextDelta("text", "partial")); entered.countDown()
+                    check(failRead.await(5, TimeUnit.SECONDS)); throw ModelRequestException(ModelFailure.NETWORK)
+                }
+                override fun resume(sink: (ModelEvent) -> Unit) { resumes.incrementAndGet(); sink(ModelEvent.TextFinal("text", "complete")) }
+                override fun cancel() { failRead.countDown() }
+            }
+        }
+        val chosen = AtomicReference(ChildModelDefinition("a", 1) { port })
+        val dynamic = ChildModelDefinition("a", 1, null, { chosen.get() }, "a") { port }
+        val binding = supervisor.bind(parent.owner, parent.caps, parent.auth, mapOf("p" to dynamic))
+        val task = (supervisor.submit(binding, parent.context("one"), listOf(ChildModelTask("p", "task"))) as ChildTaskAdmission.Accepted).tasks.single()
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS)); await { supervisor.progress(task.owner) == "partial" }
+            val group = supervisor.pauseGroup(binding); supervisor.finishParent(binding)
+            chosen.set(ChildModelDefinition("b", 1) { answer(newOpens, "new") })
+            failRead.countDown()
+            await { supervisor.snapshots(binding).single().pauseState == ChildTaskPauseState.PAUSED }
+            assertEquals("partial", supervisor.progress(task.owner))
+            assertTrue(supervisor.resumeGroup(group))
+            await { supervisor.snapshots(binding).single().settled }
+            assertEquals("complete", journal.get(task.owner)?.text)
+            assertEquals(1, opens.get()); assertEquals(1, nexts.get()); assertEquals(1, resumes.get())
+            assertEquals(0, newOpens.get()); assertEquals(1, journal.enqueues.get())
+        } finally { failRead.countDown(); close(supervisor) }
+    }
+
     @Test fun sentRequestKeepsTransportAndReadableProgressAfterStop() {
         val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val opens = AtomicInteger(); val other = AtomicInteger()

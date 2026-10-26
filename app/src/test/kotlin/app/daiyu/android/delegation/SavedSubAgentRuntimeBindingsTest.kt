@@ -61,6 +61,25 @@ class SavedSubAgentRuntimeBindingsTest {
         assertEquals(child.modelId, captured.last().model)
     }
 
+    @Test fun configurationRaceRejectsBeforeCreatingAnObsoleteModel() {
+        var latest = config.copy(profiles = listOf(profile.copy(modelId = "new-record")))
+        val changed = child.copy(id = "new-record", modelId = "new-api-model")
+        val source = listOf(provider.copy(models = listOf(child, changed)))
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val resolve: (String, String) -> ModelSettings = { _, id ->
+            if (id == changed.id) saved.copy(model = changed.modelId) else saved
+        }
+        val prepared = bindings.freeze(owner, config, source, resolve,
+            latestConfig = { latest }, latestModel = { id ->
+                val selected = bindings.freeze(owner, latest, source, resolve).getValue(id)
+                latest = latest.copy(enabled = false)
+                selected
+            })
+        assertThrows(IllegalStateException::class.java) { prepared.getValue(profile.id).current().create() }
+        assertTrue(captured.isEmpty())
+    }
+
     @Test fun unavailableSelectionsAndMediaRejectBeforeReadingCredentials() {
         var reads = 0
         val bindings = SavedSubAgentRuntimeBindings()

@@ -70,8 +70,11 @@ internal class SavedSubAgentRuntimeBindings(
                 ChildModelDefinition(original.poolKey, original.parallelLimit, display,
                     latest = {
                         val next = latestConfig()
-                        if (frozen.acceptsModelHotUpdate(next) && next.parallelLimit(model) == original.parallelLimit)
-                            latestModel(binding.profile.id) else original
+                        if (frozen.acceptsModelHotUpdate(next) && next.parallelLimit(model) == original.parallelLimit) {
+                            val selected = latestModel(binding.profile.id)
+                            check(latestConfig() == next) { "child_model_configuration_changed" }
+                            selected
+                        } else original
                     }, selection = binding.child) { runModel(binding.child) }
         }
         return FrozenSubAgentModels(definitions, current)

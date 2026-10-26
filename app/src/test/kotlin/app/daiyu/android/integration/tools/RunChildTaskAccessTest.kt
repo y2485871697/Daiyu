@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class RunChildTaskAccessTest {
     private val old = ChildTaskRecord(ChildRunOwner("conversation", "old-parent", "old-group", 2,
-        "child", "child-message"), "old-message", "old-owner", 0, "removed-profile", "input")
+        "child", "child-message"), "old-message", "old-owner", 0, "old-profile", "input")
     private fun caller(conversation: String): RunExecutionOwner {
         var captured: RunExecutionOwner? = null
         val receipts = object : ReceiptBatchToolExecutor {
@@ -39,12 +39,12 @@ class RunChildTaskAccessTest {
         return ToolDispatcher(registry.snapshot(), caps, ToolLedger(InMemoryToolLedgerStore())).dispatchOwned(
             TaskAuthorization("session", owner.runId.value), listOf(ToolInvocation(ToolCallId("call"), name, body)), owner).single().outcome
     }
-    @Test fun newParentCanInspectAndContinueOldPausedTaskWithRemovedProfile() {
+    @Test fun newParentCanInspectAndContinueOldPausedTaskWhenNewConfigurationIsUnavailable() {
         val resumes = AtomicInteger()
         val access = RunChildTaskAccess("conversation", { listOf(old) }, { old.takeIf { row -> row.owner == it } },
             { listOf(RetainedChildTask(old, false, false, false, ChildTaskPauseState.PAUSED)) }, { "progress" },
             { resumes.incrementAndGet(); assertEquals(old.owner, it.owner); ChildTaskControlReceipt.RESUMED },
-            { ChildTaskControlReceipt.PENDING }, { ChildTaskStop.REQUESTED }, { emptySet() })
+            { ChildTaskControlReceipt.PENDING }, { ChildTaskStop.REQUESTED }, { error("configuration unavailable") })
         val owner = caller("conversation")
         val inspected = invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed
         val task = JSONObject(inspected.payload).getJSONArray("tasks").getJSONObject(0)
@@ -67,6 +67,35 @@ class RunChildTaskAccessTest {
         assertEquals("cde", body.getString("text")); assertEquals(5, body.getInt("next_text_offset"))
         assertEquals("rti", body.getString("progress")); assertEquals("COMPLETED", body.getString("status"))
     }
+    @Test fun stoppedTaskKeepsQueryableContentButCannotContinue() {
+        val stopped = old.copy(status = ChildTaskStatus.UNKNOWN, detail = "child_result_unconfirmed")
+        val access = RunChildTaskAccess("conversation", { listOf(stopped) }, { stopped.takeIf { row -> row.owner == it } },
+            { listOf(RetainedChildTask(stopped, true, true, false)) }, { "retained partial" },
+            { ChildTaskControlReceipt.STALE }, { ChildTaskControlReceipt.STALE }, { ChildTaskStop.ALREADY_SETTLED }, { emptySet() })
+        val owner = caller("conversation")
+        val inspected = invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed
+        val task = JSONObject(inspected.payload).getJSONArray("tasks").getJSONObject(0)
+        assertEquals("retained partial", task.getString("progress")); assertTrue(task.getBoolean("stop_requested"))
+        assertTrue(task.getBoolean("settled")); assertTrue(task.getBoolean("live_state_available"))
+        assertTrue(invoke(access, owner, "control_child_task", arguments().toString()) is DispatchOutcome.NotExecuted)
+    }
+
+    @Test fun absentLiveObservationDoesNotClaimTransportDrainOrConfirmedJournal() {
+        val running = old.copy(status = ChildTaskStatus.RUNNING)
+        val access = RunChildTaskAccess("conversation", { listOf(running) }, { running.takeIf { row -> row.owner == it } },
+            { emptyList() }, { "partial" }, { error("must not resume") }, { error("must not pause") }, { error("must not stop") }, { emptySet() })
+        val owner = caller("conversation")
+        val inspected = invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed
+        val task = JSONObject(inspected.payload).getJSONArray("tasks").getJSONObject(0)
+        assertFalse(task.getBoolean("live_state_available")); assertTrue(task.isNull("settled"))
+        assertTrue(task.isNull("stop_requested")); assertTrue(task.isNull("journal_unconfirmed"))
+        val args = arguments().apply { remove("parent_message_id"); remove("parent_owner_id"); remove("expected_revision"); remove("action") }
+        val result = invoke(access, owner, "get_child_task", args.toString()) as DispatchOutcome.Confirmed
+        val body = JSONObject(result.payload)
+        assertFalse(body.getBoolean("live_state_available")); assertTrue(body.isNull("settled")); assertTrue(body.isNull("journal_unconfirmed"))
+        assertEquals("RUNNING", body.getString("status")); assertEquals("partial", body.getString("progress"))
+    }
+
     @Test fun wrongConversationIdentityCapabilityAndStoppedTasksCannotRestart() {
         val resumes = AtomicInteger()
         val access = RunChildTaskAccess("conversation", { listOf(old) }, { old.takeIf { row -> row.owner == it } },

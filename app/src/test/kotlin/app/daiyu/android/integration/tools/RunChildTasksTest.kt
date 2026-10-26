@@ -25,6 +25,22 @@ class RunChildTasksTest {
         @Synchronized override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
             rows[task.owner.childRunId] = task.copy(status = status, text = text, detail = detail)
         }
+        private val commands = linkedMapOf<String, Pair<String, ChildTaskRecord>>()
+        val commandWrites = AtomicInteger()
+        @Synchronized override fun get(owner: ChildRunOwner) = rows[owner.childRunId]?.takeIf { it.owner == owner }
+        @Synchronized override fun commandReceipt(command: ChildTaskCommand): ChildTaskCommandReceipt? = commands[command.callId]?.let {
+            if (it.first == command.fingerprint()) ChildTaskCommandReceipt.Accepted(it.second)
+            else ChildTaskCommandReceipt.Rejected("child_request_conflict")
+        }
+        @Synchronized override fun enqueueCommand(parent: RunExecutionOwner, command: ChildTaskCommand, successor: ChildTaskRecord): ChildTaskCommandReceipt {
+            commandReceipt(command)?.let { return it }
+            val source = get(command.source.owner) ?: return ChildTaskCommandReceipt.Rejected("child_source_stale")
+            command.validateSource(source)?.let { return ChildTaskCommandReceipt.Rejected(it) }
+            rows[source.owner.childRunId] = source.copy(revision = source.revision + 1)
+            rows[successor.owner.childRunId] = successor
+            commandWrites.incrementAndGet(); commands[command.callId] = command.fingerprint() to successor
+            return ChildTaskCommandReceipt.Accepted(successor)
+        }
         @Synchronized override fun list(conversationId: String, limit: Int) = rows.values.filter { it.owner.conversationId == conversationId }.take(limit)
     }
     private val message = Message(MessageId("parent"), ConversationId("conversation"), RunId("run"),
@@ -152,6 +168,38 @@ class RunChildTasksTest {
             assertEquals(ChildTaskControlReceipt.STALE, adapter.resume(child))
             assertEquals(ChildTaskPauseState.ACTIVE, adapter.snapshots().single().pauseState)
         } finally { close(supervisor, model) }
+    }
+
+    @Test fun hostCommandRefreshesNewProfilesAndKeepsDurableReplayWhenConfigurationFails() {
+        val journal = Journal(); val model = Held().apply { release.countDown() }; val oldModel = Held(); val owner = owner()
+        val caps = SessionCapabilities("session", setOf(RunChildTasks.CAPABILITY)); val auth = TaskAuthorization("session", "run")
+        val supervisor = RetainedChildTasks(journal)
+        val original = ChildModelDefinition("pool", 1) { oldModel }
+        val models = mapOf("review" to original, "added" to ChildModelDefinition("added-pool", 1) { model })
+        var unavailable = false; var refreshes = 0
+        val binding = supervisor.bind(owner, caps, auth, mapOf("review" to original))
+        val adapter = RunChildTasks(supervisor, binding, setOf("review"), currentModels = {
+            refreshes++; check(!unavailable); models
+        })
+        val source = ChildTaskRecord(ChildRunOwner("conversation", "run", "source-group", 1, "source", "source-message"),
+            owner.assistantMessageId.value, owner.ownerId, 0, "review", "original")
+        journal.enqueue(owner, listOf(source)); journal.started(source); journal.finished(source, ChildTaskStatus.COMPLETED, "original result")
+        val completed = checkNotNull(journal.get(source.owner))
+        val command = ChildTaskCommand("host-command", completed, ChildTaskCommandKind.APPEND, "added", "extra")
+        val invocation = ToolInvocation(ToolCallId("host-call"), "direct_child_task", "{}")
+        try {
+            val accepted = adapter.command(invocation, command) as ChildTaskCommandReceipt.Accepted
+            assertEquals("added", accepted.task.profileId); assertEquals(1, journal.commandWrites.get())
+            assertEquals(completed.copy(revision = 1), journal.get(source.owner))
+            unavailable = true
+            val beforeReplay = refreshes
+            assertEquals(accepted, adapter.command(invocation, command))
+            assertEquals(beforeReplay, refreshes); assertEquals(1, journal.commandWrites.get())
+            val next = command.copy(callId = "new-command", source = checkNotNull(journal.get(source.owner)))
+            assertEquals(ChildTaskCommandReceipt.Rejected("child_model_configuration_unavailable"), adapter.command(invocation, next))
+            assertEquals(1, journal.commandWrites.get()); assertTrue(model.entered.await(3, TimeUnit.SECONDS))
+        } finally { close(supervisor, model) }
+        assertEquals(1, model.opened.get()); assertEquals(0, oldModel.opened.get())
     }
 
     @Test fun schemaDoesNotExposeToolsWritesOrRecursiveDelegation() {

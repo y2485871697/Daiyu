@@ -61,10 +61,18 @@ class ImmediateConversationContractTest(unittest.TestCase):
     def test_android_regressions_cover_real_entries_recreation_drafts_and_failure(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ImmediateConversationActivityTest.kt').read_text()
         for fragment in ['node("chat-menu:NEW_CHAT").performClick()', 'node("drawer-new").performClick()',
-                         'ConversationDatabase(fixture.application).use', 'recreateActivity(activity)', 'RAISE(IGNORE)',
+                         'val reopened = ConversationDatabase(fixture.application)', 'recreateActivity(activity)', 'RAISE(IGNORE)',
                          'ReasoningEffort.HIGH', 'fixture.database.draft()', 'assertEquals(0, fixture.opens.get())',
                          'testFallbackSelectionDoesNotCreateAConversation']:
             self.assertIn(fragment, test)
+
+    def test_database_reopen_closes_without_newer_sdk_autocloseable_cast(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ImmediateConversationActivityTest.kt').read_text()
+        reopen = test.split('fun testEmptyConversationSurvivesDatabaseReopenAndActivityRecreation()', 1)[1].split('fun testIgnoredCreate', 1)[0]
+        self.assertIn('val reopened = ConversationDatabase(fixture.application)', reopen)
+        self.assertIn('} finally {\n            reopened.close()\n        }', reopen)
+        self.assertLess(reopen.index('reopened.close()'), reopen.index('recreateActivity(activity)'))
+        self.assertNotIn('.use {', reopen)
 
     def test_database_recovery_uses_an_independent_released_fixture(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/storage/ImmediateConversationDatabaseTest.kt').read_text()

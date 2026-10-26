@@ -150,12 +150,16 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
     fun testTouchOwnershipSurvivesResumeAndTemporaryViewportChanges() {
         mount()
         ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
-        val before = top("chat-turn:tail")
         mainThread { owner.registry.currentState = Lifecycle.State.CREATED; viewport = 320.dp }
+        ui.waitForIdle()
+        val before = top("chat-turn:tail")
         mainThread { height += 300.dp }
+        ui.waitForIdle()
+        assertEquals("Stopped growth cannot reclaim a touched reading position", before, top("chat-turn:tail"), 1f)
         mainThread { owner.registry.currentState = Lifecycle.State.RESUMED; viewport = 240.dp }
         ui.waitForIdle()
         assertEquals("Resume cannot reclaim a touched reading position", before, top("chat-turn:tail"), 1f)
+        ui.onNodeWithText("resume tail marker").assertIsNotDisplayed()
         mainThread { request = ChatScrollRequest(2) }
         ui.waitForIdle()
         ui.onNodeWithText("resume tail marker").assertIsDisplayed()

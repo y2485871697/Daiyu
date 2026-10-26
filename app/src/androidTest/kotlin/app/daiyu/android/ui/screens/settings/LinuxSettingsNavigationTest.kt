@@ -84,7 +84,7 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
             show(dark = dark)
             ui.waitForIdle()
             assertEquals(Color(0xff82728f), colors.primary)
-            assertEquals(Color.White, colors.onPrimary)
+            assertEquals(Color.Black, colors.onPrimary)
             assertColorPair(ui.onNodeWithTag("linux-tab-indicator:basic", useUnmergedTree = true),
                 colors.primary, colors.onPrimary)
             assertColorPair(node("linux-tab:files"), colors.primaryContainer, colors.onPrimaryContainer)

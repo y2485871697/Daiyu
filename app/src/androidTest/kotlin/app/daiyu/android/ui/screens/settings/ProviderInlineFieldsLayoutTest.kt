@@ -191,13 +191,13 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
             editor.performTextReplacement("invalid-json")
             assertFalse(draft.bodyFieldsValid)
             editor.assertEditableText("invalid-json")
-            control("model-body-field-add").performScrollTo().assertIsDisplayed()
+            control("model-body-field-add").scrollToVisible().assertIsDisplayed()
             capture("provider-body-invalid-${if (dark) "dark" else "light"}-$fontScale")
-            control("model-body-field-delete:0").performScrollTo().performTouchInput { click() }
-            control("model-body-field-add").performScrollTo().assertIsDisplayed()
+            control("model-body-field-delete:0").scrollToVisible().performTouchInput { click() }
+            control("model-body-field-add").scrollToVisible().assertIsDisplayed()
             assertTrue(draft.bodyFieldsValid)
             control("model-body-field-name:0").assertDoesNotExist()
-            control("model-body-fields").performScrollTo().performClick()
+            control("model-body-fields").scrollToVisible().performClick()
         }
         assertEquals(0, fixture.opens.get())
     }
@@ -228,7 +228,7 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
             mainThread { enabled = true }
             add.performTouchInput { click(androidx.compose.ui.geometry.Offset(width.toFloat() - 12f, center.y)) }
             control("$prefix-name:0").assertIsDisplayed()
-            control("$prefix-delete:0").performScrollTo().performClick()
+            control("$prefix-delete:0").scrollToVisible().performClick()
             control("$prefix-add").assertIsDisplayed()
             control(if (headers) "model-custom-headers" else "model-body-fields").performClick()
         }

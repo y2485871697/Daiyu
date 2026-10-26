@@ -396,7 +396,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(listOf(accentReset), saves); assertEquals(accentReset, state) }
         mainThread { state = original; saves.clear() }
         open("色彩风格")
-        node("appearance-style:neutral").performScrollTo()
+        node("appearance-style:neutral").scrollToVisible()
         node("appearance-style:neutral").assertIsNotSelected()
         node("appearance-color-default").performClick()
         node("appearance-style:neutral").assertIsSelected()

@@ -278,7 +278,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                     assertEquals("Footer has only the original bottom padding", with(surface.layoutInfo.density) { 16.dp.toPx() },
                         surfaceBounds(surface).bottom - initialFooter.bottom, 1.5f)
                     assertTrue("Only the body occupies space above the footer", rawBounds(body).bottom <= initialFooter.top)
-                    if (state == 3) ui.onNodeWithText("Group 19").performScrollTo().assertIsDisplayed()
+                    if (state == 3) ui.onNodeWithText("Group 19").scrollToVisible().assertIsDisplayed()
                     if (state == 5) node("subagent-card-worker-7").scrollToVisible().assertIsDisplayed()
                     assertEquals("Scrolling never moves the footer", initialFooter.bottom,
                         rawBounds(node("subagent-collaboration-footer").fetchSemanticsNode()).bottom, 1f)

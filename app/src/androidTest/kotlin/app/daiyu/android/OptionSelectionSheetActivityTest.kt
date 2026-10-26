@@ -108,7 +108,7 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
         var selected = -1
         mount(options = 40, mode = AppearanceThemeMode.DARK, fontScale = 1.3f,
             selections = selections, onSelect = { selected = it })
-        node("choice:39").performScrollTo().assertIsDisplayed().assertIsNotSelected()
+        node("choice:39").scrollToVisible().assertIsDisplayed().assertIsNotSelected()
         assertEquals(0, selections.get())
         node("choice:39").performClick()
         awaitClosed()

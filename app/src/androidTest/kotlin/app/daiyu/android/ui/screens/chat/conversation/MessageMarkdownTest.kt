@@ -809,12 +809,13 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             assertEquals(first, manager.primaryClip!!.getItemAt(0).text.toString())
         }
-        ui.onAllNodesWithTag("markdown-code-copy", useUnmergedTree = true)[1].performScrollTo().performClick()
+        val secondCopy = ui.onAllNodesWithTag("markdown-code-copy", useUnmergedTree = true)[1]
+        secondCopy.scrollToVisible().performClick()
         mainThread {
             val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             assertEquals(second, manager.primaryClip!!.getItemAt(0).text.toString())
         }
-        ui.onNodeWithContentDescription("已复制代码", useUnmergedTree = true).assertExists()
+        secondCopy.onChild().assertContentDescriptionEquals("已复制代码")
         assertTrue(opened.isEmpty())
     }
 
@@ -945,8 +946,9 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.waitForIdle()
         assertEquals("vertical code scroll stays locked", 0f, verticalOffset(), 1f)
         assertTrue("locked vertical gesture can scroll chat", parent.value > 0)
-        ui.onNodeWithTag("code-scroll-parent", useUnmergedTree = true)
-            .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -100_000f) }
+        kotlinx.coroutines.runBlocking {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { parent.scrollTo(0) }
+        }
         ui.waitForIdle()
         assertEquals(0, parent.value)
         ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).performClick()

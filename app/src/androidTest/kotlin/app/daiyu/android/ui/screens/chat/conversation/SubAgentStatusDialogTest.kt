@@ -85,7 +85,7 @@ class SubAgentStatusDialogTest : WiredActivityTestCase() {
             ui.onNodeWithTag("subagent-status-list").performScrollToIndex(rows.lastIndex)
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
-            ui.onNodeWithTag("subagent-status:task-39").performScrollTo().assertIsDisplayed()
+            ui.onNodeWithTag("subagent-status:task-39").scrollToVisible().assertIsDisplayed()
             ui.onNodeWithText("冻结模型 39").assertDoesNotExist()
             ui.onNodeWithTag("subagent-status:task-39").performClick()
             ui.onNodeWithText("冻结模型 39").scrollToVisible().assertIsDisplayed()

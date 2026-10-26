@@ -294,15 +294,34 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
             val openingHeight = card.getUnclippedBoundsInRoot().height
             assertTrue(openingHeight > collapsedHeight + 1.dp)
             ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
-            ui.mainClock.advanceTimeBy(32)
-            val reversedHeight = card.getUnclippedBoundsInRoot().height
-            assertTrue(reversedHeight > collapsedHeight + 1.dp)
-            assertTrue(reversedHeight <= openingHeight + 1.dp)
+            val closingFrames = mutableListOf(openingHeight)
+            var reversedHeight = openingHeight
+            var reversed = false
+            repeat(12) {
+                if (!reversed) {
+                    ui.mainClock.advanceTimeByFrame()
+                    val current = card.getUnclippedBoundsInRoot().height
+                    closingFrames += current
+                    reversed = current < reversedHeight - 1.dp && current > collapsedHeight + 1.dp
+                    reversedHeight = current
+                }
+            }
+            assertTrue("Closing must reverse before reaching the collapsed endpoint: $closingFrames", reversed)
             ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
             mainThread { reported = listOf(ReportedReasoning("r", "updated line\nsecond line\nthird line")) }
-            ui.mainClock.advanceTimeBy(32)
-            val reopeningHeight = card.getUnclippedBoundsInRoot().height
-            assertTrue(reopeningHeight >= reversedHeight - 1.dp)
+            val reopeningFrames = mutableListOf(reversedHeight)
+            var reopeningHeight = reversedHeight
+            var reopened = false
+            repeat(12) {
+                if (!reopened) {
+                    ui.mainClock.advanceTimeByFrame()
+                    val current = card.getUnclippedBoundsInRoot().height
+                    reopeningFrames += current
+                    reopened = current > reopeningHeight + 1.dp
+                    reopeningHeight = current
+                }
+            }
+            assertTrue("Opening must reverse continuously from its current frame: $reopeningFrames", reopened)
             ui.mainClock.advanceTimeBy(300)
             ui.onNodeWithText("updated line\nsecond line\nthird line").assertIsDisplayed()
             ui.onNodeWithText("first line\nsecond line\nthird line").assertDoesNotExist()

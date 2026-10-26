@@ -74,9 +74,12 @@ class ImmediateConversationActivityTest : WiredActivityTestCase() {
     fun testEmptyConversationSurvivesDatabaseReopenAndActivityRecreation() {
         mainThread { activity.createNewConversation() }
         val created = assertEmptySelected()
-        ConversationDatabase(fixture.application).use { reopened ->
+        val reopened = ConversationDatabase(fixture.application)
+        try {
             assertEquals(created.id, reopened.conversations().single().id)
             assertTrue(reopened.messages(created.id).isEmpty())
+        } finally {
+            reopened.close()
         }
         activity = recreateActivity(activity)
         awaitControl("empty owner restored") { selectedConversation()?.id == created.id }

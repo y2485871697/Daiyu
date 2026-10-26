@@ -60,6 +60,19 @@ enum class ChatMenuAction {
 
 private data class MenuEntry(val title: String, val icon: ImageVector, val action: ChatMenuAction)
 
+internal fun chatOverflowIconColor(action: ChatMenuAction, dark: Boolean, accent: Color): Color = when (action) {
+    ChatMenuAction.NEW_CHAT -> if (dark) Color(0xFF9ABCEB) else Color(0xFF5F85B4)
+    ChatMenuAction.SEARCH -> if (dark) Color(0xFFB2BBEF) else Color(0xFF747CB3)
+    ChatMenuAction.INTERACTIVE_MODE -> if (dark) Color(0xFFDFA9C1) else Color(0xFFAD728E)
+    ChatMenuAction.OPEN_TERMINAL -> if (dark) Color(0xFF80B3B1) else Color(0xFF568E90)
+    ChatMenuAction.OPEN_BROWSER -> if (dark) Color(0xFF8CC7DF) else Color(0xFF4A819C)
+    ChatMenuAction.OPEN_WORKSPACE -> if (dark) Color(0xFFC5A778) else Color(0xFF9D7845)
+    ChatMenuAction.CONTEXT_STATS -> if (dark) Color(0xFF9BC8AA) else Color(0xFF567E62)
+    ChatMenuAction.COMPRESS_CONTEXT -> if (dark) Color(0xFFDBAE8A) else Color(0xFFA46D49)
+    ChatMenuAction.AUTO_COMPRESS -> if (dark) Color(0xFF8ACBC1) else Color(0xFF47857A)
+    else -> accent
+}
+
 @Composable
 internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
@@ -123,11 +136,9 @@ private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (Cha
         }
         .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        Icon(entry.icon, null, Modifier.size(17.dp), tint = (if (!previewStyle) daiyuIconColor(entry.icon) else when (entry.action) {
-            ChatMenuAction.OPEN_TERMINAL -> if (dark) Color(0xFF80B3B1) else Color(0xFF568E90)
-            ChatMenuAction.OPEN_WORKSPACE -> if (dark) Color(0xFFC5A778) else Color(0xFFB08D59)
-            else -> colors.accent
-        }).copy(alpha = if (enabled) .9f else .38f))
+        Icon(entry.icon, null, Modifier.size(17.dp), tint = (if (previewStyle)
+            chatOverflowIconColor(entry.action, dark, colors.accent) else daiyuIconColor(entry.icon))
+            .copy(alpha = if (enabled) .9f else .38f))
         Text(entry.title, Modifier.weight(1f), maxLines = 1,
             style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp),
             color = (if (previewStyle) colors.text else scheme.onSurface).copy(alpha = if (enabled) 1f else .38f))

@@ -56,7 +56,20 @@ TAB_CHIP_ORIGINAL_PADDING = '.padding(start = 10.dp, end = if (showClose) 6.dp e
 
 
 def approved_original_ui_source(path, source):
+    if path == 'ui/chat/StandardChatSheet.kt':
+        return source.replace('        sheetGesturesEnabled = false,\n', '', 1)
     if path == 'ui/browser/BrowserSheet.kt':
+        # Compare the unchanged drawing against the frozen original, not its removed gesture guard.
+        before, marker, web = source.partition('// ── WebView + overlays ──')
+        if '.nestedScroll(webViewScrollGuard)' not in web:
+            web = web.replace('.fillMaxWidth(),', '.fillMaxWidth()\n                    .nestedScroll(webViewScrollGuard),', 1)
+        source = before + marker + web
+        for name in ('androidx.compose.ui.geometry.Offset',
+                     'androidx.compose.ui.input.nestedscroll.NestedScrollConnection',
+                     'androidx.compose.ui.input.nestedscroll.NestedScrollSource',
+                     'androidx.compose.ui.input.nestedscroll.nestedScroll'):
+            if 'import ' + name + '\n' not in source:
+                source = 'import ' + name + '\n' + source
         prefix, marker, chip = source.partition('private fun TabChip(')
         chip = chip.replace(TAB_CHIP_STABLE_CLOSE, TAB_CHIP_ORIGINAL_CLOSE, 1)
         chip = chip.replace(TAB_CHIP_STABLE_PADDING, TAB_CHIP_ORIGINAL_PADDING, 1)
@@ -262,6 +275,17 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
                 contract = body_contract if expected['mode'] == 'body' else render_contract
                 self.assertEqual(expected['contract_sha256'], digest(contract(source)), 'original UI contract changed: ' + path)
                 self.assertEqual(expected['imports_sha256'], digest(imports_contract(source)), 'non-approved UI import: ' + path)
+
+    def test_browser_gesture_adaptation_does_not_hide_drawing_changes(self):
+        for path, old, new in [
+            ('ui/chat/StandardChatSheet.kt', 'height(sheetHeight)', 'height(100.dp)'),
+            ('ui/browser/BrowserSheet.kt', '.weight(1f)\n                    .fillMaxWidth(),',
+             '.weight(2f)\n                    .fillMaxWidth(),')]:
+            source = (PORT / path).read_text()
+            self.assertIn(old, source)
+            contract = body_contract if self.baseline['files'][path]['mode'] == 'body' else render_contract
+            self.assertNotEqual(contract(approved_original_ui_source(path, source)),
+                                contract(approved_original_ui_source(path, source.replace(old, new, 1))))
 
     def test_history_locale_uses_only_the_approved_observable_adaptation(self):
         source = (PORT / HISTORY_PATH).read_text()

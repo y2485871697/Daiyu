@@ -4999,7 +4999,12 @@ class MainActivity : ComponentActivity() {
         controller.attachCommandApprovalUi(commandApprovalUi)
         legacyLaunchersReady = true
         // ActivityResult can arrive before RESUMED. Do not open a provider until then.
+        val browserTarget = browserResumeTarget
+        val browserEpoch = browserVisualEpoch
         window.decorView.post {
+            if (browserTarget != null && browserTarget.owner == null) {
+                resumeBrowserVisualPage(browserTarget, browserEpoch)
+            }
             if (generationResumed() && generationInputsDelegate.isInitialized()) generationInputs.resume()
             presentBackupImportResult()
             settleChatReference()

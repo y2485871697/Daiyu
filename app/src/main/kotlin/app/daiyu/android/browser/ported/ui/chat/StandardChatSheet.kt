@@ -68,6 +68,7 @@ fun StandardChatSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        sheetGesturesEnabled = false,
         containerColor = ChatColors.background,
         dragHandle = { CompactDragHandle() },
     ) {

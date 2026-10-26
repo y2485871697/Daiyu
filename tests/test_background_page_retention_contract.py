@@ -115,7 +115,7 @@ class HostBackgroundRetentionContractTest(unittest.TestCase):
                        'openContextManagement(', 'confirmCompression('):
             self.assertNotIn(action, resume)
 
-    def test_paused_browser_requires_a_fresh_click_and_exact_original_target(self):
+    def test_task_browser_requires_a_fresh_click_and_exact_original_target(self):
         main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         body = main.split('private fun resumeBrowserVisualPage(', 1)[1].split('private fun resumeContextManagementPage(', 1)[0]
         for guard in ('browserResumeTarget !== target', 'epoch != browserVisualEpoch',
@@ -128,7 +128,7 @@ class HostBackgroundRetentionContractTest(unittest.TestCase):
         self.assertIn('Modifier.testTag("browser-resume")', main)
         self.assertIn('if (original != null) key(original)', main)
         tests = (ANDROID / 'BrowserPageLifecycleActivityTest.kt').read_text()
-        self.assertIn('fun testPauseRetainsBrowserRouteAndOnlyFreshContinueReopensVisit()', tests)
+        self.assertIn('fun testTaskTargetDoesNotAutoReconnectOrFallBackToHuman()', tests)
         self.assertIn('oldContinue(); assertNull(visit())', tests)
 
     def test_context_continue_rechecks_epoch_editor_and_conversation(self):

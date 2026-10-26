@@ -68,11 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -135,16 +131,6 @@ internal fun BrowserSheet(
     // defensive fallback.
     LaunchedEffect(Unit) {
         tabPool.ensureTabForUI()
-    }
-
-    // Prevent the bottom sheet from swallowing WebView scroll gestures.
-    // Returning the full delta as "consumed" on pre-scroll keeps the sheet's
-    // nested-scroll dispatcher from dragging the sheet down when the user
-    // scrolls inside a webpage.
-    val webViewScrollGuard = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = available
-        }
     }
 
     StandardChatSheet(
@@ -314,8 +300,7 @@ internal fun BrowserSheet(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .nestedScroll(webViewScrollGuard),
+                    .fillMaxWidth(),
             ) {
                 if (selectedTab != null && tabPool.visit != null) {
                     androidx.compose.runtime.key(tabPool.visit, selectedTab.id) {

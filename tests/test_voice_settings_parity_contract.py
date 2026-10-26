@@ -176,6 +176,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertNotIn('SettingsRow("保存参考声音"', panel)
         self.assertNotIn('runtime.saveAccount', button)
         self.assertNotIn('remote.', button)
+        self.assertIn('SettingsNote("支持 MP3 / WAV，参考录音不超过 7.5 MB。")', panel)
 
     def test_speech_and_account_tickets_recheck_configuration_before_loading_credentials(self):
         text = source('ui/screens/settings/SettingsModelSource.kt')

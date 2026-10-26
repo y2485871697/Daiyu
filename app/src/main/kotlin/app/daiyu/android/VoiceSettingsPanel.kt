@@ -369,7 +369,7 @@ internal fun VoiceSettingsPanel(
                                 }
                             })
                         }; SettingsTextField("试听文字", sampleText, { sampleText = it.take(300) }, multiline = true)
-                        SettingsNote("支持 MP3 / WAV，参考录音不超过 7.5 MB。导入仅保存在本机；试听与朗读时，会在单次确认后把参考录音和文字发送到所选 MiMo 提供商。") }
+                        SettingsNote("支持 MP3 / WAV，参考录音不超过 7.5 MB。") }
                         items(voices.size, key = { voices[it].id }) { index ->
                             val voice = voices[index]
                             VoiceSettingsCard {

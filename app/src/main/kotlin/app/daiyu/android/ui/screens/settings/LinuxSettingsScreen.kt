@@ -173,8 +173,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                                             } else message = "选项未保存，请重试。"
                                         }
                                     })
-                                } else LinuxInstallAction(displayedInstallation, page, mode, distribution, enabled,
-                                    otherBlocked = otherInstallation?.let { it.busy || it.unknown || it.recoveryBlocked || it.cleanupPending || it.registrationPending || (it.prepared != null && !it.registered) } == true,
+                                } else LinuxInstallAction(displayedInstallation, page, mode, enabled,
                                     ownerCurrent = ::basicCurrent,
                                     onInstall = { if (basicCurrent()) confirmInstall = true },
                                     onEnable = { if (basicCurrent()) confirmUse = true })
@@ -192,7 +191,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                 }
                 item("linux-configuration") {
                     SettingsSectionTitle("环境配置")
-                    SettingsCard {
+                    SettingsCard(Modifier.testTag("linux-environment-configuration")) {
                         LinuxChoiceRow("Linux 发行版", distributionName(distribution), "linux-distribution-choice", choiceEnabled,
                             choices = listOf("Alpine", "Debian"),
                             selectedIndex = if (distribution.equals("debian", true)) 1 else 0,
@@ -204,6 +203,21 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                             selectedIndex = if (mode == LinuxExecutionMode.CHROOT) 1 else 0,
                             popupScope = choiceScope, ownerCurrent = ::choiceCurrent,
                             onSelect = { choose(distribution, if (it == 0) LinuxExecutionMode.PROOT else LinuxExecutionMode.CHROOT) })
+                        if ((!installed || pendingRequest) &&
+                            !(pendingRequest && installation?.prepared != null && !installationMatches) && displayedInstallation?.let {
+                            it.unavailableReason == null && !it.busy && !it.unknown && !it.recoveryBlocked &&
+                                !it.registered && it.prepared == null && it.receipt?.directorySyncConfirmed != true
+                        } == true) {
+                            val installEnabled = enabled && otherInstallation?.let {
+                                it.busy || it.unknown || it.recoveryBlocked || it.cleanupPending || it.registrationPending || (it.prepared != null && !it.registered)
+                            } != true
+                            Button(enabled = installEnabled,
+                                colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.buttonColorsPrimary(),
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                                    .fillMaxWidth().heightIn(min = 48.dp).testTag("linux-install-environment"), onClick = {
+                                if (basicCurrent() && page.prepareInstall(distribution, "primary", mode)) confirmInstall = true
+                            }) { Text("安装环境", color = if (installEnabled) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton) }
+                        }
                     }
                 }
                 item("linux-tools-heading") { SettingsSectionTitle("可选工具") }
@@ -295,8 +309,7 @@ private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: B
 
 @Composable
 private fun LinuxInstallAction(state: LinuxInstallState?, page: LinuxSettingsPageOwner, mode: LinuxExecutionMode,
-    distribution: String, enabled: Boolean, otherBlocked: Boolean, ownerCurrent: () -> Boolean,
-    onInstall: () -> Unit, onEnable: () -> Unit) {
+    enabled: Boolean, ownerCurrent: () -> Boolean, onInstall: () -> Unit, onEnable: () -> Unit) {
     val prepared = state?.prepared
     val ready = enabled && state != null && !state.busy && state.unavailableReason == null
     when {
@@ -312,11 +325,7 @@ private fun LinuxInstallAction(state: LinuxInstallState?, page: LinuxSettingsPag
             TextButton("继续安装", enabled = ready, onClick = onInstall)
             TextButton("取消安装", enabled = ready, onClick = { if (ownerCurrent()) page.discardInstall(mode) })
         }
-        else -> Button(enabled = ready && !otherBlocked,
-            colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.buttonColorsPrimary(),
-            modifier = Modifier.testTag("linux-install-environment"), onClick = {
-            if (ownerCurrent() && page.prepareInstall(distribution, "primary", mode)) onInstall()
-        }) { Text("安装环境", color = if (ready && !otherBlocked) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton) }
+        else -> Unit
     }
     if (state?.notice?.startsWith("操作未确认成功：") == true && !state.busy)
         Text("操作未完成，请重试。", color = MiuixTheme.colorScheme.error)

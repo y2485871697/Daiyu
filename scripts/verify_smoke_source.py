@@ -21,7 +21,7 @@ def verify(env, record, source_run, jobs, changed):
     if (str(source_run['id']) != run_id
             or type(source_run['run_attempt']) is not int or source_run['run_attempt'] != 1
             or source_run['head_sha'] != sha or source_run['head_branch'] != 'main'
-            or source_run['workflow_id'] != 383377276 or source_run['status'] != 'completed'
+            or source_run['workflow_id'] != 397560064 or source_run['status'] != 'completed'
             or source_run.get('conclusion') not in ('success', 'failure')):
         raise ValueError('源run身份或终态不符')
     job_name = '单测、检查与生产Release' if variant in ('release', 'daily') else '单测、检查与开发包'
@@ -107,7 +107,7 @@ def verify_candidate(env, root, source_run, jobs, changed, source_workflow, curr
     if (not re.fullmatch(r'[0-9a-f]{40}', sha) or not run_id.isdecimal()
             or str(source_run['id']) != run_id or type(source_run['run_attempt']) is not int
             or source_run['run_attempt'] != 1 or source_run['head_sha'] != sha
-            or source_run['head_branch'] != 'main' or source_run['workflow_id'] != 383377276
+            or source_run['head_branch'] != 'main' or source_run['workflow_id'] != 397560064
             or source_run['status'] != 'completed' or source_run.get('conclusion') not in ('success', 'failure')):
         raise ValueError('候选源run身份或终态不符')
     if not any(j['name'] == '定向候选编译（非正式交付）' and j['conclusion'] == 'success' for j in jobs):

@@ -161,7 +161,7 @@ def verify_bundle(directory, sha, config, scope, receiving=False):
                 or digest(archive) != proof['artifact_sha256']
                 or run['id'] != proof['run_id'] or run['run_attempt'] != proof['attempt']
                 or run['head_sha'] != sha or run['conclusion'] != 'success'
-                or run['workflow_id'] != 383377276 or run['head_branch'] != 'main'
+                or run['workflow_id'] != 397560064 or run['head_branch'] != 'main'
                 or run['repository']['full_name'] != 'y2485871697/Daiyu'
                 or not any(j['id'] == proof['job_id'] and j['conclusion'] == 'success'
                            and j['run_attempt'] == proof['attempt'] for j in jobs)):

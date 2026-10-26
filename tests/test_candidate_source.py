@@ -32,7 +32,7 @@ class CandidateSourceTests(unittest.TestCase):
                                  GITHUB_RUN_ATTEMPT='1', SMOKE_TEST_CLASSES=classes))
         (self.root / 'candidate.json').write_text(json.dumps(value))
         self.run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main',
-                        workflow_id=383377276, status='completed', conclusion='failure')
+                        workflow_id=397560064, status='completed', conclusion='failure')
         self.jobs = [dict(name='定向候选编译（非正式交付）', conclusion='success')]
         self.current = (ROOT / '.github/workflows/build.yml').read_text()
         self.previous = source.candidate_workflow_inputs(self.current)

@@ -41,7 +41,7 @@ class CloudEvidenceTests(unittest.TestCase):
             jobs.append(dict(id=aid, name='只检查 ' + platform, status='completed', conclusion='success', run_attempt=1))
         atomic_json(self.base / 'jobs.json', jobs)
         atomic_json(self.base / 'run.json', dict(id=42, run_attempt=1, head_sha=self.sha, status='completed', conclusion='success',
-                    workflow_id=383377276, head_branch='main', repository={'full_name': 'y2485871697/Daiyu'}))
+                    workflow_id=397560064, head_branch='main', repository={'full_name': 'y2485871697/Daiyu'}))
         atomic_json(self.base / 'complete.json', dict(source_sha=self.sha, attempt=1, scopes=['unit'], platforms=['ubuntu-26.04', 'windows-latest']))
         self.linux = self.state / 'evidence/github-42-1-ubuntu-26.04/unit'
         self.windows = self.state / 'evidence/github-42-1-windows-latest/unit'

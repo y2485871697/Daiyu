@@ -15,7 +15,7 @@ is_zero() {
     case "$1" in *[!0]*) return 1 ;; *) return 0 ;; esac
 }
 
-anchor=846e2f175782d1b0aaa35b3125649ffedebdfde2
+anchor=bab2326fb374e53d5e86efe8983508449d7d8339
 expected=$(printf '%s\n' \
     'y2485871697' 'y2485871697@users.noreply.github.com' \
     'y2485871697' 'y2485871697@users.noreply.github.com')
@@ -25,18 +25,31 @@ while read -r local_ref local_oid remote_ref remote_oid extra || [ -n "${local_r
     valid_oid "$local_oid" && valid_oid "$remote_oid" || fail 'Invalid object ID.'
     [ "$remote_ref" = refs/heads/main ] || fail 'Only updates to main are allowed.'
     is_zero "$local_oid" && fail 'Deleting main is not allowed.'
-    is_zero "$remote_oid" && fail 'Creating a remote main is not allowed by this project guard.'
     [ "$(git cat-file -t "$local_oid" 2>/dev/null)" = commit ] || fail 'Local commit is unavailable.'
-    [ "$(git cat-file -t "$remote_oid" 2>/dev/null)" = commit ] || fail 'Fetch remote main before pushing; its commit is missing locally.'
     [ "$(git rev-parse --is-shallow-repository)" = false ] || fail 'Fetch complete history before pushing.'
     [ -z "${GIT_GRAFT_FILE-}" ] || fail 'GIT_GRAFT_FILE overrides are unsupported.'
     grafts=$(git rev-parse --git-path info/grafts)
     [ ! -s "$grafts" ] || fail 'Legacy grafts must not alter the history being checked.'
-    git merge-base --is-ancestor "$anchor" "$remote_oid" 2>/dev/null || \
-        fail 'Remote main is not on the corrected history. Sync and inspect it; do not merge the old history.'
-    git merge-base --is-ancestor "$remote_oid" "$local_oid" || \
-        fail 'Non-fast-forward update refused. Sync corrected main without merging the old history.'
-    commits=$(git rev-list "$remote_oid..$local_oid") || fail 'Cannot enumerate new commits.'
+    if is_zero "$remote_oid"; then
+        [ "$(git config --local --get daiyu.allowInitialMainPush || :)" = true ] || \
+            fail 'Creating a remote main requires explicit one-time bootstrap authorization.'
+        [ "${1-}" = origin ] || fail 'Initial main must be published to origin.'
+        case "${2-}" in
+            https://github.com/y2485871697/Daiyu.git|git@github.com:y2485871697/Daiyu.git) ;;
+            *) fail 'Initial main may only be published to y2485871697/Daiyu.' ;;
+        esac
+        git merge-base --is-ancestor "$anchor" "$local_oid" 2>/dev/null || \
+            fail 'Initial main does not contain the audited history anchor.'
+        commits=$(git rev-list "$local_oid") || fail 'Cannot enumerate the complete initial history.'
+    else
+        [ "$(git cat-file -t "$remote_oid" 2>/dev/null)" = commit ] || \
+            fail 'Fetch remote main before pushing; its commit is missing locally.'
+        git merge-base --is-ancestor "$anchor" "$remote_oid" 2>/dev/null || \
+            fail 'Remote main is not on the corrected history. Sync and inspect it; do not merge the old history.'
+        git merge-base --is-ancestor "$remote_oid" "$local_oid" || \
+            fail 'Non-fast-forward update refused. Sync corrected main without merging the old history.'
+        commits=$(git rev-list "$remote_oid..$local_oid") || fail 'Cannot enumerate new commits.'
+    fi
     for commit in $commits; do
         actual=$(git show --no-patch --no-show-signature --format='%an%n%ae%n%cn%n%ce' "$commit") || \
             fail "Cannot read commit $commit."

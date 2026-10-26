@@ -207,7 +207,7 @@ class SourceTests(unittest.TestCase):
     def test_identity_and_unchanged_application(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123')
         record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android', variant='debug', debuggable=True)
-        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=383377276, status='completed', conclusion='success')
+        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=397560064, status='completed', conclusion='success')
         jobs = [dict(name='单测、检查与开发包', conclusion='success')]
         source.verify(env, record, run, jobs, ['scripts/smoke_boot.sh', 'docs/acceptance/final-delivery-entry.md',
                                               'scripts/acceptance/cloud_report.py', 'tests/test_smoke_boot.py'])
@@ -245,7 +245,7 @@ class SourceTests(unittest.TestCase):
                       variant='release', debuggable=False, production_delivery=True, profileable=False,
                       validation_profile='daily', full_regression_passed=False)
         run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main',
-                   workflow_id=383377276, status='completed', conclusion='success')
+                   workflow_id=397560064, status='completed', conclusion='success')
         jobs = [dict(name='单测、检查与生产Release', conclusion='success')]
         source.verify(env, record, run, jobs, [])
         for wrong in (dict(env, SOURCE_VARIANT='release'), dict(env, SOURCE_VARIANT='debug')):
@@ -260,7 +260,7 @@ class SourceTests(unittest.TestCase):
         record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android',
                       variant='release', debuggable=False, production_delivery=True, profileable=False,
                       test_application_id='app.daiyu.android.test')
-        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=383377276,
+        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=397560064,
                    status='completed', conclusion='failure')
         jobs = [dict(name='单测、检查与生产Release', conclusion='success')]
         source.verify(env, record, run, jobs, ['tests/test_release_package.py'])

@@ -16,7 +16,7 @@ from evidence import (DIGEST, InvalidEvidence, SafeParser, artifact_path,
 from instrumentation_result import ResultError, instrumentation, report_text
 
 REPOSITORY = "y2485871697/Daiyu"
-WORKFLOW_ID = 383377276
+WORKFLOW_ID = 397560064
 BRANCH = "main"
 APIS = ("26", "37.2")
 MAX_TEXT_BYTES = 4 * 1024 * 1024

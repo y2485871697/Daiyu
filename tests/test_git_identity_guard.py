@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().parents[1]
-ANCHOR = "846e2f175782d1b0aaa35b3125649ffedebdfde2"
+ANCHOR = "bab2326fb374e53d5e86efe8983508449d7d8339"
 NAME = "y2485871697"
 EMAIL = "y2485871697@users.noreply.github.com"
 IDENTITY = (NAME, EMAIL, NAME, EMAIL)
@@ -60,8 +60,8 @@ class GitIdentityGuardTest(unittest.TestCase):
     def row(self, local, remote=None, ref="refs/heads/main"):
         return f"refs/heads/main {local} {ref} {remote or self.base}\n"
 
-    def check_hook(self, data, success, env=None):
-        p = subprocess.run(["sh", str(self.hook), "origin", "unused-local-test-remote"],
+    def check_hook(self, data, success, env=None, target="unused-local-test-remote"):
+        p = subprocess.run(["sh", str(self.hook), "origin", target],
                            cwd=self.root, input=data.encode("utf-8"),
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env or self.env)
         stderr = p.stderr.decode("utf-8")
@@ -116,6 +116,35 @@ class GitIdentityGuardTest(unittest.TestCase):
                     self.row(good, ref="refs/heads/other"), self.row(good, ref="refs/tags/v1")):
             with self.subTest(row=row):
                 self.check_hook(row, False)
+
+    def authorize_initial_push(self):
+        self.run_git("config", "--local", "daiyu.allowInitialMainPush", "true")
+        self.base = self.commit(parents=[])
+        original = (SOURCE / "scripts/git-hooks/pre-push").read_text(encoding="utf-8")
+        self.hook.write_text(original.replace("anchor=" + ANCHOR, "anchor=" + self.base),
+                             encoding="utf-8", newline="\n")
+
+    def test_authorized_initial_push_checks_every_commit(self):
+        self.authorize_initial_push()
+        target = "https://github.com/y2485871697/Daiyu.git"
+        self.check_hook(self.row(self.commit(), remote=ZERO), True, target=target)
+        bad = self.commit(identity=("Eta Agent", "agent@localhost", NAME, EMAIL))
+        self.check_hook(self.row(self.commit(parents=[bad]), remote=ZERO), False, target=target)
+
+    def test_initial_push_rejects_another_repository_and_missing_anchor(self):
+        self.authorize_initial_push()
+        self.check_hook(self.row(self.commit(), remote=ZERO), False)
+        foreign = self.commit(parents=[])
+        self.check_hook(self.row(foreign, remote=ZERO), False,
+                        target="https://github.com/y2485871697/Daiyu.git")
+
+    def test_initial_push_flag_is_one_time_and_does_not_allow_force_push(self):
+        self.authorize_initial_push()
+        self.run_git("config", "--local", "--unset", "daiyu.allowInitialMainPush")
+        self.check_hook(self.row(self.commit(), remote=ZERO), False,
+                        target="https://github.com/y2485871697/Daiyu.git")
+        self.run_git("config", "--local", "daiyu.allowInitialMainPush", "true")
+        self.check_hook(self.row(self.commit(), remote=self.commit()), False)
 
     def test_missing_local_and_remote_objects_are_rejected(self):
         self.check_hook(self.row("f" * 40), False)

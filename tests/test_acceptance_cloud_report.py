@@ -40,7 +40,7 @@ class CloudReportTests(unittest.TestCase):
         self.snapshot_path = self.root / "snapshot.json"
         self.snapshot = {"schema_version": 1, "run": {
             "id": 42, "run_attempt": 1, "head_sha": SHA,
-            "repository": {"full_name": "y2485871697/Daiyu"}, "workflow_id": 383377276,
+            "repository": {"full_name": "y2485871697/Daiyu"}, "workflow_id": 397560064,
             "head_branch": "main", "status": "completed", "conclusion": "success"},
             "jobs": [], "reports": []}
         self.reports = {}

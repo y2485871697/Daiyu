@@ -19,7 +19,7 @@ from evidence import (InvalidEvidence, SafeParser, artifact_path, bounded_read,
 from template import make_template
 
 REPOSITORY = "y2485871697/Daiyu"
-WORKFLOW_ID = 383377276
+WORKFLOW_ID = 397560064
 APIS = ("26", "37.2")
 # Contract identity is code, not caller-editable JSON. Order is AC-001..AC-081.
 FEATURE_NUMBERS = (

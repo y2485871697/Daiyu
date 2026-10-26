@@ -390,11 +390,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
             val count=db.update("messages",encoded,"id=? AND conversation_id=? AND run_id=? AND role=? AND status='RUNNING' AND EXISTS (SELECT 1 FROM conversations WHERE id=?)",
                 arrayOf(message.id.value,message.conversationId.value,message.runId.value,message.role,message.conversationId.value))
             if (count==0) {
-                val identical=db.rawQuery("SELECT conversation_id,run_id,role,blocks,status,error,protocol,history_segments FROM messages WHERE id=?",arrayOf(message.id.value)).use {c ->
-                    c.moveToFirst() && c.getString(0)==message.conversationId.value && c.getString(1)==message.runId.value && c.getString(2)==message.role &&
-                        c.getString(3)==encoded.getAsString("blocks") && c.getString(4)==encoded.getAsString("status") &&
-                        (c.isNull(5) && encoded.get("error")==null || !c.isNull(5) && c.getString(5)==encoded.getAsString("error")) &&
-                        c.getString(6)==encoded.getAsString("protocol") && c.getString(7)==encoded.getAsString(historyColumn)
+                val identical=db.rawQuery("SELECT conversation_id,run_id,role,status FROM messages WHERE id=?",arrayOf(message.id.value)).use {c ->
+                    c.moveToFirst() && c.getString(0)==message.conversationId.value && c.getString(1)==message.runId.value &&
+                        c.getString(2)==message.role && c.getString(3)==encoded.getAsString("status")
+                } && listOf("blocks", "error", "protocol", historyColumn).all { column ->
+                    SQLiteText.read(db, "messages", column, "id", message.id.value) == encoded.getAsString(column)
                 }
                 check(identical) {"消息已结束或所属会话不存在，拒绝迟到回执"}
             }
@@ -479,20 +479,23 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 require(encodedBytes<=16*1024*1024) {"备份超过16MiB上限"}
             }
             val conversations=JSONArray()
-            db.rawQuery("SELECT id,title,draft,updated,folder,pinned,assistant_id FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
-                val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",c.getString(2)).put("updated",c.getLong(3)).put("folder",c.getString(4)).put("pinned",c.getInt(5)!=0).put("assistant_id",c.getString(6) ?: JSONObject.NULL)
+            db.rawQuery("SELECT id,title,updated,folder,pinned,assistant_id FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
+                val draft=checkNotNull(SQLiteText.read(db, "conversations", "draft", "id", c.getString(0), 16L*1024*1024))
+                val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",draft).put("updated",c.getLong(2)).put("folder",c.getString(3)).put("pinned",c.getInt(4)!=0).put("assistant_id",c.getString(5) ?: JSONObject.NULL)
                 reserve(value);conversations.put(value)
             }}
             val messages=JSONArray()
-            db.rawQuery("SELECT id,conversation_id,run_id,role,blocks,status,error,protocol,history_segments,created_at FROM messages$messageWhere ORDER BY seq",args).use {c->while(c.moveToNext()) {
-                val blocks=JSONArray(c.getString(4));validateBlocks(blocks)
-                val protocol=JSONArray(c.getString(7))
-                val value=JSONObject().put("id",c.getString(0)).put("conversation_id",c.getString(1)).put("run_id",c.getString(2)).put("role",c.getString(3)).put("blocks",blocks).put("status",c.getString(5)).put("error",c.getString(6) ?: JSONObject.NULL).put("protocol",protocol)
-                val createdAt = if (c.isNull(9)) null else c.getLong(9)
+            db.rawQuery("SELECT id,conversation_id,run_id,role,status,created_at FROM messages$messageWhere ORDER BY seq",args).use {c->while(c.moveToNext()) {
+                fun text(column:String)=SQLiteText.read(db, "messages", column, "id", c.getString(0), 16L*1024*1024)
+                val blocks=JSONArray(checkNotNull(text("blocks")));validateBlocks(blocks)
+                val protocol=JSONArray(checkNotNull(text("protocol")))
+                val error=text("error")
+                val value=JSONObject().put("id",c.getString(0)).put("conversation_id",c.getString(1)).put("run_id",c.getString(2)).put("role",c.getString(3)).put("blocks",blocks).put("status",c.getString(4)).put("error",error ?: JSONObject.NULL).put("protocol",protocol)
+                val createdAt = if (c.isNull(5)) null else c.getLong(5)
                 MessageTimeCodec.write(value, createdAt)
-                val rawSegments=c.getString(8)
+                val rawSegments=checkNotNull(text(historyColumn))
                 val segments=MessageHistoryCodec.decode(JSONArray(rawSegments))
-                val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments,createdAt=createdAt)
+                val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(4)),error,jsonStrings(protocol),historySegments=segments,createdAt=createdAt)
                 AssistantReplyIdentities.encode(db, projection)?.let { value.put("reply_identity", it) }
                 MessageHistoryCodec.validate(projection)
                 MessageImages.validate(projection)
@@ -504,7 +507,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 validateProtocol(protocol, if (JSONArray(rawSegments).length()==0) decode(blocks) else emptyList(), c.getString(3))
                 reserve(value);messages.put(value)
             }}
-            val draft=if(conversationId==null) db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)} else ""
+            val draft=if(conversationId==null) composerDraft(db) else ""
             reserve(JSONObject().put("draft",draft))
             val payload=JSONObject().put("conversations",conversations).put("messages",messages).put("draft",draft).toString()
             result=JSONObject().put("format","daiyu-neutral-text").put("version",2).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()
@@ -601,7 +604,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 replyIdentities[it.id.value]?.let { identity -> AssistantReplyIdentities.insert(db, it, identity) }
                 if (!deferVideoWitness) SQLiteMessageVideoStore.insert(db, it, emptyList())
             }
-            val existing=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
+            val existing=composerDraft(db)
             require(draft.isEmpty() || existing.isEmpty() || draft==existing) {"未创建会话草稿冲突；未覆盖"}
             if(existing.isEmpty()) check(db.update("composer",ContentValues().apply {put("draft",draft)},"id=1",null)==1)
             check(db.rawQuery("SELECT 1 FROM composer WHERE id=1 AND draft=?",

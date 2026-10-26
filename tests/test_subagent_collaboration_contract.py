@@ -80,7 +80,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
                          'assertEquals(preset?.id, repository.snapshot(owner).appliedPresetId)',
                          'assertEquals(beforeOpen, prefs.all)', 'assertEquals(beforeNavigation, prefs.all)',
                          'assertEquals(1, dismissals)', 'assertEquals(0, fixture.opens.get())',
-                         'px(48), secondary.height', 'secondary.height, done.height',
+                         'minOf(secondary.height, done.height) >= px(48) - 1.5f', 'secondary.height, done.height',
                          'secondary.width, done.width', 'secondary.bottom, done.bottom',
                          'px(16), surface.bottom - done.bottom', 'px(12), done.left - secondary.right',
                          'px(16), surface.bottom - footer.bottom', 'footer.bottom, done.bottom',

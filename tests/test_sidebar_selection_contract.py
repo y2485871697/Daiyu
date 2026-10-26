@@ -66,7 +66,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
         helper = host.split('private fun openRetainedConversation(id: String) {', 1)[1].split('\n', 1)[0]
         self.assertIn('val conversation = retainedConversation(id); dismissSidebar(); returnToChat(); select(conversation)', helper)
         self.assertIn('onOpenConversation = { id -> guard { openRetainedConversation(id) } }', host)
-        self.assertIn('onNewConversation = { guard { dismissSidebar(); select(null) } }', host)
+        self.assertIn('onNewConversation = { guard { createNewConversation(); dismissSidebar() } }', host)
         hit = host.split('private fun openHistoryHit(', 1)[1].split('private fun toast(', 1)[0]
         self.assertIn('openRetainedConversation(hit.conversationId)', hit)
 

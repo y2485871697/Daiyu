@@ -41,15 +41,21 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertDraft("menu draft stays unsent")
     }
 
-    fun testNewChatMenuRestoresUnattachedDraftAndPreservesConversationDraft() {
+    fun testNewChatMenuCreatesEmptyConversationAndPreservesBothPreviousDrafts() {
         selectDraft()
         val conversation = fixture.database.conversations().single()
         mainThread { fixture.database.draft("未附着草稿") }
         menu(ChatMenuAction.NEW_CHAT)
         awaitUniqueTag("chat-draft")
-        assertDraft("未附着草稿")
-        assertEquals("menu draft stays unsent", fixture.database.conversations().single().draft)
-        assertEquals(1, fixture.database.conversations().size)
+        assertDraft("")
+        val conversations = fixture.database.conversations()
+        assertEquals("menu draft stays unsent", conversations.single { it.id == conversation.id }.draft)
+        val created = conversations.single { it.id != conversation.id }
+        assertEquals("", created.draft)
+        assertTrue(fixture.database.messages(created.id).isEmpty())
+        assertEquals(created.id.value, fixture.controller.preferences.getString("selected", null))
+        assertEquals("未附着草稿", fixture.database.draft())
+        assertEquals(2, conversations.size)
         assertEquals(0, fixture.opens.get())
         mainThread { activity.select(conversation) }
         assertDraft("menu draft stays unsent")

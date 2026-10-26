@@ -156,10 +156,14 @@ class ActivityTest : WiredActivityTestCase() {
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; ui.waitForIdle()
         mainThread { oldBEditor.onTextChange("stale B"); oldBEditor.onSelectionChange(0, 0) }
         mainThread {
-            assertNull("new-chat menu must select the unattached slot", fixture.controller.preferences.getString("selected", null))
+            val created = fixture.database.conversations().single { it.id != a.id && it.id != b.id }
+            assertEquals(created.id.value, fixture.controller.preferences.getString("selected", null))
+            assertTrue(fixture.database.messages(created.id).isEmpty())
             assertEquals("unattached slot survives the menu action", unattached, fixture.database.draft())
             assertEquals("previous slot survives the menu action", " B草稿\n ", fixture.database.conversations().single { it.id == b.id }.draft)
         }
+        assertDraft(""); assertSelection(0, 0)
+        mainThread { activity.select(null) }
         assertDraft(unattached); assertSelection(2, 4)
         mainThread {
             activity.select(a)
@@ -201,8 +205,9 @@ class ActivityTest : WiredActivityTestCase() {
         selectionCheckpoint("replacement-focused")
         assertDraft(" B新稿\n "); assertSelection(1, 2)
         mainThread { activity.select(a) }; assertDraft("A下一条"); ui.onNodeWithText("A回复").assertExists()
-        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; assertDraft(unattached); assertSelection(2, 4)
-        assertEquals(2, fixture.database.conversations().size)
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; assertDraft(""); assertSelection(0, 0)
+        assertEquals(4, fixture.database.conversations().size)
+        mainThread { activity.select(null) }; assertDraft(unattached); assertSelection(2, 4)
         mainThread {
             val expected = highestSupportedRefreshRate(activity.window.decorView.display?.supportedModes?.map { it.refreshRate }.orEmpty())
             assertTrue(expected > 0f); assertEquals(expected, activity.window.attributes.preferredRefreshRate, 0f)
@@ -244,10 +249,13 @@ class ActivityTest : WiredActivityTestCase() {
             activity = recreateActivity(activity); node("chat-draft").assertIsNotEnabled()
             release.countDown(); awaitControl("import completes") { !fixture.controller.dataBusy && fixture.controller.dataRevision > 0 }
             ui.waitForIdle(); node("chat-draft").assertIsEnabled(); assertDraft(imported)
-            mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; assertDraft(imported)
+            mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; assertDraft("")
+            assertEquals(imported, fixture.database.draft())
             val conversation = fixture.database.create(); fixture.database.organize(conversation.id, "测试文件夹", true)
             mainThread { activity.select(conversation); activity.select(null) }; assertDraft(imported)
-            assertTrue(fixture.database.conversations().single().pinned); assertEquals("测试文件夹", fixture.database.conversations().single().folder)
+            val organized = fixture.database.conversations().single { it.id == conversation.id }
+            assertTrue(organized.pinned); assertEquals("测试文件夹", organized.folder)
+            assertEquals(2, fixture.database.conversations().size)
             assertEquals(0, fixture.opens.get())
             mainThread { fixture.controller.dataTask(work = { error("synthetic failure") }) }
             awaitControl("failure clears busy") { !fixture.controller.dataBusy }

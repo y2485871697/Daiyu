@@ -196,4 +196,20 @@ class ConversationReasoningPreferenceTest {
         assertEquals(ReasoningEffort.LOW, preference.snapshot(null))
     }
 
+    @Test fun explicitDurableNewChatCopiesSourceWithoutChangingStandaloneDraft() {
+        val values = MemoryKeyValue()
+        val preference = ConversationReasoningPreference(values)
+        preference.set(null, ReasoningEffort.LOW)
+        preference.set("source", ReasoningEffort.HIGH)
+        preference.retainAccepted("new-id", preference.snapshot("source"))
+        assertEquals(ReasoningEffort.HIGH, preference.snapshot("new-id"))
+        assertEquals(ReasoningEffort.LOW, preference.snapshot(null))
+        preference.set("source", ReasoningEffort.OFF)
+        val restored = ConversationReasoningPreference(values)
+        assertEquals(ReasoningEffort.HIGH, restored.snapshot("new-id"))
+        restored.set("new-id", ReasoningEffort.MINIMAL)
+        assertEquals(ReasoningEffort.OFF, restored.snapshot("source"))
+        assertEquals(ReasoningEffort.LOW, restored.snapshot(null))
+    }
+
 }

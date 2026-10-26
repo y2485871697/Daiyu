@@ -3878,10 +3878,10 @@ class ChatController internal constructor(private val application:Application,
         }
         // database.send returns only after its real two-row transaction receipt succeeds.
         acceptedTitle.set(saved.title)
-        // Only THIS newly-created durable first run gets a job. Never inspect old/new-empty
-        // conversations, restoration, or a subsequent send for catch-up title generation.
+        // Explicit New chat already has a durable row. Admit only its first accepted turn,
+        // never restoration, regeneration, or a subsequent send as title catch-up.
         // Title preparation failure cannot turn the accepted chat receipt into rejection.
-        if (conversation == null) {
+        if (physicalVideoHistory.rows.isEmpty() && actionRevision == null) {
             try {
                 val coordinator = titleCoordinator
                 if (synchronized(this) { closed }) coordinator.close()

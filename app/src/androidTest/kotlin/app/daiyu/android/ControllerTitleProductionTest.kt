@@ -134,10 +134,24 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
         assertEquals(1L, ContextService(f.app, f.db).usage(saved.id.value).requests)
     }
 
-    fun testExistingEmptyConversationAndFailedFirstTurnNeverStartTitle() {
-        val old = fresh(); val empty = old.db.create("default")
-        send(old, empty); state(old) { old.controller.active == null }
-        assertEquals(0, old.calls.get())
+    fun testPersistedEmptyConversationFirstTurnNamesOnceWithoutCreatingAnotherConversation() {
+        val f = fresh(); val empty = f.db.create("default")
+        assertEquals(0, f.calls.get())
+        val accepted = send(f, empty); await(f.entered)
+        state(f) { f.controller.active == null }
+        assertEquals(empty.id, accepted.id)
+        assertEquals(empty.id, f.db.conversations().single().id)
+        send(f, f.db.conversations().single()); state(f) { f.controller.active == null }
+        assertEquals(1, f.calls.get())
+        f.release.countDown(); state(f) { f.controller.titleRevision == 1L }
+        assertEquals("生产标题", f.db.conversations().single().title)
+    }
+
+    fun testRenamedEmptyConversationAndFailedFirstTurnNeverStartTitle() {
+        val renamed = fresh(); val empty = renamed.db.create("default")
+        renamed.db.rename(empty.id, "自定标题")
+        send(renamed, empty); state(renamed) { renamed.controller.active == null }
+        assertEquals(0, renamed.calls.get())
         val failed = fresh(RunStatus.FAILED); val accepted = send(failed)
         state(failed) { failed.controller.active == null }
         assertEquals(RunStatus.FAILED, failed.db.messages(accepted.id).last().second.status)

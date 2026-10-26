@@ -2197,7 +2197,7 @@ class MainActivity : ComponentActivity() {
                         onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
                         onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
                         onConversationExport = { item -> backupGuard { openConversationExport(item.id) } },
-                        onNewConversation = { guard { dismissSidebar(); select(null) } },
+                        onNewConversation = { guard { createNewConversation(); dismissSidebar() } },
                         onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
                         onCreateFolder = { name -> guard { retainedData.createFolder(name); updatePane() } },
                         onRenameFolder = { old, name -> guard {
@@ -2800,7 +2800,7 @@ class MainActivity : ComponentActivity() {
                 if (voiceEntryPreferences.edit().putString("mode", action.name).commit()) voiceEntryMode = action
                 else toast("语音入口未保存；保持原选择")
             }
-            ChatMenuAction.NEW_CHAT -> if (currentChat()) select(null)
+            ChatMenuAction.NEW_CHAT -> if (currentChat()) createNewConversation()
             ChatMenuAction.RENAME -> selected?.let { conversation ->
                 editConversation(conversation.id.value, false)
             }
@@ -5611,6 +5611,20 @@ class MainActivity : ComponentActivity() {
             draft = value; publishChat(rowsChanged = false)
         }
     }
+    internal fun createNewConversation() {
+        requireActivityUsable()
+        check(pendingTextSend == null && controller.textSendState() == null) { "请等待本次发送结果" }
+        check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
+        val reasoning = reasoningPreference.snapshot(selected?.id?.value)
+        val created = app.daiyu.android.context.DatabaseTransactions { controller.database.writableDatabase }.run {
+            controller.database.create(controller.database.selectedAssistantId()).also {
+                reasoningPreference.retainAccepted(it.id.value, reasoning)
+            }
+        }
+        select(created)
+        updatePane()
+    }
+
     internal fun select(conversation: Conversation?) {
         cancelPaneConversationSelection()
         select(conversation, null)

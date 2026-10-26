@@ -392,6 +392,8 @@ class MainActivity : ComponentActivity() {
         catch (_: Exception) { revokeUniversalVoice(); toast("持续语音未启动：检查会话独立配置、离线包或音频释放状态") }
     }
     private var preparedSpeech: FrozenVoiceSpeech? = null
+    private var messageSpeechAttempt by mutableStateOf(0L)
+    private var reportedMessageSpeechError: Pair<Long, SpeechPlaybackState>? = null
     private var voiceConsent: android.app.AlertDialog? = null
     private var voiceConversationDialogOwner by mutableStateOf<ChatController.TextSendOwner?>(null)
     private var voiceRequestEpoch = 0L
@@ -469,6 +471,7 @@ class MainActivity : ComponentActivity() {
         fun play(value: FrozenVoiceSpeech) {
             if (!current()) return
             preparedSpeech = value
+            messageSpeechAttempt++
             try { speechHost.speak(expectedOwner, id, text) } finally { preparedSpeech = null }
         }
         val config = frozen.configuration
@@ -2093,6 +2096,19 @@ class MainActivity : ComponentActivity() {
                         onOpenPermissions = { dismissSidebar(); retainedPage = "permission-check" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
+                            val messageSpeech by speechHost.state.collectAsStateWithLifecycle()
+                            val speechMessageId = messageSpeech.requestId.takeIf {
+                                messageSpeech.owner == speechHost.owner && voiceHostIsActive(messageSpeech)
+                            }
+                            LaunchedEffect(messageSpeechAttempt, messageSpeech) {
+                                val event = messageSpeechAttempt to messageSpeech
+                                if (messageSpeech == speechHost.state.value && messageSpeech.owner == speechHost.owner &&
+                                    messageSpeech.phase in setOf(SpeechPhase.UNAVAILABLE, SpeechPhase.ERROR) &&
+                                    reportedMessageSpeechError != event) {
+                                    reportedMessageSpeechError = event
+                                    voiceHostStatusResource(messageSpeech)?.let { voiceConfigurationToast(getString(it)) }
+                                }
+                            }
                             val contextUsage = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage(
                                 controller, selected?.id, contextReceiptRevision, controller.dataRevision,
                                 contextModelRevision, chatState.composer.phase)
@@ -2115,9 +2131,8 @@ class MainActivity : ComponentActivity() {
                                                 videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true)), chatActions(), modifier = Modifier.weight(1f), turnExtras = { turn ->
                                         if (turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)
-                                            VoiceExtras(turn.id)
                                         }
-                                    }, dedicatedTool = { step -> DedicatedQuestion(step) },
+                                    }, speechMessageId = speechMessageId, dedicatedTool = { step -> DedicatedQuestion(step) },
                                         toolContent = { step -> ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,
                                         assistant = projectedAssistants.firstOrNull { it.id == (selected?.assistantId ?: activeAssistant) },
                                         composerAttachments = { if (!sidebarVisible) key(editorGeneration) {
@@ -2477,9 +2492,15 @@ class MainActivity : ComponentActivity() {
                 else -> if (currentChat()) voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
             }
         },
-        onRegenerate = messageCallbacks.onRegenerate, onSpeak = { id ->
-            if (editorMatches() && controller.ready && !controller.dataBusy &&
-                speechHost.owner == renderedSpeechOwner && selected?.id?.value == renderedConversation) {
+        onRegenerate = messageCallbacks.onRegenerate, onSpeak = speak@{ id ->
+            if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
+                speechHost.owner != renderedSpeechOwner || selected?.id?.value != renderedConversation ||
+                editorGeneration != renderedEditorGeneration) return@speak
+            val playback = speechHost.state.value
+            if (playback.owner == renderedSpeechOwner && playback.requestId == id && voiceHostIsActive(playback)) {
+                invalidatePreparedSpeech()
+                speechHost.stop(renderedSpeechOwner, id)
+            } else if (editorMatches() && controller.ready && !controller.dataBusy) {
                 // Resolve the CURRENT displayed answer, never a captured stream/tool payload.
                 voiceHostText(chatState.turns, id)?.let { text ->
                     requestConfiguredSpeech(renderedSpeechOwner, id, text)
@@ -4566,25 +4587,6 @@ class MainActivity : ComponentActivity() {
     }
     private fun openSettingsFromPage(route: FeatureRoute) {
         if (activityUsable() && retainedPage == "settings") guard { openSettingsRoute(route) }
-    }
-
-    @Composable private fun VoiceExtras(id: String) {
-        val state by speechHost.state.collectAsStateWithLifecycle()
-        if (state.owner != speechHost.owner || state.requestId != id) return
-        val status = voiceHostStatusResource(state) ?: return
-        val renderedOwner = state.owner
-        top.yukonga.miuix.kmp.basic.Text(
-            text = stringResource(status),
-            modifier = Modifier.testTag("voice-host-status-$id")
-                .semantics { liveRegion = LiveRegionMode.Polite },
-        )
-        if (voiceHostIsActive(state)) {
-            app.daiyu.android.ui.haptics.miuix.TextButton(
-                text = stringResource(R.string.voice_host_stop),
-                modifier = Modifier.testTag("voice-host-stop-$id"),
-                onClick = { speechHost.stop(renderedOwner, id) },
-            )
-        }
     }
 
     private fun controlChildTaskFromCard(step: WorkStepUi, request: ToolCardActionRequest) {

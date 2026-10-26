@@ -72,6 +72,7 @@ internal fun ChatMessageList(
     composerBottomInset: Dp = 0.dp,
     timeline: List<app.daiyu.android.timeline.ChatTimelineEntry> = emptyList(),
     compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null,
+    speechMessageId: String? = null,
 ) {
     val timelineAfter = remember(timeline) { timeline.groupBy { it.anchor.listKey } }
     val compressionVisible = compressionActivity?.running == true
@@ -217,6 +218,7 @@ internal fun ChatMessageList(
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
                             AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent,
+                                speaking = speechMessageId == turn.id,
                                 onRevealSettled = { settled ->
                                     if (settled) revealedTurns[turn.listKey] = turn else revealedTurns.remove(turn.listKey)
                                 }) { ready ->
@@ -283,6 +285,7 @@ internal fun AssistantTurn(
     imageLoader: MessageImageLoader? = null,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
+    speaking: Boolean = false,
     onRevealSettled: (Boolean) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
 ) = key(turn.listKey) {
@@ -332,7 +335,7 @@ internal fun AssistantTurn(
                 it is MessageContentUi.Text && it.text.isNotBlank()
             }
             MessageActionBar(turn.id, actions, timestamp = turn.timestamp,
-                allowSpeech = hasTextActions, showCopyAction = hasTextActions)
+                allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking)
         }
     }
 }

@@ -119,12 +119,12 @@ fun AssistantPickerDialog(
                 })
         }
         Row(Modifier.fillMaxWidth().testTag("assistant-list-meta")
-            .padding(start = 2.dp * s, end = 2.dp * s, top = 10.dp * s, bottom = 7.dp * s),
-            horizontalArrangement = Arrangement.SpaceBetween) {
+            .padding(horizontal = 2.dp * s, vertical = 8.dp * s),
+            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.assistant_count, filtered.size), color = colors.muted,
-                fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
+                modifier = Modifier.alignByBaseline(), fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
             Text(stringResource(R.string.assistant_list_hint), color = colors.muted,
-                fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
+                modifier = Modifier.alignByBaseline(), fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("assistant-list"),
             contentPadding = PaddingValues(start = 2.dp * s, end = 2.dp * s, top = 2.dp * s, bottom = 7.dp * s),

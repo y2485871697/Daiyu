@@ -97,6 +97,8 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
         val fontWeight: FontWeight?,
         val color: Color,
         val height: Int,
+        val bounds: Rect,
+        val firstBaseline: Float,
     )
     private data class PickerFrame(
         val bounds: List<Rect>,
@@ -106,10 +108,10 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun pickerFrame(): PickerFrame {
         val geometry = listOf("assistant-sheet", "assistant-search", "assistant-list", "assistant-item-visual-a",
-            "assistant-item-visual-b", "assistant-avatar-visual-a", "assistant-new", "assistant-done")
+            "assistant-item-visual-b", "assistant-avatar-visual-a", "assistant-new", "assistant-done", "assistant-list-meta")
             .map { ui.onNodeWithTag(it, useUnmergedTree = true).fetchSemanticsNode() }
         val texts = listOf(text(R.string.assistant_picker_title), text(R.string.assistant_search),
-            text(R.string.assistant_count, 2), "Visual A", "First description", text(R.string.assistant_current),
+            text(R.string.assistant_count, 2), text(R.string.assistant_list_hint), "Visual A", "First description", text(R.string.assistant_current),
             text(R.string.assistant_new), text(R.string.assistant_done))
             .associateWith { ui.onNodeWithText(it, useUnmergedTree = true).fetchSemanticsNode() }
         val root = geometry.first().root
@@ -127,7 +129,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
                 val result = results.single()
                 val input = result.layoutInput
                 TypeFrame(input.style.fontSize, input.style.lineHeight, input.density.fontScale,
-                    input.style.fontWeight, input.style.color, result.size.height)
+                    input.style.fontWeight, input.style.color, result.size.height, node.boundsInRoot, result.firstBaseline)
             }
             PickerFrame(bounds, types, density.get().density)
         }
@@ -141,6 +143,9 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             val avatar = frame.bounds[5]
             val newButton = frame.bounds[6]
             val done = frame.bounds[7]
+            val meta = frame.bounds[8]
+            val count = frame.types.getValue(text(R.string.assistant_count, 2))
+            val hint = frame.types.getValue(text(R.string.assistant_list_hint))
             fun dp(px: Float) = px / frame.density
             fun assertType(text: String, size: TextUnit, lineHeight: TextUnit) {
                 val sample = frame.types.getValue(text)
@@ -153,7 +158,11 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertEquals(16f, dp(sheet.right - search.right), .6f)
             assertEquals(84f, dp(search.top - sheet.top), .8f)
             assertEquals(44f, dp(search.height), dp(1f) + .01f)
-            assertEquals(17f + dp(frame.types.getValue(text(R.string.assistant_count, 2)).height.toFloat()), dp(list.top - search.bottom), .8f)
+            assertEquals(search.bottom, meta.top, .51f)
+            assertEquals(meta.bottom, list.top, .51f)
+            assertEquals(8f, dp(minOf(count.bounds.top, hint.bounds.top) - meta.top), .6f)
+            assertEquals(8f, dp(meta.bottom - maxOf(count.bounds.bottom, hint.bounds.bottom)), .6f)
+            assertEquals(count.bounds.top + count.firstBaseline, hint.bounds.top + hint.firstBaseline, .51f)
             assertEquals(2f, dp(first.top - list.top), .6f)
             assertEquals(2f, dp(first.left - list.left), .6f)
             assertEquals(76f, dp(first.height), .6f)
@@ -172,6 +181,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertEquals(FontWeight(650), frame.types.getValue(text(R.string.assistant_picker_title)).fontWeight)
             assertType(text(R.string.assistant_search), 14.sp, 20.sp)
             assertType(text(R.string.assistant_count, 2), 11.sp, 16.sp)
+            assertType(text(R.string.assistant_list_hint), 11.sp, 16.sp)
             assertType("Visual A", 15.sp, 21.sp)
             assertEquals(FontWeight(550), frame.types.getValue("Visual A").fontWeight)
             assertType("First description", 12.sp, 18.sp)

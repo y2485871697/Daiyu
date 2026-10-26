@@ -12,13 +12,13 @@ class AssistantPickerFrameContractTest(unittest.TestCase):
         helper = text.split('private fun pickerFrame(): PickerFrame {', 1)[1].split('fun testPickerKeeps', 1)[0]
         lookup, sample = helper.split('return awaitStableWindowFrame(view) {', 1)
         for tag in ('assistant-sheet', 'assistant-search', 'assistant-list', 'assistant-item-visual-a',
-                    'assistant-item-visual-b', 'assistant-avatar-visual-a', 'assistant-new', 'assistant-done'):
+                    'assistant-item-visual-b', 'assistant-avatar-visual-a', 'assistant-new', 'assistant-done', 'assistant-list-meta'):
             self.assertIn('"' + tag + '"', lookup)
         for token in ('nodes.forEach { assertSame(root, it.root) }', '!it.layoutInfo.isPlaced',
                       '!it.layoutInfo.coordinates.isAttached', 'geometry.map { it.boundsInRoot }',
                       'node.config[SemanticsActions.GetTextLayoutResult].action', 'results.single()',
                       'input.style.fontSize', 'input.style.lineHeight', 'input.density.fontScale',
-                      'input.style.fontWeight', 'input.style.color', 'result.size.height',
+                      'input.style.fontWeight', 'input.style.color', 'result.size.height', 'node.boundsInRoot', 'result.firstBaseline',
                       'PickerFrame(bounds, types, density.get().density)'):
             self.assertIn(token, sample)
         for forbidden in ('fetchSemanticsNode', 'performSemanticsAction', 'ui.waitUntil', 'Thread.sleep',
@@ -26,6 +26,23 @@ class AssistantPickerFrameContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, sample)
         self.assertIn('private data class TypeFrame(', text)
         self.assertIn('private data class PickerFrame(', text)
+
+    def test_meta_labels_share_a_baseline_and_symmetric_vertical_insets(self):
+        picker = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/assistants/AssistantPickerDialogs.kt').read_text()
+        meta = picker.split('testTag("assistant-list-meta")', 1)[1].split('LazyColumn(', 1)[0]
+        self.assertIn('.padding(horizontal = 2.dp * s, vertical = 8.dp * s)', meta)
+        self.assertIn('verticalAlignment = Alignment.CenterVertically', meta)
+        self.assertIn('horizontalArrangement = Arrangement.SpaceBetween', meta)
+        self.assertEqual(2, meta.count('Modifier.alignByBaseline()'))
+        self.assertEqual(2, meta.count('fontSize = (11f * s).sp, lineHeight = (16f * s).sp'))
+        visual = SOURCE.read_text()
+        for oracle in ('val meta = frame.bounds[8]', 'text(R.string.assistant_list_hint)',
+                       'assertEquals(search.bottom, meta.top, .51f)',
+                       'assertEquals(meta.bottom, list.top, .51f)',
+                       'minOf(count.bounds.top, hint.bounds.top) - meta.top',
+                       'meta.bottom - maxOf(count.bounds.bottom, hint.bounds.bottom)',
+                       'count.bounds.top + count.firstBaseline, hint.bounds.top + hint.firstBaseline'):
+            self.assertIn(oracle, visual)
 
     def test_original_geometry_type_and_color_oracles_consume_only_the_snapshot(self):
         body = SOURCE.read_text().split('fun testPickerKeepsReadableSpacingAndOnlyAppliesFontScaleOnce()', 1)[1].split(

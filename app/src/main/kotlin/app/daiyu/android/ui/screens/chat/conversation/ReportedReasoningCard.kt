@@ -18,11 +18,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.withFrameNanos
@@ -51,10 +51,11 @@ internal fun ReportedReasoningCard(
     ownerKey: String,
     reported: List<ReportedReasoning>,
     allowLiveTiming: Boolean = false,
+    generationComplete: Boolean = !allowLiveTiming,
     nanoTime: () -> Long = System::nanoTime
 ) {
     val summaries = reported.filter { hasReportedReasoningText(it.text) }
-    val isThinking = allowLiveTiming && reported.any { it.activeSinceNanos != null }
+    val isThinking = isReportedReasoningActive(reported, allowLiveTiming)
     if (summaries.isEmpty() && !isThinking) return
     val hasSummary = summaries.isNotEmpty()
     val colors = conversationColors()
@@ -68,9 +69,12 @@ internal fun ReportedReasoningCard(
     )
     Column(Modifier.fillMaxWidth().testTag("reported-reasoning:$ownerKey")
         .clip(shape).border(1.dp, colors.line, shape).background(colors.surface)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 35.dp)
-            .conversationClickable(enabled = hasSummary) { expandedOverride = !expanded }
-            .semantics { if (hasSummary) stateDescription = if (expanded) "已展开" else "已折叠" }
+        Row(Modifier.fillMaxWidth().heightIn(min = 35.dp).testTag("reported-reasoning-header:$ownerKey")
+            .then(if (hasSummary) Modifier.conversationClickable(
+                onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
+            ) { expandedOverride = !expanded }.semantics {
+                stateDescription = if (expanded) "已展开" else "已折叠"
+            } else Modifier.semantics(mergeDescendants = true) {})
             .padding(horizontal = 11.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(14.dp), tint = colors.accent)
@@ -99,10 +103,13 @@ internal fun ReportedReasoningCard(
                 HorizontalDivider(thickness = 1.dp, color = colors.line)
                 Column(Modifier.padding(start = 11.dp, end = 11.dp, top = 8.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SelectionContainer {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            summaries.forEach { Text(it.text, color = colors.muted,
-                                style = MiuixTheme.textStyles.body2.copy(fontSize = 16.sp, lineHeight = 26.sp)) }
+                    summaries.forEach { summary ->
+                        key(ownerKey, summary.itemId) {
+                            val projection = rememberMarkdownProjection(listOf(summary.text))
+                            ProjectedMessageMarkdown(
+                                summary.text, projection?.blocks?.get(summary.text), Modifier.fillMaxWidth(),
+                                generationComplete = generationComplete,
+                            )
                         }
                     }
                 }
@@ -140,10 +147,13 @@ private fun ReasoningElapsedTime(
     }
     millis?.let { duration ->
         Text("${duration / 1_000}.${duration / 100 % 10} 秒",
-            Modifier.testTag("reported-reasoning-duration:$ownerKey"), color = conversationColors().muted,
+            Modifier.testTag("reported-reasoning-duration:$ownerKey"), color = conversationColors().text,
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 16.sp))
     }
 }
 
 internal fun hasReportedReasoningText(text: String): Boolean =
     text.any { !it.isWhitespace() && it != '.' && it != '…' }
+
+internal fun isReportedReasoningActive(reported: List<ReportedReasoning>, allowLiveTiming: Boolean): Boolean =
+    allowLiveTiming && reported.any { it.activeSinceNanos != null }

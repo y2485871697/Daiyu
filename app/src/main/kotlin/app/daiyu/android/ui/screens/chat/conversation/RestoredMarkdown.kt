@@ -11,7 +11,8 @@ internal fun restoredMarkdownSources(messages: List<Message>): List<String> =
     MessageHistory.expand(messages).filter { it.role == Message.ASSISTANT_ROLE && it.status != RunStatus.RUNNING }
         .flatMap { message ->
             val texts = message.blocks.filterIsInstance<MessageBlock.Text>().map { it.text }
-            if (message.blocks.any { it is MessageBlock.Tool }) texts
+            val summaries = message.reportedReasoning.filter { hasReportedReasoningText(it.text) }.map { it.text }
+            summaries + if (message.blocks.any { it is MessageBlock.Tool }) texts
             else texts + texts.joinToString("\n\n")
         }
 

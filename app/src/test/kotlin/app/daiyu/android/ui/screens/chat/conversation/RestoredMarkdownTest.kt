@@ -67,4 +67,32 @@ class RestoredMarkdownTest {
         } catch (_: kotlinx.coroutines.CancellationException) { }
         assertNull(cache.getBlocks("cancelled", parser))
     }
+
+    @Test fun restoredReasoningHasExactPreparedAstWithoutRewritingItsSource() {
+        val source = "**Planning concise warm Chinese story answer**"
+        val historical = MessageHistorySegment(MessageId("answer"), Message.ASSISTANT_ROLE,
+            listOf(MessageBlock.Text("body", "answer remains")),
+            reportedReasoning = listOf(ReportedReasoning("r", source, 1_200L), ReportedReasoning("empty", "...")))
+        val original = message("answer remains").copy(historySegments = listOf(historical))
+        val cache = MarkdownProjectionCache()
+        var calls = 0
+        val parser: (String) -> List<MarkdownBlock> = { calls++; MarkdownParser.parse(it) }
+        prepareRestoredMarkdown(listOf(original), cache, parser)
+        assertEquals(MarkdownParser.parse(source), cache.getPrepared(listOf(source), parser)!!.blocks[source])
+        assertNotNull(cache.getBlocks("answer remains", parser))
+        assertFalse(restoredMarkdownSources(listOf(original)).contains("..."))
+        val firstCalls = calls
+        prepareRestoredMarkdown(listOf(original), cache, parser)
+        assertEquals(firstCalls, calls)
+        assertEquals(source, original.historySegments.single().reportedReasoning.first().text)
+        assertEquals(1_200L, original.historySegments.single().reportedReasoning.first().elapsedMillis)
+    }
+
+    @Test fun runningAndUserReasoningAreNotPrepared() {
+        val running = message("stream").copy(status = RunStatus.RUNNING,
+            reportedReasoning = listOf(ReportedReasoning("r", "**live summary**", 0L, 0L)))
+        val user = message("user").copy(role = Message.USER_ROLE)
+        assertFalse(restoredMarkdownSources(listOf(running, user)).contains("**live summary**"))
+        assertFalse(restoredMarkdownSources(listOf(running, user)).contains("**not an assistant**"))
+    }
 }

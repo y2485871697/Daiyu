@@ -381,7 +381,8 @@ internal fun AssistantTurn(
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }
         ReportedReasoningCard(turn.listKey, turn.reportedReasoning,
-            allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING)
+            allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
+            generationComplete = turn.status != RunStatus.RUNNING)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent) { text, modifier ->
@@ -414,7 +415,8 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
     if (turn.finalText.isNotBlank()) {
         ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), visibleCharacters = reveal.limit("final"),
             generationComplete = turn.status != RunStatus.RUNNING)
-    } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
+    } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null &&
+        !isReportedReasoningActive(turn.reportedReasoning, turn.isStreaming)) {
         Text("正在思考…", color = conversationColors().muted,
             style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp))
     }

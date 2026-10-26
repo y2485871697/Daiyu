@@ -12,6 +12,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import kotlinx.coroutines.runBlocking
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.WiredActivityTestCase
@@ -23,6 +25,10 @@ import app.daiyu.android.ui.app.AgentAppTheme
 /** Production AssistantTurn rendering, offline component host only. */
 class ReportedReasoningCardTest : WiredActivityTestCase() {
 
+    private fun prepareSummaries(vararg sources: String) {
+        runBlocking { projectMarkdown(sources.toList()) }
+    }
+
     private fun awaitAnswer(text: String) {
         ui.waitUntil(5_000) {
             ui.onAllNodesWithText(text).fetchSemanticsNodes().size == 1
@@ -30,6 +36,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
     }
 
     fun testReasoningDisclosureDoesNotConsumeAnswerOrToolAndKeepsExpandedStateOnUpdate() {
+        prepareSummaries("reported summary", "final reported summary")
         var turn by mutableStateOf(ChatTurnUi.Assistant("assistant", finalText = "answer remains", status = RunStatus.COMPLETED,
             reportedReasoning = listOf(ReportedReasoning("r", "reported summary")),
             workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(WorkStepUi("tool", "fixture tool", "tool result", WorkStepState.OK)))), "已完成"),
@@ -97,13 +104,14 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
     }
 
     fun testLivePlaceholderHasOnlyStatusAndLateSummaryBecomesExpandable() {
+        prepareSummaries("real summary…")
         ui.mainClock.autoAdvance = false
         var reported by mutableStateOf(listOf(ReportedReasoning("r", "...", 1_200L, 0L)))
         var live by mutableStateOf(true)
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    ReportedReasoningCard("pending", reported, live, { 0L })
+                    ReportedReasoningCard("pending", reported, live, nanoTime = { 0L })
                 }
             } }
             ui.mainClock.advanceTimeBy(32)
@@ -131,6 +139,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
     }
 
     fun testMixedReasoningHidesPlaceholdersAndKeepsTotalElapsed() {
+        prepareSummaries("checked…")
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ReportedReasoningCard("mixed", listOf(
@@ -147,6 +156,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
     }
 
     fun testRealElapsedTimerUsesOneDecimalFreezesAndSurvivesRemount() {
+        prepareSummaries("live summary", "final summary")
         ui.mainClock.autoAdvance = false
         var now = 0L
         val clock = { now }
@@ -155,7 +165,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         var mounted by mutableStateOf(true)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                if (mounted) ReportedReasoningCard("timer", reported, live, clock)
+                if (mounted) ReportedReasoningCard("timer", reported, live, nanoTime = clock)
             }
         } }
         ui.mainClock.advanceTimeBy(32)
@@ -190,12 +200,13 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
     }
 
     fun testUnknownHistoricalTimeIsNotInventedAndManualExpansionSurvivesCompletion() {
+        prepareSummaries("summary")
         ui.mainClock.autoAdvance = false
         var reported by mutableStateOf(listOf(ReportedReasoning("r", "summary", 1_000L, 0L)))
         var live by mutableStateOf(true)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                ReportedReasoningCard("manual", reported, live, { 0L })
+                ReportedReasoningCard("manual", reported, live, nanoTime = { 0L })
             }
         } }
         ui.mainClock.advanceTimeBy(32)
@@ -214,6 +225,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
 
 
     fun testDisclosureAnimatesBothDirectionsAndKeepsBodyUntilExitFinishes() {
+        prepareSummaries("first line\nsecond line\nthird line")
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setContent {
@@ -263,6 +275,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
     }
 
     fun testDisclosureReversesFromCurrentFrameAndKeepsLatestSummary() {
+        prepareSummaries("first line\nsecond line\nthird line", "updated line\nsecond line\nthird line")
         ui.mainClock.autoAdvance = false
         var reported by mutableStateOf(listOf(ReportedReasoning("r", "first line\nsecond line\nthird line")))
         try {
@@ -305,4 +318,61 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         }
     }
 
+
+    fun testActiveReasoningReplacesOnlyTheDuplicateAnswerFallback() {
+        prepareSummaries("actual summary")
+        ui.mainClock.autoAdvance = false
+        var reported by mutableStateOf(listOf(ReportedReasoning("r", "...", 0L, 0L)))
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    AssistantTurn(ChatTurnUi.Assistant("progress", status = RunStatus.RUNNING, isStreaming = true,
+                        reportedReasoning = reported), ChatScreenActions())
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onAllNodesWithText("正在思考…").assertCountEquals(1)
+            mainThread { reported = listOf(ReportedReasoning("r", "actual summary", 0L, 0L)) }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onAllNodesWithText("正在思考…").assertCountEquals(1)
+            ui.onNodeWithText("actual summary").assertIsDisplayed()
+            mainThread { reported = emptyList() }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("reported-reasoning:progress").assertDoesNotExist()
+            ui.onAllNodesWithText("正在思考…").assertCountEquals(1)
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testPlaceholderIsReadableProgressInsteadOfADisabledButton() {
+        prepareSummaries("real summary")
+        ui.mainClock.autoAdvance = false
+        var reported by mutableStateOf(listOf(ReportedReasoning("r", "...", 1_200L, 0L)))
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReportedReasoningCard("semantics", reported, allowLiveTiming = true, nanoTime = { 0L })
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            val header = ui.onNodeWithTag("reported-reasoning-header:semantics", useUnmergedTree = true)
+            val pending = header.fetchSemanticsNode().config
+            assertFalse(pending.contains(SemanticsActions.OnClick))
+            assertFalse(pending.contains(SemanticsProperties.Role))
+            assertFalse(pending.contains(SemanticsProperties.Disabled))
+            ui.onNodeWithText("正在思考…", useUnmergedTree = true).assertExists()
+            ui.onNodeWithText("1.2 秒", useUnmergedTree = true).assertExists()
+            mainThread { reported = listOf(ReportedReasoning("r", "real summary", 1_200L, 0L)) }
+            ui.mainClock.advanceTimeBy(300)
+            header.assertHasClickAction().assertIsEnabled()
+            header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+            header.performClick()
+            ui.mainClock.advanceTimeBy(300)
+            header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
+            ui.onNodeWithText("real summary").assertDoesNotExist()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
 }

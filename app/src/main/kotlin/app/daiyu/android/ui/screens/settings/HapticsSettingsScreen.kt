@@ -4,11 +4,17 @@ import app.daiyu.android.ui.app.DaiyuPalette
 
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import app.daiyu.android.ui.haptics.toggleable
-import androidx.compose.material3.Slider as IntensityPreviewSlider
+import top.yukonga.miuix.kmp.basic.Slider as IntensityPreviewSlider
+import top.yukonga.miuix.kmp.basic.SliderDefaults
+import top.yukonga.miuix.kmp.basic.Text
 import app.daiyu.android.ui.screens.settings.SettingsSwitch as Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
@@ -19,7 +25,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import app.daiyu.android.ui.icons.DaiyuIcon
+import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -65,18 +75,19 @@ internal fun HapticsSettingsScreen(
         }
     }
 
-    fun save(transform: HapticSettings.() -> HapticSettings) {
-        if (!canAct()) return
+    fun save(transform: HapticSettings.() -> HapticSettings): Boolean {
+        if (!canAct()) return false
         val old = runtime.store.read()
         val next = old.transform()
         if (!runtime.store.write(next)) {
             settings = runtime.store.read()
             error = "设置写入失败，未保存"
-        } else {
-            settings = next
-            error = null
-            if (!old.touch && next.touch) session.touch()
+            return false
         }
+        settings = next
+        error = null
+        if (!old.touch && next.touch) session.touch()
+        return true
     }
     fun preview(intensity: HapticIntensity) {
         if (!canAct()) return
@@ -89,7 +100,8 @@ internal fun HapticsSettingsScreen(
             HapticDelivery.PLAYED -> null
         }
     }
-    val labels = listOf("系统默认", "低", "中", "高")
+    val labels = listOf("默认", "低", "中", "高")
+    val intensityAccent = assistantPreviewPalette().primary
     SettingsScaffoldPage(title = "触感反馈", onBack = onBack, modifier = modifier) {
         item(key = "haptics_switches") {
             SettingsSectionTitle("触感设置")
@@ -97,9 +109,11 @@ internal fun HapticsSettingsScreen(
                 SettingsRow("触感反馈", tag = "settings-switch:触感反馈",
                     summary = labels[settings.intensity.ordinal],
                     onClick = { if (canAct()) intensityDialog = true }, trailing = {
-                        Switch(checked = settings.touch,
-                            colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                                checkedBorderColor = DaiyuPalette.switchTrack), onCheckedChange = { save { copy(touch = it) } })
+                        HapticsSwitchSlot("触感反馈", expanded = intensityDialog) {
+                            Switch(checked = settings.touch,
+                                colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                    checkedBorderColor = DaiyuPalette.switchTrack), onCheckedChange = { save { copy(touch = it) } })
+                        }
                     })
                 HapticsSwitchRow("消息生成震动", settings.generationOn, settings.touch) {
                     save { copy(generation = it) }
@@ -112,42 +126,47 @@ internal fun HapticsSettingsScreen(
                     },
                     onClick = if (settings.generationOn) ({
                         if (canAct()) {
-                            if (!settings.backgroundOn) { save { copy(background = true) }; expanded = true }
+                            if (!settings.backgroundOn) { if (save { copy(background = true) }) expanded = true }
                             else { expanded = !expanded }
                         }
                     }) else null, trailing = {
-                        Switch(checked = settings.backgroundOn, enabled = settings.generationOn,
-                            colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                                checkedBorderColor = DaiyuPalette.switchTrack),
-                            onCheckedChange = { expanded = it; save { copy(background = it) } })
+                        HapticsSwitchSlot("后台震动", expanded = expanded.takeIf { settings.backgroundOn }) {
+                            Switch(checked = settings.backgroundOn, enabled = settings.generationOn,
+                                colors = SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
+                                    checkedBorderColor = DaiyuPalette.switchTrack),
+                                onCheckedChange = { if (save { copy(background = it) }) expanded = it })
+                        }
                     })
                 if (expanded && settings.backgroundOn) HapticsSwitchRow(
                     "后台推理过程震动", settings.backgroundReasoning, true,
                 ) { save { copy(backgroundReasoning = it) } }
             }
-            SettingsNote("关闭上级开关不会覆盖已保存的下级选项。后台震动不会保持应用进程存活。")
         }
         error?.let { message -> item(key = "haptics_error") { SettingsNote(message, error = true) } }
     }
-    top.yukonga.miuix.kmp.window.WindowDialog(show = intensityDialog, title = "触感强度",
+    top.yukonga.miuix.kmp.window.WindowDialog(show = intensityDialog, title = "震动幅度",
         onDismissRequest = { intensityDialog = false }) {
-            SettingsCard {
-                SettingsRow("强度", summary = labels[settings.intensity.ordinal])
-                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-                    IntensityPreviewSlider(value = settings.intensity.ordinal.toFloat(), valueRange = 0f..3f, steps = 2,
-                        modifier = Modifier.testTag("haptics-intensity"),
-                        onValueChange = { value ->
-                            val next = HapticIntensity.entries[value.roundToInt().coerceIn(0, 3)]
-                            if (canAct() && next != runtime.store.read().intensity) {
-                                preview(next)
-                                val saved = runtime.store.write(runtime.store.read().copy(intensity = next))
-                                settings = runtime.store.read()
-                                if (!saved) error = "设置写入失败，未保存"
-                            }
-                        })
-                }
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                DaiyuIcon(DaiyuIcons.Vibration, contentDescription = null, size = 32.dp,
+                    tint = intensityAccent, modifier = Modifier.padding(top = 6.dp))
+                Text(labels[settings.intensity.ordinal], style = MiuixTheme.textStyles.title3,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 16.dp))
+                IntensityPreviewSlider(value = settings.intensity.ordinal.toFloat(), valueRange = 0f..3f, steps = 2,
+                    showKeyPoints = true, keyPoints = HapticIntensity.entries.indices.map { it.toFloat() },
+                    magnetThreshold = 0.18f, hapticEffect = SliderDefaults.SliderHapticEffect.None,
+                    colors = SliderDefaults.sliderColors(foregroundColor = intensityAccent,
+                        keyPointColor = intensityAccent.copy(alpha = .30f), keyPointForegroundColor = intensityAccent),
+                    modifier = Modifier.fillMaxWidth().testTag("haptics-intensity"),
+                    onValueChange = { value ->
+                        val next = HapticIntensity.entries[value.roundToInt().coerceIn(0, 3)]
+                        if (canAct() && next != runtime.store.read().intensity) {
+                            preview(next)
+                            val saved = runtime.store.write(runtime.store.read().copy(intensity = next))
+                            settings = runtime.store.read()
+                            if (!saved) error = "设置写入失败，未保存"
+                        }
+                    })
             }
-            SettingsNote("系统默认使用系统触感主题；低、中、高优先使用设备支持的震动原语，无振幅控制时使用系统振幅。")
         }
 
 }
@@ -161,10 +180,27 @@ private fun HapticsSwitchRow(title: String, checked: Boolean, enabled: Boolean,
     SettingsRow(title, tag = "settings-switch:$title", modifier = Modifier.toggleable(
         value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange,
     ), trailing = {
-        Switch(checked = checked, enabled = enabled, onCheckedChange = null,
-            colors = SwitchDefaults.colors(checkedThumbColor = colors.onPrimary,
-                checkedTrackColor = DaiyuPalette.switchTrack, checkedBorderColor = DaiyuPalette.switchTrack,
-                uncheckedThumbColor = colors.onSurfaceVariantSummary,
-                uncheckedTrackColor = colors.surface, uncheckedBorderColor = colors.onSurfaceVariantSummary))
+        HapticsSwitchSlot(title) {
+            Switch(checked = checked, enabled = enabled, onCheckedChange = null,
+                colors = SwitchDefaults.colors(checkedThumbColor = colors.onPrimary,
+                    checkedTrackColor = DaiyuPalette.switchTrack, checkedBorderColor = DaiyuPalette.switchTrack,
+                    uncheckedThumbColor = colors.onSurfaceVariantSummary,
+                    uncheckedTrackColor = colors.surface, uncheckedBorderColor = colors.onSurfaceVariantSummary))
+        }
     })
+}
+
+@Composable
+private fun HapticsSwitchSlot(title: String, expanded: Boolean? = null, content: @Composable () -> Unit) {
+    Row(Modifier.size(width = 72.dp, height = 48.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        if (expanded != null) DaiyuIcon(
+            if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
+            contentDescription = if (expanded) "收起$title" else "展开$title",
+            size = 16.dp, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        ) else Box(Modifier.size(16.dp))
+        Box(Modifier.size(48.dp).testTag("haptics-switch-slot:$title"), contentAlignment = Alignment.Center) {
+            content()
+        }
+    }
 }

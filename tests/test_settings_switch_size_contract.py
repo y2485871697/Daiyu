@@ -64,7 +64,7 @@ class SettingsSwitchSizeContractTest(unittest.TestCase):
             self.assertIn(text, row)
         haptics = (SETTINGS / 'HapticsSettingsScreen.kt').read_text()
         self.assertIn('if (canAct()) intensityDialog = true', haptics)
-        self.assertIn('onCheckedChange = { expanded = it; save { copy(background = it) } }', haptics)
+        self.assertIn('onCheckedChange = { if (save { copy(background = it) }) expanded = it }', haptics)
         appearance = (SETTINGS / 'AppearanceSettingsScreen.kt').read_text()
         self.assertIn('else loadingExpanded = !loadingExpanded', appearance)
         self.assertIn('onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) }', appearance)

@@ -40,7 +40,7 @@ class SettingsSwitchAccentContractTest(unittest.TestCase):
         self.assertEqual(3, haptics.count(f'checkedBorderColor = {TOKEN}'))
         for retained in ('if (canAct()) intensityDialog = true',
                          'else { expanded = !expanded }',
-                         'onCheckedChange = { expanded = it; save { copy(background = it) } }',
+                         'onCheckedChange = { if (save { copy(background = it) }) expanded = it }',
                          'enabled = settings.generationOn', 'onCheckedChange = null'):
             self.assertIn(retained, haptics)
 

@@ -58,6 +58,26 @@ class HapticEngineTest {
         assertEquals(HapticMotorEffect.OneShot(10L, null), motorEffect(default, 26, false, true))
     }
 
+    @Test fun originalIntensityScalesAndApi34CapabilityFallbacksArePreserved() {
+        assertEquals(listOf("default", "low", "medium", "high"), HapticIntensity.entries.map { it.wireValue })
+        assertEquals(listOf(0f, .25f, .60f, 1f), HapticIntensity.entries.map { it.clickScale })
+        assertEquals(listOf(0f, .18f, .48f, .85f), HapticIntensity.entries.map { it.tickScale })
+        assertEquals(listOf(0, 48, 140, 255), HapticIntensity.entries.map { it.clickAmplitude })
+        assertEquals(listOf(0, 32, 96, 200), HapticIntensity.entries.map { it.tickAmplitude })
+        HapticIntensity.entries.drop(1).forEach { intensity ->
+            val click = HapticRequest(HapticKind.CLICK, intensity)
+            val tick = HapticRequest(HapticKind.TICK, intensity)
+            assertEquals(HapticMotorEffect.Primitive(false, intensity.clickScale), motorEffect(click, 34, true, false))
+            assertEquals(HapticMotorEffect.Primitive(true, intensity.tickScale), motorEffect(tick, 34, true, false))
+            assertEquals(HapticMotorEffect.OneShot(16L, intensity.clickAmplitude), motorEffect(click, 34, false, true))
+            assertEquals(HapticMotorEffect.OneShot(10L, intensity.tickAmplitude), motorEffect(tick, 34, false, true))
+            assertEquals(HapticMotorEffect.OneShot(16L, null), motorEffect(click, 34, false, false))
+            assertEquals(HapticMotorEffect.OneShot(10L, null), motorEffect(tick, 34, false, false))
+        }
+        assertEquals(HapticMotorEffect.SystemTick,
+            motorEffect(HapticRequest(HapticKind.TICK, HapticIntensity.DEFAULT, generation = true), 34, true, false))
+    }
+
     @Test fun generationUsesThirtyTwoMillisAndDoesNotReplayDroppedText() {
         val f = Fixture()
         assertEquals(HapticDelivery.PLAYED, f.engine.visibleAdvance(f.owner))

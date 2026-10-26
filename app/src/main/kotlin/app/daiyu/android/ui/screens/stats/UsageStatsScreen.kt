@@ -109,6 +109,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
 
     MiuixScaffoldPage(
         title = stringResource(R.string.stats_page_title),
+        compactTitle = true,
         onBack = onBack,
         modifier = Modifier.testTag("usage-stats-screen"),
     ) {

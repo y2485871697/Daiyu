@@ -237,6 +237,7 @@ internal fun DaiyuSettingsScreen(
             return@PageBackStack
         }
         MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier, listState = listState,
+            compactTitle = true,
             scrollBehavior = scrollBehavior, containerColor = settingsPageBackground(),
             listModifier = Modifier.background(settingsPageBackground())
                 .then(if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier),

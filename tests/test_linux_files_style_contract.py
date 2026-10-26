@@ -81,7 +81,7 @@ class LinuxFilesStyleContract(unittest.TestCase):
         self.assertNotIn('SettingsNote', actions)
         parent = read('WorkspaceSettingsScreen.kt')
         toolbar = parent.split('SettingsScaffoldPage(', 1)[1].split('    }) {', 1)[0]
-        for token in ['compactTitle = integratedLinux', 'privatePanel?.actions?.invoke()',
+        for token in ['compactTitle = true', 'privatePanel?.actions?.invoke()',
                       'rootfsPanel?.actions?.invoke()', 'workspace-refresh', 'linux-open-terminal']:
             self.assertIn(token, toolbar)
         self.assertLess(toolbar.index('privatePanel?.actions'), toolbar.index('linux-open-terminal'))
@@ -141,13 +141,14 @@ class LinuxFilesStyleContract(unittest.TestCase):
                 with self.subTest(name=name, text=text):
                     self.assertIn(text, read(name))
 
-    def test_compact_topbar_is_opt_in_and_does_not_change_other_pages(self):
+    def test_settings_share_compact_topbar_without_changing_non_settings_defaults(self):
         adaptive = (COMPONENTS / 'AdaptiveTopAppBar.kt').read_text()
         scaffold = (COMPONENTS / 'MiuixScaffoldPage.kt').read_text()
-        for source in [adaptive, scaffold, read('SettingsScaffold.kt')]:
+        for source in [adaptive, scaffold]:
             self.assertIn('compactTitle: Boolean = false', source)
         self.assertIn('if (compactTitle || rememberIsWideScreen())', adaptive)
         self.assertIn('compactTitle = compactTitle', scaffold)
+        self.assertIn('compactTitle: Boolean = true', read('SettingsScaffold.kt'))
         self.assertIn('compactTitle = compactTitle', read('SettingsScaffold.kt'))
         self.assertIn('leave, compactTitle = true, actions', read('LinuxSettingsScreen.kt'))
 

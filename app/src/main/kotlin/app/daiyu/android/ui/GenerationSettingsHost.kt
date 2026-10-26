@@ -80,7 +80,7 @@ internal fun GenerationSettingsHost(
             )
         } else {
             // No placeholder/default form for corrupt/unconfirmed/unavailable source reads.
-            MiuixScaffoldPage(title = "独立生成模型设置", onBack = leave, modifier = Modifier.weight(1f)) {
+            MiuixScaffoldPage(title = "独立生成模型设置", onBack = leave, modifier = Modifier.weight(1f), compactTitle = true) {
                 item {
                     SettingsNote(if (state.loading) "正在后台读取生成配置…"
                         else state.errorText ?: "此设置页面已失效，请返回后重新打开。", error = state.failure != null)

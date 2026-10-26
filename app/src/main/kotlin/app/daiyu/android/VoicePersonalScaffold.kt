@@ -34,7 +34,7 @@ internal fun VoicePersonalScaffold(
     content: LazyListScope.() -> Unit,
 ) {
     Box(Modifier.fillMaxSize().testTag("voice-account")) {
-        MiuixScaffoldPage(title, onBack, actions = {
+        MiuixScaffoldPage(title, onBack, compactTitle = true, actions = {
             if (onSettings != null) IconButton(onClick = onSettings, enabled = enabled,
                 modifier = Modifier.testTag("voice-account-menu")) {
                 DaiyuIcon(DaiyuIcons.Settings, "声音设置")

@@ -1937,7 +1937,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         if (ready == null || page == null) TerminalLoadingPage(state, onBack = leave,
-                            title = if (route == "chat-workspace") "工作区" else "Linux 工具环境")
+                            title = if (route == "chat-workspace") "工作区" else "Linux 工具环境", compactTitle = true)
                         else key(page) {
                             LinuxSettingsScreen(ready.application.settings, page, host = ready.application.terminalOwner.host,
                                 filesOnly = route == "chat-workspace", onOpenTerminal = {
@@ -2148,7 +2148,7 @@ class MainActivity : ComponentActivity() {
                         if (page != null) LegacyLibraryScreen(page, ::pickLegacySource, ::pickLegacyTarget,
                             onBack = { retainedPage = "backup" })
                         else app.daiyu.android.ui.components.MiuixScaffoldPage("旧版兼容资料库",
-                            onBack = { retainedPage = "backup" }) {
+                            onBack = { retainedPage = "backup" }, compactTitle = true) {
                             item("reopen") {
                                 app.daiyu.android.ui.haptics.miuix.TextButton("重新打开资料库",
                                     onClick = { backupGuard { openLegacyLibrary() } })
@@ -5237,8 +5237,9 @@ class MainActivity : ComponentActivity() {
         state: app.daiyu.android.terminal.TerminalApplicationState,
         onBack: () -> Unit,
         title: String = "终端",
+        compactTitle: Boolean = false,
     ) {
-        app.daiyu.android.ui.components.MiuixScaffoldPage(title = title, onBack = onBack) {
+        app.daiyu.android.ui.components.MiuixScaffoldPage(title = title, onBack = onBack, compactTitle = compactTitle) {
             item {
                 app.daiyu.android.ui.screens.settings.SettingsNote(
                     if (state == app.daiyu.android.terminal.TerminalApplicationState.Unavailable)

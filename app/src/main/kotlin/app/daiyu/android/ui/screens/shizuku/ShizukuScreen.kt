@@ -102,7 +102,7 @@ internal fun ShizukuScreen(
         }
     }
     MiuixScaffoldPage(
-        title = stringResource(R.string.shizuku_title), onBack = onBack,
+        title = stringResource(R.string.shizuku_title), onBack = onBack, compactTitle = session == null,
         actions = {
             TextButton(stringResource(R.string.shizuku_refresh), onClick = { refresh++ },
                 enabled = !busy, modifier = Modifier.testTag("shizuku-refresh"))

@@ -111,6 +111,7 @@ fun MiuixScaffold(
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
     containerColor: Color = MiuixTheme.colorScheme.surface,
+    compactTitle: Boolean = false,
     content: @Composable (
         paddingValues: PaddingValues,
         scrollBehavior: ScrollBehavior,
@@ -128,6 +129,7 @@ fun MiuixScaffold(
             TopBarBackdrop(backdrop, containerColor) {
                 AdaptiveTopAppBar(
                     title = title,
+                    compactTitle = compactTitle,
                     color = topBarColor,
                     navigationIcon = { MiuixBackButton(onClick = onBack) },
                     actions = actions,

@@ -203,7 +203,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         }) else null
     val rootfsPanel = if (integratedLinux && location == LinuxFileLocation.ROOTFS) key(rootfs) { rememberLinuxRootfsPanel(rootfs?.rootfs) } else null
     // Loading must not measure the retained position against a temporarily shorter list.
-    SettingsScaffoldPage(title = pageTitle, onBack = back, modifier = modifier, compactTitle = integratedLinux,
+    SettingsScaffoldPage(title = pageTitle, onBack = back, modifier = modifier, compactTitle = true,
         listState = if (showShared && (!loaded || restoringDirectory)) loadingListState else listState, actions = {
         privatePanel?.actions?.invoke()
         rootfsPanel?.actions?.invoke()

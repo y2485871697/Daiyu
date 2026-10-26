@@ -31,6 +31,7 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
     val reasoningOverride: Boolean? = null,
     val visionOverride: Boolean? = null,
     val usageIdentity: app.daiyu.android.model.UsageModelIdentity? = null,
+    val oauth: app.daiyu.android.model.oauth.CodexAuth? = null,
 ) {
     val hasModelOverrides: Boolean get() = contextWindowOverride != null || reasoningOverride != null || visionOverride != null
     fun enabledTools(): Set<ReadOnlyTool> = buildSet {
@@ -58,13 +59,19 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
         if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint))
             app.daiyu.android.voice.providers.DoubaoSpeech.validateBaseUrl(endpoint)
         requestEndpoint()
+        if (oauth != null) {
+            require(protocol == ProviderProtocol.RESPONSES) { "OAuth 仅支持 Responses 协议" }
+            app.daiyu.android.model.oauth.CodexOAuthProtocol.requireEndpoint(endpoint, responsesPath)
+            require(apiKey.isEmpty()) { "OAuth 不使用 API Key" }
+            require(requestOptions.speedMode != app.daiyu.android.model.GptSpeedMode.ULTRA_FAST) { "Codex 不支持 ULTRA_FAST" }
+        }
         requestOptions.validate(protocol)
         require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }
         if (hasModelOverrides && requestOptions.customBody.isNotEmpty()) {
             val body = app.daiyu.android.model.MessagesRequest.jsonObject(requestOptions.customBody)
             require(!body.has("model") || body.opt("model") == model) { "自定义请求体 model 与能力声明所选模型冲突" }
         }
-        require(model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写有效密钥"}
+        require(model.length<=200 && (oauth != null || apiKey.isNotBlank()) && apiKey.length<=8192) {"请填写有效密钥"}
         require(!apiKey.contains('\n') && !apiKey.contains('\r')) {"密钥含非法换行"}
     }
 }
@@ -93,6 +100,7 @@ class ModelSettingsStore internal constructor(
         require(namespace.matches(Regex("[a-zA-Z0-9._-]+"))) { "模型设置 namespace 无效" }
         require(keyAliasPrefix.isNotBlank())
     }
+    init { app.daiyu.android.model.oauth.CodexOAuthRuntime.initialize(context) }
     private val preferences=context.getSharedPreferences(namespace,Context.MODE_PRIVATE)
     private val restoreIdentity = Any()
     internal val modelCatalog by lazy { FileSavedModelCatalogPersistence(
@@ -277,6 +285,9 @@ class ModelSettingsStore internal constructor(
         preferences.getBoolean(REBIND_REQUIRED, false)
     } catch (_: Exception) { true } // Malformed gate fails closed before any decryption.
 
+    private fun readOAuth(): app.daiyu.android.model.oauth.CodexAuth? =
+        preferences.getString("oauth-reference", null)?.let { app.daiyu.android.model.oauth.CodexAuth(it) }
+
     private fun readRequestOptions(): ProviderRequestOptions = ProviderRequestOptions.decode(
         if (preferences.contains("request-options")) preferences.getString("request-options", null)
             ?: throw IllegalStateException("模型请求配置无效；请重新保存") else null)
@@ -312,7 +323,7 @@ class ModelSettingsStore internal constructor(
         }
         return EditingSettings(ModelSettings(values["endpoint"] as? String ?: "", values["model"] as? String ?: "", "",
             values["battery"] as? Boolean ?: false, values["responses-path"] as? String ?: "",
-            values["device-status"] as? Boolean ?: false, readProtocol(), options), true, optionsUnavailable,
+            values["device-status"] as? Boolean ?: false, readProtocol(), options, oauth = readOAuth()), true, optionsUnavailable,
             includeHeadersState && (preferences.contains("request-headers") || preferences.contains("request-headers-iv")))
     }
     private fun keyStore()=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
@@ -355,7 +366,7 @@ class ModelSettingsStore internal constructor(
             ProviderHeaders.EMPTY
         }
         EditingSettings(ModelSettings(values["endpoint"] as? String ?: "",values["model"] as? String ?: "",apiKey,
-            values["battery"] as? Boolean ?: false,values["responses-path"] as? String ?: "",values["device-status"] as? Boolean ?: false,readProtocol(),options,headers),unavailable,optionsUnavailable,headersUnavailable)
+            values["battery"] as? Boolean ?: false,values["responses-path"] as? String ?: "",values["device-status"] as? Boolean ?: false,readProtocol(),options,headers, oauth = readOAuth()),unavailable,optionsUnavailable,headersUnavailable)
     }
     fun load():ModelSettings=synchronized(lock) {
         check(readProtocol() != ProviderProtocol.UNKNOWN) {"模型协议无效；请到模型设置重新选择"}
@@ -381,7 +392,7 @@ class ModelSettingsStore internal constructor(
         val previousConnection = previousEditing.settings
         val connectionChanged = previousEditing.credentialUnavailable ||
             previousConnection.endpoint != settings.endpoint || previousConnection.apiKey != settings.apiKey ||
-            previousConnection.customHeaders != settings.customHeaders
+            previousConnection.customHeaders != settings.customHeaders || previousConnection.oauth != settings.oauth
         val previousOptionsValid = try {
             val previousOptions = readRequestOptions()
             val previousProtocol = readProtocol()
@@ -427,6 +438,7 @@ class ModelSettingsStore internal constructor(
                         putString("request-headers-iv", Base64.encodeToString(headerCipher.iv, Base64.NO_WRAP))
                     }
                 }
+                .apply { if (settings.oauth == null) remove("oauth-reference") else putString("oauth-reference", settings.oauth.id) }
                 .putString("key-owner",owner).putString("key-alias",alias).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP)).putString("key",encrypted)
                 .apply { if (connectionChanged) putBoolean(CATALOG_PENDING, true) }
                 .remove(REBIND_REQUIRED).commit()
@@ -496,7 +508,7 @@ class ModelSettingsStore internal constructor(
         private const val REBIND_REQUIRED = "credential-rebind-required"
         private const val CATALOG_PENDING = "catalog-configuration-pending"
         private val configurationFields = listOf("endpoint", "model", "responses-path", "device-status", "battery", "protocol")
-        private val fields = configurationFields + listOf("request-options", "request-headers", "request-headers-iv", "key-owner", "key-alias", "iv", "key", REBIND_REQUIRED, CATALOG_PENDING)
+        private val fields = configurationFields + listOf("oauth-reference", "request-options", "request-headers", "request-headers-iv", "key-owner", "key-alias", "iv", "key", REBIND_REQUIRED, CATALOG_PENDING)
 
         private fun putField(editor: SharedPreferences.Editor, name: String, values: Map<String, Any?>) {
             if(!values.containsKey(name)) editor.remove(name)

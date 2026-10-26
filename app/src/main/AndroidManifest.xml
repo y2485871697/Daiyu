@@ -66,6 +66,8 @@
             android:enabled="true" android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <!-- Explicit root-owner cover only; independent task, never a launcher/deep-link target. -->
+        <activity android:name=".model.oauth.CodexLoginActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity android:name=".vd.VirtualDisplayAnchorActivity"
             android:exported="true" android:excludeFromRecents="true"
             android:allowTaskReparenting="false" android:taskAffinity="app.daiyu.android.vd.anchor"

@@ -30,7 +30,7 @@ class ProviderHeaders private constructor(private val values: Map<String, String
             "authorization", "proxy-authorization", "host", "content-type", "content-length",
             "content-encoding", "accept", "accept-encoding", "connection", "keep-alive", "te",
             "trailer", "transfer-encoding", "upgrade", "cookie", "cookie2", "expect",
-            "x-api-key", "x-goog-api-key", "anthropic-version", "session-id", "thread-id", "x-opencode-session",
+            "chatgpt-account-id", "originator", "version", "x-api-key", "x-goog-api-key", "anthropic-version", "session-id", "thread-id", "x-opencode-session",
         )
 
         /** Exact JSON object; no trimming, coercion or case-insensitive duplicate merging. */

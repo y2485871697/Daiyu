@@ -17,6 +17,7 @@ internal object SummaryProviderFactory {
 
     private fun validatedCustomBody(snapshot: ProviderSnapshot): JSONObject {
         snapshot.asModelSettings().validate()
+        require(snapshot.oauth == null) { "Codex OAuth 不支持摘要所需的 max_output_tokens 上限，请选择 API Key 摘要模型" }
         require(snapshot.protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)) {
             "摘要模型尚不支持 ${snapshot.protocol.wireName}；仅支持 Responses/Messages/Chat Completions"
         }

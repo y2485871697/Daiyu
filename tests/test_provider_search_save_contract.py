@@ -13,7 +13,9 @@ class ProviderSearchSaveContractTest(unittest.TestCase):
         validation = source.split('fun validateConnection()', 1)[1].split('class CredentialUnavailableException', 1)[0]
         self.assertIn('requestEndpoint()', validation)
         self.assertIn('requestOptions.validate(protocol)', validation)
-        self.assertNotIn('requireEndpoint', validation)
+        api_key_validation = validation.split('        if (oauth != null) {', 1)[0] + validation.split('        }', 1)[1]
+        self.assertNotIn('requireEndpoint', api_key_validation)
+        self.assertIn('CodexOAuthProtocol.requireEndpoint(endpoint, responsesPath)', validation)
         protocol = (MAIN / 'model/ResponsesSearchProtocol.kt').read_text()
         self.assertNotIn('fun requireEndpoint', protocol)
         self.assertNotIn('api.openai.com', protocol)

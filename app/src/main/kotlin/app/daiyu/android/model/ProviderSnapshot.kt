@@ -25,6 +25,7 @@ class ProviderSnapshot private constructor(
     val endpoint: String,
     val model: String,
     val apiKey: String,
+    val oauth: app.daiyu.android.model.oauth.CodexAuth?,
     val responsesPath: String,
     val batteryEnabled: Boolean,
     val deviceStatusEnabled: Boolean,
@@ -45,6 +46,7 @@ class ProviderSnapshot private constructor(
         endpoint = endpoint,
         model = model,
         apiKey = apiKey,
+        oauth = oauth,
         batteryEnabled = batteryEnabled,
         responsesPath = responsesPath,
         deviceStatusEnabled = deviceStatusEnabled,
@@ -67,7 +69,7 @@ class ProviderSnapshot private constructor(
 
     override fun equals(other: Any?): Boolean = other is ProviderSnapshot &&
         protocol == other.protocol && endpoint == other.endpoint && model == other.model &&
-        apiKey == other.apiKey && responsesPath == other.responsesPath &&
+        apiKey == other.apiKey && oauth == other.oauth && responsesPath == other.responsesPath &&
         batteryEnabled == other.batteryEnabled && deviceStatusEnabled == other.deviceStatusEnabled &&
         contextWindowOverride == other.contextWindowOverride && reasoningOverride == other.reasoningOverride &&
         visionOverride == other.visionOverride && tools == other.tools && requestOptions == other.requestOptions && customHeaders == other.customHeaders && imageInputSupported == other.imageInputSupported
@@ -77,6 +79,7 @@ class ProviderSnapshot private constructor(
         result = 31 * result + endpoint.hashCode()
         result = 31 * result + model.hashCode()
         result = 31 * result + apiKey.hashCode()
+        result = 31 * result + (oauth?.hashCode() ?: 0)
         result = 31 * result + responsesPath.hashCode()
         result = 31 * result + batteryEnabled.hashCode()
         result = 31 * result + deviceStatusEnabled.hashCode()
@@ -94,7 +97,7 @@ class ProviderSnapshot private constructor(
         fun capture(settings: ModelSettings): ProviderSnapshot = capture(settings, settings.protocol)
 
         fun capture(settings: ModelSettings, protocol: ProviderProtocol, imageInputSupported: Boolean? = null): ProviderSnapshot {
-            if (settings.apiKey.isBlank()) throw MissingProviderCredentialException()
+            if (settings.apiKey.isBlank() && settings.oauth == null) throw MissingProviderCredentialException()
             if (protocol == ProviderProtocol.UNKNOWN) settings.validate()
             else settings.copy(protocol = protocol).validate()
             return ProviderSnapshot(
@@ -103,6 +106,7 @@ class ProviderSnapshot private constructor(
                 endpoint = settings.endpoint,
                 model = settings.model,
                 apiKey = settings.apiKey,
+                oauth = settings.oauth,
                 responsesPath = settings.responsesPath,
                 batteryEnabled = settings.batteryEnabled,
                 deviceStatusEnabled = settings.deviceStatusEnabled,

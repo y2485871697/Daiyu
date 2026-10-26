@@ -60,18 +60,20 @@ private class PausedProviderDraft(
     val draft: ModelSettingsDraftUi, val balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration?,
     val pageUi: ProviderPageUiState,
 )
-private class NewProviderDraft(protocol: ProviderProtocol, val speechOnly: Boolean = false) {
+private class NewProviderDraft(protocol: ProviderProtocol, val speechOnly: Boolean = false, oauth: app.daiyu.android.model.oauth.CodexAuth? = null) {
     val pageUi = ProviderPageUiState()
     var error by mutableStateOf<String?>(null)
     var draft by mutableStateOf((if (speechOnly) ModelSettingsDraftUi(
         providerName = "豆包语音", endpoint = app.daiyu.android.voice.providers.DoubaoSpeech.BASE_URL,
         model = "seed-tts-2.0", providerEnabled = true,
-    ) else ModelSettingsDraftUi(providerName = "")).selectProtocol(protocol))
+    ) else if (oauth != null) ModelSettingsDraftUi(providerName = "OpenAI Codex", endpoint = app.daiyu.android.model.oauth.CodexOAuthProtocol.BASE_URL,
+        responsesPath = "/responses", oauth = oauth) else ModelSettingsDraftUi(providerName = "")).selectProtocol(protocol))
     var balanceTestJob: kotlinx.coroutines.Job? = null
-    fun revoke() { balanceTestJob?.cancel(); balanceTestJob = null }
+    val registration = ProviderRegistrationOwnership { oauth?.let(app.daiyu.android.model.oauth.CodexOAuthRuntime::discard) }
+    fun revoke() { balanceTestJob?.cancel(); balanceTestJob = null; registration.revoke() }
 }
 private class ProviderConfirm(val title: String, val message: String, val destructive: Boolean, val action: () -> Unit)
-private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(protocol = protocol, endpoint = endpoint,
+private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(oauth = oauth, protocol = protocol, endpoint = endpoint,
     responsesPath = responsesPath, apiKey = apiKey, model = model, batteryEnabled = batteryEnabled,
     deviceStatusEnabled = deviceStatusEnabled, customBody = requestOptions.customBody,
     speedMode = requestOptions.speedMode, codex = requestOptions.codex,
@@ -80,7 +82,7 @@ private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(protocol = prot
     sessionGateway = requestOptions.sessionGateway,
     customHeaders = if (customHeaders.isEmpty) "" else customHeaders.encode())
 private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(),
-    responsesPath = responsesPath.trim(), model = model.trim(), apiKey = apiKey, protocol = protocol,
+    responsesPath = responsesPath.trim(), model = model.trim(), apiKey = apiKey, oauth = oauth, protocol = protocol,
     batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
     customHeaders = app.daiyu.android.model.ProviderHeaders.parse(customHeaders),
     requestOptions = base.requestOptions.copy(sessionGateway = sessionGateway, customBody = customBody, speedMode = speedMode, codex = codex,
@@ -93,6 +95,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
 ) = ProviderSettingsTheme {
     val repo = controller.providers
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val ownerCheck by rememberUpdatedState(ownerCurrent)
     val visit = remember { AtomicBoolean(true) }
@@ -116,6 +119,21 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var creating by remember { mutableStateOf<NewProviderDraft?>(null) }
     var confirmation by remember { mutableStateOf<ProviderConfirm?>(null) }
     var version by remember { mutableStateOf(0L) }
+    var oauthAttempt by remember { mutableStateOf<String?>(null) }
+    var oauthResult by remember { mutableStateOf<app.daiyu.android.model.oauth.CodexAuth?>(null) }
+    var oauthReturned by remember { mutableStateOf(false) }
+    var oauthRegistryRevision by remember { mutableStateOf<Long?>(null) }
+    fun discardOAuth(auth: app.daiyu.android.model.oauth.CodexAuth?) {
+        if (auth != null) app.daiyu.android.model.oauth.CodexOAuthRuntime.discard(auth)
+    }
+    val oauthLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data
+        val auth = data?.getStringExtra("oauth-reference")?.let { runCatching { app.daiyu.android.model.oauth.CodexAuth(it) }.getOrNull() }
+        if (oauthAttempt != null && (data == null || data.getStringExtra("attempt") == oauthAttempt) && ownerCheck() && visit.get()) {
+            oauthResult = auth; oauthReturned = true
+        } else { discardOAuth(auth); oauthReturned = true }
+    }
     fun current(p: ProviderPagePermit) = visit.get() && p.live.get() && permit === p && resumed &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()
     fun clearTransientPrompts() { confirmation = null; managing = null }
@@ -244,7 +262,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }
                 // Pause revokes execution authority, not the user's page or in-memory draft.
                 serial++
-                resumed = false; permit.revoke(); detail?.revoke(); creating?.revoke()
+                resumed = false; permit.revoke(); detail?.revoke(); creating?.balanceTestJob?.cancel()
                 creating?.let { it.draft = it.draft.copy(protocolChangeAuthorized = false,
                     requestOptionsReplacementAuthorized = false, headersReplacementAuthorized = false) }
                 clearTransientPrompts(); checkingRegistry = false
@@ -254,10 +272,29 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { pausedDraft = null; visit.set(false); permit.revoke(); detail?.revoke(); creating?.revoke(); lifecycle.removeObserver(observer) }
+        onDispose { oauthAttempt = null; discardOAuth(oauthResult); oauthResult = null; pausedDraft = null; visit.set(false); permit.revoke(); detail?.revoke(); creating?.revoke(); lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(resumed, permit, busy, initialSlot, pendingOpen) {
-        if (pendingOpen && current(permit) && busy == null) {
+    LaunchedEffect(resumed, permit, oauthReturned) {
+        if (resumed && current(permit) && oauthReturned) {
+            val auth = oauthResult
+            val sameRegistry = withContext(Dispatchers.IO) { runCatching { repo.snapshot().revision == oauthRegistryRevision }.getOrDefault(false) }
+            if (auth != null && oauthAttempt != null && sameRegistry && current(permit)) {
+                authentication = true; creating = NewProviderDraft(ProviderProtocol.RESPONSES, oauth = auth)
+                pendingOpen = false
+            } else { discardOAuth(auth); notice = "OAuth 登录已取消或页面已变化，请重试。" }
+            // Clear the effect key only after the final suspension and credential hand-off.
+            oauthResult = null; oauthReturned = false; oauthAttempt = null; oauthRegistryRevision = null
+        }
+    }
+    LaunchedEffect(resumed, permit, busy, initialSlot, pendingOpen, oauthAttempt, oauthReturned) {
+        if (current(permit) && busy == null && oauthAttempt == null && !oauthReturned) {
+            val registered = creating?.registration?.registeredSlot
+            if (registered != null) {
+                creating?.revoke(); creating = null; authentication = false; pendingOpen = false
+                open(registered)
+                return@LaunchedEffect
+            }
+            if (!pendingOpen) return@LaunchedEffect
             val restore = pausedDraft
             pendingOpen = false
             if (restore != null) open(restore.editor.slotId, restore)
@@ -266,6 +303,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         }
     }
     fun back() {
+        oauthAttempt = null; oauthRegistryRevision = null; oauthReturned = false
+        discardOAuth(oauthResult); oauthResult = null
         if (creating != null) { serial++; clearPrompts(); refresh(); return }
         if (authentication && !loading) { serial++; authentication = false; clearPrompts(); refresh(); return }
         detail?.revoke()
@@ -309,10 +348,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 } }
             }
             if (modelTab) ProviderEmptyModelsPage("添加提供商", { back() }, tabs,
-                "请先在配置页保存名称、Base URL 和 API Key，再添加或拉取模型。",
+                "请先在配置页保存提供商配置，再添加或拉取模型。",
                 listState = newProvider.pageUi.modelListState, queryState = newProvider.pageUi.modelQuery)
             else ModelSettingsScreen(draft, { if (current(p) && enabled && creating === newProvider && newProvider.draft === draft) {
-                newProvider.revoke(); newProvider.error = null; newProvider.draft = it
+                newProvider.balanceTestJob?.cancel(); newProvider.balanceTestJob = null; newProvider.error = null; newProvider.draft = it
             } },
                 onSave = { submitted ->
                     val expected = registry
@@ -332,8 +371,15 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         }, reportFailure = { message ->
                             if (creating === newProvider) newProvider.error = message
                         }) { repo, revision, admit ->
-                            val created = repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
-                                submitted.protocol != submitted.savedProtocol, enabled = submitted.providerEnabled, admit = admit)
+                            newProvider.registration.beginSave()
+                            val created = try {
+                                repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
+                                    submitted.protocol != submitted.savedProtocol, enabled = submitted.providerEnabled, admit = admit)
+                                    .also { result ->
+                                        val added = result.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
+                                        newProvider.registration.registered(added.slotId)
+                                    }
+                            } finally { newProvider.registration.finishSave() }
                             submitted.providerBalanceConfiguration()?.let {
                                 val added = created.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
                                 val runtime = kotlinx.coroutines.runBlocking { controller.providerBalances.get(added.slotId) }
@@ -351,7 +397,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         requestCancelled() || configuration == null || !configuration.queryEnabled ||
                         runCatching { configuration.validateProviderBinding() }.isFailure) false
                     else {
-                        newProvider.revoke()
+                        newProvider.balanceTestJob?.cancel()
                         newProvider.balanceTestJob = scope.launch {
                             val result = try { controller.providerBalances.queryDraft(configuration) }
                             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -534,8 +580,16 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         } else if (loading) {
             SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
         } else if (authentication) {
-            ProviderAuthenticationPage(enabled, null, onBack = { back() }, onApiKey = {
+            ProviderAuthenticationPage(enabled && oauthAttempt == null, notice, onBack = { back() }, onApiKey = {
                 if (current(p) && enabled) creating = NewProviderDraft(ProviderProtocol.RESPONSES)
+            }, onOAuth = {
+                if (enabled && current(p) && oauthAttempt == null) {
+                    oauthRegistryRevision = registry?.revision
+                    oauthAttempt = java.util.UUID.randomUUID().toString()
+                    try { oauthLauncher.launch(android.content.Intent(context, app.daiyu.android.model.oauth.CodexLoginActivity::class.java)
+                        .putExtra("attempt", oauthAttempt)) }
+                    catch (_: Exception) { oauthAttempt = null; oauthRegistryRevision = null; notice = "无法打开 OAuth 登录" }
+                }
             })
         } else {
             ProviderDirectoryPage(registry, summaries, query, { query = it }, enabled && registry != null,

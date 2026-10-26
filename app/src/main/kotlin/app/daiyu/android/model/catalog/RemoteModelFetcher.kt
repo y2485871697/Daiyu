@@ -44,6 +44,7 @@ data class RemoteModelRequest(
     val timeoutMillis: Int = RemoteModelFetcher.DEFAULT_TIMEOUT_MILLIS,
     val anthropicVersion: String? = null,
     val customHeaders: ProviderHeaders = ProviderHeaders.EMPTY,
+    val oauth: app.daiyu.android.model.oauth.CodexAuth? = null,
 ) {
     override fun toString(): String = "RemoteModelRequest(protocol=$protocol, apiKey=<redacted>)"
 }
@@ -124,7 +125,11 @@ class RemoteModelFetcher(
     ): T {
         val (baseUrl, apiKey, protocol, modelsPath, timeoutMillis) = request
         val endpoint = try {
-            remoteModelsEndpoint(baseUrl, protocol, modelsPath)
+            if (request.oauth != null) {
+                require(protocol == RemoteModelProtocol.OPENAI && modelsPath.isEmpty())
+                app.daiyu.android.model.oauth.CodexOAuthProtocol.requireEndpoint(baseUrl, "/responses")
+                "$baseUrl/models?client_version=${app.daiyu.android.model.oauth.CodexOAuthProtocol.CLIENT_VERSION}&limit=100"
+            } else remoteModelsEndpoint(baseUrl, protocol, modelsPath)
         } catch (_: IllegalArgumentException) {
             throw RemoteModelException(RemoteModelFailure.INVALID_ENDPOINT)
         }
@@ -144,6 +149,10 @@ class RemoteModelFetcher(
         }
         checkCancelled(isCancelled)
 
+        val oauthHeaders = try { request.oauth?.let { app.daiyu.android.model.oauth.CodexOAuthRuntime.headers(it) } }
+        catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
+        catch (_: Exception) { throw RemoteModelException(RemoteModelFailure.AUTHENTICATION) }
+        checkCancelled(isCancelled)
         var connection: HttpURLConnection? = null
         var configuringRequest = true
         try {
@@ -168,6 +177,7 @@ class RemoteModelFetcher(
                 // The version header is part of Anthropic's protocol even for a public test server.
                 connection.setRequestProperty("anthropic-version", request.anthropicVersion ?: ANTHROPIC_VERSION)
             }
+            oauthHeaders?.forEach { (key, value) -> connection.setRequestProperty(key, value) }
             configuringRequest = false
             checkCancelled(isCancelled)
             val status = connection.responseCode

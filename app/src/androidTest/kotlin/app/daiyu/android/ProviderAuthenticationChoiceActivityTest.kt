@@ -75,7 +75,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         val before = fixture.controller.providers.snapshot()
         reveal("provider-add", "模型提供商").performClick()
         node("page:认证方式").assertExists()
-        node("provider-auth-oauth").assertHasNoClickAction()
+        node("provider-auth-oauth").assertHasClickAction()
         reveal("provider-auth-api-key", "认证方式").performClick()
         awaitUniqueTag("page:添加提供商")
         node("prompt-input").assertDoesNotExist()

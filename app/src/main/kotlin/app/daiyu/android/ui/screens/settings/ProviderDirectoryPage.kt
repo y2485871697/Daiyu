@@ -86,7 +86,7 @@ internal fun ProviderDirectoryPage(
 }
 
 @Composable
-internal fun ProviderAuthenticationPage(enabled: Boolean, notice: String?, onBack: () -> Unit, onApiKey: () -> Unit) {
+internal fun ProviderAuthenticationPage(enabled: Boolean, notice: String?, onBack: () -> Unit, onApiKey: () -> Unit, onOAuth: () -> Unit = {}) {
     SettingsScaffoldPage("认证方式", onBack) {
         notice?.let { item("auth-notice") { SettingsNote(it, error = true) } }
         item {
@@ -97,7 +97,7 @@ internal fun ProviderAuthenticationPage(enabled: Boolean, notice: String?, onBac
                     showChevron = true, onClick = if (enabled) onApiKey else null)
                 SettingsRow("OAuth", summary = "使用 OpenAI Codex 登录", tag = "provider-auth-oauth",
                     leading = { DaiyuIcon(DaiyuIcons.Model, null) },
-                    trailing = { DaiyuIcon(DaiyuIcons.ChevronRight, null) })
+                    trailing = { DaiyuIcon(DaiyuIcons.ChevronRight, null) }, onClick = if (enabled) onOAuth else null)
             }
             SettingsNote("OAuth 通过服务商网页登录；API Key 使用您手动配置的密钥。")
         }

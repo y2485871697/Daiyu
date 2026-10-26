@@ -34,6 +34,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * savedProtocol stays fixed for the editing session (copy() preserves it).
  */
 internal data class ModelSettingsDraftUi(
+    val oauth: app.daiyu.android.model.oauth.CodexAuth? = null,
     val providerName: String? = null,
     val protocol: ProviderProtocol = ProviderProtocol.RESPONSES,
     val endpoint: String = "",
@@ -138,11 +139,12 @@ internal fun ModelSettingsScreen(
             SettingsCard {
                 if (providerName != null) SettingsTextField("名称", draft.providerName ?: providerName,
                     { changeDraft(draft.copy(providerName = it)) }, enabled = enabled, compact = true, tag = "provider-name")
-                SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled && !speechOnly, compact = true)
-                SettingsTextField("API Key", draft.apiKey, { key ->
+                SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled && !speechOnly && draft.oauth == null, compact = true)
+                if (draft.oauth == null) SettingsTextField("API Key", draft.apiKey, { key ->
                     changeDraft(draft.copy(apiKey = key))
                 }, password = true, enabled = enabled, compact = true)
-                if (!speechOnly) ProviderProtocolFields(draft, enabled, changeDraft)
+                else SettingsNote("认证方式：OAuth · OpenAI Codex；令牌在发送前自动刷新。Codex 不支持关闭思考，关闭／默认按 medium 发送；登录失效时请重新添加 OAuth 提供商。自动压缩需选择独立 API Key 摘要模型或明确关闭；Codex 不支持后台断流恢复。")
+                if (!speechOnly) ProviderProtocolFields(draft, enabled && draft.oauth == null, changeDraft)
                 if (credentialUnavailable) SettingsNote("密钥失效，请重输", error = true)
                 if (draft.savedProtocol == ProviderProtocol.UNKNOWN) SettingsNote("协议无效，请重选", error = true)
                 if (providerName == null && draft.protocol == ProviderProtocol.RESPONSES) {

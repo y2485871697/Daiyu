@@ -6057,7 +6057,7 @@ class MainActivity : ComponentActivity() {
             // This page cannot authorize a protocol/key rebind. The model editor owns that flow.
             require(editing.settings.protocol != app.daiyu.android.model.ProviderProtocol.UNKNOWN)
             require(!editing.credentialUnavailable || editing.requestOptionsUnavailable)
-            require(editing.settings.apiKey.isNotBlank())
+            require(editing.settings.oauth != null || editing.settings.apiKey.isNotBlank())
             require(!editing.requestOptionsUnavailable || gatewayReplacementAuthorized)
             value.validate() // Unknown retention/keySource may be saved, but never executed.
             val next = editing.settings.copy(requestOptions = editing.settings.requestOptions.copy(sessionGateway = value))

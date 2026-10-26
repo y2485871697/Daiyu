@@ -112,12 +112,13 @@ class ResponsesModel internal constructor(
             }
             try {
                 val url = settings.requestEndpoint() + "/$id?stream=true&starting_after=$sequence"
+                val authentication = authHeaders()
                 conn = connect(URL(url))
                 synchronized(postLock) { checkCancelled(); connection = conn }
                 conn.requestMethod = "GET"; conn.doOutput = false; conn.instanceFollowRedirects = false
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
-                conn.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
                 settings.customHeaders.applyTo(conn)
+                authentication.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 conn.setRequestProperty("Accept", "text/event-stream")
                 checkCancelled()
                 configuringRequest = false
@@ -187,6 +188,15 @@ class ResponsesModel internal constructor(
         private var started = false
         private var pending = emptySet<String>()
         init { settings.validate() }
+        private fun authHeaders(): Map<String, String> {
+            settings.validateConnection()
+            val result = if (settings.oauth == null) mapOf("Authorization" to "Bearer ${settings.apiKey}")
+            else try { app.daiyu.android.model.oauth.CodexOAuthRuntime.headers(settings.oauth) }
+                catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
+                catch (_: Exception) { throw ModelRequestException(ModelFailure.AUTHENTICATION) }
+            checkCancelled()
+            return result
+        }
         private fun checkCancelled() {
             if (cancelled.get() || Thread.currentThread().isInterrupted) throw InterruptedException()
         }
@@ -215,6 +225,7 @@ class ResponsesModel internal constructor(
                 backgroundResume.requireMatches(settings)
                 request.put("background", true).put("stream", true).put("store", false)
             } else require(!request.has("background") || request.opt("background") == false) { "Background mode requires explicit informed opt-in" }
+            if (settings.oauth != null) app.daiyu.android.model.oauth.CodexRequestPolicy.apply(request, settings.requestOptions.speedMode)
             val finalUrl = settings.requestEndpoint()
             SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
             if (videoPlan != null) app.daiyu.android.model.videos.VideoRequestPolicy.disableReasoning(request)
@@ -285,6 +296,7 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 transportStarted = true
                 configuringRequest = true
+                val authentication = authHeaders()
                 val conn = connect(URL(finalUrl))
                 // Own the result before checking cancellation so a late factory return is always
                 // disconnected by finally, even when it must never be published or write a body.
@@ -299,8 +311,8 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
-                conn.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
                 settings.customHeaders.applyTo(conn)
+                authentication.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Accept", "text/event-stream")
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 checkCancelled()

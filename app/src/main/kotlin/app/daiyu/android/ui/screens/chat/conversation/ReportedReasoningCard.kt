@@ -53,13 +53,14 @@ internal fun ReportedReasoningCard(
     allowLiveTiming: Boolean = false,
     nanoTime: () -> Long = System::nanoTime
 ) {
-    val visible = reported.filter { it.text.isNotBlank() || it.activeSinceNanos != null }
-    if (visible.isEmpty()) return
+    val summaries = reported.filter { hasReportedReasoningText(it.text) }
+    val isThinking = allowLiveTiming && reported.any { it.activeSinceNanos != null }
+    if (summaries.isEmpty() && !isThinking) return
+    val hasSummary = summaries.isNotEmpty()
     val colors = conversationColors()
     val shape = RoundedCornerShape(14.dp)
-    val isThinking = allowLiveTiming && visible.any { it.activeSinceNanos != null }
     var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
-    val expanded = expandedOverride ?: isThinking
+    val expanded = hasSummary && (expandedOverride ?: isThinking)
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
@@ -68,20 +69,22 @@ internal fun ReportedReasoningCard(
     Column(Modifier.fillMaxWidth().testTag("reported-reasoning:$ownerKey")
         .clip(shape).border(1.dp, colors.line, shape).background(colors.surface)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 35.dp)
-            .conversationClickable { expandedOverride = !expanded }
-            .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
+            .conversationClickable(enabled = hasSummary) { expandedOverride = !expanded }
+            .semantics { if (hasSummary) stateDescription = if (expanded) "已展开" else "已折叠" }
             .padding(horizontal = 11.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(14.dp), tint = colors.accent)
             Text(if (isThinking) "正在思考…" else "已思考", Modifier.weight(1f), color = colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
-            ReasoningElapsedTime(ownerKey, visible, isThinking, nanoTime)
-            Icon(ChatPreviewIcons.Chevron,
-                if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
-                Modifier.size(10.dp).rotate(chevronRotation), tint = colors.muted)
+            ReasoningElapsedTime(ownerKey, reported, isThinking, nanoTime)
+            if (hasSummary) {
+                Icon(ChatPreviewIcons.Chevron,
+                    if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
+                    Modifier.size(10.dp).rotate(chevronRotation), tint = colors.muted)
+            }
         }
         AnimatedVisibility(
-            visible = expanded && visible.any { it.text.isNotBlank() },
+            visible = expanded,
             modifier = Modifier.fillMaxWidth(),
             enter = expandVertically(
                 animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
@@ -98,7 +101,7 @@ internal fun ReportedReasoningCard(
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SelectionContainer {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            visible.filter { it.text.isNotBlank() }.forEach { Text(it.text, color = colors.muted,
+                            summaries.forEach { Text(it.text, color = colors.muted,
                                 style = MiuixTheme.textStyles.body2.copy(fontSize = 16.sp, lineHeight = 26.sp)) }
                         }
                     }
@@ -141,3 +144,6 @@ private fun ReasoningElapsedTime(
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 16.sp))
     }
 }
+
+internal fun hasReportedReasoningText(text: String): Boolean =
+    text.any { !it.isWhitespace() && it != '.' && it != '…' }

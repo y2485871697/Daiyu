@@ -71,6 +71,80 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.onNodeWithText("ordinary answer").assertIsDisplayed()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").assertDoesNotExist()
     }
+    fun testCompletedPlaceholdersDoNotCreateCardOrConsumeAnswerAndTool() {
+        var reasoning by mutableStateOf(listOf(ReportedReasoning("r", "...")))
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                AssistantTurn(ChatTurnUi.Assistant("placeholder", finalText = "answer remains", status = RunStatus.COMPLETED,
+                    reportedReasoning = reasoning,
+                    workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(
+                        WorkStepUi("tool", "fixture tool", "tool result", WorkStepState.OK)))), "已完成")), ChatScreenActions())
+            }
+        } }
+        awaitAnswer("answer remains")
+        ui.onNodeWithTag("reported-reasoning:placeholder").assertDoesNotExist()
+        ui.onNodeWithText("...").assertDoesNotExist()
+        listOf("...", " \n\t", "…", "……", "").forEach { text ->
+            mainThread { reasoning = listOf(ReportedReasoning("r", text, 1_000L, 0L)) }
+            ui.waitForIdle()
+            ui.onAllNodesWithTag("reported-reasoning:placeholder").assertCountEquals(0)
+            ui.onNodeWithText("已思考").assertDoesNotExist()
+            ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").assertDoesNotExist()
+            ui.onNodeWithText("answer remains").assertIsDisplayed()
+            ui.onNodeWithTag("work-process-header").assertIsDisplayed()
+        }
+    }
+
+    fun testLivePlaceholderHasOnlyStatusAndLateSummaryBecomesExpandable() {
+        ui.mainClock.autoAdvance = false
+        var reported by mutableStateOf(listOf(ReportedReasoning("r", "...", 1_200L, 0L)))
+        var live by mutableStateOf(true)
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReportedReasoningCard("pending", reported, live, { 0L })
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithText("正在思考…").assertExists()
+            ui.onNodeWithText("...").assertDoesNotExist()
+            ui.onNodeWithText("1.2 秒").assertExists()
+            ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").assertDoesNotExist()
+            ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").assertDoesNotExist()
+            mainThread { reported = listOf(ReportedReasoning("r", "real summary…", 1_200L, 0L)) }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("real summary…").assertIsDisplayed()
+            ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            mainThread { reported = listOf(ReportedReasoning("r", "real summary…", 1_500L)); live = false }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithText("1.5 秒").assertExists()
+            ui.onNodeWithText("real summary…").assertDoesNotExist()
+            mainThread { reported = listOf(ReportedReasoning("r", "...", 1_500L)) }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("reported-reasoning:pending").assertDoesNotExist()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testMixedReasoningHidesPlaceholdersAndKeepsTotalElapsed() {
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ReportedReasoningCard("mixed", listOf(
+                    ReportedReasoning("first", "...", 400L),
+                    ReportedReasoning("second", "checked…", 800L),
+                    ReportedReasoning("third", " ", 300L)))
+            }
+        } }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("已思考").fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithText("1.5 秒").assertExists()
+        ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
+        ui.onNodeWithText("checked…").assertIsDisplayed()
+        ui.onNodeWithText("...").assertDoesNotExist()
+    }
+
     fun testRealElapsedTimerUsesOneDecimalFreezesAndSurvivesRemount() {
         ui.mainClock.autoAdvance = false
         var now = 0L

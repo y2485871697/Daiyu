@@ -18,7 +18,9 @@ internal object BackupStatisticsCodec {
         UsageStatisticsStore.CONVERSATIONS to listOf("conversation_id"), UsageStatisticsStore.RETIRED_MESSAGES to listOf("message_id"), RECEIPTS to receiptColumns.take(3))
     private val names = mapOf(UsageStatisticsStore.REQUESTS to "requests", UsageStatisticsStore.CONVERSATIONS to "conversations", UsageStatisticsStore.RETIRED_MESSAGES to "retired_messages", RECEIPTS to "receipts")
     data class Validated(val tables: Map<String, List<JSONObject>>, val textConversations: Set<String>)
-    data class Receipt(val expected: Map<String, List<JSONObject>>)
+    data class RetirementRestore(val before: JSONObject, val after: JSONObject)
+    data class Receipt(val expected: Map<String, List<JSONObject>>,
+        val retirementRestores: Map<String, RetirementRestore> = emptyMap())
 
     fun export(db: SQLiteDatabase, conversation: String?): JSONObject = JSONObject().put("version", 1).apply {
         columns.forEach { (table, fields) ->
@@ -61,32 +63,62 @@ internal object BackupStatisticsCodec {
         return Validated(tables, textConversations)
     }
 
-    /** Freeze the target before any import writes. Identity collisions must be equal facts,
-     * never max/replace/add: another backup may contain exactly the same retired requests. */
-    fun prepare(db: SQLiteDatabase, incoming: Validated?): Receipt? {
+    /** Freeze accounting before import writes. Only an explicit restoration of an absent
+     * live conversation may reverse retirement; request identities remain immutable. */
+    fun prepare(db: SQLiteDatabase, incoming: Validated?, restoringConversations: Set<String> = emptySet()): Receipt? {
         if (incoming == null) return null
+        check(db.inTransaction())
+        val retirementRestores = linkedMapOf<String, RetirementRestore>()
         val expected = columns.mapValues { (table, fields) ->
             val rows = BackupHistoryRows.read(db, table, fields).associateByTo(linkedMapOf()) { key(table, it) }
             incoming.tables.getValue(table).forEach { row ->
-                val previous = rows[key(table, row)]
-                require(previous == null || same(fields, previous, row)) { "统计身份冲突，未覆盖现有账目" }
-                rows[key(table, row)] = row
+                val identity = key(table, row)
+                val previous = rows[identity]
+                if (previous != null && !same(fields, previous, row)) {
+                    val conversation = if (table == UsageStatisticsStore.CONVERSATIONS)
+                        BackupHistoryRows.text(row, "conversation_id") else null
+                    require(conversation != null && conversation in incoming.textConversations &&
+                        conversation in restoringConversations &&
+                        !previous.isNull("retired_messages") && !previous.isNull("retired_day") &&
+                        row.isNull("retired_messages") && row.isNull("retired_day") &&
+                        same(fields.filterNot { it == "retired_messages" || it == "retired_day" }, previous, row) &&
+                        !db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(conversation)).use { it.moveToFirst() }
+                    ) { "统计身份冲突，未覆盖现有账目" }
+                    retirementRestores[identity] = RetirementRestore(previous, row)
+                }
+                rows[identity] = row
             }
             require(rows.size <= BackupHistoryRows.MAX_ROWS)
             rows.values.toList()
         }
-        return Receipt(expected)
+        return Receipt(expected, retirementRestores)
     }
-    fun restore(db: SQLiteDatabase, incoming: Validated?) {
+    fun restore(db: SQLiteDatabase, incoming: Validated?, receipt: Receipt? = null) {
         if (incoming == null) return
         check(db.inTransaction())
         incoming.tables.forEach { (table, rows) -> rows.forEach { row ->
             val identity = identities.getValue(table)
-            val exists = db.rawQuery("SELECT 1 FROM $table WHERE " + identity.joinToString(" AND ") { "$it=?" },
-                identity.map { BackupHistoryRows.text(row, it) }.toTypedArray()).use { it.moveToFirst() }
-            if (exists) BackupUsageCodec.verifyRow(db, table, row, identity)
-            else BackupHistoryRows.insert(db, table, row)
+            val retirement = if (table == UsageStatisticsStore.CONVERSATIONS)
+                receipt?.retirementRestores?.get(key(table, row)) else null
+            if (retirement != null) BackupUsageCodec.verifyRow(db, table, retirement.before, identity)
+            else {
+                val exists = db.rawQuery("SELECT 1 FROM $table WHERE " + identity.joinToString(" AND ") { "$it=?" },
+                    identity.map { BackupHistoryRows.text(row, it) }.toTypedArray()).use { it.moveToFirst() }
+                if (exists) BackupUsageCodec.verifyRow(db, table, row, identity)
+                else BackupHistoryRows.insert(db, table, row)
+            }
         } }
+        receipt?.retirementRestores?.values?.forEach { retirement ->
+            val before = retirement.before
+            // Later inserts may run triggers. Recheck the frozen row immediately before CAS.
+            BackupUsageCodec.verifyRow(db, UsageStatisticsStore.CONVERSATIONS, before,
+                identities.getValue(UsageStatisticsStore.CONVERSATIONS))
+            UsageStatisticsStore.restoreRetirement(db, BackupHistoryRows.text(before, "conversation_id"),
+                if (before.isNull("created_at")) null else BackupHistoryRows.number(before, "created_at"),
+                BackupHistoryRows.number(before, "retired_messages"), BackupHistoryRows.text(before, "retired_day"))
+            BackupUsageCodec.verifyRow(db, UsageStatisticsStore.CONVERSATIONS, retirement.after,
+                identities.getValue(UsageStatisticsStore.CONVERSATIONS))
+        }
     }
     fun verify(db: SQLiteDatabase, incoming: Validated?, receipt: Receipt? = null) {
         if (incoming == null) return
@@ -96,6 +128,11 @@ internal object BackupStatisticsCodec {
             BackupHistoryRows.text(it, "conversation_id") in incoming.textConversations
         }
         check(equalRows(RECEIPTS, incoming.tables.getValue(RECEIPTS), actualReceipts)) { "会话用量收据集合不匹配" }
+        receipt?.retirementRestores?.values?.forEach { retirement ->
+            UsageStatisticsStore.verifyRestoredRetirement(db,
+                BackupHistoryRows.text(retirement.before, "conversation_id"),
+                BackupHistoryRows.number(retirement.before, "retired_messages"))
+        }
         if (receipt != null) receipt.expected.forEach { (table, expected) ->
             val actual = BackupHistoryRows.read(db, table, columns.getValue(table))
             check(equalRows(table, expected, actual)) { "统计导入集合不匹配" }

@@ -28,6 +28,30 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         ui.onNodeWithTag("timeline-close").performClick()
         ui.onNodeWithTag("timeline-details").assertDoesNotExist()
     }
+    fun testDetailsSurfaceTouchesNeverReachTheOutsideScrim() {
+        var dismissals = 0
+        var show by mutableStateOf(true)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            if (show) TimelineDetailsSheet("summary body", { dismissals++; show = false },
+                title = "Summary title", compressorLabel = "Model label")
+        } } }
+        ui.onNodeWithTag("timeline-details").assertIsDisplayed()
+        for (surface in listOf(ui.onNodeWithTag("timeline-header"), ui.onNodeWithText("Summary title"),
+            ui.onNodeWithText("Model label"))) {
+            surface.performTouchInput { click() }
+            ui.onNodeWithTag("timeline-details").assertIsDisplayed()
+            assertEquals(0, dismissals)
+        }
+        ui.onNodeWithTag("timeline-copy").performTouchInput { click() }
+        ui.onNodeWithContentDescription("已复制").assertExists()
+        ui.onNodeWithTag("preview-dialog-viewport").performTouchInput {
+            click(androidx.compose.ui.geometry.Offset(center.x, 1f))
+        }
+        ui.waitUntil { dismissals == 1 }
+        ui.onNodeWithTag("timeline-details").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testZeroCountIsHiddenAndLegacyUnknownModelIsNotInvented() {
         var entry by mutableStateOf(ChatTimelineEntry.Compression("legacy", anchor, 1L,
             "legacy summary", null, 0, null, null))

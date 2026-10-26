@@ -341,10 +341,11 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             attempted = true; db.beginTransaction()
             var successful = false
             try {
-            val statisticsReceipt = BackupStatisticsCodec.prepare(db, parsed.statistics)
-            val result = run {
             val duplicate = db.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
             check(duplicate == duplicateSnapshot) { "导入身份在原件阶段已变化；未自动重试" }
+            val statisticsReceipt = BackupStatisticsCodec.prepare(db, parsed.statistics,
+                restoringConversations = if (duplicate) emptySet() else parsed.statistics?.textConversations.orEmpty())
+            val result = run {
             if (duplicate) {
                 store.verifyRestoredBackup(db, parsed.payload.getString("text_backup"))
                 verifyImportedTables(db, parsed.payload.getJSONObject("tables"), parsed.version, parsed.columns)
@@ -388,7 +389,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 app.daiyu.android.storage.ConversationUsageStore.backfill(db, importedConversations)
                 app.daiyu.android.storage.UsageStatisticsStore.importLegacyReceipts(db, importedConversations)
             }
-            else BackupStatisticsCodec.restore(db, parsed.statistics)
+            else BackupStatisticsCodec.restore(db, parsed.statistics, statisticsReceipt)
             if (parsed.static.isNotEmpty()) BackupHistoryRows.install(db)
             val importedMessages = objectOf(objectOf(parsed.payload.getString("text_backup")).getString("payload")).getJSONArray("messages")
             parsed.static.forEach { StaticGenerationCodec.saveInTransaction(db, it, importedMessages) }

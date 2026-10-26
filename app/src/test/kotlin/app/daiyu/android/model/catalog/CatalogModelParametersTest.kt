@@ -13,6 +13,27 @@ import java.io.File
 class CatalogModelParametersTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun defaultCapabilitiesDoNotBecomeExplicitOverridesOrRejectCustomModel() {
+        val options = ProviderRequestOptions(customBody = "{\"model\":\"relay/actual-model\"}")
+        val current = ModelSettings("https://example.invalid", "catalog-model", "key", false)
+        val projected = CatalogModelParameters(requestOptions = options).applyTo(current, "catalog-model")
+        projected.validate()
+        assertFalse(projected.hasModelOverrides)
+        assertNull(projected.reasoningOverride)
+        assertNull(projected.visionOverride)
+        assertEquals(true, projected.requestSnapshot().imageInputSupported)
+        assertEquals(projected, projected.requestSnapshot().asModelSettings())
+        for (declared in listOf(true, false)) {
+            val explicit = CatalogModelParameters(requestOptions = options, visionOverride = declared)
+                .applyTo(current, "catalog-model")
+            assertTrue(explicit.hasModelOverrides)
+            assertThrows(IllegalArgumentException::class.java) { explicit.validate() }
+            val noOverride = explicit.copy(requestOptions = ProviderRequestOptions())
+            assertEquals(declared, noOverride.requestSnapshot().imageInputSupported)
+            assertEquals(noOverride, noOverride.requestSnapshot().asModelSettings())
+        }
+    }
+
     @Test fun anthropicVersionRoundTripsThroughCatalog() {
         val options = ProviderRequestOptions(anthropicVersion = "2023-06-01")
         val source = ModelSettings("https://example.invalid", "model", "synthetic-key", false,
@@ -20,7 +41,7 @@ class CatalogModelParametersTest {
         val migrated = CatalogModelParameters.fromCurrent(source)
         val decoded = CatalogModelParametersCodec.decode(CatalogModelParametersCodec.encode(migrated.settings))
         assertEquals(options, decoded.requestOptions)
-        assertEquals(source.copy(reasoningOverride = true, visionOverride = true),
+        assertEquals(source.copy(defaultVisionSupported = true),
             decoded.applyTo(source.copy(requestOptions = ProviderRequestOptions()), source.model))
         val file = File(temporary.root, "anthropic-version-catalog")
         val saved = FileSavedModelCatalogPersistence(file, CatalogModelParametersCodec).register(listOf(migrated))
@@ -79,8 +100,9 @@ class CatalogModelParametersTest {
             assertTrue(record.settings.visionSupported)
             val projected = record.settings.applyTo(ModelSettings("https://example.invalid", "old", "key", false,
                 reasoningOverride = false, visionOverride = false), record.id)
-            assertEquals(true, projected.reasoningOverride)
-            assertEquals(true, projected.visionOverride)
+            assertNull(projected.reasoningOverride)
+            assertNull(projected.visionOverride)
+            assertEquals(true, projected.requestSnapshot().imageInputSupported)
         }
         assertNotEquals(one.settings.localIdentity, two.settings.localIdentity)
     }
@@ -93,7 +115,7 @@ class CatalogModelParametersTest {
             requestOptions = ProviderRequestOptions("{\"temperature\":0.1}"))
         val applied = selected.applyTo(current, "b")
         assertEquals(current.copy(model = "b", batteryEnabled = false, deviceStatusEnabled = true,
-            requestOptions = selected.requestOptions, reasoningOverride = true, visionOverride = true), applied)
+            requestOptions = selected.requestOptions, defaultVisionSupported = true), applied)
         assertEquals(current.apiKey, applied.apiKey)
         assertEquals(current.endpoint, applied.endpoint)
         assertEquals(current.protocol, applied.protocol)

@@ -75,6 +75,9 @@ internal fun parseOpenRouterVideoFacts(body: String, source: String, exactModel:
  * Architecture.video plus the documented OpenRouter video contract is required; a model name,
  * image support or Responses protocol by itself is never sufficient.
  */
+internal fun sameVideoRunConfiguration(saved: ModelSettings, provider: ProviderSnapshot): Boolean =
+    saved.copy(usageIdentity = null) == provider.asModelSettings().copy(usageIdentity = null)
+
 class OpenRouterVideoEvidence private constructor(
     private val provider: ProviderSnapshot,
     val configurationRevision: Long,
@@ -114,7 +117,7 @@ class OpenRouterVideoEvidence private constructor(
         ): OpenRouterVideoEvidence {
             val isSavedCurrent = {
                 currentConfigurationRevision() == revision &&
-                    loadSaved() == provider.asModelSettings() && currentConfigurationRevision() == revision
+                    sameVideoRunConfiguration(loadSaved(), provider) && currentConfigurationRevision() == revision
             }
             require(isSavedCurrent()) { "Saved video configuration changed" }
             require(revision >= 0 && provider.protocol == ProviderProtocol.RESPONSES)

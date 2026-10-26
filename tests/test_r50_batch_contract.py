@@ -8,15 +8,23 @@ class R50BatchContract(unittest.TestCase):
  def test_chat_hiding_uses_window_owned_dismissal_before_focus_is_cleared(self):
   managed=(M/'ManagedInput.kt').read_text();chat=(M/'ChatInputIme.kt').read_text()
   helper=managed.split('internal fun clearManagedInputFocus',1)[1].split('private class ComposeInputRegion',1)[0]
-  for token in ['view.inputWindow()?.let { InputWindows.windows[it] }','host.dismiss(view, action)','view.rootView.requestFocus()','clear()','if (before !is EditText)']:self.assertIn(token,helper)
+  for token in ['view.inputWindow()?.let { InputWindows.windows[it] }','host.dismiss(view, action, hideIme)','view.rootView.requestFocus()','clear()','if (before !is EditText)']:self.assertIn(token,helper)
   self.assertLess(helper.index('if (before !is EditText)'),helper.index('view.rootView.requestFocus()'))
   self.assertLess(helper.index('view.rootView.requestFocus()'),helper.index('action()'))
-  self.assertIn('clearManagedInputFocus(view) { focusManager.clearFocus(force = true) }',chat)
-  common=managed.split('fun dismiss(view: View, clear: () -> Unit)',1)[1].split('fun remove(entry:',1)[0]
+  self.assertIn('clearManagedInputFocus(view, hideIme = {',chat)
+  self.assertIn('if (keyboard != null) keyboard.hide() else hideManagedInputIme(view)',chat)
+  self.assertIn('}) { focusManager.clearFocus(force = true) }',chat)
+  common=managed.split('fun dismiss(view: View, clear: () -> Unit, hideIme: () -> Unit = { hideManagedInputIme(view) })',1)[1].split('fun remove(entry:',1)[0]
   self.assertLess(common.index('if (nativeBefore !is EditText)'),common.index('holdRestingFocus()'))
   self.assertLess(common.index('holdRestingFocus()'),common.index('clear()'))
   self.assertIn('if (entries.any { it.focused() } ||',common)
-  self.assertIn('hideSoftInputFromWindow(view.windowToken, 0)',common)
+  self.assertEqual(1,common.count('hideIme()'))
+  self.assertLess(common.index('return false'),common.index('hideIme()'))
+  self.assertLess(common.index('hideIme()'),common.index('return true'))
+  native=managed.split('internal fun hideManagedInputIme(',1)[1].split('private fun clearWithoutNativeFocusFallback',1)[0]
+  for token in ['if (controller != null) controller.hide(WindowInsetsCompat.Type.ime())',
+                'else (view.context.getSystemService','hideSoftInputFromWindow(view.windowToken, 0)']:
+   self.assertIn(token,native)
  def test_lazy_last_row_waits_for_queued_scroll_without_losing_height_checks(self):
   source=(T/'BottomSheetEdgeActivityTest.kt').read_text();body=source.split('if (state == 4)',1)[1].split('close("conversation-agent-sheet")',1)[0]
   self.assertLess(body.index('performScrollToIndex(rows.lastIndex)'),body.index('ui.mainClock.advanceTimeByFrame()'))

@@ -120,6 +120,13 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         assertEquals(ChildTaskStatus.RUNNING, runtime.childTasks.get(source.owner)?.status)
         runtime.childTasks.finished(source, ChildTaskStatus.COMPLETED, "valid")
         assertEquals(source.copy(status = ChildTaskStatus.COMPLETED, display = display, text = "valid"), runtime.childTasks.get(source.owner))
+        assertEquals(display, runtime.childTasks.list(owner.conversationId.value).single().display)
+        runtime.close(); db.close()
+        val reopened = ConversationDatabase(contexts.last()).also { databases.add(it) }
+        val reacquired = lease(reopened)
+        assertEquals(display, reacquired.childTasks.get(source.owner)?.display)
+        assertEquals(display, reacquired.childTasks.list(owner.conversationId.value).single().display)
+        assertEquals(source.owner, reacquired.childTasks.get(source.owner)?.owner)
     }
 
     fun testDirectedCommandCasProvenanceAndDurableReplay() {

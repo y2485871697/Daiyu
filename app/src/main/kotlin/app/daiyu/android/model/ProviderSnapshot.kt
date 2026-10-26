@@ -36,6 +36,7 @@ class ProviderSnapshot private constructor(
     val contextWindowOverride: Int?,
     val reasoningOverride: Boolean?,
     val visionOverride: Boolean?,
+    val defaultVisionSupported: Boolean?,
     tools: Set<ReadOnlyTool>
 ) {
     val tools: Set<ReadOnlyTool> =
@@ -56,6 +57,7 @@ class ProviderSnapshot private constructor(
         contextWindowOverride = contextWindowOverride,
         reasoningOverride = reasoningOverride,
         visionOverride = visionOverride,
+        defaultVisionSupported = defaultVisionSupported,
     )
 
     internal fun withoutNativeSearch(): ProviderSnapshot = if (!requestOptions.openAiWebSearchEnabled) this else
@@ -72,7 +74,7 @@ class ProviderSnapshot private constructor(
         apiKey == other.apiKey && oauth == other.oauth && responsesPath == other.responsesPath &&
         batteryEnabled == other.batteryEnabled && deviceStatusEnabled == other.deviceStatusEnabled &&
         contextWindowOverride == other.contextWindowOverride && reasoningOverride == other.reasoningOverride &&
-        visionOverride == other.visionOverride && tools == other.tools && requestOptions == other.requestOptions && customHeaders == other.customHeaders && imageInputSupported == other.imageInputSupported
+        visionOverride == other.visionOverride && defaultVisionSupported == other.defaultVisionSupported && tools == other.tools && requestOptions == other.requestOptions && customHeaders == other.customHeaders && imageInputSupported == other.imageInputSupported
 
     override fun hashCode(): Int {
         var result = protocol.hashCode()
@@ -90,6 +92,7 @@ class ProviderSnapshot private constructor(
         result = 31 * result + (contextWindowOverride ?: 0)
         result = 31 * result + (reasoningOverride?.hashCode() ?: 0)
         result = 31 * result + (visionOverride?.hashCode() ?: 0)
+        result = 31 * result + (defaultVisionSupported?.hashCode() ?: 0)
         return result
     }
 
@@ -112,10 +115,11 @@ class ProviderSnapshot private constructor(
                 deviceStatusEnabled = settings.deviceStatusEnabled,
                 requestOptions = settings.requestOptions,
                 customHeaders = settings.customHeaders,
-                imageInputSupported = settings.visionOverride ?: imageInputSupported,
+                imageInputSupported = settings.visionOverride ?: settings.defaultVisionSupported ?: imageInputSupported,
                 contextWindowOverride = settings.contextWindowOverride,
                 reasoningOverride = settings.reasoningOverride,
                 visionOverride = settings.visionOverride,
+                defaultVisionSupported = settings.defaultVisionSupported,
                 tools = settings.enabledTools()
             )
         }

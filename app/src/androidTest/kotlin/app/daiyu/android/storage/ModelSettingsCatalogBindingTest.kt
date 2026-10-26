@@ -34,6 +34,16 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         try { root.deleteRecursively() } finally { super.tearDown() }
     }
 
+    fun testSavedCustomModelRemainsUsableWithDefaultCapabilities() {
+        store.save(initial.copy(model = "catalog-model", requestOptions = ProviderRequestOptions(
+            customBody = "{\"model\":\"relay/actual-model\"}")))
+        val loaded = store.loadForRun()
+        loaded.validate()
+        assertFalse(loaded.hasModelOverrides)
+        assertEquals(true, loaded.requestSnapshot().imageInputSupported)
+        assertEquals("relay/actual-model", org.json.JSONObject(loaded.requestOptions.customBody).getString("model"))
+    }
+
     fun testProtocolAndPathSaveKeepTheWholeDirectoryAndInvalidateOldTickets() {
         val configured = initial.copy(responsesPath = "/responses")
         store.save(configured)
@@ -178,7 +188,7 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         val frozen = repository.freezeActive()
         assertEquals(8192, frozen.settings.contextWindowOverride)
         assertEquals(false, frozen.settings.reasoningOverride)
-        assertEquals(true, frozen.settings.visionOverride)
+        assertEquals(true, frozen.settings.requestSnapshot().imageInputSupported)
         assertTrue(repository.isCurrentActive(frozen))
         assertEquals(directory, store.localModelCatalogSnapshot())
         assertEquals(preferences, raw.all)
@@ -190,8 +200,9 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertFalse(repository.isCurrentActive(frozen))
         val next = repository.freezeActive()
         assertNull(next.settings.contextWindowOverride)
-        assertEquals(true, next.settings.reasoningOverride)
-        assertEquals(true, next.settings.visionOverride)
+        assertNull(next.settings.reasoningOverride)
+        assertNull(next.settings.visionOverride)
+        assertEquals(true, next.settings.requestSnapshot().imageInputSupported)
         assertTrue(repository.isCurrentActive(next))
         assertEquals(8192, frozen.settings.contextWindowOverride)
     }
@@ -211,7 +222,7 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(extra.settings.requestOptions, frozen.settings.requestOptions)
         assertEquals(32768, frozen.settings.contextWindowOverride)
         assertEquals(false, frozen.settings.reasoningOverride)
-        assertEquals(true, frozen.settings.visionOverride)
+        assertEquals(true, frozen.settings.requestSnapshot().imageInputSupported)
         assertEquals(initial.model, store.load().model)
         assertEquals(preferences, raw.all)
         assertEquals(catalog, store.localModelCatalogSnapshot())
@@ -313,7 +324,7 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(listOf("model-a", "model-b", "model-c"), local.models.map { it.id })
         reopened.selectCatalogModel(a, local.selectionFor("model-b")!!)
         val expectedB = b.settings.applyTo(a, "model-b")
-        assertEquals(expectedB.copy(reasoningOverride = null, visionOverride = null), reopened.load())
+        assertEquals(expectedB.copy(reasoningOverride = null, visionOverride = null, defaultVisionSupported = null), reopened.load())
         assertEquals(expectedB, reopened.loadForRun())
         val editedB = reopened.load().copy(batteryEnabled = true,
             requestOptions = ProviderRequestOptions("{\"temperature\":0.4}"))

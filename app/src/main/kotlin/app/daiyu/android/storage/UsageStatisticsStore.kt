@@ -80,6 +80,37 @@ internal object UsageStatisticsStore {
         }, "conversation_id=? AND retired_messages IS NULL", arrayOf(conversation)) == 1)
     }
 
+    /** Restore only lossless retirement transitions after live text is installed. */
+    fun restoreRetirement(db: SQLiteDatabase, conversation: String, createdAt: Long?,
+        retiredMessages: Long, retiredDay: String) {
+        check(db.inTransaction())
+        verifyRestoredRetirement(db, conversation, retiredMessages)
+        val createdClause = if (createdAt == null) "created_at IS NULL" else "created_at=?"
+        val args = buildList {
+            add(conversation)
+            if (createdAt != null) add(createdAt.toString())
+            add(retiredMessages.toString()); add(retiredDay); add(conversation)
+        }.toTypedArray()
+        check(db.update(CONVERSATIONS, ContentValues().apply {
+            putNull("retired_messages"); putNull("retired_day")
+        }, "conversation_id=? AND $createdClause AND retired_messages=? AND retired_day=? " +
+            "AND EXISTS(SELECT 1 FROM conversations WHERE id=?)", args) == 1) { "退役恢复前值已变化" }
+    }
+
+    fun verifyRestoredRetirement(db: SQLiteDatabase, conversation: String, retiredMessages: Long) {
+        check(db.inTransaction())
+        check(db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(conversation)).use { it.moveToFirst() }) {
+            "退役恢复缺少已恢复会话"
+        }
+        require(messageCount(db, conversation).toLong() == retiredMessages) {
+            "恢复消息数与退役账目不同，未覆盖现有账目"
+        }
+        require(!db.rawQuery("SELECT 1 FROM messages m JOIN $RETIRED_MESSAGES r ON r.message_id=m.id " +
+            "WHERE m.conversation_id=? LIMIT 1", arrayOf(conversation)).use { it.moveToFirst() }) {
+            "恢复消息与退役消息账目重叠，未覆盖现有账目"
+        }
+    }
+
     data class ModelIdentity(val providerId: String, val providerName: String, val modelId: String, val modelName: String) {
         init { require(listOf(providerId, providerName, modelId, modelName).all { it.isNotBlank() && it.length <= 400 }) }
     }

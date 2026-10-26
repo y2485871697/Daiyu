@@ -21,12 +21,12 @@ class R53BatchContract(unittest.TestCase):
 
     def test_compose_parking_does_not_replace_native_transfer_veto(self):
         source = M.read_text()
-        common = source.split('fun dismiss(view: View, clear: () -> Unit): Boolean {', 1)[1].split('fun remove(entry:', 1)[0]
+        common = source.split('fun dismiss(view: View, clear: () -> Unit, hideIme: () -> Unit = { hideManagedInputIme(view) }): Boolean {', 1)[1].split('fun remove(entry:', 1)[0]
         self.assertLess(common.index('if (nativeBefore !is EditText)'), common.index('holdRestingFocus()'))
         self.assertLess(common.index('holdRestingFocus()'), common.index('root.requestFocus()'))
         self.assertLess(common.index('root.requestFocus()'), common.index('clear()'))
         self.assertIn('(window.currentFocus !== nativeBefore && window.currentFocus?.onCheckIsTextEditor() == true)) return false', common)
-        self.assertLess(common.index('return false'), common.index('hideSoftInputFromWindow'))
+        self.assertLess(common.index('return false'), common.index('hideIme()'))
 
     def test_voice_back_and_save_wait_for_the_actual_ui_terminal_state(self):
         source = (R / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceSettingsStructureActivityTest.kt').read_text()

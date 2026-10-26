@@ -511,24 +511,26 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         f.settings.save(f.settings.load().copy(model = "another-exact-model"))
         f.settings.modelCatalogSnapshot()
         f.db.draft(conversation.id, "keep this text")
-        for (supported in listOf<Boolean?>(null, false)) {
+        f.settings.modelCatalog.updateRegisteredModel(f.settings.load().model) { current ->
+            val record = checkNotNull(current)
+            record.copy(settings = record.settings.copy(visionOverride = false))
+        }
+        assertEquals(false, f.controller.providers.freezeActive().settings.visionOverride)
+        assertNull(f.controller.send(conversation, "keep this text"))
+        assertEquals(1, f.probe.opens.get()); assertEquals(2, f.db.messages(conversation.id).size)
+        assertEquals("keep this text", f.db.conversations().single().draft)
+        for ((index, supported) in listOf<Boolean?>(null, true).withIndex()) {
             f.settings.modelCatalog.updateRegisteredModel(f.settings.load().model) { current ->
                 val record = checkNotNull(current)
                 record.copy(settings = record.settings.copy(visionOverride = supported))
             }
-            assertEquals(supported, f.controller.providers.freezeActive().settings.visionOverride)
-            assertNull(f.controller.send(conversation, "keep this text"))
-            assertEquals(1, f.probe.opens.get()); assertEquals(2, f.db.messages(conversation.id).size)
-            assertEquals("keep this text", f.db.conversations().single().draft)
+            val frozen = f.controller.providers.freezeActive().settings
+            assertEquals(supported, frozen.visionOverride)
+            assertEquals(true, frozen.requestSnapshot().imageInputSupported)
+            assertNotNull(f.controller.send(conversation, "keep this text"))
+            await(f) { f.controller.active == null }
+            assertEquals(index + 2, f.probe.opens.get())
         }
-        f.settings.modelCatalog.updateRegisteredModel(f.settings.load().model) { current ->
-            val record = checkNotNull(current)
-            record.copy(settings = record.settings.copy(visionOverride = true))
-        }
-        assertEquals(true, f.controller.providers.freezeActive().settings.visionOverride)
-        assertNotNull(f.controller.send(conversation, "keep this text"))
-        await(f) { f.controller.active == null }
-        assertEquals(2, f.probe.opens.get())
     }
 
     fun testCloseDuringPreparationRetainsDraftAndDrainsBeforeStorageClose() {

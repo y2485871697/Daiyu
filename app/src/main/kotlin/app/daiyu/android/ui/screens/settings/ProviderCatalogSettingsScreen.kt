@@ -65,6 +65,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     onDelete: (() -> Unit)? = null,
     pageUi: ProviderPageUiState? = null,
     modelScrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
+    speechOnly: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -122,7 +123,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
                 }) }
         } else ModelSettingsScreen(
             pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs, providerName = providerName,
-            listState = configurationListState,
+            listState = configurationListState, speechOnly = speechOnly,
             onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
             engineeringUi = engineeringUi,
             testConnection = testConnection?.let { test -> { value, cancelled, deliver ->

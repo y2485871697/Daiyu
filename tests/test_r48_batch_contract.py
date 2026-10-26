@@ -12,7 +12,7 @@ class R48BatchContract(unittest.TestCase):
         source = (MAIN / 'ui/components/ManagedInput.kt').read_text()
         clear = source.split('InputEntry(view, { state.focused }', 1)[1].split('DisposableEffect(entry)', 1)[0]
         self.assertNotIn('root.requestFocus()', clear)
-        dismiss = source.split('fun dismiss(view: View, clear: () -> Unit)', 1)[1].split('fun remove(entry:', 1)[0]
+        dismiss = source.split('fun dismiss(view: View, clear: () -> Unit, hideIme: () -> Unit = { hideManagedInputIme(view) })', 1)[1].split('fun remove(entry:', 1)[0]
         self.assertLess(dismiss.index('if (nativeBefore !is EditText)'), dismiss.index('root.requestFocus()'))
         self.assertLess(dismiss.index('root.requestFocus()'), dismiss.index('clear()'))
         self.assertIn('root.isFocusableInTouchMode = true', dismiss)

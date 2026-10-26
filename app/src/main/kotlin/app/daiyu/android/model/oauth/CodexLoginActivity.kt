@@ -7,6 +7,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import app.daiyu.android.ui.haptics.setHapticClickListener
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -34,7 +35,7 @@ class CodexLoginActivity : ComponentActivity() {
         if (savedInstanceState != null || runCatching { UUID.fromString(attempt).toString() == attempt }.getOrDefault(false).not()) { finish(); return }
         CodexOAuthRuntime.initialize(this)
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val close = Button(this).apply { text = "取消登录"; setOnClickListener { finish() } }
+        val close = Button(this).apply { text = "取消登录"; setHapticClickListener { finish() } }
         val status = TextView(this).apply { text = "使用 OpenAI Codex 登录"; setPadding(24, 12, 24, 12) }
         val browser = WebView(this)
         web = browser

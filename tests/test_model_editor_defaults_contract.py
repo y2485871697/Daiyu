@@ -29,14 +29,16 @@ class ModelEditorDefaultsContractTest(unittest.TestCase):
         source = (MAIN / "model/catalog/CatalogModelParameters.kt").read_text()
         for capability in ("reasoning", "vision"):
             self.assertIn(f"val {capability}Supported: Boolean get() = {capability}Override ?: true", source)
-            self.assertIn(f"{capability}Override = {capability}Supported", source)
+            self.assertIn(f"{capability}Override = {capability}Override", source)
         self.assertIn('optionalBoolean("reasoning_override")', source)
         self.assertIn('optionalBoolean("vision_override")', source)
         main_run = (MAIN / "storage/ModelSettings.kt").read_text().split("internal fun loadForRun(", 1)[1].split("internal fun checkCatalogConfiguration", 1)[0]
-        self.assertIn("reasoningOverride = selected?.settings?.reasoningSupported ?: true", main_run)
-        self.assertIn("visionOverride = selected?.settings?.visionSupported ?: true", main_run)
+        self.assertIn("reasoningOverride = selected?.settings?.reasoningOverride", main_run)
+        self.assertIn("visionOverride = selected?.settings?.visionOverride", main_run)
+        self.assertIn("defaultVisionSupported = true", source)
+        self.assertIn("defaultVisionSupported = true", main_run)
         snapshot = (MAIN / "model/ProviderSnapshot.kt").read_text()
-        self.assertIn("imageInputSupported = settings.visionOverride ?: imageInputSupported", snapshot)
+        self.assertIn("imageInputSupported = settings.visionOverride ?: settings.defaultVisionSupported ?: imageInputSupported", snapshot)
 
     def test_append_only_import_uses_shared_model_defaults_not_name_heuristics(self):
         source = (MAIN / "model/catalog/CatalogModelParameters.kt").read_text()

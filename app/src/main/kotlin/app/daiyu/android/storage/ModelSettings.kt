@@ -32,6 +32,7 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
     val visionOverride: Boolean? = null,
     val usageIdentity: app.daiyu.android.model.UsageModelIdentity? = null,
     val oauth: app.daiyu.android.model.oauth.CodexAuth? = null,
+    val defaultVisionSupported: Boolean? = null,
 ) {
     val hasModelOverrides: Boolean get() = contextWindowOverride != null || reasoningOverride != null || visionOverride != null
     fun enabledTools(): Set<ReadOnlyTool> = buildSet {
@@ -142,7 +143,8 @@ class ModelSettingsStore internal constructor(
         val current = load()
         val selected = modelCatalog.readRegisteredModel(modelId ?: current.model)
         if (modelId == null) current.copy(contextWindowOverride = selected?.settings?.contextWindowOverride,
-            reasoningOverride = selected?.settings?.reasoningSupported ?: true, visionOverride = selected?.settings?.visionSupported ?: true)
+            reasoningOverride = selected?.settings?.reasoningOverride, visionOverride = selected?.settings?.visionOverride,
+            defaultVisionSupported = true)
         else checkNotNull(selected) { "摘要模型不在本地目录中" }.let { it.settings.applyTo(current, it.id) }
     }
 

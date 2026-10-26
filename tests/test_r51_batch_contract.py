@@ -8,15 +8,22 @@ class R51BatchContract(unittest.TestCase):
   managed=(M/'ManagedInput.kt').read_text();chat=(M/'ChatInputIme.kt').read_text()
   helper=managed.split('internal fun clearManagedInputFocus',1)[1].split('private class ComposeInputRegion',1)[0]
   self.assertIn('): Boolean {',helper)
-  self.assertIn('if (host != null) return host.dismiss(view, action)',helper)
+  self.assertIn('if (host != null) return host.dismiss(view, action, hideIme)',helper)
   self.assertLess(helper.index('action()'),helper.index('return true'))
-  common=managed.split('fun dismiss(view: View, clear: () -> Unit): Boolean {',1)[1].split('fun remove(entry:',1)[0]
+  common=managed.split('fun dismiss(view: View, clear: () -> Unit, hideIme: () -> Unit = { hideManagedInputIme(view) }): Boolean {',1)[1].split('fun remove(entry:',1)[0]
   self.assertIn('onCheckIsTextEditor() == true)) return false',common)
-  self.assertLess(common.index('return false'),common.index('hideSoftInputFromWindow'))
-  self.assertLess(common.index('hideSoftInputFromWindow'),common.index('return true'))
+  self.assertLess(common.index('return false'),common.index('hideIme()'))
+  self.assertLess(common.index('hideIme()'),common.index('return true'))
   body=chat.split('internal fun hideChatInputIme',1)[1].split('internal suspend fun showChatInputIme',1)[0]
-  self.assertIn('if (!clearManagedInputFocus(view) { focusManager.clearFocus(force = true) }) return',body)
-  self.assertLess(body.index('}) return'),body.index('keyboard?.hide()'))
+  self.assertIn('clearManagedInputFocus(view, hideIme = {',body)
+  self.assertIn('if (keyboard != null) keyboard.hide() else hideManagedInputIme(view)',body)
+  self.assertIn('}) { focusManager.clearFocus(force = true) }',body)
+  fallback=managed.split('internal fun clearManagedInputFocus(',1)[1].split('internal fun hideManagedInputIme',1)[0]
+  self.assertIn('if (next !== before && next?.onCheckIsTextEditor() == true) return false',fallback)
+  self.assertEqual(1,fallback.count('hideIme()'))
+  self.assertLess(fallback.index('return false'),fallback.index('hideIme()'))
+  self.assertLess(fallback.index('hideIme()'),fallback.index('return true'))
+  self.assertEqual(1,common.count('hideIme()'))
  def test_real_editor_transfer_keeps_outer_hide_and_window_ime_oracles(self):
   source=(R/'app/src/androidTest/kotlin/app/daiyu/android/ChatComposerImeActivityTest.kt').read_text()
   body=source.split('fun testDismissDoesNotHideImeWhenBlurListenerTransfersToAnotherEditor()',1)[1].split('fun testOutsideBlankAndTitleTaps',1)[0]

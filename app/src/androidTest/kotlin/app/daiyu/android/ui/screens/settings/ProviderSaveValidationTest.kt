@@ -21,6 +21,33 @@ class ProviderSaveValidationTest : WiredActivityTestCase() {
         awaitModelEditor()
     }
 
+    fun testOrdinaryEndpointRemainsEditableWhenDraftResemblesSpeechService() {
+        render()
+        val endpoint = reveal("settings-field:Base URL")
+        for (value in listOf("https://openspeech.bytedance.com/api/v3/tts/unidirectional",
+            "https://openspeech.bytedance.com:8443/?invalid=1", "https://example.invalid/v1")) {
+            endpoint.performTextReplacement(value)
+            endpoint.assertIsEnabled().assertEditableText(value)
+        }
+        assertEquals("https://example.invalid/v1", draft.endpoint)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDedicatedSpeechEntryKeepsOfficialEndpointFixed() {
+        mainThread {
+            draft = draft.copy(endpoint = app.daiyu.android.voice.providers.DoubaoSpeech.BASE_URL)
+            activity.setContent { MiuixTheme {
+                ModelSettingsScreen(draft, { draft = it }, { saves++ }, {}, {},
+                    providerName = "豆包语音", showCatalog = false, speechOnly = true)
+            } }
+        }
+        awaitModelEditor()
+        reveal("settings-field:Base URL").assertIsNotEnabled()
+        assertEquals(app.daiyu.android.voice.providers.DoubaoSpeech.BASE_URL, draft.endpoint)
+        assertEquals(0, saves)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testInvalidRowsOnlyShowOneSummaryAboveSaveAfterClickAndNeverSubmit() {
         val headerError = "第 1 项请求头名称不能为空"
         val bodyError = "字段值须为有效 JSON，且不能覆盖系统字段。"

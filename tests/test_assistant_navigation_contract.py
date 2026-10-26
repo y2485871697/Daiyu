@@ -31,10 +31,10 @@ class AssistantNavigationContractTest(unittest.TestCase):
         self.assertIn('onOutsideDismiss: () -> Unit = onDismiss', self.preview)
         self.assertRegex(self.preview,
             r'Dialog\(onDismissRequest = \{\s*'
-            r'motion\?\.requestDismiss\(BottomSheetDismissSource\.System\) \?: onDismiss\(\)')
+            r'if \(dismissEnabled\) motion\?\.requestDismiss\(BottomSheetDismissSource\.System\) \?: onDismiss\(\)')
         self.assertRegex(self.preview,
             r'onClick = \{\s*'
-            r'motion\?\.requestDismiss\(BottomSheetDismissSource\.Outside\) \?: onOutsideDismiss\(\)')
+            r'if \(dismissEnabled\) motion\?\.requestDismiss\(BottomSheetDismissSource\.Outside\) \?: onOutsideDismiss\(\)')
         self.assertIn('DialogMotionProvider(motion, onDismiss, onOutsideDismiss = onOutsideDismiss)', self.preview)
         motion = (SRC / "ui/components/DialogMotion.kt").read_text()
         for token in ('val latestDismiss by rememberUpdatedState(onDismiss)',
@@ -42,6 +42,9 @@ class AssistantNavigationContractTest(unittest.TestCase):
                       'BottomSheetDismissSource.System -> latestDismiss()',
                       'BottomSheetDismissSource.Outside -> latestOutsideDismiss()'):
             self.assertIn(token, motion)
+        for token in ('dismissEnabled: Boolean = true', 'dismissOnBackPress = dismissEnabled',
+                      'dismissOnClickOutside = dismissEnabled', '.clickable(enabled = dismissEnabled'):
+            self.assertIn(token, self.preview)
         self.assertIn('testTag("preview-dialog-scrim")', self.preview)
         self.assertIn('onOutsideDismiss = onOutsideDismiss', self.shell)
 

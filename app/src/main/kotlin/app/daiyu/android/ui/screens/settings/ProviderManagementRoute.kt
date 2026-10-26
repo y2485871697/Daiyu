@@ -390,7 +390,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     }
                 }, onFetchCatalog = {}, onBack = { back() }, pageTitle = "添加提供商", providerName = "",
                 headerContent = tabs, showCatalog = false, enabled = enabled, errorText = newProvider.error,
-                listState = newProvider.pageUi.configurationListState,
+                listState = newProvider.pageUi.configurationListState, speechOnly = newProvider.speechOnly,
                 testBalance = { value, requestCancelled, deliver ->
                     val configuration = value.providerBalanceConfiguration()
                     if (!current(p) || !enabled || creating !== newProvider || newProvider.draft !== value ||
@@ -559,7 +559,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                     headersUnavailable = d.editing.headersUnavailable,
                     catalogEnabled = false, errorText = d.error?.takeIf { d.live.get() }, testBalance = balanceTest, onDelete = delete,
-                    listState = d.pageUi.configurationListState)
+                    listState = d.pageUi.configurationListState,
+                    speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(d.editing.settings.endpoint))
             } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
                 createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
                     if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
@@ -576,7 +577,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                 headersUnavailable = d.editing.headersUnavailable,
                 testConnection = connection, localModelActions = actions, testBalance = balanceTest,
-                onDelete = delete, pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior)
+                onDelete = delete, pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior,
+                speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(d.editing.settings.endpoint))
         } else if (loading) {
             SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
         } else if (authentication) {

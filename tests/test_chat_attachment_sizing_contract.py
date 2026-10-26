@@ -47,7 +47,7 @@ class ChatAttachmentSizingContract(unittest.TestCase):
             self.assertNotIn(token, self.attachment)
 
     def test_shared_shell_preserves_glass_safe_area_and_wrap_content(self):
-        for token in ["PreviewDialog(onDismiss, bottomSheet = true)",
+        for token in ["PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled)",
                       "RoundedCornerShape(25.dp)",
                       ".padding(10.dp)", ".previewGlassBlur(shape, 28f, 1.3f)", "max = available", "fill = height != null"]:
             self.assertIn(token, self.shell)

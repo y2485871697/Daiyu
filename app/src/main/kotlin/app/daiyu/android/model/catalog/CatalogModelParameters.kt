@@ -24,8 +24,9 @@ internal data class CatalogModelParameters(
         model = model, batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
         requestOptions = requestOptions,
         contextWindowOverride = contextWindowOverride,
-        reasoningOverride = reasoningSupported,
-        visionOverride = visionSupported,
+        reasoningOverride = reasoningOverride,
+        visionOverride = visionOverride,
+        defaultVisionSupported = true,
     )
 
     companion object {

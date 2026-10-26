@@ -17,6 +17,19 @@ class OpenRouterVideoEvidenceTest {
         catch (_: RemoteModelException) { }
     }
 
+    @Test fun savedRunComparisonIgnoresOnlyAccountingIdentity() {
+        val saved = ModelSettings(OpenRouterVideoCapability.ENDPOINT, model, "fixture-key", false,
+            contextWindowOverride = 16384, reasoningOverride = false, visionOverride = true)
+        val frozen = ProviderSnapshot.capture(saved.copy(usageIdentity = app.daiyu.android.model.UsageModelIdentity("provider", "Provider")))
+        assertTrue(sameVideoRunConfiguration(saved, frozen))
+        assertTrue(sameVideoRunConfiguration(saved.copy(usageIdentity = app.daiyu.android.model.UsageModelIdentity("other", "Other")), frozen))
+        for (changed in listOf(saved.copy(apiKey = "changed"), saved.copy(model = "other"),
+            saved.copy(contextWindowOverride = 8192), saved.copy(reasoningOverride = true),
+            saved.copy(visionOverride = false), saved.copy(requestOptions = saved.requestOptions.copy(customBody = "{\"temperature\":0.2}")))) {
+            assertFalse(sameVideoRunConfiguration(changed, frozen))
+        }
+    }
+
     @Test fun strictFactsRequireExactOfficialSourceModelAndVideo() {
         val facts = parseOpenRouterVideoFacts(valid, OPENROUTER_MODELS_ENDPOINT, model)
         assertEquals(model, facts.model)

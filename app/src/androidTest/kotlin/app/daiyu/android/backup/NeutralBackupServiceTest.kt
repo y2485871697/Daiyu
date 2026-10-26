@@ -8,6 +8,7 @@ import app.daiyu.android.context.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.CompressionPolicy
 import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.storage.UsageStatisticsStore
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -41,6 +42,80 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
     private fun reject(block: () -> Unit) { try { block(); fail("must reject") } catch (_: Exception) {} }
     private fun completeImportStages() = listOf("正在解析备份包", "正在校验备份内容", "正在检查目标状态",
         "正在恢复并核验原件", "正在写入导入数据", "正在复核导入回执", "正在提交导入事务")
+
+    private fun statistics(db: ConversationDatabase) = db.writableDatabase.let { sql ->
+        sql.beginTransaction()
+        try { UsageStatisticsStore.snapshot(sql, 0).also { sql.setTransactionSuccessful() } }
+        finally { sql.endTransaction() }
+    }
+    private fun recordUsage(db: ConversationDatabase, owner: ConversationId) {
+        val sql = db.writableDatabase
+        sql.beginTransaction()
+        try {
+            UsageStatisticsStore.record(sql, "backup-request-${owner.value}", owner.value,
+                UsageStatisticsStore.ModelIdentity("provider", "Provider", "model", "Model"),
+                100L, UsageStatisticsStore.Fields(100L, 20L, 0L, 0L), null)
+            sql.setTransactionSuccessful()
+        } finally { sql.endTransaction() }
+    }
+    private fun restoreDeletedConversation(single: Boolean) {
+        val (context, db, service) = fresh()
+        val owner = seed(db, 1)
+        recordUsage(db, owner)
+        val before = statistics(db)
+        val text = if (single) service.exportConversation(owner) else service.exportPackage()
+        db.delete(owner)
+        assertEquals(0, statistics(db).currentConversations)
+        assertFalse(service.importPackage(text).alreadyImported)
+        val restored = statistics(db)
+        assertEquals(before.currentMessages, restored.currentMessages)
+        assertEquals(before.lifetimeMessages, restored.lifetimeMessages)
+        assertEquals(before.lifetimeConversations, restored.lifetimeConversations)
+        assertEquals(before.lifetimeInputTokens, restored.lifetimeInputTokens)
+        assertEquals(before.lifetimeOutputTokens, restored.lifetimeOutputTokens)
+        assertTrue(service.importPackage(text).alreadyImported)
+        db.close()
+        val reopened = ConversationDatabase(context)
+        try {
+            assertTrue(NeutralBackupService(context, reopened).importPackage(text).alreadyImported)
+            assertEquals(before.lifetimeMessages, statistics(reopened).lifetimeMessages)
+            reopened.delete(owner)
+            assertEquals(before.lifetimeMessages, statistics(reopened).lifetimeMessages)
+            assertEquals(before.lifetimeInputTokens, statistics(reopened).lifetimeInputTokens)
+            assertEquals(0, statistics(reopened).currentMessages)
+        } finally { reopened.close() }
+    }
+    fun testCompleteBackupRestoresDeletedConversationWithoutDuplicatingAccounting() = restoreDeletedConversation(false)
+    fun testSingleConversationBackupRestoresDeletedConversationWithoutDuplicatingAccounting() = restoreDeletedConversation(true)
+
+    fun testDeletedConversationRestoreKeepsStrictConflictsAndRollsBackLateCorruption() {
+        for (conflict in listOf("created", "request", "count", "tombstone", "late", "late-message")) {
+            val (_, db, service) = fresh()
+            val owner = seed(db, 1)
+            recordUsage(db, owner)
+            val text = service.exportPackage()
+            val messageId = db.messages(owner).first().second.id.value
+            db.delete(owner)
+            val sql = db.writableDatabase
+            when (conflict) {
+                "created" -> sql.execSQL("UPDATE usage_statistics_conversations SET created_at=created_at+1 WHERE conversation_id=?", arrayOf(owner.value))
+                "request" -> sql.execSQL("UPDATE usage_statistics_requests SET input_tokens=101 WHERE conversation_id=?", arrayOf(owner.value))
+                "count" -> sql.execSQL("UPDATE usage_statistics_conversations SET retired_messages=retired_messages+1 WHERE conversation_id=?", arrayOf(owner.value))
+                "tombstone" -> sql.execSQL("INSERT INTO usage_statistics_retired_messages VALUES(?,?)", arrayOf(messageId, owner.value))
+                "late" -> sql.execSQL("CREATE TRIGGER corrupt_restored_statistics AFTER INSERT ON neutral_imports BEGIN " +
+                    "UPDATE usage_statistics_requests SET input_tokens=101; END")
+                "late-message" -> sql.execSQL("CREATE TRIGGER inject_restored_message AFTER INSERT ON neutral_imports BEGIN " +
+                    "INSERT INTO messages(id,conversation_id,run_id,role,status,blocks,protocol,history_segments,created_at) " +
+                    "SELECT 'late-' || id,conversation_id,run_id,role,status,blocks,protocol,history_segments,created_at " +
+                    "FROM messages WHERE role='user' LIMIT 1; END")
+            }
+            val before = service.exportPackage()
+            reject { service.importPackage(text) }
+            assertEquals(before, service.exportPackage())
+            assertEquals(0, statistics(db).currentConversations)
+            assertEquals(0, sql.rawQuery("SELECT COUNT(*) FROM neutral_imports", null).use { it.moveToFirst(); it.getInt(0) })
+        }
+    }
 
     fun testImportStagesFollowActualWorkAndObserverFailureRollsBackBeforeCommit() {
         val (_, source, exporter) = fresh()

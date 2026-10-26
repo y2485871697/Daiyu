@@ -111,8 +111,8 @@ internal fun ModelSettingsScreen(
     testBalance: ProviderBalanceTester? = null,
     onDelete: (() -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
+    speechOnly: Boolean = false,
 ) {
-    val speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(draft.endpoint)
     val latestDraft by rememberUpdatedState(draft)
     val latestEnabled by rememberUpdatedState(enabled)
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)

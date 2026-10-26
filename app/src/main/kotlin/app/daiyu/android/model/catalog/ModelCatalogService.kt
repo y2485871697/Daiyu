@@ -12,9 +12,10 @@ class ModelCatalogService(
     private val loadSaved: () -> ModelSettings,
     private val fetcher: RemoteModelFetcher = RemoteModelFetcher(),
     private val speechTransport: app.daiyu.android.voice.providers.VoiceHttpTransport? = null,
+    private val loadSavedForRun: () -> ModelSettings = loadSaved,
 ) {
     constructor(store: ModelSettingsStore, fetcher: RemoteModelFetcher = RemoteModelFetcher()) :
-        this(store::load, fetcher)
+        this(store::load, fetcher, loadSavedForRun = { store.loadForRun() })
 
     /**
      * Worker-only, uncached production proof for one pending approval. The revision belongs to
@@ -33,12 +34,12 @@ class ModelCatalogService(
             require(configurationRevision >= 0 && currentConfigurationRevision() == configurationRevision) {
                 "Saved video configuration changed"
             }
-            require(loadSaved() == snapshot.asModelSettings()) { "Video snapshot is not the saved configuration" }
+            require(sameVideoRunConfiguration(loadSavedForRun(), snapshot)) { "Video snapshot is not the saved configuration" }
             require(currentConfigurationRevision() == configurationRevision) { "Saved video configuration changed" }
         }
         checkSaved()
         val evidence = OpenRouterVideoEvidence.fetchFresh(snapshot, configurationRevision, isCancelled,
-            loadSaved, currentConfigurationRevision)
+            loadSavedForRun, currentConfigurationRevision)
         checkSaved()
         return evidence
     }

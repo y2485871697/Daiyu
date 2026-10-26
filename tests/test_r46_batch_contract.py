@@ -22,11 +22,24 @@ class R46BatchContract(unittest.TestCase):
         self.assertIn('entry.view.findViewTreeLifecycleOwner()?.lifecycle', text)
 
     def test_pause_uses_real_framework_cycle_and_positive_compose_root(self):
-        text = (TEST / 'ContextManagementEntryActivityTest.kt').read_text().split('fun testPauseWithoutStop', 1)[1].split('fun testSelectionAndPage', 1)[0]
+        source = (TEST / 'ContextManagementEntryActivityTest.kt').read_text()
+        text = source.split('fun testPauseWithoutStopRevokesOldCompressionConfirmationAndRetainsRoute()', 1)[1].split('\n    fun ', 1)[0]
         self.assertIn('realPauseResume(activity, atPause = {', text)
         self.assertNotIn('callActivityOnPause', text)
-        self.assertIn('awaitUniqueTag("chat-draft")', text)
         self.assertIn('assertFalse(old.state.value.confirmingCompression)', text)
+        self.assertIn('assertPausedContextRoute()', text)
+        self.assertIn('val next = continueAndAwait()', text)
+        self.assertIn('assertEquals(before, fixture.database.exportBackup())', text)
+        self.assertIn('assertEquals(0, fixture.opens.get())', text)
+        paused = source.split('private fun assertPausedContextRoute()', 1)[1].split('private fun continueAndAwait()', 1)[0]
+        for token in ('assertEquals("context-management", getter.apply { isAccessible = true }.invoke(activity))',
+                      'assertNoVisit()', 'awaitUniqueTag("context-management-paused")',
+                      'node("context-compression-confirmation").assertDoesNotExist()'):
+            self.assertIn(token, paused)
+        continued = source.split('private fun continueAndAwait()', 1)[1].split('private fun stopped(', 1)[0]
+        for token in ('node("context-management-resume").performClick()', 'awaitUniqueTag("context-management")',
+                      'assertFalse(result.state.value.confirmingCompression)'):
+            self.assertIn(token, continued)
 
     def test_mcp_rejection_compares_persisted_values_and_generation(self):
         text = (TEST / 'McpSettingsScreenTest.kt').read_text()

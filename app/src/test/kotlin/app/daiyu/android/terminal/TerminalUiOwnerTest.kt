@@ -79,9 +79,9 @@ class TerminalUiOwnerTest {
     @Test fun workspaceIsFrozenPerAndroidRequestWithoutChangingBackendOrSelection() {
         val first = Fixture()
         val second = Fixture()
-        val a = TerminalWorkspaceDirectory(java.io.File("/approved/rootfs/a"),
-            LinuxWorkspaceDirectory(java.io.File("/approved/rootfs/a"), "/a"))
-        val b = TerminalWorkspaceDirectory(java.io.File("/private/workspace"))
+        val a = TerminalWorkspaceDirectory(java.io.File("/approved/rootfs/a").absoluteFile,
+            LinuxWorkspaceDirectory(java.io.File("/approved/rootfs/a").absoluteFile, "/a"))
+        val b = TerminalWorkspaceDirectory(java.io.File("/private/workspace").absoluteFile)
         try {
             assertTrue(first.owner.openAndroid(ConversationId("conversation-a"), a))
             assertTrue(second.owner.openAndroid(ConversationId("conversation-b"), b))
@@ -91,7 +91,7 @@ class TerminalUiOwnerTest {
             assertNull(first.backend.requests.single().linux)
             assertEquals(0, first.backend.selections.get())
             assertEquals(0, second.backend.selections.get())
-            assertEquals(java.io.File("/approved/rootfs/a"), first.backend.requests.single().workspace!!.hostDirectory)
+            assertEquals(java.io.File("/approved/rootfs/a").absoluteFile, first.backend.requests.single().workspace!!.hostDirectory)
         } finally { first.dispose(); second.dispose() }
     }
 

@@ -16,11 +16,21 @@ class MessagesFactoryContractTest {
         assertTrue(ModelFactory.create(source.copy(protocol=ProviderProtocol.RESPONSES)," MESSAGES ") is MessagesModel)
         assertTrue(ModelFactory.create(source.copy(protocol=ProviderProtocol.RESPONSES)) is ResponsesModel)
     }
-    @Test fun invalidProtocolEndpointAndResponsesPathFailBeforePortConstruction() {
-        for (source in listOf(settings().copy(responsesPath="/responses"),settings().copy(endpoint="https://example.invalid/v1/responses"),settings().copy(protocol=ProviderProtocol.UNKNOWN))) {
+    @Test fun invalidProtocolAndEndpointFailBeforePortConstruction() {
+        for (source in listOf(settings().copy(endpoint="https://example.invalid/v1/responses"),settings().copy(protocol=ProviderProtocol.UNKNOWN))) {
             try { ModelFactory.create(source);fail("invalid protocol configuration accepted") }
             catch (_:IllegalArgumentException) {}
         }
+    }
+    @Test fun inactiveResponsesPathIsRetainedWithoutChangingMessagesEndpoint() {
+        val source = settings().copy(responsesPath = "/responses")
+        val snapshot = source.requestSnapshot()
+        assertEquals("/responses", snapshot.responsesPath)
+        assertEquals(source, snapshot.asModelSettings())
+        assertEquals("https://example.invalid/v1/messages", source.requestEndpoint())
+        assertEquals(source.requestEndpoint(), MessagesRequest.endpoint(snapshot.asModelSettings()))
+        assertTrue(ModelFactory.create(source) is MessagesModel)
+        assertTrue(ModelFactory.create(snapshot) is MessagesModel)
     }
     @Test fun keyAndToolSetStayBoundToCapturedProtocol() {
         val source=settings().copy(batteryEnabled=true)

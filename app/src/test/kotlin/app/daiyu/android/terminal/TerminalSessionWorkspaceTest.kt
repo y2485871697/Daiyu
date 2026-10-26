@@ -62,8 +62,8 @@ class TerminalSessionWorkspaceTest {
     @Test fun restartAndSendKeepOriginalConversationWorkspaceDespiteNewCallerBinding() {
         Fixture().use { f ->
             f.workspace.setSimple(false)
-            val original = TerminalWorkspaceDirectory(java.io.File("/approved/rootfs/first"))
-            val changed = TerminalWorkspaceDirectory(java.io.File("/private/second"))
+            val original = TerminalWorkspaceDirectory(java.io.File("/approved/rootfs/first").absoluteFile)
+            val changed = TerminalWorkspaceDirectory(java.io.File("/private/second").absoluteFile)
             val conversation = app.daiyu.android.domain.ConversationId("original")
             assertTrue(f.workspace.create(conversation, original))
             val id = f.workspace.state.value.activeSessionId!!
@@ -83,7 +83,7 @@ class TerminalSessionWorkspaceTest {
             f.workspace.setSimple(false)
             val closes = java.util.concurrent.atomic.AtomicInteger()
             val pin = AutoCloseable { closes.incrementAndGet() }
-            assertTrue(f.workspace.create(workspace = TerminalWorkspaceDirectory(java.io.File("/approved/project")), workspacePin = pin))
+            assertTrue(f.workspace.create(workspace = TerminalWorkspaceDirectory(java.io.File("/approved/project").absoluteFile), workspacePin = pin))
             val id = f.workspace.state.value.activeSessionId!!
             await { f.workspace.state.value.active?.state?.acceptsInput == true }
             f.workspace.stop(id)

@@ -51,7 +51,7 @@ class IconAppearanceWiringTest {
         assertEquals(app.attr("icon"), app.attr("roundIcon"))
     }
 
-    @Test fun targetRemainsEnabledAndJsonGrantIntentUnchangedWithoutDuplicateLauncher() {
+    @Test fun targetRemainsEnabledAndDocumentGrantIntentHasOnlyJsonAndZipWithoutDuplicateLauncher() {
         val app = application()
         val target = app.elements("activity").single { it.attr("name") in listOf(".MainActivity", "app.daiyu.android.MainActivity") }
         assertNotEquals("false", target.attr("enabled"))
@@ -63,9 +63,12 @@ class IconAppearanceWiringTest {
         val filter = target.elements("intent-filter").single()
         assertEquals(listOf("android.intent.action.VIEW"), filter.elements("action").map { it.attr("name") })
         assertEquals(listOf("android.intent.category.DEFAULT"), filter.elements("category").map { it.attr("name") })
-        val data = filter.elements("data").single()
-        assertEquals("content", data.attr("scheme"))
-        assertEquals("application/json", data.attr("mimeType"))
+        val data = filter.elements("data")
+        assertEquals(2, data.size)
+        assertEquals(
+            setOf("content" to "application/json", "content" to "application/zip"),
+            data.map { it.attr("scheme") to it.attr("mimeType") }.toSet(),
+        )
         assertEquals("false", app.attr("allowBackup"))
         assertEquals("false", app.attr("usesCleartextTraffic"))
     }

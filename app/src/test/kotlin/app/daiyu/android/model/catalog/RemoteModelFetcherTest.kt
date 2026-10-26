@@ -32,14 +32,11 @@ class RemoteModelFetcherTest {
         }
     }
 
-    @Test fun invalidOrCrossProtocolVersionNeverOpensCatalogueConnection() {
+    @Test fun invalidVersionNeverOpensCatalogueConnection() {
         var connects = 0
         val fetcher = RemoteModelFetcher { connects++; throw AssertionError("connection attempted") }
-        for ((protocol, version) in listOf(
-            RemoteModelProtocol.ANTHROPIC to "2023-02-29",
-            RemoteModelProtocol.ANTHROPIC to "2023-06-01\r\nX-Injected: yes",
-            RemoteModelProtocol.OPENAI to "2023-06-01",
-            RemoteModelProtocol.GEMINI to "2023-06-01")) {
+        for (protocol in RemoteModelProtocol.entries) for (version in listOf(
+            "2023-02-29", "2023-06-01\r\nX-Injected: yes", "0000-01-01")) {
             try {
                 fetcher.fetch(RemoteModelRequest("https://example.invalid", "secret", protocol, anthropicVersion = version))
                 org.junit.Assert.fail("bad version must be rejected")
@@ -49,6 +46,29 @@ class RemoteModelFetcherTest {
             }
         }
         assertEquals(0, connects)
+    }
+
+    @Test fun inactiveVersionIsRetainedWithoutLeakingAnthropicHeaders() {
+        for (protocol in RemoteModelProtocol.entries.filter { it != RemoteModelProtocol.ANTHROPIC })
+            for (key in listOf("", "secret")) for (explicitCancellation in listOf(false, true)) {
+                val google = protocol == RemoteModelProtocol.GEMINI || protocol == RemoteModelProtocol.GOOGLE
+                val body = if (google) """{"models":[{"name":"models/model"}]}"""
+                    else """{"data":[{"id":"model"}]}"""
+                val connection = FakeConnection(200, body)
+                var connects = 0
+                val fetcher = RemoteModelFetcher { connects++; connection }
+                val request = RemoteModelRequest("https://example.invalid", key, protocol,
+                    anthropicVersion = "2023-06-01")
+                val result = if (explicitCancellation) fetcher.fetch(request) { false } else fetcher.fetch(request)
+                assertEquals(if (google) "models/model" else "model", result.single().id)
+                assertEquals(1, connects)
+                assertEquals(1, connection.disconnectCalls)
+                assertNull(connection.getRequestProperty("anthropic-version"))
+                assertNull(connection.getRequestProperty("x-api-key"))
+                assertEquals(if (google || key.isEmpty()) null else "Bearer $key", connection.authorization)
+                assertEquals(if (google && key.isNotEmpty()) key else null,
+                    connection.getRequestProperty("x-goog-api-key"))
+            }
     }
 
     @Test fun endpointDefaultsAreProtocolAwareAndSafe() {

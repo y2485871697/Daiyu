@@ -69,7 +69,10 @@ class CompressionSettingsDraftTest {
     }
 
     @Test fun protocolChangePreservesOptionsUntilExplicitReset() {
-        val options = ProviderRequestOptions(speedMode = GptSpeedMode.FAST)
+        val options = ProviderRequestOptions(
+            customBody = """{"service_tier":"fast"}""",
+            speedMode = GptSpeedMode.FAST,
+        )
         val original = CompressionSettingsDraftUi(binding,
             provider = ModelSettings("https://summary.invalid", "model", "synthetic-key", false,
                 requestOptions = options), savedProtocol = ProviderProtocol.RESPONSES)

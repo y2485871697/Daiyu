@@ -81,7 +81,7 @@
             android:launchMode="standard" android:theme="@style/Theme.Daiyu.Anchor" />
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
             android:enableOnBackInvokedCallback="true" android:windowSoftInputMode="adjustResize">
-            <!-- Only JSON documents with content grants; no file/http or wildcard MIME capture. -->
+            <!-- Only JSON/ZIP documents with content grants; no file/http or wildcard MIME capture. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

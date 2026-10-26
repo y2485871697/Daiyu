@@ -56,12 +56,15 @@ class RuntimeModelOverridesTest {
         assertEquals(snapshot, ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.DEFAULT))
         assertEquals(false, ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.OFF).reasoningOverride)
         rejected { ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.HIGH) }
+        rejected { ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.MAX) }
         rejected { ReasoningRequestPolicy.validate(JSONObject("""{"reasoning":{"effort":"high"}}"""), ProviderProtocol.RESPONSES, false) }
         ReasoningRequestPolicy.validate(JSONObject("""{"thinking":{"type":"disabled"}}"""), ProviderProtocol.MESSAGES, false)
         rejected { ReasoningRequestPolicy.validate(JSONObject("""{"thinking":{"type":"enabled","budget_tokens":1024}}"""), ProviderProtocol.MESSAGES, false) }
         val allowed = ProviderSnapshot.capture(settings().copy(reasoningOverride = true))
         assertEquals(allowed, ReasoningRequestPolicy.freeze(allowed, ReasoningEffort.DEFAULT))
-        rejected { ReasoningRequestPolicy.freeze(allowed, ReasoningEffort.MAX) }
+        val max = ReasoningRequestPolicy.freeze(allowed, ReasoningEffort.MAX)
+        assertEquals("max", JSONObject(max.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
+        assertEquals(true, max.reasoningOverride)
     }
 
     @Test fun modelOverridesBindCustomBodyAndFinalRequestToExactModel() {

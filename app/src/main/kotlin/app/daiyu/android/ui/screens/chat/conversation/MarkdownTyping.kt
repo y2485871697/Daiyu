@@ -14,14 +14,18 @@ internal class MarkdownReveal(private val target: MarkdownTypingTarget?, private
 private data class MarkdownTypingFrame(val target: MarkdownTypingTarget?, val visible: Int)
 
 @Composable
-internal fun rememberMarkdownReveal(turn: ChatTurnUi.Assistant, projection: MarkdownProjection?): MarkdownReveal {
+internal fun rememberMarkdownReveal(
+    turn: ChatTurnUi.Assistant,
+    projection: MarkdownProjection?,
+    resetEpoch: Long = 0L,
+): MarkdownReveal {
     val parser = LocalMarkdownParser.current
     val identity = MarkdownParserIdentity(parser)
     val sources = remember(turn.content, turn.finalText) {
         if (turn.content.isEmpty()) listOf(MarkdownTypingSource("final", turn.finalText))
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
     }
-    val baseline = remember(identity) { sources.toList() }
+    val baseline = remember(identity, resetEpoch) { sources.toList() }
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text })
     val baselineLength = remember(baselineProjection) {
         baselineProjection?.let { parsed -> baseline.sumOf {
@@ -33,8 +37,8 @@ internal fun rememberMarkdownReveal(turn: ChatTurnUi.Assistant, projection: Mark
             MarkdownTypingPart(it, markdownBlocksLength(parsed.blocks.getValue(it.text)))
         } }
     }
-    val motion = remember(identity) { MarkdownTypingState(baseline) }
-    val target = remember(parts, baselineLength, turn.isStreaming, turn.status) {
+    val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
+    val target = remember(motion, parts, baselineLength, turn.isStreaming, turn.status) {
         motion.update(parts, baselineLength, turn.isStreaming, turn.status != RunStatus.RUNNING)
     }
     val frame by produceState(MarkdownTypingFrame(target, target?.start ?: 0), target) {

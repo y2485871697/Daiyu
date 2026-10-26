@@ -15,7 +15,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("val obscuredTail = if (currentOcclusionPx > 0)", follow)
         self.assertIn("(last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("maxOf(motion.step(overflow.toFloat(), frameTime, currentDensity), obscuredTail.toFloat())", follow)
-        self.assertLess(follow.index("if (!followBottom || currentDragging"), follow.index("val obscuredTail"))
+        self.assertLess(follow.index("if (!scrollResumed || !followBottom || currentDragging"), follow.index("val obscuredTail"))
         self.assertIn("if (delta > 0f) listState.scrollBy(delta)", follow)
 
     def test_device_sources_use_real_composer_measure_and_unclipped_tail_geometry(self):

@@ -28,7 +28,7 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_full_sources_still_project_once_not_per_frame(self):
         self.assertIn("val projection = rememberMarkdownProjection(sources)", self.chat)
-        self.assertIn("val reveal = rememberMarkdownReveal(turn, projection)", self.chat)
+        self.assertIn("val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch)", self.chat)
         self.assertIn("withFrameNanos { motion.advance(current, it) }", self.typing)
         for source in [self.typing, self.reveal]:
             for forbidden in ["MarkdownParser.parse", "MarkdownText.render(", "substring(0,", "Thread.sleep", "delay("]:
@@ -36,8 +36,8 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("while (shown < current.total)", self.typing)
 
     def test_mount_baseline_and_part_identity_are_not_text_guesses(self):
-        for token in ["remember(identity) { sources.toList() }", "MarkdownTypingSource(it.itemId, it.text)",
-                      "rememberMarkdownProjection(baseline.map { it.text })", "remember(identity) { MarkdownTypingState(baseline) }"]:
+        for token in ["remember(identity, resetEpoch) { sources.toList() }", "MarkdownTypingSource(it.itemId, it.text)",
+                      "rememberMarkdownProjection(baseline.map { it.text })", "remember(identity, resetEpoch) { MarkdownTypingState(baseline) }"]:
             self.assertIn(token, self.typing)
         self.assertIn('visibleCharacters = reveal.limit("final")', self.chat)
         self.assertIn("visibleCharacters = reveal.limit(text.itemId)", self.chat)

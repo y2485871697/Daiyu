@@ -51,6 +51,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.BottomFollowMotion
 import kotlinx.coroutines.flow.collect
@@ -84,6 +87,28 @@ internal fun ChatMessageList(
     var wasDragged by remember { mutableStateOf(false) }
     var touchEpoch by remember { mutableStateOf(0L) }
     var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var scrollResumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    var resumeFollowPending by remember { mutableStateOf(false) }
+    var revealResetEpoch by remember { mutableStateOf(0L) }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    scrollResumed = false
+                    resumeFollowPending = true
+                    wasDragged = false
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (resumeFollowPending) revealResetEpoch++
+                    scrollResumed = true
+                }
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     val density = LocalDensity.current
     val occlusionPx = with(density) { composerBottomInset.roundToPx() }
     val currentDensity by rememberUpdatedState(density.density)
@@ -95,12 +120,14 @@ internal fun ChatMessageList(
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
-    LaunchedEffect(scrollRequest, requestedIndex, turns.size, touchEpoch) {
+    LaunchedEffect(scrollRequest, requestedIndex, turns.size, touchEpoch, scrollResumed) {
+        if (!scrollResumed) return@LaunchedEffect
         scrollRequest?.takeIf { it.serial != consumedScrollSerial }?.let { request ->
             followBottom = request.followBottom && request.messageId == null && request.listKey == null
             wasDragged = false
             // Subcomposition may start this effect during measurement.
             withFrameNanos { }
+            if (!scrollResumed) return@LaunchedEffect
             if (request.messageId != null || request.listKey != null) {
                 val index = request.targetIndex(turns)
                 if (index >= 0) {
@@ -113,18 +140,23 @@ internal fun ChatMessageList(
             }
         }
     }
-    LaunchedEffect(dragging) {
-        if (dragging) { followBottom = false; wasDragged = true }
-    }
     LaunchedEffect(listState) {
-        snapshotFlow { listState.canScrollForward to listState.isScrollInProgress }.collect { (canScroll, scrolling) ->
-            if (!canScroll && !scrolling && !currentDragging && wasDragged) followBottom = true
-        }
+        snapshotFlow { Triple(scrollResumed, currentDragging, listState.isScrollInProgress) }
+            .collect { (resumed, dragged, scrolling) ->
+                if (!resumed) wasDragged = false
+                else if (dragged) { followBottom = false; wasDragged = true }
+                else if (!scrolling && wasDragged) {
+                    wasDragged = false
+                    followBottom = !listState.canScrollForward
+                }
+            }
     }
     // Keep a single motion across target-height updates instead of snapping each new line.
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, revealResetEpoch) {
+        var previousViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
+        var alignViewport = false
         snapshotFlow {
-            followBottom && !currentDragging && currentTailIndex >= 0 &&
+            scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
                 (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
         }.collectLatest { canFollow ->
             if (!canFollow) return@collectLatest
@@ -133,29 +165,51 @@ internal fun ChatMessageList(
                 while (true) {
                     // Layout notifications may arrive during measurement; scroll only on a frame.
                     val frameTime = withFrameNanos { it }
-                    if (!followBottom || currentDragging || currentTailIndex < 0 ||
+                    if (!scrollResumed || !followBottom || currentDragging || currentTailIndex < 0 ||
                         (currentScrollSerial != null && currentScrollSerial != consumedScrollSerial)) {
                         motion.reset()
                         continue
                     }
                     val index = currentTailIndex
-                    val layout = listState.layoutInfo
-                    val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
+                    var layout = listState.layoutInfo
+                    val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding)
+                    if (previousViewport != null && previousViewport != viewport) alignViewport = true
+                    previousViewport = viewport
+                    var last = layout.visibleItemsInfo.lastOrNull { it.index == index }
                     if (last == null) {
                         listState.scrollToItem(index)
+                        layout = listState.layoutInfo
+                        last = layout.visibleItemsInfo.lastOrNull { it.index == index }
+                        motion.reset()
+                        if (last == null) continue
+                    }
+                    val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
+                    if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
+                        (readyTurns[tail.listKey] != tail || !tail.isStreaming && revealedTurns[tail.listKey] != tail)) {
                         motion.reset()
                         continue
                     }
                     val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
                     if (overflow <= 0) {
                         motion.reset()
+                        resumeFollowPending = false
+                        alignViewport = false
                         // Recheck on subscription, including growth coalesced with reaching bottom.
                         snapshotFlow {
                             val nextIndex = currentTailIndex
                             val nextLayout = listState.layoutInfo
                             val nextLast = nextLayout.visibleItemsInfo.lastOrNull { it.index == nextIndex }
-                            nextLast == null || nextLast.offset + nextLast.size + nextLayout.afterContentPadding > nextLayout.viewportEndOffset
+                            Triple(nextLayout.viewportSize, nextLayout.beforeContentPadding, nextLayout.afterContentPadding) != previousViewport ||
+                                nextLast == null || nextLast.offset + nextLast.size + nextLayout.afterContentPadding > nextLayout.viewportEndOffset
                         }.first { it }
+                        continue
+                    }
+                    // Window restoration is layout correction, not new output to animate.
+                    if (resumeFollowPending || alignViewport) {
+                        listState.scrollBy(overflow.toFloat())
+                        resumeFollowPending = false
+                        alignViewport = false
+                        motion.reset()
                         continue
                     }
                     val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
@@ -219,6 +273,7 @@ internal fun ChatMessageList(
                         is ChatTurnUi.Assistant -> Column {
                             AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent,
                                 speaking = speechMessageId == turn.id,
+                                revealResetEpoch = revealResetEpoch,
                                 onRevealSettled = { settled ->
                                     if (settled) revealedTurns[turn.listKey] = turn else revealedTurns.remove(turn.listKey)
                                 }) { ready ->
@@ -286,6 +341,7 @@ internal fun AssistantTurn(
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
     speaking: Boolean = false,
+    revealResetEpoch: Long = 0L,
     onRevealSettled: (Boolean) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
 ) = key(turn.listKey) {
@@ -294,7 +350,7 @@ internal fun AssistantTurn(
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { it.text }
     }
     val projection = rememberMarkdownProjection(sources)
-    val reveal = rememberMarkdownReveal(turn, projection)
+    val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch)
     var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { mutableStateOf(false) }
     val initialBodyPending = sources.any { it.isNotBlank() } && projection == null && !hasProjectedBody
     SideEffect { if (projection != null && sources.any { it.isNotBlank() }) hasProjectedBody = true }

@@ -26,7 +26,10 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("val frameTime = withFrameNanos { it }", self.follow)
         self.assertIn("motion.step(overflow.toFloat(), frameTime, currentDensity)", self.follow)
         self.assertIn("listState.scrollBy(delta)", self.follow)
-        self.assertNotIn("scrollBy(overflow.toFloat())", self.follow)
+        correction = self.follow.split("if (resumeFollowPending || alignViewport) {", 1)[1].split("val visibleBottom", 1)[0]
+        self.assertIn("listState.scrollBy(overflow.toFloat())", correction)
+        self.assertIn("motion.reset()", correction)
+        self.assertIn("motion.step(overflow.toFloat(), frameTime, currentDensity)", self.follow.split("val visibleBottom", 1)[1])
         self.assertNotIn("animateScrollToItem", self.follow)
         self.assertIn("if (overflow <= 0) {", self.follow)
         self.assertIn("}.first { it }", self.follow)
@@ -36,7 +39,7 @@ class StreamingFollowContract(unittest.TestCase):
     def test_explicit_scroll_and_touch_keep_ownership(self):
         self.assertIn("currentScrollSerial != null && currentScrollSerial != consumedScrollSerial", self.follow)
         self.assertIn("currentScrollSerial == null || currentScrollSerial == consumedScrollSerial", self.follow)
-        self.assertIn("if (!followBottom || currentDragging || currentTailIndex < 0", self.follow)
+        self.assertIn("if (!scrollResumed || !followBottom || currentDragging || currentTailIndex < 0", self.follow)
         self.assertIn("followBottom = false; wasDragged = false", self.source)
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)
         self.assertIn("listState.animateScrollToItem(index)", self.source)

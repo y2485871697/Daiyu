@@ -45,6 +45,7 @@ import app.daiyu.android.domain.MessageImageReference
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.ui.app.AgentAppTheme
 import java.util.concurrent.CopyOnWriteArrayList
+import org.junit.Assert.assertArrayEquals
 
 /** Real consumers, isolated component host: no model, browser, network or production controller. */
 class MessageMarkdownTest : WiredActivityTestCase() {

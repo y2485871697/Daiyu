@@ -56,10 +56,10 @@ class TerminalActivityTest : WiredActivityTestCase() {
         awaitTerminal()
         lateinit var oldOpen: () -> Unit
         mainThread {
-            val page = invokeHost(activity, "getTerminalPageOwner")
-            val open = MainActivity::class.java.getDeclaredMethod("createTerminalSession", Any::class.java)
+            val page = checkNotNull(invokeHost(activity, "getTerminalPageOwner"))
+            val open = MainActivity::class.java.getDeclaredMethod("createTerminalSession", Any::class.java, String::class.java)
                 .apply { isAccessible = true }
-            oldOpen = { open.invoke(activity, page); Unit }
+            oldOpen = { open.invoke(activity, page, null); Unit }
         }
         backToChat(activity)
         ui.waitForIdle()
@@ -108,9 +108,9 @@ class TerminalActivityTest : WiredActivityTestCase() {
             awaitTerminal()
             node("terminal-shortcuts").assertIsDisplayed()
             node("terminal-input").assertDoesNotExist()
-            val page = invokeHost(activity, "getTerminalPageOwner")
-            val open = MainActivity::class.java.getDeclaredMethod("createTerminalSession", Any::class.java).apply { isAccessible = true }
-            realPauseResume(activity) { open.invoke(activity, page) }
+            val page = checkNotNull(invokeHost(activity, "getTerminalPageOwner"))
+            val open = MainActivity::class.java.getDeclaredMethod("createTerminalSession", Any::class.java, String::class.java).apply { isAccessible = true }
+            realPauseResume(activity) { open.invoke(activity, page, null) }
             assertSame(caller, owner.caller.value)
             assertFalse(owner.host.state.value.ownsResources)
             assertTrue(workspace.state.value.sessions.isEmpty())

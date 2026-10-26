@@ -517,6 +517,30 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         assertEquals(0, childLate.count("neutral_imports")); assertEquals(0, childLate.count("context_usage"))
         assertEquals(0, childLate.count("child_tasks")); assertEquals(0, childLate.count("runtime_preparations"))
     }
+    fun testUpgradePreservesAuthoritativeEmptyReceiptsAndBackfillsOnlyMissingSchema() {
+        val source = fresh(); seed(source)
+        source.tx { it.execSQL("DELETE FROM conversation_usage_receipts") }
+        val text = source.service().exportPackage()
+        val target = fresh(); target.service().importPackage(text)
+        assertEquals(0, target.count("conversation_usage_receipts"))
+        val before = payload(target.service().exportPackage()).getJSONObject("statistics").toString()
+        target.db.writableDatabase.version = 20; target.reopen()
+        assertEquals(28, target.db.readableDatabase.version)
+        assertEquals(0, target.count("conversation_usage_receipts"))
+        assertEquals(before, payload(target.service().exportPackage()).getJSONObject("statistics").toString())
+        assertTrue(target.service().importPackage(text).alreadyImported)
+
+        val legacy = fresh(); seed(legacy)
+        legacy.tx { it.execSQL("DROP TABLE conversation_usage_receipts") }
+        legacy.db.writableDatabase.version = 20; legacy.reopen()
+        assertEquals(28, legacy.db.readableDatabase.version)
+        assertTrue("Missing legacy receipt schema must still backfill", legacy.count("conversation_usage_receipts") > 0)
+        val backfilled = payload(legacy.service().exportPackage()).getJSONObject("statistics").toString()
+        legacy.db.writableDatabase.version = 20; legacy.reopen()
+        assertEquals(28, legacy.db.readableDatabase.version)
+        assertEquals(backfilled, payload(legacy.service().exportPackage()).getJSONObject("statistics").toString())
+    }
+
     fun testOldImportedChildHistoryRemainsIdempotentAcrossDisplaySchemaUpgrade() {
         val source = fresh(); seed(source)
         val old = mutate(source.service().exportPackage()) { data ->
@@ -539,9 +563,11 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
                 db.execSQL("UPDATE neutral_backup_history SET payload=? WHERE kind='child_task' AND identity=?", arrayOf(row.toString(), id))
             }
         }
+        val authoritativeStatistics = payload(target.service().exportPackage()).getJSONObject("statistics").toString()
         target.db.writableDatabase.version = 20
         target.reopen()
         assertEquals(28, target.db.readableDatabase.version)
+        assertEquals(authoritativeStatistics, payload(target.service().exportPackage()).getJSONObject("statistics").toString())
         assertTrue(target.service().importPackage(old).alreadyImported)
         val exported = payload(target.service().exportPackage()).getJSONObject("child_task_history")
         assertEquals(4, exported.getInt("version"))

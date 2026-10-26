@@ -76,6 +76,9 @@ internal class LinuxBackupProcess(private val context: Context) {
             while (errors.isAlive) try { errors.join() } catch (_: InterruptedException) { interrupted = true }
             if (interrupted) Thread.currentThread().interrupt()
         }
+        if (process.exitValue() != 0 && diagnostic.contains("rootfs backup: restore hardlink:")) {
+            throw IllegalStateException("linux_backup_hardlink_unavailable", failure)
+        }
         failure?.let { throw it }
         check(process.exitValue() == 0) {
             when {

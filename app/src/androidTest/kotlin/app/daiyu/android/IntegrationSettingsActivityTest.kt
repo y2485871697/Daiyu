@@ -419,8 +419,12 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         openModels(); editModel("Base URL", "https://catalog.invalid/v1/responses")
         editModel("API Key", "")
         fetch(); finished(connection)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-option:second").fetchSemanticsNodes().isNotEmpty() }
-        node("provider-model-option:second").performClick()
+        awaitUniqueTag("provider-model-list")
+        val models = node("provider-model-list")
+        awaitNodeWindowFocus(models)
+        awaitDialogEnter(models)
+        models.scrollToDescendant(hasTestTag("provider-model-option:second"))
+        node("provider-model-option:second").assertIsDisplayed().assertIsEnabled().performClick()
         node("dialog-confirm").assertIsEnabled().performClick()
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isEmpty() }
         assertEquals(before, fixture.settings.load())

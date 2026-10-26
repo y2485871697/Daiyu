@@ -86,9 +86,12 @@ class MessageSpeechButtonTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeByFrame()
             val button = ui.onNodeWithContentDescription("停止朗读")
             val beforeBounds = button.fetchSemanticsNode().boundsInRoot
-            val first = captureScreenNode(button).toPixelMap()
+            val waves = ui.onNodeWithTag("message-speech-playing", useUnmergedTree = true)
+            val first = waves.captureToImage().toPixelMap()
             ui.mainClock.advanceTimeBy(600)
-            val second = captureScreenNode(button).toPixelMap()
+            val second = waves.captureToImage().toPixelMap()
+            assertEquals(first.width, second.width)
+            assertEquals(first.height, second.height)
             assertEquals(beforeBounds, button.fetchSemanticsNode().boundsInRoot)
             var changed = 0
             for (y in 0 until first.height) for (x in 0 until first.width) {

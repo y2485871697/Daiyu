@@ -15,6 +15,14 @@ class UsageStatisticsPortContractTest(unittest.TestCase):
         self.assertLess(upgrade.index('UsageStatisticsStore.install(db)'),upgrade.index('if (oldVersion >= 13) return'))
         self.assertLess(upgrade.index('ConversationUsageStore.backfill(db)'),upgrade.index('UsageStatisticsStore.install(db)'))
         self.assertEqual(2, source.count('UsageStatisticsStore.created(db, value.id.value, value.updatedAt)'))
+    def test_upgrade_preserves_installed_authoritative_receipts_even_when_empty(self):
+        source=read('storage/ConversationDatabase.kt')
+        upgrade=source.split('override fun onUpgrade',1)[1].split('private fun installWorkspaceBindings',1)[0]
+        self.assertIn('val needsUsageReceiptBackfill = !db.rawQuery(',upgrade)
+        self.assertIn('arrayOf("conversation_usage_receipts")',upgrade)
+        self.assertLess(upgrade.index('val needsUsageReceiptBackfill'),upgrade.index('SQLiteRuntimeStore.installSchema(db)'))
+        self.assertIn('if (needsUsageReceiptBackfill) ConversationUsageStore.backfill(db)',upgrade)
+        self.assertNotIn('SELECT count(*) FROM conversation_usage_receipts',upgrade)
     def test_request_table_does_not_cascade_with_runtime_or_messages(self):
         source=read('storage/UsageStatisticsStore.kt')
         expression=source.split('db.execSQL("CREATE TABLE IF NOT EXISTS $REQUESTS',1)[1].split(')")',1)[0]

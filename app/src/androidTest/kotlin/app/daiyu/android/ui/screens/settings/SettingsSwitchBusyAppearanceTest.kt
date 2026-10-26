@@ -6,8 +6,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.ImageBitmap
@@ -15,6 +19,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
+import app.daiyu.android.dismissDesktopEducationTooltip
 import app.daiyu.android.context.CompressionSettingsEditor
 import app.daiyu.android.context.ProductionCompressionSettingsStore
 import app.daiyu.android.data.model.AppearanceSettings
@@ -33,6 +38,12 @@ import kotlin.math.abs
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
+    private fun Modifier.educationDismissalBlank() = testTag("switch-appearance-blank").pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) awaitPointerEvent().changes.forEach { it.consume() }
+        }
+    }
+
     private fun differentPixels(before: ImageBitmap, after: ImageBitmap, diagnostic: String = "busy-appearance", beforePhase: String = "before", afterPhase: String = "pending", expectedChange: Boolean = false): Int {
         assertEquals(before.width, after.width)
         assertEquals(before.height, after.height)
@@ -82,9 +93,11 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
                                 }
                             }
                         }
+                        Box(Modifier.align(Alignment.BottomStart).size(32.dp).educationDismissalBlank())
                     }
                 }
             }
+            dismissDesktopEducationTooltip(instrumentation, ui, node("switch-appearance-blank"))
             val before = captureScreenNode(node("busy-switch").assertIsEnabled())
             mainThread { busy.value = true }
             val pending = node("busy-switch").assertIsNotEnabled()
@@ -114,10 +127,12 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
                                 }
                             }
                         }
+                        Box(Modifier.align(Alignment.BottomStart).size(32.dp).educationDismissalBlank())
                     }
                 }
             }
-            val available = captureScreenNode(node("unavailable-switch"))
+            dismissDesktopEducationTooltip(instrumentation, ui, node("switch-appearance-blank"))
+            val available = captureScreenNode(node("unavailable-switch").assertIsEnabled())
             mainThread { enabled.value = false }
             val disabled = captureScreenNode(node("unavailable-switch").assertIsNotEnabled())
             assertTrue("disabled appearance dark=$dark checked=$checked", differentPixels(available, disabled, "unavailable-control-dark-$dark-checked-$checked",

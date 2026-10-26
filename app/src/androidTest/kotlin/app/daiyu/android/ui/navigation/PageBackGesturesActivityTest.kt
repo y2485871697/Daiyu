@@ -488,6 +488,14 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         assertEquals(0, nestedCount)
     }
 
+    private fun awaitRecordedDeparture() {
+        check(!ui.mainClock.autoAdvance)
+        ui.waitUntil(timeoutMillis = 5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("page-back-departure").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     fun testHorizontalSwipeCommitsTheRecordedDepartureWithPredictionDisabled() {
         predictive = false
         navigateOnBack = true
@@ -512,6 +520,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeByFrame()
             assertEquals("previous-page", route)
             assertEquals(1, backCount)
+            awaitRecordedDeparture()
             val departure = ui.onNodeWithTag("page-back-departure").assertExists()
             val departurePixels = captureScreenNode(departure).toPixelMap()
             val outgoing = departurePixels[departurePixels.width / 2, departurePixels.height / 2]
@@ -542,6 +551,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeByFrame()
             assertEquals("previous-page", route)
             assertEquals(1, backCount)
+            awaitRecordedDeparture()
             ui.onNodeWithTag("page-back-departure").assertExists()
             ui.mainClock.advanceTimeBy(1000)
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()

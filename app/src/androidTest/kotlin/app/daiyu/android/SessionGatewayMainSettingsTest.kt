@@ -156,7 +156,7 @@ class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
         reveal("session-gateway-save", page, lazyKey = "session_gateway_save").assertIsNotEnabled()
         reveal("settings-switch:授权替换策略", page, lazyKey = "session_gateway_save").performClick()
         mainThread { assertEquals(true, hostField("gatewayReplacementAuthorized")) }
-        realPauseResume(activity, atPause = { fixture.settings.save(changed) })
+        realPauseResume(activity, atPause = { fixture.settings.save(changed, requestOptionsReplacementAuthorized = true) })
         ui.waitUntil(5_000) {
             hostField("gatewayReloadPending") == false &&
                 hostField("gatewayDraft") == changed.requestOptions.sessionGateway

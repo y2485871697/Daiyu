@@ -63,6 +63,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         check(oldVersion in 1..27 && newVersion == 28) { "不支持此数据库版本，保留原数据" }
+        // Preserve installed receipts, including an authoritative empty v8 import.
+        val needsUsageReceiptBackfill = !db.rawQuery(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            arrayOf("conversation_usage_receipts")
+        ).use { it.moveToFirst() }
         app.daiyu.android.timeline.ChatTimelineStore.install(db)
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
@@ -110,7 +115,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         installUsageCreationColumns(db)
         CloudContextUsageStore.installSchema(db)
         ConversationUsageStore.installSchema(db)
-        ConversationUsageStore.backfill(db)
+        if (needsUsageReceiptBackfill) ConversationUsageStore.backfill(db)
         UsageStatisticsStore.install(db)
         installWorkspaceBindings(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.

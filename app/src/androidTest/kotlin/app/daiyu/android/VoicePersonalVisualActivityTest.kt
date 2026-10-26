@@ -122,7 +122,7 @@ class VoicePersonalVisualActivityTest : WiredActivityTestCase() {
             } }
             val add = node("voice-account-add").assertIsDisplayed().assertIsEnabled()
                 .assertWidthIsAtLeast(56.dp).assertHeightIsAtLeast(56.dp)
-            val pixels = captureScreenNode(add).toPixelMap()
+            val pixels = add.captureToImage().toPixelMap()
             val fill = pixels[(12f * density).toInt(), pixels.height / 2]
             val foreground = pixels[pixels.width / 2, pixels.height / 2]
             for ((actual, target) in listOf(fill to expected, foreground to expectedIcon)) {

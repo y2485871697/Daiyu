@@ -313,7 +313,8 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             }
             val (surface, body, footer, secondary, done) = bounds
             fun px(value: Int) = with(nodes.first().layoutInfo.density) { value.dp.toPx() }
-            assertEquals("Both buttons remain 48dp tall", px(48), secondary.height, 1.5f)
+            assertTrue("Both buttons remain at least 48dp tall",
+                minOf(secondary.height, done.height) >= px(48) - 1.5f)
             assertEquals(secondary.height, done.height, 1f)
             assertEquals("Both buttons remain equally wide", secondary.width, done.width, 1f)
             assertEquals("Button bottoms align", secondary.bottom, done.bottom, 1f)

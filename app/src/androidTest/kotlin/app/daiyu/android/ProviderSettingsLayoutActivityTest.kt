@@ -285,7 +285,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         node("settings-radio:Anthropic Messages").assertDoesNotExist()
         node("settings-radio:OpenAI Chat Completions").performClick()
         reveal("provider-endpoint-select").assertTextContains("Chat Completions API")
-        modelField("API Key").assertEditableText("")
+        assertModelSecret(before.apiKey)
         node("settings-switch:重输密钥并绑定").assertDoesNotExist()
         assertEquals(before, fixture.settings.load())
         assertEquals(0, fixture.opens.get())

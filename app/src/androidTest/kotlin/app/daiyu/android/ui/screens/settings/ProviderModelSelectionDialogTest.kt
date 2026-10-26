@@ -67,8 +67,13 @@ class ProviderModelSelectionDialogTest : WiredActivityTestCase() {
 
     fun testSearchUsesStableIdsAndPreservesHiddenSelections() {
         show()
-        node("provider-model-option:alpha").performClick().assertIsOn()
-        node("provider-model-option:beta").assertIsOff()
+        fun option(id: String): SemanticsNodeInteraction {
+            val tag = "provider-model-option:$id"
+            node("provider-model-list").scrollToDescendant(hasTestTag(tag))
+            return node(tag).assertIsDisplayed()
+        }
+        option("alpha").performClick().assertIsOn()
+        option("beta").assertIsOff()
         val search = node("provider-model-search").assertIsDisplayed().assertIsEnabled().assert(hasSetTextAction())
         ui.onNodeWithTag("provider-model-search-icon", useUnmergedTree = true).assertIsDisplayed()
         search.performTextReplacement(" GAMMA ")
@@ -81,12 +86,8 @@ class ProviderModelSelectionDialogTest : WiredActivityTestCase() {
         search.performTextReplacement("")
         search.assertEditableText("")
         dismissIme()
-        node("provider-model-list").performScrollToKey("alpha")
-        awaitVisualIdle()
-        node("provider-model-option:alpha").assertIsDisplayed().assertIsOn()
-        node("provider-model-list").performScrollToKey("beta")
-        awaitVisualIdle()
-        node("provider-model-option:beta").assertIsDisplayed().assertIsOff()
+        option("alpha").assertIsOn()
+        option("beta").assertIsOff()
         node("dialog-confirm").assertIsEnabled().assertIsDisplayed().performClick()
         ui.runOnIdle {
             assertEquals("one real confirmation callback", 1, confirmations.size)

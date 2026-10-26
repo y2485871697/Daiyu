@@ -28,6 +28,7 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         ui.onNodeWithTag("timeline-close").performClick()
         ui.onNodeWithTag("timeline-details").assertDoesNotExist()
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testDetailsSurfaceTouchesNeverReachTheOutsideScrim() {
         var dismissals = 0
         var show by mutableStateOf(true)
@@ -44,10 +45,35 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         }
         ui.onNodeWithTag("timeline-copy").performTouchInput { click() }
         ui.onNodeWithContentDescription("已复制").assertExists()
-        ui.onNodeWithTag("preview-dialog-viewport").performTouchInput {
-            click(androidx.compose.ui.geometry.Offset(center.x, 1f))
+        val details = ui.onNodeWithTag("timeline-details")
+        val viewport = ui.onNodeWithTag("preview-dialog-viewport")
+        awaitDialogEnter(details)
+        val viewportNode = viewport.fetchSemanticsNode()
+        val cardNode = details.fetchSemanticsNode()
+        assertSame(viewportNode.root, cardNode.root)
+        val view = (viewportNode.root as androidx.compose.ui.platform.ViewRootForTest).view
+        val (windowBounds, cardBounds, safeBounds) = awaitStableWindowFrame(view) {
+            val bars = androidx.core.view.ViewCompat.getRootWindowInsets(view)?.getInsets(
+                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
+                    androidx.core.view.WindowInsetsCompat.Type.displayCutout()
+            ) ?: return@awaitStableWindowFrame null
+            val window = viewport.fetchSemanticsNode().boundsInRoot
+            Triple(window, details.fetchSemanticsNode().boundsInRoot, androidx.compose.ui.geometry.Rect(
+                window.left + bars.left, window.top + bars.top,
+                window.right - bars.right, window.bottom - bars.bottom
+            ))
         }
-        ui.waitUntil { dismissals == 1 }
+        val blankBottom = minOf(cardBounds.top, safeBounds.bottom)
+        assertTrue("No app-owned blank area above card", blankBottom > safeBounds.top)
+        assertTrue("Empty safe viewport", safeBounds.width > 0f)
+        val outside = androidx.compose.ui.geometry.Offset(
+            safeBounds.left + safeBounds.width * 0.1f, (safeBounds.top + blankBottom) / 2f
+        )
+        assertTrue("Outside point must avoid system bars", safeBounds.contains(outside))
+        assertFalse("Outside point must not hit details", cardBounds.contains(outside))
+        viewport.performTouchInput { click(outside - windowBounds.topLeft) }
+        awaitVisualIdle()
+        ui.runOnIdle { assertEquals(1, dismissals) }
         ui.onNodeWithTag("timeline-details").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }

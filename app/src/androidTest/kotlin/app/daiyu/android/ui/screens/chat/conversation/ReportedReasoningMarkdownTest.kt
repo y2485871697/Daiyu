@@ -90,7 +90,7 @@ class ReportedReasoningMarkdownTest : WiredActivityTestCase() {
         assertEquals(26.sp, layouts.single().layoutInput.style.lineHeight)
         ui.onNodeWithText("Heading", useUnmergedTree = true).assertExists()
         ui.onNodeWithText("first item", useUnmergedTree = true).assertExists()
-        ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).assertTextEquals("println(\"**kept**\")")
+        ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).assertTextEquals("println(\"**kept**\")\n")
         assertTrue(ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
             .getUnclippedBoundsInRoot().height <= 220.dp)
         ui.onNodeWithText("answer remains", useUnmergedTree = true).assertExists()

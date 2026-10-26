@@ -74,19 +74,48 @@ class BrowserScrollGestureActivityTest : WiredActivityTestCase() {
         awaitControl("local page loaded and laid out") { loaded && view.height > 0 && view.contentHeight >= height }
     }
 
+    private fun awaitSettledScrollY(label: String, reached: () -> Boolean = { true }): Int {
+        val samples = java.util.ArrayDeque<String>(64)
+        val started = android.os.SystemClock.uptimeMillis()
+        var firstY: Int? = null
+        var lastY: Int? = null
+        var unchangedSince = 0L
+        var equalFrames = 0
+        try {
+            val settled = awaitStableWindowFrame(view) {
+                val now = android.os.SystemClock.uptimeMillis()
+                val y = view.scrollY
+                if (firstY == null) firstY = y
+                if (samples.size == 64) samples.removeFirst()
+                samples.addLast("${now - started}:$y")
+                if (lastY != y) {
+                    lastY = y
+                    unchangedSince = now
+                    equalFrames = 1
+                } else equalFrames++
+                y.takeIf { equalFrames >= 8 && now - unchangedSince >= 200L && reached() }
+            }
+            android.util.Log.i("DaiyuBrowserScroll", "$label first=$firstY settled=$settled nativeMsY=$samples")
+            return settled
+        } catch (failure: AssertionError) {
+            throw AssertionError("$label first=$firstY last=$lastY equalFrames=$equalFrames nativeMsY=$samples", failure)
+        }
+    }
+
     fun testLongPageScrollsBothWaysWithoutDraggingOrClosingBrowser() {
         show(20_000)
         val container = node("browser-visual-container")
         val before = container.fetchSemanticsNode().boundsInRoot
         container.performTouchInput { swipeUp() }
-        awaitControl("real WebView scrolled down") { view.scrollY > 0 }
-        var down = 0
-        mainThread { down = view.scrollY }
+        val down = awaitSettledScrollY("real WebView scrolled down") { view.scrollY > 0 }
+        assertTrue("real WebView scrolled down: settled=$down", down > 0)
         container.performTouchInput { swipeDown() }
-        awaitControl("real WebView scrolled back up") { view.scrollY < down }
+        val up = awaitSettledScrollY("real WebView scrolled back up from $down") { view.scrollY < down }
+        assertTrue("real WebView scrolled back up: down=$down up=$up", up < down)
         mainThread { view.scrollTo(0, 0) }
+        awaitSettledScrollY("top setup") { view.scrollY == 0 }
         container.performTouchInput { swipeDown() }
-        awaitVisualIdle()
+        awaitSettledScrollY("downward gesture at page top") { view.scrollY == 0 }
         mainThread {
             assertEquals(0, view.scrollY)
             assertEquals(0, dismissals)

@@ -60,7 +60,7 @@ internal object PlatformSettingsAccess {
         }
         PlatformReadTool.FILES -> "须精确持久化的只读SAF树授权；缺授权将拒绝；仅直接子项"
         PlatformReadTool.FILE_METADATA, PlatformReadTool.FILE_TEXT -> "须明确的content URI只读授权；缺授权将拒绝；不访问原始路径"
-        PlatformReadTool.APPS -> "仅Android允许本应用可见的包；不是完整应用清单，不申请全包可见性"
+        PlatformReadTool.APPS -> "读取系统允许本应用可见的已安装应用；结果受系统策略和扫描上限约束"
         PlatformReadTool.NOTIFICATIONS -> "仅本应用当前通知；不读其他应用，不需要通知监听或发通知权限"
         PlatformReadTool.CROSS_APP_NOTIFICATIONS, PlatformReadTool.NOTIFICATION_HISTORY -> CrossAppNotifications.from(context).status()
         else -> "无需危险系统权限；SDK不可用或限制时安全拒绝"

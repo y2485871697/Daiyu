@@ -22,6 +22,7 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 expected_permissions = {
     "INTERNET": None, "VIBRATE": None, "RECORD_AUDIO": None,
     "SYSTEM_ALERT_WINDOW": None,
+    "QUERY_ALL_PACKAGES": None, "PACKAGE_USAGE_STATS": None, "POST_NOTIFICATIONS": None,
     "MODIFY_AUDIO_SETTINGS": None, "CHANGE_WIFI_STATE": "28",
     "ACCESS_NETWORK_STATE": None, "ACCESS_WIFI_STATE": None,
     "ACCESS_COARSE_LOCATION": None, "ACCESS_FINE_LOCATION": None,

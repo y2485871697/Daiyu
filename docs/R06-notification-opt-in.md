@@ -1,5 +1,12 @@
 # R06 bounded notification increment — implementation evidence
 
+> Permission-check correction (2026-10-26): the current manifest additionally declares
+> `QUERY_ALL_PACKAGES`, `PACKAGE_USAGE_STATS`, and `POST_NOTIFICATIONS` for the existing
+> permission-check page. Usage access and notification posting still require the user's
+> system-settings grant. These are not listener access, local history recording opt-in,
+> run capability, or outbound private-result consent. The original no-declaration notes
+> below describe this increment's historical baseline, not the current manifest boundary.
+
 ## Sources checked and scope
 
 Read-only evidence: `docs/重构清单.md` R06 row / device-adapter authorization notes; `docs/R06-platform-production.md`; current `PlatformReadTool`, `AndroidPlatformReads`, `DeviceQueries`, `DeviceResultPolicy`, `AndroidToolRegistry`, `RunDeviceResources`, platform settings and manifest. The starting catalog has **13 platform leaves**, including `app_notifications` implemented by the own-app NotificationManager query. This increment does not rewrite that leaf, its `own_app_only` observation, or legacy battery/status tools. No historical candidate source tree, credentials, network, device, shell or Git operation was accessed. The unique checklist and update notes were not edited.

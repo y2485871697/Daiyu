@@ -28,10 +28,17 @@ class PlatformManifestBoundaryTest {
         assertEquals("30", permissions.single { it.getAttributeNS(android, "name") == "android.permission.BLUETOOTH" }
             .getAttributeNS(android, "maxSdkVersion"))
         assertTrue(names.containsAll(setOf("android.permission.ACCESS_WIFI_STATE", "android.permission.BLUETOOTH_CONNECT")))
-        assertFalse(names.any { it in setOf("android.permission.QUERY_ALL_PACKAGES", "android.permission.MANAGE_EXTERNAL_STORAGE",
+        assertTrue(names.containsAll(setOf("android.permission.QUERY_ALL_PACKAGES",
+            "android.permission.PACKAGE_USAGE_STATS", "android.permission.POST_NOTIFICATIONS")))
+        for (name in setOf("QUERY_ALL_PACKAGES", "PACKAGE_USAGE_STATS", "POST_NOTIFICATIONS")) {
+            assertEquals("", permissions.single { it.getAttributeNS(android, "name") == "android.permission.$name" }
+                .getAttributeNS(android, "maxSdkVersion"))
+        }
+        assertFalse(names.any { it in setOf("android.permission.MANAGE_EXTERNAL_STORAGE",
             "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.WRITE_CONTACTS", "android.permission.WRITE_CALENDAR",
-            "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE", "android.permission.POST_NOTIFICATIONS") })
-        assertEquals(20, permissions.size)
+            "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE") })
+        assertEquals(23, permissions.size)
+        assertEquals(names.size, permissions.size)
         assertTrue(names.contains("android.permission.SYSTEM_ALERT_WINDOW"))
         assertTrue(names.containsAll(setOf("com.android.alarm.permission.SET_ALARM", "android.permission.MODIFY_AUDIO_SETTINGS")))
         assertEquals("28", permissions.single { it.getAttributeNS(android, "name") == "android.permission.CHANGE_WIFI_STATE" }

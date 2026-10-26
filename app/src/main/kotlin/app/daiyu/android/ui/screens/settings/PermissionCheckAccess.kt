@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.settings
 
 import android.Manifest
 import android.app.AppOpsManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -47,11 +48,18 @@ internal class AndroidPermissionCheckAccess(private val context: Context) : Perm
             PermissionCheckItem.OVERLAY -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, packageUri)
             PermissionCheckItem.APPS, PermissionCheckItem.LOCATION -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
             PermissionCheckItem.NOTIFICATION_ACCESS -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-            PermissionCheckItem.USAGE -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            PermissionCheckItem.USAGE -> if (Build.VERSION.SDK_INT >= 29)
+                Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, packageUri)
+                else Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
             PermissionCheckItem.ACCESSIBILITY -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             PermissionCheckItem.TASK_NOTIFICATIONS -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         }
-        context.startActivity(intent)
+        try {
+            context.startActivity(intent)
+        } catch (error: ActivityNotFoundException) {
+            if (item != PermissionCheckItem.USAGE || intent.data == null) throw error
+            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        }
     }
 }

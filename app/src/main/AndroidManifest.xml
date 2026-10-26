@@ -26,7 +26,11 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
-    <!-- No all-packages/all-files permission or notification posting grant. Listener access below is separate explicit special access, never POST_NOTIFICATIONS. -->
+    <!-- Permission-check capabilities; usage and posting still need the user's system grant. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Notification-listener access remains separate from posting; no all-files permission. -->
     <!-- Android 11+ visibility for installed TTS and speech recognition services. -->
     <queries>
         <intent><action android:name="android.intent.action.SET_ALARM" /></intent>

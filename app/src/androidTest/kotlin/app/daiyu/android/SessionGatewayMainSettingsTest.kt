@@ -147,11 +147,20 @@ class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
     }
 
     fun testBackgroundConfigurationChangeRevalidatesDraftAndClearsReplacementApproval() {
+        val changed = fixture.settings.load().copy(model = "changed-while-backgrounded")
+        assertTrue(fixture.application.getSharedPreferences("model-settings", 0).edit()
+            .putString("request-options", "not-json").commit())
         openGateway()
         edit("顶层身份键", "old-unsaved.key")
-        val changed = fixture.settings.load().copy(model = "changed-while-backgrounded")
+        dismissIme()
+        reveal("session-gateway-save", page, lazyKey = "session_gateway_save").assertIsNotEnabled()
+        reveal("settings-switch:授权替换策略", page, lazyKey = "session_gateway_save").performClick()
+        mainThread { assertEquals(true, hostField("gatewayReplacementAuthorized")) }
         realPauseResume(activity, atPause = { fixture.settings.save(changed) })
-        ui.waitUntil(5_000) { hostField("gatewayReloadPending") == false && hostField("gatewayEditing") != null }
+        ui.waitUntil(5_000) {
+            hostField("gatewayReloadPending") == false &&
+                hostField("gatewayDraft") == changed.requestOptions.sessionGateway
+        }
         reveal("session-gateway-save", page, lazyKey = "session_gateway_save").assertIsEnabled()
         mainThread {
             assertEquals(changed.requestOptions.sessionGateway, hostField("gatewayDraft"))

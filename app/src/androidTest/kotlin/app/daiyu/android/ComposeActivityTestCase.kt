@@ -666,13 +666,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
         reveal("provider-open-primary", "模型提供商").assertIsDisplayed().assertIsEnabled()
     }
-    protected fun selectProviderTab(title: String) {
+    protected fun selectProviderTab(title: String, page: String = "模型设置") {
         val tag = "settings-radio:$title"
-        val tab = reveal(tag).assertIsEnabled()
+        val tab = reveal(tag, page).assertIsEnabled()
         if (tab.fetchSemanticsNode().config[SemanticsProperties.Selected] != true) {
             tab.performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         }
-        reveal(tag).assertIsSelected()
+        reveal(tag, page).assertIsSelected()
     }
     protected fun chooseProviderProtocol(label: String) {
         reveal("provider-endpoint-select").performClick()

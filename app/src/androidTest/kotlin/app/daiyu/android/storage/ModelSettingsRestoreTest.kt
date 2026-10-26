@@ -16,6 +16,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
     private val configKeys = setOf("endpoint", "model", "responses-path", "battery", "device-status", "protocol")
     private val materialKeys = setOf("key", "iv", "key-alias", "key-owner")
     private val gate = "credential-rebind-required"
+    private val metadataReadKeys = setOf(gate, "request-options", "oauth-reference", "catalog-configuration-pending")
 
     /** getAll, even without decrypting, counts as a credential read. Guard both reads and edits. */
     private inner class GuardedPreferences(val raw: SharedPreferences) : SharedPreferences by raw {
@@ -28,7 +29,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         val outcomes = mutableListOf<CommitOutcome>()
         private fun read(name: String?) {
             reads.add(name)
-            if(protectCredentials) check(name in configKeys || name == gate || name == "request-options") { "credential/unknown read: $name" }
+            if(protectCredentials) check(name in configKeys || name in metadataReadKeys) { "credential/unknown read: $name" }
         }
         private fun write(name: String?) {
             writes.add(name)
@@ -115,6 +116,26 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
                 aliases.forEach { keys.deleteEntry(it) }
             }
         } finally { super.tearDown() }
+    }
+
+    fun testCleanCatalogMetadataReadDoesNotCreateRecoveryBarrierOrReadCredentials() {
+        val f = fresh(); f.seedConfiguration(); f.seedMaterial()
+        f.store.checkCatalogConfiguration()
+        assertTrue("catalog-configuration-pending" in f.spy.reads)
+        assertTrue(f.spy.reads.intersect(materialKeys).isEmpty())
+        assertTrue(f.spy.writes.isEmpty()); assertEquals(0, f.spy.commits)
+    }
+
+    fun testGatedEditingKeepsOnlyOAuthReferenceWithoutReadingCredentialMaterial() {
+        val f = fresh(); f.seedConfiguration(); f.seedMaterial()
+        val reference = UUID.randomUUID().toString()
+        assertTrue(f.raw.edit().putString("oauth-reference", reference).putBoolean(gate, true).commit())
+        val material = f.material()
+        val editing = f.editing()
+        assertEquals(reference, editing.settings.oauth?.id)
+        assertEquals("", editing.settings.apiKey); assertTrue(editing.credentialUnavailable)
+        assertTrue(f.spy.reads.intersect(materialKeys).isEmpty()); assertEquals(material, f.material())
+        assertTrue(f.spy.writes.isEmpty()); assertEquals(0, f.spy.commits)
     }
 
     fun testPrepareIsReadOnlyImmutableAndLimitedToNonSecretKeys() {
@@ -207,7 +228,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
     fun testIllegalKeysTypesEndpointsPathsAndModelLengthsRejectedReadOnly() {
         val f = fresh(); f.seedConfiguration(); f.seedMaterial(); val before = HashMap(f.raw.all)
         val invalid = mutableListOf<JSONObject>()
-        (materialKeys + setOf(gate, "unknown", "apiKey")).forEach { invalid.add(JSONObject().put(it, "synthetic")) }
+        (materialKeys + setOf(gate, "unknown", "apiKey", "oauth-reference", "catalog-configuration-pending")).forEach { invalid.add(JSONObject().put(it, "synthetic")) }
         listOf("endpoint", "model", "responses-path").forEach { name ->
             listOf<Any>(false, 1, JSONObject.NULL, JSONObject(), org.json.JSONArray()).forEach { invalid.add(JSONObject().put(name, it)) }
         }
@@ -413,7 +434,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         val editing=f.editing(f.reopen())
         assertEquals("",editing.settings.apiKey);assertEquals(ProviderProtocol.MESSAGES,editing.settings.protocol)
         assertTrue(editing.credentialUnavailable)
-        assertTrue(f.spy.reads.all {it in configKeys || it==gate || it=="request-options"})
+        assertTrue(f.spy.reads.all {it in configKeys || it in metadataReadKeys})
         assertTrue(f.spy.writes.all {it in configKeys || it==gate})
         assertTrue(f.spy.reads.intersect(materialKeys).isEmpty())
         assertTrue(f.spy.writes.intersect(materialKeys).isEmpty())

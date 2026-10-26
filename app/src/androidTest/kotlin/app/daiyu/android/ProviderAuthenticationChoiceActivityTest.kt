@@ -149,14 +149,14 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("page:认证方式")
         reveal("provider-auth-api-key", "认证方式").performClick()
         fillNew("tab draft")
-        selectProviderTab("模型")
+        selectProviderTab("模型", "添加提供商")
         repeat(2) {
             realPauseResume(activity)
             awaitUniqueTag("page:添加提供商")
             node("settings-radio:模型").assertIsSelected()
             node("provider-name").assertDoesNotExist()
         }
-        selectProviderTab("配置")
+        selectProviderTab("配置", "添加提供商")
         reveal("provider-name", "添加提供商").assertTextContains("tab draft")
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())
@@ -264,7 +264,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         backToPage(activity, "page:模型提供商")
         reveal("provider-add-speech", "模型提供商").performClick()
         awaitUniqueTag("page:添加提供商")
-        reveal("settings-field:API Key", "添加提供商").assertTextEquals("")
+        reveal("settings-field:API Key", "添加提供商").assertEditableText("")
         reveal("provider-name", "添加提供商").assertTextContains("豆包语音")
     }
 

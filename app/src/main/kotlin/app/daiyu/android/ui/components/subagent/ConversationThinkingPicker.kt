@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.delegation.ReasoningEffort
@@ -75,7 +76,8 @@ import kotlin.math.roundToInt
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 22.dp, bottom = 24.dp).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("调整思考深度", fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.testTag("chat-thinking-title").padding(bottom = 19.dp), color = colors.text)
+                    modifier = Modifier.fillMaxWidth().testTag("chat-thinking-title").padding(bottom = 19.dp),
+                    textAlign = TextAlign.Center, color = colors.text)
                 val speedClick = onCycleSpeed?.takeIf { speedMode != null }
                 Box(Modifier.size(36.dp).testTag("chat-thinking-speed")
                     .then(if (speedClick != null) Modifier.clickable(enabled = speedEnabled, role = Role.Button,

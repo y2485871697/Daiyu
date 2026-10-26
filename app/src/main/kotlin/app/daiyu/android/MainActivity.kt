@@ -10,6 +10,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
@@ -34,8 +35,13 @@ import app.daiyu.android.ui.components.dialogEnterMotion
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import app.daiyu.android.ui.navigation.RootExitConfirmation
 import androidx.lifecycle.lifecycleScope
 import app.daiyu.android.tasksurface.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -826,10 +832,37 @@ class MainActivity : ComponentActivity() {
             } finally { if (chatReferencePick === request) chatReferencePick = null }
         }
     }
+    private val rootExitConfirmation = RootExitConfirmation()
+    private var rootExitToast: Toast? = null
+
+    private fun resetRootExitConfirmation() {
+        rootExitConfirmation.reset()
+        rootExitToast?.cancel()
+        rootExitToast = null
+    }
+
+    private fun handleRootBack(hideIme: () -> Unit) {
+        if (!activityUsable() || !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) ||
+            retainedPage != "chat" || sidebarVisible) return
+        if (ViewCompat.getRootWindowInsets(window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == true) {
+            resetRootExitConfirmation()
+            hideIme()
+            return
+        }
+        if (rootExitConfirmation.shouldExit(SystemClock.elapsedRealtime())) {
+            resetRootExitConfirmation()
+            finish()
+        } else {
+            rootExitToast?.cancel()
+            rootExitToast = Toast.makeText(this, "再按一次返回退出应用", Toast.LENGTH_SHORT).also { it.show() }
+        }
+    }
+
     private var sidebarVisibleState by mutableStateOf(false)
     private var sidebarVisible: Boolean
         get() = sidebarVisibleState
         set(value) {
+            if (value != sidebarVisibleState) resetRootExitConfirmation()
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
             if (value && !sidebarVisibleState) revokeCommandApproval()
@@ -973,6 +1006,7 @@ class MainActivity : ComponentActivity() {
         get() = retainedPageState
         set(value) {
             if (value != retainedPageState) {
+                resetRootExitConfirmation()
                 revokeCommandApproval()
                 revokeTerminalJobsVisit()
                 childStatusVisit = null
@@ -1648,6 +1682,8 @@ class MainActivity : ComponentActivity() {
             AgentAppTheme(appearance, applyInterfaceScale = true, onResolvedDarkModeChange = ::updateSystemBars) {
                 val iconCoordinator = rememberIconAppearanceCoordinator(iconNotifications, ::reportAutomaticIconSync)
                 val focus = LocalFocusManager.current
+                val keyboard = LocalSoftwareKeyboardController.current
+                val view = LocalView.current
                 val balanceState = balanceRuntime?.state?.collectAsStateWithLifecycle()?.value
                 val chatPageState = rememberSaveableStateHolder()
                 val settingsPageState = rememberSaveableStateHolder()
@@ -1678,6 +1714,9 @@ class MainActivity : ComponentActivity() {
                         val binding = videoHost.bindLifecycle(this@MainActivity)
                         onDispose { binding.close() }
                     }
+                }
+                androidx.activity.compose.BackHandler(enabled = retainedPage == "chat" && !sidebarVisible) {
+                    handleRootBack { hideChatInputIme(focus, keyboard, view) }
                 }
                 app.daiyu.android.ui.navigation.PageBackGestureHost(
                     routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,
@@ -4883,6 +4922,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        resetRootExitConfirmation()
         cancelPaneConversationSelection()
         controller.detachCommandApprovalUi(commandApprovalUi)
         revokeCommandApproval()

@@ -31,7 +31,6 @@ internal fun BackupScreen(
     var includeFullLinuxEnvironment by rememberSaveable { mutableStateOf(false) }
     SettingsScaffoldPage(title = "备份与导入", onBack = onBack, modifier = modifier) {
         item(key = "backup_intro") {
-            SettingsNote("备份文件可能包含个人数据，请妥善保管。导入前请确认来源可信。")
             if (busy) SettingsNote("处理中")
             if (!statusText.isNullOrBlank()) SettingsNote(statusText)
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)

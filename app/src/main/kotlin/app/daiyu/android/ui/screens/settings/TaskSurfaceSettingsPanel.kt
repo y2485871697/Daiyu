@@ -52,7 +52,6 @@ internal fun TaskSurfaceSettingsPanel(
     val back = { if (visit.active) onBack() }
     BackHandler { back() }
     SettingsScaffoldPage(title = "Agent任务偏好", onBack = back, modifier = modifier) {
-        item { SettingsNote("仅影响之后开始的任务，当前任务不变。选择执行位置不等于授权；具体操作仍需相应权限和确认。") }
         item {
             SettingsCard {
                 TaskSurfacePreference.entries.forEach { value ->
@@ -68,7 +67,6 @@ internal fun TaskSurfaceSettingsPanel(
                 }
             }
         }
-        item { SettingsNote("后台不可用时不会执行，也不会自动切到前台。操作代鱼自身时使用前台，但不改变这里的设置。") }
         if (editor == null) item { SettingsNote("正在读取任务位置设置…") }
         if (editor?.saved === TaskSurfaceSettings.Unavailable) item {
             SettingsNote("无法确认已保存的位置；执行入口将拒绝执行，不会默认为前台。可重新选择并保存。", error = true)

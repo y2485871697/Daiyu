@@ -100,7 +100,6 @@ internal fun SubAgentSettingsScreen(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         item {
-                            Text("预设组可供不同会话复制使用；修改预设不会改变已应用的会话。", style = MaterialTheme.typography.bodyMedium)
                             SubAgentPresetDirectoryStatus(directory)
                         }
                         items(directory.entries, key = { it.id }) { preset ->

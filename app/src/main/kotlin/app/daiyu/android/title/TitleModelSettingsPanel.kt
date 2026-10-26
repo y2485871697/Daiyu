@@ -41,7 +41,6 @@ fun TitleModelSettingsPanel(
     saving: Boolean = false,
 ) {
     SettingsScaffoldPage(title = "标题模型", onBack = onBack, modifier = modifier) {
-        item("title-model-intro") { SettingsNote("为新会话自动生成简短标题。") }
         notice?.let { item("title-model-status") { SettingsNote(it) } }
         item("title-model-summary") {
             SettingsCard(Modifier.padding(top = 12.dp)) {

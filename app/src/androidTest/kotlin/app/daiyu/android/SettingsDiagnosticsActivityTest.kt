@@ -35,8 +35,8 @@ class SettingsDiagnosticsActivityTest : WiredActivityTestCase() {
     }
     private fun assertActionSummaries() {
         for ((title, summary) in listOf(
-            "导出日志" to "导出诊断事件 JSON；不包含聊天、密钥或路径",
-            "清除日志" to "只清除诊断日志，不影响聊天与执行记录",
+            "导出日志" to "导出诊断事件JSON",
+            "清除日志" to "清理所有日志",
         )) {
             row(title)
             val actionableRow = hasTestTag("settings-row:$title") and hasClickAction()

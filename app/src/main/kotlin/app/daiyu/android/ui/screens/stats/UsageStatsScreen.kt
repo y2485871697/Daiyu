@@ -302,14 +302,8 @@ private fun ModelUsagePane(
             style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp), color = usagePalette().muted,
             modifier = Modifier.testTag("usage-model-coverage"))
         if (filtered.providers.isEmpty()) {
-            Text(
-                text = stringResource(
-                    if (startBound.isSet || endBound.isSet) {
-                        R.string.stats_model_filter_empty
-                    } else {
-                        R.string.stats_model_empty
-                    },
-                ),
+            if (startBound.isSet || endBound.isSet) Text(
+                text = stringResource(R.string.stats_model_filter_empty),
                 style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
                 color = usagePalette().muted,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),

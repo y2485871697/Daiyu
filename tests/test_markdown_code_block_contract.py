@@ -1,4 +1,4 @@
-"""Narrow wiring guard for Markdown code-block layout and exact clipboard copy."""
+"""Narrow source wiring guards, not a replacement for Android gesture/visual tests."""
 from pathlib import Path
 import unittest
 
@@ -7,31 +7,74 @@ BASE = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 
 
 class MarkdownCodeBlockContract(unittest.TestCase):
-    def test_code_block_has_symmetric_card_and_left_aligned_body(self):
-        source = (BASE / "MessageMarkdown.kt").read_text()
-        branch = source.split("is MarkdownBlock.Code ->", 1)[1].split("is MarkdownBlock.Quote ->", 1)[0]
-        self.assertIn("MarkdownCodeBlock(block, visible)", branch)
-        code = source.split("private fun MarkdownCodeBlock(", 1)[1].split("/** Width sampling", 1)[0]
-        for token in ["Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center)",
-                      "Modifier.fillMaxWidth().padding(horizontal = 4.dp)",
-                      "textAlign = TextAlign.Left", 'testTag("markdown-code-block")',
-                      'testTag("markdown-code-text")']:
-            self.assertIn(token, code)
+    @classmethod
+    def setUpClass(cls):
+        cls.markdown = (BASE / "MessageMarkdown.kt").read_text()
+        cls.code = (BASE / "MarkdownCodeBlock.kt").read_text()
 
-    def test_copy_uses_full_code_not_revealed_text_and_has_a_top_right_action(self):
-        source = (BASE / "MessageMarkdown.kt").read_text()
-        code = source.split("private fun MarkdownCodeBlock(", 1)[1].split("/** Width sampling", 1)[0]
-        self.assertIn('testTag("markdown-code-header")', code)
-        self.assertIn('testTag("markdown-code-copy")', code)
-        self.assertIn('clipboard.setText(AnnotatedString(block.text))', code)
-        self.assertNotIn('clipboard.setText(AnnotatedString(text))', code)
-        self.assertIn("DaiyuIcons.Copy", code)
-        self.assertIn('"复制代码"', code)
-        self.assertIn("DisableSelection", code)
-        android_test = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageMarkdownTest.kt").read_text()
-        self.assertIn("testCodeBlocksAreCenteredAndCopyTheirExactCodeFromTheTopRightAction", android_test)
-        self.assertIn("assertEquals(first, manager.primaryClip!!.getItemAt(0).text.toString())", android_test)
-        self.assertIn("assertEquals(second, manager.primaryClip!!.getItemAt(0).text.toString())", android_test)
+    def test_code_block_keeps_symmetric_card_and_left_aligned_body(self):
+        branch = self.markdown.split("is MarkdownBlock.Code ->", 1)[1].split("is MarkdownBlock.Quote ->", 1)[0]
+        self.assertIn("MarkdownCodeBlock(block, visible, generationComplete)", branch)
+        for token in ["Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center)",
+                      "Modifier.fillMaxWidth().padding(horizontal = 4.dp)", "RoundedCornerShape(8.dp)",
+                      "textAlign = TextAlign.Left", 'testTag("markdown-code-block")', 'testTag("markdown-code-text")']:
+            self.assertIn(token, self.code)
+
+    def test_header_actions_have_exact_order_and_no_extra_visible_labels(self):
+        for tag in ("download", "expand", "unlock", "copy"):
+            self.assertIn('"markdown-code-' + tag + '"', self.code)
+        actions = [self.code.index('"markdown-code-' + tag + '"') for tag in ("download", "expand", "unlock", "copy")]
+        self.assertEqual(sorted(actions), actions)
+        self.assertIn('testTag("markdown-code-header")', self.code)
+        self.assertIn("Modifier.size(16.dp)", self.code)
+        self.assertIn("conversationClickable", self.code)
+        self.assertNotIn("TextButton", self.code)
+
+    def test_copy_uses_full_code_not_revealed_text(self):
+        self.assertIn('clipboard.setText(AnnotatedString(block.text))', self.code)
+        self.assertNotIn('clipboard.setText(AnnotatedString(text))', self.code)
+        self.assertIn("DaiyuIcons.Copy", self.code)
+        self.assertIn('"复制代码"', self.code)
+        self.assertIn("DisableSelection", self.code)
+
+    def test_fixed_viewport_locks_both_axes_and_contains_boundary_and_fling(self):
+        for token in ["screenHeightDp.dp * .25f", ".coerceIn(128.dp, 220.dp)", ".height(bodyHeight)",
+                      "var unlocked by remember { mutableStateOf(false) }", "verticalScroll(vertical, enabled = unlocked)",
+                      "horizontalScroll(horizontal, enabled = unlocked)", "Modifier.nestedScroll(containedScroll)",
+                      "onPostScroll", ": Offset = available", "onPostFling", ": Velocity = available", "softWrap = false"]:
+            self.assertIn(token, self.code)
+        self.assertLess(self.code.index(".height(bodyHeight)"), self.code.index(".verticalScroll(vertical"))
+        self.assertNotIn("remember(block.text) { mutableStateOf(false) }\n    var unlocked", self.code)
+
+    def test_output_follows_measured_bottom_then_animates_once_to_top(self):
+        for token in ["markdownCodeProducing(block, visibleCharacters, generationComplete)", "LaunchedEffect(producing)",
+                      "snapshotFlow { vertical.maxValue }", "vertical.scrollTo(bottom)", "else if (sawOutput)",
+                      "sawOutput = false", "withFrameNanos { }", "vertical.scrollTo(vertical.maxValue)", "vertical.animateScrollTo(0, tween(300))", "horizontal.animateScrollTo(0, tween(300))"]:
+            self.assertIn(token, self.code)
+        chat = (BASE / "ChatMessageList.kt").read_text()
+        self.assertEqual(2, chat.count("generationComplete = turn.status != RunStatus.RUNNING"))
+        self.assertIn("generationComplete && body.text == text", self.markdown)
+        self.assertIn("MarkdownBlocks(block.blocks, openLink, visible, generationComplete)", self.markdown)
+        self.assertIn("MarkdownBlocks(item.blocks, openLink, itemVisible, generationComplete)", self.markdown)
+
+    def test_expansion_reuses_exact_output_dialog_but_only_hides_its_own_x(self):
+        for token in ["LocalToolOutputContext provides null", "ToolDisclosureUi(block.language, block.text, code = true)",
+                      "showCloseButton = false"]:
+            self.assertIn(token, self.code)
+        dialog = (BASE / "ToolOutputDialog.kt").read_text()
+        self.assertIn("showCloseButton: Boolean = true", dialog)
+        self.assertIn("if (showCloseButton) Box", dialog)
+        self.assertIn('testTag("tool-output-close")', dialog)
+        self.assertIn("clipboard.setText(AnnotatedString(document.text))", dialog)
+
+    def test_download_freezes_code_and_writes_only_utf8_to_selected_document(self):
+        for token in ['ActivityResultContracts.CreateDocument("text/plain")', "pendingDownload = block.text",
+                      "val content = pendingDownload", "pendingDownload = null", "uri != null && content != null",
+                      'require(uri.scheme == "content")', "Dispatchers.IO", 'openOutputStream(uri, "wt")',
+                      "content.toByteArray(Charsets.UTF_8)", "it.flush()", "throw cancelled"]:
+            self.assertIn(token, self.code)
+        self.assertNotIn("rememberSaveable", self.code)
+        self.assertNotIn("Environment.getExternalStorage", self.code)
 
 
 if __name__ == "__main__":

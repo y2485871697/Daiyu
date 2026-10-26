@@ -86,6 +86,23 @@ class MarkdownParserTest {
         assertEquals("[x](https://code.test)\n| a | b |", indented.text)
     }
 
+    @Test fun codeClosureIsExplicitAndDoesNotChangeBodyBytes() {
+        val unclosed = MarkdownParser.parse("```sh\n  echo 代鱼\n").single() as MarkdownBlock.Code
+        assertFalse(unclosed.closed)
+        assertEquals("  echo 代鱼\n", unclosed.text)
+        val closed = MarkdownParser.parse("```sh\n  echo 代鱼\n```\nAfter").first() as MarkdownBlock.Code
+        assertTrue(closed.closed)
+        assertEquals(unclosed.text, closed.text)
+        assertFalse((MarkdownParser.parse("````sh\ncode\n```").single() as MarkdownBlock.Code).closed)
+        assertTrue((MarkdownParser.parse("~~~sh\ncode\n~~~~").single() as MarkdownBlock.Code).closed)
+        assertFalse((MarkdownParser.parse("~~~sh\ncode\n~~~ not closing").single() as MarkdownBlock.Code).closed)
+        assertTrue((MarkdownParser.parse("    indented").single() as MarkdownBlock.Code).closed)
+        val quote = MarkdownParser.parse("> ```sh\n> code\n> ```").single() as MarkdownBlock.Quote
+        assertTrue((quote.blocks.single() as MarkdownBlock.Code).closed)
+        val list = MarkdownParser.parse("- ```sh\n  code\n  ```").single() as MarkdownBlock.Items
+        assertTrue((list.items.single().blocks.single() as MarkdownBlock.Code).closed)
+    }
+
     @Test fun inlineCompositionAndCodeRunsPreserveLiteralBoundaries() {
         val nodes = MarkdownParser.inline("***both*** **bold *italic*** ~~gone~~ _em_ foo_bar_baz \\*escaped\\* `` `literal` `` &amp; &#x1f600;")
         assertEquals("both bold italic gone em foo_bar_baz *escaped* `literal` & 😀", text(nodes))

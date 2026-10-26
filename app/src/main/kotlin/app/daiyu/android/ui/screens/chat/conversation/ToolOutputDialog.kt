@@ -68,7 +68,7 @@ internal fun toolDocumentTitle(title: String): String = when (title) {
 }
 
 @Composable
-internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit) {
+internal fun ToolOutputDialog(document: ToolDisclosureUi, showCloseButton: Boolean = true, onDismiss: () -> Unit) {
     val owner = LocalToolOutputContext.current
     val dark = conversationColors().dark
     val colors = toolOutputColors(dark)
@@ -92,7 +92,7 @@ internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit)
                     Text(title, fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold, color = colors.text)
                     Text(meta, Modifier.testTag("tool-output-meta"), fontSize = 12.sp, lineHeight = 18.sp, color = colors.muted)
                 }
-                Box(Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
+                if (showCloseButton) Box(Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
                     .background(if (dark) buttonSurface else Color.Transparent).testTag("tool-output-close").conversationClickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
                     Icon(DaiyuIcons.Close, "关闭完整输出", Modifier.size(18.dp), tint = if (dark) buttonText else colors.text)
                 }

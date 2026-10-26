@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
@@ -780,11 +781,11 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     }
 
     fun testCodeBlocksAreCenteredAndCopyTheirExactCodeFromTheTopRightAction() {
-        val first = "  echo \"代鱼\"\nls -la"
-        val second = "println(\"second\")"
+        val first = "  echo \"代鱼\"\nls -la\n"
+        val second = "println(\"second\")\n"
         show {
             Column(Modifier.width(300.dp).verticalScroll(rememberScrollState()).testTag("code-host")) {
-                MessageMarkdown("```sh\n$first\n```\n\n```kotlin\n$second\n```")
+                MessageMarkdown("```sh\n${first}```\n\n```kotlin\n${second}```")
             }
         }
         awaitNodes(hasTestTag("markdown-code-block"), count = 2)
@@ -807,13 +808,198 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             assertEquals(first, manager.primaryClip!!.getItemAt(0).text.toString())
         }
-        ui.onAllNodesWithTag("markdown-code-copy", useUnmergedTree = true)[1].performClick()
+        ui.onAllNodesWithTag("markdown-code-copy", useUnmergedTree = true)[1].performScrollTo().performClick()
         mainThread {
             val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             assertEquals(second, manager.primaryClip!!.getItemAt(0).text.toString())
         }
         ui.onNodeWithContentDescription("已复制代码", useUnmergedTree = true).assertExists()
         assertTrue(opened.isEmpty())
+    }
+
+    fun testCodeHeaderOrderAndExpandedOutputHasNoCloseCross() {
+        val code = "  echo 代鱼\n".repeat(45)
+        show {
+            CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext("不应继承", "工具状态")) {
+                MessageMarkdown("```sh\n${code}```")
+            }
+        }
+        awaitNodes(hasTestTag("markdown-code-block"))
+        val buttons = listOf("download", "expand", "unlock", "copy").map {
+            ui.onNodeWithTag("markdown-code-$it", useUnmergedTree = true)
+        }
+        buttons.zipWithNext().forEach { (a, b) ->
+            assertTrue(a.fetchSemanticsNode().boundsInRoot.right <= b.fetchSemanticsNode().boundsInRoot.left + 1f)
+        }
+        val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+        viewport.assertHeightIsAtLeast(128.dp)
+        assertTrue(viewport.fetchSemanticsNode().boundsInRoot.height <= 220f * activity.resources.displayMetrics.density + 1f)
+        buttons[1].performClick()
+        ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(code)
+        ui.onNodeWithTag("tool-output-close", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithText("完整输出", useUnmergedTree = true).assertExists()
+        ui.onNodeWithTag("tool-output-content", useUnmergedTree = true).performClick()
+        ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assertExists()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
+        ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assertDoesNotExist()
+        buttons[1].performClick()
+        ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithTag("preview-dialog-scrim", useUnmergedTree = true).performTouchInput { click(topLeft + androidx.compose.ui.geometry.Offset(2f, 2f)) }
+        ui.waitForIdle()
+        ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    fun testCodeDownloadUsesSelectedTargetAndFreezesExactUtf8AtClick() {
+        val original = "  echo 代鱼\n\n".repeat(20)
+        var block by mutableStateOf(MarkdownBlock.Code(original, "sh"))
+        show { MarkdownCodeBlock(block, Int.MAX_VALUE, true) }
+        val provider = instrumentation.context.packageManager.getPackageInfo(instrumentation.context.packageName,
+            android.content.pm.PackageManager.GET_PROVIDERS).providers.orEmpty().single {
+            it.name == app.daiyu.android.DiagnosticExportTestProvider::class.java.name
+        }
+        val uri = android.net.Uri.Builder().scheme("content").authority(provider.authority)
+            .appendPath(java.util.UUID.randomUUID().toString()).build()
+        val launches = AtomicInteger()
+        val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action != android.content.Intent.ACTION_CREATE_DOCUMENT) return null
+                assertEquals("text/plain", intent.type)
+                assertEquals("code.sh", intent.getStringExtra(android.content.Intent.EXTRA_TITLE))
+                launches.incrementAndGet()
+                block = block.copy(text = "changed while choosing save target")
+                return android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_OK,
+                    android.content.Intent().setData(uri))
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            ui.onNodeWithTag("markdown-code-download", useUnmergedTree = true).performClick()
+            ui.waitUntil(10_000) {
+                runCatching {
+                    activity.contentResolver.openInputStream(uri)!!.use { it.readBytes().contentEquals(original.toByteArray(Charsets.UTF_8)) }
+                }.getOrDefault(false)
+            }
+            assertEquals(1, launches.get())
+            assertArrayEquals(original.toByteArray(Charsets.UTF_8),
+                activity.contentResolver.openInputStream(uri)!!.use { it.readBytes() })
+            assertTrue(opened.isEmpty())
+        } finally {
+            instrumentation.removeMonitor(monitor)
+            activity.contentResolver.delete(uri, null, null)
+        }
+    }
+
+    fun testCancelledCodeDownloadCanBeRetriedWithoutChangingCode() {
+        val code = "echo cancel-safe\n"
+        show { MarkdownCodeBlock(MarkdownBlock.Code(code, "sh"), Int.MAX_VALUE, true) }
+        val launches = AtomicInteger()
+        val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action != android.content.Intent.ACTION_CREATE_DOCUMENT) return null
+                launches.incrementAndGet()
+                return android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            repeat(2) {
+                ui.onNodeWithTag("markdown-code-download", useUnmergedTree = true).performClick()
+                ui.waitUntil(10_000) { launches.get() == it + 1 }
+                ui.waitForIdle()
+                ui.onNodeWithTag("markdown-code-download", useUnmergedTree = true).assertIsEnabled()
+            }
+            ui.onNodeWithTag("markdown-code-copy", useUnmergedTree = true).performClick()
+            mainThread {
+                val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                assertEquals(code, manager.primaryClip!!.getItemAt(0).text.toString())
+            }
+        } finally { instrumentation.removeMonitor(monitor) }
+    }
+
+    fun testUnlockedCodeConsumesEdgeDragsWithoutMovingItsParent() {
+        lateinit var parent: androidx.compose.foundation.ScrollState
+        val code = (1..80).joinToString("\n") { "echo line-$it " + "wide ".repeat(40) }
+        show {
+            parent = rememberScrollState()
+            Column(Modifier.width(300.dp).height(440.dp).verticalScroll(parent)) {
+                MessageMarkdown("```sh\n$code\n```")
+                androidx.compose.foundation.layout.Box(Modifier.height(700.dp))
+            }
+        }
+        awaitNodes(hasTestTag("markdown-code-viewport"))
+        val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已锁定"))
+        viewport.assert(SemanticsMatcher("locked has no scroll action") { !it.config.contains(SemanticsActions.ScrollBy) })
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).performClick()
+        viewport.performTouchInput { swipeDown() }
+        ui.waitForIdle()
+        assertEquals(0, parent.value)
+        viewport.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        ui.waitForIdle()
+        viewport.performTouchInput { swipeUp() }
+        ui.waitForIdle()
+        assertEquals(0, parent.value)
+        viewport.performTouchInput { swipeLeft() }
+        ui.waitForIdle()
+        val horizontal = viewport.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+        assertTrue(horizontal.value() > 0f)
+        assertEquals(0, parent.value)
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).performClick()
+        viewport.assert(SemanticsMatcher("locked again has no scroll action") { !it.config.contains(SemanticsActions.ScrollBy) })
+    }
+
+    fun testCodeFollowsWhileOpenAndAnimatesBackAfterClosureWithoutWaitingForProse() {
+        var code by mutableStateOf(MarkdownBlock.Code("echo first\n", "sh", closed = false))
+        var visible by mutableStateOf(Int.MAX_VALUE)
+        var terminal by mutableStateOf(false)
+        show { MarkdownCodeBlock(code, visible, terminal) }
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { code = code.copy(text = (1..60).joinToString("\n") { "echo $it" }) }
+            ui.mainClock.advanceTimeBy(100)
+            ui.waitForIdle()
+            val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+            fun range() = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+            ui.mainClock.advanceTimeBy(100)
+            assertTrue(range().value() > 0f)
+            assertEquals(range().maxValue(), range().value(), 1f)
+            mainThread { visible = code.text.length - 8; code = code.copy(closed = true) }
+            ui.mainClock.advanceTimeBy(100)
+            assertTrue("reveal has not finished", range().value() > 0f)
+            mainThread { visible = Int.MAX_VALUE }
+            ui.mainClock.advanceTimeBy(120)
+            val during = range().value()
+            assertTrue("300ms animation has an intermediate position", during > 0f && during < range().maxValue())
+            ui.mainClock.advanceTimeBy(400)
+            assertEquals(0f, range().value(), 1f)
+            assertFalse(terminal)
+            mainThread { terminal = true }
+            ui.mainClock.advanceTimeBy(100)
+            assertEquals(0f, range().value(), 1f)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testFinalChunkGrowthAndClosureShowsMeasuredTailBeforeReturning() {
+        var code by mutableStateOf(MarkdownBlock.Code("first\n", "sh", closed = false))
+        show { MarkdownCodeBlock(code, Int.MAX_VALUE, false) }
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { code = code.copy(text = (1..80).joinToString("\n") { "echo $it" }, closed = true) }
+            val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+            fun range() = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+            var reachedTail = false
+            repeat(8) {
+                ui.mainClock.advanceTimeByFrame()
+                val axis = range()
+                if (axis.maxValue() > 0f && kotlin.math.abs(axis.maxValue() - axis.value()) <= 1f) reachedTail = true
+            }
+            assertTrue("final newly measured tail was displayed", reachedTail)
+            ui.mainClock.advanceTimeBy(450)
+            assertEquals(0f, range().value(), 1f)
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testLongTableHasBoundedScrollableViewportAndDoesNotTruncateCellText() {

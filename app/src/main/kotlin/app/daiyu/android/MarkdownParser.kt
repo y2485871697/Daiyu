@@ -4,7 +4,7 @@ package app.daiyu.android
 internal sealed interface MarkdownBlock {
     data class Paragraph(val content: List<MarkdownInline>) : MarkdownBlock
     data class Heading(val level: Int, val content: List<MarkdownInline>) : MarkdownBlock
-    data class Code(val text: String, val language: String = "") : MarkdownBlock
+    data class Code(val text: String, val language: String = "", val closed: Boolean = true) : MarkdownBlock
     data class Quote(val blocks: List<MarkdownBlock>) : MarkdownBlock
     data class Items(val ordered: Boolean, val start: Int, val items: List<Item>) : MarkdownBlock
     data class Item(val blocks: List<MarkdownBlock>, val checked: Boolean? = null)
@@ -116,18 +116,19 @@ internal object MarkdownParser {
                 val delimiter = opening.groupValues[1]
                 val openingIndent = line.takeWhile { it == ' ' }.length
                 val body = StringBuilder()
+                var closed = false
                 i++
                 while (i < lines.size) {
                     cancel.step()
                     val closing = lines[i].trimStart(' ')
                     if (lines[i].length - closing.length <= 3 &&
                         closing.takeWhile { it == delimiter[0] }.length >= delimiter.length &&
-                        closing.dropWhile { it == delimiter[0] }.isBlank()) { i++; break }
+                        closing.dropWhile { it == delimiter[0] }.isBlank()) { closed = true; i++; break }
                     body.append(lines[i].drop(minOf(openingIndent, lines[i].takeWhile { it == ' ' }.length)))
                     if (i < lines.lastIndex) body.append('\n')
                     i++
                 }
-                result += MarkdownBlock.Code(body.toString(), opening.groupValues[2].trim().substringBefore(' '))
+                result += MarkdownBlock.Code(body.toString(), opening.groupValues[2].trim().substringBefore(' '), closed)
                 continue
             }
             val title = heading.matchEntire(line)

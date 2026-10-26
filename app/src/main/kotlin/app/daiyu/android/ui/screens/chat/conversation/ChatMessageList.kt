@@ -318,7 +318,7 @@ internal fun AssistantTurn(
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent) { text, modifier ->
                 ProjectedMessageMarkdown(text.text, projection?.blocks?.get(text.text), modifier,
-                    visibleCharacters = reveal.limit(text.itemId))
+                    visibleCharacters = reveal.limit(text.itemId), generationComplete = turn.status != RunStatus.RUNNING)
             }
         } else {
             AssistantTextContent(turn, actions, projection, reveal, toolContent)
@@ -344,7 +344,8 @@ internal fun AssistantTurn(
 private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, toolContent: @Composable (WorkStepUi) -> Unit) {
     turn.workProcess?.let { WorkProcessCard(it, turn.listKey, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
-        ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), visibleCharacters = reveal.limit("final"))
+        ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), visibleCharacters = reveal.limit("final"),
+            generationComplete = turn.status != RunStatus.RUNNING)
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
         Text("正在思考…", color = conversationColors().muted,
             style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp))

@@ -269,14 +269,48 @@ class SavedSubAgentRuntimeBindingsTest {
         assertEquals(listOf(GptSpeedMode.FAST, GptSpeedMode.NORMAL), captured.map { it.requestOptions.speedMode })
     }
 
-    @Test fun codexFastKeepsPriorityAndUltraFastStillRejectsBeforeNetwork() {
-        val gpt = child.copy(modelId = "gpt-test", supportsGptSpeed = true)
-        val settings = saved.copy(model = gpt.modelId, requestOptions = ProviderRequestOptions(codex = true))
+    @Test fun codexAndOAuthFreezeAllThreeSpeedModesAndPreserveAuthentication() {
+        val gpt = child.copy(modelId = "gpt-6.1-sol", supportsGptSpeed = true, defaultReasoning = ReasoningEffort.HIGH)
+        val auth = app.daiyu.android.model.oauth.CodexAuth("00000000-0000-0000-0000-000000000001")
         val key = SubAgentProfile.modelReasoningKey(provider.id, child.id)
-        val fast = capture(profile.copy(gptSpeedByModel = mapOf(key to GptSpeedMode.FAST)), settings, gpt)
-        assertEquals("priority", fast.requestOptions.apply(JSONObject().put("model", gpt.modelId).put("stream", true).put("input", "test"), ProviderProtocol.RESPONSES).getString("service_tier"))
-        assertThrows(IllegalArgumentException::class.java) {
-            capture(profile.copy(gptSpeedByModel = mapOf(key to GptSpeedMode.ULTRA_FAST)), settings, gpt)
+        for (oauth in listOf(false, true)) for (speed in GptSpeedMode.entries) {
+            val settings = saved.copy(model = gpt.modelId,
+                endpoint = if (oauth) app.daiyu.android.model.oauth.CodexOAuthProtocol.BASE_URL else saved.endpoint,
+                responsesPath = if (oauth) "/responses" else "", apiKey = if (oauth) "" else saved.apiKey,
+                oauth = auth.takeIf { oauth }, requestOptions = ProviderRequestOptions(codex = !oauth,
+                    customBody = """{"metadata":{"fixture":"kept"}}"""))
+            val frozen = capture(profile.copy(gptSpeedByModel = mapOf(key to speed)), settings, gpt)
+            assertEquals(settings.oauth, frozen.oauth)
+            assertEquals(settings.apiKey, frozen.apiKey)
+            assertEquals(settings.requestOptions.codex, frozen.requestOptions.codex)
+            assertEquals("kept", JSONObject(frozen.requestOptions.customBody).getJSONObject("metadata").getString("fixture"))
+            assertEquals("high", JSONObject(frozen.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
+            assertEquals("""{"metadata":{"fixture":"kept"}}""", settings.requestOptions.customBody)
+            assertEquals(speed, frozen.requestOptions.speedMode)
+            val request = frozen.requestOptions.apply(JSONObject().put("model", gpt.modelId)
+                .put("stream", true).put("input", "test"), ProviderProtocol.RESPONSES)
+            if (oauth) app.daiyu.android.model.oauth.CodexRequestPolicy.apply(request, speed)
+            val wire = request
+            when (speed) {
+                GptSpeedMode.NORMAL -> assertFalse(wire.has("service_tier"))
+                GptSpeedMode.FAST -> assertEquals("priority", wire.getString("service_tier"))
+                GptSpeedMode.ULTRA_FAST -> assertEquals("ultrafast", wire.getString("service_tier"))
+            }
+        }
+    }
+
+    @Test fun absentProfileOverrideInheritsSavedSpeedAndExplicitNormalWins() {
+        val gpt = child.copy(modelId = "gpt-6.1-sol", supportsGptSpeed = true)
+        val key = SubAgentProfile.modelReasoningKey(provider.id, child.id)
+        for (speed in GptSpeedMode.entries) {
+            val settings = saved.copy(model = gpt.modelId, requestOptions = ProviderRequestOptions(speedMode = speed))
+            val inherited = capture(profile, settings, gpt)
+            assertEquals(speed, inherited.requestOptions.speedMode)
+            val explicit = capture(profile.copy(gptSpeedByModel = mapOf(key to GptSpeedMode.NORMAL)), settings, gpt)
+            assertEquals(GptSpeedMode.NORMAL, explicit.requestOptions.speedMode)
+            assertEquals(speed, inherited.requestOptions.speedMode)
+            assertEquals(speed, settings.requestOptions.speedMode)
+            assertTrue(profile.gptSpeedByModel.isEmpty())
         }
     }
 }

@@ -17,6 +17,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.delegation.*
+import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.ui.components.subagent.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -128,6 +129,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     val speedProvider = presentationProviders.singleOrNull { it.id == draft.providerId && it.isEnabled }
     val speedModel = speedProvider?.models?.singleOrNull { it.id == draft.modelId && it.isEnabled }
     val canEditSpeed = boundConfig != null && supportsGptSpeedBinding(speedProvider, speedModel)
+    val defaultSpeed = speedModel?.defaultGptSpeed ?: GptSpeedMode.NORMAL
     val media = if (draft.isMedia && boundConfig != null) MediaReasoningSettings.resolve(boundConfig, draft.role) else null
     val canThink = boundConfig != null && (!draft.isMedia || media?.status == MediaReasoningSettings.Status.SUPPORTED)
     val thinking = boundConfig?.let { subAgentThinkingPreference(draft, it) }
@@ -162,10 +164,10 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     SubAgentSettingRow("模型", boundConfig?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (draft.modelId.isBlank()) "选择模型" else "模型不可用",
                         Icons.Rounded.ViewInAr, "草稿模型", usable, badge = boundConfig?.providerName,
                         onClick = { interact { modelPicker = true } }, onLongClick = { if (usable && canThink) { thinkingPicker = true } })
-                    if (canEditSpeed) SubAgentSettingRow("GPT 速度", subAgentGptSpeedDisplayName(draft.gptSpeedForModel()), Icons.Rounded.Speed, "草稿GPT速度", usable, onClick = { interact {
+                    if (canEditSpeed) SubAgentSettingRow("GPT 速度", subAgentGptSpeedDisplayName(draft.gptSpeedForModel(fallback = defaultSpeed)), Icons.Rounded.Speed, "草稿GPT速度", usable, onClick = { interact {
                         session.edit { profile ->
                             if (profile.providerId != draft.providerId || profile.modelId != draft.modelId || profile.role != draft.role) profile
-                            else profile.copy(gptSpeedByModel = profile.gptSpeedByModel + (SubAgentProfile.modelReasoningKey(profile.providerId, profile.modelId) to profile.gptSpeedForModel().next()))
+                            else profile.copy(gptSpeedByModel = profile.gptSpeedByModel + (SubAgentProfile.modelReasoningKey(profile.providerId, profile.modelId) to profile.gptSpeedForModel(fallback = defaultSpeed).next()))
                         }
                     } })
                     SubAgentSettingRow("职责", draft.roleLabel, Icons.Rounded.Assignment, "草稿职责", usable, onClick = { interact { choices = "role" } })

@@ -81,13 +81,14 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
     private class ProfileFixture(val repository: ConversationSubAgentPreferences,
         val editor: ConversationSubAgentEditor, val provider: SubAgentProvider, val profile: SubAgentProfile)
 
-    private fun profileFixture(providerName: String = "Provider", modelName: String = "gpt-6.1-sol"): ProfileFixture {
+    private fun profileFixture(providerName: String = "Provider", modelName: String = "gpt-6.1-sol",
+        defaultSpeed: GptSpeedMode = GptSpeedMode.NORMAL): ProfileFixture {
         val name = "subagent-layout-${UUID.randomUUID()}"
         preferenceNames += name
         val repository = ConversationSubAgentPreferences(instrumentation.targetContext.getSharedPreferences(name, 0))
         val owner = SubAgentConfigKey.Conversation("layout-fixture")
         val provider = SubAgentProvider("provider", providerName, listOf(
-            SubAgentModel("gpt-local", "gpt-6.1-sol", displayName = modelName, supportsGptSpeed = true),
+            SubAgentModel("gpt-local", "gpt-6.1-sol", displayName = modelName, supportsGptSpeed = true, defaultGptSpeed = defaultSpeed),
             SubAgentModel("other-local", "gemini-3")))
         val profile = SubAgentProfile("worker", "Worker", role = "implementation", providerId = provider.id,
             modelId = "gpt-local", tier = SubAgentTaskTier.entries.first())
@@ -96,6 +97,63 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         mainThread { editor = ConversationSubAgentEditor(owner, repository,
             { id -> provider.takeIf { it.id == id } }) { true }; editors += editor }
         return ProfileFixture(repository, editor, provider, profile)
+    }
+
+    fun testCardDisplaysInheritedSpeedAndFirstClickAdvancesTheActualSavedMode() {
+        for (inherited in listOf(GptSpeedMode.FAST, GptSpeedMode.ULTRA_FAST)) {
+            val data = profileFixture(defaultSpeed = inherited)
+            mainThread { activity.setContent {
+                key(data.editor) {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        CompositionLocalProvider(LocalConversationAgentStyle provides true,
+                            LocalConversationSubAgentEditor provides data.editor) {
+                            val config = (data.editor.observe() as? SubAgentEditorState.Loaded)?.config
+                            config?.profiles?.singleOrNull()?.let { SubAgentProfileRow(it, listOf(data.provider)) }
+                        }
+                    }
+                }
+            } }
+            val label = if (inherited == GptSpeedMode.FAST) "快速" else "极速"
+            ui.onNodeWithText("GPT 速度 · $label", useUnmergedTree = true).assertIsDisplayed()
+            assertTrue(data.repository.snapshot(data.editor.owner).profiles.single().gptSpeedByModel.isEmpty())
+            val next = inherited.next()
+            node("subagent-gpt-speed-worker").performClick()
+            ui.waitUntil(5_000) { data.repository.snapshot(data.editor.owner).profiles.single().gptSpeedForModel() == next }
+            val nextLabel = if (next == GptSpeedMode.ULTRA_FAST) "极速" else "标准"
+            ui.onNodeWithText("GPT 速度 · $nextLabel", useUnmergedTree = true).assertIsDisplayed()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDraftUsesInheritedSpeedAndCancelDoesNotSaveTheCycle() {
+        for (inherited in listOf(GptSpeedMode.FAST, GptSpeedMode.ULTRA_FAST)) {
+            val data = profileFixture(defaultSpeed = inherited)
+            lateinit var session: SubAgentProfileDraftSession
+            var visible by mutableStateOf(true)
+            mainThread {
+                session = checkNotNull(SubAgentProfileDraftSession.open(data.editor, data.profile))
+                activity.setContent {
+                    key(data.editor) {
+                        AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                            if (visible) SubAgentProfileConfigDialog(session, data.editor, listOf(data.provider),
+                                onDismiss = { visible = false })
+                        }
+                    }
+                }
+            }
+            val before = data.repository.snapshot(data.editor.owner)
+            assertTrue(before.profiles.single().gptSpeedByModel.isEmpty())
+            val label = if (inherited == GptSpeedMode.FAST) "快速" else "极速"
+            ui.onNode(hasText(label) and hasAnyAncestor(hasContentDescription("草稿GPT速度")),
+                useUnmergedTree = true).assertIsDisplayed()
+            ui.onNodeWithContentDescription("草稿GPT速度").scrollToVisible().performClick()
+            ui.runOnIdle { assertEquals(inherited.next(), session.draft.gptSpeedForModel()) }
+            assertEquals(before, data.repository.snapshot(data.editor.owner))
+            ui.runOnIdle { session.dismiss(); visible = false }
+            ui.onNodeWithText("子代理配置").assertDoesNotExist()
+            assertEquals(before, data.repository.snapshot(data.editor.owner))
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testFourRoleIndicatorsHaveNoClickAction() {

@@ -46,6 +46,7 @@ internal data class SubAgentModel(
     val mediaReasoningLabel: String = "当前接口未适配",
     val mediaReasoningEfforts: List<ReasoningEffort>? = null,
     val grokImage: Boolean = false,
+    val defaultGptSpeed: GptSpeedMode = GptSpeedMode.NORMAL,
 )
 
 internal data class ModelFeatureSelection(val enabled: Boolean, val providerId: String, val modelId: String)

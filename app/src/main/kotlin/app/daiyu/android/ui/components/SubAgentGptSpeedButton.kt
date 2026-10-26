@@ -55,18 +55,17 @@ internal fun subAgentGptSpeedDescription(name: String, mode: GptSpeedMode): Stri
 internal fun SubAgentGptSpeedButton(profile: SubAgentProfile, providers: List<SubAgentProvider>, enabled: Boolean, modifier: Modifier = Modifier) {
     val editor = LocalConversationSubAgentEditor.current
     val usable = enabled && editor?.enabled == true
-    val eligible = remember(profile.providerId, profile.modelId, providers) {
+    val boundModel = remember(profile.providerId, profile.modelId, providers) {
         val provider = providers.firstOrNull { it.id == profile.providerId && it.isEnabled }
         val model = provider?.models?.firstOrNull { it.id == profile.modelId && it.isEnabled }
-        supportsGptSpeedBinding(provider, model)
-    }
-    if (!eligible) return
-    key(editor, profile.id, profile.providerId, profile.modelId) { BoundSubAgentGptSpeedButton(profile, editor, usable, modifier) }
+        model?.takeIf { supportsGptSpeedBinding(provider, it) }
+    } ?: return
+    val mode = profile.gptSpeedForModel(fallback = boundModel.defaultGptSpeed)
+    key(editor, profile.id, profile.providerId, profile.modelId) { BoundSubAgentGptSpeedButton(profile, editor, usable, mode, modifier) }
 }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: ConversationSubAgentEditor?, usable: Boolean, modifier: Modifier) {
-    val mode = profile.gptSpeedForModel(providerId = profile.providerId, modelId = profile.modelId)
+private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: ConversationSubAgentEditor?, usable: Boolean, mode: GptSpeedMode, modifier: Modifier) {
     val gate = remember { SubAgentGptSpeedAnimationGate() }
     val progress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()

@@ -31,8 +31,9 @@ internal data class SubAgentProfile(
     fun withRole(next: String): SubAgentProfile = (if (role == next ||
         (!isMedia && next in setOf("implementation", "review"))) copy(role = next)
         else copy(role = next, providerId = "", modelId = "", reasoning = null, imageResolution = null)).normalizedTaskTier()
-    fun gptSpeedForModel(providerId: String = this.providerId, modelId: String = this.modelId): GptSpeedMode =
-        gptSpeedByModel[modelReasoningKey(providerId, modelId)] ?: GptSpeedMode.NORMAL
+    fun gptSpeedForModel(providerId: String = this.providerId, modelId: String = this.modelId,
+        fallback: GptSpeedMode = GptSpeedMode.NORMAL): GptSpeedMode =
+        gptSpeedByModel[modelReasoningKey(providerId, modelId)] ?: fallback
     val selection get() = ModelFeatureSelection(true, providerId, modelId)
     val roleLabel get() = when (role) {
         "implementation" -> "执行"

@@ -185,7 +185,7 @@ internal class ConversationSubAgentEditor(
                 if (config.presetApplicationToken != capturedToken) throw LostOwner()
                 val old = config.profiles.singleOrNull { it.id == id } ?: throw LostOwner()
                 if (old != (expected ?: captured) || old.providerId != providerId || old.modelId != modelId || !supportsGptSpeedBinding(provider, model)) throw LostOwner()
-                config.copy(profiles = config.profiles.map { profile -> if (profile.id != id) profile else old.copy(gptSpeedByModel = old.gptSpeedByModel + (SubAgentProfile.modelReasoningKey(providerId, modelId) to old.gptSpeedForModel().next())) })
+                config.copy(profiles = config.profiles.map { profile -> if (profile.id != id) profile else old.copy(gptSpeedByModel = old.gptSpeedByModel + (SubAgentProfile.modelReasoningKey(providerId, modelId) to old.gptSpeedForModel(fallback = model.defaultGptSpeed).next())) })
             }.also { result -> if (result is ConversationSubAgentPreferences.WriteResult.Saved) resolvedBindings[SubAgentProfile.modelReasoningKey(providerId, modelId)] = binding }
         } catch (_: LostOwner) { ConversationSubAgentPreferences.WriteResult.Rejected }
         catch (failure: Exception) { fail(failure); ConversationSubAgentPreferences.WriteResult.Rejected }

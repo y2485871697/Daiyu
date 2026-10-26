@@ -46,6 +46,32 @@ class SavedCatalogSubAgentModelSourceTest {
         }
     }
 
+    @Test fun speedProjectionAndProfileFallbackFollowTheExactSavedSelection() {
+        for (speed in GptSpeedMode.entries) {
+            val first = snapshot().models.single().copy(id = "gpt-6.1-sol",
+                settings = snapshot().models.single().settings.copy(requestOptions = ProviderRequestOptions(speedMode = speed)))
+            val other = first.copy(settings = first.settings.copy(localIdentity = "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                requestOptions = ProviderRequestOptions()))
+            val provider = projectSubAgentProvider(snapshot().copy(models = listOf(first, other)), ProviderProtocol.RESPONSES)
+            val model = provider.models[0]
+            assertTrue(supportsGptSpeedBinding(provider, model))
+            assertEquals(speed, model.defaultGptSpeed)
+            assertEquals(GptSpeedMode.NORMAL, provider.models[1].defaultGptSpeed)
+            val profile = SubAgentProfile("profile", "Profile", providerId = provider.id, modelId = model.id)
+            assertEquals(speed, profile.gptSpeedForModel(fallback = model.defaultGptSpeed))
+            for (override in GptSpeedMode.entries) {
+                val selected = profile.copy(gptSpeedByModel = mapOf(SubAgentProfile.modelReasoningKey(provider.id, model.id) to override))
+                assertEquals(override, selected.gptSpeedForModel(fallback = model.defaultGptSpeed))
+                assertEquals(GptSpeedMode.NORMAL, selected.gptSpeedForModel(modelId = other.settings.localIdentity,
+                    fallback = provider.models[1].defaultGptSpeed))
+                assertEquals(speed, selected.gptSpeedForModel(providerId = "another-provider", fallback = model.defaultGptSpeed))
+            }
+            assertEquals(GptSpeedMode.entries[(speed.ordinal + 1) % GptSpeedMode.entries.size],
+                profile.gptSpeedForModel(fallback = model.defaultGptSpeed).next())
+            assertTrue(profile.gptSpeedByModel.isEmpty())
+        }
+    }
+
     @Test fun sameDisplayNameAndCaseDistinctApiModelsKeepTheirSavedOrderAndIdentity() {
         val first = snapshot().models.single().copy(id = "Model-A", displayName = "Same")
         val second = first.copy(id = "model-a", settings = first.settings.copy(localIdentity = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
@@ -62,8 +88,16 @@ class SavedCatalogSubAgentModelSourceTest {
 
     @Test fun invalidPerModelPolicyCannotBeSelectedForAnotherProtocol() {
         val record = snapshot().models.single()
-        val bad = record.copy(settings = record.settings.copy(requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.FAST)))
+        val bad = record.copy(settings = record.settings.copy(requestOptions = ProviderRequestOptions(customBody = """{"service_tier":"fast"}""")))
         assertFalse(projectSubAgentProvider(snapshot().copy(models = listOf(bad)), ProviderProtocol.MESSAGES).models.single().isEnabled)
+    }
+
+    @Test fun storedSpeedDoesNotDisableAnOtherwiseValidNonResponsesSelection() {
+        val record = snapshot().models.single().copy(id = "gpt-6.1-sol")
+        val selected = record.copy(settings = record.settings.copy(requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.FAST)))
+        val model = projectSubAgentProvider(snapshot().copy(models = listOf(selected)), ProviderProtocol.MESSAGES).models.single()
+        assertTrue(model.isEnabled)
+        assertFalse(model.supportsGptSpeed)
     }
 
     @Test fun refreshReadsOnlySuppliedSnapshotsAndClearsAnOlderSuccessOnFailure() = runBlocking {

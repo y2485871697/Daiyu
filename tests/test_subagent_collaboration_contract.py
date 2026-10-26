@@ -71,7 +71,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
         speed = form.split('if (canEditSpeed) SubAgentSettingRow("GPT 速度"', 1)[1].split('SubAgentSettingRow("职责"', 1)[0]
         self.assertIn('session.edit { profile ->', speed)
-        self.assertIn('profile.gptSpeedForModel().next()', speed)
+        self.assertIn('profile.gptSpeedForModel(fallback = defaultSpeed).next()', speed)
         self.assertNotIn('divider =', speed)
         self.assertNotIn('choices =', speed)
         self.assertNotIn('Picker', speed)
@@ -79,6 +79,26 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertLess(modes.index('NORMAL'), modes.index('FAST'))
         self.assertLess(modes.index('FAST'), modes.index('ULTRA_FAST'))
         self.assertIn('"标准"', (UI / 'SubAgentThinkingSpeedAnimation.kt').read_text())
+
+    def test_card_draft_and_commit_use_the_exact_saved_model_speed(self):
+        projection = (SRC / 'delegation/SavedCatalogSubAgentModelSource.kt').read_text()
+        self.assertIn('defaultGptSpeed = record.settings.requestOptions.speedMode ?: GptSpeedMode.NORMAL', projection)
+        profile = (SRC / 'delegation/SubAgentProfile.kt').read_text()
+        self.assertIn('gptSpeedByModel[modelReasoningKey(providerId, modelId)] ?: fallback', profile)
+        button = (UI / 'SubAgentGptSpeedButton.kt').read_text()
+        self.assertIn('profile.gptSpeedForModel(fallback = boundModel.defaultGptSpeed)', button)
+        form = (UI / 'SubAgentProfileConfigDialog.kt').read_text()
+        self.assertIn('draft.gptSpeedForModel(fallback = defaultSpeed)', form)
+        self.assertIn('profile.gptSpeedForModel(fallback = defaultSpeed).next()', form)
+        editor = (UI / 'ConversationSubAgentEditor.kt').read_text()
+        self.assertIn('old.gptSpeedForModel(fallback = model.defaultGptSpeed).next()', editor)
+        commit = editor.split('suspend fun commitProfileDraft(', 1)[1].split('fun removeProfileDraft(', 1)[0]
+        self.assertNotIn('confirmedDraft', commit)
+        self.assertIn('old.profiles + draft', commit)
+        self.assertIn('if (it.id == draft.id) draft else it', commit)
+        defaults = (SRC / 'delegation/SubAgentModelDefaults.kt').read_text()
+        self.assertIn('gptSpeedByModel = if (gptSpeedInherited) emptyMap() else mapOf(key to gptSpeed)', defaults)
+        self.assertIn('!in profile.gptSpeedByModel', defaults)
 
     def test_role_indicators_are_not_buttons(self):
         icon = (UI / 'SubAgentRoleIcon.kt').read_text()
@@ -189,7 +209,8 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         padding = speed.index('.then(if (chatStyle) Modifier.padding(horizontal = 8.dp, vertical = 3.dp)')
         self.assertLess(clickable, padding)
         self.assertIn('editor?.cycleGptSpeed(profile.id, profile.providerId, profile.modelId, expected = profile)', speed)
-        self.assertIn('if (!eligible) return', speed)
+        self.assertIn('model?.takeIf { supportsGptSpeedBinding(provider, it) }', speed)
+        self.assertIn('} ?: return', speed)
 
     def test_passive_role_uses_a_small_glyph_not_a_button_sized_slot(self):
         role = (UI / 'SubAgentRoleIcon.kt').read_text()

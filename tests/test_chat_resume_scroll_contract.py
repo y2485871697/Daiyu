@@ -57,7 +57,7 @@ class ChatResumeScrollContract(unittest.TestCase):
     def test_resume_resets_only_reveal_progress_not_the_formatted_body(self):
         self.assertIn('if (resumeFollowPending) revealResetEpoch++', self.chat)
         self.assertIn('revealResetEpoch = revealResetEpoch', self.chat)
-        self.assertIn('rememberMarkdownReveal(turn, projection, revealResetEpoch)', self.chat)
+        self.assertIn('rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance)', self.chat)
         self.assertIn('remember(identity, resetEpoch) { sources.toList() }', self.typing)
         self.assertIn('remember(identity, resetEpoch) { MarkdownTypingState(baseline) }', self.typing)
         self.assertIn('remember(motion, parts, baselineLength, turn.isStreaming, turn.status)', self.typing)

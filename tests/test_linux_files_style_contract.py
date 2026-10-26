@@ -108,9 +108,11 @@ class LinuxFilesStyleContract(unittest.TestCase):
             self.assertNotIn(name, components)
         private = read('PrivateWorkspacePanel.kt')
         standalone = private.split('if (!compact) {', 1)[1].split('        notice?.let', 1)[0]
-        description = '应用专属目录，与只读共享和 Linux 挂载分开。导入单文件上限 256 MiB；删除仅支持文件和空目录。'
+        description = '应用专属目录，与只读共享和 Linux 挂载分开。导入按可用存储空间处理，无固定单文件大小门槛；删除仅支持文件和空目录。'
         self.assertIn(description, standalone)
         self.assertEqual(private.count(description), 1)
+        self.assertNotIn('导入单文件上限', private)
+        self.assertNotIn('256 MiB', private)
         shared = read('WorkspaceSettingsScreen.kt')
         self.assertIn('if (!integratedLinux) SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")', shared)
         self.assertIn('summary = if (integratedLinux) null else', shared)
@@ -128,7 +130,13 @@ class LinuxFilesStyleContract(unittest.TestCase):
     def test_empty_errors_confirmations_and_access_fences_remain(self):
         for name, texts in {
             'PrivateWorkspacePanel.kt': ['此私有目录为空', '仅显示前 100 项，请缩小目录范围',
-                '操作未确认完成，请重新进入目录检查；不会自动重试', '无法撤销；不会删除原导入来源。',
+                '私有目录未读取，请重试',
+                'else -> "文件传输失败；请刷新检查结果，不会自动重试"',
+                '已取消导入；未发布不完整文件',
+                '已取消导出；目标可能包含部分内容',
+                '存储空间不足，文件未完成传输；导入临时文件已清理',
+                '文件访问授权已失效，请重新选择文件',
+                '未确认删除；条目可能已变更或目录非空，请刷新', '无法撤销；不会删除原导入来源。',
                 'current() && !busy && !sharedBusy() && pending == null && request == null && directory != null',
                 'lifecycle.withResumed', 'permitted(at)'],
             'LinuxRootfsPanel.kt': ['Rootfs 未读取，请刷新或检查环境状态', '此目录为空',

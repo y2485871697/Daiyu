@@ -132,7 +132,7 @@ class TouchHapticsContractTest(unittest.TestCase):
         self.assertIn("TouchHaptics.action(view) { preview(index); commit(index) }", (SRC / "ui/components/subagent/ConversationThinkingPicker.kt").read_text())
         text = (SRC / "ui/components/subagent/ThinkingEffortPicker.kt").read_text()
         self.assertIn("CompositionLocalProvider(LocalConversationAgentStyle provides !mainChat)", text)
-        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description)", text)
+        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description, speedMode, onCycleSpeed, speedEnabled)", text)
         self.assertNotIn("WindowDialog", text)
         self.assertNotIn("SliderDefaults", text)
 

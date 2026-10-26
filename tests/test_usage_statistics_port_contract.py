@@ -47,7 +47,11 @@ class UsageStatisticsPortContractTest(unittest.TestCase):
         self.assertIn('frozen.settings.copy(usageIdentity = null)',read('storage/ProviderRepository.kt'))
     def test_retirement_and_branch_share_real_write_transactions(self):
         self.assertIn('UsageStatisticsStore.retire(db, id.value)',read('storage/ConversationDatabase.kt'))
-        self.assertIn('UsageStatisticsStore.retireMessages(db, removed)',read('storage/MessageActionStore.kt'))
+        actions = read('storage/MessageActionStore.kt')
+        self.assertIn('UsageStatisticsStore.retireMessages(db, removed.filter { it.id != preservedUser })', actions)
+        self.assertIn('preservedUser: MessageId? = null', actions)
+        self.assertIn('commitPrefix(db, revision.target.conversationId, history, revision.prefix, revision.user.id)', actions)
+        self.assertIn('commitPrefix(db, target.conversationId, history, retained)', actions)
         self.assertIn('UsageStatisticsStore.retireMessages(db, original.drop(cutoff))',read('context/ContextService.kt'))
         self.assertIn('UsageStatisticsStore.created(db, copy.value, values.getAsLong("updated"))',read('context/ProductionConversationBranch.kt'))
         store=read('storage/UsageStatisticsStore.kt')

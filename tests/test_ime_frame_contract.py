@@ -99,7 +99,7 @@ class ImeFrameContractTest(unittest.TestCase):
         show = body.index('awaitImeFrame(node("settings-field:声音名称"), visible = true)')
         navigate = body.index('reveal("settings-row:查找我的音色名额"')
         self.assertLess(show, navigate)
-        self.assertEqual(2, body.count('awaitImeFrame(node("settings-field:AK"), visible = false)'))
+        self.assertEqual(5, body.count('awaitImeFrame(node("settings-field:AK"), visible = false)'))
         self.assertEqual(2, body.count('sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)'))
         self.assertIn('awaitUniqueTag("page:制作声音")', body)
         self.assertIn('assertTextContains("local draft")', body)

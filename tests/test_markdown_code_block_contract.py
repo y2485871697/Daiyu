@@ -37,14 +37,25 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn('"复制代码"', self.code)
         self.assertIn("DisableSelection", self.code)
 
-    def test_fixed_viewport_locks_both_axes_and_contains_boundary_and_fling(self):
+    def test_fixed_viewport_only_locks_vertical_and_contains_unlocked_boundary_and_fling(self):
         for token in ["screenHeightDp.dp * .25f", ".coerceIn(128.dp, 220.dp)", ".height(bodyHeight)",
-                      "var unlocked by remember { mutableStateOf(false) }", "verticalScroll(vertical, enabled = unlocked)",
-                      "horizontalScroll(horizontal, enabled = unlocked)", "Modifier.nestedScroll(containedScroll)",
+                      "var unlocked by remember { mutableStateOf(false) }", "verticalScroll(vertical, enabled = verticalScrollEnabled)",
+                      "horizontalScroll(horizontal)", "Modifier.nestedScroll(containedScroll)",
                       "onPostScroll", ": Offset = available", "onPostFling", ": Velocity = available", "softWrap = false"]:
             self.assertIn(token, self.code)
+        self.assertNotIn("horizontalScroll(horizontal, enabled = unlocked)", self.code)
+        self.assertIn('"锁定代码上下滑动" else "解锁代码上下滑动"', self.code)
         self.assertLess(self.code.index(".height(bodyHeight)"), self.code.index(".verticalScroll(vertical"))
         self.assertNotIn("remember(block.text) { mutableStateOf(false) }\n    var unlocked", self.code)
+
+    def test_unlock_is_only_shown_for_measured_vertical_overflow(self):
+        for token in ["val overflowsVertically = vertical.viewportSize > 0 && vertical.maxValue > 0",
+                      "val verticalScrollEnabled = unlocked && overflowsVertically",
+                      "if (overflowsVertically) CodeAction(CodeBlockIcons.Scroll",
+                      "if (verticalScrollEnabled) Modifier.nestedScroll(containedScroll)"]:
+            self.assertIn(token, self.code)
+        self.assertNotIn("horizontal.maxValue", self.code)
+        self.assertNotIn("if (unlocked) Modifier.nestedScroll", self.code)
 
     def test_output_follows_measured_bottom_then_animates_once_to_top(self):
         for token in ["markdownCodeProducing(block, visibleCharacters, generationComplete)", "LaunchedEffect(producing)",

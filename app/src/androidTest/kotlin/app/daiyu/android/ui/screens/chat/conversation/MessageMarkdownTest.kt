@@ -919,12 +919,13 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         } finally { instrumentation.removeMonitor(monitor) }
     }
 
-    fun testUnlockedCodeConsumesEdgeDragsWithoutMovingItsParent() {
+    fun testCodeHorizontalScrollIgnoresLockAndUnlockedVerticalStaysInItsParent() {
         lateinit var parent: androidx.compose.foundation.ScrollState
         val code = (1..80).joinToString("\n") { "echo line-$it " + "wide ".repeat(40) }
         show {
             parent = rememberScrollState()
-            Column(Modifier.width(300.dp).height(440.dp).verticalScroll(parent)) {
+            Column(Modifier.width(300.dp).height(440.dp).testTag("code-scroll-parent").verticalScroll(parent)) {
+                androidx.compose.foundation.layout.Box(Modifier.height(40.dp))
                 MessageMarkdown("```sh\n$code\n```")
                 androidx.compose.foundation.layout.Box(Modifier.height(700.dp))
             }
@@ -933,23 +934,90 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
         ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true)
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已锁定"))
-        viewport.assert(SemanticsMatcher("locked has no scroll action") { !it.config.contains(SemanticsActions.ScrollBy) })
-        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).performClick()
-        viewport.performTouchInput { swipeDown() }
-        ui.waitForIdle()
-        assertEquals(0, parent.value)
-        viewport.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
-        ui.waitForIdle()
-        viewport.performTouchInput { swipeUp() }
-        ui.waitForIdle()
-        assertEquals(0, parent.value)
+        fun horizontalOffset() = viewport.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange].value()
+        fun verticalOffset() = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
         viewport.performTouchInput { swipeLeft() }
         ui.waitForIdle()
-        val horizontal = viewport.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
-        assertTrue(horizontal.value() > 0f)
+        assertTrue("horizontal scroll works before unlocking", horizontalOffset() > 0f)
+        assertEquals(0f, verticalOffset(), 1f)
+        assertEquals(0, parent.value)
+        viewport.performTouchInput { swipeUp() }
+        ui.waitForIdle()
+        assertEquals("vertical code scroll stays locked", 0f, verticalOffset(), 1f)
+        assertTrue("locked vertical gesture can scroll chat", parent.value > 0)
+        ui.onNodeWithTag("code-scroll-parent", useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -100_000f) }
+        ui.waitForIdle()
         assertEquals(0, parent.value)
         ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).performClick()
-        viewport.assert(SemanticsMatcher("locked again has no scroll action") { !it.config.contains(SemanticsActions.ScrollBy) })
+        mainThread { parent.dispatchRawDelta(20f) }
+        val parentBaseline = parent.value
+        assertTrue(parentBaseline > 0 && parentBaseline < parent.maxValue)
+        viewport.performTouchInput { swipeDown() }
+        ui.waitForIdle()
+        assertEquals(parentBaseline, parent.value)
+        var gestures = 0
+        fun verticalMax() = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue()
+        while (verticalOffset() < verticalMax() - 1f && gestures++ < 40) {
+            viewport.performTouchInput { swipeUp() }
+            ui.waitForIdle()
+            assertEquals(parentBaseline, parent.value)
+        }
+        assertTrue(verticalMax() > 0f)
+        assertEquals(verticalMax(), verticalOffset(), 1f)
+        viewport.performTouchInput { swipeUp() }
+        ui.waitForIdle()
+        assertEquals(parentBaseline, parent.value)
+        val unlockedHorizontal = horizontalOffset()
+        viewport.performTouchInput { swipeLeft() }
+        ui.waitForIdle()
+        assertTrue("horizontal gesture also works while unlocked", horizontalOffset() > unlockedHorizontal)
+        assertEquals(parentBaseline, parent.value)
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).performClick()
+        val beforeHorizontal = horizontalOffset()
+        val beforeVertical = verticalOffset()
+        viewport.performTouchInput { swipeRight() }
+        ui.waitForIdle()
+        assertTrue("horizontal scroll still works after relocking", horizontalOffset() < beforeHorizontal)
+        assertEquals(beforeVertical, verticalOffset(), 1f)
+        assertEquals(parentBaseline, parent.value)
+    }
+
+    fun testCodeUnlockOnlyAppearsForVerticalOverflowNotWideLines() {
+        lateinit var parent: androidx.compose.foundation.ScrollState
+        val wideLine = "wide ".repeat(200)
+        var block by mutableStateOf(MarkdownBlock.Code(wideLine, "sh"))
+        show {
+            parent = rememberScrollState()
+            Column(Modifier.width(300.dp).height(440.dp).verticalScroll(parent)) {
+                MarkdownCodeBlock(block, Int.MAX_VALUE, true)
+                androidx.compose.foundation.layout.Box(Modifier.height(700.dp))
+            }
+        }
+        val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
+        assertEquals(0f, viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue(), 1f)
+        listOf("download", "expand", "copy").forEach {
+            ui.onNodeWithTag("markdown-code-$it", useUnmergedTree = true).assertExists()
+        }
+        viewport.performTouchInput { swipeLeft() }
+        ui.waitForIdle()
+        assertTrue(viewport.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange].value() > 0f)
+        assertEquals(0, parent.value)
+        mainThread { block = block.copy(text = (1..80).joinToString("\n") { "echo $it" }) }
+        ui.waitUntil(5_000) {
+            viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue() > 0f
+        }
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertIsDisplayed().performClick()
+        mainThread { block = block.copy(text = wideLine) }
+        ui.waitUntil(5_000) {
+            viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue() == 0f
+        }
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
+        viewport.performTouchInput { swipeUp() }
+        ui.waitForIdle()
+        assertTrue("short code must not trap vertical chat gestures after shrinking", parent.value > 0)
+        assertEquals(0f, viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), 1f)
     }
 
     fun testCodeFollowsWhileOpenAndAnimatesBackAfterClosureWithoutWaitingForProse() {

@@ -105,6 +105,8 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
     }
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
+    val overflowsVertically = vertical.viewportSize > 0 && vertical.maxValue > 0
+    val verticalScrollEnabled = unlocked && overflowsVertically
     val producing = markdownCodeProducing(block, visibleCharacters, generationComplete)
     var sawOutput by remember { mutableStateOf(false) }
     LaunchedEffect(producing) {
@@ -151,7 +153,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                         }
                     }
                     CodeAction(CodeBlockIcons.Expand, "查看完整代码", "markdown-code-expand") { expanded = true }
-                    CodeAction(CodeBlockIcons.Scroll, if (unlocked) "锁定代码滑动" else "解锁代码滑动", "markdown-code-unlock",
+                    if (overflowsVertically) CodeAction(CodeBlockIcons.Scroll, if (unlocked) "锁定代码上下滑动" else "解锁代码上下滑动", "markdown-code-unlock",
                         modifier = Modifier.semantics { stateDescription = if (unlocked) "已解锁" else "已锁定" },
                         tint = if (unlocked) colors.accent else colors.muted) { unlocked = !unlocked }
                     CodeAction(if (copied) DaiyuIcons.Check else DaiyuIcons.Copy,
@@ -165,8 +167,8 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                 Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
                 Box(Modifier.fillMaxWidth().height(bodyHeight).clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
                     .testTag("markdown-code-viewport")
-                    .then(if (unlocked) Modifier.nestedScroll(containedScroll) else Modifier)
-                    .verticalScroll(vertical, enabled = unlocked).horizontalScroll(horizontal, enabled = unlocked)
+                    .then(if (verticalScrollEnabled) Modifier.nestedScroll(containedScroll) else Modifier)
+                    .verticalScroll(vertical, enabled = verticalScrollEnabled).horizontalScroll(horizontal)
                     .padding(12.dp)) {
                     BasicText(text, Modifier.testTag("markdown-code-text"), softWrap = false,
                         style = TextStyle(color = colors.text, fontFamily = FontFamily.Monospace,

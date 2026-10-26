@@ -95,7 +95,7 @@ fun AssistantPickerDialog(
         footer = {
             // Creation remains a visual placeholder until its editor flow is connected.
             AssistantPreviewButton(stringResource(R.string.assistant_new), {},
-                Modifier.weight(1f).testTag("assistant-new"), icon = AssistantPreviewIcons.Add)
+                Modifier.weight(1f).testTag("assistant-new"), secondary = true, icon = AssistantPreviewIcons.Add)
             AssistantPreviewButton(stringResource(R.string.assistant_done), onDismiss,
                 Modifier.weight(1f).testTag("assistant-done"), primary = true)
         }) {

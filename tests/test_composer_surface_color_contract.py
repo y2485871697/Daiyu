@@ -10,7 +10,7 @@ ANDROID_TEST = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
 class ComposerSurfaceColorContractTest(unittest.TestCase):
     def test_light_card_adds_only_a_trace_of_color_to_the_original_white_glass(self):
         surface = (CHAT / 'ChatComposerSurface.kt').read_text()
-        self.assertIn('val tint = if (dark) Color(0xFF1F1C29) else Color(0xFFF1EFF5)', surface)
+        self.assertIn('val tint = LocalAppearanceSettings.current.styleColor(if (dark) Color(0xFF1F1C29) else Color(0xFFF1EFF5))', surface)
         self.assertIn('background(tint.copy(alpha = if (dark) .36f else .32f))', surface)
         self.assertIn('background.luminance() < 0.3f', surface)
         self.assertIn('RoundedCornerShape(22.dp)', surface)
@@ -26,7 +26,7 @@ class ComposerSurfaceColorContractTest(unittest.TestCase):
 
     def test_idle_empty_is_neutral_and_all_active_actions_share_append_colors(self):
         appearance = (CHAT / 'ChatAppearance.kt').read_text()
-        self.assertIn('sendContainer = if (dark) buttons.primary else Color(0xFFE8E7EE)', appearance)
+        self.assertIn('sendContainer = if (dark) buttons.primary else secondary?.copy(alpha = .14f) ?: Color(0xFFE8E7EE)', appearance)
         self.assertIn('sendContent = if (dark) buttons.onPrimary else buttons.accent', appearance)
         self.assertIn('appendContainer = buttons.primary', appearance)
         self.assertIn('appendContent = buttons.onPrimary', appearance)

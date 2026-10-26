@@ -15,6 +15,9 @@ internal class AppearanceSettingsStore(private val preferences: SharedPreference
         pureBlackEnabled = preferences.getBoolean("pure_black", false),
         paletteStyle = AppearancePaletteStyle.fromPersistedValue(preferences.getString("palette", null)),
         accentColor = AppearanceAccentColor.fromPersistedValue(preferences.getString("accent", null)),
+        paletteSeedColor = preferences.optionalColor("palette_seed"),
+        primaryAccentColor = preferences.optionalColor("primary_accent"),
+        secondaryAccentColor = preferences.optionalColor("secondary_accent"),
         blurEnabled = preferences.getBoolean("blur", true),
         topBarBlurStyle = AppearanceTopBarBlurStyle.fromPersistedValue(preferences.getString("blur_style", null)),
         morphLoadingIndicator = preferences.getBoolean("morph_loading", true),
@@ -37,6 +40,9 @@ internal class AppearanceSettingsStore(private val preferences: SharedPreference
             .putBoolean("pure_black", normalized.pureBlackEnabled)
             .putString("palette", normalized.paletteStyle.persistedValue)
             .putString("accent", normalized.accentColor.persistedValue)
+            .putOptionalColor("palette_seed", normalized.paletteSeedColor)
+            .putOptionalColor("primary_accent", normalized.primaryAccentColor)
+            .putOptionalColor("secondary_accent", normalized.secondaryAccentColor)
             .putBoolean("blur", normalized.blurEnabled)
             .putString("blur_style", normalized.topBarBlurStyle.persistedValue)
             .putBoolean("morph_loading", normalized.morphLoadingIndicator)
@@ -49,6 +55,12 @@ internal class AppearanceSettingsStore(private val preferences: SharedPreference
             .commit()) { "外观设置保存失败" }
         return normalized
     }
+
+    private fun SharedPreferences.optionalColor(key: String): Int? =
+        if (contains(key)) getInt(key, 0) else null
+
+    private fun SharedPreferences.Editor.putOptionalColor(key: String, color: Int?): SharedPreferences.Editor =
+        if (color == null) remove(key) else putInt(key, color)
 
     companion object { const val FILE_NAME = "appearance-settings" }
 }

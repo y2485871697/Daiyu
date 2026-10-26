@@ -21,8 +21,6 @@ import app.daiyu.android.ui.haptics.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import app.daiyu.android.ui.haptics.material.Slider
 import androidx.compose.material3.SliderDefaults
-import top.yukonga.miuix.kmp.window.WindowDialog
-import app.daiyu.android.ui.haptics.miuix.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,7 +81,7 @@ private fun ThemeChoice(mode: AppearanceThemeMode, selected: Boolean, onClick: (
             }
         }
         Text(title, style = MiuixTheme.textStyles.body2.copy(fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal),
-            color = if (selected) colors.primary else colors.onSurface)
+            color = if (selected) colors.onPrimaryContainer else colors.onSurface)
     }
 }
 
@@ -100,8 +98,7 @@ internal fun AppearanceSettingsScreen(
 ) {
     val colors = MiuixTheme.colorScheme
     var scaleDraft by remember(state.interfaceScale) { mutableStateOf(state.interfaceScale) }
-    var scaleEditor by remember { mutableStateOf(false) }
-    var scaleInput by remember { mutableStateOf("") }
+    var colorEditor by remember { mutableStateOf<AppearanceColorEditor?>(null) }
     var loadingExpanded by remember { mutableStateOf(false) }
     var iconExpanded by rememberSaveable { mutableStateOf(false) }
     var choosingBlur by remember { mutableStateOf(false) }
@@ -125,18 +122,8 @@ internal fun AppearanceSettingsScreen(
             }
         }
     }
-    if (scaleEditor) WindowDialog(show = true, title = "界面缩放", onDismissRequest = { scaleEditor = false }) {
-        Column {
-            SettingsTextField("缩放百分比", scaleInput, { scaleInput = it.filter(Char::isDigit).take(3) }, hint = "80–110")
-            val value = scaleInput.toIntOrNull()
-            TextButton(text = "确定", enabled = value != null && value in 80..110, onClick = {
-                if (value != null && value in 80..110) {
-                    onChange(state.copy(interfaceScale = value / 100f))
-                    scaleEditor = false
-                }
-            })
-            TextButton(text = "取消", onClick = { scaleEditor = false })
-        }
+    colorEditor?.let { editor ->
+        AppearanceColorSheet(editor, state, onChange, onDismiss = { colorEditor = null })
     }
     SettingsScaffoldPage(title = "外观与主题", onBack = onBack, modifier = modifier) {
         item(key = "appearance_theme") {
@@ -153,17 +140,16 @@ internal fun AppearanceSettingsScreen(
         item(key = "appearance_colors") {
             SettingsSectionTitle("色彩与背景")
             SettingsCard {
-                SettingsRow("色彩风格", onClick = {})
-                SettingsRow("强调色", onClick = {})
+                SettingsRow("色彩风格", onClick = { colorEditor = AppearanceColorEditor.STYLE })
+                SettingsRow("强调色", onClick = { colorEditor = AppearanceColorEditor.ACCENTS })
                 SettingsSwitchRow("纯黑背景", state.pureBlackEnabled) { onChange(state.copy(pureBlackEnabled = it)) }
             }
         }
         item(key = "appearance_icon") {
             SettingsSectionTitle("应用图标")
             SettingsCard {
-                SettingsRow("图标", summary = "浅色、暗色和猫咪颜色", onClick = { iconExpanded = !iconExpanded },
+                SettingsRow("图标", onClick = { iconExpanded = !iconExpanded },
                     modifier = Modifier.semantics { stateDescription = if (iconExpanded) "已展开" else "已收起" },
-                    leading = { SettingsIcon(DaiyuIcons.AppIcon) },
                     trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null,
                         modifier = Modifier.rotate(if (iconExpanded) 180f else 0f),
                         tint = colors.onSurfaceVariantSummary, size = 20.dp) })
@@ -173,14 +159,12 @@ internal fun AppearanceSettingsScreen(
         item(key = "appearance_scale") {
             SettingsSectionTitle("界面缩放")
             SettingsCard {
-                SettingsRow("界面缩放", summary = "${(scaleDraft * 100).roundToInt()}%",
-                    onClick = { scaleInput = (scaleDraft * 100).roundToInt().toString(); scaleEditor = true })
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         Text("文字与控件大小", style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp), color = colors.onSurface)
                         Text("${(scaleDraft * 100).roundToInt()}%", style = MiuixTheme.textStyles.body2,
-                            color = colors.primary, modifier = Modifier.testTag("appearance-scale-value"))
+                            color = colors.onPrimaryContainer, modifier = Modifier.testTag("appearance-scale-value"))
                     }
                     Column(Modifier.fillMaxWidth().background(colors.surfaceVariant, RoundedCornerShape(14.dp)).padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -196,8 +180,8 @@ internal fun AppearanceSettingsScreen(
                             onChange(state.copy(interfaceScale = requested))
                         },
                         valueRange = scaleRange,
-                        colors = SliderDefaults.colors(thumbColor = colors.primary, activeTrackColor = colors.primary,
-                            inactiveTrackColor = colors.primaryContainer),
+                        colors = SliderDefaults.colors(thumbColor = DaiyuPalette.switchTrack, activeTrackColor = DaiyuPalette.switchTrack,
+                            inactiveTrackColor = DaiyuPalette.switchTrack.copy(alpha = .15f)),
                         modifier = Modifier.fillMaxWidth().testTag("appearance-scale").semantics { contentDescription = "界面缩放" })
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("${(scaleRange.start * 100).roundToInt()}%", style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary)

@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
+import app.daiyu.android.ui.app.LocalAppearanceSettings
+import app.daiyu.android.ui.app.styleColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -39,7 +41,7 @@ import kotlin.math.max
 internal fun ChatComposerSurface(backdrop: LayerBackdrop? = null, content: @Composable ColumnScope.() -> Unit) {
     val dark = MiuixTheme.colorScheme.background.luminance() < 0.3f
     val shape = RoundedCornerShape(22.dp)
-    val tint = if (dark) Color(0xFF1F1C29) else Color(0xFFF1EFF5)
+    val tint = LocalAppearanceSettings.current.styleColor(if (dark) Color(0xFF1F1C29) else Color(0xFFF1EFF5))
     val blur = if (backdrop == null) Modifier else Modifier.textureBlur(
         backdrop = backdrop, shape = shape, blurRadius = 24f,
         colors = BlurColors(blendColors = emptyList(), saturation = 1.35f),

@@ -12,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import app.daiyu.android.ui.components.PreviewBackdropHost
@@ -34,17 +33,7 @@ fun AgentAppTheme(
         AppearanceThemeMode.LIGHT -> false
         AppearanceThemeMode.DARK -> true
     }
-    val colors = if (isDark) DaiyuPalette.dark else DaiyuPalette.light
-    val themedColors = remember(colors, isDark, appearance.pureBlackEnabled) {
-        if (appearance.pureBlackEnabled && isDark) {
-            colors.copy(
-                background = Color.Black,
-                surface = Color.Black,
-            )
-        } else {
-            colors
-        }
-    }
+    val themedColors = remember(appearance, isDark) { resolveAppearanceColors(appearance, isDark) }
 
     LaunchedEffect(isDark) { onResolvedDarkModeChange(isDark) }
 

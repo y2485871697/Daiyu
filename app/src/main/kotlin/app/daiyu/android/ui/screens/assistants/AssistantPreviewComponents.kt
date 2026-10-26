@@ -3,6 +3,12 @@ package app.daiyu.android.ui.screens.assistants
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.ui.app.LocalAppearanceSettings
+import app.daiyu.android.ui.app.resolvedPrimaryAccent
+import app.daiyu.android.ui.app.styleColor
+import app.daiyu.android.ui.app.colorContentColor
+import app.daiyu.android.ui.app.readableAccent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
@@ -53,25 +59,28 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Assistant surfaces share the app's device-tuned density and retain system font scaling. */
-internal data class AssistantPreviewPalette(val dark: Boolean) {
+internal data class AssistantPreviewPalette(val dark: Boolean, val appearance: AppearanceSettings = AppearanceSettings()) {
     val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
     val toolbar = if (dark) Color(0xFFB2A9C7) else Color(0xFF716A82)
     val muted = if (dark) Color(0xFF9C92A8) else Color(0xFF968B9F)
-    val accent = if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
+    val accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
     val line = if (dark) Color(0x29C5B1DB) else Color(0x299B89AA)
-    val soft = if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9)
+    val soft = appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9))
+    val secondary = appearance.secondaryAccentColor?.let(::Color) ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
+    val secondaryContainer = appearance.secondaryAccentColor?.let { Color(it).copy(alpha = .14f) } ?: soft
+    val onSecondary = if (appearance.secondaryAccentColor != null) readableAccent(secondary, dark) else secondary
     val fieldBackground = if (dark) Color(0x22C4ACD7) else Color(0x1FA18DB9)
-    val primary = if (dark) Color(0xFFB6A4C7) else Color(0xFF8E7C9E)
-    val onPrimary = if (dark) Color(0xFF261F30) else Color.White
+    val primary = appearance.resolvedPrimaryAccent ?: if (dark) Color(0xFFB6A4C7) else Color(0xFF8E7C9E)
+    val onPrimary = if (appearance.resolvedPrimaryAccent != null) colorContentColor(primary) else if (dark) Color(0xFF261F30) else Color.White
     val danger = if (dark) Color(0xFFDF9CA9) else Color(0xFFAE687A)
     val border = if (dark) Color(0x26DCCDFF) else Color(0xEDFFFFFF)
-    val background = if (dark) Color(0xFF101218) else Color.White
-    val gradient = if (dark) listOf(Color(0xF22E283B), Color(0xF21B1825))
-        else listOf(Color(0xF0FFFFFF), Color(0xF0F8F4FF))
+    val background = appearance.styleColor(if (dark) Color(0xFF101218) else Color.White)
+    val gradient = (if (dark) listOf(Color(0xF22E283B), Color(0xF21B1825))
+        else listOf(Color(0xF0FFFFFF), Color(0xF0F8F4FF))).map(appearance::styleColor)
 }
 
 @Composable internal fun assistantPreviewPalette() =
-    AssistantPreviewPalette(MiuixTheme.colorScheme.background.luminance() < .5f)
+    AssistantPreviewPalette(MiuixTheme.colorScheme.background.luminance() < .5f, LocalAppearanceSettings.current)
 
 @Composable internal fun assistantPreviewScale(): Float =
     1f
@@ -162,17 +171,18 @@ internal fun AssistantPreviewButton(
     icon: ImageVector? = null,
     actionRow: Boolean = false,
     compact: Boolean = false,
+    secondary: Boolean = false,
 ) {
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     val cornerRadius = ButtonDefaults.CornerRadius * s
     val surface = if (actionRow) Modifier.clip(RoundedCornerShape(11.dp * s)) else Modifier
-        .squircleSurface(color = when { primary -> colors.primary; danger -> Color(0x0BAE687A); else -> colors.soft },
+        .squircleSurface(color = when { primary -> colors.primary; secondary -> colors.secondaryContainer; danger -> Color(0x0BAE687A); else -> colors.soft },
             cornerRadius = cornerRadius)
         .squircleBorder(width = 1.dp,
-            color = when { primary -> colors.primary; danger -> Color(0x40AE687A); else -> colors.line },
+            color = when { primary -> colors.primary; secondary -> colors.secondaryContainer; danger -> Color(0x40AE687A); else -> colors.line },
             cornerRadius = cornerRadius)
-    val foreground = when { danger -> colors.danger; primary -> colors.onPrimary; else -> colors.accent }
+    val foreground = when { danger -> colors.danger; primary -> colors.onPrimary; secondary -> colors.onSecondary; else -> colors.accent }
     val click = Modifier.clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() },
         indication = null, role = if (compact) Role.Button else null, onClick = onClick)
     Row(modifier.heightIn(min = (if (actionRow || compact) 48 else 44).dp * s).alpha(if (enabled) 1f else .4f)
@@ -251,7 +261,7 @@ internal fun AssistantPreviewSwitch(checked: Boolean, enabled: Boolean, label: S
                 interactionSource = remember { MutableInteractionSource() }, indication = null, onValueChange = onToggle),
             contentAlignment = Alignment.Center) {
             Box(Modifier.size(36.dp * s, 22.dp * s).clip(CircleShape)
-                .background(if (checked) (if (colors.dark) Color(0xFFB3A0C7) else Color(0xFFA18BB8)) else colors.soft)
+                .background(if (checked) (colors.appearance.resolvedPrimaryAccent ?: if (colors.dark) Color(0xFFB3A0C7) else Color(0xFFA18BB8)) else colors.soft)
                 .border(1.dp, if (checked) Color.Transparent else colors.line, CircleShape)
                 .padding(horizontal = 3.dp * s)) {
                 Box(Modifier.align(if (checked) Alignment.CenterEnd else Alignment.CenterStart)

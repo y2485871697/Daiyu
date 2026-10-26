@@ -7,7 +7,7 @@ const val DEFAULT_INTERFACE_SCALE = 1f
 
 data class AppearanceSettings(
     val themeMode: AppearanceThemeMode = AppearanceThemeMode.LIGHT,
-    // Retained preference data; the current theme does not apply these three color options.
+    // Keep legacy keys readable while custom colors use independent optional overrides.
     val monetEnabled: Boolean = false,
     val paletteStyle: AppearancePaletteStyle = AppearancePaletteStyle.NEUTRAL,
     val accentColor: AppearanceAccentColor = AppearanceAccentColor.SYSTEM,
@@ -23,12 +23,27 @@ data class AppearanceSettings(
     val iconLightColor: Int = DEFAULT_ICON_LIGHT,
     val iconDarkColor: Int = DEFAULT_ICON_DARK,
     val iconCatColor: Int = DEFAULT_ICON_CAT,
+    val paletteSeedColor: Int? = null,
+    val primaryAccentColor: Int? = null,
+    val secondaryAccentColor: Int? = null,
 ) {
     fun normalized(): AppearanceSettings = copy(
         interfaceScale = normalizeInterfaceScale(interfaceScale),
+        paletteSeedColor = paletteSeedColor?.or(0xFF000000.toInt()),
+        primaryAccentColor = primaryAccentColor?.or(0xFF000000.toInt()),
+        secondaryAccentColor = secondaryAccentColor?.or(0xFF000000.toInt()),
         iconLightColor = iconLightColor or 0xFF000000.toInt(),
         iconDarkColor = iconDarkColor or 0xFF000000.toInt(),
         iconCatColor = iconCatColor or 0xFF000000.toInt(),
+    )
+
+    fun withColorStyle(source: AppearanceSettings) = copy(
+        paletteStyle = source.paletteStyle, paletteSeedColor = source.paletteSeedColor,
+    )
+
+    fun withAccentColors(source: AppearanceSettings) = copy(
+        accentColor = source.accentColor, primaryAccentColor = source.primaryAccentColor,
+        secondaryAccentColor = source.secondaryAccentColor,
     )
 
     companion object {

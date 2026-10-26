@@ -5,6 +5,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import app.daiyu.android.ui.app.LocalAppearanceSettings
+import app.daiyu.android.ui.app.readableAccent
+import app.daiyu.android.ui.app.resolvedPrimaryAccent
+import app.daiyu.android.ui.app.styleColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -18,7 +22,7 @@ import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Chat-local preview colors; deliberately does not change the application theme. */
+/** Conversation tokens retain their default contrast and consume the shared appearance. */
 internal data class ConversationColors(
     val dark: Boolean,
     val text: Color,
@@ -36,12 +40,17 @@ internal data class ConversationColors(
 @Composable
 internal fun conversationColors(): ConversationColors {
     val dark = MiuixTheme.colorScheme.surfaceVariant.luminance() < 0.5f
-    return if (dark) ConversationColors(true, Color(0xFFE0DCE8), Color(0xFF8F879B),
+    val base = if (dark) ConversationColors(true, Color(0xFFE0DCE8), Color(0xFF8F879B),
         Color(0xFFBBAACB), Color(0xFF26233D), Color(0x85282331), Color(0x24C2ADDB),
         Color(0x13BEA8D7), Color(0xFF9AB3A4), Color(0xFFD896A1), Color(0xFFC3AF8A))
     else ConversationColors(false, Color(0xFF36333F), Color(0xFF918997),
         Color(0xFF756980), Color(0xFFF0ECFC), Color(0x8CFAF8FC), Color(0x2692819F),
         Color(0x108A779A), Color(0xFF6B8574), Color(0xFFAD626E), Color(0xFFA48D65))
+    val appearance = LocalAppearanceSettings.current
+    return base.copy(accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: base.accent,
+        bubble = appearance.styleColor(base.bubble), surface = appearance.styleColor(base.surface),
+        line = appearance.styleColor(base.line),
+        soft = appearance.secondaryAccentColor?.let { Color(it).copy(alpha = .14f) } ?: base.soft)
 }
 
 /** Keep native click semantics and interaction tracking, without a ripple indication. */

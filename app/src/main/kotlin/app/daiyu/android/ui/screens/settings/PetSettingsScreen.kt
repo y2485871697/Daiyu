@@ -7,6 +7,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import app.daiyu.android.ui.app.DaiyuPalette
+import androidx.compose.material3.SliderDefaults
 import app.daiyu.android.ui.haptics.material.Slider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -112,7 +114,9 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                 PetSettingsPage.SCALE -> item("pet-scale") {
                     SettingsCard {
                         SettingsRow("当前大小", summary = "${(settings.scale * 100).roundToInt()}%")
-                        Slider(value = settings.scale, onValueChange = { host.controller.setScale(it) }, enabled = enabled,
+                        Slider(colors = SliderDefaults.colors(thumbColor = DaiyuPalette.switchTrack,
+                            activeTrackColor = DaiyuPalette.switchTrack, inactiveTrackColor = DaiyuPalette.switchTrack.copy(alpha = .15f)),
+                            value = settings.scale, onValueChange = { host.controller.setScale(it) }, enabled = enabled,
                             valueRange = .5f..1.8f, steps = 25, modifier = Modifier.padding(horizontal = 16.dp))
                         SettingsRow("恢复默认大小", showChevron = true, onClick = if (enabled) ({ host.controller.setScale(1f) }) else null)
                     }

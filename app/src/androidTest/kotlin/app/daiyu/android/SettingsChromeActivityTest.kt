@@ -189,6 +189,18 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertTrue(events.isEmpty()) }
     }
 
+    private fun assertAppearanceColorSheetAndDismiss(title: String) {
+        awaitDialogEnter(node("assistant-sheet"))
+        node("appearance-color-default").assertIsDisplayed()
+        node("appearance-color-confirm").assertIsDisplayed()
+        node("appearance-color-pad:${if (title == "强调色") "强调色" else "界面色彩"}").assertExists()
+        if (title == "强调色") node("appearance-color-pad:次强调色").assertExists()
+        androidx.test.espresso.Espresso.pressBack()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+        }
+    }
+
     fun testAppearanceSelectionAndWholeRowSwitchUpdateControlledState() {
         var state by mutableStateOf(AppearanceSettings())
         mainThread {
@@ -209,6 +221,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             reveal("settings-row:$title", "外观与主题").assertHasClickAction().performClick()
             node("page:外观与主题").assertExists()
             ui.onAllNodesWithTag("prompt-choice:0", useUnmergedTree = true).assertCountEquals(0)
+            assertAppearanceColorSheetAndDismiss(title)
             ui.runOnIdle { assertEquals(beforePaletteClicks, state) }
         }
         reveal("settings-switch:消息时间戳", "外观与主题").performClick().assertIsOn()
@@ -337,10 +350,63 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                 assertTrue(bounds.left >= host.left && bounds.right <= host.right)
             }
             val before = state
-            for (title in listOf("色彩风格", "强调色")) reveal("settings-row:$title", "外观与主题").performClick()
+            for (title in listOf("色彩风格", "强调色")) {
+                reveal("settings-row:$title", "外观与主题").performClick()
+                assertAppearanceColorSheetAndDismiss(title)
+            }
             ui.runOnIdle { assertEquals(before, state) }
             reveal("settings-switch:横移返回手势", "外观与主题").performClick()
             ui.runOnIdle { assertEquals(!before.swipeDismissEnabled, state.swipeDismissEnabled) }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testColorSheetsKeepDefaultsAndDraftsIndependentUntilConfirm() {
+        val original = AppearanceSettings(paletteStyle = app.daiyu.android.data.model.AppearancePaletteStyle.VIBRANT,
+            paletteSeedColor = 0xFF439965.toInt(), primaryAccentColor = 0xFF996543.toInt(),
+            secondaryAccentColor = 0xFF436599.toInt(), interfaceScale = .9f)
+        var state by mutableStateOf(original)
+        val saves = mutableListOf<AppearanceSettings>()
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(state, true) {
+                    AppearanceSettingsScreen(state, onChange = { saves += it; state = it }, onBack = {})
+                }
+            }
+        }
+        fun open(title: String) {
+            reveal("settings-row:$title", "外观与主题").performTouchInput { click() }
+            awaitDialogEnter(node("assistant-sheet"))
+        }
+        fun awaitClosed() {
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+            }
+        }
+        open("强调色")
+        node("appearance-color-default").performClick()
+        ui.runOnIdle { assertEquals(original, state); assertTrue(saves.isEmpty()) }
+        androidx.test.espresso.Espresso.pressBack()
+        awaitClosed()
+        open("强调色")
+        node("appearance-color-default").performClick()
+        node("appearance-color-confirm").performClick()
+        awaitClosed()
+        val accentReset = original.withAccentColors(AppearanceSettings())
+        ui.runOnIdle { assertEquals(listOf(accentReset), saves); assertEquals(accentReset, state) }
+        mainThread { state = original; saves.clear() }
+        open("色彩风格")
+        node("appearance-style:neutral").performScrollTo()
+        node("appearance-style:neutral").assertIsNotSelected()
+        node("appearance-color-default").performClick()
+        node("appearance-style:neutral").assertIsSelected()
+        ui.runOnIdle { assertEquals(original, state); assertTrue(saves.isEmpty()) }
+        node("appearance-color-confirm").performClick()
+        awaitClosed()
+        ui.runOnIdle {
+            assertEquals(listOf(original.withColorStyle(AppearanceSettings())), saves)
+            assertEquals(original.primaryAccentColor, state.primaryAccentColor)
+            assertEquals(original.secondaryAccentColor, state.secondaryAccentColor)
         }
         assertEquals(0, fixture.opens.get())
     }

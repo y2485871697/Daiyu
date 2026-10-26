@@ -11,7 +11,8 @@ TOKEN = 'DaiyuPalette.switchTrack'
 class SettingsSwitchAccentContractTest(unittest.TestCase):
     def test_checked_track_token_preserves_reference_and_global_primary_colours(self):
         palette = (SRC / 'ui/app/DaiyuPalette.kt').read_text()
-        self.assertIn('val switchTrack = Color(0xFF82728F)', palette)
+        self.assertIn('val switchTrack: Color', palette)
+        self.assertIn('LocalAppearanceSettings.current.resolvedPrimaryAccent ?: Color(0xFF82728F)', palette)
         self.assertIn('primary = Color(0xFF7563B4)', palette)
         self.assertIn('primary = Color(0xFFA491F1)', palette)
         style = (SRC / 'ui/components/subagent/ConversationAgentStyle.kt').read_text()

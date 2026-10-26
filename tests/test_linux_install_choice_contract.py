@@ -66,13 +66,13 @@ class LinuxInstallChoiceContract(unittest.TestCase):
         theme = (SETTINGS / 'LinuxSettingsTheme.kt').read_text()
         switch = (SOURCE / 'ui/components/subagent/ConversationAgentStyle.kt').read_text()
         palette = (SOURCE / 'ui/app/DaiyuPalette.kt').read_text()
-        self.assertIn('val switchTrack = Color(0xFF82728F)', palette)
+        self.assertIn('LocalAppearanceSettings.current.resolvedPrimaryAccent ?: Color(0xFF82728F)', palette)
         self.assertIn('import app.daiyu.android.ui.app.DaiyuPalette', switch)
         actual_switch = switch.split('@Composable internal fun ConversationAgentSwitch(', 1)[1].split('@Composable internal fun ConversationAgentButton(', 1)[0]
         self.assertIn('.background(if (checked) DaiyuPalette.switchTrack else Color(0x28b4aabb))', actual_switch)
         self.assertIn('.border(1.dp, if (checked) DaiyuPalette.switchTrack else colors.line, shape)', actual_switch)
-        self.assertIn('val primary = Color(0xff82728f)', theme)
-        for token in ['val onPrimary = Color.White', 'MiuixTheme(colors = MiuixTheme.colorScheme.copy(',
+        self.assertIn('val primary = DaiyuPalette.switchTrack', theme)
+        for token in ['val onPrimary = colorContentColor(primary)', 'MiuixTheme(colors = MiuixTheme.colorScheme.copy(',
                       'MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(',
                       'primaryVariant = primary', 'disabledPrimaryButton = container',
                       'primaryContainer = container, onPrimaryContainer = onContainer']:
@@ -81,7 +81,7 @@ class LinuxInstallChoiceContract(unittest.TestCase):
         self.assertIn('suppliedChoicePreferences: LinuxInstallChoicePreferences? = null) = LinuxSettingsTheme {', screen)
         self.assertIn('ButtonDefaults.buttonColorsPrimary()', screen)
         self.assertIn('MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton', screen)
-        self.assertNotIn('DaiyuPalette', theme)
+        self.assertIn('import app.daiyu.android.ui.app.DaiyuPalette', theme)
 
     def test_upload_is_upward_existing_vector_but_remains_real_import(self):
         panel = (SETTINGS / 'PrivateWorkspacePanel.kt').read_text()

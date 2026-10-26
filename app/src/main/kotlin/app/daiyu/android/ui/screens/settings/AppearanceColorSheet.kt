@@ -1,0 +1,196 @@
+package app.daiyu.android.ui.screens.settings
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.data.model.AppearanceAccentColor
+import app.daiyu.android.data.model.AppearancePaletteStyle
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.ui.app.DaiyuPalette
+import app.daiyu.android.ui.app.colorHsv
+import app.daiyu.android.ui.app.resolvedPrimaryAccent
+import app.daiyu.android.ui.haptics.material.Slider
+import app.daiyu.android.ui.haptics.selectable
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewDialog
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+internal enum class AppearanceColorEditor { STYLE, ACCENTS }
+
+@Composable
+internal fun AppearanceColorSheet(
+    editor: AppearanceColorEditor,
+    state: AppearanceSettings,
+    onChange: (AppearanceSettings) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var draft by remember { mutableStateOf(state) }
+    val accents = editor == AppearanceColorEditor.ACCENTS
+    val buttons = assistantPreviewPalette()
+    val defaults = AssistantPreviewPalette(buttons.dark)
+    AssistantPreviewDialog(show = true, title = if (accents) "强调色" else "色彩风格",
+        onDismiss = onDismiss, showCloseButton = false,
+        footer = {
+            AssistantPreviewButton("默认", {
+                draft = if (accents) draft.withAccentColors(AppearanceSettings())
+                    else draft.withColorStyle(AppearanceSettings())
+            }, Modifier.weight(1f).testTag("appearance-color-default"), secondary = true)
+            AssistantPreviewButton("确定", {
+                onChange(if (accents) state.withAccentColors(draft) else state.withColorStyle(draft))
+                onDismiss()
+            }, Modifier.weight(1f).testTag("appearance-color-confirm"), primary = true)
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            .testTag("appearance-color-content"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            if (accents) {
+                AppearanceColorPicker("强调色", draft.resolvedPrimaryAccent ?: defaults.primary) {
+                    draft = draft.copy(accentColor = AppearanceAccentColor.SYSTEM, primaryAccentColor = it.toArgb())
+                }
+                AppearanceColorPicker("次强调色", draft.secondaryAccentColor?.let(::Color) ?: defaults.secondary) {
+                    draft = draft.copy(secondaryAccentColor = it.toArgb())
+                }
+            } else {
+                AppearanceColorPicker("界面色彩", Color(draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())) {
+                    draft = draft.copy(paletteSeedColor = it.toArgb())
+                }
+                AppearancePaletteStyle.entries.chunked(3).forEach { row ->
+                    Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { style ->
+                            val selected = draft.paletteStyle == style
+                            val label = when (style) {
+                                AppearancePaletteStyle.TONAL_SPOT -> "柔和"
+                                AppearancePaletteStyle.NEUTRAL -> "中性"
+                                AppearancePaletteStyle.VIBRANT -> "鲜艳"
+                                AppearancePaletteStyle.EXPRESSIVE -> "灵动"
+                                AppearancePaletteStyle.RAINBOW -> "彩虹"
+                                AppearancePaletteStyle.FRUIT_SALAD -> "缤纷"
+                                AppearancePaletteStyle.MONOCHROME -> "灰阶"
+                                AppearancePaletteStyle.FIDELITY -> "原色"
+                                AppearancePaletteStyle.CONTENT -> "自然"
+                            }
+                            Box(Modifier.weight(1f).height(44.dp)
+                                .background(if (selected) buttons.soft else Color.Transparent, CircleShape)
+                                .border(1.dp, if (selected) buttons.primary else buttons.line, CircleShape)
+                                .testTag("appearance-style:${style.persistedValue}")
+                                .selectable(selected, role = Role.RadioButton, onClick = {
+                                    draft = draft.copy(paletteStyle = style,
+                                        paletteSeedColor = draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())
+                                }), contentAlignment = Alignment.Center) { Text(label, color = buttons.text) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppearanceColorPicker(label: String, color: Color, onChange: (Color) -> Unit) {
+    val colors = MiuixTheme.colorScheme
+    val hsv = colorHsv(color)
+    val changeColor by rememberUpdatedState(onChange)
+    var grayHue by remember { mutableStateOf(hsv[0]) }
+    val hue = if (hsv[1] > .001f) hsv[0] else grayHue
+    val swatches = listOf(0xFF8E7C9E, 0xFF407FCE, 0xFFBA668F, 0xFFBD5964,
+        0xFFC68046, 0xFFC1A340, 0xFF56896C, 0xFF448D91)
+    val currentHue by rememberUpdatedState(hue)
+    fun select(saturation: Float, value: Float) {
+        changeColor(Color.hsv(currentHue, saturation.coerceIn(0f, 1f), value.coerceIn(0f, 1f)))
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = colors.onSurface)
+            Box(Modifier.size(26.dp).background(color, CircleShape).border(1.dp, colors.outline, CircleShape))
+        }
+        Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.SpaceBetween) {
+            swatches.forEach { value ->
+                val swatch = Color(value)
+                Box(Modifier.weight(1f).height(44.dp)
+                    .testTag("appearance-swatch:$label:$value")
+                    .semantics { contentDescription = "$label #${value.toString(16).takeLast(6)}" }
+                    .selectable(color.toArgb() == swatch.toArgb(), role = Role.RadioButton,
+                        onClick = { grayHue = colorHsv(swatch)[0]; onChange(swatch) }),
+                    contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(26.dp).background(swatch, CircleShape)
+                        .border(if (color.toArgb() == swatch.toArgb()) 3.dp else 1.dp,
+                            if (color.toArgb() == swatch.toArgb()) colors.onSurface else colors.outline, CircleShape))
+                }
+            }
+        }
+        Canvas(Modifier.fillMaxWidth().height(92.dp).testTag("appearance-color-pad:$label")
+            .semantics {
+                contentDescription = "$label 饱和度与明度"
+                customActions = listOf(
+                    CustomAccessibilityAction("增加饱和度") { select(hsv[1] + .05f, hsv[2]); true },
+                    CustomAccessibilityAction("减少饱和度") { select(hsv[1] - .05f, hsv[2]); true },
+                    CustomAccessibilityAction("增加明度") { select(hsv[1], hsv[2] + .05f); true },
+                    CustomAccessibilityAction("减少明度") { select(hsv[1], hsv[2] - .05f); true },
+                )
+            }
+            .pointerInput(Unit) {
+                detectTapGestures { point -> select(point.x / size.width, 1f - point.y / size.height) }
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(onDragStart = { point -> select(point.x / size.width, 1f - point.y / size.height) }) { change, _ ->
+                    change.consume()
+                    select(change.position.x / size.width, 1f - change.position.y / size.height)
+                }
+            }) {
+            drawRect(Brush.horizontalGradient(listOf(Color.White, Color.hsv(hue, 1f, 1f))))
+            drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
+            val cursor = Offset(hsv[1] * size.width, (1f - hsv[2]) * size.height)
+            drawCircle(Color.Black, 7.dp.toPx(), cursor, style = Stroke(3.dp.toPx()))
+            drawCircle(Color.White, 7.dp.toPx(), cursor, style = Stroke(1.5.dp.toPx()))
+        }
+        Slider(value = hue, onValueChange = {
+            grayHue = it
+            onChange(Color.hsv(it, hsv[1], hsv[2]))
+        },
+            valueRange = 0f..359.99f,
+            colors = SliderDefaults.colors(thumbColor = DaiyuPalette.switchTrack,
+                activeTrackColor = DaiyuPalette.switchTrack,
+                inactiveTrackColor = DaiyuPalette.switchTrack.copy(alpha = .15f)),
+            modifier = Modifier.fillMaxWidth().testTag("appearance-color-hue:$label")
+                .semantics { contentDescription = "$label 色相" })
+    }
+}

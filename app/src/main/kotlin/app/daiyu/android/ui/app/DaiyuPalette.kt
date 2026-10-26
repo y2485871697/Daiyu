@@ -1,13 +1,15 @@
 package app.daiyu.android.ui.app
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.Composable
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 
-/** Fixed lavender and charcoal surfaces shared by native and retained screens. */
+/** Default lavender and charcoal surfaces; custom colors resolve above these tokens. */
 internal object DaiyuPalette {
-    val switchTrack = Color(0xFF82728F)
+    val switchTrack: Color
+        @Composable get() = LocalAppearanceSettings.current.resolvedPrimaryAccent ?: Color(0xFF82728F)
 
     val light: Colors = lightColorScheme(
         primary = Color(0xFF7563B4),

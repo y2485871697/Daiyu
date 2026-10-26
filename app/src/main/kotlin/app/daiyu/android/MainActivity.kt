@@ -1547,13 +1547,14 @@ class MainActivity : ComponentActivity() {
         assistantEditReturnToSidebar = false
     }
     private fun dismissAssistantFlow() {
+        val returnPage = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage
         assistantEditingId = null
         assistantPicker = false
         assistantSelectionOwner = null
         assistantEditReturnPage = "chat"
         assistantEditReturnToSidebar = false
         dismissSidebar()
-        returnToChat()
+        if (returnPage == "chat") returnToChat() else retainedPage = returnPage
     }
     private var assistantAvatarRevision by mutableStateOf(0L)
     private var collaborationOwner by mutableStateOf<String?>(null)

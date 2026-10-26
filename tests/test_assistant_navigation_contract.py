@@ -48,14 +48,17 @@ class AssistantNavigationContractTest(unittest.TestCase):
         self.assertIn('testTag("preview-dialog-scrim")', self.preview)
         self.assertIn('onOutsideDismiss = onOutsideDismiss', self.shell)
 
-    def test_full_dismiss_clears_flow_and_returns_to_chat(self):
+    def test_full_dismiss_clears_flow_and_preserves_origin_page(self):
         close = self.main.split('private fun dismissAssistantFlow() {', 1)[1].split('private var assistantAvatarRevision', 1)[0]
         for assignment in ('assistantEditingId = null', 'assistantPicker = false',
                            'assistantSelectionOwner = null', 'assistantEditReturnPage = "chat"',
                            'assistantEditReturnToSidebar = false'):
             self.assertIn(assignment, close)
         self.assertIn('dismissSidebar()', close)
-        self.assertIn('returnToChat()', close)
+        self.assertIn('val returnPage = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage', close)
+        self.assertLess(close.index('val returnPage ='), close.index('assistantEditReturnPage = "chat"'))
+        self.assertIn('if (returnPage == "chat") returnToChat() else retainedPage = returnPage', close)
+        self.assertEqual(1, close.count('returnToChat()'))
 
     def test_picker_reopens_with_fresh_owner_instead_of_child_state(self):
         opening = self.main.split('private fun openAssistantPicker(', 1)[1].split('private fun assistantOwnerMatches', 1)[0]
@@ -97,7 +100,7 @@ class AssistantNavigationContractTest(unittest.TestCase):
 
     def test_chat_entry_waits_for_native_geometry_before_one_real_click(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/AssistantNavigationActivityTest.kt').read_text()
-        opening = source.split('private fun openPicker(', 1)[1].split('private fun dismissOutside()', 1)[0]
+        opening = source.split('private fun openPicker(', 1)[1].split('private fun dismissOutside(', 1)[0]
         chat = opening.split('        } else {', 1)[1]
         for token in ('assertIsDisplayed().assertIsEnabled()', 'awaitNodeWindowFocus(entry)',
                       'awaitStableWindowFrame(view)', 'view.windowToken != token',
@@ -117,18 +120,29 @@ class AssistantNavigationContractTest(unittest.TestCase):
         oracle = source.split('fun testEditorKeepsOriginalPageComposed()', 1)[1]
         self.assertIn('for (fromSettings in listOf(false, true))', oracle)
         self.assertIn('for (system in listOf(false, true))', oracle)
-        self.assertEqual(3, oracle.count('assertEquals(original, node(tag).fetchSemanticsNode().id)'))
+        self.assertEqual(4, oracle.count('assertEquals(original, node(tag).fetchSemanticsNode().id)'))
         self.assertIn('assertEquals(before, fixture.database.exportBackup())', oracle)
         self.assertIn('assertEquals(0, fixture.opens.get())', oracle)
 
     def test_device_regressions_cover_outside_reopen_background_avatar_and_transparency(self):
         tests = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
         navigation = (tests / 'AssistantNavigationActivityTest.kt').read_text()
-        for name in ('testOutsideDismissAtEveryAssistantLevelReturnsToChatAndReopensList',
+        for name in ('testOutsideDismissAtEveryAssistantLevelKeepsOriginalPageAndReopensList',
                      'testEditorKeepsOriginalPageComposed',
                      'testHeaderAndSystemBackReturnThroughActionsAndListWithoutSaving'):
             self.assertIn('fun ' + name, navigation)
         self.assertIn('scrim.performTouchInput', navigation)
+        outside = navigation.split('fun testOutsideDismissAtEveryAssistantLevelKeepsOriginalPageAndReopensList()', 1)[1].split('fun testEditorKeepsOriginalPageComposed()', 1)[0]
+        for token in ('val originalPage = if (fromSettings) "page:设置" else "chat-draft"',
+                      'val originalNode = node(originalPage).fetchSemanticsNode().id',
+                      'dismissOutside(fromSettings)',
+                      'assertEquals(originalNode, node(originalPage).fetchSemanticsNode().id)',
+                      'node("settings-row:助手").assertIsDisplayed().assertIsEnabled().performClick()',
+                      'if (fromSettings) backToChat(activity)'):
+            self.assertIn(token, outside)
+        dismiss = navigation.split('private fun dismissOutside(', 1)[1].split('private fun actions(', 1)[0]
+        self.assertIn('fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()', dismiss)
+        self.assertIn('awaitUniqueTag(if (fromSettings) "page:设置" else "chat-draft")', dismiss)
         visual = (tests / 'AssistantEditVisualTest.kt').read_text()
         self.assertIn('fun testAvatarCardIsAboveNameAndTracksNameDraft', visual)
         self.assertIn('fun testSkillsLegendPaddingIsTransparentInBothThemes', visual)

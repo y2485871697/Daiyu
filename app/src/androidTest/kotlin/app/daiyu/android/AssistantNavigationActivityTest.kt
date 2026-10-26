@@ -35,14 +35,17 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
         }
     }
 
-    private fun dismissOutside() {
+    private fun dismissOutside(fromSettings: Boolean) {
         val scrim = node("preview-dialog-scrim")
         val bounds = scrim.fetchSemanticsNode().boundsInRoot
         val sheet = node("assistant-sheet").fetchSemanticsNode().boundsInRoot
         val gap = sheet.top - bounds.top
         assertTrue("Assistant sheet must leave an outside hit region", gap > 24f)
         scrim.performTouchInput { click(Offset(center.x, gap / 2f)) }
-        awaitUniqueTag("chat-draft")
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("assistant-sheet").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
+        awaitUniqueTag(if (fromSettings) "page:设置" else "chat-draft")
     }
 
     private fun actions(id: String) {
@@ -138,13 +141,15 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
         node("page:设置").assertExists()
         assertEquals(0, fixture.opens.get())
     }
-    fun testOutsideDismissAtEveryAssistantLevelReturnsToChatAndReopensList() {
+    fun testOutsideDismissAtEveryAssistantLevelKeepsOriginalPageAndReopensList() {
         val store = fixture.controller.assistantStore
         val profile = store.assistants.value.first()
         val before = fixture.database.exportBackup()
         val selected = store.selectedId.value
         for (fromSettings in listOf(false, true)) for (level in 0..2) {
             openPicker(fromSettings)
+            val originalPage = if (fromSettings) "page:设置" else "chat-draft"
+            val originalNode = node(originalPage).fetchSemanticsNode().id
             ui.onNodeWithTag("assistant-action-edit").assertDoesNotExist()
             ui.onNodeWithTag("assistant-editor").assertDoesNotExist()
             if (level >= 1) actions(profile.id)
@@ -154,15 +159,26 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
                     .performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString("Unsaved outside name")) }
                 dismissIme()
             }
-            dismissOutside()
-            node("chat-assistant").assertIsDisplayed()
+            dismissOutside(fromSettings)
+            assertEquals(originalNode, node(originalPage).fetchSemanticsNode().id)
             ui.onNodeWithTag("assistant-sheet").assertDoesNotExist()
-            ui.onNodeWithTag("page:设置").assertDoesNotExist()
-            openPicker(fromSettings = false)
+            if (fromSettings) {
+                node("settings-row:助手").assertIsDisplayed().assertIsEnabled().performClick()
+                awaitUniqueTag("assistant-list")
+            } else {
+                node("chat-assistant").assertIsDisplayed()
+                ui.onNodeWithTag("page:设置").assertDoesNotExist()
+                openPicker(fromSettings = false)
+            }
             ui.onNodeWithTag("assistant-action-edit").assertDoesNotExist()
             ui.onNodeWithTag("assistant-editor").assertDoesNotExist()
             ui.onNodeWithText("Unsaved outside name").assertDoesNotExist()
             node("assistant-done").performClick()
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag("assistant-sheet").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+            }
+            assertEquals(originalNode, node(originalPage).fetchSemanticsNode().id)
+            if (fromSettings) backToChat(activity)
             assertEquals(profile, store.read(profile.id))
         }
         assertEquals(selected, store.selectedId.value)
@@ -188,7 +204,9 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
                 awaitUniqueTag("assistant-list")
                 assertEquals(original, node(tag).fetchSemanticsNode().id)
             }
-            dismissOutside()
+            dismissOutside(fromSettings)
+            assertEquals(original, node(tag).fetchSemanticsNode().id)
+            if (fromSettings) backToChat(activity)
         }
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())

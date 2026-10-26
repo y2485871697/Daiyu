@@ -13,7 +13,7 @@ class SubAgentThinkingPickerContractTest(unittest.TestCase):
         self.assertIn("mainChat: Boolean = false", text)
         self.assertIn("if (!show || options.isEmpty()) return", text)
         self.assertIn("LocalConversationAgentStyle provides !mainChat", text)
-        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description)", text)
+        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description, speedMode, onCycleSpeed, speedEnabled)", text)
         self.assertNotIn("WindowDialog", text)
         self.assertNotIn("SliderDefaults", text)
 

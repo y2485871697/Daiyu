@@ -1,6 +1,9 @@
 package app.daiyu.android.ui.components.subagent
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import app.daiyu.android.ui.haptics.clickable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
@@ -41,7 +44,8 @@ import kotlin.math.roundToInt
 }
 
 @Composable internal fun ConversationThinkingPicker(show: Boolean, effort: ReasoningEffort, options: List<ReasoningEffort>,
-    onDismiss: () -> Unit, onEffortChange: (ReasoningEffort) -> Unit, description: String?) {
+    onDismiss: () -> Unit, onEffortChange: (ReasoningEffort) -> Unit, description: String?,
+    speedMode: app.daiyu.android.model.GptSpeedMode? = null, onCycleSpeed: (() -> Unit)? = null, speedEnabled: Boolean = true) {
     if (!show) return
     val colors = conversationAgentColors()
     val subagent = LocalConversationAgentStyle.current
@@ -70,13 +74,20 @@ import kotlin.math.roundToInt
         ConversationAgentSheet(onDismiss, radius = 28, modifier = Modifier.heightIn(max = maxHeight)) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 22.dp, bottom = 24.dp).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("调整思考深度", fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 19.dp), color = colors.text)
-                Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-                    ConversationThinkingMark(Modifier.size(30.dp), tint = colors.strong)
+                Text("调整思考深度", fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.testTag("chat-thinking-title").padding(bottom = 19.dp), color = colors.text)
+                val speedClick = onCycleSpeed?.takeIf { speedMode != null }
+                Box(Modifier.size(36.dp).testTag("chat-thinking-speed")
+                    .then(if (speedClick != null) Modifier.clickable(enabled = speedEnabled, role = Role.Button,
+                        interactionSource = remember { MutableInteractionSource() }, indication = null,
+                        onClickLabel = "切换 GPT 速度", onClick = speedClick) else Modifier),
+                    contentAlignment = Alignment.Center) {
+                    app.daiyu.android.ui.components.ChatThinkingSpeedIcon(speedMode,
+                        tint = colors.strong, modifier = Modifier.size(24.dp))
                 }
-                Text(choices.getOrNull(selected)?.displayName ?: "选择思考深度", fontSize = 20.sp,
+                Text(choices.getOrNull(selected)?.displayName ?: "选择思考深度", fontSize = 18.sp,
                     lineHeight = 28.sp, fontWeight = FontWeight(450), color = colors.text,
-                    modifier = Modifier.testTag("chat-thinking-value").padding(top = 8.dp, bottom = 18.dp))
+                    modifier = Modifier.testTag("chat-thinking-value").padding(top = 8.dp, bottom = 13.dp))
                 if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { index ->
                     selected = index
                     if (choices[index] != effort) onEffortChange(choices[index])

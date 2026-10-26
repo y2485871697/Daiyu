@@ -123,6 +123,8 @@ data class ComposerUi(
     val phase: ComposerPhase = ComposerPhase.IDLE,
     val modelLabel: String = "模型",
     val reasoningLabel: String = "默认",
+    val gptSpeedMode: app.daiyu.android.model.GptSpeedMode? = null,
+    val gptSpeedEnabled: Boolean = false,
     val assistantLabel: String = "助手",
     val contextFraction: Float? = null,
     val contextLabel: String = "上下文",

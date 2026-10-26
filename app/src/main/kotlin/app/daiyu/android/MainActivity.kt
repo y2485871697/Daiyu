@@ -984,6 +984,7 @@ class MainActivity : ComponentActivity() {
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry(closeRoute = false)) editorGeneration++
             if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
+            if (value != retainedPageState) { gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null }
             if (value != "chat") cancelBrowserDownloadVisit()
             if (value != "reconnect-settings") {
                 reconnectSettingsPageOwner?.revoke()
@@ -1565,6 +1566,8 @@ class MainActivity : ComponentActivity() {
     private var automaticCompression by mutableStateOf<Boolean?>(null)
     private var automaticCompressionPending by mutableStateOf(false)
     private var confirmedModelLabel by mutableStateOf("模型")
+    private var confirmedGptSpeed: ChatGptSpeedSelection? = null
+    private var gptSpeedSaveOwner: ModelSettingsSaveOwner? = null
     private var contextModelRevision by mutableStateOf(0L)
     private var contextReceiptRevision by mutableStateOf(0L)
     private var conversationUsageRevision by mutableStateOf(0L)
@@ -2370,8 +2373,11 @@ class MainActivity : ComponentActivity() {
                 // Saved independently for the standalone composer or this conversation.
                 // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
+                val thinkingSpeed = confirmedGptSpeed
                 SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = reasoningPreference.get(thinkingOwner),
-                    mainChat = true,
+                    mainChat = true, speedMode = chatState.composer.gptSpeedMode,
+                    speedEnabled = chatState.composer.gptSpeedEnabled,
+                    onCycleSpeed = { cycleChatGptSpeed(thinkingSpeed, thinkingOwner) },
                     options = ReasoningEffort.entries.filter { it != ReasoningEffort.DEFAULT },
                     onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
                         if (activityUsable() && selected?.id?.value == thinkingOwner) {
@@ -2503,7 +2509,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        val renderedSpeed = confirmedGptSpeed
+        val renderedSpeedConversation = selected?.id?.value
         return ChatScreenActions(
+        onCycleGptSpeed = { cycleChatGptSpeed(renderedSpeed, renderedSpeedConversation) },
         onVisibleCompleted = completionReadAction(),
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onMore = { if (currentChat()) refreshAutomaticCompression() },
@@ -4818,6 +4827,7 @@ class MainActivity : ComponentActivity() {
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
         contextManagementEntryEpoch++
         browserVisualEpoch++
+        if (retainedPage == "chat") refreshConfirmedModelLabel()
         if (selectionReady) publishChat() // Re-arm foreground read confirmation; never acknowledge on background refresh.
         prepareMessageActionSnapshot()
         if (retainedPage == "platform-settings") platformSettingsRevision++
@@ -4881,6 +4891,7 @@ class MainActivity : ComponentActivity() {
             if (!preserve) revokeChatReferencePick()
         }
         modelSaveOwner?.revoke(); modelSaveOwner = null
+        gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null
         subAgentModelSource.clear()
         revokePlatformActionVisit()
         // Pending location UI cannot survive backgrounding. An already handed-off external GUI
@@ -4977,6 +4988,7 @@ class MainActivity : ComponentActivity() {
         closeBrowserVisualVisit()
         revokeChatReferencePick(); chatReferencePick = null
         modelSaveOwner?.revoke(); modelSaveOwner = null
+        gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null
         paneRefreshClosed = true
         paneRefreshSerial++
         paneRefreshPending = false
@@ -5448,6 +5460,7 @@ class MainActivity : ComponentActivity() {
 
     private fun select(conversation: Conversation?, prepared: PaneConversationSnapshot?) {
         requireActivityUsable()
+        gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null
         revokeCommandApproval()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
@@ -5879,6 +5892,10 @@ class MainActivity : ComponentActivity() {
                     (!imageHost.session.attachments.state.value.canSubmit || state != null),
                 modelLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
+                gptSpeedMode = confirmedGptSpeed?.mode,
+                gptSpeedEnabled = allowed && controller.active == null && !controller.hasLiveChildTasks() &&
+                    gptSpeedSaveOwner == null && pendingTextSend == null &&
+                    !imageHost.sending && !videoSending && inlineMessageEditor == null,
                 assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && inlineMessageEditor == null && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null,
                 supplementAvailable = controlOwner?.let(controller::canSupplement) == true &&
                     supplementDraft.pending == null && !supplementMediaBlocked(),
@@ -5922,6 +5939,37 @@ class MainActivity : ComponentActivity() {
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息", text))
     }
 
+    private fun cycleChatGptSpeed(expected: ChatGptSpeedSelection?, conversationId: String?) {
+        if (expected == null || expected !== confirmedGptSpeed || expected.mode == null ||
+            !activityUsable() || retainedPage != "chat" || sidebarVisible || selected?.id?.value != conversationId ||
+            !chatState.composer.enabled || !chatState.composer.gptSpeedEnabled || gptSpeedSaveOwner != null) return
+        val next = try { expected.next() } catch (failure: IllegalStateException) {
+            toast(failure.message ?: "当前模型不支持此速度"); return
+        }
+        val owner = ModelSettingsSaveOwner()
+        gptSpeedSaveOwner = owner
+        publishChat(rowsChanged = false)
+        val value = expected.editing.settings.copy(requestOptions = expected.editing.settings.requestOptions.copy(speedMode = next))
+        try { controller.saveProviderSettings(expected.editor, value, expected.editing,
+            protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false, owner = owner) { success ->
+            if (gptSpeedSaveOwner !== owner) return@saveProviderSettings
+            gptSpeedSaveOwner = null
+            if (!activityUsable() || retainedPage != "chat" || selected?.id?.value != conversationId ||
+                confirmedGptSpeed?.editor != expected.editor || confirmedGptSpeed?.editing?.settings?.model != value.model) return@saveProviderSettings
+            if (success) {
+                confirmedGptSpeed = expected.copy(editing = expected.editing.copy(settings = value))
+                toast(chatGptSpeedToast(next))
+            } else toast("速度切换未保存，请重新尝试")
+            publishChat(rowsChanged = false)
+            refreshConfirmedModelLabel()
+        } } catch (_: Exception) {
+            owner.revoke()
+            if (gptSpeedSaveOwner === owner) gptSpeedSaveOwner = null
+            toast("速度切换未受理，请稍后重试")
+            publishChat(rowsChanged = false)
+        }
+    }
+
     private fun refreshConfirmedModelLabel() {
         val request = Any()
         modelLabelRead = request
@@ -5930,11 +5978,13 @@ class MainActivity : ComponentActivity() {
             val saved = withContext(Dispatchers.IO) { runCatching {
                 val editor = controller.providers.activeEditor()
                 val runtime = controller.providerBalances.get(editor.slotId)
-                val model = controller.providers.withEditor(editor) { runCatching { it.load().model }.getOrDefault("") }
-                Triple(editor, model, runtime)
+                val editing = controller.providers.withEditor(editor) { it.loadForEditing() }
+                Triple(editor, editing, runtime)
             }.getOrNull() }
             if (activityUsable() && modelLabelRead === request) {
-                confirmedModelLabel = saved?.second?.ifBlank { "模型" } ?: "模型"
+                confirmedModelLabel = saved?.second?.settings?.model?.ifBlank { "模型" } ?: "模型"
+                confirmedGptSpeed = saved?.let { ChatGptSpeedSelection(it.first, it.second) }
+                publishChat(rowsChanged = false)
                 contextModelRevision++
                 balanceRuntime = saved?.third
                 balanceLifecycle = saved?.third?.let { runtime ->

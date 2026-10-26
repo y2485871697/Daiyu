@@ -40,13 +40,13 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertNotIn('LocalDensity', self.text)
 
     def test_toolbar_graphics_are_optically_sized_inside_unchanged_touch_slots(self):
-        attach = self.text.split('ChatIconButton(ChatPreviewIcons.Attach,', 1)[1].split('ChatIconButton(ChatPreviewIcons.Thought,', 1)[0]
-        thought = self.text.split('ChatIconButton(ChatPreviewIcons.Thought,', 1)[1].split('Box(Modifier.size(32.dp).testTag("chat-assistant")', 1)[0]
+        attach = self.text.split('ChatIconButton(ChatPreviewIcons.Attach,', 1)[1].split('Box(Modifier.size(32.dp).testTag("chat-reasoning")', 1)[0]
+        thought = 'Box(Modifier.size(32.dp).testTag("chat-reasoning")' + self.text.split('Box(Modifier.size(32.dp).testTag("chat-reasoning")', 1)[1].split('Box(Modifier.size(32.dp).testTag("chat-assistant")', 1)[0]
         assistant = self.text.split('Box(Modifier.size(32.dp).testTag("chat-assistant")', 1)[1].split('key(state.controlOwnerKey)', 1)[0]
         self.assertIn('Modifier.size(32.dp)', attach)
         self.assertIn('iconSize = 22.5.dp', attach)
         self.assertIn('Modifier.size(32.dp).testTag("chat-reasoning")', thought)
-        self.assertIn('iconSize = 24.dp', thought)
+        self.assertIn('modifier = Modifier.size(24.dp)', thought)
         self.assertIn('actions.onOpenReasoning', thought)
         self.assertIn('AssistantAvatar(assistant, 19.dp,', assistant)
         self.assertIn('onClick = actions.onOpenAssistant', assistant)

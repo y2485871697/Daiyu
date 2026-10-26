@@ -133,6 +133,25 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         return ((4f * density).roundToInt() + spare - (spare / 2f).roundToInt()).toFloat()
     }
 
+    fun testGptLongPressIsSeparateFromTapAndUnavailableModesHaveNoSpeedAction() {
+        var clicks = 0
+        var cycles = 0
+        val actions = ChatScreenActions(onOpenReasoning = { clicks++ }, onCycleGptSpeed = { cycles++ })
+        for (dark in listOf(false, true)) {
+            show(composer().copy(gptSpeedMode = app.daiyu.android.model.GptSpeedMode.NORMAL, gptSpeedEnabled = true), actions, dark = dark)
+            node("chat-reasoning").performTouchInput { longClick() }
+            assertEquals(0, clicks)
+            node("chat-reasoning").performTouchInput { click() }
+            assertEquals(1, clicks)
+            assertEquals(1, cycles)
+            for (state in listOf(composer(), composer().copy(gptSpeedMode = app.daiyu.android.model.GptSpeedMode.FAST))) {
+                show(state, actions, dark = dark)
+                node("chat-reasoning").assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
+            }
+            clicks = 0; cycles = 0
+        }
+    }
+
     fun testRunningComposerAt320DpKeepsActionsSeparateAndContextReadable() {
         val state = composer().copy(text = "")
         show(state)

@@ -249,8 +249,18 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
                                 Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 22.5.dp)
-                            ChatIconButton(ChatPreviewIcons.Thought, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
-                                Modifier.size(32.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 24.dp)
+                            Box(Modifier.size(32.dp).testTag("chat-reasoning")
+                                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                                    enabled = state.enabled, role = Role.Button,
+                                    onClickLabel = "调整思考深度",
+                                    onLongClickLabel = if (state.gptSpeedMode != null && state.gptSpeedEnabled) "切换 GPT 速度" else null,
+                                    onLongClick = if (state.gptSpeedMode != null && state.gptSpeedEnabled) actions.onCycleGptSpeed else null,
+                                    onClick = actions.onOpenReasoning)
+                                .semantics { contentDescription = "推理强度，当前为 ${state.reasoningLabel}" },
+                                contentAlignment = Alignment.Center) {
+                                app.daiyu.android.ui.components.ChatThinkingSpeedIcon(state.gptSpeedMode,
+                                    tint = chrome.accent.copy(alpha = if (state.enabled) 1f else .38f), modifier = Modifier.size(24.dp))
+                            }
                             Box(Modifier.size(32.dp).testTag("chat-assistant").clip(CircleShape)
                                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button,
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)

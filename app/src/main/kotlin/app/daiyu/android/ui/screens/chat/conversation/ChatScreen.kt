@@ -49,6 +49,7 @@ data class ChatScreenActions(
     val onReasoningClick: () -> Unit = {},
     val onAssistantClick: () -> Unit = {},
     val onOpenReasoning: () -> Unit = onReasoningClick,
+    val onCycleGptSpeed: () -> Unit = {},
     val onOpenAssistant: () -> Unit = onAssistantClick,
     val onCopy: (String) -> Unit = {},
     val onRegenerate: (String) -> Unit = {},

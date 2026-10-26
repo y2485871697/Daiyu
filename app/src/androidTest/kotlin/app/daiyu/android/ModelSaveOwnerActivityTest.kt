@@ -100,10 +100,9 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         openModels(); editModel("API Key", "restore-read-paused-model")
         withHeldCatalog { release ->
             realPauseResume(activity)
-            ui.waitUntil(5_000) {
-                ui.onAllNodesWithText("正在读取提供商详情")
-                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
-            }
+            node("page:主模型服务商").assertIsDisplayed()
+            modelField("API Key").assertIsNotEnabled()
+            reveal("model-save").assertIsNotEnabled()
             realPauseResume(activity, atPause = { release() })
         }
         assertEquals(saved, fixture.settings.load())

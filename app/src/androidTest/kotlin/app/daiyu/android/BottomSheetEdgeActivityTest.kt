@@ -70,6 +70,14 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         androidx.compose.ui.geometry.Rect(node.positionInRoot,
             androidx.compose.ui.geometry.Size(node.size.width.toFloat(), node.size.height.toFloat()))
 
+    private fun surfaceBounds(node: androidx.compose.ui.semantics.SemanticsNode): Rect {
+        val bounds = rawBounds(node)
+        return if (node.config[SemanticsProperties.TestTag] == "subagent-collaboration-card") {
+            val inset = with(node.layoutInfo.density) { 10.dp.toPx() }
+            Rect(bounds.left + inset, bounds.top + inset, bounds.right - inset, bounds.bottom - inset)
+        } else bounds
+    }
+
     private fun assertHorizontalInsets(surfaceTag: String,
         surface: androidx.compose.ui.semantics.SemanticsNode,
         viewport: androidx.compose.ui.semantics.SemanticsNode,
@@ -90,8 +98,8 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             }
         }
         val gap = (available - width) / 2
-        val surfaceLeft = rawBounds(surface).left
-        val surfaceRight = rawBounds(surface).right
+        val surfaceLeft = surfaceBounds(surface).left
+        val surfaceRight = surfaceBounds(surface).right
         assertEquals("Original left inset remains outside the surface", safeLeft + gap, surfaceLeft, 2f)
         assertEquals("Original right inset remains outside the surface", safeRight - gap, surfaceRight, 2f)
     }
@@ -119,7 +127,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         instrumentation.runOnMainSync {
             val viewportBottom = viewport.boundsInRoot.bottom + viewport.positionOnScreen.y - viewport.positionInRoot.y
             val screenOffset = surface.positionOnScreen - surface.positionInRoot
-            surfaceBottom = rawBounds(surface).bottom + screenOffset.y
+            surfaceBottom = surfaceBounds(surface).bottom + screenOffset.y
             safeBottom = viewportBottom
             if (control != null) {
                 assertSame(surface.root, control.root)
@@ -259,26 +267,26 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                         2, 3 -> ui.waitUntil(5_000) { ui.onAllNodesWithText("Group ${count - 1}").fetchSemanticsNodes().size == 1 }
                         else -> awaitUniqueTag("subagent-collaboration-add-row")
                     }
-                    assertFloating("conversation-agent-sheet", "subagent-collaboration-done")
-                    val surface = node("conversation-agent-sheet").fetchSemanticsNode()
+                    assertFloating("subagent-collaboration-card", "subagent-collaboration-done")
+                    val surface = node("subagent-collaboration-card").fetchSemanticsNode()
                     val footer = node("subagent-collaboration-footer").fetchSemanticsNode()
                     val body = node("subagent-collaboration-body").fetchSemanticsNode()
                     assertSame(surface.root, footer.root)
                     assertSame(surface.root, body.root)
                     val initialFooter = rawBounds(footer)
-                    assertEquals("Collaboration and assistant surfaces share a default height", expectedHeight, rawBounds(surface).height, 2f)
+                    assertEquals("Collaboration and assistant surfaces share a default height", expectedHeight, surfaceBounds(surface).height, 2f)
                     assertEquals("Footer has only the original bottom padding", with(surface.layoutInfo.density) { 16.dp.toPx() },
-                        rawBounds(surface).bottom - initialFooter.bottom, 1.5f)
+                        surfaceBounds(surface).bottom - initialFooter.bottom, 1.5f)
                     assertTrue("Only the body occupies space above the footer", rawBounds(body).bottom <= initialFooter.top)
                     if (state == 3) ui.onNodeWithText("Group 19").performScrollTo().assertIsDisplayed()
                     if (state == 5) node("subagent-card-worker-7").scrollToVisible().assertIsDisplayed()
                     assertEquals("Scrolling never moves the footer", initialFooter.bottom,
                         rawBounds(node("subagent-collaboration-footer").fetchSemanticsNode()).bottom, 1f)
                     assertEquals("Scrolling never resizes the surface", expectedHeight,
-                        rawBounds(node("conversation-agent-sheet").fetchSemanticsNode()).height, 2f)
+                        surfaceBounds(node("subagent-collaboration-card").fetchSemanticsNode()).height, 2f)
                     node("subagent-collaboration-done").assertIsDisplayed().assertIsEnabled()
                     assertEquals(before, prefs.all)
-                    close("conversation-agent-sheet")
+                    close("subagent-collaboration-card")
                     assertEquals(before, prefs.all)
                 } finally { prefs.edit().clear().commit() }
             }
@@ -292,7 +300,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                 ui.onAllNodesWithText(secondaryLabel).fetchSemanticsNodes().singleOrNull()
                     ?.config?.contains(SemanticsProperties.Disabled) == false
             }
-            val nodes = listOf(node("conversation-agent-sheet"), node("subagent-collaboration-body"),
+            val nodes = listOf(node("subagent-collaboration-card"), node("subagent-collaboration-body"),
                 node("subagent-collaboration-footer"),
                 ui.onNodeWithText(secondaryLabel).assertIsEnabled().assertHasClickAction(),
                 node("subagent-collaboration-done").assertIsEnabled().assertHasClickAction())
@@ -301,7 +309,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             nodes.forEach { assertSame(root, it.root) }
             val bounds = awaitStableWindowFrame((root as ViewRootForTest).view) {
                 if (nodes.any { !it.layoutInfo.isPlaced || !it.layoutInfo.coordinates.isAttached }) null
-                else nodes.map { rawBounds(it) }.takeIf { sampled -> sampled.none { it.isEmpty } }
+                else nodes.mapIndexed { index, node -> if (index == 0) surfaceBounds(node) else rawBounds(node) }.takeIf { sampled -> sampled.none { it.isEmpty } }
             }
             val (surface, body, footer, secondary, done) = bounds
             fun px(value: Int) = with(nodes.first().layoutInfo.density) { value.dp.toPx() }
@@ -339,7 +347,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
                 }
                 if (preset == null) awaitUniqueTag("subagent-no-presets")
                 else ui.onNodeWithContentDescription("应用子代理组空组").assertIsDisplayed()
-                awaitDialogEnter(node("conversation-agent-sheet"))
+                awaitDialogEnter(node("subagent-collaboration-card"))
                 val expected = footerFrame("使用当前配置")
                 assertEquals(beforeOpen, prefs.all)
                 if (preset == null) ui.onNodeWithText("使用当前配置").performClick()

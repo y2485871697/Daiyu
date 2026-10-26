@@ -54,7 +54,7 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
                 maxY = maxOf(maxY, y)
             }
         }
-        if (different != 0) {
+        if (different != 0 || expectedChange) {
             val message = "$diagnostic different=$different bbox=$minX,$minY,$maxX,$maxY image=${left.width}x${left.height}"
             if (expectedChange) android.util.Log.i("DaiyuSwitchPixels", message) else android.util.Log.e("DaiyuSwitchPixels", message)
             val directory = File(checkNotNull(activity.getExternalFilesDir(null)), "settings-ui")
@@ -120,7 +120,7 @@ class SettingsSwitchBusyAppearanceTest : WiredActivityTestCase() {
             val available = captureScreenNode(node("unavailable-switch"))
             mainThread { enabled.value = false }
             val disabled = captureScreenNode(node("unavailable-switch").assertIsNotEnabled())
-            assertTrue(differentPixels(available, disabled, "unavailable-control-dark-$dark-checked-$checked",
+            assertTrue("disabled appearance dark=$dark checked=$checked", differentPixels(available, disabled, "unavailable-control-dark-$dark-checked-$checked",
                 "available", "disabled", expectedChange = true) > 0)
             mainThread { busy.value = true }
             val pending = node("unavailable-switch").assertIsNotEnabled()

@@ -154,6 +154,6 @@ class AndroidImageAttachmentsTest : InstrumentationTestCase() {
         assertEquals(listOf(ref), store.list(owner))
         store.clear(owner)
         assertTrue(store.list(owner).isEmpty())
-        assertTrue(original.contentEquals(ready.bytes()))
+        failure(ImageAttachmentFailure.MISSING) { ready.bytes() }
     }
 }

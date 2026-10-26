@@ -338,6 +338,7 @@ internal fun PageBackGestureHost(
         frame.backTargetKey = visualBackTargetKey
         frame.returnDirection = state.returnDirection
         frame.animateReturn = animateBackEnabled && resumed && state.previewAllowed
+        if (departure?.forward == true && !state.previewAllowed) departure.forwardSkipped = true
     }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val currentBack by rememberUpdatedState(dispatchBack)
@@ -345,7 +346,9 @@ internal fun PageBackGestureHost(
         animateFloatAsState(state.progress,
             animationSpec = if (state.active) snap() else spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f), label = "page-back-reset")
     }
-    state.transitionBlocked = departing || (state.previewAllowed && !state.active && progress > 0f)
+    val activeDeparture = departing && !(departure?.forward == true &&
+        (!state.previewAllowed || departure.forwardSkipped))
+    state.transitionBlocked = activeDeparture || (state.previewAllowed && !state.active && progress > 0f)
     val showDeparture = departure != null && departing && departure.frame.image != null && !departure.forwardSkipped && state.previewAllowed
     CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackStackPath provides stackPath,
         LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }) {
@@ -486,7 +489,7 @@ internal fun PageBackGestureHost(
                     } while (event.changes.any { it.pressed })
                 }
             })
-            if (departing && departure?.forward == true) Box(Modifier.fillMaxSize().testTag("page-enter-blocker").pointerInput(departure) {
+            if (activeDeparture && departure?.forward == true) Box(Modifier.fillMaxSize().testTag("page-enter-blocker").pointerInput(departure) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false).consume()
                     do {

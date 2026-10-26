@@ -649,15 +649,25 @@ class ConversationDatabase internal constructor(context: Context, private val af
         }
     }
     internal fun preflightBackup(text:String): List<Message> { val (_, rows, _) = parseBackup(text); backupReplyIdentities(text, rows); return rows }
-    fun importBackup(text:String):Pair<Int,Int> = importBackup(text, deferVideoWitness = false)
-    internal fun importBackupForVideoAssets(db: SQLiteDatabase, text: String): Pair<Int, Int> {
+    fun importBackup(text:String):Pair<Int,Int> =
+        importBackup(text, deferVideoWitness = false, restoreUsageRetirements = true)
+    internal fun importBackupForPackage(db: SQLiteDatabase, text: String): Pair<Int, Int> {
         check(db === writableDatabase && db.inTransaction())
-        return importBackup(text, deferVideoWitness = true)
+        return importBackup(text, deferVideoWitness = false, restoreUsageRetirements = false)
     }
-    private fun importBackup(text: String, deferVideoWitness: Boolean): Pair<Int, Int> {
+    internal fun importBackupForVideoAssets(db: SQLiteDatabase, text: String,
+        restoreUsageRetirements: Boolean = true): Pair<Int, Int> {
+        check(db === writableDatabase && db.inTransaction())
+        return importBackup(text, deferVideoWitness = true, restoreUsageRetirements = restoreUsageRetirements)
+    }
+    private fun importBackup(text: String, deferVideoWitness: Boolean,
+        restoreUsageRetirements: Boolean): Pair<Int, Int> {
         val (imported,restored,draft)=parseBackup(text)
         val replyIdentities = backupReplyIdentities(text, restored)
         transaction {db->
+            val retirementRestores = if (restoreUsageRetirements)
+                UsageStatisticsStore.prepareRetirementRestores(db, imported.map { it.id.value }.toSet())
+                else emptyList()
             // Append only. Any identity collision aborts the entire transaction.
             imported.forEach {c->check(db.insertOrThrow("conversations",null,ContentValues().apply {
                 put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0);put("assistant_id",c.assistantId);put("workspace_binding",c.workspaceBinding)
@@ -674,8 +684,10 @@ class ConversationDatabase internal constructor(context: Context, private val af
             check(db.rawQuery("SELECT 1 FROM composer WHERE id=1 AND draft=?",
                 arrayOf(if (existing.isEmpty()) draft else existing)).use { it.moveToFirst() })
             check(workspaceBinding(db, null) == composerWorkspace) { "导入改变了新聊天工作区绑定" }
+            retirementRestores.forEach { UsageStatisticsStore.restoreRetirement(db, it) }
             verifyBackupRows(db, imported, restored, verifyVideoWitness = !deferVideoWitness)
             restored.forEach { check(AssistantReplyIdentities.read(db, it) == replyIdentities[it.id.value]) { "回复身份导入回执不一致" } }
+            retirementRestores.forEach { UsageStatisticsStore.verifyRetirementRestore(db, it) }
         }
         return imported.size to restored.size
     }

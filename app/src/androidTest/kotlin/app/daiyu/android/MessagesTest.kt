@@ -141,7 +141,7 @@ class MessagesTest : InstrumentationTestCase() {
         assertEquals("2023-06-01", first.getRequestProperty("anthropic-version"))
         assertNull(first.getRequestProperty("Authorization")); assertFalse(first.instanceFollowRedirects)
         val request = JSONObject(first.request.toString("UTF-8"))
-        assertEquals(4096, request.getInt("max_tokens")); assertTrue(request.getBoolean("stream"))
+        assertEquals(64000, request.getInt("max_tokens")); assertTrue(request.getBoolean("stream"))
         assertTrue(request.getJSONArray("tools").getJSONObject(0).getJSONObject("input_schema").getJSONObject("properties").has("x"))
         session.next(listOf(ToolOutput(ToolCallId("call"), "ok")), events::add)
         val next = JSONObject(second.request.toString("UTF-8")).getJSONArray("messages")

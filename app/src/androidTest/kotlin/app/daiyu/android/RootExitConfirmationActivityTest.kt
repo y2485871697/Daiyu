@@ -38,7 +38,14 @@ class RootExitConfirmationActivityTest : WiredActivityTestCase() {
     fun testSidebarClosesBeforeRootExitConfirmation() {
         dismissIme()
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        mainThread { assertEquals(true, invokeHost(activity, "getSidebarVisible")) }
         pressBack()
+        ui.waitUntil(5_000) {
+            var closed = false
+            instrumentation.runOnMainSync { closed = invokeHost(activity, "getSidebarVisible") == false }
+            closed
+        }
+        dismissIme()
         mainThread { assertFalse(activity.isFinishing); assertFalse(hasExitPrompt()) }
         pressBack()
         mainThread { assertFalse(activity.isFinishing); assertTrue(hasExitPrompt()) }

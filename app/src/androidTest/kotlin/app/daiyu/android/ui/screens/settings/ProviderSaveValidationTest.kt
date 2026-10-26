@@ -41,7 +41,7 @@ class ProviderSaveValidationTest : WiredActivityTestCase() {
                     providerName = "豆包语音", showCatalog = false, speechOnly = true)
             } }
         }
-        awaitModelEditor()
+        awaitUniqueTag("page:模型设置")
         reveal("settings-field:Base URL").assertIsNotEnabled()
         assertEquals(app.daiyu.android.voice.providers.DoubaoSpeech.BASE_URL, draft.endpoint)
         assertEquals(0, saves)

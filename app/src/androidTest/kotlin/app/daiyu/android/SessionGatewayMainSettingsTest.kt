@@ -151,7 +151,8 @@ class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
         edit("顶层身份键", "old-unsaved.key")
         val changed = fixture.settings.load().copy(model = "changed-while-backgrounded")
         realPauseResume(activity, atPause = { fixture.settings.save(changed) })
-        ui.waitUntil(5_000) { runCatching { node("session-gateway-save").assertIsEnabled(); true }.getOrDefault(false) }
+        ui.waitUntil(5_000) { hostField("gatewayReloadPending") == false && hostField("gatewayEditing") != null }
+        reveal("session-gateway-save", page, lazyKey = "session_gateway_save").assertIsEnabled()
         mainThread {
             assertEquals(changed.requestOptions.sessionGateway, hostField("gatewayDraft"))
             assertEquals(false, hostField("gatewayReplacementAuthorized"))

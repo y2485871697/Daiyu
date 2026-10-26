@@ -71,8 +71,9 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
             awaitNodeWindowFocus(node("thinking-depth-slider"))
             ui.onNode(hasTestTag("conversation-agent-sheet") and
                 hasAnyDescendant(hasTestTag("thinking-depth-slider")), useUnmergedTree = true).assertIsDisplayed()
-            node("subagent-thinking-value").assertTextEquals("选择思考深度")
-            node("thinking-depth-slider").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ProgressBarRangeInfo))
+            node("subagent-thinking-value").assertTextEquals("关闭")
+            node("thinking-depth-slider").assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo,
+                androidx.compose.ui.semantics.ProgressBarRangeInfo(0f, 0f..6f, 5)))
             node("thinking-depth-slider").performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(4f)) }
             node("subagent-thinking-value").assertTextEquals("高")
             val range = node("thinking-depth-slider").fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]

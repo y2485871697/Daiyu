@@ -61,11 +61,8 @@ class ImmediateConversationActivityTest : WiredActivityTestCase() {
     }
 
     fun testIndependentComposerIsNotMovedIntoExplicitNewConversation() {
-        mainThread {
-            fixture.database.draft("独立草稿")
-            activity.select(null)
-            activity.createNewConversation()
-        }
+        setDraft("独立草稿")
+        mainThread { activity.createNewConversation() }
         val created = assertEmptySelected()
         assertEquals("独立草稿", fixture.database.draft())
         assertNull(fixture.database.workspaceBinding(created.id))

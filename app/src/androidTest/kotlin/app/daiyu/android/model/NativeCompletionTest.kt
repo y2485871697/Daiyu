@@ -328,12 +328,16 @@ class NativeCompletionTest : InstrumentationTestCase() {
         }
     }
 
-    fun testGeminiGenerationConfigIsStrictAndThinkingIsExplicitlyUnsupported() {
+    fun testGeminiGenerationConfigAndThinkingAreStrictlyValidated() {
         val protocol = ProviderProtocol.GEMINI
         val invalid = listOf("null", "\"not an object\"", "[]", "false", "3",
-            "{\"thinkingConfig\":null}", "{\"thinkingConfig\":{}}",
-            "{\"thinkingConfig\":{\"thinkingBudget\":1024}}",
-            "{\"thinkingConfig\":{\"thinkingLevel\":\"high\",\"includeThoughts\":true}}")
+            """{"thinkingConfig":null}""", """{"thinkingConfig":[]}""",
+            """{"thinkingConfig":{"thinkingBudget":"1024"}}""",
+            """{"thinkingConfig":{"thinkingBudget":-2}}""",
+            """{"thinkingConfig":{"thinkingLevel":"unknown"}}""",
+            """{"thinkingConfig":{"includeThoughts":"true"}}""",
+            """{"thinkingConfig":{"thinkingBudget":1024,"thinkingLevel":"high"}}""",
+            """{"thinkingConfig":{"unknown":true}}""")
         invalid.forEach { value ->
             val options = ProviderRequestOptions("{\"generationConfig\":$value}")
             rejected { options.validate(protocol) }
@@ -345,7 +349,10 @@ class NativeCompletionTest : InstrumentationTestCase() {
             }
             assertEquals(0, posts)
         }
-        listOf("{}", "{\"candidateCount\":1,\"maxOutputTokens\":64}").forEach { value ->
+        listOf("{}", "{\"candidateCount\":1,\"maxOutputTokens\":64}",
+            """{"thinkingConfig":{}}""", """{"thinkingConfig":{"thinkingBudget":1024}}""",
+            """{"thinkingConfig":{"thinkingLevel":"high","includeThoughts":true}}"""
+        ).forEach { value ->
             val options = ProviderRequestOptions("{\"generationConfig\":$value}")
             options.validate(protocol)
             val merged = options.apply(NativeCompletionRequest.body(settings(protocol), JSONArray(), emptyList(), null), protocol)

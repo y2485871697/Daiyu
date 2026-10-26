@@ -50,7 +50,7 @@ class BackupScreenTest : WiredActivityTestCase() {
             val actionsCard = node("backup-actions-card").fetchSemanticsNode().boundsInRoot
             assertEquals(optionsCard.left, actionsCard.left)
             assertEquals(optionsCard.right, actionsCard.right)
-            assertTrue(optionsCard.bottom < actionsCard.top)
+            assertTrue(optionsCard.bottom <= actionsCard.top)
             node("backup-export").assertTextEquals("导出数据")
             node("backup-import").assertTextEquals("导入数据")
             assertTrue(optionBounds.bottom <= exportBounds.top)

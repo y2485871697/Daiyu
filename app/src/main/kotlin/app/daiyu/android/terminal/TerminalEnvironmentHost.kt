@@ -434,7 +434,7 @@ private class AndroidTerminalEnvironmentBackend(
                     }
             }
             val home = File(root, "home").apply { check(mkdirs() || isDirectory) }
-            val cwd = request.workspace?.hostDirectory ?: File(context.filesDir, "workspace").apply {
+            val cwd = request.workspace?.hostDirectory ?: File(context.filesDir.canonicalFile, "workspace").apply {
                 check(mkdirs() || isDirectory) { "terminal_workspace_unavailable" }
             }
             require(cwd.isAbsolute && cwd == cwd.canonicalFile && cwd.isDirectory) { "terminal_workspace_unavailable" }

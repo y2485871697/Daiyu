@@ -156,7 +156,10 @@ internal object ResponsesStream {
                 "response.reasoning_summary_text.done" -> done(event,"text") { summary(event,it,true) }
                 "response.reasoning_summary_part.done" -> {
                     val part=event.getJSONObject("part")
-                    if (part.optString("type") == "summary_text") done(part,"text") { summary(event,it,true) }
+                    if (part.optString("type") == "summary_text") {
+                        checkProtocol(part.opt("text") is String)
+                        summary(event, part.getString("text"), true)
+                    }
                 }
                 "response.output_text.delta","response.refusal.delta" -> {
                     val delta=event.getString("delta");chars+=delta.length

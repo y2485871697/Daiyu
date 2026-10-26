@@ -41,7 +41,7 @@ class ChatModelPickerBalanceBindingTest : WiredActivityTestCase() {
         val app = instrumentation.targetContext.applicationContext as ChatApplication
         val original = app.providerBalanceHost
         val models = listOf(ModelCatalogEntryUi("model"))
-        fun amount(slot: String, text: String) = ui.onNode(hasText(text) and
+        fun amount(slot: String, text: String) = ui.onNode(hasText(formatBalanceDisplay(text)) and
             hasAnyAncestor(hasTestTag("chat-model-provider-balance:$slot")), useUnmergedTree = true)
         try {
             mainThread {

@@ -104,7 +104,7 @@ class ResponsesTest:InstrumentationTestCase() {
     }
     fun testConfirmedDisabledOrInvalidDeviceStatusReturnsSafeResult() {
         for((enabled,arguments,expected) in listOf(
-            Triple(false,"{}","capability_disabled"),Triple(true,"{} trailing","invalid_arguments"))) {
+            Triple(false,"{}","capability_disabled"),Triple(true,"{\"extra\":true}","invalid_arguments"))) {
             val config=settings.copy(batteryEnabled=false,deviceStatusEnabled=enabled)
             val item=call().put("name","device_status").put("arguments",arguments)
             val connections=listOf(Connection(frames(event("response.output_item.done","item" to item),completed(item))),Connection(frames(completed(message("拒绝读取")))))
@@ -262,7 +262,7 @@ class ResponsesTest:InstrumentationTestCase() {
         var executed=0
         val result=run(listOf(Connection(frames(event("response.output_item.done","item" to call()),event("response.incomplete"))))) {executed++;"{}"}
         assertEquals(RunStatus.FAILED,result.status);assertEquals(0,executed)
-        assertNull((result.blocks.single() as MessageBlock.Tool).result)
+        assertTrue(result.blocks.filterIsInstance<MessageBlock.Tool>().isEmpty())
     }
     fun testFinalCallMustBeCompletedAndMatch() {
         val changed=call().put("status","in_progress")
@@ -413,7 +413,7 @@ class ResponsesTest:InstrumentationTestCase() {
         val result=run(listOf(Connection(frames(event("response.output_item.done","item" to call()),
             reasoningPart(0,"partial",status="incomplete"),event("response.incomplete"))))) {executed++;"{}"}
         assertEquals(RunStatus.FAILED,result.status);assertEquals(0,executed)
-        assertNull((result.blocks.single() as MessageBlock.Tool).result)
+        assertTrue(result.blocks.filterIsInstance<MessageBlock.Tool>().isEmpty())
         assertEquals(RunStatus.FAILED,run(listOf(Connection(frames(reasoningDelta(-1,"bad"),completed())))).status)
         val malformed=event("response.reasoning_summary_part.done","item_id" to "rs","summary_index" to 0,
             "part" to event("summary_text"))
@@ -503,7 +503,7 @@ class ResponsesTest:InstrumentationTestCase() {
     }
     fun testInvalidCompleteCallsReturnPlatformValidationErrors() {
         val backend=app.daiyu.android.platform.AndroidBatteryTool(instrumentation.targetContext,true)
-        for(arguments in listOf("{\"extra\":true}","[]","null","\"text\"","0","true","{")) {
+        for(arguments in listOf("{\"extra\":true}")) {
             val invocation=call().put("arguments",arguments)
             val first=Connection(frames(event("response.output_item.done","item" to invocation),completed(invocation)))
             val second=Connection(frames(completed(message("invalid request rejected"))))
@@ -522,6 +522,19 @@ class ResponsesTest:InstrumentationTestCase() {
             assertEquals((result.blocks.first() as MessageBlock.Tool).result,replay.getString("output"))
             assertFalse(JSONObject(replay.getString("output")).getBoolean("ok"))
             assertEquals("invalid_arguments",JSONObject(replay.getString("output")).getString("error"))
+        }
+    }
+
+    fun testInvalidJsonAndNonObjectCallsFailBeforePlatformValidation() {
+        for (arguments in listOf("[]", "null", "\"text\"", "0", "true", "{")) {
+            val invocation = call().put("arguments", arguments)
+            val connection = Connection(frames(event("response.output_item.done", "item" to invocation), completed(invocation)))
+            var validations = 0
+            val result = run(listOf(connection)) { validations++; error("protocol-invalid call must not execute") }
+            assertEquals(RunStatus.FAILED, result.status)
+            assertEquals(ModelFailure.PROTOCOL.userMessage, result.error)
+            assertEquals(0, validations)
+            assertTrue(result.blocks.filterIsInstance<MessageBlock.Tool>().isEmpty())
         }
     }
 

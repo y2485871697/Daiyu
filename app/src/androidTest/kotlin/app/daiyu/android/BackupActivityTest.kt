@@ -100,6 +100,8 @@ class BackupActivityTest:ComposeActivityTestCase() {
     private lateinit var application:ChatApplication
     private lateinit var fixtureApp:FixtureApplication
     private lateinit var controller:ChatController
+    private val observedDataNotice = AtomicReference<String?>()
+    private val noticeObserver: () -> Unit = { controller.dataNotice?.let { observedDataNotice.set(it) } }
     private lateinit var provider:Documents
     private lateinit var directory:File
     private var original:ChatController?=null
@@ -146,6 +148,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             providerBalanceHost = { fixtureBalanceHost })
         awaitState {controller.ready}
         assertNull(controller.problem)
+        main { controller.observe(noticeObserver) }
         // Small real backup with historical messages/tool result; importing must not replay them.
         val conversation=database.create("default")
         val run=RunId("historical-run")
@@ -170,6 +173,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             main {activity?.finish()}
             instrumentation.waitForIdleSync()
             main {original?.let {application.controller=it}}
+            main { controller.unobserve(noticeObserver) }
             controller.close();fixtureBalanceHost.close();fixtureApp.deleteDatabase("conversations.db")
             fixtureApp.getSharedPreferences("conversation-ui",0).edit().clear().commit()
             fixtureApp.getSharedPreferences("model-settings",0).getString("key-alias",null)?.let {alias->
@@ -257,8 +261,8 @@ class BackupActivityTest:ComposeActivityTestCase() {
         start(); val before = controller.database.exportBackup()
         val output = Uri.parse("content://activity-backup/linux.zip")
         picker(103, uri = output, includeLinux = true)
-        awaitState { !controller.dataBusy && controller.dataNotice != null }
-        assertEquals("请先在 Linux 设置选择可用环境，再导出完整环境", controller.dataNotice)
+        awaitState { !controller.dataBusy && observedDataNotice.get() != null }
+        assertEquals("请先在 Linux 设置选择可用环境，再导出完整环境", observedDataNotice.get())
         assertEquals(0, provider.opens.get())
         assertFalse(provider.file(output).exists())
         unchanged(before)
@@ -314,12 +318,15 @@ class BackupActivityTest:ComposeActivityTestCase() {
             assertEquals(1,controller.database.conversations().size)
             assertTrue(bytes.contentEquals(provider.file(uri).readBytes()));assertEquals(0,modelCalls.get())
             val output=Uri.parse("content://activity-backup/output-$code.json")
-            picker(if(code==104) 103 else 101,uri=output);awaitState {!controller.dataBusy}
+            observedDataNotice.set(null)
+            picker(if(code==104) 103 else 101,uri=output)
+            awaitState { !controller.dataBusy && observedDataNotice.get() != null }
+            assertTrue("export notice=${observedDataNotice.get()}, opens=${provider.opens.get()}", provider.file(output).isFile)
             val text=provider.file(output).readText()
             assertTrue(text.contains("historical answer"))
             val envelope=org.json.JSONObject(text)
             assertEquals("daiyu-neutral-complete",envelope.getString("format"))
-            assertEquals(7,envelope.getInt("version"))
+            assertEquals(8,envelope.getInt("version"))
             NeutralBackupService(fixtureApp,controller.database).preflight(text)
             controller.database.conversations().forEach {controller.database.delete(it.id)}
             // Reset only revision for the second independent UI route; format fixtures stay tiny.

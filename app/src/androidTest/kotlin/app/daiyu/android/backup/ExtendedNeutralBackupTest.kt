@@ -344,7 +344,7 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
         val context = ContextService(target.context, target.db)
         val original = context.displayHistory(owner)
         val actions = MessageActionStore(target.db, context, MessageImageAssetStore(File(target.context.filesDir, "branch-images")))
-        val branch = actions.branch(actions.snapshot(owner).targets.getValue(user.id.value))
+        val branch = actions.branch(actions.snapshot(owner).targets.getValue(assistant.id.value))
         val copied = context.displayHistory(branch.id)
         assertEquals(original.take(2).map { it.blocks }, copied.map { it.blocks })
         assertEquals(original.take(2).map { it.createdAt }, copied.map { it.createdAt })

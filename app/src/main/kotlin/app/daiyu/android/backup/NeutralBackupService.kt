@@ -357,8 +357,11 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             try {
             val duplicate = db.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
             check(duplicate == duplicateSnapshot) { "导入身份在原件阶段已变化；未自动重试" }
+            val textBackup = parsed.payload.getString("text_backup")
+            val importedConversations = uniqueIds(objectOf(objectOf(textBackup).getString("payload"))
+                .getJSONArray("conversations"), "id")
             val statisticsReceipt = BackupStatisticsCodec.prepare(db, parsed.statistics,
-                restoringConversations = if (duplicate) emptySet() else parsed.statistics?.textConversations.orEmpty())
+                restoringConversations = if (duplicate) emptySet() else importedConversations)
             val result = run {
             if (duplicate) {
                 store.verifyRestoredBackup(db, parsed.payload.getString("text_backup"))
@@ -375,8 +378,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 return@run ImportResult(parsed.id, parsed.inventory, true)
             }
             // Existing parser validates text protocol, IDs, drafts and collisions; nested transaction shares helper.
-            if (video == null) store.importBackup(parsed.payload.getString("text_backup"))
-            else store.importBackupForVideoAssets(db, parsed.payload.getString("text_backup"))
+            if (video == null) store.importBackupForPackage(db, textBackup)
+            else store.importBackupForVideoAssets(db, textBackup, restoreUsageRetirements = false)
             parsed.columns.forEach { (table, columns) -> val rows = parsed.payload.getJSONObject("tables").getJSONArray(table)
                 repeat(rows.length()) { val row = rows.getJSONObject(it); val values = ContentValues()
                     columns.forEach { key -> when (val value = row.get(key)) {
@@ -397,13 +400,13 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             BackupGenerationCodec.restore(db, parsed.generation)
             BackupChildTaskCodec.restore(db, parsed.children)
             BackupRuntimeUsageCodec.restore(db, parsed.runtimeUsage)
-            val importedConversations = uniqueIds(objectOf(objectOf(parsed.payload.getString("text_backup"))
-                .getString("payload")).getJSONArray("conversations"), "id")
             if (parsed.statistics == null) {
                 app.daiyu.android.storage.ConversationUsageStore.backfill(db, importedConversations)
-                app.daiyu.android.storage.UsageStatisticsStore.importLegacyReceipts(db, importedConversations)
+                app.daiyu.android.storage.UsageStatisticsStore.importLegacyReceipts(db, importedConversations,
+                    preserveExistingFor = statisticsReceipt?.legacyRequests.orEmpty()
+                        .map { BackupHistoryRows.text(it, "conversation_id") }.toSet())
             }
-            else BackupStatisticsCodec.restore(db, parsed.statistics, statisticsReceipt)
+            BackupStatisticsCodec.restore(db, parsed.statistics, statisticsReceipt)
             if (parsed.static.isNotEmpty()) BackupHistoryRows.install(db)
             val importedMessages = objectOf(objectOf(parsed.payload.getString("text_backup")).getString("payload")).getJSONArray("messages")
             parsed.static.forEach { StaticGenerationCodec.saveInTransaction(db, it, importedMessages) }

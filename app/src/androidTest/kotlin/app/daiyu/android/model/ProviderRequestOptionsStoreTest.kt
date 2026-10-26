@@ -90,7 +90,7 @@ class ProviderRequestOptionsStoreTest : InstrumentationTestCase() {
             ProviderRequestOptions("""{"input":[]}""") to ProviderProtocol.RESPONSES,
             ProviderRequestOptions("""{"service_tier":7}""") to ProviderProtocol.RESPONSES,
             ProviderRequestOptions("""{"service_tier":"priority"}""") to ProviderProtocol.MESSAGES,
-            ProviderRequestOptions(speedMode = GptSpeedMode.FAST) to ProviderProtocol.MESSAGES
+            ProviderRequestOptions("""{"max_tokens":"64"}""") to ProviderProtocol.MESSAGES
         )
         for ((options, protocol) in cases) {
             val valid = if (protocol == ProviderProtocol.MESSAGES) settings().copy(

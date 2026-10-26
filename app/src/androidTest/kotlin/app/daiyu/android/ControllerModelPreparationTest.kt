@@ -14,8 +14,9 @@ import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
 class ControllerModelPreparationTest : InstrumentationTestCase() {
-    private val expectedBaseCatalog = setOf("get_battery_status", "context_usage", "ask_user",
-        "assistant_memory_read", "assistant_memory_search")
+    private val expectedBaseCatalog = listOf("get_battery_status", "ask_user", "context_usage",
+        "assistant_memory_read", "assistant_memory_search", "inspect_child_tasks", "control_child_task", "get_child_task",
+        "terminal_exec", "terminal_read")
     private class FixtureApplication(base: Context) : Application() {
         private val privateFiles=File(base.cacheDir,"controller-model-files-${UUID.randomUUID()}").apply {check(mkdirs() || isDirectory)}
         init { attachBaseContext(base) }
@@ -120,8 +121,8 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                     f.settings.save(config.copy(model="later-model", apiKey="later-key", batteryEnabled=false, deviceStatusEnabled=true))
                     opens.incrementAndGet()
-                    assertEquals(expectedBaseCatalog, definitions.map { it.name }.toSet())
-                    assertEquals(setOf("ask_user"), definitions.filter {it.sideEffect}.map {it.name}.toSet())
+                    assertEquals(expectedBaseCatalog, definitions.map { it.name })
+                    assertEquals(setOf("ask_user", "terminal_exec"), definitions.filter {it.sideEffect}.map {it.name}.toSet())
                     assertEquals("fixture-model", config.model)
                     assertEquals("fixture-key", config.apiKey)
                     val runTools = ChatController::class.java.getDeclaredField("runTools").apply { isAccessible = true }
@@ -284,8 +285,8 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             probe
         }
         val c=f.db.create("default");finish(f,c)
-        assertEquals(expectedBaseCatalog,probe.definitions.map {it.name}.toSet())
-        assertEquals(setOf("ask_user"),probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
+        assertEquals(expectedBaseCatalog,probe.definitions.map {it.name})
+        assertEquals(setOf("ask_user", "terminal_exec"),probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
         val usage=probe.definitions.single {it.name=="context_usage"}
         val reply=f.db.messages(c.id).last().second
         assertTrue(usage.description.contains(c.id.value));assertTrue(usage.description.contains(reply.runId.value))
@@ -391,7 +392,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         }
         finish(f,c)
         assertEquals(setOf("skills_list","skills_read","skills_read_resource"),probe.definitions.filter {it.name.startsWith("skills_")}.map {it.name}.toSet())
-        assertEquals(setOf("ask_user"),probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
+        assertEquals(setOf("ask_user", "terminal_exec"),probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
         assertTrue(probe.definitions.single {it.name=="skills_list"}.description.contains(old.revision))
         val outputs=probe.returned.single();assertEquals(3,outputs.size)
         val index=org.json.JSONObject(outputs[0].output);assertTrue(index.getBoolean("ok"))

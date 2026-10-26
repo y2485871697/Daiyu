@@ -111,6 +111,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     )
 
     private fun stableScreenBounds(view: android.view.View,
+        touchBounds: (androidx.compose.ui.geometry.Rect) -> androidx.compose.ui.geometry.Rect = { it },
         readBounds: () -> androidx.compose.ui.geometry.Rect?): androidx.compose.ui.geometry.Rect {
         val automation = instrumentation.uiAutomation
         val oldFlags = automation.serviceInfo.flags
@@ -142,8 +143,10 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                     nativeBounds.right.toFloat(), nativeBounds.bottom.toFloat())
                 val contained = windowBounds.left <= bounds.left && windowBounds.top <= bounds.top &&
                     windowBounds.right >= bounds.right && windowBounds.bottom >= bounds.bottom
+                val touch = touchBounds(bounds)
+                check(touch.width > 0f && touch.height > 0f && bounds.contains(touch.topLeft) && touch.right <= bounds.right && touch.bottom <= bounds.bottom)
                 val targetPixels = android.graphics.Rect()
-                android.graphics.RectF(bounds.left, bounds.top, bounds.right, bounds.bottom).roundOut(targetPixels)
+                android.graphics.RectF(touch.left, touch.top, touch.right, touch.bottom).roundOut(targetPixels)
                 val occluded = windows.any { other ->
                     if (other.id == id || other.layer <= window.layer) false else {
                         if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -157,7 +160,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                             val overlay = android.graphics.Rect()
                             other.getBoundsInScreen(overlay)
                             !overlay.isEmpty && androidx.compose.ui.geometry.Rect(overlay.left.toFloat(), overlay.top.toFloat(),
-                                overlay.right.toFloat(), overlay.bottom.toFloat()).overlaps(bounds)
+                                overlay.right.toFloat(), overlay.bottom.toFloat()).overlaps(touch)
                         }
                     }
                 }
@@ -180,13 +183,14 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     }
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    private fun screenBounds(tag: String): androidx.compose.ui.geometry.Rect {
+    private fun screenBounds(tag: String,
+        touchBounds: (androidx.compose.ui.geometry.Rect) -> androidx.compose.ui.geometry.Rect = { it }): androidx.compose.ui.geometry.Rect {
         val interaction = node(tag).scrollToVisible()
         awaitVisualIdle()
         awaitNodeWindowFocus(interaction)
         val target = interaction.fetchSemanticsNode()
         val view = (target.root as androidx.compose.ui.platform.ViewRootForTest).view
-        val stable = stableScreenBounds(view) {
+        val stable = stableScreenBounds(view, touchBounds) {
             val coordinates = target.layoutInfo.coordinates
             if (!target.layoutInfo.isPlaced || !coordinates.isAttached) null else {
                 val screen = IntArray(2)
@@ -228,13 +232,19 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     }
 
     private fun realLongPress(tag: String) {
-        val bounds = screenBounds(tag)
+        val bounds = screenBounds(tag) { full ->
+            val x = full.left + full.width * .2f
+            androidx.compose.ui.geometry.Rect(x - 1f, full.center.y - 1f, x + 1f, full.center.y + 1f)
+        }
         val point = androidx.compose.ui.geometry.Offset(bounds.left + bounds.width * .2f, bounds.center.y)
         injectGesture(listOf(0L to point, (android.view.ViewConfiguration.getLongPressTimeout() + 80L) to point))
     }
 
     private fun realDrag(tag: String) {
-        val bounds = screenBounds(tag)
+        val bounds = screenBounds(tag) { full ->
+            androidx.compose.ui.geometry.Rect(full.left + full.width * .2f - 1f, full.center.y - 1f,
+                full.right - full.width * .1f + 1f, full.center.y + 1f)
+        }
         val hold = android.view.ViewConfiguration.getLongPressTimeout() + 80L
         val start = androidx.compose.ui.geometry.Offset(bounds.left + bounds.width * .2f, bounds.center.y)
         val end = androidx.compose.ui.geometry.Offset(bounds.right - bounds.width * .1f, bounds.center.y)

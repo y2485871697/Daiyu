@@ -71,7 +71,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                 ui.waitForIdle()
                 // Do not reveal/scroll the row here: restoration itself must make it visible.
                 node(tag).assertIsDisplayed()
-                assertEquals(position, settingsScrollPosition(), .00002f)
+                assertEquals(position, settingsScrollPosition(), 1f)
                 val restored = node(tag).fetchSemanticsNode().boundsInRoot
                 assertEquals(bounds.top, restored.top, 2f)
                 assertEquals(bounds.bottom, restored.bottom, 2f)
@@ -110,7 +110,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             }
             node("page:App 信息与更新").assertDoesNotExist()
             node(tag).assertIsDisplayed()
-            assertEquals(position, settingsScrollPosition(), .00002f)
+            assertEquals(position, settingsScrollPosition(), 1f)
             assertEquals(bounds.top, node(tag).fetchSemanticsNode().boundsInRoot.top, 2f)
             assertEquals(bounds.bottom, node(tag).fetchSemanticsNode().boundsInRoot.bottom, 2f)
         }

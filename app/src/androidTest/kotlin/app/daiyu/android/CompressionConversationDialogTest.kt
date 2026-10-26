@@ -120,7 +120,9 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
     fun testOnlyActualCompressionShowsProgressAndDispatchesOneCancellation() {
         show(dark = true, operation = ContextManagementOperation.COMPRESS)
         node("context-management").performScrollToIndex(0)
-        node("compression-dialog-operation").assertIsDisplayed().assertTextContains("正在压缩会话…")
+        node("compression-dialog-operation").assertIsDisplayed()
+        ui.onNode(hasText("正在压缩会话…") and
+            hasAnyAncestor(hasTestTag("compression-dialog-operation")), useUnmergedTree = true).assertIsDisplayed()
         node("context-cancel").scrollToVisible().assertIsDisplayed().assertTextContains("取消压缩").performClick()
         node("context-cancel").assertIsNotEnabled()
         node("context-compress").assertIsNotEnabled()

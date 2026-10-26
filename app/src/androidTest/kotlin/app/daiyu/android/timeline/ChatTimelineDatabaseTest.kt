@@ -129,6 +129,7 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         val envelope = JSONObject(NeutralBackupService(context, db).exportPackage())
         val payload = JSONObject(envelope.getString("payload"))
         payload.getJSONObject("tables").remove("chat_timeline_events")
+        payload.remove("statistics")
         val raw = payload.toString()
         envelope.put("version", 6).put("payload", raw).put("sha256", PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8)))
         val (destination, target) = fresh(); NeutralBackupService(destination, target).importPackage(envelope.toString())

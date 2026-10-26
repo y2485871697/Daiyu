@@ -177,9 +177,16 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
         val connection=Connection(frames(ready(),completed(call(),message())))
         val session=ResponsesModel(settings) {connection}.open(emptyList())
         val events=mutableListOf<ModelEvent>()
-        expectInterrupted {session.next(emptyList()) {events.add(it);if(it is ModelEvent.ToolReady) session.cancel()}}
+        var cancelledAt = -1
+        expectInterrupted {session.next(emptyList()) {
+            events.add(it)
+            if(it is ModelEvent.ToolReady) { cancelledAt = events.size; session.cancel() }
+        }}
         assertEquals(1,events.filterIsInstance<ModelEvent.ToolReady>().size)
-        assertNoConfirmation(events)
+        assertTrue(cancelledAt >= 0)
+        assertEquals(cancelledAt, events.size)
+        assertFalse(events.any { it is ModelEvent.ProtocolOutput })
+        assertEquals("confirmed", events.filterIsInstance<ModelEvent.TextFinal>().single().text)
         assertTrue(connection.disconnected.get())
     }
     fun testCancellationDuringProtocolOutputDoesNotReturnSuccess() {

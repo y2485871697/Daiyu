@@ -168,7 +168,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         store.save(profile)
         store.save(AssistantProfile("other", "other", "other instructions", memoryEnabled = false))
         store.select(profile.id)
-        val config = fixture.settings.load()
+        val config = controller.providers.freezeActive().settings
         val provider = ProviderSnapshot.capture(config)
         browserSettings.save(BrowserSettings(BrowserAccess.FULL))
         val draft = draft()

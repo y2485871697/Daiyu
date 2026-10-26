@@ -61,7 +61,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         test = test.split('fun testAssistantUsageChoiceAndModelEditorShareFloatingInsets()', 1)[0]
         for required in ('rawBounds(node("assistant-sheet").fetchSemanticsNode()).height',
                          'listOf(0, 1, 2, 3, 4, 5)', 'listOf(1f, .8f)', 'fontScale = 1.3f',
-                         'expectedHeight, rawBounds(surface).height, 2f)',
+                         'expectedHeight, surfaceBounds(surface).height, 2f)',
                          '16.dp.toPx()', '"Scrolling never moves the footer"',
                          '"Group 19"', '"subagent-card-worker-7"', 'assertEquals(before, prefs.all)',
                          'assertEquals(0, fixture.opens.get())'):
@@ -93,7 +93,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         sample = sample.split('val (surface, body, footer, secondary, done) = bounds', 1)[0]
         self.assertIn('nodes.forEach { assertSame(root, it.root) }', lookup)
         self.assertIn('!it.layoutInfo.isPlaced || !it.layoutInfo.coordinates.isAttached', sample)
-        self.assertIn('nodes.map { rawBounds(it) }', sample)
+        self.assertIn('nodes.mapIndexed { index, node -> if (index == 0) surfaceBounds(node) else rawBounds(node) }', sample)
         self.assertNotIn('fetchSemanticsNode', sample)
         self.assertNotIn('Thread.sleep', test)
         self.assertNotIn('SystemClock.sleep', test)

@@ -358,7 +358,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertNull(fixture.controller.active)
     }
 
-    fun testAttachmentMenuContainsOnlyPickersAndBackPreservesDraftConfigurationAndGrants() {
+    fun testAttachmentMenuContainsExpectedEntriesAndBackPreservesDraftConfigurationAndGrants() {
         selectDraft()
         val before = fixture.database.exportBackup()
         val settings = fixture.settings.load()
@@ -368,10 +368,17 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
             ChatMenuAction.ATTACH_FILE, ChatMenuAction.ATTACH_FOLDER)) {
             node("chat-attachment:${action.name}").assertIsDisplayed()
         }
-        ui.onAllNodes(SemanticsMatcher("attachment picker entry") {
+        val expectedEntries = setOf("ATTACH_IMAGE", "ATTACH_VIDEO", "ATTACH_FILE", "ATTACH_FOLDER",
+            "BROWSER_TOOLS", "GUI_TOOLS", "MCP_TOOLS", "TERMINAL_TOOLS",
+            "GENERATE_IMAGE", "GENERATE_VIDEO", "GENERATION_SETTINGS")
+        val entries = ui.onAllNodes(SemanticsMatcher("attachment entry") {
             it.config.contains(SemanticsProperties.TestTag) &&
                 it.config[SemanticsProperties.TestTag].startsWith("chat-attachment:")
-        }).assertCountEquals(4)
+        }).fetchSemanticsNodes()
+        assertEquals(expectedEntries.map { "chat-attachment:$it" }.toSet(),
+            entries.map { it.config[SemanticsProperties.TestTag] }.toSet())
+        assertEquals(expectedEntries.size, entries.size)
+        expectedEntries.forEach { node("chat-attachment:$it").scrollToVisible().assertIsDisplayed().assertHasClickAction() }
         node("image-host-authorize").assertDoesNotExist()
         node("chat-attachment-path-toggle").assertDoesNotExist()
         ui.onNodeWithText("声明图片能力").assertDoesNotExist()

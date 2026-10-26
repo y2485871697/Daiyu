@@ -471,8 +471,11 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 awaitVisualIdle()
                 val density = node("chrome-host").fetchSemanticsNode().boundsInRoot.width / 320f
                 fun assertGraphic(description: String, sizeDp: Float) {
-                    val graphic = ui.onNode(hasContentDescription(description) and !hasClickAction(),
-                        useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                    val graphicNode = if (description == "推理强度，当前为 高") {
+                        node("chat-reasoning").assertContentDescriptionEquals(description).assertHasClickAction()
+                        ui.onNode(hasParent(hasTestTag("chat-reasoning")) and !hasClickAction(), useUnmergedTree = true)
+                    } else ui.onNode(hasContentDescription(description) and !hasClickAction(), useUnmergedTree = true)
+                    val graphic = graphicNode.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
                     val slot = button(description).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
                     assertEquals(sizeDp, graphic.width / density, .75f)
                     assertEquals(sizeDp, graphic.height / density, .75f)

@@ -288,7 +288,8 @@ class ModelSettingsStore internal constructor(
     } catch (_: Exception) { true } // Malformed gate fails closed before any decryption.
 
     private fun readOAuth(): app.daiyu.android.model.oauth.CodexAuth? =
-        preferences.getString("oauth-reference", null)?.let { app.daiyu.android.model.oauth.CodexAuth(it) }
+        if (!preferences.contains("oauth-reference")) null
+        else preferences.getString("oauth-reference", null)?.let { app.daiyu.android.model.oauth.CodexAuth(it) }
 
     private fun readRequestOptions(): ProviderRequestOptions = ProviderRequestOptions.decode(
         if (preferences.contains("request-options")) preferences.getString("request-options", null)

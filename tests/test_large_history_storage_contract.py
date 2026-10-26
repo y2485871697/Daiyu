@@ -61,7 +61,10 @@ class LargeHistoryStorageContractTest(unittest.TestCase):
     def test_reader_rejects_over_budget_and_invalid_utf8_without_fallback(self):
         source = READER.read_text()
         self.assertIn("require(length in 0..maxBytes)", source)
-        self.assertIn("check(bytes.size().toLong()==length)", source)
+        self.assertIn("if (consumed == length) return -1", source)
+        self.assertIn("check(part.isNotEmpty() && part.size.toLong() <= length - consumed)", source)
+        self.assertIn("java.io.InputStreamReader(source, decoder)", source)
+        self.assertNotIn("ByteArrayOutputStream", source)
         self.assertIn("CodingErrorAction.REPORT", source)
         self.assertNotIn("takeLast", source)
         self.assertNotIn("getOrDefault", source)

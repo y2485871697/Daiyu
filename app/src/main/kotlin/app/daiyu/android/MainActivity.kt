@@ -131,6 +131,8 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicBoolean
 import androidx.compose.ui.graphics.asImageBitmap
 
+internal val RetainedPausedResumeAction = androidx.compose.ui.semantics.SemanticsPropertyKey<() -> Unit>("RetainedPausedResumeAction")
+
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
     private var balanceRuntime by mutableStateOf<app.daiyu.android.balance.BalanceRuntime?>(null)
@@ -2344,9 +2346,11 @@ class MainActivity : ComponentActivity() {
                         app.daiyu.android.ui.components.UsageGlassDialog("压缩会话", onDismiss = closePaused) {
                             top.yukonga.miuix.kmp.basic.Text("页面已暂停；继续查看会重新读取上下文，压缩操作需重新确认",
                                 modifier = Modifier.testTag("context-management-paused"))
-                            app.daiyu.android.ui.components.UsageAction("继续查看",
-                                { resumeContextManagementPage(conversation, generation, epoch) },
-                                modifier = Modifier.testTag("context-management-resume"))
+                            val resume = { resumeContextManagementPage(conversation, generation, epoch) }
+                            app.daiyu.android.ui.components.UsageAction("继续查看", resume,
+                                modifier = Modifier.testTag("context-management-resume").semantics {
+                                    this[RetainedPausedResumeAction] = resume
+                                })
                             app.daiyu.android.ui.components.UsageAction("返回", closePaused)
                         }
                     }
@@ -2367,8 +2371,11 @@ class MainActivity : ComponentActivity() {
                         app.daiyu.android.ui.components.UsageGlassDialog("浏览器", onDismiss = closePaused) {
                             top.yukonga.miuix.kmp.basic.Text("浏览器已暂停；点击继续查看后才重新连接，不会自动恢复任务",
                                 modifier = Modifier.testTag("browser-paused"))
-                            app.daiyu.android.ui.components.UsageAction("继续查看", { resumeBrowserVisualPage(target, epoch) },
-                                modifier = Modifier.testTag("browser-resume"))
+                            val resume = { resumeBrowserVisualPage(target, epoch) }
+                            app.daiyu.android.ui.components.UsageAction("继续查看", resume,
+                                modifier = Modifier.testTag("browser-resume").semantics {
+                                    this[RetainedPausedResumeAction] = resume
+                                })
                             app.daiyu.android.ui.components.UsageAction("返回", closePaused)
                         }
                     }

@@ -156,7 +156,13 @@ class ProviderInlineFieldsLayoutTest : WiredActivityTestCase() {
             val editor = control("model-body-field-value:0")
             editor.performTextReplacement("")
             awaitVisualIdle()
-            assertEquals("empty JSON does not reserve blank lines", nameHeight, valueHeight(), tolerance)
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            ui.onNodeWithText("值（JSON）", useUnmergedTree = true).performSemanticsAction(
+                androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { getLayout -> assertTrue(getLayout(layouts)) }
+            val placeholder = layouts.single()
+            assertEquals(1, placeholder.lineCount)
+            assertEquals("empty JSON only reserves its one-line placeholder",
+                maxOf(nameHeight, placeholder.size.height / density + 24f), valueHeight(), tolerance)
             editor.assertEditableText("")
             assertFalse(draft.bodyFieldsValid)
             editor.performTextReplacement("{\n  \"nested\": true\n}")

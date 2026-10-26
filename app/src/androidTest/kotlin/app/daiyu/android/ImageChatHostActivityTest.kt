@@ -218,15 +218,16 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val owner = host().session.owner
         val ordered = host().session.attachments.state.value.ready.map { it.attachment.id }
         assertEquals(2, documents.opens.get())
-        // Unknown or explicitly unsupported catalog capability must retain the draft without submitting.
-        for (supported in listOf<Boolean?>(null, false)) {
+        // An explicit unsupported override retains the draft; auto uses the default capability.
+        for (supported in listOf(false)) {
             setImageCapability(supported)
             node("chat-send").performClick()
             ui.waitUntil(10_000) { !host().sending }
             assertEquals(0, calls.get()); assertEquals(2, host().session.attachments.state.value.ready.size)
             assertDraft("正文在图片之前")
         }
-        setImageCapability()
+        setImageCapability(null)
+        assertEquals(true, controller.providers.freezeActive().settings.requestSnapshot().imageInputSupported)
         node("chat-send").performClick()
         awaitControl("one image request") { calls.get() == 1 && controller.active == null }
         ui.waitUntil(10_000) { !host().sending && host().session.attachments.state.value.items.isEmpty() }
@@ -292,16 +293,18 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
 
     fun testChangedExactModelDoesNotReusePreviousModelCatalogCapability() {
         setDraft("保留")
-        pick(1); waitImages(1); setImageCapability()
+        pick(1); waitImages(1); setImageCapability(false)
         val previousModel = settings.load().model
         settings.save(settings.load().copy(model = "different-exact-model"))
-        assertEquals(true, settings.modelCatalog.readRegisteredModel(previousModel)?.settings?.visionOverride)
-        assertNull(controller.providers.freezeActive().settings.visionOverride)
+        assertEquals(false, settings.modelCatalog.readRegisteredModel(previousModel)?.settings?.visionOverride)
+        val selected = controller.providers.freezeActive().settings
+        assertNull(selected.visionOverride)
+        assertEquals(true, selected.requestSnapshot().imageInputSupported)
         node("chat-send").performClick()
-        ui.waitUntil(10_000) { !host().sending }
-        assertDraft("保留")
-        assertEquals(1, host().session.attachments.state.value.ready.size)
-        assertEquals(0, calls.get())
+        awaitControl("new exact model accepts one image request") { calls.get() == 1 && controller.active == null }
+        ui.waitUntil(10_000) { !host().sending && host().session.attachments.state.value.items.isEmpty() }
+        assertDraft("")
+        assertEquals(1, calls.get())
     }
 
     fun testRecreationRestoresSameUnsentOwnerAndReferencesWithoutSending() {

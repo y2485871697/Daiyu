@@ -81,7 +81,8 @@ class SystemAccessSettingsActivityTest : WiredActivityTestCase() {
         setDraft("source unsent")
         val before = fixture.database.exportBackup()
         openSettings()
-        val intents = intercept { entry("源代码") }
+        entry("App 信息与更新")
+        val intents = intercept { reveal("settings-row:源代码", "App 信息与更新").performClick() }
         assertEquals(1, intents.size)
         assertEquals(Intent.ACTION_VIEW, intents.single().action)
         assertEquals("https://github.com/y2485871697/Daiyu", intents.single().dataString)

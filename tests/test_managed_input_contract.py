@@ -118,13 +118,13 @@ class ManagedInputContractTest(unittest.TestCase):
     def test_real_touches_map_layout_window_bounds_to_screen_before_injection(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()
         bounds = text.split('private fun screenBounds(', 1)[1].split('private fun injectGesture(', 1)[0]
-        for token in ('awaitNodeWindowFocus(interaction)', 'stableScreenBounds(view)',
+        for token in ('awaitNodeWindowFocus(interaction)', 'stableScreenBounds(view, touchBounds)',
                       'val coordinates = target.layoutInfo.coordinates', 'coordinates.boundsInWindow()',
                       'view.getLocationOnScreen(screen)', 'view.getLocationInWindow(window)',
                       '(screen[0] - window[0]).toFloat()', '(screen[1] - window[1]).toFloat()',
                       '!coordinates.isAttached', 'screen-bounds tag=$tag'):
             self.assertIn(token, bounds)
-        self.assertLess(bounds.index('awaitNodeWindowFocus(interaction)'), bounds.index('stableScreenBounds(view)'))
+        self.assertLess(bounds.index('awaitNodeWindowFocus(interaction)'), bounds.index('stableScreenBounds(view, touchBounds)'))
         stable = text.split('private fun stableScreenBounds(', 1)[1].split('private fun screenBounds(', 1)[0]
         for token in ('awaitStableWindowFrame(view) { sample() }', 'view.windowToken != token',
                       '!view.isAttachedToWindow', '!view.hasWindowFocus()', 'view.isLayoutRequested',
@@ -172,7 +172,7 @@ class ManagedInputContractTest(unittest.TestCase):
         stable = text.split('private fun stableScreenBounds(', 1)[1].split('@OptIn', 1)[0]
         for token in ('val windows = automation.windows', 'windows.singleOrNull', 'val occluded = windows.any',
                       'other.id == id', 'other.layer <= window.layer', 'other.getBoundsInScreen(overlay)',
-                      '!overlay.isEmpty', '.overlaps(bounds)', 'contained && !occluded',
+                      '!overlay.isEmpty', '.overlaps(touch)', 'contained && !occluded',
                       'instrumentation.runOnMainSync { current = sample() }'):
             self.assertIn(token, stable)
         precise = stable.split('if (android.os.Build.VERSION.SDK_INT >= 30)', 1)[1].split('} else {', 1)[0]
@@ -181,7 +181,7 @@ class ManagedInputContractTest(unittest.TestCase):
             self.assertIn(token, precise)
         for forbidden in ('getBoundsInScreen', '.bounds', 'quickReject', '.center'):
             self.assertNotIn(forbidden, precise)
-        self.assertIn('RectF(bounds.left, bounds.top, bounds.right, bounds.bottom).roundOut(targetPixels)', stable)
+        self.assertIn('RectF(touch.left, touch.top, touch.right, touch.bottom).roundOut(targetPixels)', stable)
         self.assertIn('Touch geometry rejected: $lastSample', stable)
         self.assertEqual(1, stable.count('automation.windows'))
         self.assertNotIn('requestFocus', stable)

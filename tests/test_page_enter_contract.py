@@ -64,9 +64,9 @@ class PageEnterContractTest(unittest.TestCase):
         self.assertIn('LaunchedEffect(departure, departure?.forwardSkipped)', self.host)
         self.assertIn('var forwardSkipped by mutableStateOf(false)', self.layers)
         self.assertIn('if (frame.holdingForChild) frame.childChangeCaptured = false', self.host)
-        self.assertIn('if (departing && departure?.forward == true) Box(', self.host)
+        self.assertIn('if (activeDeparture && departure?.forward == true) Box(', self.host)
         self.assertIn('testTag("page-enter-blocker").pointerInput(departure)', self.host)
-        self.assertIn('state.transitionBlocked = departing ||', self.host)
+        self.assertIn('state.transitionBlocked = activeDeparture ||', self.host)
 
     def test_frame_fixture_keeps_cold_clock_paused_and_samples_pixels_before_geometry(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageEnterActivityTest.kt').read_text()

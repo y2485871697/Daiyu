@@ -61,6 +61,9 @@ class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
         awaitModelEditor()
         reveal("model-save", lazyKey = "model_save").assertIsDisplayed()
         node("model-save-error").assertDoesNotExist()
+        modelField("API Key").assert(SemanticsMatcher.keyIsDefined(
+            androidx.compose.ui.semantics.SemanticsProperties.Password))
+        reveal("settings-secret-visibility:API Key").performClick()
         modelField("API Key").assertEditableText(before.apiKey).performTextReplacement("")
         saveModel()
         reveal("model-save-error", lazyKey = "model_save").assertExists()

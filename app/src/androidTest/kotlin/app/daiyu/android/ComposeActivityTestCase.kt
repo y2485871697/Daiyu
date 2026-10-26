@@ -640,6 +640,16 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             it.config.getOrNull(SemanticsProperties.EditableText)?.text == text
         })
     }
+    protected fun assertModelSecret(expected: String) {
+        val field = modelField("API Key")
+        val hidden = field.fetchSemanticsNode().config.contains(SemanticsProperties.Password)
+        if (hidden) reveal("settings-secret-visibility:API Key").performClick()
+        field.assertEditableText(expected)
+        if (hidden) {
+            reveal("settings-secret-visibility:API Key").performClick()
+            field.assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        }
+    }
     protected fun saveModel() {
         reveal("model-save", lazyKey = "model_save").performClick()
         awaitControl("model settings completion") {
@@ -783,8 +793,19 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             }
         }
     }
-    protected fun retainedControls(activity: MainActivity) = invokeHost(activity, "chatActions") as
-        app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+    protected fun retainedControls(activity: MainActivity): app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions {
+        fun capture() = invokeHost(activity, "chatActions") as
+            app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return capture()
+        var controls: app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions? = null
+        var failure: Throwable? = null
+        instrumentation.runOnMainSync {
+            try { controls = capture() }
+            catch (caught: Throwable) { failure = caught }
+        }
+        failure?.let { throw it }
+        return checkNotNull(controls)
+    }
     protected fun invokeHost(activity: MainActivity, name: String, vararg arguments: Any): Any? {
         val method = MainActivity::class.java.declaredMethods.single { it.name == name && it.parameterCount == arguments.size }
         try { return method.apply { isAccessible = true }.invoke(activity, *arguments) }

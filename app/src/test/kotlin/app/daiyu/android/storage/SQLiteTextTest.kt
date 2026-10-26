@@ -28,4 +28,33 @@ class SQLiteTextTest {
             }
         }
     }
+    @Test fun streamedUtf8KeepsChunkBoundariesNullsAndStrictEndOfInput() {
+        SQLiteDatabase.create(null).use { db ->
+            db.execSQL("CREATE TABLE composer (id TEXT PRIMARY KEY, draft TEXT)")
+            val draft = "a".repeat(65535) + "数🙂\u0000" + "b".repeat(65533) + "🙂数"
+            db.execSQL("INSERT INTO composer VALUES (?,?)", arrayOf("1", draft))
+            assertEquals(draft, SQLiteText.read(db, "composer", "draft", "id", "1"))
+            for (prefix in 65533..65535) {
+                val boundary = "a".repeat(prefix) + "🙂" + "末"
+                db.execSQL("UPDATE composer SET draft=? WHERE id='1'", arrayOf(boundary))
+                val bytes = boundary.toByteArray(Charsets.UTF_8).size.toLong()
+                assertEquals(boundary, SQLiteText.read(db, "composer", "draft", "id", "1", maxBytes = bytes))
+                assertTrue(runCatching { SQLiteText.read(db, "composer", "draft", "id", "1", maxBytes = bytes - 1) }
+                    .exceptionOrNull() is IllegalArgumentException)
+            }
+            for (hex in listOf("80", "E4B8", "F09F99")) {
+                db.execSQL("UPDATE composer SET draft=CAST(X'$hex' AS TEXT) WHERE id='1'")
+                assertTrue(runCatching { SQLiteText.read(db, "composer", "draft", "id", "1") }
+                    .exceptionOrNull() is java.nio.charset.CharacterCodingException)
+            }
+            db.execSQL("UPDATE composer SET draft='' WHERE id='1'")
+            assertEquals("", SQLiteText.read(db, "composer", "draft", "id", "1"))
+            db.execSQL("UPDATE composer SET draft=NULL WHERE id='1'")
+            assertNull(SQLiteText.read(db, "composer", "draft", "id", "1"))
+            val signal = android.os.CancellationSignal().apply { cancel() }
+            assertTrue(runCatching { SQLiteText.read(db, "composer", "draft", "id", "1", cancellationSignal = signal) }
+                .exceptionOrNull() is android.os.OperationCanceledException)
+        }
+    }
+
 }

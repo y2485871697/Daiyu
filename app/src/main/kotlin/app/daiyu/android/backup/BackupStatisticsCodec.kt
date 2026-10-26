@@ -20,7 +20,9 @@ internal object BackupStatisticsCodec {
     data class Validated(val tables: Map<String, List<JSONObject>>, val textConversations: Set<String>)
     data class RetirementRestore(val before: JSONObject, val after: JSONObject)
     data class Receipt(val expected: Map<String, List<JSONObject>>,
-        val retirementRestores: Map<String, RetirementRestore> = emptyMap())
+        val retirementRestores: Map<String, RetirementRestore> = emptyMap(),
+        val legacyRetirementRestores: List<UsageStatisticsStore.RetirementSnapshot> = emptyList(),
+        val legacyRequests: List<JSONObject> = emptyList())
 
     fun export(db: SQLiteDatabase, conversation: String?): JSONObject = JSONObject().put("version", 1).apply {
         columns.forEach { (table, fields) ->
@@ -66,7 +68,14 @@ internal object BackupStatisticsCodec {
     /** Freeze accounting before import writes. Only an explicit restoration of an absent
      * live conversation may reverse retirement; request identities remain immutable. */
     fun prepare(db: SQLiteDatabase, incoming: Validated?, restoringConversations: Set<String> = emptySet()): Receipt? {
-        if (incoming == null) return null
+        if (incoming == null) {
+            if (restoringConversations.isEmpty()) return null
+            val restores = UsageStatisticsStore.prepareRetirementRestores(db, restoringConversations)
+            val retained = restores.map { it.conversation }.toSet()
+            return if (restores.isEmpty()) null else Receipt(emptyMap(), legacyRetirementRestores = restores,
+                legacyRequests = BackupHistoryRows.read(db, UsageStatisticsStore.REQUESTS, UsageStatisticsStore.requestColumns)
+                    .filter { !it.isNull("conversation_id") && BackupHistoryRows.text(it, "conversation_id") in retained })
+        }
         check(db.inTransaction())
         val retirementRestores = linkedMapOf<String, RetirementRestore>()
         val expected = columns.mapValues { (table, fields) ->
@@ -88,13 +97,32 @@ internal object BackupStatisticsCodec {
                 }
                 rows[identity] = row
             }
+            if (table == UsageStatisticsStore.CONVERSATIONS) {
+                val supplied = incoming.tables.getValue(table).map { key(table, it) }.toSet()
+                rows.toMap().forEach { (identity, before) ->
+                    val conversation = BackupHistoryRows.text(before, "conversation_id")
+                    if (identity !in supplied && conversation in incoming.textConversations &&
+                        conversation in restoringConversations && !before.isNull("retired_messages")) {
+                        require(!before.isNull("retired_day") && !db.rawQuery(
+                            "SELECT 1 FROM conversations WHERE id=?", arrayOf(conversation)).use { it.moveToFirst() }
+                        ) { "统计身份冲突，未覆盖现有账目" }
+                        val after = JSONObject(before.toString()).put("retired_messages", JSONObject.NULL)
+                            .put("retired_day", JSONObject.NULL)
+                        retirementRestores[identity] = RetirementRestore(before, after)
+                        rows[identity] = after
+                    }
+                }
+            }
             require(rows.size <= BackupHistoryRows.MAX_ROWS)
             rows.values.toList()
         }
         return Receipt(expected, retirementRestores)
     }
     fun restore(db: SQLiteDatabase, incoming: Validated?, receipt: Receipt? = null) {
-        if (incoming == null) return
+        if (incoming == null) {
+            receipt?.legacyRetirementRestores.orEmpty().forEach { UsageStatisticsStore.restoreRetirement(db, it) }
+            return
+        }
         check(db.inTransaction())
         incoming.tables.forEach { (table, rows) -> rows.forEach { row ->
             val identity = identities.getValue(table)
@@ -121,7 +149,17 @@ internal object BackupStatisticsCodec {
         }
     }
     fun verify(db: SQLiteDatabase, incoming: Validated?, receipt: Receipt? = null) {
-        if (incoming == null) return
+        if (incoming == null) {
+            val restored = receipt?.legacyRetirementRestores.orEmpty()
+            restored.forEach { UsageStatisticsStore.verifyRetirementRestore(db, it) }
+            if (restored.isNotEmpty()) {
+                val retained = receipt!!.legacyRequests.map { BackupHistoryRows.text(it, "conversation_id") }.toSet()
+                val actual = BackupHistoryRows.read(db, UsageStatisticsStore.REQUESTS, UsageStatisticsStore.requestColumns)
+                    .filter { !it.isNull("conversation_id") && BackupHistoryRows.text(it, "conversation_id") in retained }
+                check(equalRows(UsageStatisticsStore.REQUESTS, receipt.legacyRequests, actual)) { "统计身份冲突，未覆盖现有账目" }
+            }
+            return
+        }
         incoming.tables.forEach { (table, rows) -> rows.forEach { BackupUsageCodec.verifyRow(db, table, it, identities.getValue(table)) } }
         // Receipts are conversation-owned, including authoritative empty sets in v8 packages.
         val actualReceipts = BackupHistoryRows.read(db, RECEIPTS, receiptColumns).filter {

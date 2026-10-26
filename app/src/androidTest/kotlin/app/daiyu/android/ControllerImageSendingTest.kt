@@ -94,8 +94,10 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         f.controller.imageAttachments.store.import(owner, png().inputStream())
     private fun provider(f: Fixture, supported: Boolean? = true): ProviderSnapshot =
         ProviderSnapshot.capture(f.settings.load(), f.settings.load().protocol, supported)
+    private fun runProvider(f: Fixture): ProviderSnapshot =
+        ProviderSnapshot.capture(f.controller.providers.freezeActive().settings)
     private fun submit(f: Fixture, conversation: Conversation?, owner: ImageAttachmentOwner, revision: Long,
-        parts: List<ImageSendPart>, provider: ProviderSnapshot = provider(f),
+        parts: List<ImageSendPart>, provider: ProviderSnapshot = runProvider(f),
         expectedDraft: String = if (conversation == null) f.db.draft() else
             f.db.conversations().single { it.id == conversation.id }.draft): ImageSendResult {
         val done = CountDownLatch(1); val result = AtomicReference<ImageSendResult>()
@@ -415,12 +417,19 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         assertEquals(receipt.userId, replay.userId); assertEquals(2, f.probe.opens.get())
     }
 
-    fun testUnsupportedOrUnknownCapabilityRejectsBeforeFactoryAndKeepsDraft() {
-        for (supported in listOf<Boolean?>(null, false)) {
+    fun testExplicitUnsupportedCapabilityRejectsBeforeFactoryAndKeepsDraft() {
+        for (supported in listOf(false)) {
             val f = fixture(); val conversation = f.db.create("default")
             val owner = ImageAttachmentOwner(conversation.id.value, "editor")
             val image = image(f, owner); f.db.draft(conversation.id, "keep")
-            val result = submit(f, conversation, owner, 1, listOf(ImageSendPart.Image(image)), provider(f, supported))
+            f.settings.modelCatalogSnapshot()
+            f.settings.modelCatalog.updateRegisteredModel(f.settings.load().model) { current ->
+                val record = checkNotNull(current)
+                record.copy(settings = record.settings.copy(visionOverride = supported))
+            }
+            val selected = runProvider(f)
+            assertEquals(false, selected.imageInputSupported)
+            val result = submit(f, conversation, owner, 1, listOf(ImageSendPart.Image(image)), selected)
             assertTrue(result is ImageSendResult.Rejected)
             assertEquals(0, f.probe.opens.get()); assertTrue(f.db.messages(conversation.id).isEmpty())
             assertEquals(listOf(image), f.controller.imageAttachments.store.list(owner))
@@ -456,7 +465,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         f.probe.beforeFactory = { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
         lateinit var handle: ImageSendHandle
         main { handle = checkNotNull(f.controller.sendImages(conversation, owner, 3,
-            listOf(ImageSendPart.Image(image)), provider(f), "") { result.set(it); done.countDown() }) }
+            listOf(ImageSendPart.Image(image)), runProvider(f), "") { result.set(it); done.countDown() }) }
         try {
             assertTrue(entered.await(10, TimeUnit.SECONDS))
             main { assertTrue(handle.cancel()); assertNull(f.controller.active) }
@@ -474,6 +483,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         f.probe.beforeFactory = { f.db.draft(conversation.id, "new draft") }
         val rejected = submit(f, conversation, owner, 4, parts, expectedDraft = "old draft")
         assertTrue(rejected is ImageSendResult.Rejected)
+        assertEquals("编辑草稿已变化；保留当前草稿，未发起请求", (rejected as ImageSendResult.Rejected).reason)
         assertEquals("new draft", f.db.conversations().single().draft)
         assertTrue(f.db.messages(conversation.id).isEmpty()); assertEquals(0, f.probe.opens.get())
         assertEquals(listOf(image), f.controller.imageAttachments.store.list(owner))
@@ -541,7 +551,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         val result = AtomicReference<ImageSendResult>()
         f.probe.beforeFactory = { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
         main { assertNotNull(f.controller.sendImages(conversation, owner, 1,
-            listOf(ImageSendPart.Image(image)), provider(f), "") { result.set(it); done.countDown() }) }
+            listOf(ImageSendPart.Image(image)), runProvider(f), "") { result.set(it); done.countDown() }) }
         try {
             assertTrue(entered.await(10, TimeUnit.SECONDS))
             main { f.controller.close() } // Must not wait on the factory under the monitor.

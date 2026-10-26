@@ -17,20 +17,47 @@ internal object SQLiteText {
             check(it.moveToFirst()); if(it.isNull(0)) null else it.getLong(0)
         } ?: return null
         require(length in 0..maxBytes)
-        val bytes=java.io.ByteArrayOutputStream();var start=1L
-        while(start<=length) {
-            cancellationSignal?.throwIfCanceled()
-            val part=db.rawQuery("SELECT substr(CAST($column AS BLOB),?,65536) FROM $table WHERE $key=?", arrayOf(start.toString(),id), cancellationSignal).use {
-                check(it.moveToFirst());it.getBlob(0)
+        val source = object : java.io.InputStream() {
+            private var consumed = 0L
+            private var part = ByteArray(0)
+            private var offset = 0
+            override fun read(): Int {
+                val one = ByteArray(1)
+                return if (read(one, 0, 1) == -1) -1 else one[0].toInt() and 255
             }
-            check(part.isNotEmpty() && bytes.size().toLong()+part.size<=length)
-            bytes.write(part);start+=part.size
+            override fun read(target: ByteArray, off: Int, len: Int): Int {
+                if (off < 0 || len < 0 || off > target.size - len) throw IndexOutOfBoundsException()
+                if (len == 0) return 0
+                cancellationSignal?.throwIfCanceled()
+                if (consumed == length) return -1
+                if (offset == part.size) {
+                    part = db.rawQuery("SELECT substr(CAST($column AS BLOB),?,65536) FROM $table WHERE $key=?",
+                        arrayOf((consumed + 1).toString(), id), cancellationSignal).use {
+                        check(it.moveToFirst()); it.getBlob(0)
+                    }
+                    check(part.isNotEmpty() && part.size.toLong() <= length - consumed)
+                    offset = 0
+                }
+                val count = minOf(len, part.size - offset)
+                part.copyInto(target, off, offset, offset + count)
+                offset += count
+                consumed += count
+                return count
+            }
         }
-        cancellationSignal?.throwIfCanceled()
-        check(bytes.size().toLong()==length)
-        return Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+        val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-            .decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString()
-            .also { cancellationSignal?.throwIfCanceled() }
+        return java.io.InputStreamReader(source, decoder).use { reader ->
+            val result = StringBuilder(length.toInt())
+            val chars = CharArray(8192)
+            while (true) {
+                cancellationSignal?.throwIfCanceled()
+                val count = reader.read(chars)
+                if (count == -1) break
+                result.append(chars, 0, count)
+            }
+            cancellationSignal?.throwIfCanceled()
+            result.toString()
+        }
     }
 }

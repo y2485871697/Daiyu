@@ -337,7 +337,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         val mainOpens = AtomicInteger()
         val f = fresh(factory = { provider, _ ->
             assertEquals("fixture", provider.model)
-            assertNull(provider.imageInputSupported)
+            assertEquals(false, provider.imageInputSupported)
             CatalogFixturePort { history ->
                 mainOpens.incrementAndGet()
                 assertTrue(history.all { it.blocks.none { block -> block is MessageBlock.Image } })
@@ -351,9 +351,14 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         })
         f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
             ModelSettings("https://vision.invalid", "separate-vision-api", "separate-vision-key", false), null, true, true)
-        val main = ProviderSnapshot.capture(f.controller.settings.load())
+        f.controller.settings.modelCatalogSnapshot()
+        f.controller.settings.modelCatalog.updateRegisteredModel(f.controller.settings.load().model) { current ->
+            val record = checkNotNull(current)
+            record.copy(settings = record.settings.copy(visionOverride = false))
+        }
+        val main = ProviderSnapshot.capture(f.controller.providers.freezeActive().settings)
         val route = f.controller.captureImageRoute(main)
-        assertNull(main.imageInputSupported)
+        assertEquals(false, main.imageInputSupported)
         assertEquals("separate-vision-api", route.actual.model)
         assertEquals(true, route.actual.imageInputSupported)
         assertNotNull(route.auxiliaryGeneration)

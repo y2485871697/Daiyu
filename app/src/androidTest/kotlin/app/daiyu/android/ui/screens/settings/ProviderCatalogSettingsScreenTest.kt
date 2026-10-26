@@ -80,6 +80,8 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         startFetch()
         mainThread { checkNotNull(fetched).invoke(listOf(RemoteModel("existing", "Remote rename"), RemoteModel("add"), RemoteModel("unchecked"))) }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isNotEmpty() }
+        awaitDialogEnter(node("dialog-confirm"))
+        dismissIme()
     }
 
     fun testFetchAndConfirmationAppendOnlyCheckedWithoutSavingOrSelectingActiveModel() {
@@ -89,6 +91,8 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         node("provider-model-option:existing").assertIsOff()
             .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
         node("provider-model-option:existing").assertIsOn()
+        node("provider-model-list").performScrollToKey("add")
+        awaitVisualIdle()
         node("provider-model-option:add").assertIsOff()
             .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
         node("provider-model-option:add").assertIsOn()
@@ -122,6 +126,8 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
     fun testRevisionChangeWhileDialogOpenFailsClosed() {
         show()
         fetch()
+        node("provider-model-list").performScrollToKey("add")
+        awaitVisualIdle()
         node("provider-model-option:add").assertIsOff()
             .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
         node("provider-model-option:add").assertIsOn()

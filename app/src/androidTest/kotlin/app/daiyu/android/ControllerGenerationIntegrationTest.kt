@@ -841,7 +841,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         controlMain { assertTrue(target.loadMessageActionSnapshot(conversation) { snapshot.set(it); captured.countDown() }) }
         assertTrue(captured.await(10, TimeUnit.SECONDS))
         val done = CountDownLatch(1); val result = AtomicReference<MessageActionResult>()
-        controlMain { assertTrue(target.messageAction(MessageAction.BRANCH, checkNotNull(snapshot.get()).targets.values.first()) {
+        controlMain { assertTrue(target.messageAction(MessageAction.BRANCH, checkNotNull(snapshot.get()).targets.values.single { it.role == Message.ASSISTANT_ROLE }) {
             result.set(it); done.countDown()
         }) }
         assertTrue(done.await(15, TimeUnit.SECONDS)); assertTrue(result.get().toString(), result.get() is MessageActionResult.Branch)

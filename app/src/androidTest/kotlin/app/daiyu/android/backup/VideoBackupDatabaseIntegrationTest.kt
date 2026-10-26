@@ -202,6 +202,36 @@ class VideoBackupDatabaseIntegrationTest : InstrumentationTestCase() {
         assertEquals(before, state(f))
     }
 
+    fun testVideoRestoreClearsLocalRetirementForCurrentAndLegacyPackages() {
+        for (version in listOf(7, 8)) {
+            val f = fresh()
+            val assets = VideoAssets()
+            val turn = videoTurn(f, assets, "retirement-$version")
+            val backup = service(f, assets)
+            val envelope = JSONObject(backup.exportPackage())
+            if (version == 7) {
+                val data = JSONObject(envelope.getString("payload"))
+                data.remove("statistics")
+                val raw = data.toString()
+                envelope.put("version", 7).put("payload", raw)
+                    .put("sha256", PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8)))
+            }
+            val text = envelope.toString()
+            val expected = f.db.messages(turn.conversation).map { it.second }
+            f.db.delete(turn.conversation)
+            assertFalse(backup.importPackage(text).alreadyImported)
+            assertEquals(expected, f.db.messages(turn.conversation).map { it.second })
+            f.db.readableDatabase.rawQuery("SELECT retired_messages,retired_day FROM usage_statistics_conversations WHERE conversation_id=?",
+                arrayOf(turn.conversation.value)).use { c ->
+                assertTrue(c.moveToFirst()); assertTrue(c.isNull(0)); assertTrue(c.isNull(1))
+            }
+            assertTrue(backup.importPackage(text).alreadyImported)
+            assertEquals(1, backup.preflight(backup.exportPackage()).conversations)
+            f.db.delete(turn.conversation)
+            assertTrue(f.db.conversations().isEmpty())
+        }
+    }
+
     private fun roundTrip(singleConversation: Boolean) {
         val source = source()
         val from = source.fixture
@@ -321,6 +351,8 @@ class VideoBackupDatabaseIntegrationTest : InstrumentationTestCase() {
             val envelope = JSONObject(current)
             val data = payload(current)
             val inventory = data.getJSONObject("inventory")
+            data.remove("statistics")
+            data.getJSONObject("tables").remove("chat_timeline_events")
             data.remove("static_generation_history"); inventory.remove("static_generation_outputs")
             if (version < 4) {
                 data.remove("runtime_usage_history")

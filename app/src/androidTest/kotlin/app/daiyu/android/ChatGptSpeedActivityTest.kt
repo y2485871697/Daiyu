@@ -52,13 +52,17 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
         node("chat-reasoning").performClick()
         node("chat-thinking-speed").assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(36.dp)
         node("thinking-depth-slider").assertHeightIsEqualTo(28.dp)
+        awaitDialogEnter(node("chat-thinking-title"))
         val title = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
         node("chat-thinking-title").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) {
             assertTrue(it(title))
         }
         assertEquals(14f, title.single().layoutInput.style.fontSize.value, .001f)
         assertEquals(22f, title.single().layoutInput.style.lineHeight.value, .001f)
-        assertFalse(title.single().hasVisualOverflow)
+        val layout = title.single()
+        assertFalse("title size=${layout.size} constraints=${layout.layoutInput.constraints} " +
+            "lines=${layout.lineCount} widthOverflow=${layout.didOverflowWidth} heightOverflow=${layout.didOverflowHeight} " +
+            "bounds=${node("chat-thinking-title").fetchSemanticsNode().boundsInRoot}", layout.hasVisualOverflow)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         node("chat-reasoning").performClick()
         assertNull(fixture.settings.load().requestOptions.speedMode)

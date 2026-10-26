@@ -28,7 +28,7 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
         }
         realPauseResume(activity)
         assertPausedBrowser()
-        val oldContinue = checkNotNull(node("browser-resume").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val oldContinue = node("browser-resume").fetchSemanticsNode().config[RetainedPausedResumeAction]
         realPauseResume(activity, atPause = { oldContinue(); assertNull(visit()) })
         assertPausedBrowser()
         mainThread { oldContinue(); assertNull(visit()) }

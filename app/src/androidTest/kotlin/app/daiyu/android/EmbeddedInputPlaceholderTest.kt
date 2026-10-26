@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.Density
@@ -106,7 +107,9 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
                 show(kind, dark, direction, fontScale = 1.3f, enabled = false)
                 assertPlaceholderInside(kind)
                 field(kind).assertIsNotEnabled().performTouchInput { click() }
-                field(kind).assertIsNotFocused()
+                field(kind).assert(SemanticsMatcher("not focused") {
+                    it.config.getOrNull(SemanticsProperties.Focused) != true
+                })
                 assertEquals("", value)
                 assertPlaceholderInside(kind)
             }
@@ -137,7 +140,11 @@ class EmbeddedInputPlaceholderTest : WiredActivityTestCase() {
             field(kind).performClick().performTextInputSelection(TextRange(3))
             val frame = ui.onNodeWithTag("${tag(kind)}-container").fetchSemanticsNode().boundsInRoot
             val eye = ui.onNodeWithTag("settings-secret-visibility:$label")
-            val bounds = eye.assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+            val eyeNode = eye.assertWidthIsAtLeast(40.dp).assertHeightIsAtLeast(40.dp).fetchSemanticsNode()
+            val bounds = eyeNode.boundsInRoot
+            val minimumTouch = with(eyeNode.layoutInfo.density) { 48.dp.toPx() }
+            assertTrue("eye touch width", eyeNode.touchBoundsInRoot.width >= minimumTouch - 1f)
+            assertTrue("eye touch height", eyeNode.touchBoundsInRoot.height >= minimumTouch - 1f)
             assertTrue("eye is inside $kind", bounds.left >= frame.left && bounds.right <= frame.right + 1f &&
                 bounds.top >= frame.top && bounds.bottom <= frame.bottom + 1f)
             assertEquals(frame.center.y, bounds.center.y, 1f)

@@ -328,7 +328,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         for guard in ('state.previewOwners.add(previewOwner)', 'state.previewOwners.remove(previewOwner)',
                       'previewOwners.none { it.enabled && !it.previewEnabled }',
                       'if (!alive || (transitionBlocked && swipeCommit == null) || committing) return', 'committing = true',
-                      'departing || (state.previewAllowed && !state.active && progress > 0f)'):
+                      'activeDeparture || (state.previewAllowed && !state.active && progress > 0f)'):
             self.assertIn(guard, self.host)
         for file in ('VoiceSettingsPanel.kt', 'VoiceAccountPanel.kt', 'ui/SubAgentSettingsScreen.kt',
                      'ui/screens/settings/SettingsHomeScreen.kt', 'ui/screens/settings/PetSettingsScreen.kt',

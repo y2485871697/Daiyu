@@ -41,7 +41,8 @@ internal object UsageStatisticsStore {
         check(db.insertOrThrow(META, null, ContentValues().apply { put("key", "initialized"); put("value", "1") }) != -1L)
     }
 
-    fun importLegacyReceipts(db: SQLiteDatabase, conversations: Set<String>? = null) {
+    fun importLegacyReceipts(db: SQLiteDatabase, conversations: Set<String>? = null,
+        preserveExistingFor: Set<String> = emptySet()) {
         check(db.inTransaction())
         db.rawQuery("SELECT conversation_id,request_owner,request_id,input_tokens,output_tokens,cached_tokens,cache_creation_tokens,window_tokens " +
             "FROM conversation_usage_receipts", null).use { c -> while (c.moveToNext()) {
@@ -54,7 +55,17 @@ internal object UsageStatisticsStore {
                 put("input_tokens", normalized.input); put("output_tokens", normalized.output)
                 put("cached_tokens", normalized.cached); put("cache_creation_tokens", normalized.creation)
             }
-            if (!db.rawQuery("SELECT 1 FROM $REQUESTS WHERE id=?", arrayOf("legacy:$id")).use { it.moveToFirst() })
+            val exists = db.rawQuery("SELECT conversation_id,input_tokens,output_tokens,cached_tokens,cache_creation_tokens " +
+                "FROM $REQUESTS WHERE id=?", arrayOf("legacy:$id")).use { previous ->
+                if (!previous.moveToFirst()) false else {
+                    check(previous.getString(0) == c.getString(0) &&
+                        Fields(token(previous, 1), token(previous, 2), token(previous, 3), token(previous, 4)) == normalized) {
+                        "统计身份冲突，未覆盖现有账目"
+                    }
+                    true
+                }
+            }
+            if (!exists && c.getString(0) !in preserveExistingFor)
                 check(db.insertOrThrow(REQUESTS, null, values) != -1L)
         } }
     }
@@ -78,6 +89,42 @@ internal object UsageStatisticsStore {
             // Original retired heatmap uses last update, not a guessed creation timestamp.
             put("retired_day", day(updated).toString())
         }, "conversation_id=? AND retired_messages IS NULL", arrayOf(conversation)) == 1)
+    }
+
+    data class RetirementSnapshot(val conversation: String, val createdAt: Long?,
+        val retiredMessages: Long, val retiredDay: String)
+
+    fun prepareRetirementRestores(db: SQLiteDatabase, conversations: Set<String>): List<RetirementSnapshot> {
+        check(db.inTransaction())
+        return conversations.mapNotNull { id ->
+            require(!db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(id)).use { it.moveToFirst() }) {
+                "退役恢复仅允许恢复不存在的会话"
+            }
+            db.rawQuery("SELECT created_at,retired_messages,retired_day FROM $CONVERSATIONS WHERE conversation_id=?",
+                arrayOf(id)).use { c ->
+                if (!c.moveToFirst()) null else {
+                    check(c.isNull(1) == c.isNull(2)) { "退役账目字段不完整" }
+                    if (c.isNull(1)) null else RetirementSnapshot(id,
+                        if (c.isNull(0)) null else c.getLong(0), c.getLong(1), c.getString(2))
+                }
+            }
+        }
+    }
+
+    fun restoreRetirement(db: SQLiteDatabase, before: RetirementSnapshot) =
+        restoreRetirement(db, before.conversation, before.createdAt, before.retiredMessages, before.retiredDay)
+
+    fun verifyRetirementRestore(db: SQLiteDatabase, before: RetirementSnapshot) {
+        verifyRestoredRetirement(db, before.conversation, before.retiredMessages)
+        val createdClause = if (before.createdAt == null) "created_at IS NULL" else "created_at=?"
+        val args = buildList {
+            add(before.conversation)
+            before.createdAt?.let { add(it.toString()) }
+        }.toTypedArray()
+        check(db.rawQuery("SELECT 1 FROM $CONVERSATIONS WHERE conversation_id=? AND $createdClause " +
+            "AND retired_messages IS NULL AND retired_day IS NULL", args).use { it.moveToFirst() }) {
+            "退役恢复回执不匹配"
+        }
     }
 
     /** Restore only lossless retirement transitions after live text is installed. */

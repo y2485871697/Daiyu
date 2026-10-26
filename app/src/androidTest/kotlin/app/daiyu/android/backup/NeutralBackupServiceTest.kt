@@ -88,6 +88,146 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
     fun testCompleteBackupRestoresDeletedConversationWithoutDuplicatingAccounting() = restoreDeletedConversation(false)
     fun testSingleConversationBackupRestoresDeletedConversationWithoutDuplicatingAccounting() = restoreDeletedConversation(true)
 
+    private fun recordPortableUsageHistory(db: ConversationDatabase, owner: ConversationId) {
+        val message = db.messages(owner).first { it.second.role == Message.ASSISTANT_ROLE }.second
+        val sql = db.writableDatabase
+        sql.execSQL("INSERT INTO recorded_usage_checkpoints(message_id,conversation_id,run_id) VALUES (?,?,?)",
+            arrayOf(message.id.value, owner.value, message.runId.value))
+        sql.execSQL("INSERT INTO recorded_usage_requests(kind,message_id,conversation_id,run_id,parent_message_id," +
+            "request_owner,request_id,attempt_id,operation,usage_source,has_usage,input_tokens,output_tokens,cached_tokens,cache_creation_tokens) " +
+            "VALUES ('CHECKPOINT',?,?,?,?, 'paid-owner','paid-request','paid-attempt','NEXT','MAIN',1,100,20,0,0)",
+            arrayOf(message.id.value, owner.value, message.runId.value, message.id.value))
+    }
+
+    fun testVersionSevenPortableHistoryDoesNotDuplicateRetainedPaidRequest() {
+        val (_, db, service) = fresh(); val owner = seed(db, 1)
+        recordUsage(db, owner); recordPortableUsageHistory(db, owner)
+        val before = statistics(db)
+        val text = JSONObject(mutate(service.exportConversation(owner)) { it.remove("statistics") })
+            .put("version", 7).toString()
+        db.delete(owner)
+        service.importPackage(text)
+        val restored = statistics(db)
+        assertEquals(before.lifetimeInputTokens, restored.lifetimeInputTokens)
+        assertEquals(before.lifetimeOutputTokens, restored.lifetimeOutputTokens)
+        assertEquals(before.lifetimeMessages, restored.lifetimeMessages)
+        assertEquals(1L, db.writableDatabase.rawQuery("SELECT COUNT(*) FROM usage_statistics_requests", null)
+            .use { it.moveToFirst(); it.getLong(0) })
+        assertTrue(service.importPackage(text).alreadyImported)
+    }
+
+    fun testVersionSevenPortableHistoryRejectsConflictingLegacyIdentity() {
+        val (_, db, service) = fresh(); val owner = seed(db, 1)
+        recordPortableUsageHistory(db, owner)
+        val legacy = "legacy:" + UUID.nameUUIDFromBytes((owner.value + "\u0000paid-owner\u0000paid-request")
+            .toByteArray(Charsets.UTF_8)).toString()
+        val sql = db.writableDatabase
+        sql.beginTransaction()
+        try {
+            UsageStatisticsStore.record(sql, legacy, owner.value,
+                UsageStatisticsStore.ModelIdentity("provider", "Provider", "model", "Model"),
+                100L, UsageStatisticsStore.Fields(101L, 20L, 0L, 0L), null)
+            sql.setTransactionSuccessful()
+        } finally { sql.endTransaction() }
+        val text = JSONObject(mutate(service.exportConversation(owner)) { it.remove("statistics") })
+            .put("version", 7).toString()
+        db.delete(owner)
+        val before = statistics(db)
+        reject { service.importPackage(text) }
+        assertEquals(before, statistics(db))
+        assertTrue(db.messages(owner).isEmpty())
+        assertEquals(0L, sql.rawQuery("SELECT COUNT(*) FROM neutral_imports", null).use { it.moveToFirst(); it.getLong(0) })
+    }
+
+    fun testTextRestoreClearsOnlyFrozenRetirementAndCanExportAndDeleteAgain() {
+        for (unknownCreation in listOf(false, true)) {
+            val (_, db, service) = fresh()
+            val owner = seed(db, 1)
+            recordUsage(db, owner)
+            val sql = db.writableDatabase
+            if (unknownCreation) sql.execSQL("UPDATE usage_statistics_conversations SET created_at=NULL WHERE conversation_id=?", arrayOf(owner.value))
+            val before = statistics(db)
+            val text = db.exportBackup()
+            repeat(2) {
+                db.delete(owner)
+                db.importBackup(text)
+                sql.rawQuery("SELECT created_at,retired_messages,retired_day FROM usage_statistics_conversations WHERE conversation_id=?",
+                    arrayOf(owner.value)).use { c ->
+                    assertTrue(c.moveToFirst()); assertEquals(unknownCreation, c.isNull(0))
+                    assertTrue(c.isNull(1)); assertTrue(c.isNull(2))
+                }
+                assertEquals(before.lifetimeMessages, statistics(db).lifetimeMessages)
+                assertEquals(before.lifetimeInputTokens, statistics(db).lifetimeInputTokens)
+                assertEquals(1, service.preflight(service.exportPackage()).conversations)
+            }
+            db.delete(owner)
+            assertEquals(0, statistics(db).currentMessages)
+            assertEquals(before.lifetimeMessages, statistics(db).lifetimeMessages)
+        }
+    }
+
+    fun testVersionSevenRestoreUsesLocalRetirementSnapshotWithoutDuplicatingRequests() {
+        val (_, db, service) = fresh()
+        val owner = seed(db, 1)
+        recordUsage(db, owner)
+        val before = statistics(db)
+        val text = JSONObject(mutate(service.exportPackage()) { it.remove("statistics") })
+            .put("version", 7).toString()
+        db.delete(owner)
+        assertFalse(service.importPackage(text).alreadyImported)
+        assertTrue(service.importPackage(text).alreadyImported)
+        assertEquals(before.lifetimeMessages, statistics(db).lifetimeMessages)
+        assertEquals(before.lifetimeInputTokens, statistics(db).lifetimeInputTokens)
+        assertEquals(1, service.preflight(service.exportPackage()).conversations)
+        db.delete(owner)
+        assertEquals(0, statistics(db).currentMessages)
+    }
+
+    fun testCompletePackageWithoutPortableConversationAccountingStillReversesLocalRetirement() {
+        for (countMismatch in listOf(false, true)) {
+            val (_, db, service) = fresh()
+            val owner = seed(db, 1)
+            val text = mutate(service.exportPackage()) { payload ->
+                payload.getJSONObject("statistics").put("conversations", org.json.JSONArray())
+            }
+            db.delete(owner)
+            if (countMismatch) db.writableDatabase.execSQL("UPDATE usage_statistics_conversations SET retired_messages=retired_messages+1")
+            if (countMismatch) {
+                val before = service.exportPackage()
+                reject { service.importPackage(text) }
+                assertEquals(before, service.exportPackage())
+                assertTrue(db.conversations().isEmpty())
+            } else {
+                assertFalse(service.importPackage(text).alreadyImported)
+                assertEquals(1, service.preflight(service.exportPackage()).conversations)
+                db.delete(owner)
+                assertTrue(db.conversations().isEmpty())
+            }
+        }
+    }
+
+    fun testTextRestoreRetirementConflictAndIgnoredCasRollBackAllImportedRows() {
+        for (failure in listOf("count", "overlap", "ignored", "created", "late")) {
+            val (_, db, service) = fresh()
+            val owner = seed(db, 1)
+            val text = db.exportBackup()
+            val message = db.messages(owner).first().second.id.value
+            db.delete(owner)
+            val sql = db.writableDatabase
+            when (failure) {
+                "count" -> sql.execSQL("UPDATE usage_statistics_conversations SET retired_messages=retired_messages+1")
+                "overlap" -> sql.execSQL("INSERT INTO usage_statistics_retired_messages VALUES(?,?)", arrayOf(message, owner.value))
+                "ignored" -> sql.execSQL("CREATE TRIGGER ignore_retirement BEFORE UPDATE ON usage_statistics_conversations BEGIN SELECT RAISE(IGNORE); END")
+                "created" -> sql.execSQL("CREATE TRIGGER mutate_retirement AFTER INSERT ON conversations BEGIN UPDATE usage_statistics_conversations SET created_at=created_at+1; END")
+                "late" -> sql.execSQL("CREATE TRIGGER dirty_retirement AFTER UPDATE ON usage_statistics_conversations WHEN NEW.retired_messages IS NULL BEGIN UPDATE usage_statistics_conversations SET retired_messages=2,retired_day='2026-01-01'; END")
+            }
+            val before = service.exportPackage()
+            reject { db.importBackup(text) }
+            assertEquals(before, service.exportPackage())
+            assertTrue(db.conversations().isEmpty())
+        }
+    }
+
     fun testDeletedConversationRestoreKeepsStrictConflictsAndRollsBackLateCorruption() {
         for (conflict in listOf("created", "request", "count", "tombstone", "late", "late-message")) {
             val (_, db, service) = fresh()

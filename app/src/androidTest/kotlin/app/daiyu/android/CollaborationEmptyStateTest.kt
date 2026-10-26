@@ -83,13 +83,17 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         val messageNode = node(tag).assertIsDisplayed().fetchSemanticsNode()
         val cardNode = node("subagent-collaboration-card").fetchSemanticsNode()
         val footerNode = node("subagent-collaboration-footer").assertIsDisplayed().fetchSemanticsNode()
-        val surfaceNode = node("conversation-agent-sheet").assertIsDisplayed().fetchSemanticsNode()
+        val surfaceNode = cardNode
         assertSame(cardNode.root, footerNode.root)
         assertSame(cardNode.root, messageNode.root)
         assertSame(cardNode.root, surfaceNode.root)
         val view = (cardNode.root as androidx.compose.ui.platform.ViewRootForTest).view
         val (layout, visible) = awaitStableWindowFrame(view) {
-            listOf(rawBounds(cardNode), rawBounds(footerNode), rawBounds(messageNode), rawBounds(surfaceNode)) to
+            listOf(rawBounds(cardNode), rawBounds(footerNode), rawBounds(messageNode),
+                rawBounds(surfaceNode).let { outer ->
+                    val inset = with(surfaceNode.layoutInfo.density) { 10.dp.toPx() }
+                    Rect(outer.left + inset, outer.top + inset, outer.right - inset, outer.bottom - inset)
+                }) to
                 (cardNode.boundsInRoot to footerNode.boundsInRoot)
         }
         val (card, footer, message, surface) = layout

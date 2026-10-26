@@ -648,7 +648,8 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         val assets = (ChatController::class.java.getDeclaredField("staticGenerationAssets\$delegate").apply {
             isAccessible = true
         }.get(controller) as Lazy<*>).value
-        val publicationFault: () -> Unit = { throw java.io.IOException("Activity UNKNOWN fixture") }
+        val publicationHits = AtomicInteger()
+        val publicationFault: () -> Unit = { publicationHits.incrementAndGet(); throw java.io.IOException("Activity UNKNOWN fixture") }
         app.daiyu.android.media.StaticGenerationAssets::class.java.getDeclaredField("afterAtomicMove").apply {
             isAccessible = true
         }.set(assets, publicationFault)
@@ -659,10 +660,14 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         val obsolete = AtomicInteger()
         mainThread {
             val host = ControllerMessageActionHost(controller)
-            host.bind(snapshot.get(), { true }) { obsolete.incrementAndGet() }.onBranch(snapshot.get().targets.keys.first())
+            host.bind(snapshot.get(), { true }) { obsolete.incrementAndGet() }
+                .onBranch(snapshot.get().targets.values.single {
+                    it.messageId.value == output.destination.assistantMessageId
+                }.messageId.value)
             host.invalidate(); lifecycle("onPause"); page("settings")
         }
         ui.waitUntil(10_000) { !controller.dataBusy && controller.pendingBranchOutcome() != null }
+        assertEquals("Static asset publication fault was reached", 1, publicationHits.get())
         val receipt = checkNotNull(controller.pendingBranchOutcome())
         val locator = checkNotNull(receipt.locator)
         assertEquals(0, obsolete.get())

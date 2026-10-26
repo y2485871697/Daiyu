@@ -286,8 +286,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         openAndAwait()
         realPauseResume(activity)
         assertPausedContextRoute()
-        val oldContinue = checkNotNull(node("context-management-resume").fetchSemanticsNode().config[
-            androidx.compose.ui.semantics.SemanticsActions.OnClick].action)
+        val oldContinue = node("context-management-resume").fetchSemanticsNode().config[RetainedPausedResumeAction]
         realPauseResume(activity, atPause = { oldContinue(); assertNoVisit() })
         assertPausedContextRoute()
         mainThread { oldContinue(); assertNoVisit() }

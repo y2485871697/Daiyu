@@ -17,11 +17,14 @@ data class ReportedReasoning(
     val text: String,
     val elapsedMillis: Long? = null,
     /** Process-local monotonic anchor; codecs persist only the sampled elapsed duration. */
-    val activeSinceNanos: Long? = null
+    val activeSinceNanos: Long? = null,
+    /** Number of preceding body blocks in this history segment; null for legacy histories. */
+    val blockOffset: Int? = null
 ) {
     init {
         require(itemId.isNotBlank() && itemId.length <= 512 && text.length <= 2_000_000)
         require(elapsedMillis == null || elapsedMillis >= 0)
+        require(blockOffset == null || blockOffset >= 0)
         require(activeSinceNanos == null || elapsedMillis != null)
     }
 
@@ -165,6 +168,7 @@ object MessageHistory {
         require(segment.reportedReasoning.isEmpty() || segment.role == Message.ASSISTANT_ROLE)
         require(segment.reportedReasoning.size <= 1024 && segment.reportedReasoning.map { it.itemId }.distinct().size == segment.reportedReasoning.size)
         require(segment.reportedReasoning.sumOf { it.text.length.toLong() } <= 2_000_000)
+        require(segment.reportedReasoning.all { it.blockOffset == null || it.blockOffset <= segment.blocks.size })
         val calls = mutableSetOf<ToolCallId>()
         segment.blocks.forEach { block -> when (block) {
             is MessageBlock.Text -> identity(block.itemId)

@@ -82,7 +82,11 @@ data class WorkProcessUi(
     val running: Boolean = false,
 )
 
-data class WorkSegmentUi(val narration: String? = null, val steps: List<WorkStepUi> = emptyList())
+data class WorkSegmentUi(
+    val narration: String? = null,
+    val steps: List<WorkStepUi> = emptyList(),
+    val reasoning: app.daiyu.android.domain.ReportedReasoning? = null,
+)
 
 data class WorkStepOwnerUi(val conversationId: String, val runId: String, val messageId: String)
 data class ToolDetailSectionUi(val title: String, val text: String)

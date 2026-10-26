@@ -673,13 +673,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         }
                         is ModelEvent.ReasoningDelta -> {
                             checkText(event.itemId, event.text, final = false, reasoning = true)
-                            segmentHistory.acceptReasoning(event.itemId, event.text, final = false)
+                            segmentHistory.acceptReasoning(event.itemId, event.text, final = false, blockOffset = current.blocks.size)
                             apply(current)
                             try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ReasoningFinal -> {
                             checkText(event.itemId, event.text, final = true, reasoning = true)
-                            segmentHistory.acceptReasoning(event.itemId, event.text, final = true)
+                            segmentHistory.acceptReasoning(event.itemId, event.text, final = true, blockOffset = current.blocks.size)
                             apply(current)
                             try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }

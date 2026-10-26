@@ -41,21 +41,29 @@ internal fun MessageContent(
     markdown: Boolean,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
+    reasoningBody: @Composable (app.daiyu.android.domain.ReportedReasoning, Boolean) -> Unit = { _, _ -> },
     textBody: @Composable (MessageContentUi.Text, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text.text, modifier, markdown) },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         var imageNumber = 0
         content.forEachIndexed { index, block ->
-            val itemKey = if (block is MessageContentUi.Text) block.itemId else index
+            val itemKey = when (block) {
+                is MessageContentUi.Text -> "text:${block.itemId}"
+                is MessageContentUi.Reasoning -> "reasoning:${block.reported.itemId}"
+                is MessageContentUi.Tool -> "tool:${block.step.toolCallId}"
+                is MessageContentUi.Image -> "image:$index:${block.image.reference.id}"
+            }
             key(itemKey) {
                 when (block) {
                     is MessageContentUi.Text -> {
                         if (block.text.isNotBlank()) textBody(block, Modifier.testTag("message-content-text:$index"))
                     }
+                    is MessageContentUi.Reasoning -> reasoningBody(block.reported,
+                        content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning })
                     is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                     is MessageContentUi.Tool -> {
                         key(block.step.owner, block.step.toolCallId) {
-                            if (!dedicatedTool(block.step)) WorkStepRow(block.step, toolContent = toolContent)
+                            if (!dedicatedTool(block.step)) WorkStepRow(block.step, showConnector = content.getOrNull(index + 1).let { it is MessageContentUi.Tool || it is MessageContentUi.Reasoning }, toolContent = toolContent)
                         }
                     }
                 }

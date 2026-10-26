@@ -211,6 +211,7 @@ class ChatTurnMapperTest {
             is MessageContentUi.Text -> block.text
             is MessageContentUi.Tool -> block.step.toolCallId
             is MessageContentUi.Image -> "image"
+                is MessageContentUi.Reasoning -> "reasoning"
         } })
         val steps = turn.content.filterIsInstance<MessageContentUi.Tool>().map { it.step }
         assertEquals("validated-question", steps.first().dedicatedKey)

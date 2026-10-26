@@ -380,12 +380,19 @@ internal fun AssistantTurn(
             Text(identity?.name ?: "助手", color = conversationColors().text,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }
-        ReportedReasoningCard(turn.listKey, turn.reportedReasoning,
+        val integratedReasoning = if (turn.content.isNotEmpty()) turn.content.any { it is MessageContentUi.Reasoning }
+            else turn.workProcess?.segments.orEmpty().any { it.reasoning != null }
+        if (!integratedReasoning) ReportedReasoningCard(turn.listKey, turn.reportedReasoning,
             allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
             generationComplete = turn.status != RunStatus.RUNNING)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
-            MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent) { text, modifier ->
+            MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent,
+                reasoningBody = { reported, connector ->
+                    ReasoningStepRow(turn.listKey, reported, connector,
+                        allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
+                        generationComplete = turn.status != RunStatus.RUNNING)
+                }) { text, modifier ->
                 ProjectedMessageMarkdown(text.text, projection?.blocks?.get(text.text), modifier,
                     visibleCharacters = reveal.limit(text.itemId), generationComplete = turn.status != RunStatus.RUNNING)
             }
@@ -411,7 +418,9 @@ internal fun AssistantTurn(
 
 @Composable
 private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, toolContent: @Composable (WorkStepUi) -> Unit) {
-    turn.workProcess?.let { WorkProcessCard(it, turn.listKey, toolContent = toolContent) }
+    turn.workProcess?.let { WorkProcessCard(it, turn.listKey,
+        allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
+        generationComplete = turn.status != RunStatus.RUNNING, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
         ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), visibleCharacters = reveal.limit("final"),
             generationComplete = turn.status != RunStatus.RUNNING)

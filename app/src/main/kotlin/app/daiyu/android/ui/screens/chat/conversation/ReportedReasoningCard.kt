@@ -10,6 +10,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +57,7 @@ internal fun ReportedReasoningCard(
     reported: List<ReportedReasoning>,
     allowLiveTiming: Boolean = false,
     generationComplete: Boolean = !allowLiveTiming,
+    embedded: Boolean = false,
     nanoTime: () -> Long = System::nanoTime
 ) {
     val summaries = reported.filter { hasReportedReasoningText(it.text) }
@@ -68,23 +74,23 @@ internal fun ReportedReasoningCard(
         label = "reported-reasoning-chevron"
     )
     Column(Modifier.fillMaxWidth().testTag("reported-reasoning:$ownerKey")
-        .clip(shape).border(1.dp, colors.line, shape).background(colors.surface)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 35.dp).testTag("reported-reasoning-header:$ownerKey")
+        .then(if (embedded) Modifier else Modifier.clip(shape).border(1.dp, colors.line, shape).background(colors.surface))) {
+        Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey")
             .then(if (hasSummary) Modifier.conversationClickable(
                 onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
             ) { expandedOverride = !expanded }.semantics {
                 stateDescription = if (expanded) "已展开" else "已折叠"
             } else Modifier.semantics(mergeDescendants = true) {})
-            .padding(horizontal = 11.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Icon(ChatPreviewIcons.Thought, null, Modifier.size(14.dp), tint = colors.accent)
-            Text(if (isThinking) "正在思考…" else "已思考", Modifier.weight(1f), color = colors.accent,
+            .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (embedded) 6.dp else 7.dp)) {
+            Icon(ChatPreviewIcons.Thought, null, Modifier.size(if (embedded) 18.dp else 14.dp), tint = colors.accent)
+            Text(if (isThinking) "正在思考…" else "已思考", Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
-            ReasoningElapsedTime(ownerKey, reported, isThinking, nanoTime)
+            ReasoningElapsedTime(ownerKey, reported, isThinking, nanoTime, embedded)
             if (hasSummary) {
                 Icon(ChatPreviewIcons.Chevron,
                     if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
-                    Modifier.size(10.dp).rotate(chevronRotation), tint = colors.muted)
+                    Modifier.size(if (embedded) 14.dp else 10.dp).rotate(chevronRotation), tint = colors.muted)
             }
         }
         AnimatedVisibility(
@@ -100,8 +106,8 @@ internal fun ReportedReasoningCard(
             ) + fadeOut(tween(ReasoningDisclosureDurationMillis))
         ) {
             Column(Modifier.fillMaxWidth()) {
-                HorizontalDivider(thickness = 1.dp, color = colors.line)
-                Column(Modifier.padding(start = 11.dp, end = 11.dp, top = 8.dp, bottom = 10.dp),
+                if (!embedded) HorizontalDivider(thickness = 1.dp, color = colors.line)
+                Column(Modifier.padding(start = if (embedded) 0.dp else 11.dp, end = if (embedded) 0.dp else 11.dp, top = 8.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     summaries.forEach { summary ->
                         key(ownerKey, summary.itemId) {
@@ -124,7 +130,8 @@ private fun ReasoningElapsedTime(
     ownerKey: String,
     reported: List<ReportedReasoning>,
     live: Boolean,
-    nanoTime: () -> Long
+    nanoTime: () -> Long,
+    embedded: Boolean
 ) {
     fun elapsed(now: Long): Long? {
         if (reported.any { it.elapsedMillis == null }) return null
@@ -148,7 +155,7 @@ private fun ReasoningElapsedTime(
     millis?.let { duration ->
         Text("${duration / 1_000}.${duration / 100 % 10} 秒",
             Modifier.testTag("reported-reasoning-duration:$ownerKey"), color = conversationColors().text,
-            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 16.sp))
+            style = MiuixTheme.textStyles.footnote1.copy(fontSize = if (embedded) 12.sp else 11.sp, lineHeight = if (embedded) 17.sp else 16.sp))
     }
 }
 
@@ -157,3 +164,26 @@ internal fun hasReportedReasoningText(text: String): Boolean =
 
 internal fun isReportedReasoningActive(reported: List<ReportedReasoning>, allowLiveTiming: Boolean): Boolean =
     allowLiveTiming && reported.any { it.activeSinceNanos != null }
+
+@Composable
+internal fun ReasoningStepRow(
+    ownerKey: String,
+    reported: ReportedReasoning,
+    showConnector: Boolean = false,
+    allowLiveTiming: Boolean = false,
+    generationComplete: Boolean = !allowLiveTiming,
+) {
+    val colors = conversationColors()
+    Row(Modifier.fillMaxWidth().testTag("work-reasoning:${reported.itemId}").drawBehind {
+        if (showConnector) drawLine(colors.line, Offset(5.dp.toPx(), 27.dp.toPx()),
+            Offset(5.dp.toPx(), size.height + 3.dp.toPx()), 1.dp.toPx())
+    }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.padding(top = 17.dp).width(12.dp)) {
+            Box(Modifier.size(10.dp).border(1.5.dp, colors.accent, CircleShape))
+        }
+        Column(Modifier.weight(1f)) {
+            ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),
+                allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, embedded = true)
+        }
+    }
+}

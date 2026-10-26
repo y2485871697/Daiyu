@@ -24,6 +24,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,11 +47,12 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     var expanded by rememberSaveable(ownerKey) { mutableStateOf(false) }
+    val reasoningState = rememberSaveableStateHolder()
     val colors = conversationColors()
     val steps = work.segments.flatMap { it.steps }
-    val stepCount = steps.size
+    val stepCount = steps.size + work.segments.count { it.reasoning != null }
     val category = steps.map { it.category }.distinct().singleOrNull()
     val title = ToolCardPresentations.processTitle(steps.map { it.category })
     val shape = RoundedCornerShape(12.dp)
@@ -88,18 +90,28 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                 Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 3.dp, bottom = 4.dp)) {
                     work.segments.forEachIndexed { segmentIndex, segment ->
                         if (!segment.narration.isNullOrBlank()) {
-                            val narrationConnector = work.segments.take(segmentIndex).any { it.steps.isNotEmpty() } &&
-                                work.segments.drop(segmentIndex).any { it.steps.isNotEmpty() }
+                            val narrationConnector = work.segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null } &&
+                                work.segments.drop(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }
                             Text(segment.narration, Modifier.fillMaxWidth().drawBehind {
                                 if (narrationConnector) drawLine(colors.line, Offset(5.dp.toPx(), 0f),
                                     Offset(5.dp.toPx(), size.height + 3.dp.toPx()), 1.dp.toPx())
                             }.padding(start = if (narrationConnector) 18.dp else 0.dp), color = colors.muted,
                                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
                         }
+                        segment.reasoning?.let { reported ->
+                            key(ownerKey, "reasoning", reported.itemId) {
+                                reasoningState.SaveableStateProvider(reported.itemId) {
+                                    ReasoningStepRow(ownerKey, reported,
+                                        showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
+                                            .any { it.steps.isNotEmpty() || it.reasoning != null },
+                                        allowLiveTiming = allowLiveTiming, generationComplete = generationComplete)
+                                }
+                            }
+                        }
                         segment.steps.forEachIndexed { index, step ->
                             key(ownerKey, step.owner, step.toolCallId) {
                                 val laterStep = index < segment.steps.lastIndex ||
-                                    work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() }
+                                    work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
                                 WorkStepRow(step, showConnector = laterStep, toolContent = toolContent)
                             }
                         }

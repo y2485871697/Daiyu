@@ -7,6 +7,7 @@ import app.daiyu.android.domain.MessageImageReference
 sealed interface MessageContentUi {
     data class Text(val itemId: String, val text: String) : MessageContentUi
     data class Image(val image: MessageImageUi) : MessageContentUi
+    data class Reasoning(val reported: app.daiyu.android.domain.ReportedReasoning) : MessageContentUi
     data class Tool(
         val step: WorkStepUi,
         val arguments: String = "",

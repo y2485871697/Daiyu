@@ -344,8 +344,13 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             }
             ui.onNodeWithTag("tool-output-content", useUnmergedTree = true).performClick()
             ui.onNodeWithTag("tool-output-dialog").assertExists()
+            awaitNodeWindowFocus(node("tool-output-dialog"))
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-            ui.waitForIdle()
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodesWithTag("tool-output-dialog").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+            }
+            ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
             ui.onNodeWithText(body).assertDoesNotExist()
             assertEquals(0, executions)
         }

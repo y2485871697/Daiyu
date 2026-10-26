@@ -16,6 +16,12 @@ class ProviderHeaders private constructor(private val values: Map<String, String
         }
     }
 
+    internal fun validateCodexRouting() {
+        require("x-codex-routing-hint" !in values && "openai-service-tier" !in values) {
+            "OAuth 服务档位请通过速度选项或请求体配置，不能自定义路由头"
+        }
+    }
+
     internal fun encode(): String = JSONObject(values).toString()
     override fun toString(): String = "ProviderHeaders(<redacted>)"
     override fun equals(other: Any?): Boolean = other is ProviderHeaders && values == other.values

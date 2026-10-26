@@ -171,19 +171,14 @@ class ProviderRequestWireTest {
         assertEquals(custom, config.requestOptions.customBody)
     }
 
-    @Test fun codexPriorityAndUltraFastRejectionLeaveReasoningIndependent() {
-        val config = settings.copy(requestOptions = ProviderRequestOptions("""{"reasoning":{"effort":"low"}}""", GptSpeedMode.FAST, codex = true))
-        val conn = Connection(response())
-        ResponsesModel(config) { conn }.open(emptyList()).next(emptyList()) {}
-        assertEquals("priority", conn.body().getString("service_tier"))
-        assertEquals("low", conn.body().getJSONObject("reasoning").getString("effort"))
-        var connections = 0
-        expectRejected {
-            ResponsesModel(config.copy(requestOptions = config.requestOptions.copy(speedMode = GptSpeedMode.ULTRA_FAST))) {
-                connections++; conn
-            }.open(emptyList()).next(emptyList()) {}
+    @Test fun codexPriorityAndUltraFastLeaveReasoningIndependent() {
+        for ((mode, tier) in listOf(GptSpeedMode.FAST to "priority", GptSpeedMode.ULTRA_FAST to "ultrafast")) {
+            val config = settings.copy(requestOptions = ProviderRequestOptions("""{"reasoning":{"effort":"low"}}""", mode, codex = true))
+            val conn = Connection(response())
+            ResponsesModel(config) { conn }.open(emptyList()).next(emptyList()) {}
+            assertEquals(tier, conn.body().getString("service_tier"))
+            assertEquals("low", conn.body().getJSONObject("reasoning").getString("effort"))
         }
-        assertEquals(0, connections)
     }
 
     @Test fun nonGptFinalModelDoesNotAcquireGptTier() {

@@ -331,6 +331,9 @@ class ResponsesModel internal constructor(
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
                 settings.customHeaders.applyTo(conn)
                 authentication.forEach { (name, value) -> conn.setRequestProperty(name, value) }
+                if (settings.oauth != null) app.daiyu.android.model.oauth.CodexRequestPolicy.routingHint(wireRequest)?.let {
+                    conn.setRequestProperty("x-codex-routing-hint", it)
+                }
                 conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Accept", "text/event-stream")
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 checkCancelled()

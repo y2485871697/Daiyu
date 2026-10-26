@@ -27,9 +27,6 @@ internal data class ChatGptSpeedSelection(val editor: ProviderEditorSlot, val ed
             GptSpeedMode.FAST -> GptSpeedMode.ULTRA_FAST
             GptSpeedMode.ULTRA_FAST -> GptSpeedMode.NORMAL
         }
-        check(!(editing.settings.oauth != null || editing.settings.requestOptions.codex) || next != GptSpeedMode.ULTRA_FAST) {
-            "Codex 不支持极速速度"
-        }
         return next
     }
 }

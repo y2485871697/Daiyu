@@ -21,6 +21,12 @@ internal object CodexRequestPolicy {
         }
         if (!reasoning.has("summary")) reasoning.put("summary", "auto")
         GptServiceTier.apply(request, speed, codex = true)
-        require(!request.optString("service_tier").equals("ultrafast", ignoreCase = true)) { "Codex 不支持 ULTRA_FAST" }
+    }
+
+    fun routingHint(request: JSONObject): String? {
+        val model = request.opt("model") as? String ?: return null
+        val tier = request.opt("service_tier") as? String
+        val hint = "model=$model" + if (tier == null) "" else ";tier=$tier"
+        return hint.takeIf { value -> value.all { it.code in 32..126 } }
     }
 }

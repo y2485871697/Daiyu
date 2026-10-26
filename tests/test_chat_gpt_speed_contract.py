@@ -51,12 +51,12 @@ class ChatGptSpeedContractTest(unittest.TestCase):
         self.assertIn('if (retainedPage == "chat") refreshConfirmedModelLabel()', resume)
         self.assertIn('!controller.hasLiveChildTasks()', host)
 
-    def test_configuration_eligibility_uses_final_model_and_codex_gate(self):
+    def test_configuration_eligibility_uses_final_model_without_obsolete_codex_gate(self):
         text = source('ChatGptSpeedSelection.kt')
         for token in ('ProviderProtocol.RESPONSES', 'GptServiceTier.isGptSpeedModel(model)',
-                      'json.has("model")', 'editing.requestOptionsUnavailable',
-                      'editing.settings.oauth != null', 'next != GptSpeedMode.ULTRA_FAST'):
+                      'json.has("model")', 'editing.requestOptionsUnavailable'):
             self.assertIn(token, text)
+        self.assertNotIn('Codex 不支持', text)
         for message in ('已切换标准速度', '已切换快速速度', '已切换极速速度'):
             self.assertIn(message, text)
 

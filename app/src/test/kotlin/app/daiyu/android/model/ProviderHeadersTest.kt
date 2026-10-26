@@ -49,6 +49,26 @@ class ProviderHeadersTest {
         }
     }
 
+    @Test fun oauthRoutingCannotBeOverriddenByManualHeaders() {
+        for (name in listOf("OpenAI-Service-Tier", "X-Codex-Routing-Hint")) {
+            val headers = ProviderHeaders.parse(JSONObject().put(name, "manual-value").toString())
+            val oauth = ModelSettings("https://chatgpt.com/backend-api/codex", "gpt-fixture", "", false,
+                responsesPath = "/responses", oauth = app.daiyu.android.model.oauth.CodexAuth("00000000-0000-0000-0000-000000000001"),
+                customHeaders = headers)
+            assertThrows(IllegalArgumentException::class.java) { oauth.validateConnection() }
+        }
+    }
+
+    @Test fun apiKeyGatewayRetainsItsManualTierAndRoutingHeaders() {
+        val headers = ProviderHeaders.parse("""{"OpenAI-Service-Tier":"manual-tier","X-Codex-Routing-Hint":"manual-hint"}""")
+        ModelSettings("https://relay.invalid/v1/responses", "gpt-fixture", "synthetic", false,
+            customHeaders = headers).validateConnection()
+        val connection = Connection()
+        headers.applyTo(connection)
+        assertEquals("manual-tier", connection.getRequestProperty("openai-service-tier"))
+        assertEquals("manual-hint", connection.getRequestProperty("x-codex-routing-hint"))
+    }
+
     @Test fun countValueAndEncodedBoundsAreEnforced() {
         assertFalse(ProviderHeaders.parse(JSONObject().put("x-long", "a".repeat(8192)).toString()).isEmpty)
         reject(JSONObject().put("x-long", "a".repeat(8193)).toString())

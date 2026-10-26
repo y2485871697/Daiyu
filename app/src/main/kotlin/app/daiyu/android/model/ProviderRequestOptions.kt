@@ -38,7 +38,6 @@ data class ProviderRequestOptions(
             }
             validateBodyOptions(body, protocol)
         }
-        require(!codex || speedMode != GptSpeedMode.ULTRA_FAST) { "Codex 不支持 ULTRA_FAST" }
     }
 
     internal fun apply(base: JSONObject, protocol: ProviderProtocol): JSONObject {

@@ -44,10 +44,19 @@ class ChatGptSpeedSelectionTest {
             original.editing.copy(headersUnavailable = true)).forEach { assertNull(original.copy(editing = it).mode) }
     }
 
-    @Test fun codexKeepsExistingUltraFastRejection() {
-        assertEquals(GptSpeedMode.FAST, selection(codex = true).next())
-        try { selection(mode = GptSpeedMode.FAST, codex = true).next(); fail("Codex ultra-fast accepted") }
-        catch (_: IllegalStateException) { }
+    @Test fun codexAndOAuthCanCycleThroughUltraFast() {
+        val legacy = selection(mode = GptSpeedMode.FAST, codex = true)
+        assertEquals(GptSpeedMode.ULTRA_FAST, legacy.next())
+        val oauth = legacy.copy(editing = legacy.editing.copy(settings = legacy.editing.settings.copy(
+            endpoint = "https://chatgpt.com/backend-api/codex", responsesPath = "/responses", apiKey = "",
+            oauth = app.daiyu.android.model.oauth.CodexAuth("00000000-0000-0000-0000-000000000001"),
+            requestOptions = legacy.editing.settings.requestOptions.copy(codex = false))))
+        oauth.editing.settings.validate()
+        assertEquals(GptSpeedMode.ULTRA_FAST, oauth.next())
+        val ultra = oauth.copy(editing = oauth.editing.copy(settings = oauth.editing.settings.copy(
+            requestOptions = oauth.editing.settings.requestOptions.copy(speedMode = oauth.next()))))
+        ultra.editing.settings.validate()
+        assertEquals(GptSpeedMode.NORMAL, ultra.next())
     }
 
     @Test fun speedDoesNotAlterReasoningOrOtherRequestOptions() {

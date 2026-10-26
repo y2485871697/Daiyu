@@ -64,7 +64,7 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
             require(protocol == ProviderProtocol.RESPONSES) { "OAuth 仅支持 Responses 协议" }
             app.daiyu.android.model.oauth.CodexOAuthProtocol.requireEndpoint(endpoint, responsesPath)
             require(apiKey.isEmpty()) { "OAuth 不使用 API Key" }
-            require(requestOptions.speedMode != app.daiyu.android.model.GptSpeedMode.ULTRA_FAST) { "Codex 不支持 ULTRA_FAST" }
+            customHeaders.validateCodexRouting()
         }
         requestOptions.validate(protocol)
         require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }

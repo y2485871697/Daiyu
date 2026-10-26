@@ -40,8 +40,11 @@ internal object GptServiceTier {
         if (mode == null) return
         val actualModel = request.opt("model") as? String ?: return
         if (!isGptSpeedModel(actualModel)) return
-        require(!codex || mode != GptSpeedMode.ULTRA_FAST) { "Codex 不支持 ULTRA_FAST" }
-        request.put("service_tier", if (codex && mode == GptSpeedMode.FAST) "priority" else mode.serviceTier)
+        if (codex && mode == GptSpeedMode.NORMAL) {
+            request.remove("service_tier")
+        } else {
+            request.put("service_tier", if (codex && mode == GptSpeedMode.FAST) "priority" else mode.serviceTier)
+        }
     }
 
     /**

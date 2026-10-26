@@ -107,9 +107,10 @@ class CodexOAuthTest {
         assertEquals("rotated-short", resolver.resolve(auth).access)
         assertEquals(1, calls)
     }
-    @Test fun codexRejectsUltrafastInMergedBodyWithoutAnExplicitSpeed() {
+    @Test fun codexPreservesUltrafastInMergedBodyWithoutAnExplicitSpeed() {
         val request = JSONObject().put("model", "gpt-fixture").put("service_tier", "ultrafast")
-        reject { CodexRequestPolicy.apply(request, null) }
+        CodexRequestPolicy.apply(request, null)
+        assertEquals("ultrafast", request.getString("service_tier"))
     }
     @Test fun initialCredentialSaveFailureRetainsTheCleanupHandle() {
         var discarded: CodexAuth? = null

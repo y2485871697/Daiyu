@@ -3848,10 +3848,10 @@ class ChatController internal constructor(private val application:Application,
                 }
                 ControllerVideoHistory(database).assertCurrent(db, physicalVideoHistory)
                 databaseSendEntered=true
-                    if (actionRevision != null) messageActionStore.commitRevision(db, actionRevision)
-                    database.send(user,assistant,conversation==null,assistantContext.assistantId,
-                        preserveDraft = actionRevision != null, replyIdentity = replyIdentity,
-                        expectedWorkspaceBinding = token.workspaceBinding)
+                if (actionRevision != null) messageActionStore.commitRevision(db, actionRevision)
+                database.send(user,assistant,conversation==null,assistantContext.assistantId,
+                    preserveDraft = actionRevision != null, replyIdentity = replyIdentity,
+                    expectedWorkspaceBinding = token.workspaceBinding)
                 } } catch (failure: Exception) {
                     // A failed pre-write CAS is definitely rejected, not an ambiguous commit.
                     if (browserPreparation != null && !databaseSendEntered) null else throw failure

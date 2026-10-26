@@ -45,11 +45,11 @@ internal class AccessibilityKeepAliveEnforcer(
     @Volatile
     private var lastRestoreLogAt = 0L
 
-    fun start(context: Context) {
-        if (!started.compareAndSet(false, true)) return
-        if (!schedule(context, reason = "system_ready", delayMs = 0L)) {
-            started.set(false)
-        }
+    fun start(context: Context): Boolean {
+        if (!started.compareAndSet(false, true)) return true
+        val queued = schedule(context, reason = "system_ready", delayMs = 0L)
+        if (!queued) started.set(false)
+        return queued
     }
 
     private fun reconcile(context: Context, reason: String) {

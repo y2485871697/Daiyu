@@ -1,0 +1,6 @@
+<resources>
+    <string name="timeline_summary_title">压缩摘要</string>
+    <string name="timeline_copied">已复制</string>
+    <string name="timeline_copy">复制摘要</string>
+    <string name="timeline_close">关闭</string>
+</resources>

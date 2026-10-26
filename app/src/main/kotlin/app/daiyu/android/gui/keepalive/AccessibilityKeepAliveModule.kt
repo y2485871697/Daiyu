@@ -2,6 +2,8 @@ package app.daiyu.android.gui.keepalive
 
 import android.content.Context
 import android.os.Handler
+import android.os.HandlerThread
+import android.os.Process
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedInterface
@@ -19,24 +21,29 @@ class AccessibilityKeepAliveModule : XposedModule() {
                 .setId("daiyu.accessibility.keepalive.${method.parameterCount}")
                 .intercept { chain ->
                     val result = chain.proceed()
-                    start(chain.getThisObject(), param.classLoader)
+                    start(chain.getThisObject())
                     result
                 }
         } catch (failure: Exception) {
             Log.w("DaiyuAccessibility", "System hook unavailable: ${failure.javaClass.simpleName}")
         }
     }
-    @Synchronized private fun start(owner: Any?, loader: ClassLoader) {
+    @Synchronized private fun start(owner: Any?) {
         if (enforcer != null || owner == null) return
+        var worker: HandlerThread? = null
         try {
             val context = systemContext(owner) ?: return
-            val handler = Class.forName("com.android.internal.os.BackgroundThread", false, loader)
-                .getDeclaredMethod("getHandler").apply { isAccessible = true }.invoke(null) as? Handler ?: return
+            val thread = HandlerThread("DaiyuAccessibility", Process.THREAD_PRIORITY_BACKGROUND)
+            worker = thread
+            thread.start()
+            val handler = Handler(checkNotNull(thread.looper))
             val value = AccessibilityKeepAliveEnforcer(handler)
-            value.start(context)
+            if (!value.start(context)) return
             enforcer = value
         } catch (failure: Exception) {
             Log.w("DaiyuAccessibility", "System backend unavailable: ${failure.javaClass.simpleName}")
+        } finally {
+            if (enforcer == null) worker?.quitSafely()
         }
     }
     private fun systemContext(owner: Any): Context? {

@@ -17,10 +17,25 @@ class AccessibilityKeepAliveContract(unittest.TestCase):
                          (base / "java_init.list").read_text().strip())
         module = self.read("AccessibilityKeepAliveModule.kt")
         for value in ("onSystemServerStarting", 'it.name == "startOtherServices"',
-                      "chain.proceed()", "BackgroundThread", "AccessibilityKeepAliveEnforcer(handler)"):
+                      "chain.proceed()", "HandlerThread", "AccessibilityKeepAliveEnforcer(handler)"):
             self.assertIn(value, module)
         self.assertIn('compileOnly("io.github.libxposed:api:102.0.0")', (ROOT / "app/build.gradle.kts").read_text())
         self.assertIn('resources.merges += "META-INF/xposed/*"', (ROOT / "app/build.gradle.kts").read_text())
+
+    def test_module_uses_public_worker_and_releases_failed_start(self):
+        module = self.read("AccessibilityKeepAliveModule.kt")
+        self.assertNotIn("BackgroundThread", module)
+        self.assertNotIn('getDeclaredMethod("getHandler")', module)
+        self.assertIn("Process.THREAD_PRIORITY_BACKGROUND", module)
+        self.assertIn("Handler(checkNotNull(thread.looper))", module)
+        self.assertIn("if (!value.start(context)) return", module)
+        self.assertIn("if (enforcer == null) worker?.quitSafely()", module)
+        self.assertLess(module.index("thread.start()"), module.index("thread.looper"))
+        self.assertLess(module.index("if (!value.start(context))"), module.index("enforcer = value"))
+        enforcer = self.read("AccessibilityKeepAliveEnforcer.kt")
+        self.assertIn("fun start(context: Context): Boolean", enforcer)
+        self.assertIn("if (!queued) started.set(false)", enforcer)
+        self.assertIn("return queued", enforcer)
 
     def test_no_manual_switch_or_task_privileged_backend(self):
         panel = (SRC / "ui/screens/settings/GuiSettingsPanel.kt").read_text()

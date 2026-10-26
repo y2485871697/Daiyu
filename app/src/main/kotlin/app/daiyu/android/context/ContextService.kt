@@ -112,36 +112,48 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     private fun summaryMessage(id: ConversationId, archive: String, summary: String) =
         Message(MessageId("summary-$archive"), id, RunId("summary-$archive"), "user",
             listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n$summary\n[摘要结束]")), RunStatus.COMPLETED)
-    private fun effective(db: SQLiteDatabase, id: ConversationId): PreparedContext {
-        val original = read(db, id)
-        val archive = db.rawQuery("SELECT id,prefix_count,revision,summary,blob_hash FROM context_archives WHERE conversation_id=? AND active=1 ORDER BY created DESC,id DESC LIMIT 1", arrayOf(id.value)).use { c ->
-            if (!c.moveToFirst()) null else listOf(c.getString(0), c.getInt(1).toString(), c.getString(2), c.getString(3), c.getString(4))
-        }
-        if (archive == null) return PreparedContext(original, estimateTokens(original), null)
-        val count = archive[1].toInt()
-        if (count !in 0..original.size || ContextRevision.digest(original.take(count)) != archive[2])
-            return PreparedContext(original, estimateTokens(original), null)
-        if (original.take(count).any { app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty() })
-            return PreparedContext(original, estimateTokens(original), null)
-        val document = ArchiveCodec.decodeDocument(blobs.read(archive[4]))
+    private data class ArchiveFit(val physicalCount: Int, val tail: List<Message>)
+
+    private fun fitArchive(id: ConversationId, current: List<Message>, count: Int, revision: String,
+        document: ArchiveCodec.Document): ArchiveFit? {
         val archived = document.messages
         require(archived.size == count && archived.all { it.conversationId == id } &&
-            ContextRevision.digest(archived) == archive[2]) { "原文档案不一致" }
-        val logicalCut = document.logicalPrefixCount
-        val tail = if (logicalCut == null) {
-            if (!isCompleteContextPrefix(original, count))
-                return PreparedContext(original, estimateTokens(original), null)
-            original.drop(count)
-        } else {
-            val expanded = MessageHistory.expand(original)
-            require(isHistoryClosedPrefix(original, count) && logicalCut < expanded.size &&
-                TokenTailCompression.isSafeCut(expanded, logicalCut) &&
-                MessageHistory.expand(archived).take(logicalCut) == expanded.take(logicalCut)) { "归档逻辑前缀不一致" }
-            expanded.drop(logicalCut)
+            ContextRevision.digest(archived) == revision) { "原文档案不一致" }
+        val cut = document.logicalPrefixCount
+        if (cut == null) {
+            if (count !in 0..current.size || ContextRevision.digest(current.take(count)) != revision ||
+                !isCompleteContextPrefix(current, count)) return null
+            return ArchiveFit(count, current.drop(count))
         }
-        val summary = summaryMessage(id, archive[0], archive[3])
-        val messages = listOf(summary) + tail
-        return PreparedContext(messages, estimateTokens(messages), archive[0])
+        val entries = MessageHistory.expandWithSources(current)
+        val logical = entries.map { it.message }
+        if (cut !in 1..logical.size || !TokenTailCompression.isSafeCut(logical, cut) ||
+            MessageHistory.expand(archived).take(cut) != logical.take(cut)) return null
+        val unchanged = count in 0..current.size && ContextRevision.digest(current.take(count)) == revision &&
+            isHistoryClosedPrefix(current, count)
+        val physicalCount = if (unchanged) count else {
+            val minimum = entries.take(cut).maxOf { it.sourcePhysicalIndex } + 1
+            (minimum..current.size).firstOrNull { n -> isHistoryClosedPrefix(current, n) &&
+                MessageHistory.expand(current.take(n)).take(cut) == logical.take(cut) } ?: return null
+        }
+        return ArchiveFit(physicalCount, logical.drop(cut))
+    }
+
+    private fun effective(db: SQLiteDatabase, id: ConversationId, supplied: List<Message>? = null): PreparedContext {
+        val original = supplied ?: read(db, id)
+        db.rawQuery("SELECT id,prefix_count,revision,summary,blob_hash FROM context_archives WHERE conversation_id=?" +
+            (if (supplied == null) " AND active=1" else "") + " ORDER BY created DESC,id DESC", arrayOf(id.value)).use { c ->
+            while (c.moveToNext()) {
+                val document = ArchiveCodec.decodeDocument(blobs.read(c.getString(4)))
+                val fit = fitArchive(id, original, c.getInt(1), c.getString(2), document) ?: continue
+                if (original.take(fit.physicalCount).any {
+                    app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty()
+                }) continue
+                val messages = listOf(summaryMessage(id, c.getString(0), c.getString(3))) + fit.tail
+                return PreparedContext(messages, estimateTokens(messages), c.getString(0))
+            }
+        }
+        return PreparedContext(original, estimateTokens(original), null)
     }
     fun compress(id: ConversationId, policy: CompressionPolicy, summarizer: ContextSummarizer,
         pendingMessages: List<Message> = emptyList(), cancelled: () -> Boolean = { false }): String? {
@@ -323,9 +335,10 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         generation: app.daiyu.android.backup.StaticGenerationBranch?,
         authorize: (SQLiteDatabase) -> Unit,
         cancelled: () -> Boolean,
-        copyAssets: (List<Message>, List<Message>) -> List<Message>): BranchLocator =
+        copyAssets: (List<Message>, List<Message>) -> List<Message>,
+        selectPrefix: ((List<Message>) -> List<Message>)? = null): BranchLocator =
         ProductionConversationBranch(store, blobs, transactions, videos, generation, cancelled)
-            .branch(id, through, authorize, copyAssets)
+            .branch(id, through, authorize, copyAssets, selectPrefix)
 
     /** Materializes a true conversation copy. All IDs/run IDs are remapped, original is unchanged. */
     fun branch(id: ConversationId, through: MessageId,
@@ -481,10 +494,60 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         db.execSQL("UPDATE conversations SET updated=? WHERE id=?", arrayOf<Any>(System.currentTimeMillis(), id.value))
         app.daiyu.android.storage.CloudContextUsageStore.invalidate(db, id)
     }
+    internal fun prepareActionSend(id: ConversationId, retained: List<Message>, policy: CompressionPolicy,
+        pending: List<Message>): PreparedContext = transactions.run { db ->
+        validateActionArchives(db, id)
+        effective(db, id, retained).also { requireCapacity(policy, it.messages + pending) }
+    }
+
+    internal fun validateActionArchives(db: SQLiteDatabase, id: ConversationId) = verifyArchives(db, id)
+
+    /** Remove invalid summary references, not immutable original blobs. Unchanged prefixes survive. */
+    internal fun retainActionArchives(db: SQLiteDatabase, id: ConversationId, retained: List<Message>) {
+        data class Retention(val archive: String, val oldCount: Int, val oldRevision: String,
+            val cut: Int?, val fit: ArchiveFit?)
+        val plans = db.rawQuery("SELECT id,prefix_count,revision,blob_hash FROM context_archives WHERE conversation_id=?",
+            arrayOf(id.value)).use { c -> buildList { while (c.moveToNext()) {
+                val document = ArchiveCodec.decodeDocument(blobs.read(c.getString(3)))
+                add(Retention(c.getString(0), c.getInt(1), c.getString(2), document.logicalPrefixCount,
+                    fitArchive(id, retained, c.getInt(1), c.getString(2), document)))
+            } } }
+        plans.forEach { plan ->
+            val fit = plan.fit
+            if (fit == null) {
+                check(db.delete("context_archives", "id=? AND conversation_id=?", arrayOf(plan.archive, id.value)) == 1)
+                db.delete("chat_timeline_events", "id=? AND conversation_id=?", arrayOf(plan.archive, id.value))
+                check(!db.rawQuery("SELECT 1 FROM context_archives WHERE id=?", arrayOf(plan.archive)).use { it.moveToFirst() })
+            } else if (plan.cut != null) {
+                val prefix = retained.take(fit.physicalCount)
+                val revision = ContextRevision.digest(prefix)
+                if (fit.physicalCount != plan.oldCount || revision != plan.oldRevision) {
+                    val hash = blobs.put(ArchiveCodec.encodeDocument(prefix, plan.cut))
+                    check(db.update("context_archives", ContentValues().apply {
+                        put("prefix_count", fit.physicalCount); put("revision", revision); put("blob_hash", hash)
+                    }, "id=? AND conversation_id=?", arrayOf(plan.archive, id.value)) == 1)
+                }
+            }
+        }
+        val active = db.rawQuery("SELECT id FROM context_archives WHERE conversation_id=? ORDER BY created DESC,id DESC LIMIT 1",
+            arrayOf(id.value)).use { if (it.moveToFirst()) it.getString(0) else null }
+        if (active != null) {
+            db.execSQL("UPDATE context_archives SET active=CASE WHEN id=? THEN 1 ELSE 0 END WHERE conversation_id=?", arrayOf(active, id.value))
+            check(db.rawQuery("SELECT id FROM context_archives WHERE conversation_id=? AND active<>0", arrayOf(id.value)).use {
+                it.moveToFirst() && it.getString(0) == active && !it.moveToNext()
+            })
+        }
+        val keys = app.daiyu.android.timeline.TimelineAnchor.keys(retained)
+        app.daiyu.android.timeline.ChatTimelineStore.read(db, id.value).filter { it.anchor.listKey !in keys }.forEach {
+            check(db.delete("chat_timeline_events", "id=? AND conversation_id=?", arrayOf(it.id, id.value)) == 1)
+        }
+    }
+
     private fun verifyArchives(db: SQLiteDatabase, id: ConversationId) {
-        db.rawQuery("SELECT blob_hash,revision FROM context_archives WHERE conversation_id=?", arrayOf(id.value)).use { c -> while (c.moveToNext()) {
+        db.rawQuery("SELECT blob_hash,revision,prefix_count FROM context_archives WHERE conversation_id=?", arrayOf(id.value)).use { c -> while (c.moveToNext()) {
             val archived = ArchiveCodec.decode(blobs.read(c.getString(0))).also { MessageHistory.expand(it) }
-            require(ContextRevision.digest(archived) == c.getString(1)) { "缺档拒绝修订" }
+            require(archived.all { it.conversationId == id } && archived.size == c.getInt(2) &&
+                ContextRevision.digest(archived) == c.getString(1)) { "缺档或原文身份不符；拒绝修订" }
         } }
     }
     private fun ensureIdle(db: SQLiteDatabase, id: ConversationId) {

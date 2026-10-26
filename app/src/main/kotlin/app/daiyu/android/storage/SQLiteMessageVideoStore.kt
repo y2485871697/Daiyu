@@ -48,6 +48,15 @@ internal object SQLiteMessageVideoStore {
         }
     }
 
+    fun reviseKnown(db: SQLiteDatabase, before: Message, after: Message,
+        previous: List<MessageVideoInput>, inputs: List<MessageVideoInput>) {
+        check(db.inTransaction() && before.id == after.id && before.runId == after.runId)
+        app.daiyu.android.ControllerVideoManifestWitness.verify(db, before, previous)
+        db.delete(TABLE, "message_id=?", arrayOf(before.id.value))
+        check(db.delete(app.daiyu.android.ControllerVideoManifestWitness.TABLE, "message_id=?", arrayOf(before.id.value)) == 1)
+        insert(db, after, inputs)
+    }
+
     fun deleteConversation(db: SQLiteDatabase, conversationId: String) {
         check(db.inTransaction())
         db.execSQL("DELETE FROM $TABLE WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=?)",

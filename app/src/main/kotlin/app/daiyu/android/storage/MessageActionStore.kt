@@ -5,7 +5,6 @@ import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.ContextRevision
-import app.daiyu.android.domain.context.isHistoryClosedPrefix
 import app.daiyu.android.media.MessageImageAssetStore
 import app.daiyu.android.media.MessageImageOwner as MediaOwner
 import app.daiyu.android.media.MessageImageReference as MediaReference
@@ -14,10 +13,11 @@ import app.daiyu.android.media.MessageImageReference as MediaReference
  * The revision covers all authoritative rows, never only the visible page. */
 internal data class MessageActionTarget(val conversationId: ConversationId, val messageId: MessageId,
     val ownerId: MessageId, val runId: RunId, val role: String, val revision: String,
-    val assistantId: String?, val toolCallId: ToolCallId? = null)
+    val assistantId: String?, val toolCallId: ToolCallId? = null, val segmentIndex: Int = 0)
 internal data class MessageActionSnapshot(val conversationId: ConversationId, val revision: String,
     val targets: Map<String, MessageActionTarget>, val steps: Map<String, MessageActionTarget> = emptyMap(),
-    val rowRevisions: Map<String, String> = emptyMap()) {
+    val rowRevisions: Map<String, String> = emptyMap(),
+    val renderedTargets: Map<String, MessageActionTarget> = emptyMap()) {
     fun matchesRendered(rows: List<Message>): Boolean = rows.all {
         it.conversationId == conversationId && rowRevisions[it.id.value] == ContextRevision.digest(listOf(it))
     }
@@ -52,6 +52,19 @@ internal class MessageActionStore(private val database: ConversationDatabase,
             add(owner.id, owner.role)
             owner.historySegments.filter { it.role == Message.USER_ROLE }.forEach { add(it.messageId, it.role) }
         }
+        val renderedTargets = linkedMapOf<String, MessageActionTarget>()
+        val counts = mutableMapOf<MessageId, Int>()
+        MessageHistory.expandWithSources(history).forEach { entry ->
+            val row = entry.message
+            val segment = counts[row.id] ?: 0
+            counts[row.id] = segment + 1
+            val owner = history[entry.sourcePhysicalIndex]
+            val target = MessageActionTarget(row.conversationId, row.id, owner.id, row.runId, row.role,
+                revision, binding, segmentIndex = segment)
+            val key = app.daiyu.android.timeline.TimelineAnchor(row.conversationId.value, row.runId.value,
+                row.id.value, segment).listKey
+            renderedTargets[key] = target
+        }
         val steps = linkedMapOf<String, MessageActionTarget>()
         val ambiguousSteps = mutableSetOf<String>()
         history.filter { it.role == Message.ASSISTANT_ROLE }.forEach { owner ->
@@ -64,7 +77,7 @@ internal class MessageActionStore(private val database: ConversationDatabase,
             }
         }
         MessageActionSnapshot(id, revision, targets.toMap(), steps.toMap(),
-            history.associate { it.id.value to ContextRevision.digest(listOf(it)) })
+            history.associate { it.id.value to ContextRevision.digest(listOf(it)) }, renderedTargets.toMap())
     }
 
     fun validate(target: MessageActionTarget) { transactions.run { authorize(it, target) } }
@@ -74,7 +87,6 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         val selected = displayed(history, target)
         require(selected.role == Message.USER_ROLE) { "只能回填原用户文本" }
         selected.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
-            .also { require(it.isNotBlank()) { "该用户消息没有可编辑文本；附件保持原样" } }
     }
 
     fun branch(target: MessageActionTarget): Conversation {
@@ -82,93 +94,96 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         // reject an outer transaction, and acquiring their fence there reverses the lock order.
         val through = transactions.run { db ->
             val history = authorize(db, target)
-            val end = history.indexOfLast { it.runId == target.runId } + 1
-            require(end > 0 && isHistoryClosedPrefix(history, end)) { "不能分离工具批次或补充消息" }
-            require(history.take(end).all { it.status == RunStatus.COMPLETED }) { "只能复制已完成的历史基线" }
-            history[end - 1].id
+            val prefix = MessageHistoryCut.prefix(history, MessageHistoryCut.index(history, target) + 1)
+            require(prefix.isNotEmpty())
+            prefix.last().id
         }
         val locator = context.branchWithStatic(target.conversationId, through, videos, staticGeneration,
-            authorize = { authorize(it, target) }, cancelled = cancelled, copyAssets = ::copyImages)
+            authorize = { authorize(it, target) }, cancelled = cancelled, copyAssets = ::copyImages,
+            selectPrefix = { history -> MessageHistoryCut.prefix(history, MessageHistoryCut.index(history, target) + 1) })
         // Post-COMMIT presentation must not lose the already allocated UNKNOWN locator.
         return try { transactions.run { conversation(it, locator.conversationId) } }
         catch (failure: Exception) { throw app.daiyu.android.context.BranchOutcomeUnknown(locator, failure) }
     }
 
-    /** Remove one COMPLETE physical run, not a UI fragment or an individual tool result.
-     * Runtime/generation tombstones stay intact. Physical files are retained, not garbage-collected.
-     * Deleting metadata and its independent video witness is one FK-protected transaction. */
+    /** Delete the selected displayed segment and its tail, never the preceding user question. */
     fun deleteTurn(target: MessageActionTarget) = transactions.run { db ->
         val history = authorize(db, target)
-        val removed = history.filter { it.runId == target.runId }
-        val retained = history.filterNot { it.runId == target.runId }
-        require(removed.isNotEmpty())
-        MessageHistory.expand(retained)
-        require(retained.none { owner -> owner.historySegments.any { segment ->
-            removed.any { it.id == segment.messageId }
-        } }) { "不能删除另一所有者引用的消息" }
-        history.forEach { SQLiteMessageVideoStore.readVerified(db, it) }
-        UsageStatisticsStore.retireMessages(db, removed)
+        val retained = MessageHistoryCut.prefix(history, MessageHistoryCut.index(history, target))
+        context.validateActionArchives(db, target.conversationId)
+        commitPrefix(db, target.conversationId, history, retained)
+    }
+
+    fun prepareRegeneration(target: MessageActionTarget, replacementText: String? = null): MessageRevision = transactions.run { db ->
+        val history = authorize(db, target)
+        val logical = MessageHistory.expand(history)
+        val index = MessageHistoryCut.index(history, target)
+        val userIndex = if (replacementText != null) {
+            require(target.role == Message.USER_ROLE) { "只能编辑用户消息" }; index
+        } else {
+            require(target.role == Message.ASSISTANT_ROLE) { "请从助手答复重新生成" }
+            (index - 1 downTo 0).firstOrNull { logical[it].role == Message.USER_ROLE }
+                ?: error("原用户消息不存在")
+        }
+        val selected = logical[userIndex]
+        val text = replacementText ?: selected.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
+        require(text.isNotBlank() || selected.blocks.any { it is MessageBlock.Image }) { "消息内容不能为空" }
+        val blocks = if (replacementText == null) selected.blocks else buildList {
+            if (text.isNotBlank()) add(MessageBlock.Text("edited-user", text))
+            addAll(selected.blocks.filterNot { it is MessageBlock.Text })
+        }
+        val prefix = MessageHistoryCut.prefix(history, userIndex)
+        // Historical tool results stay data. No prior tool session, approval or attempt is resumed.
+        require(MessageHistory.expand(prefix).none { row -> row.blocks.any { it is MessageBlock.Tool && it.result == null } }) {
+            "保留的历史有未确认工具结果；请先核实结果"
+        }
+        require(history.all { SQLiteMessageVideoStore.readVerified(db, it).isEmpty() }) {
+            "原视频重新提交需要新的上传批准；原消息保留"
+        }
+        context.validateActionArchives(db, target.conversationId)
+        MessageRevision(target, history, prefix, selected.copy(blocks = blocks, protocolItems = emptyList(),
+            historySegments = emptyList(), status = RunStatus.COMPLETED, error = null))
+    }
+
+    /** Called inside the existing send transaction after provider preflight and original-history CAS. */
+    fun commitRevision(db: SQLiteDatabase, revision: MessageRevision) {
+        check(db.inTransaction())
+        val history = authorize(db, revision.target)
+        check(history == revision.original)
+        commitPrefix(db, revision.target.conversationId, history, revision.prefix, revision.user.id)
+    }
+
+    private fun commitPrefix(db: SQLiteDatabase, id: ConversationId, history: List<Message>, retained: List<Message>,
+        preservedUser: MessageId? = null) {
+        val byId = retained.associateBy { it.id }
+        val removed = history.filter { it.id !in byId }
+        val inputs = history.associate { it.id to SQLiteMessageVideoStore.readVerified(db, it) }
+        app.daiyu.android.backup.MessageGenerationCut.retain(db, id, history, retained)
+        UsageStatisticsStore.retireMessages(db, removed.filter { it.id != preservedUser })
         removed.forEach { row ->
             db.delete("neutral_assets", "message_id=?", arrayOf(row.id.value))
-            db.delete(SQLiteGenerationOutputStore.TABLE, "conversation_id=? AND assistant_id=? AND run_id=?",
-                arrayOf(row.conversationId.value, row.id.value, row.runId.value))
             check(db.delete("messages", "id=? AND conversation_id=? AND run_id=?",
                 arrayOf(row.id.value, row.conversationId.value, row.runId.value)) == 1) { "删除回执未确认" }
         }
-        db.execSQL("UPDATE context_archives SET active=0 WHERE conversation_id=?", arrayOf(target.conversationId.value))
-        // RAISE(IGNORE) can suppress UPDATE without throwing or proving deactivation.
-        check(!db.rawQuery("SELECT 1 FROM context_archives WHERE conversation_id=? AND active<>0 LIMIT 1",
-            arrayOf(target.conversationId.value)).use { it.moveToFirst() }) { "历史摘要失效回执未确认" }
-        check(ContextService.read(db, target.conversationId) == retained) { "删除后历史回执不一致" }
-        removed.forEach { row ->
-            for (table in listOf("message_video_inputs", "message_video_witnesses")) {
-                check(!db.rawQuery("SELECT 1 FROM $table WHERE message_id=?", arrayOf(row.id.value)).use { it.moveToFirst() })
+        retained.forEach { row ->
+            val before = history.single { it.id == row.id }
+            if (row != before) {
+                val videos = inputs.getValue(row.id).filter { input ->
+                    MessageHistory.expand(listOf(row)).any { it.role == Message.USER_ROLE && it.id.value == input.owner.messageId }
+                }
+                check(db.update("messages", ContextService.messageValues(row), "id=? AND conversation_id=?",
+                    arrayOf(row.id.value, id.value)) == 1)
+                SQLiteMessageVideoStore.reviseKnown(db, before, row, inputs.getValue(row.id), videos)
             }
-            check(!db.rawQuery("SELECT 1 FROM generation_outputs WHERE conversation_id=? AND assistant_id=?",
-                arrayOf(target.conversationId.value, row.id.value)).use { it.moveToFirst() })
         }
+        context.retainActionArchives(db, id, retained)
+        check(ContextService.read(db, id) == retained) { "修订后历史回执不一致" }
         retained.forEach { SQLiteMessageVideoStore.readVerified(db, it) }
         SQLiteMessageVideoStore.assertNoOrphans(db)
-        CloudContextUsageStore.invalidate(db, target.conversationId)
-    }
-
-    data class Regeneration(val conversation: Conversation, val text: String)
-
-    /** Explicit fork-and-new-request, never resume an old provider attempt. Conservative contract:
-     * only known completed TEXT history and a simple user/assistant target run. No tool in even
-     * the old target may be rerun. More capable replay needs an audited tool-ledger contract. */
-    fun prepareRegeneration(target: MessageActionTarget): Regeneration = transactions.run { db ->
-        val history = authorize(db, target)
-        require(target.role == Message.ASSISTANT_ROLE) { "请从助手答复重新生成" }
-        val start = history.indexOfFirst { it.runId == target.runId }
-        val run = history.filter { it.runId == target.runId }
-        require(start >= 0 && run.size == 2 && run[0].role == Message.USER_ROLE &&
-            history.getOrNull(start + 1) == run[1] &&
-            run[1].id == target.ownerId && run[1].role == Message.ASSISTANT_ROLE &&
-            run.all { it.historySegments.isEmpty() }) { "复杂运行没有安全重生成契约；未重放工具" }
-        val baseline = history.take(start)
-        require(isHistoryClosedPrefix(history, start))
-        require((baseline + run).all { it.status == RunStatus.COMPLETED && it.error == null &&
-            it.historySegments.isEmpty() && it.blocks.all { block -> block is MessageBlock.Text } }) {
-            "历史包含附件、工具、失败或 UNKNOWN；未发起请求，请新建会话核实后发送"
-        }
-        (baseline + run).forEach { row ->
-            require(SQLiteMessageVideoStore.readVerified(db, row).isEmpty()) { "原视频不能按纯文本重新发送" }
-            require(!db.rawQuery("SELECT 1 FROM generation_outputs WHERE conversation_id=? AND assistant_id=?",
-                arrayOf(target.conversationId.value, row.id.value)).use { it.moveToFirst() }) { "不能重新提交生成资产操作" }
-        }
-        val text = run[0].blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
-        require(text.isNotBlank())
-        val copy = if (baseline.isEmpty()) {
-            // create() retains the conversation binding; it does not send anything.
-            database.create(target.assistantId)
-        } else conversation(db, context.branch(target.conversationId, baseline.last().id) { _, mapped ->
-            // A new request uses canonical text facts, never old opaque provider continuation
-            // items (which may carry old tool/request IDs even beside a text projection).
-            mapped.map { it.copy(protocolItems = emptyList()) }
-        })
-        database.draft(copy.id, text)
-        Regeneration(copy.copy(draft = text), text)
+        app.daiyu.android.backup.MessageGenerationCut.verify(db, id, retained)
+        check(db.update("conversations", android.content.ContentValues().apply { put("updated", System.currentTimeMillis()) },
+            "id=?", arrayOf(id.value)) == 1)
+        CloudContextUsageStore.invalidate(db, id)
     }
 
     fun rejectRetry(target: MessageActionTarget): Nothing = transactions.run { db ->
@@ -192,13 +207,8 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         return history
     }
 
-    private fun displayed(history: List<Message>, target: MessageActionTarget): Message {
-        val owner = history.single { it.id == target.ownerId && it.runId == target.runId }
-        if (target.messageId == owner.id) return owner
-        val segment = owner.historySegments.single { it.messageId == target.messageId && it.role == target.role }
-        return owner.copy(id = segment.messageId, role = segment.role, blocks = segment.blocks,
-            protocolItems = segment.protocolItems, historySegments = emptyList())
-    }
+    private fun displayed(history: List<Message>, target: MessageActionTarget): Message =
+        MessageHistory.expand(history)[MessageHistoryCut.index(history, target)]
 
     private fun copyImages(original: List<Message>, mapped: List<Message>): List<Message> {
         val ids = mutableMapOf<String, String>()

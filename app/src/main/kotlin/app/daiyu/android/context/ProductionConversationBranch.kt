@@ -35,7 +35,8 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
         }
     }
     fun branch(id: ConversationId, through: MessageId, authorize: (SQLiteDatabase) -> Unit,
-        copyImages: (List<Message>, List<Message>) -> List<Message>): BranchLocator {
+        copyImages: (List<Message>, List<Message>) -> List<Message>,
+        selectPrefix: ((List<Message>) -> List<Message>)? = null): BranchLocator {
         val db = transactions.database()
         check(!db.inTransaction()) { "分支原件读取不能在外层SQL事务内" }
         val copy = ConversationId(UUID.randomUUID().toString())
@@ -57,9 +58,11 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             val original = ContextService.read(sql, id)
             require(original.none { it.status == RunStatus.RUNNING })
             val end = original.indexOfFirst { it.id == through } + 1
-            require(end > 0 && isHistoryClosedPrefix(original, end)) { "不能分离工具批次或补充消息" }
-            val prefix = original.take(end)
-            require(prefix.all { it.status == RunStatus.COMPLETED }) { "只能复制已完成的历史基线" }
+            require(end > 0 && (selectPrefix != null || isHistoryClosedPrefix(original, end))) { "不能分离工具批次或补充消息" }
+            val prefix = selectPrefix?.invoke(original) ?: original.take(end)
+            require(prefix.isNotEmpty() && MessageHistory.expand(prefix) ==
+                MessageHistory.expand(original).take(MessageHistory.expand(prefix).size))
+            require(prefix.none { it.status == RunStatus.RUNNING }) { "运行中不能分支" }
             require(MessageHistory.expand(prefix).all { m -> m.blocks.none { it is MessageBlock.Tool && it.result == null } })
             val runs = mutableMapOf<RunId, RunId>()
             val ids = mutableMapOf<Triple<ConversationId, RunId, MessageId>, MessageId>()
@@ -72,6 +75,11 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             Snapshot(original, prefix, mapped, sourceValues(sql), attachments(sql), archives(sql),
                 original.map { SQLiteMessageVideoStore.readVerified(sql, it) }, capture,
                 prefix.map { AssistantReplyIdentities.read(sql, it) })
+        }
+        val selectedVideoInputs = snapshot.prefix.map { row ->
+            snapshot.inputs[snapshot.history.indexOfFirst { it.id == row.id }].filter { input ->
+                MessageHistory.expand(listOf(row)).any { it.role == Message.USER_ROLE && it.id.value == input.owner.messageId }
+            }
         }
         val locator = BranchLocator(copy, snapshot.generation?.outputs?.map { it.identity }.orEmpty())
         var settlement = StaticGenerationSettlement.UNKNOWN
@@ -88,7 +96,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             }
             snapshot.prefix.flatMap { it.blocks + it.historySegments.flatMap { s -> s.blocks } }
                 .filterIsInstance<MessageBlock.Image>().forEach { reserve(it.reference.sha256, it.reference.bytes.toLong()) }
-            snapshot.inputs.take(snapshot.prefix.size).flatten().flatMap { it.references }.forEach { reserve(it.sha256, it.bytes) }
+            selectedVideoInputs.flatten().flatMap { it.references }.forEach { reserve(it.sha256, it.bytes) }
             snapshot.generation?.outputs?.forEach { reserve(it.source.sha256, it.source.bytes) }
             snapshot.attachments.filter { row -> snapshot.prefix.any { it.id.value == row.getString("message_id") } }
                 .forEach { reserve(it.getString("blob_hash"), it.getLong("bytes")) }
@@ -115,8 +123,8 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 ownerMap[old.id.value] = new.id.value
                 old.historySegments.zip(new.historySegments).forEach { (a, b) -> ownerMap[a.messageId.value] = b.messageId.value }
             }
-            val copiedVideos = snapshot.inputs.take(snapshot.prefix.size).mapIndexed { position, inputs ->
-                inputs.map { input ->
+            val copiedVideos = snapshot.prefix.mapIndexed { position, row ->
+                selectedVideoInputs[position].map { input ->
                     checkCancelled()
                     val owner = app.daiyu.android.media.video.MessageVideoOwner(copy.value, ownerMap.getValue(input.owner.messageId))
                     val references = input.references.map { it.copy(owner = owner) }

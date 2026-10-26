@@ -3186,7 +3186,8 @@ class ChatController internal constructor(private val application:Application,
         virtualDisplay:ControllerVirtualDisplayEntry?=null,
         gui:ControllerGuiEntry?=null,
         videoAttempt:ControllerVideoAttempt?=null,
-        platformAction:ControllerPlatformActionPreparation?=null):Conversation? {
+        platformAction:ControllerPlatformActionPreparation?=null,
+        actionRevision: app.daiyu.android.storage.MessageRevision? = null):Conversation? {
         require(platformAction == null || (platformAction.submitted && !platformAction.cancelled &&
             platformAction.scope != null && imageAttempt == null && shizukuPreparation == null &&
             shizukuAuthorization == null && mcpPreparation == null && browserPreparation == null &&
@@ -3311,6 +3312,7 @@ class ChatController internal constructor(private val application:Application,
         var user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets,acceptedAt) ?:
             Message(videoAttempt?.userId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED,createdAt=acceptedAt)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
+        if (actionRevision != null) user = actionRevision.user.copy(runId = run)
         val assistant=Message(mcpPreparation?.assistantMessageId ?: gui?.assistantId ?: terminalJobPreparation?.identity?.assistantMessageId ?: virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
         val physicalVideoHistory = try { ControllerVideoHistory(database).capture(conversationId) }
         catch (_: Exception) {
@@ -3406,7 +3408,12 @@ class ChatController internal constructor(private val application:Application,
                 user, checkNotNull(gui.delivery))
             val frozen = coordinator.freeze(conversationId,listOf(modelUser),token.cancellation, summaryUsage = summary.usagePort,
                 contextWindowOverride = requestProvider.contextWindowOverride, chatProvider = requestProvider)
-            if (video == null) coordinator.prepare(frozen) else {
+            if (actionRevision != null) {
+                check(video == null)
+                val history = contextService.prepareActionSend(conversationId, actionRevision.prefix, frozen.policy, listOf(modelUser))
+                app.daiyu.android.context.PreparedSendContext(frozen, history,
+                    app.daiyu.android.domain.context.ContextRevision.digest(actionRevision.original))
+            } else if (video == null) coordinator.prepare(frozen) else {
                 // A video run must not silently replace physical/retained history with a text summary.
                 // Keep the same policy/budget and acceptance revision, but send every physical row.
                 val estimate = app.daiyu.android.domain.context.estimateTokens(physicalVideoHistory.rows + user)
@@ -3440,7 +3447,7 @@ class ChatController internal constructor(private val application:Application,
                 checkNotNull(video.first.post), onFrozenPlan = video.first::onFrozenPlan,
                 backgroundResume = frozenReconnect.responsesBackground) else {
             // Capability preflight is against the actual image route, not the text/main provider.
-            val imageHistory=(contextService.displayHistory(conversationId) + preparedContext.messages)
+            val imageHistory=((actionRevision?.prefix ?: contextService.displayHistory(conversationId)) + preparedContext.messages)
                 .distinctBy { it.id }
             val summaries = preparedContext.messages.filter { row ->
                 preparedContext.archiveId != null && row.id.value == "summary-${preparedContext.archiveId}" &&
@@ -3767,7 +3774,9 @@ class ChatController internal constructor(private val application:Application,
                 }
                 ControllerVideoHistory(database).assertCurrent(db, physicalVideoHistory)
                 databaseSendEntered=true
-                    database.send(user,assistant,conversation==null,assistantContext.assistantId, replyIdentity = replyIdentity)
+                    if (actionRevision != null) messageActionStore.commitRevision(db, actionRevision)
+                    database.send(user,assistant,conversation==null,assistantContext.assistantId,
+                        preserveDraft = actionRevision != null, replyIdentity = replyIdentity)
                 } } catch (failure: Exception) {
                     // A failed pre-write CAS is definitely rejected, not an ambiguous commit.
                     if (browserPreparation != null && !databaseSendEntered) null else throw failure
@@ -4111,7 +4120,7 @@ class ChatController internal constructor(private val application:Application,
      * Deletion seals the exact generation RUN before waiting on its publication barrier.
      * Read fences are closed on the worker; unrelated runs retain their publication rights. */
     internal fun messageAction(action: MessageAction, target: MessageActionTarget,
-        complete: (MessageActionResult) -> Unit): Boolean {
+        replacementText: String? = null, complete: (MessageActionResult) -> Unit): Boolean {
         synchronized(this) {
             if (!idleAvailable() || hasLiveChildTasks()) return false
             if ((action == MessageAction.RETRY_STEP) != (target.toolCallId != null)) return false
@@ -4122,10 +4131,10 @@ class ChatController internal constructor(private val application:Application,
             var changed = false
             var branchReasoning: app.daiyu.android.delegation.ReasoningEffort? = null
             val result = try {
-                if (action == MessageAction.BRANCH || action == MessageAction.REGENERATE)
+                if (action == MessageAction.BRANCH)
                     branchReasoning = reasoningPreference.snapshot(target.conversationId.value)
                 when (action) {
-                    MessageAction.EDIT_USER -> MessageActionResult.EditDraft(messageActionStore.originalUserText(target))
+                    MessageAction.EDIT_USER -> MessageActionResult.EditDraft(messageActionStore.originalUserText(target), target)
                     MessageAction.BRANCH -> {
                         val copy = messageActionStore.branch(target); changed = true
                         reasoningPreference.retainAccepted(copy.id.value, checkNotNull(branchReasoning))
@@ -4145,28 +4154,24 @@ class ChatController internal constructor(private val application:Application,
                         MessageActionResult.Deleted
                     }
                     MessageAction.RETRY_STEP -> messageActionStore.rejectRetry(target)
-                    MessageAction.REGENERATE -> {
-                        val prepared = messageActionStore.prepareRegeneration(target); changed = true
-                        reasoningPreference.retainAccepted(prepared.conversation.id.value, checkNotNull(branchReasoning))
-                        val token = synchronized(this) {
-                            if (closed) null else {
-                                // Retain the data reservation through result delivery as well
-                                // as normal preparation, so a late completion cannot clear a
-                                // newer operation's busy gate. sendPrepared owns this token.
-                                reservePreparation()
-                            }
-                        }
+                    MessageAction.REGENERATE, MessageAction.SAVE_EDIT -> {
+                        val revision = messageActionStore.prepareRegeneration(target,
+                            if (action == MessageAction.SAVE_EDIT) requireNotNull(replacementText) else null)
+                        val owner = database.conversations().single { it.id == target.conversationId }
+                        val text = revision.user.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
+                        val token = synchronized(this) { if (closed) null else reservePreparation() }
+                        var saved: Conversation? = null
                         val outcome = if (token == null) RegenerationSendOutcome.NOT_SENT else try {
-                            val saved = try { sendPrepared(token, prepared.conversation, prepared.text,
-                                expectedDraftText = prepared.text) } catch (_: Exception) { null }
+                            saved = try { sendPrepared(token, owner, text, actionRevision = revision) }
+                                catch (_: Exception) { null }
                             when {
                                 saved != null -> RegenerationSendOutcome.ACCEPTED
                                 token.persistenceUnconfirmed -> RegenerationSendOutcome.UNKNOWN
                                 else -> RegenerationSendOutcome.NOT_SENT
                             }
                         } finally { finishPreparation(token) }
-                        // Even UNKNOWN carries the exact new branch. Never re-prepare or resend.
-                        MessageActionResult.Regenerated(prepared.conversation, outcome)
+                        changed = outcome != RegenerationSendOutcome.NOT_SENT
+                        MessageActionResult.Regenerated(saved ?: owner, outcome)
                     }
                 }
             } catch (failure: app.daiyu.android.context.BranchRolledBack) {

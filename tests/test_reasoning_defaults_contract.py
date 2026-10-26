@@ -22,7 +22,8 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
         actions = (SRC / 'ChatController.kt').read_text().split('internal fun messageAction(action:', 1)[1].split('internal fun skillManagement', 1)[0]
         self.assertIn('branchReasoning = reasoningPreference.snapshot(target.conversationId.value)', actions)
         self.assertLess(actions.index('reasoningPreference.retainAccepted(copy.id.value'), actions.index('MessageActionResult.Branch(copy)'))
-        self.assertLess(actions.index('reasoningPreference.retainAccepted(prepared.conversation.id.value'), actions.index('sendPrepared(token, prepared.conversation'))
+        self.assertIn('sendPrepared(token, owner, text, actionRevision = revision)', actions)
+        self.assertNotIn('retainAccepted(prepared.conversation.id.value', actions)
         self.assertIn('reasoningPreference.retainAccepted(failure.locator.conversationId.value', actions)
 
     def test_model_switch_restores_target_only_after_the_model_change(self):

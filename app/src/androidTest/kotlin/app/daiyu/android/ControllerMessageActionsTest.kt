@@ -96,9 +96,9 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         main { assertTrue(f.controller.loadMessageActionSnapshot(owner) { value.set(it); done.countDown() }) }
         await(done); return checkNotNull(value.get())
     }
-    private fun action(f: Fixture, action: MessageAction, target: MessageActionTarget): MessageActionResult {
+    private fun action(f: Fixture, action: MessageAction, target: MessageActionTarget, text: String? = null): MessageActionResult {
         val done = CountDownLatch(1); val value = AtomicReference<MessageActionResult>()
-        main { assertTrue(f.controller.messageAction(action, target) {
+        main { assertTrue(f.controller.messageAction(action, target, replacementText = text) {
             assertEquals(Looper.getMainLooper(), Looper.myLooper()); value.set(it); done.countDown()
         }) }
         await(done); return value.get()
@@ -110,7 +110,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         f.db.draft(owner.id, "unsent draft")
         val before = history(f, owner.id)
         val target = snapshot(f, owner.id).targets.values.single { it.role == Message.USER_ROLE }
-        assertEquals(MessageActionResult.EditDraft("original user 0"), action(f, MessageAction.EDIT_USER, target))
+        assertEquals(MessageActionResult.EditDraft("original user 0", target), action(f, MessageAction.EDIT_USER, target))
         assertEquals(before, history(f, owner.id)); assertEquals(0, f.opens.get())
         assertEquals("unsent draft", f.db.conversations().single().draft)
     }
@@ -155,7 +155,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         val sql = f.db.writableDatabase
         sql.execSQL("UPDATE conversations SET assistant_id=NULL WHERE id=?", arrayOf(owner.id.value))
         val before = history(f, owner.id)
-        val target = snapshot(f, owner.id).targets.getValue(before.first().id.value)
+        val target = snapshot(f, owner.id).targets.getValue(before[1].id.value)
         val copy = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
         assertNull(f.db.assistantId(copy.id)); assertEquals(before, history(f, owner.id))
         val count = f.db.conversations().size
@@ -168,19 +168,19 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         } finally { sql.execSQL("DROP TRIGGER corrupt_branch_binding") }
     }
 
-    fun testBranchCopiesWholeRunAndDeleteDoesNotChangeCopy() {
+    fun testBranchAndDeleteUseSelectedAssistantBoundaryWithoutChangingCopy() {
         val f = fresh(); val owner = seed(f, n = 2, tool = true)
         val before = history(f, owner.id)
-        val target = snapshot(f, owner.id).targets.getValue(before.first().id.value)
+        val target = snapshot(f, owner.id).targets.getValue(before[1].id.value)
         val copy = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
         val copied = history(f, copy.id)
         assertEquals(2, copied.size); assertTrue(copied.all { it.conversationId == copy.id })
         assertTrue(copied.none { a -> before.any { a.id == it.id || a.runId == it.runId } })
         assertEquals(before, history(f, owner.id))
         assertEquals(MessageActionResult.Deleted, action(f, MessageAction.DELETE_TURN, target))
-        assertEquals(before.drop(2), history(f, owner.id)); assertEquals(copied, history(f, copy.id))
+        assertEquals(before.take(1), history(f, owner.id)); assertEquals(copied, history(f, copy.id))
         val db = f.db.readableDatabase
-        before.take(2).forEach { row ->
+        before.drop(1).forEach { row ->
             for (table in listOf("message_video_inputs", "message_video_witnesses")) {
                 assertFalse(db.rawQuery("SELECT 1 FROM $table WHERE message_id=?", arrayOf(row.id.value)).use { it.moveToFirst() })
             }
@@ -188,66 +188,194 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertEquals(0, f.opens.get())
     }
 
-    fun testRetryUnknownToolAndRegenerateToolHistoryRejectWithoutTransport() {
+    fun testRetryUnknownToolRejectsButRegenerationStartsFreshWithoutOldToolDispatch() {
         val f = fresh(); val owner = seed(f, tool = true)
         val snapshot = snapshot(f, owner.id)
         val before = history(f, owner.id)
         val retry = action(f, MessageAction.RETRY_STEP, snapshot.steps.values.single()) as MessageActionResult.Rejected
         assertTrue(retry.reason.contains("UNKNOWN"))
         val answer = snapshot.targets.values.single { it.role == Message.ASSISTANT_ROLE }
-        assertTrue(action(f, MessageAction.REGENERATE, answer) is MessageActionResult.Rejected)
-        assertEquals(before, history(f, owner.id)); assertEquals(1, f.db.conversations().size); assertEquals(0, f.opens.get())
+        val result = action(f, MessageAction.REGENERATE, answer) as MessageActionResult.Regenerated
+        assertEquals(RegenerationSendOutcome.ACCEPTED, result.outcome)
+        assertEquals(owner.id, result.conversation.id)
+        assertEquals(1, f.db.conversations().size)
     }
 
-    fun testExplicitRegenerationMakesOneNewRequestOnNewSafeBranch() {
+    fun testExplicitRegenerationMakesOneNewRequestInOriginalConversation() {
         val seen = AtomicReference<List<Message>>()
         val f = fresh { history, sink -> seen.set(history); sink(ModelEvent.TextFinal("new", "regenerated")) }
         val owner = seed(f, n = 2)
         val before = history(f, owner.id)
         val answer = snapshot(f, owner.id).targets.getValue(before.last().id.value)
         val result = action(f, MessageAction.REGENERATE, answer) as MessageActionResult.Regenerated
-        assertEquals(RegenerationSendOutcome.ACCEPTED, result.outcome); assertTrue(result.conversation.id != owner.id)
+        assertEquals(RegenerationSendOutcome.ACCEPTED, result.outcome); assertEquals(owner.id, result.conversation.id)
         val completed = CountDownLatch(1)
         val listener: () -> Unit = { if (f.controller.active == null) completed.countDown() }
         main { f.controller.observe(listener); listener() }; await(completed)
         main { f.controller.unobserve(listener) }
-        assertEquals(1, f.opens.get()); assertEquals(before, history(f, owner.id))
+        assertEquals(1, f.opens.get()); assertEquals(before[2].id, history(f, owner.id)[2].id)
         val request = checkNotNull(seen.get())
         assertEquals(3, request.size)
         assertFalse(request.any { it.blocks.filterIsInstance<MessageBlock.Text>().any { b -> b.text == "old answer 1" } })
         assertEquals("original user 1", request.last().blocks.filterIsInstance<MessageBlock.Text>().single().text)
     }
 
-    fun testRegenerationPreparationFailureIsNotSentAndBranchDraftRemainsReachable() {
+    fun testRegenerationPreparationFailureLeavesSourceAndDraftUnchanged() {
         val f = fresh(configured = false); val owner = seed(f)
+        f.db.draft(owner.id, "unrelated draft")
         val before = history(f, owner.id)
         val answer = snapshot(f, owner.id).targets.getValue(before.last().id.value)
         val result = action(f, MessageAction.REGENERATE, answer) as MessageActionResult.Regenerated
         assertEquals(RegenerationSendOutcome.NOT_SENT, result.outcome)
-        assertTrue(result.conversation.id != owner.id)
-        assertEquals("original user 0", f.db.conversations().single { it.id == result.conversation.id }.draft)
-        assertTrue(history(f, result.conversation.id).isEmpty())
+        assertEquals(owner.id, result.conversation.id)
+        assertEquals("unrelated draft", f.db.conversations().single().draft)
         assertEquals(before, history(f, owner.id)); assertEquals(0, f.opens.get())
     }
 
-    fun testRegenerationUnknownSendRetainsExactBranchAndNeverAutomaticallyResends() {
+    fun testRegenerationUnknownSendRollsBackSourceAndNeverAutomaticallyResends() {
         val f = fresh(); val owner = seed(f)
         val before = history(f, owner.id)
         val answer = snapshot(f, owner.id).targets.getValue(before.last().id.value)
-        // The safe fork is empty. Failure occurs only after THIS preparation entered database.send.
         f.db.writableDatabase.execSQL("CREATE TRIGGER ignore_regeneration_send BEFORE INSERT ON messages " +
             "BEGIN SELECT RAISE(IGNORE); END")
         val result = action(f, MessageAction.REGENERATE, answer) as MessageActionResult.Regenerated
         assertEquals(RegenerationSendOutcome.UNKNOWN, result.outcome)
-        assertTrue(result.conversation.id != owner.id)
-        assertEquals(2, f.db.conversations().size)
-        assertEquals("original user 0", f.db.conversations().single { it.id == result.conversation.id }.draft)
-        assertTrue(history(f, result.conversation.id).isEmpty())
+        assertEquals(owner.id, result.conversation.id)
+        assertEquals(1, f.db.conversations().size)
+        assertEquals(before, history(f, owner.id))
         f.db.writableDatabase.execSQL("DROP TRIGGER ignore_regeneration_send")
-        // Refreshing the UNKNOWN branch is a read, never a replacement preparation or send.
-        snapshot(f, result.conversation.id)
-        assertEquals(2, f.db.conversations().size); assertEquals(0, f.opens.get())
-        assertEquals(before, history(f, owner.id)); assertTrue(history(f, result.conversation.id).isEmpty())
+        snapshot(f, owner.id)
+        assertEquals(1, f.db.conversations().size); assertEquals(0, f.opens.get())
+        assertEquals(before, history(f, owner.id))
+    }
+
+    fun testProductionRunnerSegmentsCanRegenerateWithoutAnotherConversation() {
+        val f = fresh(); val owner = seed(f)
+        val first = history(f, owner.id)
+        action(f, MessageAction.REGENERATE, snapshot(f, owner.id).targets.getValue(first.last().id.value))
+        val done = CountDownLatch(1)
+        val listener: () -> Unit = { if (f.controller.active == null && !f.controller.dataBusy) done.countDown() }
+        main { f.controller.observe(listener); listener() }; await(done); main { f.controller.unobserve(listener) }
+        val completed = history(f, owner.id)
+        assertTrue(completed.last().historySegments.isNotEmpty())
+        val second = action(f, MessageAction.REGENERATE,
+            snapshot(f, owner.id).targets.getValue(completed.last().id.value)) as MessageActionResult.Regenerated
+        assertEquals(RegenerationSendOutcome.ACCEPTED, second.outcome)
+        assertEquals(owner.id, second.conversation.id)
+        assertEquals(first.first().id, history(f, owner.id).first().id)
+        assertEquals(1, f.db.conversations().size)
+    }
+
+    private fun archive(f: Fixture, id: ConversationId, rows: List<Message>, name: String, at: Long,
+        logical: Int? = null): String {
+        val blobs = app.daiyu.android.context.PrivateBlobs(f.app)
+        val hash = blobs.put(if (logical == null) app.daiyu.android.context.ArchiveCodec.encode(rows)
+            else app.daiyu.android.context.ArchiveCodec.encodeDocument(rows, logical))
+        f.db.writableDatabase.insertOrThrow("context_archives", null, android.content.ContentValues().apply {
+            put("id", name); put("conversation_id", id.value); put("prefix_count", rows.size)
+            put("revision", app.daiyu.android.domain.context.ContextRevision.digest(rows)); put("summary", name)
+            put("blob_hash", hash); put("created", at); put("active", 1)
+        })
+        return hash
+    }
+
+    fun testEditingArchivedUserAtomicallyDropsCoveredSummaryAndTailButKeepsEarlierArchive() {
+        val f = fresh(); val owner = seed(f, n = 3); val before = history(f, owner.id)
+        val firstHash = archive(f, owner.id, before.take(2), "earlier", 1)
+        val removedHash = archive(f, owner.id, before.take(4), "covering", 2)
+        f.db.draft(owner.id, "unrelated composer")
+        val target = snapshot(f, owner.id).targets.getValue(before[2].id.value)
+        val done = CountDownLatch(1); val result = AtomicReference<MessageActionResult>()
+        main { assertTrue(f.controller.messageAction(MessageAction.SAVE_EDIT, target, replacementText = "edited original") {
+            result.set(it); done.countDown()
+        }) }; await(done)
+        assertEquals(RegenerationSendOutcome.ACCEPTED, (result.get() as MessageActionResult.Regenerated).outcome)
+        val after = history(f, owner.id)
+        assertEquals(before.take(2), after.take(2)); assertEquals(before[2].id, after[2].id)
+        assertEquals("edited original", (after[2].blocks.single() as MessageBlock.Text).text)
+        assertEquals(4, after.size)
+        assertEquals("unrelated composer", f.db.conversations().single().draft)
+        val sql = f.db.readableDatabase
+        assertFalse(sql.rawQuery("SELECT 1 FROM context_archives WHERE id='covering'", null).use { it.moveToFirst() })
+        assertTrue(sql.rawQuery("SELECT 1 FROM context_archives WHERE id='earlier' AND active=1", null).use { it.moveToFirst() })
+        assertTrue(app.daiyu.android.context.PrivateBlobs(f.app).read(firstHash).isNotEmpty())
+        assertTrue(app.daiyu.android.context.PrivateBlobs(f.app).read(removedHash).isNotEmpty())
+    }
+
+    fun testAssistantDeleteUsesExactLogicalSegmentAndPreservesPrecedingUser() {
+        val f = fresh(); val owner = seed(f); val before = history(f, owner.id)
+        val assistant = before.last()
+        val parts = listOf(
+            MessageHistorySegment(assistant.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("a", "first"))),
+            MessageHistorySegment(MessageId("supplement"), Message.USER_ROLE, listOf(MessageBlock.Text("u", "supplement"))),
+            MessageHistorySegment(assistant.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("b", "second"))))
+        val complete = assistant.copy(historySegments = parts)
+        DatabaseTransactions { f.db.writableDatabase }.run { db ->
+            val inputs = SQLiteMessageVideoStore.readVerified(db, assistant)
+            check(db.update("messages", ContextService.messageValues(complete), "id=?", arrayOf(assistant.id.value)) == 1)
+            SQLiteMessageVideoStore.reviseKnown(db, assistant, complete, inputs, inputs)
+        }
+        archive(f, owner.id, listOf(before.first(), complete), "within-owner", 1, 3)
+        val target = snapshot(f, owner.id).renderedTargets.values.single {
+            it.role == Message.ASSISTANT_ROLE && it.segmentIndex == 1
+        }
+        assertEquals(MessageActionResult.Deleted, action(f, MessageAction.DELETE_TURN, target))
+        val logical = MessageHistory.expand(history(f, owner.id))
+        assertEquals(listOf("original user 0", "first", "supplement"), logical.map {
+            it.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { b -> b.text }
+        })
+        assertTrue(f.db.readableDatabase.rawQuery("SELECT 1 FROM context_archives WHERE id='within-owner' AND active=1", null).use { it.moveToFirst() })
+        assertEquals("within-owner", ContextService(f.app, f.db).prepareSend(owner.id,
+            app.daiyu.android.domain.context.CompressionPolicy(), app.daiyu.android.context.ContextSummarizer { error("no new summary") }).archiveId)
+    }
+
+    fun testDeletingInsideLogicalSummaryInvalidatesItAndKeepsImmutableBlob() {
+        val f = fresh(); val owner = seed(f); val before = history(f, owner.id)
+        val assistant = before.last()
+        val complete = assistant.copy(historySegments = listOf(
+            MessageHistorySegment(assistant.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("a", "first"))),
+            MessageHistorySegment(MessageId("cut-supplement"), Message.USER_ROLE, listOf(MessageBlock.Text("u", "covered user"))),
+            MessageHistorySegment(assistant.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("b", "second")))))
+        DatabaseTransactions { f.db.writableDatabase }.run { db ->
+            val inputs = SQLiteMessageVideoStore.readVerified(db, assistant)
+            check(db.update("messages", ContextService.messageValues(complete), "id=?", arrayOf(assistant.id.value)) == 1)
+            SQLiteMessageVideoStore.reviseKnown(db, assistant, complete, inputs, inputs)
+        }
+        val hash = archive(f, owner.id, listOf(before.first(), complete), "covered-cut", 1, 3)
+        val target = snapshot(f, owner.id).renderedTargets.values.single { it.messageId.value == "cut-supplement" }
+        assertEquals(MessageActionResult.Deleted, action(f, MessageAction.DELETE_TURN, target))
+        assertEquals(2, MessageHistory.expand(history(f, owner.id)).size)
+        assertFalse(f.db.readableDatabase.rawQuery("SELECT 1 FROM context_archives WHERE id='covered-cut'", null).use { it.moveToFirst() })
+        assertTrue(app.daiyu.android.context.PrivateBlobs(f.app).read(hash).isNotEmpty())
+    }
+
+    fun testRepeatedInPlaceEditPreservesUserIdentityAndIndependentComposer() {
+        val f = fresh(); val owner = seed(f); val user = history(f, owner.id).first()
+        f.db.draft(owner.id, "independent composer")
+        repeat(2) { index ->
+            val target = snapshot(f, owner.id).targets.getValue(user.id.value)
+            val edited = action(f, MessageAction.SAVE_EDIT, target, "edit-$index") as MessageActionResult.Regenerated
+            assertEquals(RegenerationSendOutcome.ACCEPTED, edited.outcome)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
+            val idle = ChatController::class.java.getDeclaredMethod("idleAvailable").apply { isAccessible = true }
+            while (!synchronized(f.controller) { idle.invoke(f.controller) as Boolean } && System.nanoTime() < deadline) Thread.sleep(10)
+            assertTrue(synchronized(f.controller) { idle.invoke(f.controller) as Boolean })
+            val rows = history(f, owner.id)
+            assertEquals(user.id, rows.first().id)
+            assertEquals("edit-$index", rows.first().blocks.filterIsInstance<MessageBlock.Text>().single().text)
+            assertEquals("independent composer", f.db.conversations().single { it.id == owner.id }.draft)
+        }
+        assertEquals(2, f.opens.get())
+    }
+
+    fun testUserBranchStopsAtUserAndLeavesSourceSummaryUntouched() {
+        val f = fresh(); val owner = seed(f, n = 2); val before = history(f, owner.id)
+        archive(f, owner.id, before, "source-summary", 1)
+        val copy = (action(f, MessageAction.BRANCH, snapshot(f, owner.id).targets.getValue(before[0].id.value)) as MessageActionResult.Branch).conversation
+        assertEquals(1, history(f, copy.id).size)
+        assertEquals(Message.USER_ROLE, history(f, copy.id).single().role)
+        assertEquals(before, history(f, owner.id))
+        assertTrue(f.db.readableDatabase.rawQuery("SELECT 1 FROM context_archives WHERE id='source-summary'", null).use { it.moveToFirst() })
     }
 
     fun testOldRenderedCallbacksCannotMutateOrOverwriteReplacementEditor() {
@@ -299,7 +427,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         }
         main {
             f.controller.observe(observer)
-            host.bind(snapshot, { true }) { oldResults.incrementAndGet() }.onBranch(snapshot.targets.keys.first())
+            host.bind(snapshot, { true }) { oldResults.incrementAndGet() }.onBranch(snapshot.targets.values.first { it.role == Message.ASSISTANT_ROLE }.messageId.value)
         }
         try {
             await(entered)
@@ -325,7 +453,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertSame(receipt, f.controller.pendingBranchOutcome()) // inspection never acknowledges UNKNOWN
         main { f.controller.dismissBranchOutcome(receipt.copy()) }
         assertSame(receipt, f.controller.pendingBranchOutcome()) // stale/value-equal prompt cannot dismiss
-        val second = action(f, MessageAction.BRANCH, snapshot.targets.values.first()) as MessageActionResult.Unknown
+        val second = action(f, MessageAction.BRANCH, snapshot.targets.values.first { it.role == Message.ASSISTANT_ROLE }) as MessageActionResult.Unknown
         assertSame(receipt, f.controller.pendingBranchOutcome()) // a second result never overwrites the first
         main { f.controller.dismissBranchOutcome(receipt) }
         assertSame(second, f.controller.pendingBranchOutcome())
@@ -362,7 +490,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertEquals(before, history(f, owner.id)); assertEquals(0, f.opens.get())
     }
 
-    fun testDeleteRollsBackWholeRunWhenArchiveInvalidationIsIgnored() {
+    fun testDeleteRollsBackWhenArchiveRemovalIsIgnored() {
         val f = fresh(); val owner = seed(f, n = 2)
         val before = history(f, owner.id)
         val target = snapshot(f, owner.id).targets.getValue(before.first().id.value)
@@ -374,8 +502,8 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             put("revision", app.daiyu.android.domain.context.ContextRevision.digest(before))
             put("summary", "real archived history"); put("blob_hash", hash); put("created", 1L); put("active", 1)
         })
-        db.execSQL("CREATE TRIGGER ignore_archive_deactivation BEFORE UPDATE OF active ON context_archives " +
-            "WHEN OLD.active=1 AND NEW.active=0 BEGIN SELECT RAISE(IGNORE); END")
+        db.execSQL("CREATE TRIGGER ignore_archive_deactivation BEFORE DELETE ON context_archives " +
+            "BEGIN SELECT RAISE(IGNORE); END")
         assertTrue(action(f, MessageAction.DELETE_TURN, target) is MessageActionResult.Unknown)
         assertEquals(before, history(f, owner.id))
         app.daiyu.android.context.DatabaseTransactions { db }.run { sql ->
@@ -387,10 +515,8 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         // Removing the fault permits one explicit retry; no partial deletion escaped the rollback.
         db.execSQL("DROP TRIGGER ignore_archive_deactivation")
         assertEquals(MessageActionResult.Deleted, action(f, MessageAction.DELETE_TURN, target))
-        assertEquals(before.drop(2), history(f, owner.id))
-        assertEquals(0, db.rawQuery("SELECT active FROM context_archives WHERE id=?", arrayOf(archive)).use {
-            assertTrue(it.moveToFirst()); it.getInt(0)
-        })
+        assertTrue(history(f, owner.id).isEmpty())
+        assertFalse(db.rawQuery("SELECT 1 FROM context_archives WHERE id=?", arrayOf(archive)).use { it.moveToFirst() })
         assertEquals(0, f.opens.get())
     }
 
@@ -437,11 +563,12 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             blocks = listOf(MessageBlock.Text("answer", "image answer")), status = RunStatus.RUNNING)
         f.db.send(user, assistant); f.db.save(assistant.copy(status = RunStatus.COMPLETED))
         val service = MessageActionStore(f.db, ContextService(f.app, f.db), assets)
-        val target = service.snapshot(owner.id).targets.getValue(userId.value)
+        val target = service.snapshot(owner.id).targets.getValue(assistant.id.value)
         val copy = service.branch(target)
         val copiedRef = (history(f, copy.id).first().blocks.single() as MessageBlock.Image).reference
         assertTrue(copiedRef.owner != reference.owner)
         service.deleteTurn(target)
+        service.deleteTurn(service.snapshot(owner.id).targets.getValue(userId.value))
         assets.discardUnreferenced(media.owner, listOf(media)) // confirmed DB absence; must not remove copied original
         val copiedMedia = MediaReference(MediaOwner(copiedRef.owner.conversationId, copiedRef.owner.messageId), copiedRef.id,
             copiedRef.mime, copiedRef.bytes, copiedRef.sha256, copiedRef.width, copiedRef.height)
@@ -486,7 +613,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertEquals(reference.copy(owner = copiedReference.owner), copiedReference)
         assertEquals(MessageVideoOwner(copy.id.value, copied.first().id.value), copiedReference.owner)
         assertTrue(copied.first().runId != user.runId)
-        assertTrue(verifiedVideos(f, copied.last()).isEmpty())
+        assertEquals(1, copied.size)
         assertEquals(before, history(f, owner.id))
         service.deleteTurn(target)
         assertTrue(assets.discardUnreferenced(reference.owner, reference))
@@ -682,15 +809,40 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         .use { check(it.moveToFirst()); it.getInt(0) }
     private fun staticBackup(f: Fixture, seeded: StaticFixture) = app.daiyu.android.backup.NeutralBackupService(f.app, f.db).withStaticAssets(seeded.assets)
 
+    fun testPartialOwnerStaticGenerationCutKeepsEarlierTextAndBackupReadable() {
+        val f = fresh(configured = false); val seeded = staticFixture(f)
+        val rows = history(f, seeded.conversation.id); val owner = rows.last()
+        val supplement = MessageId("before-static-supplement")
+        val segmented = owner.copy(historySegments = listOf(
+            MessageHistorySegment(owner.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("earlier", "kept earlier"))),
+            MessageHistorySegment(supplement, Message.USER_ROLE, listOf(MessageBlock.Text("request", "generate"))),
+            MessageHistorySegment(owner.id, Message.ASSISTANT_ROLE, owner.blocks)))
+        DatabaseTransactions { f.db.writableDatabase }.run { db ->
+            val inputs = SQLiteMessageVideoStore.readVerified(db, owner)
+            check(db.update("messages", ContextService.messageValues(segmented), "id=?", arrayOf(owner.id.value)) == 1)
+            SQLiteMessageVideoStore.reviseKnown(db, owner, segmented, inputs, inputs)
+        }
+        val snapshot = snapshot(f, seeded.conversation.id)
+        val early = snapshot.renderedTargets.values.single { it.messageId == owner.id && it.segmentIndex == 0 }
+        val branch = (action(f, MessageAction.BRANCH, early) as MessageActionResult.Branch).conversation
+        val service = staticBackup(f, seeded)
+        assertTrue(service.staticGenerationOutputs(branch.id).isEmpty())
+        val target = snapshot.renderedTargets.values.single { it.messageId == owner.id && it.segmentIndex == 1 }
+        assertEquals(MessageActionResult.Deleted, action(f, MessageAction.DELETE_TURN, target))
+        assertTrue(service.staticGenerationOutputs(seeded.conversation.id).isEmpty())
+        assertEquals(3, MessageHistory.expand(history(f, seeded.conversation.id)).size)
+        assertEquals(0, f.opens.get())
+    }
+
     fun testProductionControllerStaticBranchAgainAndSourceDeletionAndV5DuplicateReverification() {
         val f = fresh(configured = false); val seeded = staticFixture(f); val service = staticBackup(f, seeded)
-        val target = snapshot(f, seeded.conversation.id).targets.values.first()
+        val target = snapshot(f, seeded.conversation.id).targets.values.first { it.role == Message.ASSISTANT_ROLE }
         val first = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
         val second = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
         assertEquals(MessageActionResult.Deleted, action(f, MessageAction.DELETE_TURN, target))
         val sourceDirectory = File(File(f.app.filesDir, "static-generation-assets/generation-static-v1"), seeded.output.identity.removePrefix("genstatic-v1-"))
         assertTrue(sourceDirectory.deleteRecursively()) // test-owned source fixture, never production GC
-        val nested = (action(f, MessageAction.BRANCH, snapshot(f, first.id).targets.values.first()) as MessageActionResult.Branch).conversation
+        val nested = (action(f, MessageAction.BRANCH, snapshot(f, first.id).targets.values.first { it.role == Message.ASSISTANT_ROLE }) as MessageActionResult.Branch).conversation
         for (conversation in listOf(first, second, nested)) {
             val output = service.staticGenerationOutputs(conversation.id).single()
             assertEquals(seeded.output.source, output.source)
@@ -753,7 +905,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
     fun testNoStaticCapabilityBranchAndCompleteExportFailClosed() {
         val f = fresh(configured = false); val seeded = staticFixture(f)
         val plain = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "plain-static-images")))
-        val target = plain.snapshot(seeded.conversation.id).targets.values.first()
+        val target = plain.snapshot(seeded.conversation.id).targets.values.first { it.role == Message.ASSISTANT_ROLE }
         assertTrue(runCatching { plain.branch(target) }.isFailure)
         assertTrue(runCatching { ContextService(f.app, f.db).branch(seeded.conversation.id, history(f, seeded.conversation.id).last().id) }.isFailure)
         assertTrue(runCatching { app.daiyu.android.backup.NeutralBackupService(f.app, f.db).exportPackage() }.isFailure)
@@ -766,7 +918,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         f.db.writableDatabase.execSQL("CREATE TRIGGER p37_late_source AFTER INSERT ON neutral_backup_history " +
             "WHEN NEW.kind='generation_static_output' AND NEW.identity<>'${seeded.output.identity}' BEGIN " +
             "UPDATE neutral_backup_history SET payload=replace(payload,'image/png','image/jpeg') WHERE identity='${seeded.output.identity}'; END")
-        val result = action(f, MessageAction.BRANCH, snapshot(f, seeded.conversation.id).targets.values.first())
+        val result = action(f, MessageAction.BRANCH, snapshot(f, seeded.conversation.id).targets.values.first { it.role == Message.ASSISTANT_ROLE })
         assertTrue(result is MessageActionResult.Rejected)
         assertEquals(before, history(f, seeded.conversation.id)); assertEquals(1, f.db.conversations().size)
         assertEquals(seeded.output, staticBackup(f, seeded).staticGenerationOutputs().single())
@@ -785,7 +937,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             lookup = { identity -> check(!f.db.writableDatabase.inTransaction()); service.findStaticGeneration(identity) })
         val store = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "account-static-images")),
             staticGeneration = integration)
-        val copied = store.branch(store.snapshot(seeded.conversation.id).targets.values.first())
+        val copied = store.branch(store.snapshot(seeded.conversation.id).targets.values.first { it.role == Message.ASSISTANT_ROLE })
         assertTrue(seeded.conversation.id != copied.id)
         assertEquals(2, calls.get())
         assertEquals(2, f.db.conversations().size)
@@ -804,7 +956,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             lookup = { identity -> service.findStaticGeneration(identity) })
         val store = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "changed-account-images")),
             staticGeneration = integration)
-        try { store.branch(store.snapshot(seeded.conversation.id).targets.values.first()); fail("changed account") }
+        try { store.branch(store.snapshot(seeded.conversation.id).targets.values.first { it.role == Message.ASSISTANT_ROLE }); fail("changed account") }
         catch (_: app.daiyu.android.context.BranchRolledBack) { }
         assertEquals(2, calls.get()); assertEquals(1, f.db.conversations().size)
         assertEquals(before, history(f, seeded.conversation.id))
@@ -830,7 +982,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             })
         val store = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "cas-images")),
             staticGeneration = integration)
-        val failure = runCatching { store.branch(store.snapshot(seeded.conversation.id).targets.values.first()) }.exceptionOrNull()
+        val failure = runCatching { store.branch(store.snapshot(seeded.conversation.id).targets.values.first { it.role == Message.ASSISTANT_ROLE }) }.exceptionOrNull()
         assertTrue(failure is app.daiyu.android.context.BranchRolledBack)
         assertEquals(1, reads.get()); assertEquals(1, f.db.conversations().size)
         assertEquals(2, service.staticGenerationOutputs(seeded.conversation.id).size)
@@ -859,7 +1011,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         }
         val store = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "unknown-images")),
             staticGeneration = integration)
-        val failure = runCatching { store.branch(store.snapshot(seeded.conversation.id).targets.values.first()) }.exceptionOrNull()
+        val failure = runCatching { store.branch(store.snapshot(seeded.conversation.id).targets.values.first { it.role == Message.ASSISTANT_ROLE }) }.exceptionOrNull()
         assertTrue(failure is app.daiyu.android.context.BranchOutcomeUnknown)
         val locator = (failure as app.daiyu.android.context.BranchOutcomeUnknown).locator
         assertTrue(locator.conversationId != seeded.conversation.id); assertEquals(1, locator.staticIdentities.size)

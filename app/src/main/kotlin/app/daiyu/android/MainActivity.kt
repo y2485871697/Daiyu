@@ -1051,6 +1051,9 @@ class MainActivity : ComponentActivity() {
     private var selectionStart = 0
     private var selectionEnd = 0
     @Volatile private var selectionReady = false
+    private data class InlineMessageEditor(val key: String, val text: String,
+        val target: app.daiyu.android.storage.MessageActionTarget, val visit: Any = Any())
+    private var inlineMessageEditor by mutableStateOf<InlineMessageEditor?>(null)
     private val messageActionHost by lazy { ControllerMessageActionHost(controller) }
     private var messageActionVisit = Any()
     private var messageActionSnapshot: app.daiyu.android.storage.MessageActionSnapshot? = null
@@ -1060,6 +1063,7 @@ class MainActivity : ComponentActivity() {
     private var messageActionLoading: MessageActionRenderKey? = null
     private var messageActionAttempted: MessageActionRenderKey? = null
     private fun invalidateMessageActionEditor() {
+        inlineMessageEditor = null
         messageActionHost.invalidate()
         messageActionVisit = Any()
         messageActionSnapshot = null; messageActionKey = null
@@ -2372,6 +2376,7 @@ class MainActivity : ComponentActivity() {
         val renderedEditorGeneration = editorGeneration
         val renderedContextEntryEpoch = contextManagementEntryEpoch
         val renderedDraftRevision = draftRevision
+        val renderedInlineVisit = inlineMessageEditor?.visit
         val renderedSpeechOwner = speechHost.owner
         fun editorMatches() = activityUsable() && selectionReady && pendingTextSend == null && controller.textSendState() == null &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
@@ -2390,19 +2395,26 @@ class MainActivity : ComponentActivity() {
             result = { outcome -> guard {
                 when (outcome) {
                     is MessageActionResult.EditDraft -> {
-                        updateDraft(outcome.text)
-                        selectionStart = draft.length; selectionEnd = draft.length; publishChat()
+                        outcome.target?.let { target ->
+                            val key = app.daiyu.android.timeline.TimelineAnchor(target.conversationId.value,
+                                target.runId.value, target.messageId.value, target.segmentIndex).listKey
+                            inlineMessageEditor = InlineMessageEditor(key, outcome.text, target)
+                            publishChat(rowsChanged = false)
+                        }
                     }
                     is MessageActionResult.Branch -> select(outcome.conversation)
-                    MessageActionResult.Deleted -> { shown.clear(); refresh() }
+                    MessageActionResult.Deleted -> { inlineMessageEditor = null; shown.clear(); refresh() }
                     is MessageActionResult.Regenerated -> {
-                        select(outcome.conversation)
+                        if (outcome.outcome != RegenerationSendOutcome.NOT_SENT) {
+                            inlineMessageEditor = null
+                            shown.clear(); select(outcome.conversation); refresh()
+                        }
                         when (outcome.outcome) {
                             RegenerationSendOutcome.ACCEPTED -> Unit
-                            RegenerationSendOutcome.NOT_SENT -> toast("新分支和原用户草稿已保留；本次未发送")
+                            RegenerationSendOutcome.NOT_SENT -> toast(controller.problem ?: "本次未发送；原消息、摘要及草稿保留")
                             RegenerationSendOutcome.UNKNOWN -> {
                                 shown.clear(); refresh()
-                                toast("新分支发送保存结果 UNKNOWN；请核实历史和服务端结果，不会自动重发或重新准备")
+                                toast("重新生成保存结果未确认；请核实历史，不会自动重发")
                             }
                         }
                     }
@@ -2492,7 +2504,15 @@ class MainActivity : ComponentActivity() {
                 else -> if (currentChat()) voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
             }
         },
-        onRegenerate = messageCallbacks.onRegenerate, onSpeak = speak@{ id ->
+        onRegenerate = { id ->
+            val target = actionSnapshot?.renderedTargets?.get(id) ?: actionSnapshot?.targets?.get(id)
+            val index = chatState.turns.indexOfFirst { it.listKey == id || it.id == id }
+            if (target != null && index >= 0 && chatState.turns.drop(index + 1).any { it is ChatTurnUi.User }) {
+                prompt = ChoicePrompt("重新生成将删除此回复及后面的消息", listOf("重新生成", "取消"), { choice ->
+                    if (choice == 0) messageCallbacks.onRegenerate(id)
+                })
+            } else messageCallbacks.onRegenerate(id)
+        }, onSpeak = speak@{ id ->
             if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
                 speechHost.owner != renderedSpeechOwner || selected?.id?.value != renderedConversation ||
                 editorGeneration != renderedEditorGeneration) return@speak
@@ -2508,7 +2528,26 @@ class MainActivity : ComponentActivity() {
             }
         },
         onBranch = messageCallbacks.onBranch, onEditUser = messageCallbacks.onEditUser,
-        onDeleteTurn = messageCallbacks.onDeleteTurn, onRetryStep = messageCallbacks.onRetryStep,
+        editingMessageKey = inlineMessageEditor?.key, editingMessageText = inlineMessageEditor?.text.orEmpty(),
+        onMessageEditText = { text -> if (currentChat() && editorMatches() && !controller.dataBusy &&
+            renderedInlineVisit != null && inlineMessageEditor?.visit === renderedInlineVisit) {
+            inlineMessageEditor = inlineMessageEditor?.copy(text = text); publishChat(rowsChanged = false)
+        } },
+        onCancelMessageEdit = { if (currentChat() && editorMatches() && renderedInlineVisit != null &&
+            inlineMessageEditor?.visit === renderedInlineVisit) {
+            inlineMessageEditor = null; publishChat(rowsChanged = false)
+        } },
+        onSaveMessageEdit = { inlineMessageEditor?.let { editor ->
+            if (currentChat() && editorMatches() && !controller.dataBusy && renderedInlineVisit != null &&
+                editor.visit === renderedInlineVisit && editor.target ==
+                    (actionSnapshot?.renderedTargets?.get(editor.key) ?: actionSnapshot?.targets?.get(editor.key)) &&
+                editor.text.isNotBlank()) messageCallbacks.onSaveEdit(editor.key, editor.text)
+        } },
+        onDeleteTurn = { id ->
+            prompt = ChoicePrompt("删除这条消息及后面的内容？", listOf("删除", "取消"), { choice ->
+                if (choice == 0) messageCallbacks.onDeleteTurn(id)
+            })
+        }, onRetryStep = messageCallbacks.onRetryStep,
         onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
         onProjectedDraftEdit = { expected, next, start, end ->
             if (!editorMatches() || renderedDraftRevision != draftRevision || draft != expected) false
@@ -5812,7 +5851,7 @@ class MainActivity : ComponentActivity() {
                     (!imageHost.session.attachments.state.value.canSubmit || state != null),
                 modelLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
-                assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null,
+                assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && inlineMessageEditor == null && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null,
                 supplementAvailable = controlOwner?.let(controller::canSupplement) == true &&
                     supplementDraft.pending == null && !supplementMediaBlocked(),
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
@@ -5847,7 +5886,10 @@ class MainActivity : ComponentActivity() {
         shown.addAll(0, earlier); prepareMessageActionSnapshot(); publishChat()
     }
     private fun copyMessage(id: String) {
-        val message = shown.firstOrNull { it.second.id.value == id }?.second ?: return
+        val turns = chatState.turns
+        val turn = turns.firstOrNull { it.listKey == id || it.id == id } ?: return
+        val history = app.daiyu.android.domain.MessageHistory.expand(shown.map { it.second })
+        val message = history.filter { it.id.value == turn.id }.getOrNull(turn.segmentIndex) ?: return
         val text = copyableImageHostText(message) ?: return
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息", text))
     }
@@ -6628,7 +6670,7 @@ internal fun copyableImageHostText(message: Message): String? {
 
 /** Only the current assistant's visible answer; never flatten work-process/tool payloads. */
 internal fun voiceHostText(turns: List<ChatTurnUi>, id: String): String? =
-    turns.filterIsInstance<ChatTurnUi.Assistant>().firstOrNull { it.id == id }?.finalText
+    turns.filterIsInstance<ChatTurnUi.Assistant>().firstOrNull { it.listKey == id || it.id == id }?.finalText
 
 internal fun voiceHostIsActive(state: SpeechPlaybackState) = state.phase in setOf(
     SpeechPhase.INITIALIZING, SpeechPhase.QUEUED, SpeechPhase.SPEAKING,

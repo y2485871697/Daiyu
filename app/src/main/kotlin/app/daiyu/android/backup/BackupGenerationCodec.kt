@@ -85,8 +85,11 @@ internal object BackupGenerationCodec {
             attempts.forEach { row ->
                 fields(row, attemptsColumns); validateIdentity(row)
                 require(byAttempt.put(attemptKey(row), row) == null) { "重复生成防重身份" }
-                // Deleted owners retain tombstones. If the owner survives, its exact call is authority.
-                if (owners.containsKey(id(row, "assistant_id"))) validateOwner(row, owners)
+                // A cut can retire a call inside a surviving owner. Its identity remains a
+                // tombstone, never an execution capability; output-bearing attempts stay exact.
+                val owner = owners[id(row, "assistant_id")]
+                if (owner != null && hasOwnerCall(row, owner))
+                    validateOwner(row, owners)
             }
             val slots = mutableSetOf<String>(); val receipts = mutableSetOf<String>()
             outputs.forEach { row ->
@@ -118,6 +121,14 @@ internal object BackupGenerationCodec {
         binding.identity(text(row, "item_id"))
         // Production fingerprints are SHA-256; reject custom opaque/private fingerprints explicitly.
         hash(row, "fingerprint"); GenerationProtocol.valueOf(text(row, "protocol"))
+    }
+    private fun hasOwnerCall(row: JSONObject, message: JSONObject): Boolean {
+        val history = if (message.has("history_segments")) MessageHistoryCodec.decode(message.getJSONArray("history_segments")) else emptyList()
+        return if (history.isNotEmpty()) history.filter { it.role == "assistant" }.any { segment ->
+            segment.blocks.filterIsInstance<MessageBlock.Tool>().any { it.invocation.id.value == row.getString("tool_call_id") }
+        } else message.getJSONArray("blocks").let { blocks -> (0 until blocks.length()).any {
+            blocks.getJSONObject(it).optString("type") == "tool" && blocks.getJSONObject(it).optString("id") == row.getString("tool_call_id")
+        } }
     }
     private fun validateOwner(row: JSONObject, messages: Map<String, JSONObject>) = with(BackupHistoryRows) {
         owner(row, messages, "conversation_id", "assistant_id", "run_id")

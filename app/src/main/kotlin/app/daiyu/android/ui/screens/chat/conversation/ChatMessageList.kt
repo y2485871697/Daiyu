@@ -272,7 +272,7 @@ internal fun ChatMessageList(
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
                             AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent,
-                                speaking = speechMessageId == turn.id,
+                                speaking = speechMessageId == turn.listKey || speechMessageId == turn.id,
                                 revealResetEpoch = revealResetEpoch,
                                 onRevealSettled = { settled ->
                                     if (settled) revealedTurns[turn.listKey] = turn else revealedTurns.remove(turn.listKey)
@@ -311,18 +311,20 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     clickFeedback = false, onClick = {}, onLongClick = { showMenu = true })
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
-                if (turn.content.isNotEmpty()) {
+                if (actions.editingMessageKey == turn.listKey) {
+                    InlineMessageEdit(actions)
+                } else if (turn.content.isNotEmpty()) {
                     MessageContent(turn.content, actions, imageLoader, markdown = false,
                         textBody = { text, modifier -> UserMessageText(text.text, modifier) })
                 } else {
                     UserMessageText(turn.text)
                 }
             }
-            UserTurnMenu(showMenu, { showMenu = false }, turn.id, actions)
+            UserTurnMenu(showMenu, { showMenu = false }, turn.listKey, actions)
             }
         }
-        MessageActionBar(
-            id = turn.id,
+        if (actions.editingMessageKey != turn.listKey) MessageActionBar(
+            id = turn.listKey,
             actions = actions,
             timestamp = turn.timestamp,
             showEditAction = true,
@@ -390,7 +392,7 @@ internal fun AssistantTurn(
             val hasTextActions = turn.content.isEmpty() || turn.content.any {
                 it is MessageContentUi.Text && it.text.isNotBlank()
             }
-            MessageActionBar(turn.id, actions, timestamp = turn.timestamp,
+            MessageActionBar(turn.listKey, actions, timestamp = turn.timestamp,
                 allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking)
         }
     }

@@ -27,10 +27,10 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         for source in (screen, messages):
             self.assertIn('speechMessageId: String? = null', source)
         self.assertIn('speechMessageId = speechMessageId', screen)
-        self.assertIn('speaking = speechMessageId == turn.id', messages)
+        self.assertIn('speaking = speechMessageId == turn.listKey || speechMessageId == turn.id', messages)
         self.assertIn('showCopyAction = hasTextActions, speaking = speaking', messages)
         self.assertNotIn('speechMessageId == turn.ownerMessageId', messages)
-        self.assertNotIn('speechMessageId == turn.listKey', messages)
+        self.assertIn('speechMessageId == turn.listKey', messages)
 
     def test_same_button_switches_stop_before_start_only_gates(self):
         main = (SRC / 'MainActivity.kt').read_text()

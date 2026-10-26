@@ -312,7 +312,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             arrayOf(id.value,run.value)).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
         MessageHistory.validate(ids.map { storedMessage(db,id,it) })
     }
-    /** preserveDraft is for explicit local child-command receipt runs, never composer sends. */
+    /** Preserve the independent composer for child receipts and historical-message revisions. */
     fun send(user:Message,assistant:Message,newConversation:Boolean=false,
         expectedAssistantId:String? = if(newConversation) selectedAssistantId() else assistantId(user.conversationId),
         videoInputs: List<app.daiyu.android.model.videos.MessageVideoInput> = emptyList(),

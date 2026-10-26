@@ -26,15 +26,32 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testActualEditCallbackRefillsOnlyDraftAndDoesNotSend() {
+    fun testActualEditCallbackOpensInlineEditorAndCancelKeepsDraftAndHistory() {
         val (conversation, user) = seed()
         mainThread { activity.select(conversation) }; readySnapshot()
         val before = fixture.database.messages(conversation.id)
         mainThread { retainedControls(activity).onEditUser(user.id.value) }
-        awaitControl("original user refill") { !fixture.controller.dataBusy && call("getDraft") == "original user" }
-        assertDraft("original user")
+        awaitControl("inline editor") { !fixture.controller.dataBusy && call("getInlineMessageEditor") != null }
+        assertDraft("")
+        mainThread { retainedControls(activity).onMessageEditText("cancelled edit"); retainedControls(activity).onCancelMessageEdit() }
+        assertNull(call("getInlineMessageEditor")); assertDraft("")
         assertEquals(before, fixture.database.messages(conversation.id))
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testOldInlineEditorCallbacksCannotOverwriteOrCancelANewVisit() {
+        val (conversation, user) = seed()
+        mainThread { activity.select(conversation) }; readySnapshot()
+        mainThread { retainedControls(activity).onEditUser(user.id.value) }
+        awaitControl("first inline edit") { !fixture.controller.dataBusy && call("getInlineMessageEditor") != null }
+        lateinit var old: app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+        mainThread { old = retainedControls(activity); old.onCancelMessageEdit() }
+        mainThread { retainedControls(activity).onEditUser(user.id.value) }
+        awaitControl("second inline edit") { !fixture.controller.dataBusy && call("getInlineMessageEditor") != null }
+        val current = call("getInlineMessageEditor")
+        mainThread { old.onMessageEditText("stale"); old.onCancelMessageEdit(); old.onSaveMessageEdit() }
+        assertSame(current, call("getInlineMessageEditor"))
+        assertDraft(""); assertEquals(0, fixture.opens.get())
     }
 
     fun testOldCallbackAfterNewEditorCannotBranchOrMutateDraft() {

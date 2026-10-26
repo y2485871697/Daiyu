@@ -47,15 +47,15 @@ internal class StaticGenerationBranch(
             app.daiyu.android.domain.ConversationId(conversation))))
         val historical = BackupHistoryRows.history(db, "generation_output", conversation)
         val static = StaticGenerationCodec.read(db, conversation)
-        val owners = original.map { it.id.value }.toSet()
+        val calls = MessageGenerationCut.calls(original)
         val sources = BackupHistoryRows.rows(generation.getJSONArray("outputs")).filter {
-            it.getString("assistant_id") in owners
+            MessageGenerationCut.call(it) in calls
         }.map { row ->
             val reference = BackupGenerationCodec.reference(row)
             if (BackupGenerationCodec.key(row) in historical) Source(StaticGenerationProvenance.capture(reference),
                 historical = HistoricalGenerationOutput(reference))
             else Source(StaticGenerationProvenance.capture(reference), live = reference)
-        } + static.filter { it.destination.assistantMessageId in owners }.map { Source(it.source, static = it) }
+        } + static.filter { MessageGenerationCut.call(it) in calls }.map { Source(it.source, static = it) }
         val byOwner = original.zip(mapped).associate { it.first.id.value to it.second }
         val scope = if (sources.isEmpty()) null else accountScope.getOrThrow()
         val outputs = sources.map { selected ->

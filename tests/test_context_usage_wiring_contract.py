@@ -46,7 +46,7 @@ class ContextUsageWiringContractTest(unittest.TestCase):
     def test_history_edits_and_successful_summary_revoke_in_the_write_transaction(self):
         service = text('context/ContextService.kt')
         self.assertEqual(2, service.count('CloudContextUsageStore.invalidate(db, id)'))
-        self.assertIn('CloudContextUsageStore.invalidate(db, target.conversationId)', text('storage/MessageActionStore.kt'))
+        self.assertIn('CloudContextUsageStore.invalidate(db, id)', text('storage/MessageActionStore.kt'))
         self.assertLess(service.index('check(inserted != -1L)'), service.index('CloudContextUsageStore.invalidate(db, id)'))
 
     def test_all_request_sources_update_the_conversation_ledger(self):

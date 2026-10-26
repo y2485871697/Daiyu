@@ -4,11 +4,11 @@ import app.daiyu.android.domain.Conversation
 import app.daiyu.android.storage.MessageActionSnapshot
 import app.daiyu.android.storage.MessageActionTarget
 
-internal enum class MessageAction { EDIT_USER, BRANCH, DELETE_TURN, REGENERATE, RETRY_STEP }
+internal enum class MessageAction { EDIT_USER, SAVE_EDIT, BRANCH, DELETE_TURN, REGENERATE, RETRY_STEP }
 /** Receipt for THIS preparation, not inferred from a later history refresh or another send. */
 internal enum class RegenerationSendOutcome { NOT_SENT, ACCEPTED, UNKNOWN }
 internal sealed interface MessageActionResult {
-    data class EditDraft(val text: String) : MessageActionResult
+    data class EditDraft(val text: String, val target: MessageActionTarget? = null) : MessageActionResult
     data class Branch(val conversation: Conversation) : MessageActionResult
     data object Deleted : MessageActionResult
     data class Regenerated(val conversation: Conversation, val outcome: RegenerationSendOutcome) : MessageActionResult
@@ -30,14 +30,14 @@ internal class ControllerMessageActionHost(private val controller: ChatControlle
         result: (MessageActionResult) -> Unit): Callbacks {
         val token = Any().also { lease = it }
         val admittedOwner = ownerEpoch
-        fun invoke(action: MessageAction, id: String) {
+        fun invoke(action: MessageAction, id: String, text: String? = null) {
             if (lease !== token || !isCurrent()) return
             val target: MessageActionTarget? = if (action == MessageAction.RETRY_STEP) snapshot?.steps?.get(id)
-                else snapshot?.targets?.get(id)
+                else (snapshot?.renderedTargets?.get(id) ?: snapshot?.targets?.get(id))
             if (target == null) {
                 result(MessageActionResult.Rejected("消息操作快照不可用；请刷新后重试")); return
             }
-            val admitted = controller.messageAction(action, target) {
+            val admitted = controller.messageAction(action, target, replacementText = text) {
                 // Busy/stream notifications may legitimately re-render the SAME editor while
                 // work is in flight. Rebinding fences old gestures, not an admitted receipt.
                 // Branch UNKNOWN is already retained by the controller, outside this UI lease;
@@ -50,9 +50,10 @@ internal class ControllerMessageActionHost(private val controller: ChatControlle
             onRegenerate = { invoke(MessageAction.REGENERATE, it) },
             onBranch = { invoke(MessageAction.BRANCH, it) },
             onEditUser = { invoke(MessageAction.EDIT_USER, it) },
+            onSaveEdit = { id, text -> invoke(MessageAction.SAVE_EDIT, id, text) },
             onDeleteTurn = { invoke(MessageAction.DELETE_TURN, it) },
             onRetryStep = { invoke(MessageAction.RETRY_STEP, it) })
     }
     data class Callbacks(val onRegenerate: (String) -> Unit, val onBranch: (String) -> Unit,
-        val onEditUser: (String) -> Unit, val onDeleteTurn: (String) -> Unit, val onRetryStep: (String) -> Unit)
+        val onEditUser: (String) -> Unit, val onSaveEdit: (String, String) -> Unit, val onDeleteTurn: (String) -> Unit, val onRetryStep: (String) -> Unit)
 }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="gui_accessibility_label">代鱼 · 显式授权屏幕操作</string>
-    <string name="gui_accessibility_description">仅在你明确授权本次会话后读取当前界面的有界 UI 树，并执行你确认的具体点击、长按、滚动、输入或系统导航。可能接触屏幕上的个人信息；密码节点隐藏。截图仅 Android 11 及以上、另行明确授权和请求时可用。开启系统服务不等于授权 Agent，关闭或断开后旧授权失效。不会自动点击开启权限、使用 root 保活或绕过系统限制。</string>
+    <string name="gui_accessibility_label">代鱼</string>
+    <string name="gui_accessibility_description">仅在你明确授权本次会话后读取当前界面的有界 UI 树，并执行你确认的具体点击、长按、滚动、输入或系统导航。可能接触屏幕上的个人信息；密码节点隐藏。截图仅 Android 11 及以上、另行明确授权和请求时可用。开启系统服务不等于授权 Agent，关闭或断开后旧授权失效。首次手动授予后，已启用的 LSPosed 系统模块默认保持服务；不会自动授予首次权限或恢复旧任务授权。</string>
 </resources>

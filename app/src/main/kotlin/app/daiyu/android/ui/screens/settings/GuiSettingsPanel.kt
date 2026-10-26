@@ -65,18 +65,18 @@ internal fun GuiSettingsPanel(
                 SettingsRow(title = if (connected) "服务已连接" else "服务未连接 · 不执行任何操作",
                     summary = if (enabled) "系统已启用；断开后旧会话和旧授权失效，不自动恢复任务。" else "系统尚未启用。请阅读风险并自行决定是否开启。",
                     tag = "gui-status")
-                SettingsRow(title = "前往系统无障碍设置", summary = "可能读取个人信息、操作其他应用。仅你可在系统页面明确开启或关闭。",
+                SettingsRow(title = "前往系统无障碍设置", summary = "可能读取个人信息、操作其他应用。首次开启必须由你在系统页面明确授权。",
                     tag = "gui-open-system", onClick = { if (active()) notice = describe(GuiSystemSettings.openFromUser(context)) })
                 SettingsRow(title = "刷新服务状态", tag = "gui-refresh", onClick = { if (active()) refresh() })
-                SettingsRow(title = "前往系统设置手动重新启用", summary = "仅系统已启用时打开设置。请自行关闭后重新开启本应用服务，返回后刷新状态；应用不会直接请求重绑、静默启用或恢复旧任务。",
+                SettingsRow(title = "前往系统设置手动重新启用", summary = "此按钮仅打开系统设置，不直接请求重绑。LSPosed 系统模块的服务保持独立生效；服务恢复不会恢复旧任务授权。",
                     tag = "gui-rebind", onClick = { if (active()) {
                         notice = when (val result = GuiSystemSettings.requestRebindFromUser(context)) {
-                            is GuiResult.Value -> "已打开系统无障碍设置；请手工关闭后重新开启本应用服务。返回后刷新状态，旧任务不会自动恢复。"
+                            is GuiResult.Value -> "已打开系统无障碍设置；返回后刷新状态。系统模块可能自动保持服务，旧任务不会自动恢复。"
                             else -> describe(result)
                         }
                         refresh()
                     } })
-                SettingsRow(title = "服务重绑与能力边界", summary = "不提供强制保活、提权或后台自动观察。锁屏/其他会话占用时拒绝；截图仅 API 30+ 且另行授权。",
+                SettingsRow(title = "服务重绑与能力边界", summary = "首次授权后，已启用的 LSPosed 系统模块默认保持本服务；不恢复旧任务或后台观察屏幕。锁屏/其他会话占用时拒绝；截图仅 API 30+ 且另行授权。",
                     tag = "gui-boundaries")
             }
         }

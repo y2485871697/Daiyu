@@ -87,6 +87,7 @@ android {
         }
     }
     packaging {
+        resources.merges += "META-INF/xposed/*"
         jniLibs {
             // A ProcessBuilder executable needs an installed file, not an APK mmap entry.
             // AGP merges extractNativeLibs=true; the package installer owns extraction.
@@ -145,6 +146,7 @@ android {
 }
 kotlin { jvmToolchain(27) }
 dependencies {
+    compileOnly("io.github.libxposed:api:102.0.0")
     implementation(project(":core-domain"))
     // P32: bounded RFC6455 decoding + one-shot HTTPS; licenses/API26 evidence in docs/P32-voice-network.md.
     implementation("org.java-websocket:Java-WebSocket:1.6.0")

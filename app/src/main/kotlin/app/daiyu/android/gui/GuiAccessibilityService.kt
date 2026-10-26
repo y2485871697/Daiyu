@@ -22,7 +22,7 @@ import java.util.concurrent.Executors
 import androidx.annotation.WorkerThread
 import app.daiyu.android.tasksurface.TaskSurfaceSelfTarget
 
-/** System-bound only. No root, shell, Shizuku, polling, hidden APIs, or automatic gestures. */
+/** System-bound only. Keepalive runs separately in system_server; it grants no GUI task access. */
 class GuiAccessibilityService : AccessibilityService() {
     private var watchingPermission = false
     private val permissionObserver = object : android.database.ContentObserver(GuiRuntime.main) {
@@ -136,7 +136,7 @@ internal object GuiRuntime {
     }
     val main = Handler(Looper.getMainLooper())
     private val gate = GuiLeaseGate(SystemClock::elapsedRealtime)
-    private var service: GuiAccessibilityService? = null
+    @Volatile private var service: GuiAccessibilityService? = null
     private var generation = 0L
     private var confirmation: GuiConfirmationOverlay? = null
     // Narrow parameters belong to the original gate lease, never to the process or a later owner.
@@ -208,6 +208,7 @@ internal object GuiRuntime {
     }
     private fun onMain() { check(Looper.myLooper() === Looper.getMainLooper()) { "gui_main_thread_required" } }
     fun isConnected(): Boolean { onMain(); return service != null }
+    internal fun hasServiceConnection(): Boolean = service != null
     fun connected(value: GuiAccessibilityService) {
         onMain(); confirmation?.revoke()
         targetBinding = null; clearNodes(); service = value; generation++; gate.connect()

@@ -34,6 +34,31 @@ class ProviderDirectorySelectionContractTest(unittest.TestCase):
         self.assertIn("fillHeight: Boolean = true", layout)
         self.assertIn("if (fillHeight) Modifier.fillMaxSize() else Modifier.fillMaxWidth()", layout)
 
+    def test_cancel_uses_secondary_role_and_precedes_danger_delete(self):
+        page = (UI / "ProviderDirectoryPage.kt").read_text()
+        footer = page.split("if (selectedSlots != null) WidePageContent(fillHeight = false)", 1)[1].split("internal fun ProviderAuthenticationPage", 1)[0]
+        self.assertLess(footer.index('text = "取消"'), footer.index('text = "删除"'))
+        cancel, delete = footer.split('TextButton(text = "取消"', 1)[1].split('TextButton(text = "删除"', 1)
+        self.assertIn('resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)', footer)
+        self.assertIn('color = accents.secondaryContainer', cancel)
+        self.assertIn('textColor = accents.onSecondary', cancel)
+        self.assertIn('onClick = onCancelSelection', cancel)
+        self.assertIn('colors = deletionButtonColors()', delete)
+        self.assertIn('enabled = enabled && selectedSlots.isNotEmpty()', delete)
+
+    def test_count_and_select_all_share_typography_and_text_baseline(self):
+        page = (UI / "ProviderDirectoryPage.kt").read_text()
+        header = page.split('item("provider-count")', 1)[1].split('rows.forEach', 1)[0]
+        self.assertIn('val titleStyle = MiuixTheme.textStyles.body2.copy', header)
+        self.assertIn('fontSize = if (grouped) 13.sp else 14.sp', header)
+        self.assertEqual(2, header.count('style = titleStyle'))
+        self.assertEqual(2, header.count('.alignByBaseline()'))
+        self.assertIn('testTag("provider-count-title")', header)
+        self.assertIn('testTag("provider-select-all")', header)
+        self.assertIn('role = Role.Button', header)
+        self.assertIn('enabled = enabled && visibleIds.isNotEmpty()', header)
+        self.assertNotIn('TextButton(', header)
+
     def test_selection_cancel_pause_and_back_keep_the_directory(self):
         route = (UI / "ProviderManagementRoute.kt").read_text()
         self.assertIn("if (selectedSlots != null) { clearTransientPrompts(); return }", route)

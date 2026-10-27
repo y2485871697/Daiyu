@@ -26,7 +26,7 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         assertTrue("footer is below the list, not over it", actions.top >= page.bottom - 1f)
         val delete = node("provider-delete-selected").fetchSemanticsNode().boundsInRoot
         val cancel = node("provider-cancel-selection").fetchSemanticsNode().boundsInRoot
-        assertTrue(delete.left < cancel.left)
+        assertTrue("cancel precedes delete without overlap", cancel.right <= delete.left)
         assertEquals(delete.width, cancel.width, 1f)
         ui.onNodeWithText("配置与模型").assertDoesNotExist()
         node("dialog-confirm").assertDoesNotExist()
@@ -47,6 +47,40 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
         row(ProviderRegistry.PRIMARY).performClick()
         awaitUniqueTag("page:主模型服务商")
+    }
+
+    private fun assertCountAndSelectAllTypography() {
+        val title = reveal("provider-count-title", "模型提供商", "provider-count")
+        val selectAll = reveal("provider-select-all", "模型提供商", "provider-count")
+        val titleLayouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        val actionLayouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        title.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(titleLayouts) }
+        selectAll.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(actionLayouts) }
+        val titleLayout = titleLayouts.single()
+        val actionLayout = actionLayouts.single()
+        assertEquals(titleLayout.layoutInput.style.fontSize, actionLayout.layoutInput.style.fontSize)
+        assertEquals(titleLayout.layoutInput.style.fontWeight, actionLayout.layoutInput.style.fontWeight)
+        assertFalse(titleLayout.hasVisualOverflow)
+        assertFalse(actionLayout.hasVisualOverflow)
+        val titleBounds = title.fetchSemanticsNode().boundsInRoot
+        val actionBounds = selectAll.fetchSemanticsNode().boundsInRoot
+        assertEquals(titleBounds.top + titleLayout.firstBaseline, actionBounds.top + actionLayout.firstBaseline, 1f)
+    }
+
+    fun testSelectAllMatchesCountTypographyAndBaselineInBothStates() {
+        val before = addRows()
+        openProviderManagement()
+        select(ProviderRegistry.PRIMARY)
+        node("provider-select-all").assertTextEquals("全选")
+        assertCountAndSelectAllTypography()
+        node("provider-select-all").performClick()
+        node("provider-select-all").assertTextEquals("取消全选")
+        assertCountAndSelectAllTypography()
+        node("provider-select-all").performClick()
+        node("provider-delete-selected").assertIsNotEnabled()
+        assertEquals(before, fixture.controller.providers.snapshot())
+        node("provider-cancel-selection").performClick()
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testFilteredSelectAllAndEmptySelectionDoNotSelectHiddenProviders() {

@@ -1,6 +1,13 @@
 package app.daiyu.android.ui.screens.settings
 
 import app.daiyu.android.ui.components.deletionButtonColors
+import app.daiyu.android.ui.app.LocalAppearanceSettings
+import app.daiyu.android.ui.app.LocalAppearanceDark
+import app.daiyu.android.ui.app.resolveAppearanceActions
+import app.daiyu.android.ui.haptics.clickable
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import androidx.compose.foundation.ExperimentalFoundationApi
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.background
@@ -95,17 +102,25 @@ internal fun ProviderDirectoryPage(
                 }
             }
             item("provider-count") {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) {
-                        SettingsSectionTitle("已配置提供商（共 ${registry?.providers?.size ?: 0} 个）")
-                    }
+                val grouped = LocalSettingsPageStyle.current
+                val titleStyle = MiuixTheme.textStyles.body2.copy(
+                    fontSize = if (grouped) 13.sp else 14.sp,
+                    fontWeight = if (grouped) FontWeight.Medium else FontWeight.SemiBold)
+                val titleColor = if (grouped) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.onSurface
+                Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+                    .padding(top = if (grouped) 16.dp else 20.dp, bottom = if (grouped) 1.dp else 2.dp)) {
+                    Text("已配置提供商（共 ${registry?.providers?.size ?: 0} 个）", style = titleStyle,
+                        color = titleColor, modifier = Modifier.weight(1f).alignByBaseline()
+                            .testTag("provider-count-title").padding(vertical = 8.dp))
                     if (selectedSlots != null) {
                         val visibleIds = rows.map { it.slotId }.toSet()
                         val allSelected = visibleIds.isNotEmpty() && selectedSlots.containsAll(visibleIds)
-                        TextButton(text = if (allSelected) "取消全选" else "全选",
-                            enabled = enabled && visibleIds.isNotEmpty(),
-                            onClick = { onSelectionChange(if (allSelected) selectedSlots - visibleIds else selectedSlots + visibleIds) },
-                            modifier = Modifier.padding(end = 16.dp).testTag("provider-select-all"))
+                        Text(text = if (allSelected) "取消全选" else "全选", style = titleStyle,
+                            color = titleColor.copy(alpha = if (enabled && visibleIds.isNotEmpty()) 1f else .38f),
+                            modifier = Modifier.alignByBaseline().testTag("provider-select-all")
+                                .clickable(enabled = enabled && visibleIds.isNotEmpty(), role = Role.Button,
+                                    onClick = { onSelectionChange(if (allSelected) selectedSlots - visibleIds else selectedSlots + visibleIds) })
+                                .padding(vertical = 8.dp))
                     }
                 }
             }
@@ -145,11 +160,14 @@ internal fun ProviderDirectoryPage(
             Row(Modifier.fillMaxWidth().horizontalCutoutPadding().padding(horizontal = sidePadding)
                 .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)
                 .testTag("provider-selection-actions"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val accents = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)
+                TextButton(text = "取消", enabled = enabled, onClick = onCancelSelection,
+                    colors = ButtonDefaults.textButtonColors(
+                        color = accents.secondaryContainer, textColor = accents.onSecondary),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-cancel-selection"))
                 TextButton(text = "删除", enabled = enabled && selectedSlots.isNotEmpty(), onClick = onDeleteSelected,
                     colors = deletionButtonColors(),
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-delete-selected"))
-                TextButton(text = "取消", enabled = enabled, onClick = onCancelSelection,
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-cancel-selection"))
             }
         }
     }

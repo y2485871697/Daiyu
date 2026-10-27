@@ -68,7 +68,7 @@ class SourceTests(unittest.TestCase):
         wrapper = int(re.search(r'export ADB_COMMAND_TIMEOUT=(\d+)', script).group(1))
         stages = [(phase, int(seconds)) for phase, seconds in re.findall(r'adb_stage ([a-z-]+) (\d+) ', script)]
         instrumentation = next(seconds for phase, seconds in stages if phase == 'instrumentation')
-        self.assertGreaterEqual(instrumentation, 5400)
+        self.assertGreaterEqual(instrumentation, 7200)
         self.assertLessEqual(instrumentation, 7200)
         self.assertGreater(wrapper, instrumentation + 5)
         self.assertIn('adb_stage launch 30 shell am start -S -W -n app.daiyu.android/.MainActivity', script)
@@ -592,7 +592,7 @@ exit 0
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual((self.root / 'smoke/启动.png').read_bytes(), b'\x89PNG\r\n\x1a\n')
         self.assertIn('phase=instrumentation exit=0', (self.root / 'smoke/stages.txt').read_text())
-        self.assertIn('phase=instrumentation budget=5400s', (self.root / 'smoke/stages.txt').read_text())
+        self.assertIn('phase=instrumentation budget=7200s', (self.root / 'smoke/stages.txt').read_text())
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[3:8], ['-w', '-r', '-e', 'class', 'app.daiyu.android.FirstTest'])
         self.assertEqual(args[8], 'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner')

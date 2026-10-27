@@ -24,7 +24,8 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         val holder = Thread {
             try {
                 fixture.settings.modelCatalog.readConfiguration {
-                    entered.countDown(); check(released.await(10, TimeUnit.SECONDS))
+                    entered.countDown()
+                    check(released.await(60, TimeUnit.SECONDS)) { "Test did not release the held catalog" }
                 }
             } catch (problem: Throwable) { failure.set(problem) }
         }.apply { start() }

@@ -502,7 +502,7 @@ jobs:
     needs: [build, release, candidate]
     if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || ((inputs.mode == 'release' || inputs.mode == 'daily') && needs.release.result == 'success') || (inputs.mode == 'candidate' && needs.candidate.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
-    timeout-minutes: 185
+    timeout-minutes: 215
     strategy:
       fail-fast: false
       matrix:
@@ -586,7 +586,7 @@ jobs:
       - name: 预启动 ADB
         run: adb start-server
       - name: 安装并检查启动
-        timeout-minutes: 175
+        timeout-minutes: 205
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}

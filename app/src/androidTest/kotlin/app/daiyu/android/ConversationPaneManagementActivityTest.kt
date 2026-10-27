@@ -160,6 +160,55 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testConversationDeleteHasNoCrossAndKeepsCancelBackOutsideAndConfirm() {
+        lateinit var conversation: Conversation
+        lateinit var survivor: Conversation
+        mainThread {
+            conversation = fixture.database.create()
+            survivor = fixture.database.create()
+            fixture.database.rename(conversation.id, "删除确认目标")
+            fixture.database.rename(survivor.id, "删除确认保留")
+        }
+        val before = fixture.database.exportBackup()
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        val tag = "drawer-conversation:${conversation.id.value}"
+        for (action in listOf("cancel", "back", "outside", "confirm")) {
+            node("drawer-list").performScrollToKey(conversation.id.value)
+            awaitNodeWindowFocus(node("conversation-drawer"))
+            awaitUniqueTag(tag)
+            node(tag).performTouchInput { longClick() }
+            ui.onNodeWithText(instrumentation.targetContext.getString(R.string.action_delete)).performClick()
+            awaitUniqueTag("dialog-confirm")
+            awaitDialogEnter(node("dialog-confirm"))
+            ui.onNodeWithText("删除会话").assertIsDisplayed()
+            ui.onNodeWithText("确认删除此会话及其消息？").assertIsDisplayed()
+            ui.onNodeWithContentDescription("关闭", useUnmergedTree = true).assertDoesNotExist()
+            node("dialog-cancel").assertIsDisplayed().assertHasClickAction()
+            node("dialog-confirm").assertIsDisplayed().assertHasClickAction()
+            awaitNodeWindowFocus(node("chat-selection-sheet"))
+            when (action) {
+                "cancel" -> node("dialog-cancel").performClick()
+                "back" -> instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                "outside" -> node("preview-dialog-viewport").performTouchInput { click(Offset(2f, 2f)) }
+                "confirm" -> node("dialog-confirm").performClick()
+            }
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodesWithTag("dialog-confirm").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+            }
+            if (action != "confirm") {
+                assertEquals(before, fixture.database.exportBackup())
+                assertEquals(true, mainThreadValue { hostValue("getSidebarVisible") })
+            }
+        }
+        awaitControl("confirmed target removed from database and sidebar") {
+            !fixture.controller.dataBusy && fixture.database.conversations().none { it.id == conversation.id } &&
+                paneState().historyConversations.none { it.id == conversation.id.value }
+        }
+        assertTrue(fixture.database.conversations().any { it.id == survivor.id })
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testManageSelectsInPlacePreservesOwnerDraftAndReopensWithoutLosingSelection() {
         lateinit var first: Conversation
         lateinit var second: Conversation

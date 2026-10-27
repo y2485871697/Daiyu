@@ -101,6 +101,37 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             assertEquals(0, executions)
         }
     }
+    fun testReceiptTargetLabelsRenderInBothProductionPathsWithoutReexecution() {
+        var executions = 0
+        for (mixed in listOf(false, true)) for ((backend, uid, label) in listOf(
+            Triple("android", 0, "Android • root"), Triple("android", 10444, "Android • user"),
+            Triple("linux:debian", 0, "Debian • root"), Triple("shizuku", 2000, "Android • Shizuku"))) {
+            val fixture = source(mixed, "target-$backend-$uid-$mixed")
+            val payload = org.json.JSONObject().put("ok", true).put("backend", backend).put("uid", uid)
+                .put(if (backend == "shizuku") "output" else "stdout", "target-output").put("exit_code", 0)
+                .also { if (backend != "shizuku") it.put("root", uid == 0).put("host_root", uid == 0) }.toString()
+            val name = if (backend == "shizuku") "shizuku_execute" else "terminal_exec"
+            val args = if (backend == "shizuku") """{"script":"printf target-output"}"""
+                else org.json.JSONObject().put("command", "printf target-output")
+                    .put("environment", if (backend.startsWith("linux:")) "linux" else "android").toString()
+            val message = fixture.copy(blocks = fixture.blocks.map { block ->
+                if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = name, arguments = args), result = payload)
+                else block
+            })
+            val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
+            show(turn, ChatScreenActions(onRetryStep = { executions++ }))
+            if (!mixed) {
+                ui.onNodeWithText(label).assertIsDisplayed()
+                ui.onNodeWithTag("work-process-header").performClick()
+            }
+            val title = "执行命令 · $label"
+            ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithText("target-output").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("技术详情").scrollToVisible().performClick()
+            ui.onNodeWithText("未知工具回退").assertDoesNotExist()
+            assertEquals(0, executions)
+        }
+    }
     fun testHistoricalUnknownAndEveryReservedCategoryHaveOnlyReadOnlyDisclosure() {
         var executions = 0
         ToolCardPresentations.categories.forEach { category ->

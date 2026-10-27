@@ -106,6 +106,7 @@ data class WorkStepUi(
     val categoryDetails: ToolCategoryDetailsUi? = null,
     val activity: ToolActivityUi = ToolActivityUi.from(state),
     val operationGlyph: String = "generic",
+    val executionTargetLabel: String? = null,
 ) {
     val toolCallId: String get() = id
 }

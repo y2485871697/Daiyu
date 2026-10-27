@@ -117,6 +117,7 @@ class RunShizukuCommandsTest {
             assertFalse(result.isError)
             assertEquals("result", JSONObject(result.payload).getString("output"))
             assertEquals(2000, JSONObject(result.payload).getInt("uid"))
+            assertEquals("shizuku", JSONObject(result.payload).getString("backend"))
             assertTrue((f.dispatch() as DispatchOutcome.Confirmed).replayed)
             assertEquals(1, f.backend.commands.size)
             assertTrue(f.backend.commands.single().requestId.matches(Regex("[0-9a-f]{64}")))

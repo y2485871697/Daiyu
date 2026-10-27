@@ -16,7 +16,17 @@ internal object ToolCardPresentations {
     fun processTitle(categories: List<String>): String =
         categories.distinct().singleOrNull()?.let(categoryTitles::get) ?: "工具链"
 
-    data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi)
+    fun processTitleForSteps(steps: List<WorkStepUi>): String {
+        val category = steps.map { it.category }.distinct().singleOrNull()
+        if (steps.isNotEmpty() && category in setOf("terminal", "background_job")) {
+            val targets = steps.map { it.executionTargetLabel }
+            if (targets.all { it != null }) return targets.distinct().singleOrNull()
+                ?: if (category == "terminal") "多环境终端" else "多环境后台任务"
+        }
+        return processTitle(steps.map { it.category })
+    }
+
+    data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi, val targetLabel: String? = null)
     private val tools = buildMap {
         fun group(category: String, vararg entries: Pair<String, String>) { entries.forEach { (name, title) -> put(name, category to title) } }
         group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆")
@@ -105,10 +115,12 @@ internal object ToolCardPresentations {
             if (kind.first == "delegation") add(ToolDetailSectionUi("子任务", "调用成功不代表子任务完成；后台任务以真实任务记录为准"))
             if (kind.first == "gui") add(ToolDetailSectionUi("操作回执", "动作已派发不等于业务目标已完成；历史观察不授予执行权"))
         }
-        val title = if (kind.first == "generic" && toolName.matches(Regex("[A-Za-z][A-Za-z0-9_.-]{0,63}"))) {
+        val target = if (kind.first in setOf("terminal", "background_job")) TerminalToolTarget.fromResult(toolName, result, output) else null
+        val operationTitle = if (kind.first == "generic" && toolName.matches(Regex("[A-Za-z][A-Za-z0-9_.-]{0,63}"))) {
             "执行其他工具 · $toolName"
         } else kind.second
-        return Presentation(kind.first, title, summary, sections, ToolCategoryDetails.project(kind.first, arguments, result, toolName))
+        val title = target?.let { "$operationTitle · ${it.label}" } ?: operationTitle
+        return Presentation(kind.first, title, summary, sections, ToolCategoryDetails.project(kind.first, arguments, result, toolName, target), target?.label)
     }
     private fun arrayCount(value: JSONObject?, key: String, label: String): String =
         value?.optJSONArray(key)?.let { "$label：${it.length()}" }.orEmpty()

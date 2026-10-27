@@ -115,7 +115,7 @@ internal class RunShizukuCommands(
                         if (offset == page.retainedBytes) {
                             val payload = JSONObject().put("ok", outcome.exitCode == 0).put("exit_code", outcome.exitCode)
                                 .put("output", output.toString(Charsets.UTF_8.name())).put("truncated", page.truncated)
-                                .put("uid", backend.identity.uid).toString()
+                                .put("backend", "shizuku").put("uid", backend.identity.uid).toString()
                             return ExecutionReceipt.Confirmed(payload, isError = outcome.exitCode != 0)
                         }
                     }

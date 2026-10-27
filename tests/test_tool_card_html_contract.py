@@ -38,6 +38,21 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn("WorkStepState.entries", regression)
         self.assertIn("WorkStepState.UNKNOWN, withoutReceipt", regression)
 
+    def test_terminal_execution_target_is_receipt_driven_and_used_in_both_headers(self):
+        target = (CHAT / "TerminalToolTarget.kt").read_text()
+        self.assertIn('receipt.opt("backend")', target)
+        self.assertIn('listOf("root", "host_root")', target)
+        self.assertIn('readUid("guest_uid")', target)
+        self.assertNotIn("arguments", target)
+        self.assertNotIn("Settings", target)
+        presentation = (CHAT / "ToolCardPresentation.kt").read_text()
+        self.assertIn("TerminalToolTarget.fromResult(toolName, result, output)", presentation)
+        self.assertIn("targets.all { it != null }", presentation)
+        self.assertIn("processTitleForSteps(steps)", (CHAT / "WorkProcessCard.kt").read_text())
+        self.assertIn("executionTargetLabel = display.targetLabel", (CHAT / "ChatTurnMapper.kt").read_text())
+        shizuku = (ROOT / "app/src/main/kotlin/app/daiyu/android/shizuku/RunShizukuCommands.kt").read_text()
+        self.assertIn('.put("backend", "shizuku").put("uid", backend.identity.uid)', shizuku)
+
     def test_compact_headers_adapt_locally_and_preserve_disclosure_ownership(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertEqual(2, shell.count("heightIn(min = 44.dp)"))

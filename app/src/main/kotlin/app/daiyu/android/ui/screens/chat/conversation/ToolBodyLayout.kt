@@ -29,7 +29,7 @@ internal fun toolBodyLayout(category: String, details: ToolCategoryDetailsUi): T
         "skills" -> setOf("技能", "资源", "技能数", "列表范围")
         "generation" -> setOf("生成阶段", "生成进度", "列表范围")
         "mcp" -> setOf("原工具", "列表范围")
-        "terminal", "background_job" -> setOf("退出码", "返回状态", "命令完成确认")
+        "terminal", "background_job" -> setOf("执行环境", "Android 宿主权限", "退出码", "返回状态", "命令完成确认")
         "device_read", "system_action", "context", "user_question" -> emptySet()
         else -> (rich.fields + details.fields).map { it.label }.toSet()
     }

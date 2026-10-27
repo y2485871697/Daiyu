@@ -137,6 +137,7 @@ object ChatTurnMapper {
             },
             owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value),
             toolName = block.invocation.name, category = display.category, sections = display.sections,
+            executionTargetLabel = display.targetLabel,
             dedicatedKey = dedicatedKey, categoryDetails = display.details,
             hasBrowserScreenshot = block.invocation.name in setOf("browser_read", "browser_write") &&
                 runCatching { org.json.JSONObject(block.invocation.arguments).optString("action") == "screenshot" }.getOrDefault(false),

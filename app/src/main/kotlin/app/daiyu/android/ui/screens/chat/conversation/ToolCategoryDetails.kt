@@ -36,7 +36,7 @@ internal object ToolCategoryDetails {
         "ownerTransportReady" to "宿主通道就绪", "displayInitialized" to "显示已初始化", "hasFrame" to "已有画面",
         "sourceEmpty" to "画面源为空")
 
-    fun project(category: String, arguments: String, result: String?, toolName: String = ""): ToolCategoryDetailsUi {
+    fun project(category: String, arguments: String, result: String?, toolName: String = "", terminalTarget: TerminalToolTarget? = null): ToolCategoryDetailsUi {
         val args = parse(arguments)
         val envelope = parse(result)
         val output = if (category in setOf("apps", "files", "personal_search", "device_read", "system_action"))
@@ -78,6 +78,10 @@ internal object ToolCategoryDetails {
                 "子任务记录" to "委派回执不是生命周期终态；实时控制使用本会话子任务记录页。"
             }
             "terminal", "background_job" -> {
+                (terminalTarget ?: TerminalToolTarget.fromResult(toolName, result, output))?.let { target ->
+                    fields += ToolFieldUi("执行环境", target.label)
+                    target.hostIdentity?.let { fields += ToolFieldUi("Android 宿主权限", it) }
+                }
                 numeric(output, "exit_code", "wait_status", "offset", "next_offset", "total_bytes")
                 boolean(output, "pty", "persistent_shell", "opened", "has_more", "log_truncated", "output_complete", "log_available", "leader_exited", "scope_drain_confirmed")
                 state(output)

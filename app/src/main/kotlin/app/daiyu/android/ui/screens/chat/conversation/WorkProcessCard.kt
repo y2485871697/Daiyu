@@ -54,7 +54,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val steps = work.segments.flatMap { it.steps }
     val stepCount = steps.size + work.segments.count { it.reasoning != null }
     val category = steps.map { it.category }.distinct().singleOrNull()
-    val title = ToolCardPresentations.processTitle(steps.map { it.category })
+    val title = ToolCardPresentations.processTitleForSteps(steps)
     val shape = RoundedCornerShape(12.dp)
     Column(modifier.fillMaxWidth().clip(shape).background(colors.surface).drawWithContent {
         drawContent()

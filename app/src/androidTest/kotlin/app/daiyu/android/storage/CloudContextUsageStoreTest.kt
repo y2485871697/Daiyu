@@ -115,7 +115,7 @@ class CloudContextUsageStoreTest : InstrumentationTestCase() {
             val restored = CloudContextUsageStore.read(db, conversation, reopened)
             assertEquals(240_000L, restored.inputTokens)
             assertEquals(240_000f / 272_000f, restored.fraction!!, .00001f)
-            assertEquals("240k/272k", restored.tokensLabel(java.util.Locale.US))
+            assertEquals("240K/272K", restored.tokensLabel(java.util.Locale.US))
             val summary = RequestCheckpoint("summary", "summary-attempt", "owner", RequestOperation.NEXT)
             transaction(db) {
                 CloudContextUsageStore.record(db, saved.copy(usage = saved.usage +

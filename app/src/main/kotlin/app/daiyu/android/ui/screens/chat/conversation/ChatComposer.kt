@@ -174,8 +174,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     role = Role.Button,
                     onClickLabel = if (showContextTokens) "显示上下文百分比" else "显示上下文实际用量",
                     onClick = { showContextTokens = !showContextTokens })
-                .padding(1.dp).padding(horizontal = 3.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                .padding(1.dp).padding(horizontal = 5.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
                 ChatContextMark(fraction, contextColor, Modifier.size(15.dp).testTag("chat-context-icon"))
                 AnimatedContent(targetState = showContextTokens,

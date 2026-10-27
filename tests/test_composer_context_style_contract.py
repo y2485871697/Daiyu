@@ -14,8 +14,8 @@ class ComposerContextStyleContractTest(unittest.TestCase):
 
     def test_badge_wraps_its_content_inside_compact_limits(self):
         self.assertIn('.testTag("chat-context")', self.badge)
-        self.assertIn('.padding(1.dp).padding(horizontal = 3.dp, vertical = 2.dp)', self.badge)
-        self.assertIn('Arrangement.spacedBy(4.dp)', self.badge)
+        self.assertIn('.padding(1.dp).padding(horizontal = 5.dp, vertical = 3.dp)', self.badge)
+        self.assertIn('Arrangement.spacedBy(5.dp)', self.badge)
         self.assertIn('modifier = Modifier.weight(1f, fill = false)', self.badge)
         self.assertIn('modifier = Modifier.testTag("chat-context-label")', self.badge)
         self.assertNotIn('fillMaxWidth', self.badge)

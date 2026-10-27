@@ -24,16 +24,21 @@ class CloudContextUsageTest {
         val value = CloudContextUsageUi(input, 272_000)
         assertEquals(0f, value.fraction!!, 0f)
         assertEquals("0.0% 上下文", value.label(Locale.US))
-        assertEquals("0/272k", value.tokensLabel(Locale.US))
+        assertEquals("0/272K", value.tokensLabel(Locale.US))
     }
     @Test fun compactActualAndConfiguredLimitHaveNoInventedMissingFields() {
-        assertEquals("4k/272k", CloudContextUsageUi(4_000, 272_000).tokensLabel(Locale.US))
-        assertEquals("4.1k/272k", CloudContextUsageUi(4_100, 272_000).tokensLabel(Locale.US))
-        assertEquals("999/272k", CloudContextUsageUi(999, 272_000).tokensLabel(Locale.US))
-        assertEquals("—/272k", CloudContextUsageUi(null, 272_000).tokensLabel(Locale.US))
-        assertEquals("4k/—", CloudContextUsageUi(4_000).tokensLabel(Locale.US))
+        assertEquals("4K/272K", CloudContextUsageUi(4_000, 272_000).tokensLabel(Locale.US))
+        assertEquals("4.1K/272K", CloudContextUsageUi(4_100, 272_000).tokensLabel(Locale.US))
+        assertEquals("999/272K", CloudContextUsageUi(999, 272_000).tokensLabel(Locale.US))
+        assertEquals("—/272K", CloudContextUsageUi(null, 272_000).tokensLabel(Locale.US))
+        assertEquals("4K/—", CloudContextUsageUi(4_000).tokensLabel(Locale.US))
         assertEquals("0/—", CloudContextUsageUi(0, 0).tokensLabel(Locale.US))
         assertEquals("—/—", CloudContextUsageUi().tokensLabel(Locale.US))
+    }
+    @Test fun uppercaseThousandsKeepTheThresholdAndLocalizedDecimals() {
+        assertEquals("1K/272K", CloudContextUsageUi(1_000, 272_000).tokensLabel(Locale.US))
+        assertEquals("4,1K/272K", CloudContextUsageUi(4_100, 272_000).tokensLabel(Locale.GERMANY))
+        assertEquals("—/272K", CloudContextUsageUi(-1, 272_000).tokensLabel(Locale.US))
     }
     @Test fun arcClampsButTheOneDecimalLabelRetainsOverflow() {
         val value = CloudContextUsageUi(120_000, 100_000)

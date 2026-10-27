@@ -145,7 +145,7 @@ class ProviderUsageTest {
         val reported = first.filterIsInstance<ModelEvent.Usage>().single()
         val actual = app.daiyu.android.ui.model.acceptedContextInput(reported, 272_000)
         assertEquals(240_000L, actual)
-        assertEquals("240k/272k", app.daiyu.android.ui.model.CloudContextUsageUi(actual, 272_000).tokensLabel(java.util.Locale.US))
+        assertEquals("240K/272K", app.daiyu.android.ui.model.CloudContextUsageUi(actual, 272_000).tokensLabel(java.util.Locale.US))
         assertTrue(actual!! >= 272_000 * 80 / 100)
     }
     @Test fun messagesOutputOnlyDoesNotBecomeAnInputAndReportedZeroRemainsKnown() {

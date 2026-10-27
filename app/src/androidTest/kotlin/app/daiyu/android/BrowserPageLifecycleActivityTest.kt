@@ -19,6 +19,14 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
                 .apply { isAccessible = true }.invoke(activity, null)
         }
         awaitUniqueTag("browser-visual-page")
+        awaitUniqueTag("browser-visual-container")
+        awaitControl("human browser tab mounted") {
+            val state = visit()?.snapshot()
+            state != null && state.live && !state.unknown && state.lease != null &&
+                state.tabs.any { it == state.lease } && state.takenOver && state.mounted
+        }
+        ui.waitForIdle()
+        node("browser-visual-address").assertIsEnabled()
         lateinit var result: BrowserVisualVisit
         mainThread { result = checkNotNull(visit()) }
         return result
@@ -63,16 +71,20 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
         val address = "unfinished address, do not navigate"
         val range = androidx.compose.ui.text.TextRange(2, 9)
         node("browser-visual-address").performTextReplacement(address)
+        node("browser-visual-address").assertEditableText(address)
         dismissIme()
+        node("browser-visual-address").assertEditableText(address).assertIsEnabled()
         fun presentation(): app.daiyu.android.browser.BrowserSheetUiState {
             val target = checkNotNull(invokeHost(activity, "getBrowserResumeTarget"))
             return target.javaClass.getDeclaredMethod("getPresentation").apply { isAccessible = true }
                 .invoke(target) as app.daiyu.android.browser.BrowserSheetUiState
         }
         lateinit var retained: app.daiyu.android.browser.BrowserSheetUiState
-        node("browser-visual-address").performSemanticsAction(
-            androidx.compose.ui.semantics.SemanticsActions.SetSelection
-        ) { assertTrue(it(range.start, range.end, true)) }
+        mainThread {
+            val state = presentation()
+            assertEquals(address, state.address.text)
+            state.editAddress(state.address.copy(selection = range))
+        }
         ui.waitForIdle()
         node("browser-visual-address").assert(SemanticsMatcher.expectValue(
             androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange, range))

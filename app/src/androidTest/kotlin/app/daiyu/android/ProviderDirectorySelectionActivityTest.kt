@@ -67,11 +67,20 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
     }
 
     private fun actualFirstBaseline(target: SemanticsNodeInteraction): Float {
-        val coordinates = target.fetchSemanticsNode().layoutInfo.coordinates
+        val layoutInfo = target.fetchSemanticsNode().layoutInfo
         return ui.runOnIdle {
+            var coordinates = layoutInfo.coordinates
             assertTrue(coordinates.isAttached)
-            val baseline = coordinates[FirstBaseline]
-            assertTrue(baseline != AlignmentLine.Unspecified)
+            val parentLayout = coordinates.parentLayoutCoordinates
+            var baseline = coordinates[FirstBaseline]
+            while (baseline == AlignmentLine.Unspecified) {
+                val parent = coordinates.parentCoordinates
+                assertTrue("Text must expose FirstBaseline within its own layout modifiers",
+                    parent != null && parent !== parentLayout)
+                coordinates = checkNotNull(parent)
+                assertTrue(coordinates.isAttached)
+                baseline = coordinates[FirstBaseline]
+            }
             coordinates.positionInRoot().y + baseline
         }
     }

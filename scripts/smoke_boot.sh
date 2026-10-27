@@ -50,7 +50,7 @@ for path in sorted(Path("app/src/androidTest").rglob("*")):
     if path.suffix == ".kt":
         count = len(re.findall(r"^\s*fun test\w+\(", source, re.M))
         packages = re.findall(r"^package\s+([\w.]+)\s*$", source, re.M)
-        names = re.findall(r"^class\s+(\w+Test)\s*:", source, re.M)
+        names = re.findall(r"^class\s+(\w+Test)(?:\s+private\s+constructor\s*\([^)]*\))?\s*:", source, re.M)
     else:
         count = len(re.findall(r"^\s*public\s+void\s+test\w+\s*\(\s*\)", source, re.M))
         packages = re.findall(r"^package\s+([\w.]+)\s*;\s*$", source, re.M)

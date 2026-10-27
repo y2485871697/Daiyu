@@ -3,7 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
@@ -43,7 +43,7 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
                     background = colors.background
                     expected = colors.onSurfaceVariantSummary.copy(alpha = .5f).compositeOver(background)
                     previous = colors.outline.copy(alpha = .55f).compositeOver(background)
-                    Box(Modifier.requiredWidth(360.dp).background(background)) { ChatTimelineDivider(entry) }
+                    Box(Modifier.width(360.dp).background(background)) { ChatTimelineDivider(entry) }
                 }
             } }
             awaitUniqueTag("timeline:contrast")

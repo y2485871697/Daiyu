@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.unit.IntSize
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -82,12 +83,12 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                             // Capture the composed viewport, not a child's display-list recording.
                             val frame = graphics.createGraphicsLayer()
                             val top = viewportTop
-                            frame.record(this, layoutDirection, IntSize(size.width.roundToInt(), size.height.roundToInt())) {
+                            frame.record(size = IntSize(size.width.roundToInt(), size.height.roundToInt())) {
                                 this@drawWithContent.drawContent()
                             }
                             drawLayer(frame)
                             pendingCaptures.incrementAndGet()
-                            scope.launch {
+                            scope.launch(Dispatchers.Main.immediate) {
                                 try {
                                     val pixels = frame.toImageBitmap().toPixelMap()
                                     val x = pixels.width / 2
@@ -113,8 +114,13 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                                 } catch (failure: Throwable) {
                                     captureFailure.compareAndSet(null, failure)
                                 } finally {
-                                    graphics.releaseGraphicsLayer(frame)
-                                    pendingCaptures.decrementAndGet()
+                                    try {
+                                        graphics.releaseGraphicsLayer(frame)
+                                    } catch (failure: Throwable) {
+                                        captureFailure.compareAndSet(null, failure)
+                                    } finally {
+                                        pendingCaptures.decrementAndGet()
+                                    }
                                 }
                             }
                         }) {
@@ -156,13 +162,23 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         }
     }
 
-    private fun awaitCapturedFrames() {
-        ui.waitUntil(5_000) { pendingCaptures.get() == 0 }
+    private fun throwCaptureFailure() {
         captureFailure.get()?.let { throw AssertionError("Viewport frame capture failed", it) }
     }
 
+    private fun awaitCapturedFrames() {
+        ui.waitUntil(5_000) {
+            throwCaptureFailure()
+            pendingCaptures.get() == 0
+        }
+        throwCaptureFailure()
+    }
+
     private fun awaitDraw(id: String) {
-        ui.waitUntil(5_000) { draws.any { it.frameOwner == id } }
+        ui.waitUntil(5_000) {
+            throwCaptureFailure()
+            draws.any { it.frameOwner == id }
+        }
         ui.waitForIdle()
         awaitCapturedFrames()
     }

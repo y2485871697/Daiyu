@@ -77,6 +77,16 @@ class ChatInitialPositionContract(unittest.TestCase):
                       'assertOnlyAlignedDraws("first")', 'body +=', 'release.await(5, TimeUnit.SECONDS)'):
             self.assertIn(token, device)
 
+    def test_frame_capture_uses_original_draw_scope_and_real_capture_dispatcher(self):
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatInitialPositionTest.kt').read_text()
+        self.assertIn('frame.record(size = IntSize(', device)
+        self.assertNotIn('frame.record(this, layoutDirection,', device)
+        self.assertIn('scope.launch(Dispatchers.Main.immediate)', device)
+        for helper, next_helper in (('awaitCapturedFrames', 'awaitDraw'), ('awaitDraw', 'assertOnlyAlignedDraws')):
+            body = device.split('private fun ' + helper + '(', 1)[1].split('private fun ' + next_helper + '(', 1)[0]
+            wait = body.split('ui.waitUntil(5_000) {', 1)[1]
+            self.assertLess(wait.index('throwCaptureFailure()'), wait.index('pendingCaptures.get()' if helper == 'awaitCapturedFrames' else 'draws.any'))
+
 
 if __name__ == '__main__':
     unittest.main()

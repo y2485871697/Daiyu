@@ -1159,6 +1159,21 @@ exit 0
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
 
+    def test_kotlin_private_multiline_constructor_preserves_complete_inventory(self):
+        text = ('package app.daiyu.android\n'
+                'class FirstTest private constructor(\n'
+                '    private val scale: MotionScale,\n'
+                ') : android.test.InstrumentationTestCase() {\n'
+                '    constructor() : this(MotionScale())\n'
+                '    fun testOne() {}\n'
+                '}\n')
+        result = self.smoke(source_text=text)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        inventory = json.loads((self.root / 'smoke/instrumentation-shards.json').read_text())
+        self.assertEqual(inventory['all_classes'], {'app.daiyu.android.FirstTest': 1})
+        self.assertEqual(inventory['total_tests'], 1)
+        self.assertEqual(inventory['shards'][0]['classes'], ['app.daiyu.android.FirstTest'])
+
     def test_discovery_rejects_ambiguous_class(self):
         result = self.smoke(extra_source=(
             'package app.daiyu.android\nclass SecondTest : android.test.InstrumentationTestCase() {\n fun testTwo() {}\n}\n'

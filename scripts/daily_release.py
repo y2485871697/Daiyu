@@ -25,7 +25,7 @@ def discover(root):
         if path.suffix == '.kt':
             methods = re.findall(r'^\s*fun (test\w+)\(', text, re.M)
             packages = re.findall(r'^package\s+([\w.]+)\s*$', text, re.M)
-            names = re.findall(r'^class\s+(\w+Test)\s*:', text, re.M)
+            names = re.findall(r'^class\s+(\w+Test)(?:\s+private\s+constructor\s*\([^)]*\))?\s*:', text, re.M)
         else:
             methods = re.findall(r'^\s*public\s+void\s+(test\w+)\s*\(\s*\)', text, re.M)
             packages = re.findall(r'^package\s+([\w.]+)\s*;\s*$', text, re.M)

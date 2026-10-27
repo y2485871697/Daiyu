@@ -94,8 +94,15 @@ class RunControlActivityTest : WiredActivityTestCase() {
             assertFalse(checkNotNull(fixture.controller.runState(owner)).pauseRequested)
             assertEquals(1L, session.cancelled.count)
         }
-        node("chat-control").performTouchInput { longClick() }
-        assertTrue("long press cancels owner session", session.cancelled.await(5, TimeUnit.SECONDS))
+        val root = ui.onRoot()
+        node("chat-control").assertIsDisplayed().assertIsEnabled().performTouchInput { down(center) }
+        try {
+            ui.mainClock.advanceTimeBy(android.view.ViewConfiguration.getLongPressTimeout().toLong() + 200L)
+            ui.waitForIdle()
+            assertTrue("long press cancels owner session while still held", session.cancelled.await(5, TimeUnit.SECONDS))
+        } finally {
+            root.performTouchInput { up() }
+        }
         awaitControl("long gesture stops without short pause") { fixture.controller.active == null }
         val saved = fixture.database.messages(owner.conversationId).last().second
         assertEquals(RunStatus.STOPPED, saved.status); assertEquals(1, fixture.opens.get())

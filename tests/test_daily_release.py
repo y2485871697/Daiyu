@@ -55,7 +55,31 @@ class DailyReleaseTests(unittest.TestCase):
         self.assertIs(plan['full_regression_passed'], False)
 
     def test_complete_inventory_exists_in_current_repository(self):
-        self.assertTrue(set(daily.CORE) <= daily.discover(ROOT).keys())
+        classes = daily.discover(ROOT)
+        self.assertTrue(set(daily.CORE) <= classes.keys())
+        self.assertEqual(classes['app.daiyu.android.ui.screens.settings.SettingsDisclosureMotionTest']['methods'], [
+            'testBothDirectionsMoveCardAndFollowingContent',
+            'testCollapsingFieldsLoseFocusAndActions',
+            'testRapidReversalFollowsTheLatestTarget',
+            'testZeroAndDoubleDurationScale',
+        ])
+
+    def test_private_multiline_constructor_is_discovered_without_losing_ambiguity_guards(self):
+        path = self.root / 'app/src/androidTest/kotlin/PrivateConstructorTest.kt'
+        source = ('package app.daiyu.android\n'
+                  'class PrivateConstructorTest private constructor(\n'
+                  '    private val scale: MotionScale,\n'
+                  ') : TestCase(scale) {\n'
+                  '    constructor() : this(MotionScale())\n'
+                  '    fun testOne() {}\n'
+                  '    fun testTwo() {}\n'
+                  '}\n')
+        path.write_text(source)
+        self.assertEqual(daily.discover(self.root)['app.daiyu.android.PrivateConstructorTest']['methods'],
+                         ['testOne', 'testTwo'])
+        path.write_text(source + 'class AnotherTest : TestCase() {}\n')
+        with self.assertRaisesRegex(ValueError, 'ambiguous_daily_test_inventory'):
+            daily.discover(self.root)
 
     def test_missing_short_or_identical_baseline_is_rejected(self):
         for base in ('', 'b' * 8, 'a' * 40, '$(exit 99)'):

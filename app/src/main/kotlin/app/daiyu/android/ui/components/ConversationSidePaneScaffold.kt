@@ -765,10 +765,10 @@ private fun PaneFolderBar(
         )
     }
     folderToDelete?.let { folder ->
-        DaiyuConfirmDialog(stringResource(R.string.drawer_delete_folder_title),
-            stringResource(R.string.drawer_delete_folder_message), stringResource(R.string.action_delete), true,
+        FolderDeleteConfirmation(
             onConfirm = { onDeleteFolder(folder.id); folderToDelete = null },
-            onDismiss = { folderToDelete = null }, preview = true)
+            onDismiss = { folderToDelete = null },
+        )
     }
 }
 

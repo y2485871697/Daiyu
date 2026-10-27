@@ -106,6 +106,12 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
                 self.assertNotEqual(alphas(phase), alphas(phase + spacing + extra_frames),
                                     (phase, spacing + extra_frames))
 
+    def test_isolated_bar_fixture_keeps_pixels_below_the_real_status_bar(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageSpeechButtonTest.kt').read_text()
+        mount = test.split('private fun mountBar()', 1)[1].split('fun testOriginalSpeakerToggles', 1)[0]
+        self.assertIn('Box(Modifier.width(320.dp).statusBarsPadding())', mount)
+        self.assertIn('MessageActionBar("answer"', mount)
+
     def test_wave_fixture_explicitly_enables_its_own_motion_without_changing_system_settings(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageSpeechButtonTest.kt').read_text()
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()

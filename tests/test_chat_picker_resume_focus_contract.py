@@ -52,6 +52,19 @@ class ChatPickerResumeFocusContractTest(unittest.TestCase):
         self.assertIn('assertChatPickerOffline(calls)', body)
         self.assertIn('assertEquals(0, fixture.opens.get())', body)
 
+    def test_catalog_retry_waits_for_the_list_window_then_scrolls_the_lazy_option_into_view(self):
+        text = SOURCE.read_text(encoding='utf-8')
+        body = text.split('fun testCatalogChangedAndRestoredDraftRevokesLateResponseAndCanRetry()', 1)[1].split('fun testCatalogSaveFailureAndDismissRevokePendingResponse()', 1)[0]
+        steps = ['finished(retryConnection)', 'awaitUniqueTag("provider-model-list")',
+                 'awaitNodeWindowFocus(models)', 'awaitDialogEnter(models)',
+                 'models.scrollToDescendant(hasTestTag("provider-model-option:second"))',
+                 'node("provider-model-option:second").assertIsDisplayed().assertIsEnabled()']
+        positions = [body.index(step) for step in steps]
+        self.assertEqual(sorted(positions), positions)
+        self.assertIn('node("provider-model-selection").assertDoesNotExist()', body)
+        self.assertIn('assertEquals(old, fixture.settings.load().apiKey)', body)
+        self.assertIn('assertEquals(before, fixture.settings.load())', body)
+
     def test_pause_revocation_and_stale_capability_oracles_remain(self):
         body = self.body()
         self.assertIn('stale = retainedChatPickerSelection()', body)

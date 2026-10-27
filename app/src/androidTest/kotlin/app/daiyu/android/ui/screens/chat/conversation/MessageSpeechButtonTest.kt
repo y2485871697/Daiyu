@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MonotonicFrameClock
@@ -34,7 +35,7 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
                         "frameClock=${coroutineContext[MonotonicFrameClock]?.javaClass?.name}")
                 }
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    Box(Modifier.width(320.dp)) {
+                    Box(Modifier.width(320.dp).statusBarsPadding()) {
                         MessageActionBar("answer", ChatScreenActions(onSpeak = {
                             clicks += it
                             speaking = !speaking
@@ -67,10 +68,6 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
     fun testOnlyMatchingMessageUsesAnimatedSpeakerAndClearsWithProjection() {
         mainThread {
             activity.setContent {
-                LaunchedEffect(speaking) {
-                    animationContext.set("scale=${coroutineContext[MotionDurationScale]?.scaleFactor} " +
-                        "frameClock=${coroutineContext[MonotonicFrameClock]?.javaClass?.name}")
-                }
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     DaiyuChatScreen(ChatScreenState("朗读回归", turns = listOf(
                         ChatTurnUi.Assistant("first", finalText = "第一条回答"),

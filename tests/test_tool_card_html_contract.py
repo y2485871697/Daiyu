@@ -53,6 +53,13 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         shizuku = (ROOT / "app/src/main/kotlin/app/daiyu/android/shizuku/RunShizukuCommands.kt").read_text()
         self.assertIn('.put("backend", "shizuku").put("uid", backend.identity.uid)', shizuku)
 
+    def test_terminal_header_dots_are_emphasized_only_in_both_header_renderers(self):
+        shell = (CHAT / "WorkProcessCard.kt").read_text()
+        self.assertIn('val terminalHeader = steps.isNotEmpty() && steps.all { it.category in setOf("terminal", "background_job") }', shell)
+        self.assertIn('Text(toolHeaderText(title, terminalHeader), color = colors.text,', shell)
+        self.assertIn('Text(toolHeaderText(step.name, step.category in setOf("terminal", "background_job")), color = colors.text,', shell)
+        self.assertIn('Text("$stepCount 项 · ${work.summary}"', shell)
+
     def test_compact_headers_adapt_locally_and_preserve_disclosure_ownership(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertEqual(2, shell.count("heightIn(min = 44.dp)"))

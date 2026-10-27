@@ -105,16 +105,17 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
     private val output = "first line\nsecond line\nthird line\nfourth line"
     private var actionCount = 0
 
-    private fun show(dark: Boolean, scale: Float, fontScale: Float, narrow: Boolean = false, compact: Boolean = false) {
-        val step = WorkStepUi("readability", if (compact) "查询电池" else title, "", if (compact) WorkStepState.OK else WorkStepState.UNKNOWN,
-            owner = WorkStepOwnerUi("fixture", "run", "message"), category = "device_read",
+    private fun show(dark: Boolean, scale: Float, fontScale: Float, narrow: Boolean = false, compact: Boolean = false, terminal: Boolean = false) {
+        val step = WorkStepUi("readability", if (terminal) "执行命令 · Android • user" else if (compact) "查询电池" else title, "", if (compact) WorkStepState.OK else WorkStepState.UNKNOWN,
+            owner = WorkStepOwnerUi("fixture", "run", "message"), category = if (terminal) "terminal" else "device_read",
+            executionTargetLabel = if (terminal) "Android • user" else null,
             activity = if (compact) ToolActivityUi.SUCCESS else ToolActivityUi.INTERRUPTED,
             categoryDetails = ToolCategoryDetailsUi("设备", notice = "", rich = ToolRichDetailsUi(
                 prose = ToolDisclosureUi("", prose),
                 technical = listOf(ToolDisclosureUi("调用参数", "{}", true)))))
         mainThread { activity.setContent {
             CompositionLocalProvider(LocalDensity provides Density(phoneDensity, fontScale)) {
-                key(dark, scale, fontScale, narrow, compact) {
+                key(dark, scale, fontScale, narrow, compact, terminal) {
                     AgentAppTheme(AppearanceSettings(
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
                         interfaceScale = scale), applyInterfaceScale = true) {
@@ -228,6 +229,37 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             ui.onNodeWithText(prose, useUnmergedTree = true).assertDoesNotExist()
         }
         assertEquals("Disclosures must never dispatch an action", 0, actionCount)
+    }
+
+    fun testEmphasizedTerminalDotsKeepNarrowFontScaleHeadersReadable() {
+        val target = "Android • user"
+        val stepTitle = "执行命令 · $target"
+        for (fontScale in listOf(.9f, 1.3f)) {
+            show(dark = false, scale = 1f, fontScale = fontScale, narrow = true, compact = true, terminal = true)
+            val heading = layout(ui.onNodeWithText(target, useUnmergedTree = true))
+            assertEquals(13.sp, heading.layoutInput.style.fontSize)
+            assertEquals(toolHeaderText(target, true), heading.layoutInput.text)
+            assertFalse(heading.hasVisualOverflow)
+            node("work-process-header").performClick()
+            val titleNode = ui.onNodeWithText(stepTitle, useUnmergedTree = true).assertIsDisplayed()
+            val measured = layout(titleNode)
+            assertEquals(13.sp, measured.layoutInput.style.fontSize)
+            assertEquals(toolHeaderText(stepTitle, true), measured.layoutInput.text)
+            assertFalse(measured.hasVisualOverflow)
+            for (line in 0 until measured.lineCount) assertFalse(measured.isLineEllipsized(line))
+            assertEquals(stepTitle.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))
+            val state = ui.onNodeWithText("成功", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val bounds = titleNode.fetchSemanticsNode().boundsInRoot
+            val header = node("tool-step-header:readability").fetchSemanticsNode().boundsInRoot
+            assertTrue(bounds.right <= state.left || bounds.bottom <= state.top)
+            assertTrue(bounds.left >= header.left && bounds.right <= header.right && bounds.bottom <= header.bottom)
+            if (fontScale == .9f) {
+                assertEquals(44f * phoneDensity, header.height, 1f)
+                val surface = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                assertTrue(surface.height <= 98f * phoneDensity + 1f)
+            }
+        }
+        assertEquals(0, actionCount)
     }
 
     fun testMiniActionIsClickableAndDispatchesOnce() {

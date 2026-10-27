@@ -55,6 +55,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val stepCount = steps.size + work.segments.count { it.reasoning != null }
     val category = steps.map { it.category }.distinct().singleOrNull()
     val title = ToolCardPresentations.processTitleForSteps(steps)
+    val terminalHeader = steps.isNotEmpty() && steps.all { it.category in setOf("terminal", "background_job") }
     val shape = RoundedCornerShape(12.dp)
     Column(modifier.fillMaxWidth().clip(shape).background(colors.surface).drawWithContent {
         drawContent()
@@ -71,7 +72,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                 Icon(ToolOperationIcons.category(category),
                     null, Modifier.size(18.dp).testTag("work-process-icon"), tint = colors.accent)
                 Column(Modifier.weight(1f)) {
-                    Text(title, color = colors.text,
+                    Text(toolHeaderText(title, terminalHeader), color = colors.text,
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (stacked) Text("$stepCount 项 · ${work.summary}", color = colors.muted,
@@ -165,7 +166,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(ToolOperationIcons.operation(step.operationGlyph), null, Modifier.size(18.dp).testTag("tool-operation-icon:${step.toolCallId}"), tint = colors.accent)
                     Column(Modifier.weight(1f)) {
-                        Text(step.name, color = colors.text,
+                        Text(toolHeaderText(step.name, step.category in setOf("terminal", "background_job")), color = colors.text,
                             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                         if (stacked) Text(stateLabel, Modifier.fillMaxWidth(), color = tint,

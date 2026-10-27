@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -123,10 +124,15 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             show(turn, ChatScreenActions(onRetryStep = { executions++ }))
             if (!mixed) {
                 ui.onNodeWithText(label).assertIsDisplayed()
+                assertEquals(toolHeaderText(label, true),
+                    ui.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.Text].single())
                 ui.onNodeWithTag("work-process-header").performClick()
             }
             val title = "执行命令 · $label"
-            ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed()
+            assertEquals(toolHeaderText(title, true),
+                ui.onNodeWithText(title, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.Text].single())
+            ui.onNodeWithText(title).performClick()
             ui.onNodeWithText("target-output").scrollToVisible().assertIsDisplayed()
             ui.onNodeWithText("执行环境", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithText("技术详情").assertDoesNotExist()

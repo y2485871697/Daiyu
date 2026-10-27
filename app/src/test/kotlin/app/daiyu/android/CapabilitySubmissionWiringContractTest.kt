@@ -40,10 +40,21 @@ class CapabilitySubmissionWiringContractTest {
 
     @Test fun shizukuDirectSendRejectsRevokedMountAndOriginalEditorBeforePreparing() {
         val host = source("ui/ShizukuApprovalHost.kt")
-        val click = host.substringAfter("onClick = {").substringBefore("preview?.let")
-        assertTrue(click.contains("if (!active.get() || !isCurrent()) return@Button"))
-        assertTrue(click.indexOf("if (!active.get() || !isCurrent()) return@Button") <
+        val sendStart = "sendButton(preview == null && text.isNotBlank(), send@{"
+        assertTrue(host.contains(sendStart))
+        val click = host.substringAfter(sendStart).substringBefore("preview?.let")
+        assertTrue(click.contains("if (!active.get() || !isCurrent()) return@send"))
+        assertTrue(click.indexOf("if (!active.get() || !isCurrent()) return@send") <
             click.indexOf("controller.prepareShizukuSend("))
+        val postPrepareRejection = "if (!active.get() || !isCurrent()) {\n" +
+            "                    controller.rejectShizuku(prepared)\n" +
+            "                    return@send\n" +
+            "                }"
+        assertTrue(click.contains(postPrepareRejection))
+        assertTrue(click.indexOf("controller.prepareShizukuSend(") <
+            click.indexOf(postPrepareRejection))
+        assertTrue(click.indexOf(postPrepareRejection) <
+            click.indexOf("controller.confirmShizukuSend(prepared)"))
         assertTrue(host.contains("active.set(false)"))
         assertTrue(host.contains("saved != null && active.get() && isCurrent()"))
         val main = source("MainActivity.kt")

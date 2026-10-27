@@ -84,13 +84,36 @@ class TitleModelDefaultsTest {
     }
 
     @Test fun titleRequestKeepsTheEffectiveCurrentModelButNeverItsToolsOrBody() {
-        val source = current.copy(requestOptions = ProviderRequestOptions(
-            customBody = """{"model":"effective-chat","temperature":0.5}""", openAiWebSearchEnabled = true)).requestSnapshot()
-        val title = TitleModelCoordinator.requestSnapshot(source)
-        assertEquals("effective-chat", title.model)
-        assertFalse(title.requestOptions.openAiWebSearchEnabled)
-        assertEquals("{\"max_output_tokens\":512}", title.requestOptions.customBody)
-        assertEquals("current-chat", source.model)
-        assertTrue(source.requestOptions.openAiWebSearchEnabled)
+        val cases = listOf(
+            ProviderRequestOptions(
+                customBody = """{"model":"effective-chat","temperature":0.5}"""
+            ) to "effective-chat",
+            ProviderRequestOptions(
+                customBody = """{"model":"current-chat","temperature":0.5}""",
+                openAiWebSearchEnabled = true
+            ) to "current-chat"
+        )
+        for ((options, effectiveModel) in cases) {
+            val source = current.copy(
+                batteryEnabled = true,
+                deviceStatusEnabled = true,
+                requestOptions = options
+            ).requestSnapshot()
+            val title = TitleModelCoordinator.requestSnapshot(source)
+            assertEquals(effectiveModel, title.model)
+            assertFalse(title.requestOptions.openAiWebSearchEnabled)
+            assertEquals(ProviderRequestOptions(customBody = "{\"max_output_tokens\":512}"), title.requestOptions)
+            assertFalse(title.batteryEnabled)
+            assertFalse(title.deviceStatusEnabled)
+            assertTrue(title.tools.isEmpty())
+            assertEquals("current-chat", source.model)
+            assertEquals(options, source.requestOptions)
+            assertTrue(source.batteryEnabled)
+            assertTrue(source.deviceStatusEnabled)
+            assertEquals(2, source.tools.size)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            current.copy(requestOptions = cases.first().first.copy(openAiWebSearchEnabled = true)).requestSnapshot()
+        }
     }
 }

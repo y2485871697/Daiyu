@@ -92,7 +92,8 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
             val waves = ui.onNodeWithTag("message-speech-playing", useUnmergedTree = true)
             val first = captureScreenNode(waves).toPixelMap()
             val firstTime = ui.mainClock.currentTime
-            ui.mainClock.advanceTimeBy(600)
+            // Half a cycle crosses an alpha threshold regardless of the starting phase.
+            ui.mainClock.advanceTimeBy(400)
             val second = captureScreenNode(waves).toPixelMap()
             val secondTime = ui.mainClock.currentTime
             assertEquals(first.width, second.width)

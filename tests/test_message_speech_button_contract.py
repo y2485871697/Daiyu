@@ -1,6 +1,7 @@
 """Message read-aloud source wiring; Android execution belongs to the approved batch."""
 from pathlib import Path
 import unittest
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / 'app/src/main/kotlin/app/daiyu/android'
@@ -80,9 +81,26 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         body = test.split('fun testSpeakerWavesAnimateInsideUnchangedHitTarget()', 1)[1]
         self.assertEqual(2, body.count('captureScreenNode(waves).toPixelMap()'))
         self.assertNotIn('captureToImage()', body)
-        self.assertIn('ui.mainClock.advanceTimeBy(600)', body)
+        self.assertIn('ui.mainClock.advanceTimeBy(400)', body)
         self.assertIn('assertEquals(beforeBounds, button.fetchSemanticsNode().boundsInRoot)', body)
         self.assertIn('changed > 0', body)
+
+    def test_capture_phase_spacing_cannot_alias_any_current_wave_alpha_bucket(self):
+        icon = (CHAT / 'MessageSpeechIcon.kt').read_text()
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageSpeechButtonTest.kt').read_text()
+        body = test.split('fun testSpeakerWavesAnimateInsideUnchangedHitTarget()', 1)[1]
+        period = int(re.search(r'tween\((\d+), easing = LinearEasing', icon).group(1))
+        thresholds = [float(value) for value in re.findall(r'wave < ([0-9.]+)f', icon)]
+        spacing = int(re.search(r'advanceTimeBy\((\d+)\)', body).group(1))
+        self.assertEqual(2, len(thresholds))
+        def alphas(time):
+            phase = (time % period) / period
+            return tuple(phase < threshold for threshold in thresholds)
+        # Include one capture frame and one frame of rounding, not only ideal virtual time.
+        for extra_frames in range(33):
+            for phase in range(period):
+                self.assertNotEqual(alphas(phase), alphas(phase + spacing + extra_frames),
+                                    (phase, spacing + extra_frames))
 
     def test_wave_fixture_explicitly_enables_its_own_motion_without_changing_system_settings(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageSpeechButtonTest.kt').read_text()

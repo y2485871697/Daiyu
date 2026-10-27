@@ -126,7 +126,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             node("settings-row:搜索服务").assertDoesNotExist()
             val host = node("settings-host").fetchSemanticsNode().boundsInRoot
             for ((group, title) in listOf("general" to "外观与主题", "models" to "模型提供商",
-                    "extensions" to "Skills", "tools" to "Agent任务偏好", "data" to "数据备份", "about" to "App 信息与更新")) {
+                    "extensions" to "Skills", "tools" to "Agent任务偏好", "data" to "数据备份", "about" to "APP 信息与更新")) {
                 val row = reveal("settings-row:$title", "设置").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
                 val bounds = row.fetchSemanticsNode().boundsInRoot
                 val card = node("settings-card:$group").fetchSemanticsNode().boundsInRoot

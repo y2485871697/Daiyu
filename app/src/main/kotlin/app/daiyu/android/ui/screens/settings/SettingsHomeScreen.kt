@@ -219,7 +219,7 @@ internal fun DaiyuSettingsScreen(
             if (openedPage == SettingsLocalPage.TASK_SURFACE) {
                 TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
             } else if (openedPage == SettingsLocalPage.APP_INFO) {
-                SettingsScaffoldPage(title = "App 信息与更新", onBack = localBack, modifier = modifier) {
+                SettingsScaffoldPage(title = "APP 信息与更新", onBack = localBack, modifier = modifier) {
                     item(key = "app_info_entries") {
                         SettingsHomeCard("app_info") {
                             SettingsHomeRows(SettingsCatalog.appInfoEntries, diagnosticsUi, release, relayExpanded, open)

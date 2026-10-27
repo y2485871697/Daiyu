@@ -14,7 +14,7 @@ class SettingsAppInfoContractTest(unittest.TestCase):
 
     def test_app_info_is_a_local_page_not_an_external_action(self):
         self.assertRegex(self.catalog, r"enum class SettingsLocalPage \{[^}]*\bAPP_INFO\b")
-        self.assertRegex(self.catalog, r'SettingsEntry\("app_info", "App 信息与更新"[\s\S]*?localPage = SettingsLocalPage.APP_INFO')
+        self.assertRegex(self.catalog, r'SettingsEntry\("app_info", "APP 信息与更新"[\s\S]*?localPage = SettingsLocalPage.APP_INFO')
 
     def test_home_about_group_only_exposes_the_app_info_entry(self):
         visible = self.catalog.split("fun visibleGroups", 1)[1].split("val entries: List<SettingsEntry>", 1)[0]
@@ -30,7 +30,7 @@ class SettingsAppInfoContractTest(unittest.TestCase):
 
     def test_subpage_reuses_settings_style_and_retained_rows(self):
         self.assertIn('openedPage == SettingsLocalPage.APP_INFO', self.home)
-        self.assertIn('SettingsScaffoldPage(title = "App 信息与更新"', self.home)
+        self.assertIn('SettingsScaffoldPage(title = "APP 信息与更新"', self.home)
         self.assertIn('SettingsHomeRows(SettingsCatalog.appInfoEntries', self.home)
         self.assertIn('BackHandler(onBack = localBack)', self.home)
 

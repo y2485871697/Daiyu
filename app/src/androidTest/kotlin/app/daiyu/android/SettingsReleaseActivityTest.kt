@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class SettingsReleaseActivityTest : WiredActivityTestCase() {
     private val notices = CopyOnWriteArrayList<String>()
-    private val page = "page:App 信息与更新"
+    private val page = "page:APP 信息与更新"
     private val entry = "settings-row:检查更新"
     private fun showChecker(checker: ReleaseCheck) {
         mainThread {
@@ -35,10 +35,10 @@ class SettingsReleaseActivityTest : WiredActivityTestCase() {
         "https://github.com/y2485871697/Daiyu/releases/tag/v0.2.0", comparison)
     private fun checkEntry(): SemanticsNodeInteraction {
         if (ui.onAllNodesWithTag(page).fetchSemanticsNodes().isEmpty()) {
-            reveal("settings-row:App 信息与更新", "设置").performClick()
+            reveal("settings-row:APP 信息与更新", "设置").performClick()
             awaitUniqueTag(page)
         }
-        return reveal(entry, "App 信息与更新")
+        return reveal(entry, "APP 信息与更新")
     }
     private fun awaitNotice(text: String) {
         ui.waitUntil(5_000) { notices.lastOrNull() == text }

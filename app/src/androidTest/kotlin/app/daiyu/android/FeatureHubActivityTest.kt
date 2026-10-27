@@ -33,10 +33,10 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     private fun entry(id: String): SemanticsNodeInteraction {
         val item = SettingsCatalog.entry(id)
         val about = id in SettingsCatalog.appInfoEntries.map { it.id }
-        val page = if (about) "App 信息与更新" else "设置"
-        if (about && ui.onAllNodesWithTag("page:App 信息与更新").fetchSemanticsNodes().isEmpty()) {
-            reveal("settings-row:App 信息与更新", "设置").performClick()
-            awaitUniqueTag("page:App 信息与更新")
+        val page = if (about) "APP 信息与更新" else "设置"
+        if (about && ui.onAllNodesWithTag("page:APP 信息与更新").fetchSemanticsNodes().isEmpty()) {
+            reveal("settings-row:APP 信息与更新", "设置").performClick()
+            awaitUniqueTag("page:APP 信息与更新")
         }
         if (id in setOf("relay_st", "relay_moyu")) {
             val parent = reveal("settings-row:自用中转站", page)
@@ -89,7 +89,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val tag = "settings-row:App 信息与更新"
+        val tag = "settings-row:APP 信息与更新"
         reveal(tag, "设置").assertHasClickAction()
         for (title in listOf("检查更新", "Telegram 频道", "QQ 群", "源代码", "自用中转站", "给煮波恰饭🍚")) {
             node("settings-row:$title").assertDoesNotExist()
@@ -98,17 +98,17 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         val bounds = node(tag).fetchSemanticsNode().boundsInRoot
         for (systemBack in listOf(false, true)) {
             node(tag).performClick()
-            awaitUniqueTag("page:App 信息与更新")
+            awaitUniqueTag("page:APP 信息与更新")
             node("page:设置").assertDoesNotExist()
             for (item in SettingsCatalog.appInfoEntries.filterNot { it.id in setOf("relay_st", "relay_moyu") }) {
-                val row = reveal("settings-row:${item.title}", "App 信息与更新").assertExists()
+                val row = reveal("settings-row:${item.title}", "APP 信息与更新").assertExists()
                 if (item.id == "donate") row.assertHasNoClickAction() else row.assertHasClickAction()
             }
             if (systemBack) backToPage(activity, "page:设置") else {
                 ui.onNodeWithContentDescription(activity.getString(R.string.action_back)).performClick()
                 awaitUniqueTag("page:设置")
             }
-            node("page:App 信息与更新").assertDoesNotExist()
+            node("page:APP 信息与更新").assertDoesNotExist()
             node(tag).assertIsDisplayed()
             assertEquals(position, settingsScrollPosition(), 1f)
             assertEquals(bounds.top, node(tag).fetchSemanticsNode().boundsInRoot.top, 2f)
@@ -214,13 +214,13 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
         }
         (unwired + placeholder).forEach { item ->
-            entry(item.id).assertHasNoClickAction(); node("page:App 信息与更新").assertExists()
+            entry(item.id).assertHasNoClickAction(); node("page:APP 信息与更新").assertExists()
             assertUnchanged()
         }
-        entry("relay").performClick(); node("page:App 信息与更新").assertExists(); assertUnchanged()
+        entry("relay").performClick(); node("page:APP 信息与更新").assertExists(); assertUnchanged()
         for (title in listOf("ST API", "摸鱼")) {
 
-            reveal("settings-row:$title", "App 信息与更新").assertExists(); node("page:App 信息与更新").assertExists()
+            reveal("settings-row:$title", "APP 信息与更新").assertExists(); node("page:APP 信息与更新").assertExists()
             assertUnchanged()
         }
         backToChat(activity); assertDraft("Gemini UI 草稿")

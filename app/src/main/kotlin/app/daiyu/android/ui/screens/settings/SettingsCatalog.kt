@@ -62,7 +62,7 @@ internal object SettingsCatalog {
             SettingsEntry("accessibility", "无障碍与 GUI 设置", DaiyuIcons.Accessibility, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
         )),
         SettingsGroup("about", "关于", "版本、社区与项目入口", listOf(
-            SettingsEntry("app_info", "App 信息与更新", DaiyuIcons.Info, SettingControl.PAGE,
+            SettingsEntry("app_info", "APP 信息与更新", DaiyuIcons.Info, SettingControl.PAGE,
                 localPage = SettingsLocalPage.APP_INFO, summary = "版本、社区与项目入口"),
             SettingsEntry("updates", "检查更新", DaiyuIcons.Refresh, SettingControl.ACTION),
             SettingsEntry("telegram", "Telegram 频道", DaiyuIcons.Browser, SettingControl.ACTION, summary = "公告与项目动态"),

@@ -11,15 +11,15 @@ import java.util.concurrent.CopyOnWriteArrayList
 class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
     private fun entry(title: String): SemanticsNodeInteraction {
         node("settings-search").assertDoesNotExist()
-        if (ui.onAllNodesWithTag("page:App 信息与更新").fetchSemanticsNodes().isEmpty()) {
-            reveal("settings-row:App 信息与更新", "设置").performClick()
-            awaitUniqueTag("page:App 信息与更新")
+        if (ui.onAllNodesWithTag("page:APP 信息与更新").fetchSemanticsNodes().isEmpty()) {
+            reveal("settings-row:APP 信息与更新", "设置").performClick()
+            awaitUniqueTag("page:APP 信息与更新")
         }
         if (title in setOf("ST API", "摸鱼")) {
-            val parent = reveal("settings-row:自用中转站", "App 信息与更新")
+            val parent = reveal("settings-row:自用中转站", "APP 信息与更新")
             if (ui.onAllNodesWithTag("settings-row:$title").fetchSemanticsNodes().isEmpty()) parent.performClick()
         }
-        return reveal("settings-row:$title", "App 信息与更新")
+        return reveal("settings-row:$title", "APP 信息与更新")
     }
     private fun intercept(action: () -> Unit): List<Intent> {
         val observed = CopyOnWriteArrayList<Intent>()
@@ -63,7 +63,7 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         openSettings()
         assertTrue(intercept { entry("给煮波恰饭🍚").assertHasNoClickAction() }.isEmpty())
-        node("page:App 信息与更新").assertExists()
+        node("page:APP 信息与更新").assertExists()
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
         backToChat(activity); assertDraft("donation placeholder unsent")
@@ -76,7 +76,7 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("page:设置")
         assertTrue(intercept { mainThread { click() } }.isEmpty())
         node("page:设置").assertExists()
-        node("page:App 信息与更新").assertDoesNotExist()
+        node("page:APP 信息与更新").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 

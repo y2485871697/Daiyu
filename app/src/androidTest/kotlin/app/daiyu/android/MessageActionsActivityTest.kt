@@ -147,6 +147,89 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    private fun snapshotAfterTransientAdmissionRejection(holdGate: () -> (() -> Unit)) {
+        val (conversation, _) = seed()
+        mainThread { activity.select(conversation) }; readySnapshot()
+        val before = fixture.database.messages(conversation.id)
+        mainThread {
+            val releaseGate = holdGate()
+            try {
+                call("invalidateMessageActionEditor")
+                repeat(3) {
+                    call("prepareMessageActionSnapshot")
+                    assertNull(field("messageActionSnapshot"))
+                    assertNull(field("messageActionLoading"))
+                    assertNull(field("messageActionAttempted"))
+                }
+            } finally { releaseGate() }
+            call("refresh")
+        }
+        readySnapshot()
+        assertEquals(before, fixture.database.messages(conversation.id))
+        assertEquals(0, fixture.opens.get())
+        fixture.session("regenerated after gate released", held = false)
+        mainThread { retainedControls(activity).onRegenerate(before.last().second.id.value) }
+        awaitControl("regeneration accepted after transient snapshot rejection") {
+            !fixture.controller.dataBusy && fixture.controller.active == null && fixture.opens.get() == 1
+        }
+        assertNull(field("prompt"))
+        val messages = fixture.database.messages(conversation.id)
+        assertEquals(before.first().second.id, messages.first().second.id)
+        assertTrue(messages.last().second.blocks.filterIsInstance<MessageBlock.Text>()
+            .any { it.text == "regenerated after gate released" })
+    }
+
+    fun testSnapshotRecoversAfterPreparationGateWithoutChangingHistory() {
+        snapshotAfterTransientAdmissionRejection {
+            val reserve = ChatController::class.java.declaredMethods.single {
+                it.name == "reservePreparation" && it.parameterCount == 1
+            }.apply { isAccessible = true }
+            val release = ChatController::class.java.declaredMethods.single {
+                it.name == "releasePreparation" && it.parameterCount == 1
+            }.apply { isAccessible = true }
+            val token = synchronized(fixture.controller) { reserve.invoke(fixture.controller, null) }
+            val releaseGate: () -> Unit = { release.invoke(fixture.controller, token) }
+            releaseGate
+        }
+    }
+
+    fun testSnapshotRecoversAfterGenerationReaderGateWithoutChangingHistory() {
+        snapshotAfterTransientAdmissionRejection {
+            val readers = ChatController::class.java.getDeclaredField("generationReaders").apply { isAccessible = true }
+            val previous = synchronized(fixture.controller) {
+                readers.getInt(fixture.controller).also { readers.setInt(fixture.controller, it + 1) }
+            }
+            val releaseGate: () -> Unit = { synchronized(fixture.controller) { readers.setInt(fixture.controller, previous) } }
+            releaseGate
+        }
+    }
+
+    fun testLoadingSnapshotDoesNotOfferFailureRecoveryOrReplayRegeneration() {
+        val (conversation, _) = seed()
+        mainThread { activity.select(conversation) }; readySnapshot()
+        val before = fixture.database.messages(conversation.id)
+        val executor = ChatController::class.java.getDeclaredField("executor").apply { isAccessible = true }
+            .get(fixture.controller) as java.util.concurrent.ExecutorService
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        executor.execute { entered.countDown(); release.await(15, java.util.concurrent.TimeUnit.SECONDS) }
+        try {
+            assertTrue(entered.await(15, java.util.concurrent.TimeUnit.SECONDS))
+            mainThread {
+                call("invalidateMessageActionEditor")
+                call("prepareMessageActionSnapshot")
+                assertNotNull(field("messageActionLoading"))
+                retainedControls(activity).onRegenerate(before.last().second.id.value)
+                assertNull(field("prompt"))
+            }
+            assertEquals(0, fixture.opens.get())
+        } finally { release.countDown() }
+        readySnapshot()
+        assertNull(field("prompt"))
+        assertEquals(before, fixture.database.messages(conversation.id))
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testFailedSnapshotRefreshConsumesKeyWithoutAutomaticRetry() {
         val (conversation, _) = seed()
         mainThread { activity.select(conversation) }; readySnapshot()

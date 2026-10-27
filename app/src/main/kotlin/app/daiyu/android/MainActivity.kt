@@ -1196,7 +1196,7 @@ class MainActivity : ComponentActivity() {
             app.daiyu.android.domain.context.ContextRevision.digest(shown.map { it.second }), controller.dataRevision)
         if (messageActionKey == key || messageActionLoading == key || messageActionAttempted == key) return
         messageActionSnapshot = null; messageActionKey = null
-        // Failed, mismatched and rejected reads consume this key too; refresh is not retry authority.
+        // Admitted failures and mismatches consume the key; a busy rejection has not read anything.
         messageActionAttempted = key; messageActionLoading = key
         val visit = messageActionVisit
         val admitted = controller.loadMessageActionSnapshot(owner) { candidate ->
@@ -1212,7 +1212,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        if (!admitted) messageActionLoading = null
+        if (!admitted) {
+            messageActionLoading = null
+            messageActionAttempted = null
+        }
     }
     @Volatile private var editorGeneration = 0L
         set(value) {
@@ -2693,7 +2696,9 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     is MessageActionResult.Rejected -> {
-                        if (actionSnapshot == null) {
+                        if (actionSnapshot == null && messageActionLoading != null) {
+                            toast("正在准备消息操作，请稍后再试")
+                        } else if (actionSnapshot == null) {
                             prompt = ChoicePrompt("消息操作快照不可用", listOf("重新获取消息操作", "取消"), { choice ->
                                 if (choice == 0 && editorMatches() && draftRevision == renderedDraftRevision &&
                                     retainedPage == "chat" && !sidebarVisible && messageActionLoading == null) guard {

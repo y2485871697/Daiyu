@@ -14,8 +14,8 @@ class ComposerContextStyleContractTest(unittest.TestCase):
 
     def test_badge_wraps_its_content_inside_compact_limits(self):
         self.assertIn('.testTag("chat-context")', self.badge)
-        self.assertIn('.padding(1.dp).padding(horizontal = 5.dp, vertical = 3.dp)', self.badge)
-        self.assertIn('Arrangement.spacedBy(5.dp)', self.badge)
+        self.assertIn('.padding(1.dp).padding(horizontal = 3.dp, vertical = 2.dp)', self.badge)
+        self.assertIn('Arrangement.spacedBy(4.dp)', self.badge)
         self.assertIn('modifier = Modifier.weight(1f, fill = false)', self.badge)
         self.assertIn('modifier = Modifier.testTag("chat-context-label")', self.badge)
         self.assertNotIn('fillMaxWidth', self.badge)
@@ -82,6 +82,17 @@ class ComposerContextStyleContractTest(unittest.TestCase):
                       'IntSize(text.size.width, text.size.height - 1)', 'assertTextOverflowRejected(truncated)',
                       'catch (_: junit.framework.AssertionFailedError)', 'assertTrue("overflow oracle must reject'):
             self.assertIn(token, source)
+
+    def test_only_actual_token_characters_gain_tracking_not_padding_or_slash_spaces(self):
+        self.assertIn('letterSpacing = if (showTokens) 0.3.sp else MiuixTheme.textStyles.footnote1.letterSpacing', self.badge)
+        model = (SRC / 'ui/model/CloudContextUsage.kt').read_text()
+        self.assertIn('return "${compact(inputTokens)}/${compact(windowTokens?.takeIf { it > 0 })}"', model)
+        android = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatChromeActivityTest.kt').read_text()
+        toggle = android.split('fun testContextPercentageAndActualToggleAnimateInsideTheSameCompactBadge()', 1)[1].split('fun testEmptySend', 1)[0]
+        for token in ('20_000L', '"20K/272K"', 'assertEquals(0.3.sp, tokenLayout.layoutInput.style.letterSpacing)',
+                      'assertEquals(percentLetterSpacing, layout(percent).layoutInput.style.letterSpacing)',
+                      'assertNoTextOverflow(tokenLayout)'):
+            self.assertIn(token, toggle)
 
     def test_context_toggles_locally_with_animated_text_and_width(self):
         self.assertIn('var showContextTokens by rememberSaveable { mutableStateOf(false) }', self.text)

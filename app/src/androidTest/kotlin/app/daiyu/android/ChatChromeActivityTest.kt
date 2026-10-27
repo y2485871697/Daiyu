@@ -124,7 +124,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         val density = text.layoutInput.density.density
         return maxOf((22f * density).roundToInt(),
             maxOf((15f * density).roundToInt(), text.size.height) +
-                2 * (1f * density).roundToInt() + 2 * (3f * density).roundToInt()).toFloat()
+                2 * (1f * density).roundToInt() + 2 * (2f * density).roundToInt()).toFloat()
     }
 
     private fun contextBottomGapPx(density: Float, contextHeight: Int): Float {
@@ -259,9 +259,9 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
     }
 
     fun testEnlargedComposerFitsControlsWithoutDoubleScalingText() {
-        for ((density, expected) in listOf(1f to 5f, .8f to 4f, 1.25f to 7f, 1.5f to 7f)) {
+        for ((density, expected) in listOf(1f to 6f, .8f to 4f, 1.25f to 7f, 1.5f to 9f)) {
             val context = maxOf((22f * density).roundToInt(), (15f * density).roundToInt() +
-                2 * density.roundToInt() + 2 * (3f * density).roundToInt())
+                2 * density.roundToInt() + 2 * (2f * density).roundToInt())
             assertEquals(expected, contextBottomGapPx(density, context), 0f)
         }
         val state = composer().copy(text = "", modelLabel = "gpt-6.1-sol", phase = ComposerPhase.IDLE)
@@ -342,10 +342,10 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 assertEquals(15f, icon.height / density, .75f)
                 assertEquals(contextHeightPx(text), badge.height, 0f)
                 assertTrue("compact context max width", badge.width / density <= 120f + 1f)
-                if (font <= 1f) assertTrue("default-font badge stays compact", badge.width / density < 97f)
-                assertEquals(6f, (icon.left - badge.left) / density, .75f)
-                assertEquals(5f, (label.left - icon.right) / density, .75f)
-                assertEquals(6f, (badge.right - label.right) / density, .75f)
+                if (font <= 1f) assertTrue("default-font badge stays compact", badge.width / density < 92f)
+                assertEquals(4f, (icon.left - badge.left) / density, .75f)
+                assertEquals(4f, (label.left - icon.right) / density, .75f)
+                assertEquals(4f, (badge.right - label.right) / density, .75f)
                 assertEquals(badge.center.y, icon.center.y, 1f)
                 assertEquals(icon.center.y, label.center.y, 1f)
                 assertEquals(model.center.y, badge.center.y, 1f)
@@ -395,14 +395,16 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
 
     fun testContextPercentageAndActualToggleAnimateInsideTheSameCompactBadge() {
         val events = mutableListOf<String>()
-        for (input in listOf(4_000L, 0L)) {
+        for (input in listOf(20_000L, 4_000L, 0L)) {
             val value = app.daiyu.android.ui.model.CloudContextUsageUi(input, 272_000)
             val percent = value.label(java.util.Locale.US)
             val tokens = value.tokensLabel(java.util.Locale.US)
+            if (input == 20_000L) assertEquals("20K/272K", tokens)
             show(composer().copy(contextFraction = value.fraction, contextUsageText = percent, contextTokensText = tokens),
                 ChatScreenActions(onModelClick = { events.add("model") }, onMenuAction = { events.add("menu") }))
             val before = node("chat-context").assertHasClickAction().fetchSemanticsNode().boundsInRoot
             ui.onNodeWithText(percent, useUnmergedTree = true).assertIsDisplayed()
+            val percentLetterSpacing = layout(percent).layoutInput.style.letterSpacing
             val automatic = ui.mainClock.autoAdvance
             try {
                 ui.mainClock.autoAdvance = false
@@ -421,11 +423,14 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 assertTrue("badge width interpolates rather than jumping",
                     middle.width > minOf(before.width, after.width) + .5f &&
                         middle.width < maxOf(before.width, after.width) - .5f)
-                assertNoTextOverflow(layout(tokens))
+                val tokenLayout = layout(tokens)
+                assertEquals(0.3.sp, tokenLayout.layoutInput.style.letterSpacing)
+                assertNoTextOverflow(tokenLayout)
                 node("chat-context").performClick()
                 ui.mainClock.advanceTimeBy(400)
                 ui.onNodeWithText(percent, useUnmergedTree = true).assertIsDisplayed()
                 ui.onNodeWithText(tokens, useUnmergedTree = true).assertDoesNotExist()
+                assertEquals(percentLetterSpacing, layout(percent).layoutInput.style.letterSpacing)
             } finally { ui.mainClock.autoAdvance = automatic }
             assertTrue("display toggles do not navigate or launch model requests", events.isEmpty())
         }

@@ -80,6 +80,46 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         assertDraft("model management stays unsent")
     }
 
+    fun testModelBadgesUseExplicitNamesAndKeepOnlyTheCurrentModelCheck() {
+        openLocalModels()
+        val current = fixture.settings.load().model
+        node("local-model-search").performTextReplacement("extra-local")
+        dismissIme()
+        reveal("local-model:extra-local")
+        ui.onNodeWithText("上下文未知").assertExists()
+        ui.onNodeWithText("支持视觉").assertExists()
+        ui.onNodeWithText("原生搜索").assertDoesNotExist()
+        ui.onNodeWithContentDescription("当前模型").assertDoesNotExist()
+        for (old in listOf("当前", "推理", "视觉", "搜索"))
+            ui.onNodeWithText(old).assertDoesNotExist()
+
+        reveal("local-model-rename:extra-local").performClick()
+        node("settings-field:上下文窗口（tokens）").performTextReplacement("8000")
+        node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:支持视觉"))
+        node("settings-switch:支持视觉").assertIsOn().performClick().assertIsOff()
+        node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:原生搜索"))
+        node("settings-switch:原生搜索").assertIsOff().performClick().assertIsOn()
+        node("dialog-confirm").performClick()
+        awaitControl("badge configuration saved") {
+            fixture.settings.localModelCatalogSnapshot()!!.models.single { it.id == "extra-local" }
+                .settings.let { it.contextWindowOverride == 8000 && it.visionOverride == false &&
+                    it.requestOptions.openAiWebSearchEnabled }
+        }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("catalog-model-editor").fetchSemanticsNodes().isEmpty() }
+        reveal("local-model:extra-local")
+        ui.onNodeWithText("8K 上下文").assertExists()
+        ui.onNodeWithText("支持视觉").assertDoesNotExist()
+        ui.onNodeWithText("原生搜索").assertExists()
+        node("local-model-search").performTextReplacement(current)
+        dismissIme()
+        reveal("local-model:$current")
+        ui.onNodeWithContentDescription("当前模型").assertExists()
+        for (old in listOf("当前", "推理", "视觉", "搜索"))
+            ui.onNodeWithText(old).assertDoesNotExist()
+        assertEquals(current, fixture.settings.load().model)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testCustomModelDialogMatchesFieldsAndSavesOnlyAnExplicitValidModel() {
         openLocalModels()
         val saved = fixture.settings.load()
@@ -90,8 +130,8 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         node("dialog-confirm").assertIsNotEnabled()
         node("settings-field:Model ID").performTextReplacement("custom-model")
         node("settings-field:上下文窗口（tokens）").performTextReplacement("8192")
-        node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:支持推理"))
-        node("settings-switch:支持推理").assertIsOn().performClick().assertIsOff()
+        node("settings-switch:支持推理").assertDoesNotExist()
+        node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:支持视觉"))
         node("settings-switch:支持视觉").assertIsOn()
         node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:原生搜索"))
         node("settings-switch:原生搜索").assertIsOff().performClick().assertIsOn()
@@ -104,7 +144,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         val record = fixture.settings.localModelCatalogSnapshot()!!.models.single { it.id == "custom-model" }
         assertEquals("自定义模型", record.displayName)
         assertEquals(8192, record.settings.contextWindowOverride)
-        assertEquals(false, record.settings.reasoningOverride)
+        assertEquals(true, record.settings.reasoningOverride)
         assertEquals(true, record.settings.visionOverride)
         assertTrue(record.settings.requestOptions.openAiWebSearchEnabled)
         assertEquals(saved, fixture.settings.load())

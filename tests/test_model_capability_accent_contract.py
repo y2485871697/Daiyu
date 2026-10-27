@@ -18,8 +18,9 @@ class ModelCapabilityAccentContractTest(unittest.TestCase):
             self.assertNotIn(old_or_fixed_color, self.tags)
 
     def test_all_labels_keep_their_conditions_and_compact_noninteractive_layout(self):
-        for fragment in ('"上下文未知"', '"推理".takeIf { form?.reasoning == true }',
-                         '"视觉".takeIf { form?.vision == true }', '"搜索".takeIf { form?.nativeSearch == true }', '"当前".takeIf { selected }',
+        for fragment in ('"上下文未知"', '"支持视觉".takeIf { form?.vision == true }',
+                         '"原生搜索".takeIf { form?.nativeSearch == true }',
+                         'if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型")',
                          "horizontalArrangement = Arrangement.spacedBy(6.dp)",
                          "verticalArrangement = Arrangement.spacedBy(4.dp)"):
             self.assertIn(fragment, self.source)
@@ -27,6 +28,9 @@ class ModelCapabilityAccentContractTest(unittest.TestCase):
                          ".padding(horizontal = 7.dp, vertical = 2.dp)"):
             self.assertIn(fragment, self.tags)
         self.assertNotIn(".clickable", self.tags)
+        labels = self.source.split("val labels = listOfNotNull(", 1)[1].split("labels.forEach", 1)[0]
+        for removed in ('"推理"', '"当前"', '"视觉"', '"搜索"', 'form?.reasoning', 'selected'):
+            self.assertNotIn(removed, labels)
 
     def test_tag_tokens_match_connection_button_and_local_provider_accent(self):
         helper = (SETTINGS / "ProviderSettingsComponents.kt").read_text().split(

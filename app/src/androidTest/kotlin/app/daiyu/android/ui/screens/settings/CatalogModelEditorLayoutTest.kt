@@ -161,33 +161,37 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         }
     }
 
-    fun testCapabilityRowsAreSingleLineCenteredAndSavedOffReopensOff() {
-        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
-            show(dark = dark, fontScale = fontScale)
+    fun testTwoCapabilityRowsSaveAndPreserveHiddenReasoningAcrossReopen() {
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (reasoning in listOf(false, true)) {
+            show(dark = dark, fontScale = fontScale,
+                initial = CatalogModelEdit("layout-model", "布局模型", "8192", reasoning = reasoning))
             open()
             node("catalog-model-auto").assertDoesNotExist()
             ui.onNodeWithText("恢复自动").assertDoesNotExist()
             for (summary in listOf("自动：不支持或未知", "手动：支持", "手动：不支持"))
                 ui.onNodeWithText(summary).assertDoesNotExist()
-            for (title in listOf("支持推理", "支持视觉")) {
-                val row = revealEditor("settings-switch:$title").assertIsOn().fetchSemanticsNode().boundsInRoot
+            node("settings-switch:支持推理").assertDoesNotExist()
+            ui.onNodeWithText("支持推理").assertDoesNotExist()
+            for ((title, on) in listOf("支持视觉" to true, "原生搜索" to false)) {
+                val control = revealEditor("settings-switch:$title")
+                if (on) control.assertIsOn() else control.assertIsOff()
+                val row = control.fetchSemanticsNode().boundsInRoot
                 val label = ui.onNode(hasText(title) and hasAnyAncestor(hasTestTag("catalog-model-capabilities")),
                     useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                 assertEquals("$title vertical center", row.center.y, label.center.y, 1f)
                 assertTrue("$title fits row", label.left >= row.left && label.right <= row.right)
             }
             revealEditor("settings-switch:原生搜索").assertIsOff().performClick().assertIsOn()
-            revealEditor("settings-switch:支持推理").performClick().assertIsOff()
             revealEditor("settings-switch:支持视觉").performClick().assertIsOff()
             node("dialog-confirm").performClick()
             val configured = checkNotNull(saved)
-            assertFalse(configured.reasoning)
+            assertEquals(reasoning, configured.reasoning)
             assertFalse(configured.vision)
             assertTrue(configured.nativeSearch)
             node("dialog-cancel").performClick()
             show(dark = dark, fontScale = fontScale, initial = configured)
             open()
-            revealEditor("settings-switch:支持推理").assertIsOff()
+            node("settings-switch:支持推理").assertDoesNotExist()
             revealEditor("settings-switch:支持视觉").assertIsOff()
             revealEditor("settings-switch:原生搜索").assertIsOn()
             node("dialog-cancel").performClick()
@@ -211,8 +215,10 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         revealEditor("local-model-delete:layout-model").assertIsNotEnabled()
         revealEditor("settings-field:上下文窗口（tokens）").performTextReplacement("16384")
         mainThread { enabled = false }
-        for (tag in listOf("local-model-delete:layout-model", "settings-switch:支持推理", "settings-switch:支持视觉"))
+        for (tag in listOf("local-model-delete:layout-model", "settings-switch:支持视觉", "settings-switch:原生搜索"))
             revealEditor(tag).assertIsNotEnabled().performTouchInput { click(center) }
+        revealEditor("settings-switch:支持视觉").assertIsOn()
+        revealEditor("settings-switch:原生搜索").assertIsOff()
         for (tag in listOf("dialog-confirm", "dialog-cancel"))
             node(tag).assertIsNotEnabled().performTouchInput { click(center) }
         assertEquals(1, saves)

@@ -254,9 +254,8 @@ internal fun <T> LocalCatalogModelsScreen(
                             val context = form?.contextWindow?.toIntOrNull()
                             val labels = listOfNotNull(
                                 if (context == null) "上下文未知" else if (context % 1000 == 0) "${context / 1000}K 上下文" else "$context 上下文",
-                                "推理".takeIf { form?.reasoning == true }, "视觉".takeIf { form?.vision == true },
-                                "搜索".takeIf { form?.nativeSearch == true },
-                                "当前".takeIf { selected })
+                                "支持视觉".takeIf { form?.vision == true },
+                                "原生搜索".takeIf { form?.nativeSearch == true })
                             labels.forEach { label ->
                                 Text(label, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onPrimary,
                                     modifier = Modifier.clip(RoundedCornerShape(6.dp))

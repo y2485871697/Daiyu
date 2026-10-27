@@ -7,13 +7,15 @@ MAIN = ROOT / "app/src/main/kotlin/app/daiyu/android"
 
 
 class ModelEditorDefaultsContractTest(unittest.TestCase):
-    def test_editor_has_three_single_line_switches_without_reset_action(self):
+    def test_editor_has_only_vision_and_native_search_switches_without_reset_action(self):
         source = (MAIN / "ui/screens/settings/CatalogModelEditorDialog.kt").read_text()
         for removed in ("恢复自动", "catalog-model-auto", "capabilitySummary", "手动：", "自动：不支持或未知"):
             self.assertNotIn(removed, source)
         switches = source.split('testTag("catalog-model-capabilities")', 1)[1].split("if (!isNew)", 1)[0]
         self.assertNotIn("summary =", switches)
-        self.assertIn('SettingsSwitchRow("支持推理", value.reasoning, enabled)', switches)
+        self.assertNotIn("支持推理", switches)
+        self.assertNotIn("copy(reasoning =", switches)
+        self.assertEqual(2, switches.count("SettingsSwitchRow("))
         self.assertIn('SettingsSwitchRow("支持视觉", value.vision, enabled)', switches)
         self.assertIn('SettingsSwitchRow("原生搜索", value.nativeSearch, enabled)', switches)
         self.assertIn('val nativeSearch: Boolean = false', (MAIN / "model/catalog/CatalogModelEdit.kt").read_text())

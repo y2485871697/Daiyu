@@ -80,13 +80,13 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
         }
     }
 
-    private fun assertWhiteDialogIcons(tag: String) {
+    private fun assertBlackStatusBarText(tag: String) {
         awaitNodeWindowFocus(node(tag))
         val root = node(tag).assertIsDisplayed().fetchSemanticsNode().root as ViewRootForTest
         mainThread {
             val window = (root.view.parent as DialogWindowProvider).window
             assertNotSame(activity.window, window)
-            assertFalse("Dimmed dialog must keep white status icons",
+            assertTrue("Dimmed dialog must keep black status-bar text",
                 WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars)
         }
         assertHostBars()
@@ -102,35 +102,35 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testCenteredAndBottomOverlaysKeepWhiteIconsAcrossThemesAndExactBackgrounds() {
+    fun testCenteredAndBottomOverlaysKeepBlackStatusTextAcrossThemesAndExactBackgrounds() {
         for (dark in listOf(false, true)) for (seed in listOf(null, 0xFF000000.toInt(), 0xFFFFFFFF.toInt())) {
             for (bottomSheet in listOf(false, true)) {
                 show(dark, bottomSheet, seed)
-                assertWhiteDialogIcons("modal-outer")
+                assertBlackStatusBarText("modal-outer")
                 closeOuter()
             }
         }
     }
 
-    fun testNestedSheetReturnsToOuterWithoutBlackStatusIcons() {
+    fun testNestedSheetReturnsToOuterWithoutWhiteStatusText() {
         show(dark = false, bottomSheet = true)
-        assertWhiteDialogIcons("modal-outer")
+        assertBlackStatusBarText("modal-outer")
         node("modal-outer").performClick()
-        assertWhiteDialogIcons("modal-inner")
+        assertBlackStatusBarText("modal-inner")
         Espresso.pressBack()
         ui.waitUntil(5_000) { !innerOpen.value }
         node("modal-inner").assertDoesNotExist()
         assertEquals(0, dismissals)
-        assertWhiteDialogIcons("modal-outer")
+        assertBlackStatusBarText("modal-outer")
         closeOuter()
     }
 
-    fun testThemeChangeWhileOpenKeepsWhiteDialogAndRestoresCurrentPageAppearance() {
+    fun testThemeChangeWhileOpenKeepsBlackStatusTextAndRestoresCurrentPageAppearance() {
         show(dark = true, bottomSheet = true)
-        assertWhiteDialogIcons("modal-outer")
+        assertBlackStatusBarText("modal-outer")
         mainThread { appearance.value = appearance.value.copy(themeMode = AppearanceThemeMode.LIGHT) }
         ui.waitForIdle()
-        assertWhiteDialogIcons("modal-outer")
+        assertBlackStatusBarText("modal-outer")
         closeOuter()
     }
 }

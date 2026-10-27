@@ -34,7 +34,7 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
         SideEffect {
             window?.let { dialogWindow ->
                 WindowCompat.getInsetsController(dialogWindow, dialogWindow.decorView)
-                    .isAppearanceLightStatusBars = false
+                    .isAppearanceLightStatusBars = true
             }
             window?.setDimAmount(0f)
             if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()

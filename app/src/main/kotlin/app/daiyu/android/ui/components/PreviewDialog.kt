@@ -12,7 +12,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
 
 // Page section gaps do not belong inside bottom-sheet content.
 internal val LocalBottomSheetContent = staticCompositionLocalOf { false }
@@ -22,7 +21,6 @@ internal val LocalBottomSheetContent = staticCompositionLocalOf { false }
 internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scrimBlurRadius: Float = 0f,
     bottomSheet: Boolean = false, onOutsideDismiss: () -> Unit = onDismiss, dismissEnabled: Boolean = true,
     content: @Composable BoxWithConstraintsScope.() -> Unit) {
-    val colors = usagePalette()
     val density = LocalDensity.current
     val motion = remember(bottomSheet) { if (bottomSheet) BottomSheetMotion() else null }
     Dialog(onDismissRequest = {
@@ -31,11 +29,8 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
             dismissOnBackPress = dismissEnabled, dismissOnClickOutside = dismissEnabled)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+        val dimAmount = remember(window) { window?.attributes?.dimAmount ?: 0f }
         SideEffect {
-            window?.let { dialogWindow ->
-                WindowCompat.getInsetsController(dialogWindow, dialogWindow.decorView)
-                    .isAppearanceLightStatusBars = true
-            }
             window?.setDimAmount(0f)
             if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()
         }
@@ -43,7 +38,7 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
             Box(Modifier.fillMaxSize().testTag("preview-dialog-viewport").dialogDismissInputGuard()) {
                 Box(Modifier.matchParentSize().testTag("preview-dialog-scrim")
                     .then(if (scrimBlurRadius > 0f) Modifier.previewGlassBlur(androidx.compose.ui.graphics.RectangleShape, radius = scrimBlurRadius, saturation = 1f) else Modifier)
-                    .dialogDimBackground(scrimColor ?: Color(if (colors.dark) 0x55000000 else 0x2620172d), animate = bottomSheet)
+                    .dialogDimBackground(scrimColor ?: Color.Black.copy(alpha = dimAmount), animate = bottomSheet)
                     .clickable(enabled = dismissEnabled, interactionSource = remember { MutableInteractionSource() }, indication = null,
                         clickFeedback = false, onClick = {
                         if (dismissEnabled) motion?.requestDismiss(BottomSheetDismissSource.Outside) ?: onOutsideDismiss()

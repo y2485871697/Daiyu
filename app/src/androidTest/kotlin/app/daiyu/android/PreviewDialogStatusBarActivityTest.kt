@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import kotlin.math.abs
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
@@ -31,14 +33,15 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
     private val innerOpen = mutableStateOf(false)
     private var dismissals = 0
 
-    private fun show(dark: Boolean, bottomSheet: Boolean, seed: Int? = null) {
+    private fun show(dark: Boolean, bottomSheet: Boolean, seed: Int? = null,
+        initiallyOpen: Boolean = true, backgroundOverride: Color? = null, scrim: Color? = null) {
         mainThread {
             appearance.value = AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
                 paletteSeedColor = seed,
             )
             dismissals = 0
-            outerOpen.value = true
+            outerOpen.value = initiallyOpen
             innerOpen.value = false
             activity.setContent {
                 AgentAppTheme(appearance.value, applyInterfaceScale = true, onResolvedDarkModeChange = { resolvedDark ->
@@ -50,10 +53,10 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
                     }
                 }) {
                     val darkTheme = appearance.value.themeMode == AppearanceThemeMode.DARK
-                    Box(Modifier.fillMaxSize().background(resolveAppearanceColors(appearance.value, darkTheme).background)
+                    Box(Modifier.fillMaxSize().background(backgroundOverride ?: resolveAppearanceColors(appearance.value, darkTheme).background)
                         .testTag("modal-page")) {
                         if (outerOpen.value) PreviewDialog(
-                            onDismiss = { dismissals++; outerOpen.value = false }, bottomSheet = bottomSheet,
+                            onDismiss = { dismissals++; outerOpen.value = false }, bottomSheet = bottomSheet, scrimColor = scrim,
                         ) {
                             TextButton(onClick = { innerOpen.value = true },
                                 modifier = Modifier.align(Alignment.Center).testTag("modal-outer")) { Text("打开第二层") }
@@ -80,14 +83,12 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
         }
     }
 
-    private fun assertBlackStatusBarText(tag: String) {
+    private fun assertDialogWindowAndHostBars(tag: String) {
         awaitNodeWindowFocus(node(tag))
         val root = node(tag).assertIsDisplayed().fetchSemanticsNode().root as ViewRootForTest
         mainThread {
             val window = (root.view.parent as DialogWindowProvider).window
             assertNotSame(activity.window, window)
-            assertTrue("Dimmed dialog must keep black status-bar text",
-                WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars)
         }
         assertHostBars()
     }
@@ -102,35 +103,76 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testCenteredAndBottomOverlaysKeepBlackStatusTextAcrossThemesAndExactBackgrounds() {
+    fun testCenteredAndBottomOverlaysRetainHostBarsAcrossThemesAndExactBackgrounds() {
         for (dark in listOf(false, true)) for (seed in listOf(null, 0xFF000000.toInt(), 0xFFFFFFFF.toInt())) {
             for (bottomSheet in listOf(false, true)) {
                 show(dark, bottomSheet, seed)
-                assertBlackStatusBarText("modal-outer")
+                assertDialogWindowAndHostBars("modal-outer")
                 closeOuter()
             }
         }
     }
 
-    fun testNestedSheetReturnsToOuterWithoutWhiteStatusText() {
+    fun testNestedSheetReturnsToOuterThenRestoresHostBars() {
         show(dark = false, bottomSheet = true)
-        assertBlackStatusBarText("modal-outer")
+        assertDialogWindowAndHostBars("modal-outer")
         node("modal-outer").performClick()
-        assertBlackStatusBarText("modal-inner")
+        assertDialogWindowAndHostBars("modal-inner")
         Espresso.pressBack()
         ui.waitUntil(5_000) { !innerOpen.value }
         node("modal-inner").assertDoesNotExist()
         assertEquals(0, dismissals)
-        assertBlackStatusBarText("modal-outer")
+        assertDialogWindowAndHostBars("modal-outer")
         closeOuter()
     }
 
-    fun testThemeChangeWhileOpenKeepsBlackStatusTextAndRestoresCurrentPageAppearance() {
+    fun testThemeChangeWhileOpenRestoresCurrentPageAppearance() {
         show(dark = true, bottomSheet = true)
-        assertBlackStatusBarText("modal-outer")
+        assertDialogWindowAndHostBars("modal-outer")
         mainThread { appearance.value = appearance.value.copy(themeMode = AppearanceThemeMode.LIGHT) }
         ui.waitForIdle()
-        assertBlackStatusBarText("modal-outer")
+        assertDialogWindowAndHostBars("modal-outer")
         closeOuter()
+    }
+
+    private fun assertCompositedShade(tag: String, expected: Float) {
+        var sampled = emptyList<Color>()
+        ui.waitUntil(5_000) {
+            val pixels = captureScreenNode(node(tag)).toPixelMap()
+            val x = pixels.width / 2
+            val y = pixels.height / 5
+            sampled = (-1..1).flatMap { dy -> (-1..1).map { dx -> pixels[x + dx, y + dy] } }
+            sampled.all { abs(it.red - expected) < .025f && abs(it.green - expected) < .025f &&
+                abs(it.blue - expected) < .025f }
+        }
+        for (color in sampled) {
+            assertEquals(expected, color.red, .025f)
+            assertEquals(expected, color.green, .025f)
+            assertEquals(expected, color.blue, .025f)
+        }
+    }
+
+    fun testDefaultScrimMatchesOriginalDialogThemeAndCustomScrimRemainsIndependent() {
+        for (bottomSheet in listOf(false, true)) for (custom in listOf(false, true)) {
+            val customAlpha = .35f
+            show(dark = false, bottomSheet = bottomSheet, initiallyOpen = false,
+                backgroundOverride = Color.White, scrim = if (custom) Color.Black.copy(alpha = customAlpha) else null)
+            assertCompositedShade("modal-page", 1f)
+            mainThread { outerOpen.value = true }
+            assertDialogWindowAndHostBars("modal-outer")
+            if (bottomSheet) awaitDialogEnter(node("modal-outer"))
+            val root = node("modal-outer").fetchSemanticsNode().root as ViewRootForTest
+            var originalAlpha = -1f
+            mainThread {
+                val window = (root.view.parent as DialogWindowProvider).window
+                val attributes = window.context.obtainStyledAttributes(intArrayOf(android.R.attr.backgroundDimAmount))
+                originalAlpha = try { attributes.getFloat(0, -1f) } finally { attributes.recycle() }
+                assertTrue("Original Dialog theme supplies its dim amount", originalAlpha > 0f && originalAlpha <= 1f)
+                assertEquals("Scrim owns dimming; native dim must not compound it", 0f, window.attributes.dimAmount, 0f)
+            }
+            assertCompositedShade("preview-dialog-viewport", 1f - if (custom) customAlpha else originalAlpha)
+            closeOuter()
+            assertCompositedShade("modal-page", 1f)
+        }
     }
 }

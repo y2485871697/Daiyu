@@ -79,15 +79,16 @@ internal object ChatPreviewIcons {
 
     val ThoughtFast: ImageVector by lazy {
         previewIcon("ThoughtFast") {
-            outline("M8 16c-4-4-1-11 5-11 5 0 8 5 5 9-2 3-7 3-7 0 0-2 3-3 4-1M3 10h3M2 14h3M4 18h4", 1.7f)
-            solid("M20 3l.7 1.8L22.5 5.5l-1.8.7L20 8l-.7-1.8-1.8-.7 1.8-.7Z")
+            outline("M3.25 8.25H14a3 3 0 1 0-2.9-3.75", 1.8f)
+            outline("M2.25 12h19", 1.8f)
+            outline("M5 15.75h9a3 3 0 1 1-2.9 3.75", 1.8f)
         }
     }
 
     val ThoughtUltraFast: ImageVector by lazy {
         previewIcon("ThoughtUltraFast") {
-            outline("M4 15c-3-4 1-8 8-8s11 4 8 8c-3 4-13 4-16 0ZM7 19c-4-3-2-10 3-14s9-3 9 1-5 10-9 11M2 6h4M1 10h3", 1.7f)
-            solid("M15 8l1.1 2.9L19 12l-2.9 1.1L15 16l-1.1-2.9L11 12l2.9-1.1Z")
+            outline("m14.2 2.6-9 10.7h6.4l-1.1 8.1 9.3-11.1h-6.5z", 1.8f)
+            outline("M2.5 7.5h3M2.5 17.5h3", 1.8f)
         }
     }
 

@@ -58,7 +58,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         }
     }
     private fun revealLinux(tag: String): SemanticsNodeInteraction {
-        node("page:$pageTitle").scrollToDescendant(hasTestTag(tag))
+        ui.onNode(hasTestTag("page:工作区") or hasTestTag("page:$pageTitle")).scrollToDescendant(hasTestTag(tag))
         return node(tag)
     }
     fun testOriginalGroupsHaveNoTechnicalPreviewAndUnavailableToolsAreNotMarkedInstalled() {
@@ -106,6 +106,31 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
     }
+    fun testOnlyWorkspaceSelectionChangesTheTopTitleAndOtherTabsKeepTheirTitles() {
+        show()
+        node("page:Linux 工具环境").assertExists()
+        node("page:工作区").assertDoesNotExist()
+        node("linux-tab:files").performClick().assertIsSelected()
+        node("linux-files:workspace").assertIsSelected().assertTextContains("工作区")
+        node("page:工作区").assertExists()
+        node("page:Linux 工具环境").assertDoesNotExist()
+        for ((location, label) in listOf("rootfs" to "Rootfs", "shared" to "共享文件夹")) {
+            revealLinux("linux-files:$location").performClick().assertIsSelected().assertTextContains(label)
+            node("page:Linux 工具环境").assertExists()
+            node("page:工作区").assertDoesNotExist()
+        }
+        revealLinux("linux-files:workspace").performClick().assertIsSelected()
+        node("page:工作区").assertExists()
+        node("linux-tab:basic").performClick().assertIsSelected().assertTextContains("基本")
+        node("page:Linux 工具环境").assertExists()
+        node("page:工作区").assertDoesNotExist()
+        node("linux-tab:files").performClick().assertIsSelected().assertTextContains("文件")
+        node("linux-files:workspace").assertIsSelected()
+        node("page:工作区").assertExists()
+        assertFalse(checkNotNull(owner).state.value.revoked)
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
     fun testFilesOnlyOpensNewWorkspaceWithoutBottomNavigationOrBasicActions() {
         show(filesOnly = true)
         node("page:工作区").assertExists()
@@ -117,8 +142,10 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         node("linux-execution-choice").assertDoesNotExist()
         ui.onNodeWithText("私有工作区").assertDoesNotExist()
         revealLinux("linux-files:rootfs").performClick().assertIsSelected()
+        node("page:工作区").assertExists()
         ui.onNodeWithText("当前环境暂无可浏览的 Rootfs").assertExists()
         revealLinux("linux-files:shared").performClick().assertIsSelected()
+        node("page:工作区").assertExists()
         revealLinux("workspace-pick-directory").assertHasClickAction()
         revealLinux("workspace-pick-file").assertHasClickAction()
         revealLinux("linux-files:workspace").performClick().assertIsSelected()

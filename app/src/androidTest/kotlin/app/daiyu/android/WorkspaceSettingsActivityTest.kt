@@ -48,7 +48,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         reveal("settings-row:Linux 工具环境", "设置").performClick()
         awaitUniqueTag("linux-tab:files")
         node("linux-tab:files").performClick().assertIsSelected()
-        awaitUniqueTag("page:Linux 工具环境")
+        awaitUniqueTag("page:工作区")
     }
     fun testRealWorkspaceEntryPreservesChatAndDoesNotReadOrChangeModelConfiguration() {
         setDraft("workspace unsent draft")

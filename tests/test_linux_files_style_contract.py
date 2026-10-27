@@ -12,6 +12,13 @@ def read(name):
 
 
 class LinuxFilesStyleContract(unittest.TestCase):
+    def test_only_integrated_workspace_overrides_the_existing_top_title(self):
+        workspace = read('WorkspaceSettingsScreen.kt')
+        self.assertIn('title = if (integratedLinux && location == LinuxFileLocation.WORKSPACE) "工作区" else pageTitle', workspace)
+        linux = read('LinuxSettingsScreen.kt')
+        self.assertIn('pageTitle = if (filesOnly) "工作区" else "Linux 工具环境"', linux)
+        self.assertIn('SettingsScaffoldPage("Linux 工具环境", leave, compactTitle = true', linux)
+
     def test_bottom_navigation_limits_selection_to_icon_background(self):
         nav = read('LinuxSettingsNavigation.kt').split('internal fun LinuxFileLocationTabs')[0]
         self.assertIn('import app.daiyu.android.ui.haptics.selectable', nav)

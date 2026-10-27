@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,9 +55,11 @@ internal fun ComposerShortcutPicker(kind: ComposerShortcutKind, initialQuery: St
                     inner()
                 } })
         }
-        Text(when { error != null -> error; filtered == null -> "正在加载";
-            else -> "${filtered.size} ${if (conversation) "个会话" else "个 Skill"}" },
-            Modifier.padding(vertical = 8.dp), fontSize = 11.sp, color = colors.muted)
+        if (conversation || filtered?.isEmpty() != true || error != null) {
+            Text(when { error != null -> error; filtered == null -> "正在加载";
+                else -> "${filtered.size} ${if (conversation) "个会话" else "个 Skill"}" },
+                Modifier.padding(vertical = 8.dp), fontSize = 11.sp, color = colors.muted)
+        }
         LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("reference-picker-list"),
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(filtered.orEmpty(), key = { it.id }) { choice ->
@@ -76,8 +79,15 @@ internal fun ComposerShortcutPicker(kind: ComposerShortcutKind, initialQuery: St
                 }
             }
             if (filtered?.isEmpty() == true) item {
-                Text(if (conversation) "暂无可引用会话" else "暂无可用 Skill", Modifier.fillMaxWidth().padding(20.dp),
-                    color = colors.muted, fontSize = 13.sp)
+                if (conversation) {
+                    Text("暂无可引用会话", Modifier.fillMaxWidth().padding(20.dp),
+                        color = colors.muted, fontSize = 13.sp)
+                } else {
+                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("暂无可用 Skill", Modifier.padding(20.dp), color = colors.muted,
+                            fontSize = 13.sp, textAlign = TextAlign.Center)
+                    }
+                }
             }
         }
     }

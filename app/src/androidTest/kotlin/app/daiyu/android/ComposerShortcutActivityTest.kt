@@ -72,6 +72,12 @@ class ComposerShortcutActivityTest : WiredActivityTestCase() {
         type("/")
         awaitUniqueTag("reference-picker-search")
         ui.onNodeWithText("选择 Skill").assertIsDisplayed()
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("暂无可用 Skill").fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithText("0 个 Skill").assertDoesNotExist()
+        val empty = ui.onNodeWithText("暂无可用 Skill").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val content = node("reference-picker-list").fetchSemanticsNode().boundsInRoot
+        assertTrue("Skill empty state must be horizontally centered", kotlin.math.abs(empty.center.x - content.center.x) <= 2f)
+        assertTrue("Skill empty state must be vertically centered", kotlin.math.abs(empty.center.y - content.center.y) <= 2f)
         node("reference-picker-done").performClick()
         assertDraft("/"); assertEquals(0, fixture.opens.get())
     }

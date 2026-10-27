@@ -8,6 +8,25 @@ UI = SRC / 'ui/components'
 
 
 class SubAgentCollaborationContractTest(unittest.TestCase):
+    def test_page_identity_owns_the_whole_scroll_body_but_not_the_footer(self):
+        dialog = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/components/ConversationCollaborationDialog.kt').read_text()
+        page_key = 'key(editor, choosing, current?.presetApplicationToken) {'
+        body = 'Column(Modifier.fillMaxWidth().weight(1f).testTag("subagent-collaboration-body")'
+        self.assertLess(dialog.index(page_key), dialog.index(body))
+        self.assertIn('.verticalScroll(rememberScrollState())', dialog[dialog.index(body):])
+        self.assertNotIn('.verticalScroll(key(', dialog)
+        start = dialog.index(page_key)
+        opening = dialog.index('{', start)
+        depth = 1
+        end = opening + 1
+        while depth:
+            depth += (dialog[end] == '{') - (dialog[end] == '}')
+            end += 1
+        page = dialog[opening:end]
+        self.assertIn(body, page)
+        self.assertNotIn('testTag("subagent-collaboration-footer")', page)
+        self.assertNotIn('testTag("subagent-collaboration-add-row")', page)
+
     def test_only_eligible_gpt_card_has_divider_and_speed(self):
         row = (UI / 'SubAgentProfileRow.kt').read_text()
         block = row.split('if (showGptSpeed) {', 1)[1].split('\n                    }', 1)[0]

@@ -54,7 +54,11 @@ class AssistantPickerFrameContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, body)
         for oracle in ('for (dark in listOf(false, true)) for (scale in listOf(1f, .8f))',
                        'fun dp(px: Float) = px / frame.density',
-                       'assertEquals(84f, dp(search.top - sheet.top), .8f)',
+                       'val titleHeight = frame.types.getValue(text(R.string.assistant_picker_title)).height',
+                       'val headerInsets = with(Density(frame.density))',
+                       '1.dp.roundToPx() + 10.dp.roundToPx() + 3.dp.roundToPx() +',
+                       '8.dp.roundToPx() + 6.dp.roundToPx()',
+                       'assertEquals((headerInsets + titleHeight).toFloat(), search.top - sheet.top, .51f)',
                        'assertTrue(dp(sheet.height) in 300f..520.5f)',
                        'assertEquals(44f, dp(search.height), dp(1f) + .01f)',
                        'assertEquals(76f, dp(first.height), .6f)',

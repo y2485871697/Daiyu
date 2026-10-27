@@ -123,81 +123,83 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 29.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                         }
-                        Column(Modifier.fillMaxWidth().weight(1f).testTag("subagent-collaboration-body")
-                            .verticalScroll(key(editor, choosing, current?.presetApplicationToken) { rememberScrollState() })
-                            .padding(bottom = if (panelEditor != null) 0.dp else 8.dp)) {
-                            when (state) {
-                                is SubAgentEditorState.Error -> {
-                                    Text("子代理配置读取或保存失败：${state.reason}")
-                                    ConversationAgentButton("重试恢复配置", onClick = { editor?.retry() })
-                                }
-                                SubAgentEditorState.Loading -> Text("正在读取本会话子代理配置…")
-                                else -> if (editor == null) CollaborationEmptyState(
-                                    "尚未选择会话", "开始或选择一个会话后，即可配置本会话协作。", "subagent-no-conversation")
-                                    else if (!canChange) Text("主代理尚未停止，暂不可编辑本会话配置。")
-                            }
-                            if (choosing && directory != null && editor != null && chooserPopup != null) {
-                                val (popup, ticket) = chooserPopup
-                                if (!directory.loading && directory.error == null && directory.entries.isEmpty()) {
-                                    CollaborationEmptyState("还没有子代理组",
-                                        "可在设置中添加子代理组，或使用当前配置。", "subagent-no-presets")
-                                } else {
-                                    if (directory.entries.isNotEmpty()) {
-                                        Text("选择子代理组", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
-                                        Text("应用后仅修改本会话配置，不影响原子代理组。", style = MaterialTheme.typography.bodySmall, color = conversationAgentColors().muted, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 14.dp))
+                        key(editor, choosing, current?.presetApplicationToken) {
+                            Column(Modifier.fillMaxWidth().weight(1f).testTag("subagent-collaboration-body")
+                                .verticalScroll(rememberScrollState())
+                                .padding(bottom = if (panelEditor != null) 0.dp else 8.dp)) {
+                                when (state) {
+                                    is SubAgentEditorState.Error -> {
+                                        Text("子代理配置读取或保存失败：${state.reason}")
+                                        ConversationAgentButton("重试恢复配置", onClick = { editor?.retry() })
                                     }
-                                    SubAgentPresetDirectoryStatus(directory)
+                                    SubAgentEditorState.Loading -> Text("正在读取本会话子代理配置…")
+                                    else -> if (editor == null) CollaborationEmptyState(
+                                        "尚未选择会话", "开始或选择一个会话后，即可配置本会话协作。", "subagent-no-conversation")
+                                        else if (!canChange) Text("主代理尚未停止，暂不可编辑本会话配置。")
                                 }
-                                directory.entries.forEach { preset ->
-                                    key(editor, preset.id) {
-                                        SubAgentPresetCard(preset, canChange && directory.error == null && !directory.loading,
-                                            "应用子代理组${preset.name}", selected = current?.appliedPresetId == preset.id,
-                                            onClick = {
-                                                if (popup.isCurrent(ticket, popup) && latestOwnerMatches() && !latestTaskRunning && latestCanChange && latestChoosing) {
-                                                    val result = editor.applyPreset(preset.id) { popup.isCurrent(ticket, popup) && latestOwnerMatches() && !latestTaskRunning && latestChoosing }
-                                                    if (result is ConversationSubAgentPreferences.WriteResult.Saved) { applicationError = null; chooserOverride = false }
-                                                    else applicationError = "子代理组未应用，当前会话配置已保留；请重试。"
-                                                }
-                                            })
-                                        Spacer(Modifier.height(8.dp))
+                                if (choosing && directory != null && editor != null && chooserPopup != null) {
+                                    val (popup, ticket) = chooserPopup
+                                    if (!directory.loading && directory.error == null && directory.entries.isEmpty()) {
+                                        CollaborationEmptyState("还没有子代理组",
+                                            "可在设置中添加子代理组，或使用当前配置。", "subagent-no-presets")
+                                    } else {
+                                        if (directory.entries.isNotEmpty()) {
+                                            Text("选择子代理组", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
+                                            Text("应用后仅修改本会话配置，不影响原子代理组。", style = MaterialTheme.typography.bodySmall, color = conversationAgentColors().muted, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 14.dp))
+                                        }
+                                        SubAgentPresetDirectoryStatus(directory)
                                     }
-                                }
-                                applicationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                            } else if (current != null && editor != null && panelEditor != null) {
-                                key(panelEditor) {
-                                    CompositionLocalProvider(LocalConversationSubAgentEditor provides panelEditor) {
-                                        when (panelState) {
-                                            is SubAgentEditorState.Error -> {
-                                                Text("本会话配置保存或读取失败：${panelState.reason}", color = MaterialTheme.colorScheme.error)
-                                                ConversationAgentButton("重试本会话配置", enabled = latestOwnerMatches() && !latestTaskRunning, onClick = {
-                                                    if (latestOwnerMatches() && !latestTaskRunning && !latestChoosing) { editor.retry(); panelEditor.retry() }
+                                    directory.entries.forEach { preset ->
+                                        key(editor, preset.id) {
+                                            SubAgentPresetCard(preset, canChange && directory.error == null && !directory.loading,
+                                                "应用子代理组${preset.name}", selected = current?.appliedPresetId == preset.id,
+                                                onClick = {
+                                                    if (popup.isCurrent(ticket, popup) && latestOwnerMatches() && !latestTaskRunning && latestCanChange && latestChoosing) {
+                                                        val result = editor.applyPreset(preset.id) { popup.isCurrent(ticket, popup) && latestOwnerMatches() && !latestTaskRunning && latestChoosing }
+                                                        if (result is ConversationSubAgentPreferences.WriteResult.Saved) { applicationError = null; chooserOverride = false }
+                                                        else applicationError = "子代理组未应用，当前会话配置已保留；请重试。"
+                                                    }
                                                 })
-                                            }
-                                            SubAgentEditorState.Loading -> Text("正在读取本会话子代理配置…")
-                                            else -> Unit
+                                            Spacer(Modifier.height(8.dp))
                                         }
-                                        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)
-                                            .toggleable(value = panelConfig?.enabled ?: current.enabled, enabled = panelEnabled, role = Role.Switch,
-                                                onValueChange = { if (panelEnabled && panelEditor.enabled) { panelEditor.setEnabled(it) } }),
-                                            verticalAlignment = Alignment.CenterVertically) {
-                                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Text("自动委派", style = MaterialTheme.typography.bodyLarge)
-                                                Text("按职责自动分配任务", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                                    }
+                                    applicationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                                } else if (current != null && editor != null && panelEditor != null) {
+                                    key(panelEditor) {
+                                        CompositionLocalProvider(LocalConversationSubAgentEditor provides panelEditor) {
+                                            when (panelState) {
+                                                is SubAgentEditorState.Error -> {
+                                                    Text("本会话配置保存或读取失败：${panelState.reason}", color = MaterialTheme.colorScheme.error)
+                                                    ConversationAgentButton("重试本会话配置", enabled = latestOwnerMatches() && !latestTaskRunning, onClick = {
+                                                        if (latestOwnerMatches() && !latestTaskRunning && !latestChoosing) { editor.retry(); panelEditor.retry() }
+                                                    })
+                                                }
+                                                SubAgentEditorState.Loading -> Text("正在读取本会话子代理配置…")
+                                                else -> Unit
                                             }
-                                            ConversationAgentSwitch(checked = panelConfig?.enabled ?: current.enabled, enabled = panelEnabled)
-                                        }
-                                        HorizontalDivider(Modifier.padding(bottom = 8.dp), color = conversationAgentColors().line)
-                                        (panelConfig ?: current).profiles.forEach { profile ->
-                                            key(panelEditor, profile.id) {
-                                                SubAgentProfileRow(profile, providers, enabled = panelEnabled,
-                                                    draftAllowed = latestOwnerMatches() && !latestTaskRunning && !latestChoosing,
-                                                    draftRetry = { editor.retry(); panelEditor.retry() })
-                                                Spacer(Modifier.height(8.dp))
+                                            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)
+                                                .toggleable(value = panelConfig?.enabled ?: current.enabled, enabled = panelEnabled, role = Role.Switch,
+                                                    onValueChange = { if (panelEnabled && panelEditor.enabled) { panelEditor.setEnabled(it) } }),
+                                                verticalAlignment = Alignment.CenterVertically) {
+                                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Text("自动委派", style = MaterialTheme.typography.bodyLarge)
+                                                    Text("按职责自动分配任务", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                                                }
+                                                ConversationAgentSwitch(checked = panelConfig?.enabled ?: current.enabled, enabled = panelEnabled)
                                             }
-                                        }
-                                        addedDraft?.let { session ->
-                                            SubAgentProfileConfigDialog(session, panelEditor, providers, enabled = latestOwnerMatches() && !latestTaskRunning && !latestChoosing,
-                                                onDismiss = { session.dismiss(); if (addedDraft === session) addedDraft = null }, onRetry = { editor.retry(); panelEditor.retry() })
+                                            HorizontalDivider(Modifier.padding(bottom = 8.dp), color = conversationAgentColors().line)
+                                            (panelConfig ?: current).profiles.forEach { profile ->
+                                                key(panelEditor, profile.id) {
+                                                    SubAgentProfileRow(profile, providers, enabled = panelEnabled,
+                                                        draftAllowed = latestOwnerMatches() && !latestTaskRunning && !latestChoosing,
+                                                        draftRetry = { editor.retry(); panelEditor.retry() })
+                                                    Spacer(Modifier.height(8.dp))
+                                                }
+                                            }
+                                            addedDraft?.let { session ->
+                                                SubAgentProfileConfigDialog(session, panelEditor, providers, enabled = latestOwnerMatches() && !latestTaskRunning && !latestChoosing,
+                                                    onDismiss = { session.dismiss(); if (addedDraft === session) addedDraft = null }, onRetry = { editor.retry(); panelEditor.retry() })
+                                            }
                                         }
                                     }
                                 }

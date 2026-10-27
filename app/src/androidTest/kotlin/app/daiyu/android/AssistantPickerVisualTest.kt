@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import app.daiyu.android.assistants.AssistantProfile
 import app.daiyu.android.assistants.FileAssistantAssets
 import app.daiyu.android.data.model.AppearanceSettings
@@ -156,7 +157,12 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertTrue(dp(sheet.height) in 300f..520.5f)
             assertEquals(16f, dp(search.left - sheet.left), .6f)
             assertEquals(16f, dp(sheet.right - search.right), .6f)
-            assertEquals(84f, dp(search.top - sheet.top), .8f)
+            val titleHeight = frame.types.getValue(text(R.string.assistant_picker_title)).height
+            val headerInsets = with(Density(frame.density)) {
+                1.dp.roundToPx() + 10.dp.roundToPx() + 3.dp.roundToPx() +
+                    8.dp.roundToPx() + 6.dp.roundToPx()
+            }
+            assertEquals((headerInsets + titleHeight).toFloat(), search.top - sheet.top, .51f)
             assertEquals(44f, dp(search.height), dp(1f) + .01f)
             assertEquals(search.bottom, meta.top, .51f)
             assertEquals(meta.bottom, list.top, .51f)

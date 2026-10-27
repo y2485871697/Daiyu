@@ -6,7 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -138,7 +139,7 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
     val shape = RoundedCornerShape(8.dp)
     DisableSelection {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp).clip(shape)
+            Column(Modifier.padding(horizontal = 4.dp).width(IntrinsicSize.Max).clip(shape)
                 .background(colors.soft).border(1.dp, colors.line, shape).testTag("markdown-code-block")) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp).testTag("markdown-code-header"),
                     verticalAlignment = Alignment.CenterVertically) {

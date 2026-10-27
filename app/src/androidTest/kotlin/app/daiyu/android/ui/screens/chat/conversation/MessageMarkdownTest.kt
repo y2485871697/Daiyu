@@ -819,6 +819,60 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue(opened.isEmpty())
     }
 
+    fun testCodeWidthWrapsContentAndCapsAtHostAcrossUpdates() {
+        var code by mutableStateOf("x")
+        val density = activity.resources.displayMetrics.density
+        show {
+            CompositionLocalProvider(LocalDensity provides Density(density, fontScale = 1f)) {
+                Column(Modifier.width(300.dp).testTag("code-width-host")) {
+                    MarkdownCodeBlock(MarkdownBlock.Code(code, "sh"), Int.MAX_VALUE, true)
+                }
+            }
+        }
+        awaitNodes(hasTestTag("markdown-code-block"))
+        val host = ui.onNodeWithTag("code-width-host", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+        fun cardBounds() = ui.onNodeWithTag("markdown-code-block", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        fun horizontalRange() = viewport.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+        val maximumWidth = host.width - 8f * density
+        val short = cardBounds()
+        assertTrue("short code must not fill the host", short.width < maximumWidth - 1f)
+        assertEquals(host.center.x, short.center.x, 1f)
+        assertEquals(0f, horizontalRange().maxValue(), 1f)
+        val language = ui.onNodeWithText("sh", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val buttons = listOf("download", "expand", "copy").map {
+            ui.onNodeWithTag("markdown-code-$it", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        }
+        assertTrue("language remains visible", language.width > 0f && language.right <= buttons.first().left)
+        buttons.forEach { assertTrue(it.left >= short.left && it.right <= short.right + 1f) }
+        buttons.zipWithNext().forEach { (a, b) -> assertTrue(a.right <= b.left + 1f) }
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
+
+        mainThread { code = "m".repeat(24) }
+        ui.waitForIdle()
+        val medium = cardBounds()
+        assertTrue("width grows with content", medium.width > short.width + 1f)
+        assertTrue("medium code stays below the cap", medium.width < maximumWidth - 1f)
+        assertEquals(host.center.x, medium.center.x, 1f)
+        assertEquals(0f, horizontalRange().maxValue(), 1f)
+
+        mainThread { code = "wide ".repeat(100) }
+        ui.waitForIdle()
+        val wide = cardBounds()
+        assertEquals(maximumWidth, wide.width, 2f)
+        assertEquals(host.center.x, wide.center.x, 1f)
+        assertTrue("long line keeps a bounded scrolling viewport", horizontalRange().maxValue() > 0f)
+        viewport.performTouchInput { swipeLeft() }
+        ui.waitForIdle()
+        assertTrue(horizontalRange().value() > 0f)
+
+        mainThread { code = "x" }
+        ui.waitForIdle()
+        assertEquals("short content shrinks again", short.width, cardBounds().width, 1f)
+        assertEquals(0f, horizontalRange().maxValue(), 1f)
+        assertEquals(0f, horizontalRange().value(), 1f)
+    }
+
     fun testCodeHeaderOrderAndExpandedOutputHasNoCloseCross() {
         val code = "  echo 代鱼\n".repeat(45)
         show {

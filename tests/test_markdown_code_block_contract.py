@@ -16,9 +16,20 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         branch = self.markdown.split("is MarkdownBlock.Code ->", 1)[1].split("is MarkdownBlock.Quote ->", 1)[0]
         self.assertIn("MarkdownCodeBlock(block, visible, generationComplete)", branch)
         for token in ["Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center)",
-                      "Modifier.fillMaxWidth().padding(horizontal = 4.dp)", "RoundedCornerShape(8.dp)",
+                      "Modifier.padding(horizontal = 4.dp).width(IntrinsicSize.Max)", "RoundedCornerShape(8.dp)",
                       "textAlign = TextAlign.Left", 'testTag("markdown-code-block")', 'testTag("markdown-code-text")']:
             self.assertIn(token, self.code)
+
+    def test_card_wraps_content_while_children_share_its_bounded_width(self):
+        self.assertIn("import androidx.compose.foundation.layout.IntrinsicSize", self.code)
+        self.assertIn("import androidx.compose.foundation.layout.width", self.code)
+        card = self.code.split("Column(", 1)[1].split('testTag("markdown-code-block")', 1)[0]
+        self.assertIn(".width(IntrinsicSize.Max)", card)
+        self.assertNotIn("fillMaxWidth", card)
+        self.assertIn("Row(Modifier.fillMaxWidth()", self.code)
+        self.assertIn("Box(Modifier.fillMaxWidth().height(bodyHeight)", self.code)
+        self.assertNotIn("requiredWidth", self.code)
+        self.assertNotIn("unbounded = true", self.code)
 
     def test_header_actions_have_exact_order_and_no_extra_visible_labels(self):
         for tag in ("download", "expand", "unlock", "copy"):

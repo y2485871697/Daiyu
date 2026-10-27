@@ -23,7 +23,10 @@ internal fun toolBodyLayout(category: String, details: ToolCategoryDetailsUi): T
             ToolDisclosureUi("终端输出", it.filter { doc -> doc.text.isNotEmpty() }.joinToString("\n") { doc -> doc.text }, true)
         }
         val prose = rich.prose?.takeIf { output == null || rich.failed }
-        return ToolBodyLayout(emptyList(), emptyList(), commands + listOfNotNull(output), prose, false)
+        val targetFields = details.fields.filter {
+            it.label in setOf("执行环境", "Android 宿主权限")
+        }.distinct()
+        return ToolBodyLayout(targetFields, emptyList(), commands + listOfNotNull(output), prose, false)
     }
     val inputTitles = when (category) {
         "memory", "personal_search" -> setOf("检索条件")

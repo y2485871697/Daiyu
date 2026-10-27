@@ -58,6 +58,7 @@ class ControllerPlatformActionLocationTest {
         preview.cancel()
     }
     @Test fun askCancelIsStickyAndChangingSettingsCannotAskAgainOrIssueAnActionGrant() {
+        assertTrue(store.save(TaskSurfacePreference.ASK))
         val preview = preview()
         assertSame(TaskSurfaceDecision.AskRequired, freeze(preview))
         val location = checkNotNull(preview.location)
@@ -72,6 +73,7 @@ class ControllerPlatformActionLocationTest {
         preview.cancel()
     }
     @Test fun foregroundAnswerOnlySelectsLocationThenExactApprovalUsesOriginalCatalogAndEndsOnDrain() {
+        assertTrue(store.save(TaskSurfacePreference.ASK))
         val preview = preview()
         assertSame(TaskSurfaceDecision.AskRequired, freeze(preview))
         val location = checkNotNull(preview.location)

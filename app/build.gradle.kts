@@ -336,11 +336,6 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
                         "failedContinuationPreflightDeletesPreviouslyUploadedFile",
                         "protocolDeliveryFailureDeletesUploadedFileEvenWithPendingCalls",
                     ),
-                    "model.PreparedRequestBodyTest" to listOf(
-                        "largePayloadUsesBoundedReadsAndDiskNotABase64String",
-                        "sourceCorruptionMissingMarkersAndCancellationFailBeforeNetwork",
-                        "base64TailsCrossChunksAndUnicodeRemainExactAndRepeatable",
-                    ),
                     "model.ProviderFailureBoundaryTest" to listOf(
                         "postRedirectsAreNeverFollowedReadOrReposted",
                         "inputEstimateFailureKeepsIdentityAndNeverConnectsOrReposts",

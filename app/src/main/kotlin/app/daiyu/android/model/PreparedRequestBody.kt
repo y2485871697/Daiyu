@@ -6,8 +6,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.Closeable
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
+import java.nio.channels.Channels
+import java.nio.channels.FileChannel
+import java.nio.file.StandardOpenOption
 import java.io.FilterOutputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -48,19 +49,21 @@ internal class StreamingMedia(val bytes: Long, val sha256: String, val open: () 
 }
 
 /** The exact bounded POST is frozen on disk before connection/approval, not as a giant heap array.
- * Its pathname is unlinked immediately; close releases the only retained descriptor. */
+ * Android/POSIX unlinks its pathname before writing; Windows uses delete-on-close.
+ * close releases the only retained descriptor. */
 internal class PreparedRequestBody private constructor(
-    private val source: FileInputStream,
+    private val source: FileChannel,
     val size: Int,
     val sha256: String,
 ) : Closeable {
     @Synchronized fun writeTo(output: OutputStream, cancelled: () -> Boolean) {
-        source.channel.position(0)
+        source.position(0)
+        val input = Channels.newInputStream(source)
         val buffer = ByteArray(64 * 1024)
         var copied = 0
         while (true) {
             checkRequestCancellation(cancelled)
-            val count = source.read(buffer)
+            val count = input.read(buffer)
             if (count < 0) break
             output.write(buffer, 0, count); copied += count
         }
@@ -76,11 +79,15 @@ internal class PreparedRequestBody private constructor(
             require(tokens.size == media.size)
             val used = mutableSetOf<String>()
             val path = File.createTempFile("daiyu-request-", ".pending")
-            var retained: FileInputStream? = null
+            var retained: FileChannel? = null
+            var transferred = false
             try {
-                FileOutputStream(path).use { destination ->
-                    val input = FileInputStream(path).also { retained = it }
-                    check(path.delete()) { "Cannot unlink private request spool" }
+                val input = FileChannel.open(path.toPath(), StandardOpenOption.READ,
+                    StandardOpenOption.WRITE, StandardOpenOption.DELETE_ON_CLOSE).also { retained = it }
+                Channels.newOutputStream(input).let { destination ->
+                    if (File.separatorChar != '\\') {
+                        check(!path.exists() || path.delete()) { "Cannot unlink private request spool" }
+                    }
                     val digest = MessageDigest.getInstance("SHA-256")
                     var count = 0L
                     val output = object : OutputStream() {
@@ -143,13 +150,15 @@ internal class PreparedRequestBody private constructor(
                     }
                     value(request)
                     require(used == tokens.keys) { "Frozen attachments were removed from the request" }
-                    destination.fd.sync()
+                    input.force(true)
                     checkRequestCancellation(cancelled)
-                    return PreparedRequestBody(input, count.toInt(), requestHex(digest.digest())).also { retained = null }
+                    return PreparedRequestBody(input, count.toInt(), requestHex(digest.digest())).also { transferred = true }
                 }
             } finally {
-                retained?.close()
-                if (path.exists()) path.delete()
+                if (!transferred) {
+                    try { retained?.close() }
+                    finally { if (path.exists()) path.delete() }
+                }
             }
         }
     }

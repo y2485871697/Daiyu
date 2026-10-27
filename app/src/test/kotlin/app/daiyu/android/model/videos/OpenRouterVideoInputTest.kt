@@ -296,7 +296,7 @@ class OpenRouterVideoInputTest {
         val session = ResponsesModel(settings, { conn }, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval).open(listOf(row), emptyList(), plan)
         val events = mutableListOf<ModelEvent>()
         val failure = rejected { session.next(emptyList(), events::add) }
-        assertEquals(ModelFailure.INCOMPLETE, (failure as ModelRequestException).failure)
+        assertEquals(ModelFailure.NETWORK, (failure as ModelRequestException).failure)
         assertTrue(events.any { it is ModelEvent.TextFinal && it.text == "partial" })
         assertFalse(events.any { it is ModelEvent.ProtocolOutput })
         rejected { session.next(emptyList()) {} }

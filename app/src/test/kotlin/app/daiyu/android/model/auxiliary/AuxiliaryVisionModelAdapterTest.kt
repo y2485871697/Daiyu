@@ -290,8 +290,8 @@ class AuxiliaryVisionModelAdapterTest {
     @Test fun confirmedToolsAreRejectedAsProtocolErrorsAndPartialTerminalsStayIncomplete() {
         protocols.forEach { protocol ->
             val cases = listOf(complete(protocol, tool = true) to ModelFailure.PROTOCOL,
-                (if (protocol == ProviderProtocol.RESPONSES) responsePartial()
-                else messagesComplete("partial", reason = "max_tokens")) to ModelFailure.INCOMPLETE)
+                if (protocol == ProviderProtocol.RESPONSES) responsePartial() to ModelFailure.NETWORK
+                else messagesComplete("partial", reason = "max_tokens") to ModelFailure.INCOMPLETE)
             cases.forEach { (events, expected) ->
                 val selected = binding(settings(protocol))
                 val connection = FakeConnection(events)

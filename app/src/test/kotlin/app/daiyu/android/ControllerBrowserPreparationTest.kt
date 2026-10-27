@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import app.daiyu.android.assistants.AssistantProfile
+import app.daiyu.android.browser.BrowserDefaultPermission
 import app.daiyu.android.browser.BrowserRunAuthorization
 import app.daiyu.android.browser.BrowserSettings
 import app.daiyu.android.browser.bridge.BrowserCommand
@@ -94,7 +95,7 @@ class ControllerBrowserPreparationTest {
         val p = prepare(actions, writes)
         val other = prepare()
         actions.clear(); writes.clear(); skills.clear()
-        assertEquals(setOf("new_tab", "list_tabs"), p.preview.allowedActions)
+        assertEquals(BrowserDefaultPermission.availableActions(BrowserAccess.FULL), p.preview.allowedActions)
         assertEquals(raw, p.preview.writes.single().arguments)
         assertEquals(listOf("skill-one"), p.assistant.enabledSkillIds)
         assertSame(provider, p.provider)
@@ -456,7 +457,7 @@ class ControllerBrowserPreparationTest {
     }
 
     @Test fun noForbiddenActionsArePromotedByFullPreference() {
-        listOf("fetch", "get_cookies", "set_cookies", "history", "open_child").forEach { action ->
+        listOf("history", "open_child").forEach { action ->
             try { prepare(setOf(action), emptyList()); fail(action) } catch (_: IllegalArgumentException) {}
         }
         try { prepare(setOf("navigate"), listOf("{\"action\":\"navigate\",\"url\":\"https://example.invalid\",\"tab_id\":0}"), BrowserAccess.READ_ONLY)

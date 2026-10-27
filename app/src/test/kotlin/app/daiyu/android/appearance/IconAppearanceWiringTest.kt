@@ -51,7 +51,7 @@ class IconAppearanceWiringTest {
         assertEquals(app.attr("icon"), app.attr("roundIcon"))
     }
 
-    @Test fun targetRemainsEnabledAndDocumentGrantIntentHasOnlyJsonAndZipWithoutDuplicateLauncher() {
+    @Test fun targetRemainsEnabledAndDocumentsUseDedicatedReceiverWithoutDuplicateLauncher() {
         val app = application()
         val target = app.elements("activity").single { it.attr("name") in listOf(".MainActivity", "app.daiyu.android.MainActivity") }
         assertNotEquals("false", target.attr("enabled"))
@@ -60,14 +60,28 @@ class IconAppearanceWiringTest {
         assertTrue(app.elements("activity").none { activity ->
             activity.elements("category").any { it.attr("name") == "android.intent.category.LAUNCHER" }
         })
-        val filter = target.elements("intent-filter").single()
-        assertEquals(listOf("android.intent.action.VIEW"), filter.elements("action").map { it.attr("name") })
-        assertEquals(listOf("android.intent.category.DEFAULT"), filter.elements("category").map { it.attr("name") })
-        val data = filter.elements("data")
-        assertEquals(2, data.size)
+        assertTrue(target.elements("intent-filter").isEmpty())
+        val receiver = app.elements("activity").single {
+            it.attr("name") in listOf(".attachments.OpenAttachmentActivity",
+                "app.daiyu.android.attachments.OpenAttachmentActivity")
+        }
+        assertNotEquals("false", receiver.attr("enabled"))
+        assertEquals("true", receiver.attr("exported"))
+        val filters = receiver.elements("intent-filter")
+        assertEquals(3, filters.size)
         assertEquals(
-            setOf("content" to "application/json", "content" to "application/zip"),
-            data.map { it.attr("scheme") to it.attr("mimeType") }.toSet(),
+            setOf(
+                Triple(setOf("android.intent.action.VIEW"), "content", "*/*"),
+                Triple(setOf("android.intent.action.VIEW"), "content", ""),
+                Triple(setOf("android.intent.action.SEND", "android.intent.action.SEND_MULTIPLE"), "", "*/*"),
+            ),
+            filters.map { filter ->
+                assertEquals(listOf("android.intent.category.DEFAULT"),
+                    filter.elements("category").map { it.attr("name") })
+                val data = filter.elements("data").single()
+                Triple(filter.elements("action").map { it.attr("name") }.toSet(),
+                    data.attr("scheme"), data.attr("mimeType"))
+            }.toSet(),
         )
         assertEquals("false", app.attr("allowBackup"))
         assertEquals("false", app.attr("usesCleartextTraffic"))

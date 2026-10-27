@@ -74,4 +74,47 @@ class PreparedRequestBodyTest {
             assertEquals(body.size.toLong(), count)
         }
     }
+    private fun pendingSpools(): Set<String> = java.io.File(System.getProperty("java.io.tmpdir"))
+        .listFiles().orEmpty().filter { it.name.startsWith("daiyu-request-") && it.name.endsWith(".pending") }
+        .map { it.absolutePath }.toSet()
+
+    @Test fun spoolIsAnonymousBeforeReadingAndRemovedAfterCloseOrEncodingFailure() {
+        val before = pendingSpools()
+        val bytes = byteArrayOf(1, 2, 3)
+        val source = StreamingMedia(bytes.size.toLong(), hash(bytes)) {
+            if (java.io.File.separatorChar != '\\') assertEquals(before, pendingSpools())
+            bytes.inputStream()
+        }
+        val request = JSONObject().put("type", "input_image").put("image_url", "data:image/png;base64,${source.token}")
+        val body = PreparedRequestBody.prepare(request, listOf(source)) { false }
+        body.use {
+            repeat(2) { body.writeTo(ByteArrayOutputStream()) { false } }
+            assertThrows(java.io.IOException::class.java) {
+                body.writeTo(object : java.io.OutputStream() {
+                    override fun write(value: Int) { throw java.io.IOException("synthetic sink") }
+                    override fun write(buffer: ByteArray, offset: Int, length: Int) { throw java.io.IOException("synthetic sink") }
+                }) { false }
+            }
+        }
+        assertEquals(before, pendingSpools())
+        assertThrows(java.nio.channels.ClosedChannelException::class.java) {
+            body.writeTo(ByteArrayOutputStream()) { false }
+        }
+        val broken = StreamingMedia(3, hash(bytes)) { throw java.io.IOException("synthetic source") }
+        val brokenRequest = JSONObject().put("type", "input_image").put("image_url", "data:image/png;base64,${broken.token}")
+        assertThrows(java.io.IOException::class.java) { PreparedRequestBody.prepare(brokenRequest, listOf(broken)) { false } }
+        assertEquals(before, pendingSpools())
+    }
+
+    @Test fun cancellationAfterMediaOpenClosesAndRemovesSpool() {
+        val before = pendingSpools()
+        val bytes = byteArrayOf(1, 2, 3)
+        var cancel = false
+        val source = StreamingMedia(bytes.size.toLong(), hash(bytes)) { cancel = true; bytes.inputStream() }
+        val request = JSONObject().put("type", "input_image").put("image_url", "data:image/png;base64,${source.token}")
+        assertThrows(InterruptedException::class.java) { PreparedRequestBody.prepare(request, listOf(source)) { cancel } }
+        assertTrue(cancel)
+        assertEquals(before, pendingSpools())
+    }
+
 }

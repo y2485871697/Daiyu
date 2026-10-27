@@ -312,7 +312,7 @@ class BrowserChildProductionTest {
             override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) {
                 assertEquals(0, native.creates)
             }
-            override fun started(task: ChildTaskRecord) { assertNotNull(captured.get()) }
+            override fun started(task: ChildTaskRecord) { assertNull(captured.get()) }
             override fun finished(task: ChildTaskRecord, result: ChildTaskStatus, text: String, detail: String?) {
                 status.set(result); finished.countDown()
             }

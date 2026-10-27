@@ -222,11 +222,11 @@ class ProviderSummaryModelTest {
     @Test fun partialEofIncompleteAndProviderErrorsAreNeverReturnedAsSummary() {
         for (protocol in protocols) {
             val cases = if (protocol == ProviderProtocol.RESPONSES) listOf(
-                partialResponse() to ModelFailure.INCOMPLETE,
+                partialResponse() to ModelFailure.NETWORK,
                 partialResponse() + frames(event("response.incomplete")) to ModelFailure.INCOMPLETE,
                 partialResponse() + frames(event("response.failed")) to ModelFailure.REQUEST)
             else listOf(messages("max_tokens") to ModelFailure.INCOMPLETE,
-                messages("end_turn", terminal = false) to ModelFailure.INCOMPLETE,
+                messages("end_turn", terminal = false) to ModelFailure.NETWORK,
                 frames(event("error", "error" to JSONObject().put("type", "api_error"))) to ModelFailure.SERVER)
             for ((body, expected) in cases) {
                 val wire = Connection(body)

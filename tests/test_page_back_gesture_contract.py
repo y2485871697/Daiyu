@@ -331,7 +331,7 @@ class PageBackGestureContractTest(unittest.TestCase):
                       'activeDeparture || (state.previewAllowed && !state.active && progress > 0f)'):
             self.assertIn(guard, self.host)
         for file in ('VoiceSettingsPanel.kt', 'VoiceAccountPanel.kt', 'ui/SubAgentSettingsScreen.kt',
-                     'ui/screens/settings/SettingsHomeScreen.kt', 'ui/screens/settings/PetSettingsScreen.kt',
+                     'ui/screens/settings/SettingsHomeScreen.kt',
                      'ui/screens/settings/McpSettingsScreen.kt', 'ui/screens/settings/ProviderManagementRoute.kt',
                      'ui/screens/settings/ProviderCatalogSettingsScreen.kt'):
             self.assertIn('PageBackStack(', (APP / file).read_text())

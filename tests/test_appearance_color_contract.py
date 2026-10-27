@@ -121,10 +121,13 @@ class AppearanceColorContractTest(unittest.TestCase):
     def test_slider_and_switch_share_accent_but_keep_default_reference(self):
         palette = source('ui/app/DaiyuPalette.kt')
         self.assertIn('LocalAppearanceSettings.current.resolvedPrimaryAccent ?: Color(0xFF82728F)', palette)
-        for path in ('ui/screens/settings/AppearanceSettingsScreen.kt', 'ui/screens/settings/PetSettingsScreen.kt'):
-            text = source(path)
-            self.assertIn('thumbColor = DaiyuPalette.switchTrack', text)
-            self.assertIn('activeTrackColor = DaiyuPalette.switchTrack', text)
+        text = source('ui/screens/settings/AppearanceSettingsScreen.kt')
+        self.assertIn('thumbColor = DaiyuPalette.switchTrack', text)
+        self.assertIn('activeTrackColor = DaiyuPalette.switchTrack', text)
+        pet = source('ui/screens/settings/PetSettingsScreen.kt')
+        self.assertIn('checkedTrackColor = DaiyuPalette.switchTrack', pet)
+        self.assertIn('checkedBorderColor = DaiyuPalette.switchTrack', pet)
+        self.assertNotIn('Slider(', pet)
 
     def test_duplicate_scale_editor_and_icon_decoration_are_removed(self):
         screen = source('ui/screens/settings/AppearanceSettingsScreen.kt')

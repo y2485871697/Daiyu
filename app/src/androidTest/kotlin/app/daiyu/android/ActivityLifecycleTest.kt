@@ -163,6 +163,8 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         reveal("settings-row:鲸鱼女仆", "设置").performClick()
         awaitUniqueTag("pet-settings-view")
         node("pet-settings-view").assertIsDisplayed()
+        node("pet-work-reactions").assertDoesNotExist()
+        ui.onNodeWithTag("pet-options-chevron", useUnmergedTree = true).performTouchInput { click() }
         listOf("pet-enabled", "pet-work-reactions", "pet-global-visible", "pet-custom-model", "pet-model-configure")
             .forEach { node(it).assertIsDisplayed() }
         node("pet-overlay-permission").assertDoesNotExist()
@@ -191,6 +193,75 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
             assertFalse(singleton.closed)
         }
         assertEquals(0, modelCalls.get())
+    }
+
+    fun testPetSettingsDisclosureAndPowerSwitchStayIndependent() {
+        val current = start()
+        val petDirectory = File(directory, "pet-disclosure").apply { check(mkdir()) }
+        val petContext = object : ContextWrapper(testContext(fixture, "pet-disclosure-")) {
+            override fun getApplicationContext(): Context = this
+            override fun getFilesDir(): File = petDirectory
+        }
+        val backs = AtomicInteger()
+        var pets: PetApplicationHost? = null
+        try {
+            mainThread {
+                pets = PetApplicationHost(petContext, resolver = PetModelResolver { null }, onOpenSettings = {})
+                val isolated = checkNotNull(pets)
+                assertTrue(isolated.updateSettings(isolated.host.snapshot().pet.state.settings.copy(
+                    enabled = false, globalVisible = false)) is PetCommandResult.Applied)
+                val models = IndependentModelSettings(petContext)
+                val source = SettingsModelSource(petContext, ProviderRepository(petContext))
+                current.setContent {
+                    MiuixTheme {
+                        PetSettingsScreen(host = isolated.host, models = models, source = source,
+                            assistants = emptyList(), pets = isolated, onBack = { backs.incrementAndGet() },
+                            onOverlayAllowedChange = isolated::setOverlayAllowed,
+                            onOpenOverlayPermission = { error("Unexpected overlay permission request") })
+                    }
+                }
+            }
+            val isolated = checkNotNull(pets)
+            awaitUniqueTag("pet-settings-view")
+            val optionTags = listOf("pet-work-reactions", "pet-global-visible", "pet-custom-model", "pet-model-configure")
+            val before = isolated.host.snapshot().pet.state.settings
+            node("pet-enabled").assertIsOff()
+            optionTags.forEach { node(it).assertDoesNotExist() }
+            ui.onNodeWithTag("pet-options-chevron", useUnmergedTree = true).performTouchInput { click() }
+            optionTags.forEach { node(it).assertIsDisplayed() }
+            assertEquals(before, isolated.host.snapshot().pet.state.settings)
+            ui.onNodeWithText("更多设置").assertDoesNotExist()
+            node("prompt-choice:1").assertDoesNotExist()
+            node("settings-model-picker").assertDoesNotExist()
+            node("pet-enabled").performTouchInput { click() }
+            node("pet-enabled").assertIsOn()
+            optionTags.forEach { node(it).assertIsDisplayed() }
+            assertEquals(before.copy(enabled = true), isolated.host.snapshot().pet.state.settings)
+            ui.onNodeWithTag("pet-options-chevron", useUnmergedTree = true).performTouchInput { click() }
+            optionTags.forEach { node(it).assertDoesNotExist() }
+            node("pet-enabled").assertIsOn()
+            node("pet-enabled").performTouchInput { click() }
+            node("pet-enabled").assertIsOff()
+            optionTags.forEach { node(it).assertDoesNotExist() }
+            node("pet-options-toggle").performTouchInput { click(androidx.compose.ui.geometry.Offset(12f, centerY)) }
+            optionTags.forEach { node(it).assertIsDisplayed() }
+            assertEquals(before, isolated.host.snapshot().pet.state.settings)
+            assertEquals(0, backs.get())
+            assertEquals(0, modelCalls.get())
+        } finally {
+            try { mainThread { current.setContent {} } }
+            finally {
+                try { mainThread { pets?.close() } }
+                finally {
+                    try {
+                        listOf("daiyu_pet_v1", "independent-model-bindings", "independent-pet-model",
+                            "independent-vision-model", "model-settings", "settings-model-selection").forEach { name ->
+                            check(petContext.getSharedPreferences(name, 0).edit().clear().commit())
+                        }
+                    } finally { petDirectory.deleteRecursively() }
+                }
+            }
+        }
     }
 
     fun testPetRuntimeFailureDoesNotAppearOnSettingsPage() {
@@ -233,6 +304,8 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
             }
             awaitUniqueTag("pet-settings-view")
             node("pet-settings-view").assertIsDisplayed()
+            ui.onNodeWithText(failure).assertDoesNotExist()
+            ui.onNodeWithTag("pet-options-chevron", useUnmergedTree = true).performTouchInput { click() }
             ui.onNodeWithText(failure).assertDoesNotExist()
             listOf("pet-enabled", "pet-work-reactions", "pet-global-visible", "pet-custom-model", "pet-model-configure")
                 .forEach { node(it).assertIsDisplayed() }

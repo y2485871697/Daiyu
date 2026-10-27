@@ -15,7 +15,8 @@ class PetErrorLoggingContract(unittest.TestCase):
         screen = source('ui/screens/settings/PetSettingsScreen.kt')
         for text in ('snapshot.pet.error', 'model.problem', 'pet-model-problem', 'pet-error'):
             self.assertNotIn(text, screen)
-        for tag in ('pet-enabled', 'pet-work-reactions', 'pet-global-visible', 'pet-custom-model', 'pet-model-configure'):
+        self.assertIn('Modifier.testTag("pet-enabled")', screen)
+        for tag in ('pet-work-reactions', 'pet-global-visible', 'pet-custom-model', 'pet-model-configure'):
             self.assertIn('tag = "' + tag + '"', screen)
         self.assertIn('onCheckedChange = model.onEnabledChange', screen)
         self.assertIn('model.onChoose else null', screen)

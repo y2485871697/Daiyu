@@ -3,6 +3,8 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MonotonicFrameClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -22,10 +24,15 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
     private var speaking by mutableStateOf(false)
     private var activeMessage by mutableStateOf<String?>(null)
     private val clicks = mutableListOf<String>()
+    private val animationContext = java.util.concurrent.atomic.AtomicReference("not-started")
 
     private fun mountBar() {
         mainThread {
             activity.setContent {
+                LaunchedEffect(speaking) {
+                    animationContext.set("scale=${coroutineContext[MotionDurationScale]?.scaleFactor} " +
+                        "frameClock=${coroutineContext[MonotonicFrameClock]?.javaClass?.name}")
+                }
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Box(Modifier.width(320.dp)) {
                         MessageActionBar("answer", ChatScreenActions(onSpeak = {
@@ -60,6 +67,10 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
     fun testOnlyMatchingMessageUsesAnimatedSpeakerAndClearsWithProjection() {
         mainThread {
             activity.setContent {
+                LaunchedEffect(speaking) {
+                    animationContext.set("scale=${coroutineContext[MotionDurationScale]?.scaleFactor} " +
+                        "frameClock=${coroutineContext[MonotonicFrameClock]?.javaClass?.name}")
+                }
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     DaiyuChatScreen(ChatScreenState("朗读回归", turns = listOf(
                         ChatTurnUi.Assistant("first", finalText = "第一条回答"),
@@ -90,11 +101,13 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
             val button = ui.onNodeWithContentDescription("停止朗读")
             val beforeBounds = button.fetchSemanticsNode().boundsInRoot
             val waves = ui.onNodeWithTag("message-speech-playing", useUnmergedTree = true)
-            val first = captureScreenNode(waves).toPixelMap()
+            awaitVisualIdle()
+            val first = waves.captureToImage().toPixelMap()
             val firstTime = ui.mainClock.currentTime
             // Half a cycle crosses an alpha threshold regardless of the starting phase.
             ui.mainClock.advanceTimeBy(400)
-            val second = captureScreenNode(waves).toPixelMap()
+            awaitVisualIdle()
+            val second = waves.captureToImage().toPixelMap()
             val secondTime = ui.mainClock.currentTime
             assertEquals(first.width, second.width)
             assertEquals(first.height, second.height)
@@ -108,8 +121,10 @@ class MessageSpeechButtonTest : WiredActivityTestCase(object : MotionDurationSca
                 if (first[x, y] != second[x, y]) changed++
             }
             val diagnostic = "clock=$firstTime->$secondTime size=${first.width}x${first.height} " +
-                "colors=${firstColors.size}->${secondColors.size} changed=$changed bounds=$beforeBounds"
+                "colors=${firstColors.size}->${secondColors.size} changed=$changed bounds=$beforeBounds " +
+                animationContext.get()
             android.util.Log.i("DaiyuSpeechAnimation", diagnostic)
+            assertTrue("Animation fixture must retain scale=1: $diagnostic", animationContext.get().startsWith("scale=1.0 "))
             assertTrue("Speaker wave pixels must change: $diagnostic", changed > 0)
         } finally {
             mainThread { speaking = false }

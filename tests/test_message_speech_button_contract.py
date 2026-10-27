@@ -79,8 +79,12 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
     def test_animation_pixel_regression_waits_for_real_draw_before_each_capture(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageSpeechButtonTest.kt').read_text()
         body = test.split('fun testSpeakerWavesAnimateInsideUnchangedHitTarget()', 1)[1]
-        self.assertEqual(2, body.count('captureScreenNode(waves).toPixelMap()'))
-        self.assertNotIn('captureToImage()', body)
+        self.assertEqual(2, body.count('waves.captureToImage().toPixelMap()'))
+        self.assertEqual(2, body.count('awaitVisualIdle()'))
+        self.assertNotIn('captureScreenNode(', body)
+        self.assertIn('coroutineContext[MotionDurationScale]?.scaleFactor', test)
+        self.assertIn('coroutineContext[MonotonicFrameClock]?.javaClass?.name', test)
+        self.assertIn('animationContext.get().startsWith("scale=1.0 ")', body)
         self.assertIn('ui.mainClock.advanceTimeBy(400)', body)
         self.assertIn('assertEquals(beforeBounds, button.fetchSemanticsNode().boundsInRoot)', body)
         self.assertIn('changed > 0', body)

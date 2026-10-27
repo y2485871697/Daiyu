@@ -1639,6 +1639,8 @@ class MainActivity : ComponentActivity() {
     private sealed interface Prompt { val backup: Boolean }
     private class InputPrompt(val title: String, val initial: String, val hint: String,
         val confirm: String, val action: (String) -> Unit, override val backup: Boolean = false) : Prompt
+    private class FolderPrompt(val folders: List<app.daiyu.android.ui.model.ConversationFolderUi>,
+        val initialFolderId: String?, val action: (String?) -> Unit, override val backup: Boolean = false) : Prompt
     private class ChoicePrompt(val title: String, val options: List<String>, val action: (Int) -> Unit,
         override val backup: Boolean = false) : Prompt
     private class ConfirmPrompt(val title: String, val message: String, val confirm: String,
@@ -5019,6 +5021,9 @@ class MainActivity : ComponentActivity() {
                 preview = retainedPage == "chat",
                 onConfirm = { value -> confirmInputPrompt(current, value) },
                 onDismiss = { if (valid()) { if (current === mcpInput) cancelMcpEditor() else prompt = null } })
+            is FolderPrompt -> ConversationFolderPicker(current.folders, current.initialFolderId,
+                onConfirm = { folderId -> if (valid()) { prompt = null; current.action(folderId) } },
+                onDismiss = { if (valid()) prompt = null })
             is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options, preview = retainedPage == "chat",
                 onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
             is ConfirmPrompt -> DaiyuConfirmDialog(current.title, current.message, current.confirm, current.destructive,
@@ -5782,13 +5787,22 @@ class MainActivity : ComponentActivity() {
     private fun editRetainedConversation(item: ConversationSummaryUi, folder: Boolean) { guard { editConversation(item.id, folder) } }
     private fun editConversation(id: String, folder: Boolean) {
         val current = retainedConversation(id)
-        prompt = InputPrompt(if (folder) "移动到文件夹" else "重命名", if (folder) current.folder else current.title,
-            if (folder) "文件夹" else "名称", "保存", { value -> guard {
+        if (folder) {
+            prompt = FolderPrompt(retainedData.folders(), current.folder.takeIf { it.isNotEmpty() }, { folderId -> guard {
+                val destination = if (folderId == null) "" else retainedData.folders().single { it.id == folderId }.name
                 val latest = retainedConversation(id)
-                if (folder) controller.database.organize(latest.id, value, latest.pinned) else controller.database.rename(latest.id, value)
+                controller.database.organize(latest.id, destination, latest.pinned)
                 if (selected?.id == latest.id) selected = retainedConversation(id)
                 updatePane(); refresh()
             } })
+        } else {
+            prompt = InputPrompt("重命名", current.title, "名称", "保存", { value -> guard {
+                val latest = retainedConversation(id)
+                controller.database.rename(latest.id, value)
+                if (selected?.id == latest.id) selected = retainedConversation(id)
+                updatePane(); refresh()
+            } })
+        }
     }
     private fun searchConversations() = openSearch("conversation-search")
 

@@ -82,11 +82,19 @@ internal class MessageActionStore(private val database: ConversationDatabase,
 
     fun validate(target: MessageActionTarget) { transactions.run { authorize(it, target) } }
 
-    fun originalUserText(target: MessageActionTarget): String = transactions.run { db ->
+    data class UserEdit(val text: String, val videos: List<app.daiyu.android.media.video.MessageVideoReference>)
+
+    fun originalUserText(target: MessageActionTarget): String = originalUserEdit(target).text
+
+    fun originalUserEdit(target: MessageActionTarget): UserEdit = transactions.run { db ->
         val history = authorize(db, target)
         val selected = displayed(history, target)
         require(selected.role == Message.USER_ROLE) { "只能回填原用户文本" }
-        selected.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
+        val owner = history.single { it.id == target.ownerId && it.runId == target.runId }
+        val videos = SQLiteMessageVideoStore.readVerified(db, owner).filter {
+            it.owner.conversationId == target.conversationId.value && it.owner.messageId == target.messageId.value
+        }.flatMap { it.references }
+        UserEdit(selected.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }, videos)
     }
 
     fun branch(target: MessageActionTarget): Conversation {

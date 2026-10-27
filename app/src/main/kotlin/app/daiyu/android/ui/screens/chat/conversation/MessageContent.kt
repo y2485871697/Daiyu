@@ -24,6 +24,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.Role
 import top.yukonga.miuix.kmp.window.WindowDialog
 import app.daiyu.android.ui.haptics.miuix.TextButton
@@ -73,7 +76,7 @@ internal fun MessageContent(
 }
 
 @Composable
-internal fun MessageImage(image: MessageImageUi, number: Int, loader: MessageImageLoader?) = key(image, loader) {
+internal fun MessageImage(image: MessageImageUi, number: Int, loader: MessageImageLoader?, compact: Boolean = false) = key(image, loader) {
     var expanded by remember(image, loader) { mutableStateOf(false) }
     val maxEdge = 1024
     val result by produceState<MessageImageLoadResult>(
@@ -101,15 +104,20 @@ internal fun MessageImage(image: MessageImageUi, number: Int, loader: MessageIma
             }
         }
     }
-    Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(12.dp))
+    Box(Modifier.fillMaxWidth().height(if (compact) 72.dp else 180.dp).clip(RoundedCornerShape(12.dp))
         .background(MiuixTheme.colorScheme.surfaceVariant).testTag("message-image:$number")
         .clickable(enabled = ready != null, role = Role.Button, onClickLabel = "放大图片") { expanded = true },
         contentAlignment = Alignment.Center) {
         when (val current = result) {
-            MessageImageLoadResult.Loading -> Text("图片加载中…", modifier = Modifier.padding(12.dp),
+            MessageImageLoadResult.Loading -> Text(if (compact) "…" else "图片加载中…",
+                modifier = Modifier.padding(if (compact) 4.dp else 12.dp).semantics { contentDescription = "图片加载中" },
+                style = if (compact) MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 16.sp) else MiuixTheme.textStyles.body1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            MessageImageLoadResult.Unavailable -> Text("图片不可用", modifier = Modifier.padding(12.dp)
-                .testTag("message-image-unavailable:$number"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            MessageImageLoadResult.Unavailable -> Text(if (compact) "!" else "图片不可用",
+                modifier = Modifier.padding(if (compact) 4.dp else 12.dp).semantics { contentDescription = "图片不可用" }
+                    .testTag("message-image-unavailable:$number"),
+                style = if (compact) MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 16.sp) else MiuixTheme.textStyles.body1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             is MessageImageLoadResult.Ready -> Image(current.bitmap, contentDescription = "消息图片 $number",
                 modifier = Modifier.fillMaxWidth().height(180.dp), contentScale = ContentScale.Fit)
         }

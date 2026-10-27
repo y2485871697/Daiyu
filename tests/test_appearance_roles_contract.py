@@ -28,7 +28,7 @@ class AppearanceRolesContractTest(unittest.TestCase):
         self.assertIn('fenced[preferences] ?: read()', store)
         self.assertIn('fenced.getOrPut(preferences) { read() }', store)
 
-    def test_custom_bubbles_are_user_only_and_inline_editor_has_its_own_readable_surface(self):
+    def test_custom_bubbles_are_user_only_and_edit_cancel_uses_secondary_role(self):
         chat = source('ui/screens/chat/conversation/ChatMessageList.kt')
         self.assertIn('color = conversationColors().bubbleText', chat)
         assistant = chat.split('internal fun AssistantTurn(', 1)[1].split('internal fun UserMessageText', 1)[0]
@@ -37,10 +37,11 @@ class AppearanceRolesContractTest(unittest.TestCase):
         resolve = source('ui/app/AppearanceColors.kt').split('internal fun resolveUserBubbleColors(', 1)[1]
         self.assertIn('UserBubbleMode.OFF -> UserBubbleColors(Color.Transparent, text)', resolve)
         self.assertIn('UserBubbleColors(fill, colorContentColor(fill))', resolve)
-        inline = source('ui/screens/chat/conversation/InlineMessageEdit.kt')
-        self.assertIn('background(MiuixTheme.colorScheme.surface', inline)
-        self.assertIn('readableAccent(MaterialTheme.colorScheme.primary, LocalAppearanceDark.current, surface)', inline)
-        self.assertIn('MaterialTheme.colorScheme.copy(primary = accent)', inline)
+        editing = source('ui/screens/chat/conversation/ComposerMessageEdit.kt')
+        self.assertIn('resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)', editing)
+        self.assertIn('background(colors.secondaryContainer)', editing)
+        self.assertIn('color = colors.onSecondary', editing)
+        self.assertNotIn('InlineMessageEdit(actions)', chat)
 
     def test_draft_preview_uses_production_role_resolvers_without_saving(self):
         sheet = source('ui/screens/settings/AppearanceColorSheet.kt')

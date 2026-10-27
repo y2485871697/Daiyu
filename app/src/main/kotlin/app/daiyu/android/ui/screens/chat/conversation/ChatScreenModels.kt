@@ -143,6 +143,7 @@ data class ComposerUi(
     val supplementPending: Boolean = false,
     /** Ready owned images only; never file/folder/path strings or video approval. Idle only. */
     val imageSendAvailable: Boolean = false,
+    val editingMessageCanSubmit: Boolean = false,
     /** A fenced/importing image draft must not silently fall through to text send. Editing is separate. */
     val imageSendBlocked: Boolean = false,
     val videoSendAvailable: Boolean = false,
@@ -159,6 +160,6 @@ data class ComposerUi(
 )
 
 internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
-    ComposerPhase.IDLE -> text.isNotBlank() || imageSendAvailable || videoSendAvailable
+    ComposerPhase.IDLE -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable
     ComposerPhase.PAUSED, ComposerPhase.RUNNING -> text.isNotBlank() && supplementAvailable
 }

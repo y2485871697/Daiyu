@@ -599,6 +599,11 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         val service = MessageActionStore(f.db, ContextService(f.app, f.db),
             MessageImageAssetStore(File(f.app.filesDir, "branch-images")), MessageVideoBackupAssets(assets))
         val target = service.snapshot(owner.id).targets.getValue(user.id.value)
+        val edit = service.originalUserEdit(target)
+        assertEquals("original video", edit.text)
+        assertEquals(listOf(reference), edit.videos)
+        assertTrue(runCatching { service.prepareRegeneration(target, "edited video text") }.isFailure)
+        assertEquals(before, history(f, owner.id))
         // No backup-style replace is allowed: an ignored real sidecar insert must roll back
         // conversation/messages/witnesses together, while leaving source originals readable.
         f.db.writableDatabase.execSQL("CREATE TRIGGER ignore_branch_video BEFORE INSERT ON message_video_inputs " +

@@ -4370,7 +4370,9 @@ class ChatController internal constructor(private val application:Application,
                 if (action == MessageAction.BRANCH)
                     branchReasoning = reasoningPreference.snapshot(target.conversationId.value)
                 when (action) {
-                    MessageAction.EDIT_USER -> MessageActionResult.EditDraft(messageActionStore.originalUserText(target), target)
+                    MessageAction.EDIT_USER -> messageActionStore.originalUserEdit(target).let {
+                        MessageActionResult.EditDraft(it.text, target, it.videos)
+                    }
                     MessageAction.BRANCH -> {
                         val copy = messageActionStore.branch(target); changed = true
                         reasoningPreference.retainAccepted(copy.id.value, checkNotNull(branchReasoning))

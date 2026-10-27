@@ -325,9 +325,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     clickFeedback = false, onClick = {}, onLongClick = { showMenu = true })
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
-                if (actions.editingMessageKey == turn.listKey) {
-                    InlineMessageEdit(actions)
-                } else if (turn.content.isNotEmpty()) {
+                if (turn.content.isNotEmpty()) {
                     MessageContent(turn.content, actions, imageLoader, markdown = false,
                         textBody = { text, modifier -> UserMessageText(text.text, modifier) })
                 } else {

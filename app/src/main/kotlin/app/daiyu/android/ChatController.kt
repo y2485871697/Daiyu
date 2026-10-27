@@ -4822,13 +4822,18 @@ class ChatController internal constructor(private val application:Application,
             if (cleanupProblem) "$notice；暂存文件清理未完成" else notice
         })
     }
-    internal fun exportConversationBackup(uri:Uri,conversationId:ConversationId,resolver:android.content.ContentResolver=application.contentResolver) {
+    internal fun exportConversationBackup(uri:Uri,conversationId:ConversationId,resolver:android.content.ContentResolver=application.contentResolver) =
+        exportConversationsBackup(uri, listOf(conversationId), resolver)
+
+    internal fun exportConversationsBackup(uri:Uri,conversationIds:List<ConversationId>,resolver:android.content.ContentResolver=application.contentResolver) {
+        val targets = conversationIds.toList()
         dataTask(work={
-            neutralBackup.prepareExport(emptyMap(),conversationId).use { prepared ->
+            neutralBackup.prepareConversationsExport(targets).use { prepared ->
                 resolver.openOutputStream(uri,"wt")?.use { prepared.writeTo(it) }
                     ?: throw java.io.IOException("无法打开目标")
             }
-            "单会话中立备份已导出；不含全局草稿、配置、凭据或运行恢复状态，请妥善保管"
+            val scope = if (targets.distinct().size == 1) "单会话中立备份" else "${targets.distinct().size} 个会话"
+            "${scope}已导出；不含全局草稿、配置、凭据或运行恢复状态，请妥善保管"
         })
     }
     internal fun importUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {

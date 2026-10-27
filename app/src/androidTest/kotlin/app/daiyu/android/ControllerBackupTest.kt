@@ -339,6 +339,24 @@ class ControllerBackupTest:InstrumentationTestCase() {
         assertEquals(before,f.backup.exportPackage());assertEquals(0L,f.controller.dataRevision)
         assertEquals(0,f.calls.get());assertEquals(0,target.calls.get())
     }
+    fun testBatchConversationExportWritesOneImportablePackageAndRejectsAnyMissingBeforeTruncation() {
+        val f=fresh();seed(f);settings(f)
+        val first=f.db.conversations().single().id;val last=f.db.create().id;val other=f.db.create().id
+        f.db.rename(other,"UNSELECTED_CONVERSATION");f.db.draft(other,"UNSELECTED_DRAFT")
+        val before=f.backup.exportPackage();val output=File(f.directory,"batch.json")
+        assertTrue(task(f) {f.controller.exportConversationsBackup(Uri.fromFile(output),listOf(first,last))}.startsWith("2 个会话已导出"))
+        assertEquals(2,f.backup.preflight(output.readText()).conversations)
+        assertFalse(output.readText().contains("UNSELECTED_CONVERSATION"));assertFalse(output.readText().contains("UNSELECTED_DRAFT"))
+        assertFalse(output.readText().contains("SECRET_"));assertFalse(output.readText().contains("source-model"))
+        val target=fresh();target.backup.importPackage(output.readText())
+        assertEquals(setOf(first,last),target.db.conversations().map {it.id}.toSet())
+        for(ids in listOf(emptyList(),listOf(first,ConversationId("missing")))) {
+            output.writeText("existing target")
+            assertTrue(task(f) {f.controller.exportConversationsBackup(Uri.fromFile(output),ids)}.startsWith("导出失败"))
+            assertEquals("existing target",output.readText())
+        }
+        assertEquals(before,f.backup.exportPackage());assertEquals(0L,f.controller.dataRevision);assertEquals(0,f.calls.get())
+    }
     fun testSingleConversationExportRejectsMissingBeforeOpeningOutputAndHandlesWriteFailure() {
         val f=fresh();seed(f);val selected=f.db.conversations().single().id
         val deleted=f.db.create().id;f.db.delete(deleted);val before=f.backup.exportPackage()

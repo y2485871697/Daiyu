@@ -170,6 +170,8 @@ internal fun ConversationSidePaneScaffold(
     onMoveConversationToFolder: (ConversationSummaryUi) -> Unit = {},
     onConversationTogglePin: (ConversationSummaryUi) -> Unit = {},
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
+    onConversationsExport: (List<String>) -> Unit = {},
+    exportEnabled: Boolean = true,
     onNewConversation: () -> Unit,
     onSelectFolder: (String?) -> Unit = {},
     onCreateFolder: (String) -> Unit = {},
@@ -306,6 +308,8 @@ internal fun ConversationSidePaneScaffold(
                     onNewConversation = onNewConversation,
                     onConversationTogglePin = onConversationTogglePin,
                     onConversationExport = onConversationExport,
+                    onConversationsExport = onConversationsExport,
+                    exportEnabled = exportEnabled,
                     managing = managing,
                     onManagingChange = { managing = it },
                     onSelectFolder = onSelectFolder,
@@ -350,6 +354,8 @@ private fun ConversationPanePanel(
     onMoveConversationToFolder: (ConversationSummaryUi) -> Unit = {},
     onConversationTogglePin: (ConversationSummaryUi) -> Unit = {},
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
+    onConversationsExport: (List<String>) -> Unit = {},
+    exportEnabled: Boolean = true,
     onNewConversation: () -> Unit,
     onSelectFolder: (String?) -> Unit = {},
     onCreateFolder: (String) -> Unit = {},
@@ -451,9 +457,22 @@ private fun ConversationPanePanel(
                 onDeleteFolder = onDeleteFolder,
             )
             Spacer(modifier = Modifier.height(DrawerMetrics.AfterChips))
-            if (managing) Text("已选择 ${selectedIds.size} 项", color = colors.accent,
-                fontSize = 12.sp, lineHeight = 17.sp,
-                modifier = Modifier.testTag("drawer-selection-count").padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
+            if (managing) Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("已选择 ${selectedIds.size} 项", color = colors.accent,
+                    fontSize = 12.sp, lineHeight = 17.sp,
+                    modifier = Modifier.weight(1f).testTag("drawer-selection-count"))
+                app.daiyu.android.ui.haptics.miuix.TextButton(
+                    text = "导出所选",
+                    enabled = selectedIds.isNotEmpty() && exportEnabled,
+                    onClick = {
+                        onConversationsExport(state.historyConversations.filter { it.id in selectedIds }.map { it.id })
+                    },
+                    modifier = Modifier.testTag("drawer-export-selected"),
+                )
+            }
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)

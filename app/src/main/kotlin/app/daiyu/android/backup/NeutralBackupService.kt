@@ -104,13 +104,17 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     fun exportPackage(configuration: Map<String, Any?>? = null): String = exportPackage(configuration, null)
     /** A conversation package excludes global drafts/configuration and never follows parent provenance. */
     fun exportConversation(conversationId: ConversationId): String = exportPackage(emptyMap(), conversationId)
+    fun exportConversations(conversationIds: Collection<ConversationId>): String =
+        prepareConversationsExport(conversationIds).use { it.file.readText(Charsets.UTF_8) }
     private data class ExportCapture(val text: String, val tables: JSONObject, val config: JSONObject,
         val generation: JSONObject, val children: JSONObject, val runtime: JSONObject, val statistics: JSONObject,
         val static: List<app.daiyu.android.storage.StaticGenerationOutput>, val historical: Set<String>, val video: JSONObject?) {
         fun signature() = listOf(text, tables.toString(), config.toString(), generation.toString(), children.toString(),
             runtime.toString(), statistics.toString(), StaticGenerationCodec.encodeSection(static).toString(), historical.sorted().toString(), video?.toString())
     }
-    private fun captureExport(configuration: Map<String, Any?>?, conversationId: ConversationId?) = transactions.run { db ->
+    private fun captureExport(configuration: Map<String, Any?>?, conversationId: ConversationId?): ExportCapture =
+        transactions.run { db -> captureExport(db, configuration, conversationId) }
+    private fun captureExport(db: SQLiteDatabase, configuration: Map<String, Any?>?, conversationId: ConversationId?): ExportCapture {
         val text = videoIntegration?.exportText?.invoke(db, conversationId)
             ?: if (conversationId == null) store.exportBackup() else store.exportConversationBackup(conversationId)
         val history = store.preflightBackup(text)
@@ -130,12 +134,64 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val config = if (configuration == null) readConfig(db) else projectConfiguration(configuration).first
         validateConfig(config)
         val messages = objectOf(objectOf(text).getString("payload")).getJSONArray("messages")
-        ExportCapture(text, tables, config, BackupGenerationCodec.export(db, conversationId?.value),
+        return ExportCapture(text, tables, config, BackupGenerationCodec.export(db, conversationId?.value),
             BackupChildTaskCodec.export(db, conversationId?.value), BackupRuntimeUsageCodec.export(db, conversationId?.value),
             BackupStatisticsCodec.export(db, conversationId?.value),
             StaticGenerationCodec.read(db, conversationId?.value),
             BackupHistoryRows.history(db, "generation_output", conversationId?.value).keys.toSet(),
             if (videoIntegration == null) null else BackupVideoManifest.read(db, messages))
+    }
+    private fun captureSelectedExport(configuration: Map<String, Any?>?, conversationId: ConversationId?,
+        conversationIds: List<ConversationId>?): ExportCapture {
+        if (conversationIds == null) return captureExport(configuration, conversationId)
+        return transactions.run { db ->
+            var textBytes = 0L
+            val budget = BackupConversationMerge.Budget()
+            val captures = conversationIds.map { id ->
+                captureExport(db, emptyMap(), id).also {
+                    textBytes += Utf8Payload.byteCount(it.text, 16L * 1024 * 1024)
+                    require(textBytes <= 16L * 1024 * 1024) { "备份超过16MiB上限" }
+                    if (conversationIds.size > 1) {
+                        budget.include("tables", it.tables, MAX_PACKAGE)
+                        budget.include("generation", it.generation)
+                        budget.include("children", it.children)
+                        budget.include("runtime", it.runtime, sectionLimit = BackupHistoryRows.MAX_METADATA_BYTES.toLong())
+                        budget.include("statistics", it.statistics)
+                        budget.include("static", StaticGenerationCodec.encodeSection(it.static))
+                        it.video?.let { video -> budget.include("video", video,
+                            BackupVideoManifest.MAX_MANIFEST_BYTES.toLong(), BackupVideoManifest.MAX_MANIFEST_BYTES.toLong()) }
+                    }
+                }
+            }
+            if (captures.size == 1) captures.single() else ExportCapture(
+                BackupConversationMerge.text(captures.map { it.text }),
+                BackupConversationMerge.sections(captures.map { it.tables }), JSONObject(),
+                BackupConversationMerge.sections(captures.map { it.generation }),
+                BackupConversationMerge.sections(captures.map { it.children }),
+                BackupConversationMerge.sections(captures.map { it.runtime }),
+                BackupConversationMerge.sections(captures.map { it.statistics }),
+                captures.flatMap { it.static }, captures.flatMap { it.historical }.toSet(),
+                captures.mapNotNull { it.video }.takeIf { it.isNotEmpty() }?.let(BackupConversationMerge::sections),
+            )
+        }
+    }
+    private fun validateSelectedMetadata(capture: ExportCapture) {
+        store.preflightBackup(capture.text)
+        val data = objectOf(objectOf(capture.text).getString("payload"))
+        val messages = data.getJSONArray("messages")
+        val owners = uniqueIds(data.getJSONArray("conversations"), "id")
+        columnsFor(8).forEach { (table, columns) ->
+            val rows = capture.tables.getJSONArray(table)
+            require(rows.length() <= BackupHistoryRows.MAX_ROWS)
+            uniqueIds(rows, columns.first())
+        }
+        BackupUsageCodec.validate(capture.tables.getJSONArray("context_usage"), 8L, owners, messages)
+        BackupGenerationCodec.validate(capture.generation, messages)
+        BackupChildTaskCodec.validate(capture.children, messages)
+        BackupRuntimeUsageCodec.validate(capture.runtime, owners, messages)
+        BackupStatisticsCodec.validate(capture.statistics, owners)
+        StaticGenerationCodec.decodeSection(StaticGenerationCodec.encodeSection(capture.static), messages)
+        BackupVideoManifest.decode(capture.video, messages)
     }
     private fun exportPackage(configuration: Map<String, Any?>?, conversationId: ConversationId?): String =
         prepareExport(configuration, conversationId).use { it.file.readText(Charsets.UTF_8) }
@@ -152,6 +208,16 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         }
         override fun close() = spool.close()
     }
+    internal fun prepareConversationsExport(conversationIds: Collection<ConversationId>): PreparedExport {
+        val targets = conversationIds.distinct().sortedBy { it.value }
+        require(targets.isNotEmpty() && targets.size <= 1000) { "请选择1至1000个会话" }
+        val spool = BackupPackageSpool(blobs.backupStagingParent)
+        try { return prepareExport(emptyMap(), null, spool, {}, targets) }
+        catch (failure: Throwable) {
+            try { spool.close() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            throw failure
+        }
+    }
     internal fun prepareExport(configuration: Map<String, Any?>? = null, conversationId: ConversationId? = null,
         onStage: (String) -> Unit = {}): PreparedExport {
         val spool = BackupPackageSpool(blobs.backupStagingParent)
@@ -162,10 +228,11 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         }
     }
     private fun prepareExport(configuration: Map<String, Any?>?, conversationId: ConversationId?, spool: BackupPackageSpool,
-        onStage: (String) -> Unit): PreparedExport {
+        onStage: (String) -> Unit, conversationIds: List<ConversationId>? = null): PreparedExport {
         onStage("正在准备聊天记录")
         check(!transactions.database().inTransaction()) { "完整备份原件读取不能在外层SQL事务内" }
-        val capture = captureExport(configuration, conversationId)
+        val capture = captureSelectedExport(configuration, conversationId, conversationIds)
+        if (conversationIds != null && conversationIds.size > 1) validateSelectedMetadata(capture)
         // T1 is fully released before any original reader/fence is acquired.
         val text = capture.text; val tables = capture.tables; val config = capture.config
         if (capture.static.isNotEmpty()) requireNotNull(staticAssets) { "静态原件存储未接入；不能声明完整导出" }
@@ -237,7 +304,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         capture.static.forEach { include(it.source.sha256, staticGenerationOriginal(it)) }
         // Full scalar collection CAS, including insert/delete and inert runtime v4 observations.
         onStage("正在核对备份快照")
-        check(captureExport(configuration, conversationId).signature() == capture.signature()) { "备份来源已变化；未自动重试" }
+        check(captureSelectedExport(configuration, conversationId, conversationIds).signature() == capture.signature()) { "备份来源已变化；未自动重试" }
         val contents = JSONArray()
         originals.keys.sorted().forEach { hash -> contents.put(JSONObject().put("sha256", hash)
             .put("bytes", spool.original(hash).length())) }

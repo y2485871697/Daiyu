@@ -3,17 +3,21 @@ package app.daiyu.android.ui.actions
 import app.daiyu.android.domain.MessageId
 import app.daiyu.android.domain.runtime.SupplementAdmission
 
-internal class ConversationExportSelection(restoredConversationId: String? = null) {
-    var pendingConversationId: String? = restoredConversationId
+internal class ConversationExportSelection(restoredConversationIds: List<String>? = null) {
+    var pendingConversationIds: List<String>? = restoredConversationIds?.let(::snapshot)
         private set
 
-    fun begin(conversationId: String) {
-        require(conversationId.isNotBlank())
-        check(pendingConversationId == null)
-        pendingConversationId = conversationId
+    fun begin(conversationIds: List<String>) {
+        check(pendingConversationIds == null)
+        pendingConversationIds = snapshot(conversationIds)
     }
 
-    fun take(): String? = pendingConversationId.also { pendingConversationId = null }
+    fun take(): List<String>? = pendingConversationIds.also { pendingConversationIds = null }
+
+    private fun snapshot(ids: List<String>): List<String> {
+        require(ids.isNotEmpty() && ids.size <= 1000 && ids.all { it.isNotBlank() })
+        return ids.distinct()
+    }
 }
 
 internal data class SupplementEditor(

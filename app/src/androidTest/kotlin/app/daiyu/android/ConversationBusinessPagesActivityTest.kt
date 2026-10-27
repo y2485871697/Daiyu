@@ -8,7 +8,6 @@ import app.daiyu.android.domain.delegation.ChildTaskRecord
 import app.daiyu.android.domain.delegation.ChildTaskStatus
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.conversation.ChildTaskRecordsScreen
-import app.daiyu.android.ui.screens.conversation.ConversationExportScreen
 import java.util.concurrent.atomic.AtomicInteger
 
 class ConversationBusinessPagesActivityTest : WiredActivityTestCase() {
@@ -36,28 +35,6 @@ class ConversationBusinessPagesActivityTest : WiredActivityTestCase() {
         profileId = "profile-$status", prompt = "prompt-$status", status = status,
         text = if (status == ChildTaskStatus.COMPLETED) "completed-result" else "",
     )
-
-    fun testExportButtonRequiresAvailabilityAndNoPendingOrBusyOperation() {
-        var exports = 0
-        for ((available, pending, busy) in listOf(
-            Triple(false, false, false), Triple(true, true, false),
-            Triple(true, false, true), Triple(true, false, false),
-        )) {
-            mainThread {
-                activity.setContent {
-                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                        ConversationExportScreen("Frozen conversation", available, pending, busy,
-                            onExport = { exports++ }, onBack = {})
-                    }
-                }
-            }
-            val button = node("conversation-export-choose")
-            node("page:${text(R.string.business_export_title)}").scrollToDescendant(hasTestTag("conversation-export-choose"))
-            if (available && !pending && !busy) button.assertIsEnabled().performClick()
-            else button.assertIsNotEnabled()
-        }
-        ui.runOnIdle { assertEquals(1, exports) }
-    }
 
     fun testEmptyRecordsDoNotLookLikeReadFailure() {
         val reads = AtomicInteger()

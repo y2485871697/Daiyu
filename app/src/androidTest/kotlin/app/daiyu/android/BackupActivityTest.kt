@@ -267,6 +267,41 @@ class BackupActivityTest:ComposeActivityTestCase() {
         assertFalse(provider.file(output).exists())
         unchanged(before)
     }
+    fun testConversationPickerSuccessExportsFrozenMultipleIdsToOneFileAndOpensOnlyOnce() {
+        val first=controller.database.create();val last=controller.database.create();val other=controller.database.create()
+        controller.database.rename(other.id,"UNSELECTED_TITLE");controller.database.draft(other.id,"UNSELECTED_DRAFT")
+        start();main {activity!!.select(other)}
+        val before=controller.database.exportBackup()
+        val ids=mutableListOf(first.id.value,last.id.value)
+        val uri=Uri.parse("content://activity-backup/selected-conversations.json")
+        val calls=AtomicInteger()
+        val monitor=object:Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent:Intent):Instrumentation.ActivityResult? {
+                assertEquals(Intent.ACTION_CREATE_DOCUMENT,intent.action);assertEquals("application/json",intent.type)
+                assertTrue(intent.hasCategory(Intent.CATEGORY_OPENABLE));assertEquals(105,pending())
+                assertEquals("daiyu-conversations.json",intent.getStringExtra(Intent.EXTRA_TITLE))
+                calls.incrementAndGet();ids.clear();ids.add(other.id.value)
+                activity!!.select(first)
+                return Instrumentation.ActivityResult(Activity.RESULT_OK,Intent().setData(uri))
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            main {MainActivity::class.java.getDeclaredMethod("pickConversationExports",List::class.java)
+                .apply {isAccessible=true}.invoke(activity,ids)}
+            awaitState {!controller.dataBusy && observedDataNotice.get()?.startsWith("2 个会话已导出") == true}
+            assertEquals(1,calls.get());assertEquals(1,provider.opens.get());main {assertNull(pending())}
+            val text=provider.file(uri).readText()
+            val outer=org.json.JSONObject(org.json.JSONObject(text).getString("payload"))
+            val payload=org.json.JSONObject(org.json.JSONObject(outer.getString("text_backup")).getString("payload"))
+            val rows=payload.getJSONArray("conversations")
+            assertEquals(setOf(first.id.value,last.id.value),(0 until rows.length()).map {rows.getJSONObject(it).getString("id")}.toSet())
+            assertFalse(text.contains("UNSELECTED_TITLE"));assertFalse(text.contains("UNSELECTED_DRAFT"))
+            assertEquals(0,outer.getJSONObject("config").length());assertEquals("",payload.getString("draft"))
+            unchanged(before)
+        } finally {instrumentation.removeMonitor(monitor)}
+    }
+
     fun testCanceledLinuxPickerClearsTheCapturedOptionWithoutOpeningTarget() {
         start(); val before = controller.database.exportBackup()
         picker(103, Activity.RESULT_CANCELED, completeUri, includeLinux = true)
@@ -403,8 +438,8 @@ class BackupActivityTest:ComposeActivityTestCase() {
         instrumentation.addMonitor(monitor)
         try {
             main {
-                MainActivity::class.java.getDeclaredMethod("pickConversationExport",String::class.java)
-                    .apply {isAccessible=true}.invoke(activity,conversation.id.value)
+                MainActivity::class.java.getDeclaredMethod("pickConversationExports",List::class.java)
+                    .apply {isAccessible=true}.invoke(activity,listOf(conversation.id.value))
             }
             assertTrue(observed.await(5,TimeUnit.SECONDS));instrumentation.waitForIdleSync()
             main {assertNull(pending())}

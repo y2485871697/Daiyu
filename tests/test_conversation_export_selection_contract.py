@@ -1,0 +1,49 @@
+from pathlib import Path
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+APP = ROOT / 'app/src/main/kotlin/app/daiyu/android'
+
+class ConversationExportSelectionContract(unittest.TestCase):
+    def test_single_and_batch_use_the_same_direct_picker(self):
+        activity = (APP / 'MainActivity.kt').read_text()
+        self.assertIn('pickConversationExports(listOf(item.id))', activity)
+        self.assertIn('onConversationsExport = { ids -> backupGuard { pickConversationExports(ids) } }', activity)
+        self.assertNotIn('ConversationExportScreen', activity)
+        self.assertNotIn('retainedPage = "conversation-export"', activity)
+        self.assertIn('Intent.ACTION_CREATE_DOCUMENT', activity)
+        self.assertIn('"daiyu-conversations.json"', activity)
+
+    def test_selection_is_frozen_saved_restored_and_consumed_once(self):
+        activity = (APP / 'MainActivity.kt').read_text()
+        self.assertIn('getStringArrayList("pending-conversation-exports")', activity)
+        self.assertIn('putStringArrayList("pending-conversation-exports"', activity)
+        self.assertIn('val originalIds = conversationExport.take()', activity)
+        self.assertIn('controller.exportConversationsBackup(checkNotNull(uri), originalIds.map(::ConversationId))', activity)
+        selection = (APP / 'ui/actions/ConversationActionState.kt').read_text()
+        self.assertIn('ids.isNotEmpty()', selection)
+        self.assertIn('ids.distinct()', selection)
+        self.assertIn('pendingConversationIds = null', selection)
+
+    def test_management_button_uses_all_selected_history_not_visible_filter(self):
+        ui = (APP / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
+        self.assertIn('Modifier.testTag("drawer-export-selected")', ui)
+        self.assertIn('enabled = selectedIds.isNotEmpty() && exportEnabled', ui)
+        self.assertIn('state.historyConversations.filter { it.id in selectedIds }.map { it.id }', ui)
+
+    def test_one_prepared_package_and_output_stream_for_all_selected(self):
+        controller = (APP / 'ChatController.kt').read_text()
+        self.assertIn('internal fun exportConversationsBackup(', controller)
+        batch = controller.split('internal fun exportConversationsBackup(', 1)[1].split('internal fun importUserBackup(', 1)[0]
+        self.assertIn('val targets = conversationIds.toList()', batch)
+        self.assertIn('neutralBackup.prepareConversationsExport(targets)', batch)
+        self.assertEqual(1, batch.count('openOutputStream('))
+        self.assertLess(batch.index('prepareConversationsExport'), batch.index('openOutputStream'))
+        service = (APP / 'backup/NeutralBackupService.kt').read_text()
+        self.assertIn('targets.isNotEmpty() && targets.size <= 1000', service)
+        self.assertIn('captureExport(db, emptyMap(), id)', service)
+        self.assertIn('captureSelectedExport(configuration, conversationId, conversationIds).signature() == capture.signature()', service)
+        self.assertIn('validatePayload(8, "export-validation", payload, originals)', service)
+
+if __name__ == '__main__':
+    unittest.main()

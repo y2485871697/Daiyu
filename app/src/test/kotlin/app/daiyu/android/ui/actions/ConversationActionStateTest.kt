@@ -11,23 +11,39 @@ class ConversationActionStateTest {
 
     @Test fun exportCapturesOriginalConversationAndConsumesOnlyOnce() {
         val selection = ConversationExportSelection()
-        selection.begin("conversation-A")
-        assertEquals("conversation-A", selection.pendingConversationId)
-        assertThrows(IllegalStateException::class.java) { selection.begin("conversation-B") }
-        assertEquals("conversation-A", selection.take())
+        selection.begin(listOf("conversation-A"))
+        assertEquals(listOf("conversation-A"), selection.pendingConversationIds)
+        assertThrows(IllegalStateException::class.java) { selection.begin(listOf("conversation-B")) }
+        assertEquals(listOf("conversation-A"), selection.take())
         assertNull(selection.take())
     }
     @Test fun restoredExportKeepsFrozenIdAndCancelledPickerReleasesIt() {
-        val selection = ConversationExportSelection("conversation-A")
-        assertEquals("conversation-A", selection.take())
-        selection.begin("conversation-B")
-        assertEquals("conversation-B", selection.take())
-        assertNull(selection.pendingConversationId)
+        val selection = ConversationExportSelection(listOf("conversation-A"))
+        assertEquals(listOf("conversation-A"), selection.take())
+        selection.begin(listOf("conversation-B"))
+        assertEquals(listOf("conversation-B"), selection.take())
+        assertNull(selection.pendingConversationIds)
     }
     @Test fun blankExportDoesNotCreatePendingSelection() {
         val selection = ConversationExportSelection()
-        assertThrows(IllegalArgumentException::class.java) { selection.begin(" ") }
-        assertNull(selection.pendingConversationId)
+        assertThrows(IllegalArgumentException::class.java) { selection.begin(listOf(" ")) }
+        assertNull(selection.pendingConversationIds)
+    }
+    @Test fun batchSelectionIsFrozenDeduplicatedAndConsumedOnce() {
+        val ids = mutableListOf("conversation-A", "conversation-B", "conversation-A")
+        val selection = ConversationExportSelection()
+        selection.begin(ids)
+        ids.clear(); ids.add("conversation-C")
+        assertEquals(listOf("conversation-A", "conversation-B"), selection.pendingConversationIds)
+        val restored = ConversationExportSelection(selection.pendingConversationIds)
+        assertEquals(listOf("conversation-A", "conversation-B"), restored.take())
+        assertNull(restored.take())
+    }
+    @Test fun emptyAndOversizedSelectionsCannotBecomeFullExports() {
+        val selection = ConversationExportSelection()
+        assertThrows(IllegalArgumentException::class.java) { selection.begin(emptyList()) }
+        assertThrows(IllegalArgumentException::class.java) { selection.begin(List(1001) { "id-$it" }) }
+        assertNull(selection.pendingConversationIds)
     }
     @Test fun queuedAdmissionRetainsDraftUntilMatchingAcceptedReceipt() {
         val state = PausedSupplementDraft()

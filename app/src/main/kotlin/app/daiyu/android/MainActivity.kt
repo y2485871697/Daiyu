@@ -92,7 +92,6 @@ import app.daiyu.android.domain.runtime.SupplementAdmission
 import app.daiyu.android.ui.actions.ConversationExportSelection
 import app.daiyu.android.ui.actions.SupplementEditor
 import app.daiyu.android.ui.screens.conversation.ChildTaskRecordsScreen
-import app.daiyu.android.ui.screens.conversation.ConversationExportScreen
 import app.daiyu.android.storage.ProviderEditorSlot
 import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ModelSettings
@@ -1667,8 +1666,6 @@ class MainActivity : ComponentActivity() {
     }
     private var exportPickerPending by mutableStateOf(false)
     private var conversationExport = ConversationExportSelection()
-    private var exportConversationId by mutableStateOf<String?>(null)
-    private var exportConversationTitle by mutableStateOf("")
     private var taskRecordsConversationId by mutableStateOf<String?>(null)
     // Frozen entry context. Readers run on IO and must not inspect mutable Compose/host state.
     private class SearchPage(
@@ -1900,13 +1897,12 @@ class MainActivity : ComponentActivity() {
             it != 0 && it != 101 && it != 103 && it != 107 && it !in 12000..65534
         }
         conversationExport = ConversationExportSelection(
-            state?.getString("pending-conversation-export").takeIf { pendingBackupRequest == 105 })
+            (state?.getStringArrayList("pending-conversation-exports")
+                ?: state?.getString("pending-conversation-export")?.let(::listOf))
+                .takeIf { pendingBackupRequest == 105 })
         exportPickerPending = pendingBackupRequest == 105
-        exportConversationId = state?.getString("export-page-conversation")
-        exportConversationTitle = state?.getString("export-page-title").orEmpty()
         taskRecordsConversationId = state?.getString("task-records-conversation")
-        if (exportConversationId != null) retainedPage = "conversation-export"
-        else if (taskRecordsConversationId != null) retainedPage = "child-tasks"
+        if (taskRecordsConversationId != null) retainedPage = "child-tasks"
         if (intent?.action == ChatApplication.OPEN_PET_SETTINGS) retainedPage = "pet-settings"
         setContent {
             app.daiyu.android.ui.screens.settings.ApplicationPetMount(pets, this@MainActivity, Modifier.fillMaxSize()) {
@@ -2059,16 +2055,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     "usage" -> UsageStatsScreen(onBack = { closeUsagePage() }, load = { retainedData.stats() })
-                    "conversation-export" -> exportConversationId?.let { id ->
-                        ConversationExportScreen(
-                            conversationTitle = exportConversationTitle,
-                            available = controller.ready && controller.active == null && !controller.hasLiveChildTasks() &&
-                                controller.problem?.startsWith("会话恢复失败") != true,
-                            pending = exportPickerPending || pendingBackupRequest != null, busy = backupBusy,
-                            onExport = { if (exportConversationId == id) backupGuard { pickConversationExport(id) } },
-                            onBack = { returnToChat() },
-                        )
-                    }
                     "child-tasks" -> taskRecordsConversationId?.let { id ->
                         ChildTaskRecordsScreen(id, load = { target -> controller.childTasks(ConversationId(target)) },
                             loadLive = { target -> controller.liveChildTasks(ConversationId(target)) },
@@ -2385,7 +2371,10 @@ class MainActivity : ComponentActivity() {
                         onConversationDelete = { item -> confirmDelete(item.id) },
                         onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
                         onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
-                        onConversationExport = { item -> backupGuard { openConversationExport(item.id) } },
+                        onConversationExport = { item -> backupGuard { pickConversationExports(listOf(item.id)) } },
+                        onConversationsExport = { ids -> backupGuard { pickConversationExports(ids) } },
+                        exportEnabled = controller.ready && controller.active == null && !controller.hasLiveChildTasks() &&
+                            controller.problem?.startsWith("会话恢复失败") != true && !backupBusy && !exportPickerPending && pendingBackupRequest == null,
                         onNewConversation = { guard { createNewConversation(); dismissSidebar() } },
                         onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
                         onCreateFolder = { name -> guard { retainedData.createFolder(name); updatePane() } },
@@ -5199,11 +5188,7 @@ class MainActivity : ComponentActivity() {
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
         state.putInt("legacy-next-code", nextLegacyCode)
         state.putInt("pending-backup-request", pendingBackupRequest?.takeUnless { it == 101 || it == 103 } ?: 0)
-        state.putString("pending-conversation-export", conversationExport.pendingConversationId)
-        if (retainedPage == "conversation-export") {
-            state.putString("export-page-conversation", exportConversationId)
-            state.putString("export-page-title", exportConversationTitle)
-        }
+        state.putStringArrayList("pending-conversation-exports", conversationExport.pendingConversationIds?.let { ArrayList(it) })
         if (retainedPage == "child-tasks") state.putString("task-records-conversation", taskRecordsConversationId)
         super.onSaveInstanceState(state)
     }
@@ -5489,7 +5474,7 @@ class MainActivity : ComponentActivity() {
         dismissSidebar()
         dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
-        exportConversationId = null; exportConversationTitle = ""; taskRecordsConversationId = null
+        taskRecordsConversationId = null
         if (activityUsable()) refresh()
     }
     private fun openSkillManagement() {
@@ -6857,24 +6842,21 @@ class MainActivity : ComponentActivity() {
         backupGuard { showOpenedBackup(openedBackupUri(open)) }
     }
     private fun backupMenu() { checkBackupAvailable(); lastOpenedBackupUri = null; retainedPage = "backup" }
-    private fun openConversationExport(id: String) {
-        val target = retainedConversation(id)
-        dismissSidebar(); exportConversationId = id; exportConversationTitle = target.title
-        retainedPage = "conversation-export"
-    }
     private fun openChildTaskRecords(id: String) {
         retainedConversation(id)
         dismissSidebar(); taskRecordsConversationId = id; retainedPage = "child-tasks"
     }
-    @Suppress("DEPRECATION") private fun pickConversationExport(id: String) {
+    @Suppress("DEPRECATION") private fun pickConversationExports(ids: List<String>) {
         checkBackupAvailable()
+        check(!controller.hasLiveChildTasks()) { "子任务运行中，暂不能导出" }
         check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
-        retainedConversation(id)
-        conversationExport.begin(id); pendingBackupRequest = 105; exportPickerPending = true
+        val targets = ids.toList()
+        targets.forEach { retainedConversation(it) }
+        conversationExport.begin(targets); pendingBackupRequest = 105; exportPickerPending = true
         try {
             startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"
-                putExtra(Intent.EXTRA_TITLE, "daiyu-conversation.json")
+                putExtra(Intent.EXTRA_TITLE, if (targets.size == 1) "daiyu-conversation.json" else "daiyu-conversations.json")
             }, 105)
         } catch (failure: Exception) {
             pendingBackupRequest = null; exportPickerPending = false; conversationExport.take(); throw failure
@@ -7058,12 +7040,13 @@ class MainActivity : ComponentActivity() {
         }
         if (requestCode == 105) {
             exportPickerPending = false
-            val originalId = conversationExport.take()
+            val originalIds = conversationExport.take()
             if (resultCode != RESULT_OK) return
             val uri = data?.data
             backupGuard {
-                require(originalId != null && uri?.scheme == "content") { "导出目标已失效或文件未返回；请重新选择" }
-                controller.exportConversationBackup(checkNotNull(uri), ConversationId(originalId))
+                require(!originalIds.isNullOrEmpty() && uri?.scheme == "content") { "导出目标已失效或文件未返回；请重新选择" }
+                check(!controller.hasLiveChildTasks()) { "子任务运行中，暂不能导出" }
+                controller.exportConversationsBackup(checkNotNull(uri), originalIds.map(::ConversationId))
             }
             return
         }

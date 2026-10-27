@@ -649,6 +649,57 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
     }
 
     private fun payloadOf(text: String) = JSONObject(JSONObject(text).getString("payload"))
+    fun testSelectedConversationsShareOneNativePackageAndRoundTripOnlySelectedOwners() {
+        val (context, source, backup) = fresh()
+        val first = seed(source, 6); val other = seed(source, 1); val last = seed(source, 6)
+        source.rename(other, "UNSELECTED_TITLE"); source.draft(other, "UNSELECTED_DRAFT"); source.draft("GLOBAL_DRAFT")
+        source.draft(first, "first draft"); source.draft(last, "last draft")
+        backup.setNonSecretConfiguration(mapOf("model" to "GLOBAL_MODEL"))
+        val contexts = ContextService(context, source)
+        val archives = listOf(first, last).map { id ->
+            contexts.compress(id, CompressionPolicy(keepTurns = 2), ContextSummarizer { "summary-${id.value}" })!!
+        }
+        val bytes = byteArrayOf(0, 1, -1, 42)
+        listOf(first, last).forEachIndexed { index, id ->
+            backup.attach("batch-asset-$index", source.messages(id).first().second.id.value, "application/octet-stream", bytes)
+            recordUsage(source, id)
+        }
+        backup.attach("unselected-asset", source.messages(other).first().second.id.value, "application/octet-stream", byteArrayOf(99))
+        val before = backup.exportPackage()
+        val text = backup.exportConversations(listOf(last, first, first))
+        val inventory = backup.preflight(text); val payload = payloadOf(text)
+        assertEquals(2, inventory.conversations); assertEquals(24, inventory.messages)
+        assertEquals(2, inventory.archives); assertEquals(2, inventory.attachments); assertEquals(0, inventory.configEntries)
+        assertEquals(0, payload.getJSONObject("config").length())
+        assertEquals(3, payload.getJSONArray("blobs").length())
+        assertEquals(2, payload.getJSONObject("statistics").getJSONArray("requests").length())
+        assertEquals("", payloadOf(payload.getString("text_backup")).getString("draft"))
+        for (marker in listOf("UNSELECTED_TITLE", "UNSELECTED_DRAFT", "GLOBAL_DRAFT", "GLOBAL_MODEL", "unselected-asset")) assertFalse(marker, text.contains(marker))
+        assertEquals(text, backup.exportConversations(listOf(first, last)))
+        val (targetContext, target, importer) = fresh(); target.draft("keep global")
+        assertFalse(importer.importPackage(text).alreadyImported); assertTrue(importer.importPackage(text).alreadyImported)
+        assertEquals(setOf(first, last), target.conversations().map { it.id }.toSet()); assertEquals("keep global", target.draft())
+        listOf(first, last).forEach { id ->
+            assertEquals(source.messages(id).map { it.second }, target.messages(id).map { it.second })
+            assertEquals(source.conversations().first { it.id == id }.draft, target.conversations().first { it.id == id }.draft)
+        }
+        archives.forEach { assertEquals(contexts.archivePage(it), ContextService(targetContext, target).archivePage(it)) }
+        assertEquals(200L, statistics(target).lifetimeInputTokens)
+        assertEquals(40L, statistics(target).lifetimeOutputTokens)
+        repeat(2) { assertTrue(bytes.contentEquals(importer.attachment("batch-asset-$it"))) }
+        assertEquals(before, backup.exportPackage())
+    }
+    fun testSelectedConversationsRejectEmptyMissingAndDeletedInsteadOfExportingPartialOrAll() {
+        val (_, source, backup) = fresh(); val first = seed(source, 1); val deleted = seed(source, 1)
+        source.delete(deleted)
+        val before = backup.exportPackage()
+        for (ids in listOf(emptyList(), listOf(first, deleted), listOf(first, ConversationId("missing")))) {
+            reject { backup.exportConversations(ids) }
+            assertEquals(before, backup.exportPackage())
+        }
+        assertEquals(backup.exportConversation(first), backup.exportConversations(listOf(first, first)))
+    }
+
     fun testSingleConversationPackageScopesArchivesAssetsUsageAndDraftsWithoutMutation() {
         val (context, source, backup) = fresh(); val selected = seed(source, 6); val other = seed(source, 6)
         source.rename(selected, "selected title"); source.rename(other, "OTHER_TITLE")

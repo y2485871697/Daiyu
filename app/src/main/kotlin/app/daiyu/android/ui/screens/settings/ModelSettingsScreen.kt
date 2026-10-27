@@ -51,7 +51,6 @@ internal data class ModelSettingsDraftUi(
     val anthropicVersion: String = "",
     val customHeaders: String = "",
     val headersReplacementAuthorized: Boolean = false,
-    val openAiWebSearchEnabled: Boolean = false,
     val sessionGateway: app.daiyu.android.model.sessiongateway.SessionGatewayRule = app.daiyu.android.model.sessiongateway.SessionGatewayRule(),
     val headerFieldsValid: Boolean = true,
     val bodyFieldsValid: Boolean = true,
@@ -131,8 +130,7 @@ internal fun ModelSettingsScreen(
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model &&
-            it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders &&
-            it.openAiWebSearchEnabled == draft.openAiWebSearchEnabled
+            it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders
     } == true
     SettingsScaffoldPage(title = pageTitle, onBack = { connection.cancel(); balance.cancel(); onBack() }, modifier = modifier, listState = listState) {
         headerContent()
@@ -164,11 +162,6 @@ internal fun ModelSettingsScreen(
                         listOf("/v1/responses", "/responses").indexOf(draft.responsesPath.ifBlank { "/v1/responses" })) { index ->
                         changeDraft(draft.copy(responsesPath = if (index == 0) "/v1/responses" else "/responses"))
                     }
-                }
-                if (!speechOnly) SettingsSwitchRow("Provider 托管网页搜索", draft.protocol == ProviderProtocol.RESPONSES && draft.openAiWebSearchEnabled,
-                    summary = "允许模型使用供应商提供的网页搜索",
-                    enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES) {
-                    changeDraft(draft.copy(openAiWebSearchEnabled = it))
                 }
                 if (testConnection != null) {
                     if (speechOnly) SettingsNote("测试会合成“你好”，可能产生语音服务用量；不会播放或录音。")

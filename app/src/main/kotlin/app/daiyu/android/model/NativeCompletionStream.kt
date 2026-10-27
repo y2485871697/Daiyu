@@ -43,6 +43,7 @@ internal object NativeCompletionStream {
         val reasoning = StringBuilder()
         val details = sortedMapOf<Int, JSONObject>()
         val calls = sortedMapOf<Int, Call>()
+        val annotations = linkedMapOf<String, JSONObject>()
         val eventId = "chat-${java.util.UUID.randomUUID()}"
         var sourceId: String? = null
         var reason: String? = null
@@ -127,6 +128,19 @@ internal object NativeCompletionStream {
                 }
                 else -> throw ModelRequestException(ModelFailure.PROTOCOL)
             }
+            if (delta.has("annotations") && !delta.isNull("annotations")) {
+                val incoming = delta.getJSONArray("annotations")
+                protocol(incoming.length() <= 128)
+                repeat(incoming.length()) { index ->
+                    val annotation = incoming.getJSONObject(index)
+                    val key = JSONObject(annotation.toString()).also { it.remove("index") }.toString()
+                    if (key !in annotations) {
+                        account(key.length)
+                        annotations[key] = annotation
+                        protocol(annotations.size <= 128)
+                    }
+                }
+            }
             if (delta.has("tool_calls")) protocol(delta.opt("tool_calls") is JSONArray)
             delta.optJSONArray("tool_calls")?.let { array -> for (i in 0 until array.length()) {
                 val wire = array.getJSONObject(i)
@@ -154,6 +168,8 @@ internal object NativeCompletionStream {
         if (!done) throw ModelRequestException(ModelFailure.INCOMPLETE)
         protocol(text.isNotEmpty() || reasoning.isNotEmpty() || details.isNotEmpty() || calls.isNotEmpty())
         val row = NativeCompletionRequest.textMessage(ProviderProtocol.CHAT_COMPLETIONS, "assistant", text.toString())
+        if (annotations.isNotEmpty()) row.put("annotations", JSONArray(annotations.values.toList()))
+        ChatSearchProtocol.validate(row)
         if (reasoning.isNotEmpty()) row.put("reasoning_content", reasoning.toString())
         if (details.isNotEmpty()) row.put("reasoning_details", JSONArray(details.values.toList()))
         val wireCalls = JSONArray()
@@ -171,7 +187,7 @@ internal object NativeCompletionStream {
         MessagesRequest.validateObject(row, MessagesRequest.MAX_MESSAGE_CONTAINER_DEPTH)
         protocol(row.toString().length <= 1_000_000)
         if (reasoning.isNotEmpty()) sink(ModelEvent.ReasoningFinal("$eventId:reasoning", reasoning.toString()))
-        if (text.isNotEmpty()) sink(ModelEvent.TextFinal("$eventId:text", text.toString()))
+        if (text.isNotEmpty()) sink(ModelEvent.TextFinal("$eventId:text", ChatSearchProtocol.displayText(row)))
         confirmed.forEach { sink(ModelEvent.ToolReady(it)) }
         usage?.let(sink)
         return row

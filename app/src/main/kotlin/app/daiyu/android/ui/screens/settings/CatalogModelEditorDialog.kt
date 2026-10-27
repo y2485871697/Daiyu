@@ -69,6 +69,7 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                             .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
                             SettingsSwitchRow("支持推理", value.reasoning, enabled) { value = value.copy(reasoning = it) }
                             SettingsSwitchRow("支持视觉", value.vision, enabled) { value = value.copy(vision = it) }
+                            SettingsSwitchRow("原生搜索", value.nativeSearch, enabled) { value = value.copy(nativeSearch = it) }
                         }
                         if (!isNew) {
                             Spacer(Modifier.height(12.dp))

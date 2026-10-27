@@ -7,6 +7,7 @@ internal data class CatalogModelEdit(
     val contextWindow: String = "",
     val reasoning: Boolean = true,
     val vision: Boolean = true,
+    val nativeSearch: Boolean = false,
 ) {
     fun validate() {
         require(id.isNotBlank() && id == id.trim() && id.length <= 200 && id.none { it.code < 32 || it.code == 127 })
@@ -18,7 +19,8 @@ internal data class CatalogModelEdit(
         validate()
         require(id == record.id)
         return record.copy(displayName = displayName, settings = record.settings.copy(
-            contextWindowOverride = contextWindow.toIntOrNull(), reasoningOverride = reasoning, visionOverride = vision))
+            contextWindowOverride = contextWindow.toIntOrNull(), reasoningOverride = reasoning, visionOverride = vision,
+            requestOptions = record.settings.requestOptions.copy(openAiWebSearchEnabled = nativeSearch)))
     }
     fun newRecord(): SavedCatalogModel<CatalogModelParameters> {
         validate()
@@ -26,6 +28,6 @@ internal data class CatalogModelEdit(
     }
     companion object {
         fun from(record: SavedCatalogModel<CatalogModelParameters>) = CatalogModelEdit(record.id, record.displayName,
-            record.settings.contextWindowOverride?.toString().orEmpty(), record.settings.reasoningSupported, record.settings.visionSupported)
+            record.settings.contextWindowOverride?.toString().orEmpty(), record.settings.reasoningSupported, record.settings.visionSupported, record.settings.requestOptions.openAiWebSearchEnabled)
     }
 }

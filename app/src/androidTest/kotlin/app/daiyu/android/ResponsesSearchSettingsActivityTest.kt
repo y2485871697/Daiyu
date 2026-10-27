@@ -3,33 +3,53 @@ package app.daiyu.android
 import androidx.compose.ui.test.*
 
 class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
-    fun testOfficialSearchSettingPersistsAndProtocolSwitchPreservesItsDraft() {
+    private fun editCurrentModelSearch(enabled: Boolean) {
+        selectProviderTab("模型")
+        val id = fixture.settings.load().model
+        reveal("local-model-rename:$id").performClick()
+        node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:原生搜索"))
+        val toggle = node("settings-switch:原生搜索")
+        if (enabled) toggle.assertIsOff().performClick().assertIsOn()
+        else toggle.assertIsOn().performClick().assertIsOff()
+        node("dialog-confirm").performClick()
+        awaitControl("model search saved") {
+            fixture.settings.localModelCatalogSnapshot()?.models?.singleOrNull { it.id == id }
+                ?.settings?.requestOptions?.openAiWebSearchEnabled == enabled
+        }
+    }
+
+    fun testSearchIsModelScopedAndProviderConfigurationHasNoSwitch() {
         setDraft("search settings unsent"); openModels()
-        editModel("Base URL", "https://api.openai.com/v1")
-        reveal("settings-switch:Provider 托管网页搜索").assertIsOff().performClick().assertIsOn()
-        saveModel(); backToChat(activity); awaitUniqueTag("chat-draft")
-        assertTrue(fixture.settings.load().requestOptions.openAiWebSearchEnabled)
+        node("settings-switch:Provider 托管网页搜索").assertDoesNotExist()
+        editCurrentModelSearch(true)
+        assertTrue(fixture.settings.loadForRun().requestOptions.openAiWebSearchEnabled)
+        assertFalse(fixture.settings.load().requestOptions.openAiWebSearchEnabled)
+        selectProviderTab("配置")
+        saveModel()
+        assertTrue(fixture.settings.loadForRun().requestOptions.openAiWebSearchEnabled)
+        backToChat(activity)
         assertDraft("search settings unsent")
-        openModels(); reveal("settings-switch:Provider 托管网页搜索").assertIsOn()
-        chooseProviderProtocol("OpenAI Chat Completions")
-        reveal("settings-switch:Provider 托管网页搜索").assertIsOff().assertIsNotEnabled()
-        chooseProviderProtocol("OpenAI Responses")
-        reveal("settings-switch:Provider 托管网页搜索").assertIsOn().assertIsEnabled()
-        assertTrue(fixture.settings.load().requestOptions.openAiWebSearchEnabled)
+        openModels(); selectProviderTab("模型")
+        val id = fixture.settings.load().model
+        reveal("local-model-rename:$id").performClick()
+        node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:原生搜索"))
+        node("settings-switch:原生搜索").assertIsOn().performClick().assertIsOff()
+        node("dialog-cancel").performClick()
+        assertTrue(fixture.settings.loadForRun().requestOptions.openAiWebSearchEnabled)
         assertEquals(0, fixture.opens.get())
     }
-    fun testEnablingSearchAtGatewayPersistsWithoutChangingEndpointOrSending() {
+
+    fun testChatModelSearchPersistsWithoutChangingEndpointOrSending() {
         val before = fixture.settings.load()
-        openModels(); reveal("settings-switch:Provider 托管网页搜索").assertIsOff().performClick()
-        saveModel()
-        awaitControl("gateway hosted search saved") { fixture.settings.load().requestOptions.openAiWebSearchEnabled }
-        assertEquals(before.copy(requestOptions = before.requestOptions.copy(openAiWebSearchEnabled = true)), fixture.settings.load())
-        backToChat(activity)
         openModels()
-        reveal("settings-switch:Provider 托管网页搜索").assertIsOn()
-        modelField("Base URL").assertEditableText(before.endpoint)
-        reveal("model-save", lazyKey = "model_save").assertIsDisplayed()
-        node("model-save-error").assertDoesNotExist()
+        chooseProviderProtocol("OpenAI Chat Completions")
+        saveModel()
+        editCurrentModelSearch(true)
+        assertEquals(app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS, fixture.settings.loadForRun().protocol)
+        assertTrue(fixture.settings.loadForRun().requestOptions.openAiWebSearchEnabled)
+        assertEquals(before.endpoint, fixture.settings.load().endpoint)
+        editCurrentModelSearch(false)
+        assertFalse(fixture.settings.loadForRun().requestOptions.openAiWebSearchEnabled)
         assertEquals(0, fixture.opens.get())
     }
 

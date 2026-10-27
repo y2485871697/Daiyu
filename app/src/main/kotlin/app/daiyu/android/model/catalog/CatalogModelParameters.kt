@@ -34,7 +34,9 @@ internal data class CatalogModelParameters(
             val parameters = previous?.settings ?: CatalogModelParameters()
             return SavedCatalogModel(settings.model, previous?.displayName ?: settings.model,
                 parameters.copy(batteryEnabled = settings.batteryEnabled,
-                    deviceStatusEnabled = settings.deviceStatusEnabled, requestOptions = settings.requestOptions))
+                    deviceStatusEnabled = settings.deviceStatusEnabled, requestOptions = settings.requestOptions.copy(
+                        openAiWebSearchEnabled = previous?.settings?.requestOptions?.openAiWebSearchEnabled
+                            ?: settings.requestOptions.openAiWebSearchEnabled)))
         }
 
         /** Preserve the loadForEditing error flag: its fallback options are NOT saved policy. */

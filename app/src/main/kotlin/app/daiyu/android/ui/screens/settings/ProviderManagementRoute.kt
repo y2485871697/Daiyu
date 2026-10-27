@@ -84,7 +84,6 @@ private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(oauth = oauth, 
     deviceStatusEnabled = deviceStatusEnabled, customBody = requestOptions.customBody,
     speedMode = requestOptions.speedMode, codex = requestOptions.codex,
     anthropicVersion = requestOptions.anthropicVersion.orEmpty(),
-    openAiWebSearchEnabled = requestOptions.openAiWebSearchEnabled,
     sessionGateway = requestOptions.sessionGateway,
     customHeaders = if (customHeaders.isEmpty) "" else customHeaders.encode())
 private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(),
@@ -92,7 +91,7 @@ private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.co
     batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
     customHeaders = app.daiyu.android.model.ProviderHeaders.parse(customHeaders),
     requestOptions = base.requestOptions.copy(sessionGateway = sessionGateway, customBody = customBody, speedMode = speedMode, codex = codex,
-        anthropicVersion = anthropicVersion.takeIf { it.isNotEmpty() }, openAiWebSearchEnabled = openAiWebSearchEnabled))
+        anthropicVersion = anthropicVersion.takeIf { it.isNotEmpty() }))
 
 @Composable
 internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: () -> Boolean,

@@ -21,6 +21,23 @@ class ProviderSearchSaveContractTest(unittest.TestCase):
         self.assertNotIn('api.openai.com', protocol)
         self.assertIn('protocol == ProviderProtocol.RESPONSES', (MAIN / 'model/ProviderRequestOptions.kt').read_text())
 
+    def test_search_is_only_edited_per_model_and_projected_when_freezing(self):
+        provider = (UI / 'ModelSettingsScreen.kt').read_text()
+        self.assertNotIn('Provider 托管网页搜索', provider)
+        self.assertNotIn('openAiWebSearchEnabled', provider)
+        editor = (UI / 'CatalogModelEditorDialog.kt').read_text()
+        self.assertIn('SettingsSwitchRow("原生搜索", value.nativeSearch, enabled)', editor)
+        form = (MAIN / 'model/catalog/CatalogModelEdit.kt').read_text()
+        self.assertIn('record.settings.requestOptions.copy(openAiWebSearchEnabled = nativeSearch)', form)
+        parameters = (MAIN / 'model/catalog/CatalogModelParameters.kt').read_text()
+        self.assertIn('previous?.settings?.requestOptions?.openAiWebSearchEnabled', parameters)
+        runtime = (MAIN / 'storage/ModelSettings.kt').read_text().split('internal fun loadForRun(', 1)[1].split('internal fun checkCatalogConfiguration', 1)[0]
+        self.assertIn('selected?.settings?.requestOptions?.openAiWebSearchEnabled', runtime)
+        self.assertIn('current.requestOptions.copy(', runtime)
+        chat = (MAIN / 'model/NativeCompletionRequest.kt').read_text()
+        self.assertIn('!gemini && settings.requestOptions.openAiWebSearchEnabled', chat)
+        self.assertIn('request.put("web_search_options", JSONObject())', chat)
+
     def test_validation_errors_belong_to_the_current_editor(self):
         source = (UI / 'ProviderManagementRoute.kt').read_text()
         detail = source.split('private class ProviderDetail(', 1)[1].split('private class PausedProviderDraft', 1)[0]

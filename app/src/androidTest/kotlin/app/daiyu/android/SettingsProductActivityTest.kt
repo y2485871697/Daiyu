@@ -59,7 +59,7 @@ class SettingsProductActivityTest : WiredActivityTestCase() {
         inlineBodyControl("model-body-field-value:0").assertEditableText("""{"settings_product":true}""")
         node("model-body-fields-list").assertDoesNotExist()
         node("model-body-field-editor-list").assertDoesNotExist()
-        reveal("settings-switch:Provider 托管网页搜索").assertExists().assertIsEnabled()
+        node("settings-switch:Provider 托管网页搜索").assertDoesNotExist()
         assertEquals(savedSettings, fixture.settings.load())
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())

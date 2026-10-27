@@ -7,7 +7,7 @@ MAIN = ROOT / "app/src/main/kotlin/app/daiyu/android"
 
 
 class ModelEditorDefaultsContractTest(unittest.TestCase):
-    def test_editor_has_two_single_line_switches_without_reset_action(self):
+    def test_editor_has_three_single_line_switches_without_reset_action(self):
         source = (MAIN / "ui/screens/settings/CatalogModelEditorDialog.kt").read_text()
         for removed in ("恢复自动", "catalog-model-auto", "capabilitySummary", "手动：", "自动：不支持或未知"):
             self.assertNotIn(removed, source)
@@ -15,6 +15,8 @@ class ModelEditorDefaultsContractTest(unittest.TestCase):
         self.assertNotIn("summary =", switches)
         self.assertIn('SettingsSwitchRow("支持推理", value.reasoning, enabled)', switches)
         self.assertIn('SettingsSwitchRow("支持视觉", value.vision, enabled)', switches)
+        self.assertIn('SettingsSwitchRow("原生搜索", value.nativeSearch, enabled)', switches)
+        self.assertIn('val nativeSearch: Boolean = false', (MAIN / "model/catalog/CatalogModelEdit.kt").read_text())
         row = (MAIN / "ui/screens/settings/SettingsUiComponents.kt").read_text().split("internal fun SettingsRow(", 1)[1]
         self.assertIn("verticalAlignment = Alignment.CenterVertically", row.split("internal fun SettingsSwitchRow", 1)[0])
 

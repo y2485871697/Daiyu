@@ -68,6 +68,7 @@ internal object NativeCompletionRequest {
             require(!item.has("parts") && (item.opt("content") is String || item.isNull("content"))) { "历史不是 Chat Completions 原生数据" }
             if (item.has("reasoning_content")) item.string("reasoning_content")
             if (item.has("reasoning_details")) require(item.opt("reasoning_details") is JSONArray)
+            ChatSearchProtocol.validate(item)
             if (item.has("tool_calls")) require(item.opt("tool_calls") is JSONArray)
             if (item.string("role") == "tool") { item.string("tool_call_id"); item.string("content") }
             item.optJSONArray("tool_calls")?.let { array -> for (i in 0 until array.length()) {
@@ -203,6 +204,7 @@ internal object NativeCompletionRequest {
         val gemini = settings.protocol == ProviderProtocol.GEMINI
         val request = if (gemini) JSONObject().put("contents", history) else JSONObject().put("model", settings.model)
             .put("messages", history).put("stream", true).put("stream_options", JSONObject().put("include_usage", true))
+        if (!gemini && settings.requestOptions.openAiWebSearchEnabled) request.put("web_search_options", JSONObject())
         if (!gemini && URI(settings.endpoint).host.equals("api.mistral.ai", true)) request.remove("stream_options")
         if (!instructions.isNullOrBlank()) {
             if (gemini) request.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", instructions))))

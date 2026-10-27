@@ -14,8 +14,8 @@ internal fun toolOperationGlyph(toolName: String, arguments: String): String {
         "direct_child_task" -> when (args?.optString("kind")) {
             "APPEND" -> "add"; "REPLACE" -> "swap"; "REDISPATCH" -> "retry"; else -> "generic"
         }
-        "terminal_pty_step", "shizuku_execute" -> "terminal"
-        "terminal_pty_read" -> "output"
+        "terminal_exec", "terminal_pty_step", "shizuku_execute" -> "terminal"
+        "terminal_read", "terminal_pty_read" -> "output"
         "terminal_job_start" -> "launchBackground"
         "terminal_job_read" -> "receive"
         "list_files" -> "list"

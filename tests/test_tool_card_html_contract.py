@@ -22,6 +22,22 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertNotIn('Disclosure("运行环境"', content)
         self.assertIn("if (rich.bodyRestricted)", content)
 
+    def test_ordinary_command_catalog_names_are_classified_and_have_terminal_glyphs(self):
+        catalog = (ROOT / "app/src/main/kotlin/app/daiyu/android/integration/tools/RunCommandTools.kt").read_text()
+        registered = set(re.findall(r'ToolDefinition\("([^"]+)"', catalog))
+        self.assertEqual({"terminal_exec", "terminal_read"}, registered)
+        presentation = (CHAT / "ToolCardPresentation.kt").read_text()
+        terminal_group = re.search(r'group\("terminal", ([^\n]+)\)', presentation).group(1)
+        glyph = (CHAT / "ToolOperationGlyph.kt").read_text()
+        for name in registered:
+            self.assertIn(f'"{name}" to ', terminal_group)
+            line = next(line for line in glyph.splitlines() if f'"{name}"' in line)
+            self.assertIn('-> "terminal"' if name == "terminal_exec" else '-> "output"', line)
+        regression = (ROOT / "app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardPresentationTest.kt").read_text()
+        self.assertIn("ordinaryCommandToolsUseTerminalPresentationWithoutChangingReceiptOrIdentity", regression)
+        self.assertIn("WorkStepState.entries", regression)
+        self.assertIn("WorkStepState.UNKNOWN, withoutReceipt", regression)
+
     def test_compact_headers_adapt_locally_and_preserve_disclosure_ownership(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertEqual(2, shell.count("heightIn(min = 44.dp)"))

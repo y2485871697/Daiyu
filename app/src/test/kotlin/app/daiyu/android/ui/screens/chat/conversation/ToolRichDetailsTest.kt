@@ -316,4 +316,22 @@ class ToolRichDetailsTest {
         assertEquals("本次调用未完成", failed.prose!!.text)
     }
 
+    @Test fun ordinaryCommandToolsKeepCommandAndReturnedOutputInExistingScrubbedTerminalBody() {
+        for (name in listOf("terminal_exec", "terminal_read")) {
+            val args = if (name == "terminal_exec")
+                """{"command":"printf token=PRIVATE_TERMINAL_SECRET","environment":"android"}"""
+            else """{"job_id":"00000000-0000-0000-0000-000000000001","offset":0,"limit":16384}"""
+            val card = ToolCardPresentations.present(name, args,
+                """{"ok":true,"execution":"executed","state":"exited","stdout":"hello token=PRIVATE_TERMINAL_SECRET","stderr_merged":true,"exit_code":0,"output_complete":true,"log_truncated":false,"offset":0,"next_offset":9,"has_more":false,"total_bytes":9}""")
+            val rich = card.details.rich
+            assertEquals("terminal", card.category)
+            assertEquals(name == "terminal_exec", rich.documents.any { it.title == "命令" && it.code && it.text.startsWith("printf") })
+            assertTrue(rich.documents.any { it.title == "标准输出" && it.code && it.text.startsWith("hello") })
+            assertTrue(rich.documents.none { it.title == "标准错误" })
+            assertTrue(card.details.fields.contains(ToolFieldUi("退出码", "0")))
+            assertFalse(text(rich).contains("PRIVATE_TERMINAL_SECRET"))
+            assertFalse(rich.documents.any { it.title == "已记录返回" })
+        }
+    }
+
 }

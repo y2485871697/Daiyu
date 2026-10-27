@@ -23,7 +23,7 @@ internal object ToolCardPresentations {
         group("skills", "skills_list" to "查找技能", "skills_read" to "读取技能说明", "skills_read_resource" to "读取技能资源")
         group("delegation", "run_child_models" to "批量委派", "start_child_tasks" to "后台委派")
         group("child_control", "direct_child_task" to "指导子任务")
-        group("terminal", "terminal_pty_step" to "执行终端步骤", "terminal_pty_read" to "读取输出", "shizuku_execute" to "执行命令")
+        group("terminal", "terminal_exec" to "执行命令", "terminal_read" to "读取命令输出", "terminal_pty_step" to "执行终端步骤", "terminal_pty_read" to "读取输出", "shizuku_execute" to "执行命令")
         group("background_job", "terminal_job_start" to "启动后台任务", "terminal_job_read" to "读取后台结果")
         group("files", "list_files" to "列目录", "file_metadata" to "读取文件信息", "read_text_file" to "读取文件")
         group("browser", "browser_read" to "读取网页", "browser_write" to "操作网页")
@@ -67,6 +67,9 @@ internal object ToolCardPresentations {
         }).filter { it.isNotBlank() }.joinToString(" · ")
         val output = parse(result)
         val returned = when (toolName) {
+            "terminal_exec", "terminal_read" -> listOf(numbers(output, listOf("exit_code", "offset", "next_offset", "total_bytes")),
+                flags(output, listOf("has_more", "log_truncated", "output_complete", "log_available")),
+                choice(output, "state", terminalStates))
             "terminal_pty_step" -> listOf(flags(output, listOf("pty", "persistent_shell", "opened")),
                 choice(output, "command_completion", mapOf("unknown" to "命令完成未确认")))
             "terminal_pty_read" -> listOf(numbers(output, listOf("offset", "next_offset", "total_bytes", "wait_status")),

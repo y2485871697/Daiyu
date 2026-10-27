@@ -14,6 +14,7 @@ class ToolCardPresentationTest {
         val cases = listOf(
             Triple("assistant_memory_read", "{}", "memory"), Triple("skills_read", "{}", "skills"),
             Triple("start_child_tasks", "{}", "delegation"), Triple("direct_child_task", "{\"kind\":\"APPEND\"}", "child_control"),
+            Triple("terminal_exec", "{}", "terminal"), Triple("terminal_read", "{}", "terminal"),
             Triple("terminal_pty_step", "{}", "terminal"), Triple("terminal_job_read", "{}", "background_job"),
             Triple("list_files", "{}", "files"), Triple("browser_write", "{\"action\":\"navigate\"}", "browser"),
             Triple("screen", "{\"operation\":\"observe\"}", "gui"), Triple("search_apps", "{}", "apps"),
@@ -111,7 +112,7 @@ class ToolCardPresentationTest {
             "memory" to listOf("assistant_memory_search", "assistant_memory_read"),
             "skills" to listOf("skills_list", "skills_read", "skills_read_resource"),
             "delegation" to listOf("run_child_models", "start_child_tasks"),
-            "terminal" to listOf("terminal_pty_step", "terminal_pty_read", "shizuku_execute"),
+            "terminal" to listOf("terminal_exec", "terminal_read", "terminal_pty_step", "terminal_pty_read", "shizuku_execute"),
             "background_job" to listOf("terminal_job_start", "terminal_job_read"),
             "files" to listOf("list_files", "file_metadata", "read_text_file"),
             "gui" to listOf("r08_virtual_display_step", "r08_virtual_display_read"),
@@ -160,6 +161,44 @@ class ToolCardPresentationTest {
         mapOf("skills" to "Skills", "delegation" to "子代理委派与结果", "terminal" to "终端命令",
             "background_job" to "后台与守护任务", "files" to "文件操作", "image_read" to "图片与视频封面")
             .forEach { (category, title) -> assertEquals(title, ToolCardPresentations.processTitle(listOf(category))) }
+    }
+
+    @Test fun ordinaryCommandToolsUseTerminalPresentationWithoutChangingReceiptOrIdentity() {
+        val cases = listOf("terminal_exec" to "执行命令", "terminal_read" to "读取命令输出")
+        cases.forEach { (name, title) ->
+            val args = if (name == "terminal_exec")
+                """{"command":"printf token=PRIVATE_VALUE","environment":"android","timeout_ms":30000}"""
+            else """{"job_id":"00000000-0000-0000-0000-000000000001","offset":0,"limit":16384}"""
+            val invocation = ToolInvocation(ToolCallId("call-$name"), name, args)
+            val payload = """{"ok":true,"execution":"executed","state":"exited","exit_code":0,"stdout":"actual output"}"""
+            val message = Message(MessageId("message-$name"), ConversationId("chat"), RunId("run"),
+                Message.ASSISTANT_ROLE, listOf(MessageBlock.Tool(invocation, payload)), RunStatus.COMPLETED)
+            val mappedStates = WorkStepState.entries.map { state ->
+                val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> state }).single() as ChatTurnUi.Assistant
+                val process = turn.workProcess!!
+                assertEquals("终端命令", ToolCardPresentations.processTitle(process.segments.flatMap { it.steps }.map { it.category }))
+                val step = process.segments.flatMap { it.steps }.single()
+                assertEquals("terminal", step.category)
+                assertEquals(title, step.name)
+                assertEquals(if (name == "terminal_exec") "terminal" else "output", step.operationGlyph)
+                assertEquals(invocation.id.value, step.toolCallId)
+                assertEquals(name, step.toolName)
+                assertEquals(WorkStepOwnerUi("chat", "run", message.id.value), step.owner)
+                assertEquals("运行与输出", step.categoryDetails!!.heading)
+                assertTrue(step.sections.any { it.title == "输出摘要" && it.text.contains("退出码：0") })
+                assertFalse(step.toString().contains("PRIVATE_VALUE"))
+                step.state
+            }
+            assertEquals(WorkStepState.entries.toList(), mappedStates)
+            val withoutReceipt = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
+            assertEquals(WorkStepState.UNKNOWN, withoutReceipt.workProcess!!.segments.flatMap { it.steps }.single().state)
+            assertEquals(invocation, message.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation)
+        }
+        assertEquals("工具链", ToolCardPresentations.processTitle(listOf("terminal", "device_read")))
+        for (unknown in listOf("future_terminal_exec", "functions.terminal_exec", "terminal.exec")) {
+            assertEquals("generic", ToolCardPresentations.present(unknown, "{}", null).category)
+            assertEquals("generic", toolOperationGlyph(unknown, "{}"))
+        }
     }
 
 }

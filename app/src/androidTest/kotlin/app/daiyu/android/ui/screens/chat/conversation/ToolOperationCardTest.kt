@@ -74,6 +74,33 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("final answer").assertIsDisplayed()
         }
     }
+    fun testOrdinaryCommandToolsRenderTerminalHeadersInBothProductionPaths() {
+        var executions = 0
+        for (mixed in listOf(false, true)) for ((name, title) in listOf(
+            "terminal_exec" to "执行命令", "terminal_read" to "读取命令输出")) {
+            val fixture = source(mixed, "ordinary-$name-$mixed")
+            val args = if (name == "terminal_exec") """{"command":"printf ordinary-output","environment":"android"}"""
+                else """{"job_id":"00000000-0000-0000-0000-000000000001","offset":0,"limit":16384}"""
+            val message = fixture.copy(blocks = fixture.blocks.map { block ->
+                if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = name,
+                    arguments = args),
+                    result = """{"ok":true,"execution":"executed","state":"exited","exit_code":0,"stdout":"ordinary-output"}""")
+                else block
+            })
+            val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
+            show(turn, ChatScreenActions(onRetryStep = { executions++ }))
+            if (!mixed) {
+                ui.onNodeWithText("终端命令").assertIsDisplayed()
+                ui.onNodeWithTag("work-process-header").performClick()
+            }
+            ui.onNodeWithText("未知工具回退").assertDoesNotExist()
+            ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithText("ordinary-output").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("技术详情").scrollToVisible().performClick()
+            ui.onNodeWithText("未知工具回退").assertDoesNotExist()
+            assertEquals(0, executions)
+        }
+    }
     fun testHistoricalUnknownAndEveryReservedCategoryHaveOnlyReadOnlyDisclosure() {
         var executions = 0
         ToolCardPresentations.categories.forEach { category ->

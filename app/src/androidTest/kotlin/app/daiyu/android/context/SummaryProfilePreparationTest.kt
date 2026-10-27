@@ -56,7 +56,7 @@ class SummaryProfilePreparationTest : InstrumentationTestCase() {
         SummaryProfileBudgets(32000, 27000, 2000, 1000, 2000, 30000))
 
     private fun coordinator(wire: Wire = Wire()): ContextPreparationCoordinator {
-        val settings = ProductionCompressionSettings(true, 10000, 1000, summaryModel = binding)
+        val settings = ProductionCompressionSettings(true, 5000, 1000, summaryModel = binding)
         return ContextPreparationCoordinator(service, { settings.coordinatorSettings() },
             ProductionCompressionPolicyResolver,
             ProviderSummaryModelResolver({ store.configuration(it) }, { connections++; wire },
@@ -109,6 +109,9 @@ class SummaryProfilePreparationTest : InstrumentationTestCase() {
         val wire = Wire()
         val coordinator = coordinator(wire)
         val frozen = coordinator.freeze(owner, emptyList())
+        assertTrue(frozen.policy.enabled)
+        assertFalse(frozen.policy.fitsSendBudget(
+            app.daiyu.android.domain.MessageHistory.expand(original).sumOf(TokenTailCompression::messageTokens)))
         assertEquals(0, connections)
         // Editing after freeze must not change the detached provider configuration.
         store.save(profile(ProviderProtocol.RESPONSES, "{\"temperature\":1.2}"))

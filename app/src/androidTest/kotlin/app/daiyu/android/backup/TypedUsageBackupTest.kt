@@ -105,7 +105,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val original = JSONObject(exported)
         val oldPayload = JSONObject(original.getString("payload"))
         oldPayload.getJSONObject("tables").getJSONArray("context_usage").let { rows ->
-            repeat(rows.length()) { rows.getJSONObject(it).apply { remove("cache_creation_tokens"); remove("has_usage") } }
+            repeat(rows.length()) { rows.getJSONObject(it).remove("cache_creation_tokens") }
         }
         downgradeCreation(oldPayload)
         val raw = oldPayload.toString()

@@ -44,7 +44,7 @@ class ImmediateConversationContractTest(unittest.TestCase):
         controller = (SRC / 'ChatController.kt').read_text()
         title = controller.split('acceptedTitle.set(saved.title)', 1)[1].split('imageAttempt?.accepted(saved)', 1)[0]
         self.assertIn('if (physicalVideoHistory.rows.isEmpty() && actionRevision == null)', title)
-        self.assertIn('coordinator.prepare(saved.id, run)', title)
+        self.assertIn('coordinator.prepare(saved.id, run, requestProvider)', title)
         self.assertNotIn('if (conversation == null)', title)
         self.assertIn('ControllerVideoHistory(database).assertCurrent(db, physicalVideoHistory)', controller)
 

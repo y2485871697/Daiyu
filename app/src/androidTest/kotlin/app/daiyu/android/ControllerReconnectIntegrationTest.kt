@@ -108,15 +108,17 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                     controlMain {
                         val options = field(runner(f), "options") as RunnerOptions
                         assertEquals(0, options.reconnect.maxAttempts)
+                        assertEquals(preset != ReconnectDurationPreset.NONE, options.reconnect.budgetFactory != null)
                     }
                 } finally { session.release.countDown() }
                 awaitControl("run cleaned up") { f.controller.active == null }
                 assertEquals(1, opens.get())
                 assertEquals(1, session.reads.get())
-                assertEquals(if (preset == ReconnectDurationPreset.NONE) null else diagnostic(protocol), f.controller.problem)
+                assertNull(f.controller.problem)
                 val rows = f.db.messages(f.db.conversations().single().id).map { it.second }
                 val answer = rows.single { it.role == "assistant" }
                 assertEquals(RunStatus.FAILED, answer.status)
+                assertEquals(ModelFailure.NETWORK.userMessage, answer.error)
                 assertTrue(answer.blocks.filterIsInstance<MessageBlock.Text>().any { "retained partial" in it.text })
             }
         }
@@ -158,10 +160,14 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 // A late damaged global record cannot change or abort this already-frozen run.
                 f.app.getSharedPreferences("daiyu-model-reconnect", 0).edit()
                     .putInt("reconnect-v1", 7).commit()
+                controlMain {
+                    val options = field(runner(f), "options") as RunnerOptions
+                    assertEquals(0, options.reconnect.maxAttempts)
+                    assertEquals(initial != ReconnectDurationPreset.NONE, options.reconnect.budgetFactory != null)
+                }
             } finally { assemble.countDown(); openSession.countDown(); session.release.countDown() }
             awaitControl("frozen run completes") { f.controller.active == null }
-            assertEquals(if (initial == ReconnectDurationPreset.NONE) null else diagnostic(ProviderProtocol.MESSAGES),
-                f.controller.problem)
+            assertNull(f.controller.problem)
         }
     }
 
@@ -325,6 +331,14 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 owned = runner(f)
                 observed = field(owned, "model") as ModelPort
             }
+            val callbackField = observed.javaClass.declaredFields.single {
+                Function1::class.java.isAssignableFrom(it.type)
+            }.apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val originalNotice = callbackField.get(observed) as (String) -> Unit
+            val diagnosticProbe = FrozenReconnectAdapter.freeze(
+                ReconnectSettings(ReconnectDurationPreset.WINDOW_30S), ProviderProtocol.UNKNOWN
+            ).observeFailures(CatalogFixturePort { throw ModelRequestException(ModelFailure.TIMEOUT) }, originalNotice)
             val faults: List<() -> Unit> = listOf(
                 { set(f.controller, "active", original.copy(id = MessageId("replacement-message"))) },
                 { set(f.controller, "active", original.copy(runId = RunId("replacement-run"))) },
@@ -336,7 +350,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
             )
             for (fault in faults) {
                 controlMain {
-                    try { observed.open(emptyList()); fail("probe must fail") }
+                    try { diagnosticProbe.open(emptyList()); fail("probe must fail") }
                     catch (_: ModelRequestException) { }
                     // Observer posted, but cannot execute until this main-thread task exits.
                     fault()
@@ -351,11 +365,12 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 } }
             }
             controlMain {
-                try { observed.open(emptyList()); fail("probe must fail") }
+                try { diagnosticProbe.open(emptyList()); fail("probe must fail") }
                 catch (_: ModelRequestException) { }
             }
             instrumentation.waitForIdleSync()
-            assertEquals(diagnostic(ProviderProtocol.RESPONSES), f.controller.problem)
+            assertEquals(ReconnectCapability.UNKNOWN_TRANSPORT.userMessage, f.controller.problem)
+            assertEquals(1, opens.get())
         } finally { held.release.countDown() }
         awaitControl("original run completes") { f.controller.active == null }
     }

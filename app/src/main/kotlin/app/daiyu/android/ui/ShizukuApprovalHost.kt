@@ -26,7 +26,10 @@ internal fun ShizukuApprovalHost(
     text: String,
     isCurrent: () -> Boolean,
     onAccepted: (ControllerShizukuPreparation, Conversation) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    sendButton: @Composable (Boolean, () -> Unit) -> Unit = { enabled, send ->
+        ShizukuApprovalSendButton(enabled, send)
+    }
 ) {
     var uid by remember(controller) { mutableStateOf("") }
     var command by remember(controller) { mutableStateOf("") }
@@ -66,15 +69,15 @@ internal fun ShizukuApprovalHost(
             enabled = preview == null, singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(MaterialTheme.colorScheme.error)),
             modifier = Modifier.managedInput())
-        Button(enabled = preview == null && text.isNotBlank(), modifier = Modifier.testTag("shizuku-text-send"), onClick = {
-            if (!active.get() || !isCurrent()) return@Button
+        sendButton(preview == null && text.isNotBlank(), send@{
+            if (!active.get() || !isCurrent()) return@send
             val prepared = controller.prepareShizukuSend(conversation, text, command, uid, timeout)
             if (prepared == null) {
                 error = "无法发送：请检查 UID、命令、超时，或等待当前运行结束。未发起请求。"
             } else {
                 if (!active.get() || !isCurrent()) {
                     controller.rejectShizuku(prepared)
-                    return@Button
+                    return@send
                 }
                 ownedPreparation.value = prepared
                 error = null
@@ -85,12 +88,19 @@ internal fun ShizukuApprovalHost(
                     error = "命令已失效；未重复发送。"
                 }
             }
-        }) { Text("发送 Shizuku 命令") }
+        })
         preview?.let {
             Text("运行：${it.runId.value}；准备或清理中，UNKNOWN 不自动重试。")
             TextButton(onClick = { controller.rejectShizuku(it) }) { Text("停止准备（不重试）") }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         controller.problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+internal fun ShizukuApprovalSendButton(enabled: Boolean, onClick: () -> Unit) {
+    Button(enabled = enabled, modifier = Modifier.testTag("shizuku-text-send"), onClick = onClick) {
+        Text("发送 Shizuku 命令")
     }
 }

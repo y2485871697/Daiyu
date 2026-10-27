@@ -17,6 +17,7 @@ class ShizukuApprovalHostTest : WiredActivityTestCase() {
     private val mounted = mutableStateOf(true)
     private val currentVisit = mutableStateOf(true)
     private val text = "mount-owned draft"
+    private var retainedSend: (() -> Unit)? = null
 
     private fun show() {
         mainThread {
@@ -25,7 +26,11 @@ class ShizukuApprovalHostTest : WiredActivityTestCase() {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         if (mounted.value) ShizukuApprovalHost(fixture.controller, null, text,
                             isCurrent = { currentVisit.value },
-                            onAccepted = { _, _ -> error("must not submit") })
+                            onAccepted = { _, _ -> error("must not submit") },
+                            sendButton = { enabled, send ->
+                                androidx.compose.runtime.SideEffect { retainedSend = send }
+                                ShizukuApprovalSendButton(enabled, send)
+                            })
                     }
                 }
             }
@@ -83,14 +88,18 @@ class ShizukuApprovalHostTest : WiredActivityTestCase() {
             .scrollToVisible().performTextReplacement("2000")
         ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
             .scrollToVisible().performTextReplacement("printf stale")
-        val oldSend = checkNotNull(ui.onNodeWithTag("shizuku-text-send").scrollToVisible()
-            .fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action)
+        ui.onNodeWithTag("shizuku-text-send").scrollToVisible().assertIsEnabled()
+        val oldSend = checkNotNull(retainedSend)
         mainThread { if (dispose) mounted.value = false else currentVisit.value = false }
         ui.waitForIdle()
-        mainThread { oldSend() }
-        assertNull(fixture.controller.shizukuPreparation())
-        assertEquals(0, fixture.opens.get())
-        assertTrue(fixture.database.conversations().isEmpty())
+        if (dispose) ui.onNodeWithTag("shizuku-text-send").assertDoesNotExist()
+        else ui.onNodeWithTag("shizuku-text-send").assertExists()
+        withBlockedShizukuWorker {
+            mainThread { oldSend() }
+            assertNull(fixture.controller.shizukuPreparation())
+            assertEquals(0, fixture.opens.get())
+            assertTrue(fixture.database.conversations().isEmpty())
+        }
     }
 
     fun testOldMountDisposalDoesNotRejectReplacementPreparation() {

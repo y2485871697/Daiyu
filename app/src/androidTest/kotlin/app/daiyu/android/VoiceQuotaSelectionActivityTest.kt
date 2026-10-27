@@ -153,7 +153,6 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
 
     override fun cleanupAfterLegacy() {
         try {
-            mainThread { activity.setContent {} }
             roots.forEach { it.deleteRecursively() }
         } finally { super.cleanupAfterLegacy() }
     }

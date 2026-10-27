@@ -28,7 +28,6 @@ import androidx.compose.ui.text.TextLayoutResult
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
-import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import app.daiyu.android.ui.screens.settings.ProviderActionButton
 import app.daiyu.android.ui.screens.settings.ProviderSettingsTheme
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -138,8 +137,8 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                                             if (index == titles.lastIndex) {
                                                 ProviderActionButton(title, { clicks[index]++ }, buttonModifier,
                                                     enabled = enabled.value, colors = ButtonDefaults.textButtonColorsPrimary(
-                                                        color = MiuixTheme.colorScheme.surfaceVariant,
-                                                        textColor = assistantPreviewPalette().danger))
+                                                        color = MiuixTheme.colorScheme.errorContainer,
+                                                        textColor = MiuixTheme.colorScheme.onErrorContainer))
                                             } else {
                                                 ProviderActionButton(title, { clicks[index]++ }, buttonModifier, enabled = enabled.value)
                                             }

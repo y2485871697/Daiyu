@@ -31,7 +31,7 @@ class OpenedFileReceiverTest : InstrumentationTestCase() {
             override fun getContentResolver() = resolver
             override fun getApplicationContext(): Context = this
         }
-        resolver.addProvider("opened-file-test", object : ContentProvider() {
+        val provider = object : ContentProvider() {
             override fun onCreate() = true
             override fun getType(uri: Uri) = "text/plain"
             override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
@@ -43,7 +43,12 @@ class OpenedFileReceiverTest : InstrumentationTestCase() {
             override fun insert(uri: Uri, values: ContentValues?): Uri? = error("unused")
             override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = error("unused")
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = error("unused")
+        }
+        provider.attachInfo(context, ProviderInfo().apply {
+            authority = sourceUri.authority
+            exported = false
         })
+        resolver.addProvider(sourceUri.authority!!, provider)
         store = OpenedFileStore(context)
     }
     override fun tearDown() { try { directory.deleteRecursively() } finally { super.tearDown() } }

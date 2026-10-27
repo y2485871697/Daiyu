@@ -2,6 +2,7 @@ package app.daiyu.android.model
 
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.*
+import app.daiyu.android.model.reconnect.ReconnectCapability
 import app.daiyu.android.model.reconnect.ReconnectCapabilities
 import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 import app.daiyu.android.model.catalog.*
@@ -132,8 +133,10 @@ class NativeCompletionTest : InstrumentationTestCase() {
             assertEquals(ModelEvent.Usage(10, 3, 4), events.filterIsInstance<ModelEvent.Usage>().single())
             assertEquals(1, events.filterIsInstance<ModelEvent.ProtocolOutput>().single().items.size)
             assertTrue(conn.inputClosed && conn.outputClosed && conn.disconnected)
-            assertFalse(ReconnectCapabilities.forProtocol(protocol).supported)
-            assertFalse(session is ResumableModelSession)
+            assertEquals(ReconnectCapability.REQUEST_RETRY, ReconnectCapabilities.forProtocol(protocol))
+            assertTrue(session is RequestRetryModelSession)
+            assertFalse(session is CheckpointedResumableModelSession)
+            assertFalse((session as RequestRetryModelSession).canResume)
             try { session.next(emptyList()) {}; fail("must not repost completed request") } catch (_: IllegalStateException) {}
             assertEquals(1, posts)
         }
@@ -281,7 +284,11 @@ class NativeCompletionTest : InstrumentationTestCase() {
                 else frame(gemini(JSONArray().put(JSONObject().put("text", "partial"))))
             val session = NativeCompletionModel(settings(protocol), { posts++; Connection(partial) }).open(input())
             val events = mutableListOf<ModelEvent>()
-            failure(ModelFailure.INCOMPLETE) { session.next(emptyList(), events::add) }
+            failure(ModelFailure.NETWORK) { session.next(emptyList(), events::add) }
+            assertTrue(session is RequestRetryModelSession)
+            assertFalse(session is CheckpointedResumableModelSession)
+            assertTrue((session as RequestRetryModelSession).canResume)
+            assertEquals(ReconnectCapability.REQUEST_RETRY, ReconnectCapabilities.forSession(session))
             assertEquals("partial", events.filterIsInstance<ModelEvent.TextDelta>().single().text)
             assertTrue(events.none { it is ModelEvent.TextFinal || it is ModelEvent.ToolReady || it is ModelEvent.Usage || it is ModelEvent.ProtocolOutput })
             try { session.next(emptyList()) {}; fail("no retry after EOF") } catch (_: IllegalStateException) {}

@@ -36,9 +36,11 @@ class ProductCapabilityDefaultsTest : InstrumentationTestCase() {
             assertTrue(PlatformToolSettings(platform).freeze().platformAllowed.isEmpty())
             val productBrowser = BrowserSettingsStore(context).snapshot()
             assertEquals(BrowserAccess.FULL, productBrowser.access)
-            assertEquals("DENY", productBrowser.historyConsent)
+            assertEquals("ALLOW", productBrowser.historyConsent)
             assertTrue(productBrowser.allowedCookieNames.isEmpty())
-            assertEquals(BrowserAccess.DISABLED, BrowserSettingsStore(browser).snapshot().access)
+            val injectedBrowser = BrowserSettingsStore(browser).snapshot()
+            assertEquals(BrowserAccess.DISABLED, injectedBrowser.access)
+            assertEquals("DENY", injectedBrowser.historyConsent)
             assertEquals(beforePlatform, platform.all)
             assertEquals(beforeBrowser, browser.all)
         } finally { platform.edit().clear().commit(); browser.edit().clear().commit() }

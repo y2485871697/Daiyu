@@ -368,9 +368,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
             ChatMenuAction.ATTACH_FILE, ChatMenuAction.ATTACH_FOLDER)) {
             node("chat-attachment:${action.name}").assertIsDisplayed()
         }
-        val expectedEntries = setOf("ATTACH_IMAGE", "ATTACH_VIDEO", "ATTACH_FILE", "ATTACH_FOLDER",
-            "BROWSER_TOOLS", "GUI_TOOLS", "MCP_TOOLS", "TERMINAL_TOOLS",
-            "GENERATE_IMAGE", "GENERATE_VIDEO", "GENERATION_SETTINGS")
+        val expectedEntries = setOf("ATTACH_IMAGE", "ATTACH_VIDEO", "ATTACH_FILE", "ATTACH_FOLDER")
         val entries = ui.onAllNodes(SemanticsMatcher("attachment entry") {
             it.config.contains(SemanticsProperties.TestTag) &&
                 it.config[SemanticsProperties.TestTag].startsWith("chat-attachment:")

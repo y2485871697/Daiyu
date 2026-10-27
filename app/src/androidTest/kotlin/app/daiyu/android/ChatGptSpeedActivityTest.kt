@@ -39,6 +39,14 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
         assertEquals(mode, fixture.settings.load().requestOptions.speedMode)
     }
 
+    private fun measuredPopupTextLayout(result: androidx.compose.ui.text.TextLayoutResult): androidx.compose.ui.text.TextLayoutResult {
+        val input = result.layoutInput
+        return androidx.compose.ui.text.TextMeasurer(input.fontFamilyResolver, input.density, input.layoutDirection, cacheSize = 0)
+            .measure(text = input.text, style = input.style, overflow = input.overflow, softWrap = input.softWrap,
+                maxLines = input.maxLines, placeholders = input.placeholders,
+                constraints = androidx.compose.ui.unit.Constraints.fixed(result.size.width, result.size.height))
+    }
+
     fun testLongPressAndPopupClickSharePersistedCycleWithoutChangingDepthOrDraft() {
         setDraft("speed keeps draft")
         fixture.controller.reasoningPreference.set(null, ReasoningEffort.HIGH)
@@ -75,7 +83,11 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
         }
         assertEquals(20f, title.single().layoutInput.style.fontSize.value, .001f)
         assertEquals(28f, title.single().layoutInput.style.lineHeight.value, .001f)
-        val layout = title.single()
+        val titleSemantics = title.single()
+        val layout = measuredPopupTextLayout(titleSemantics)
+        assertEquals(titleSemantics.size, layout.size)
+        assertTrue("a one-pixel title must still report overflow", measuredPopupTextLayout(
+            titleSemantics.copy(size = androidx.compose.ui.unit.IntSize(1, titleSemantics.size.height))).hasVisualOverflow)
         assertFalse("title size=${layout.size} constraints=${layout.layoutInput.constraints} " +
             "lines=${layout.lineCount} widthOverflow=${layout.didOverflowWidth} heightOverflow=${layout.didOverflowHeight} " +
             "bounds=${node("chat-thinking-title").fetchSemanticsNode().boundsInRoot}", layout.hasVisualOverflow)
@@ -83,7 +95,9 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
         node("chat-thinking-value").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) {
             assertTrue(it(values))
         }
-        val value = values.single()
+        val valueSemantics = values.single()
+        val value = measuredPopupTextLayout(valueSemantics)
+        assertEquals(valueSemantics.size, value.size)
         assertEquals(22f, value.layoutInput.style.fontSize.value, .001f)
         assertEquals(30f, value.layoutInput.style.lineHeight.value, .001f)
         assertFalse(value.hasVisualOverflow)

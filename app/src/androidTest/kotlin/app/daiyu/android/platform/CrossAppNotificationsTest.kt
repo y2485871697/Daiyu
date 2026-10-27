@@ -38,7 +38,10 @@ class CrossAppNotificationsTest : InstrumentationTestCase() {
     fun testNoSystemGrantAndNotConnectedAreNotEmptySuccess() {
         error(read(), "notification_access_required"); assertEquals(0, reads)
         try { host.record(true); fail("cannot enable recording without actual access and connection") } catch (_: IllegalStateException) { }
-        assertFalse(store.enabled())
+        assertTrue(store.enabled())
+        assertFalse(host.recording())
+        assertEquals(0L, store.since())
+        assertTrue(store.rows(now, 0, now).isEmpty())
         granted = true
         error(read(), "notification_listener_not_connected"); assertEquals(0, reads)
         connect()
@@ -59,7 +62,8 @@ class CrossAppNotificationsTest : InstrumentationTestCase() {
         duringRead = { granted = false }
         error(read(), "notification_access_required")
         assertEquals("notification_access_required", host.admission(current, policy))
-        assertFalse(store.enabled()); assertTrue(store.rows(now, 0, now).isEmpty())
+        assertTrue(store.enabled()); assertFalse(host.recording())
+        assertEquals(0L, store.since()); assertTrue(store.rows(now, 0, now).isEmpty())
         granted = true
         error(read(), "notification_listener_not_connected")
     }
@@ -68,8 +72,8 @@ class CrossAppNotificationsTest : InstrumentationTestCase() {
         error(read(), "notification_listener_changed")
         error(read(), "notification_listener_not_connected")
     }
-    fun testHistoryRequiresSeparateOptInDoesNotBackfillAndOffClears() {
-        connect(); rows = listOf(row())
+    fun testExplicitHistoryOffDoesNotBackfillAndOffClears() {
+        connect(); host.record(false); rows = listOf(row())
         var constructed = 0
         host.posted(source) { constructed++; row() }
         assertEquals(0, constructed)
@@ -97,7 +101,7 @@ class CrossAppNotificationsTest : InstrumentationTestCase() {
         assertEquals(1, read(history, """{"start_ms":$now,"end_ms":$now}""").getJSONObject("data").getJSONArray("items").length())
         error(read(history, """{"start_ms":0,"end_ms":$now}"""), "invalid_time_window")
     }
-    fun testVersion16And17UpgradeInstallsDisabledCaptureWithoutRewritingConversations() {
+    fun testVersion16And17UpgradeInstallsEnabledPreferenceWithoutRewritingConversations() {
         for (version in listOf(16, 17)) {
             val context = testContext(instrumentation.targetContext, "notifications-upgrade-$version-${UUID.randomUUID()}-")
             val old = ConversationDatabase(context)
@@ -116,7 +120,9 @@ class CrossAppNotificationsTest : InstrumentationTestCase() {
             val upgraded = ConversationDatabase(context)
             try {
                 assertEquals(29, upgraded.readableDatabase.version)
-                assertFalse(NotificationHistoryStore(upgraded).enabled())
+                val upgradedStore = NotificationHistoryStore(upgraded)
+                assertTrue(upgradedStore.enabled())
+                assertEquals(0L, upgradedStore.since())
                 upgraded.readableDatabase.rawQuery("SELECT title,draft,updated FROM conversations WHERE id='fixture'", null).use {
                     assertTrue(it.moveToFirst()); assertEquals("synthetic", it.getString(0)); assertEquals("draft", it.getString(1)); assertEquals(123L, it.getLong(2))
                 }

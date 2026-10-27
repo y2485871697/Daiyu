@@ -52,7 +52,8 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("conversation-workspace-sheet")
         node("workspace-path-card").assertExists()
         node("workspace-save").assertDoesNotExist()
-        node("workspace-close").performClick()
+        node("workspace-close").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitHostWindowFocus(activity)
         assertDraft("真实输入栏上滑保留的草稿")
         assertNull(fixture.database.workspaceBinding(null))
@@ -73,7 +74,8 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("workspace-current-path")
         node("workspace-cancel").performClick()
         node("workspace-path-card").assertExists()
-        node("workspace-close").performClick()
+        node("workspace-close").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitHostWindowFocus(activity)
         assertDraft("真实正文手势")
         assertNull(fixture.database.workspaceBinding(null))
@@ -272,6 +274,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("workspace-path-card").assertExists()
         node("workspace-path").assertDoesNotExist()
         node("workspace-save").assertDoesNotExist()
+        node("workspace-close").assertDoesNotExist()
         ui.onNodeWithText("来源").assertDoesNotExist()
         ui.onNodeWithText("路径不可用").assertDoesNotExist()
         node("workspace-path-card").performClick()
@@ -339,7 +342,8 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
                     primaryAccentColor = primary, secondaryAccentColor = secondary)
                 ui.runOnIdle { visible = true; choosing = false; busy = false; listing = false; directory = null; path = original }
                 showSheet(appearance)
-                node("workspace-close").assertExists()
+                node("workspace-close").assertDoesNotExist()
+                ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
                 node("workspace-path-card").performTouchInput { click() }
                 node("workspace-close").assertDoesNotExist()
                 ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
@@ -370,21 +374,28 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         assertTrue("Missing picker button content $foreground", foregroundCount > 8)
     }
 
-    fun testBackAndOutsideDismissNeverSaveEvenWhenBusy() {
-        choosing = true
-        setDirectory("$original/unsaved")
-        busy = true
-        showSheet()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        ui.waitUntil(5_000) { !visible }
-        ui.runOnIdle { assertEquals(0, saves); assertEquals(1, dismisses); visible = true }
-        awaitUniqueTag("conversation-workspace-sheet")
-        awaitNodeWindowFocus(node("conversation-workspace-sheet"))
-        ui.mainClock.advanceTimeBy(1_000)
-        awaitVisualIdle()
-        node("preview-dialog-scrim").performTouchInput { click(Offset(center.x, 2f)) }
-        ui.waitUntil(5_000) { !visible }
-        ui.runOnIdle { assertEquals(0, saves); assertEquals(2, dismisses) }
+    fun testBackAndOutsideDismissNeverSaveOnEitherPageEvenWhenBusy() {
+        var expectedDismisses = 0
+        for (picker in listOf(false, true)) {
+            ui.runOnIdle {
+                visible = true; choosing = picker; busy = true
+                setDirectory("$original/unsaved")
+            }
+            showSheet()
+            node("workspace-close").assertDoesNotExist()
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            ui.waitUntil(5_000) { !visible }
+            expectedDismisses++
+            ui.runOnIdle { assertEquals(0, saves); assertEquals(expectedDismisses, dismisses); visible = true }
+            awaitUniqueTag("conversation-workspace-sheet")
+            awaitNodeWindowFocus(node("conversation-workspace-sheet"))
+            ui.mainClock.advanceTimeBy(1_000)
+            awaitVisualIdle()
+            node("preview-dialog-scrim").performTouchInput { click(Offset(center.x, 2f)) }
+            ui.waitUntil(5_000) { !visible }
+            expectedDismisses++
+            ui.runOnIdle { assertEquals(0, saves); assertEquals(expectedDismisses, dismisses) }
+        }
     }
 
     fun testInvisibleOwnerDoesNotRenderOrDispatch() {

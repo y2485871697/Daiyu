@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -71,10 +70,6 @@ fun ConversationWorkspaceSheet(
                     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(if (choosing) "选择工作目录" else "工作区", style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f))
-                        if (!choosing) ConversationAgentIconButton(onClick = onDismiss,
-                            modifier = Modifier.size(48.dp).testTag("workspace-close")) {
-                            Icon(Icons.Rounded.Close, contentDescription = "关闭", modifier = Modifier.size(20.dp))
-                        }
                     }
                     if (!choosing) {
                         val shape = RoundedCornerShape(14.dp)

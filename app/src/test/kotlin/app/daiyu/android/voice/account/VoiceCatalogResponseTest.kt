@@ -45,6 +45,51 @@ class VoiceCatalogResponseTest {
         assertTrue(failure is VoiceCatalogFailure)
         assertTrue(failure!!.message!!.contains("TotalCount"))
     }
+    @Test fun emptyStateWithNullOrOmittedStatusesDoesNotHideLaterReadySlots() = runBlocking {
+        for (empty in listOf("{\"TotalCount\":0}", "{\"TotalCount\":0,\"Statuses\":null}")) {
+            val states = mutableListOf<String>()
+            val catalog = DoubaoVoiceCatalog(AccountHttpTransport { request, _ ->
+                val body = JSONObject(okio.Buffer().also { request.body!!.writeTo(it) }.readUtf8())
+                val state = body.getString("State"); states += state
+                val data = if (state == "Success") """{"TotalCount":1,"Statuses":[
+                    {"SpeakerID":"S_ready","State":"Success","Alias":"Ready","AvailableTrainingTimes":7}]}""" else empty
+                response(200, "{\"Result\":$data}")
+            })
+            val slots = catalog.list("private-ak", "private-sk", "p")
+            assertEquals(listOf("Unknown", "Training", "Success", "Active"), states)
+            assertEquals(listOf("S_ready"), slots.map { it.id })
+            assertEquals(7, slots.single().remaining)
+        }
+    }
+    @Test fun knownUnusedQuotaSurvivesTheFollowingEmptyStates() = runBlocking {
+        val catalog = DoubaoVoiceCatalog(AccountHttpTransport { request, _ ->
+            val body = JSONObject(okio.Buffer().also { request.body!!.writeTo(it) }.readUtf8())
+            response(200, if (body.getString("State") == "Unknown")
+                """{"Result":{"TotalCount":1,"Statuses":[{"SpeakerID":"S_free","AvailableTrainingTimes":10}]}}"""
+                else """{"Result":{"TotalCount":0,"Statuses":null}}""")
+        })
+        val slot = catalog.list("private-ak", "private-sk", "p").single()
+        assertEquals("S_free", slot.id); assertEquals("Unknown", slot.state); assertEquals(10, slot.remaining)
+    }
+    @Test fun explicitZeroCanReturnNullMissingOrEmptyArrayWithoutInventingQuotas() = runBlocking {
+        for (data in listOf("""{"TotalCount":0}""", """{"TotalCount":0,"Statuses":null}""",
+            """{"TotalCount":0,"Statuses":[]}""")) {
+            var calls = 0
+            val catalog = DoubaoVoiceCatalog(AccountHttpTransport { _, _ -> calls++; response(200, "{\"Result\":$data}") })
+            assertTrue(catalog.list("private-ak", "private-sk", "p").isEmpty())
+            assertEquals(4, calls)
+        }
+    }
+    @Test fun malformedSuccessIsControlledAndNeverBecomesAnEmptyListOrCredentialHint() {
+        for (data in listOf("{}", "null", "[]",
+            """{"TotalCount":1}""", """{"TotalCount":1,"Statuses":null}""",
+            """{"TotalCount":0,"Statuses":{}}""", """{"TotalCount":0,"Statuses":"private-sk"}""",
+            """{"TotalCount":1,"Statuses":[null]}""", """{"TotalCount":1,"Statuses":[{}]}""")) {
+            val text = failure(200, "{\"Result\":$data}").safeMessage
+            assertTrue(text.contains("音色列表")); assertTrue(text.contains("未取得完整列表"))
+            assertFalse(text.contains("IAM")); assertFalse(text.contains("private"))
+        }
+    }
     @Test fun readCancellationIsStillCancellation() = runBlocking {
         val cancelled = CancellationException("stop")
         val catalog = DoubaoVoiceCatalog(AccountHttpTransport { _, _ -> throw cancelled })

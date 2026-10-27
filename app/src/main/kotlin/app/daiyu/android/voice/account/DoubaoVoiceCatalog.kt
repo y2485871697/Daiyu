@@ -5,6 +5,7 @@ import kotlinx.coroutines.ensureActive
 import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -35,7 +36,8 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
                     .put("PageNumber", page).put("PageSize", 100).toString()
                 val response = transport.execute(signedRequest(ak, sk, body, Instant.now()), AccountHttpTransportLimit)
                 val root = readResponse(response, listOf(ak, sk))
-                val data = root.getJSONObject("Result")
+                val data = root.optJSONObject("Result")
+                    ?: throw VoiceCatalogFailure("音色列表响应缺少有效 Result，未取得完整列表。")
                 // optInt coerces strings/fractions and invents totals when absent. None prove completeness.
                 val rawTotal = data.opt("TotalCount")
                 checkCatalog(rawTotal is Int || rawTotal is Long) { "音色列表 TotalCount 缺失或不是非负整数，未取得完整列表" }
@@ -44,13 +46,21 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
                 val total = totalLong.toInt()
                 checkCatalog(expectedTotal == null || expectedTotal == total) { "音色列表总数在分页中变化，未取得完整列表" }
                 expectedTotal = total
-                val items = data.getJSONArray("Statuses")
+                val rawItems = data.opt("Statuses")
+                val items = when {
+                    rawItems is JSONArray -> rawItems
+                    // Empty lists can be omitted or null; only an explicit zero total proves emptiness.
+                    total == 0 && (rawItems == null || rawItems === JSONObject.NULL) -> JSONArray()
+                    else -> throw VoiceCatalogFailure("音色列表 Statuses 缺失或格式无效，未取得完整列表。")
+                }
                 val offset = (page - 1) * 100
                 val expectedCount = (total - offset).coerceIn(0, 100)
                 checkCatalog(offset <= total && items.length() == expectedCount) { "音色列表页数或条数不完整，请重新查询" }
                 for (i in 0 until items.length()) {
-                    val item = items.getJSONObject(i)
-                    val id = item.getString("SpeakerID")
+                    val item = items.optJSONObject(i)
+                        ?: throw VoiceCatalogFailure("音色列表条目格式无效，未取得完整列表。")
+                    val id = item.opt("SpeakerID") as? String
+                        ?: throw VoiceCatalogFailure("音色列表 SpeakerID 缺失或格式无效，未取得完整列表。")
                     checkCatalog(id.matches(Regex("S_[A-Za-z0-9_-]+"))) { "音色列表包含无效槽位，未取得完整列表" }
                     checkCatalog(stateIds.add(id)) { "音色列表包含重复槽位，未取得完整列表" }
                     // Separate state requests are not one snapshot: keep the latest observation, as in Eta.

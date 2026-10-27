@@ -39,6 +39,11 @@ class AccountPageFeedbackTest {
         assertFalse(voiceAccountFailure(arbitrary, null).contains("secret"))
         assertFalse(voiceAccountFailure(arbitrary, null).contains("制作"))
     }
+    @Test fun controlledNetworkFailureIsNotMisreportedAsAnIamProblem() {
+        val failure = app.daiyu.android.voice.account.AccountTransportException("账户响应读取失败，请手动查询状态")
+        assertEquals(failure.safeMessage, voiceAccountFailure(failure, "请核对 AK／SK 和 IAM 权限"))
+        assertFalse(voiceAccountFailure(failure, null).contains("IAM"))
+    }
     @Test fun trainingKeepsItsOwnUnknownSubmissionWarning() {
         assertEquals("制作结果未确认，请查询原音色，不要重复提交。",
             voiceAccountFailure(IllegalStateException("secret"), "制作结果未确认，请查询原音色，不要重复提交。"))

@@ -334,7 +334,7 @@ internal fun VoiceAccountPanel(
                     SettingsRow("读取我的名额", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
                         val a = ak; val s = sk; val p = project
                         ask("查询项目 $p 的槽位；已制作槽位将用当前语音 Key 校验，不制作、不合成",
-                            "名额读取失败，请核对控制面 AK／SK、当前项目与 IAM 权限后重试。") { report ->
+                            "名额读取失败，请手动重试；若持续失败，请检查网络或本机存储。") { report ->
                             val count = resources.voices.importPurchased(speech!!, a, s, p)
                             report(if (count == 0) "本项目未找到名额；请核对项目与语音 API Key。" else "已同步 $count 个名额；未使用的名额在制作声音时选择。")
                         }

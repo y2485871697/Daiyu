@@ -83,7 +83,10 @@ class AccountHttpTransportTest {
             val task = async(start = CoroutineStart.UNDISPATCHED) { runCatching { OkHttpAccountTransport(calls).execute(request(), 8) } }
             val body = TrackedBody(ByteArray(100000), declared)
             calls.last.respond(body)
-            assertTrue(task.await().isFailure); assertTrue(body.closed); assertTrue(calls.last.cancelled)
+            val error = task.await().exceptionOrNull()
+            assertTrue(error is AccountTransportException)
+            assertEquals("账户响应读取失败，请手动查询状态", (error as AccountTransportException).safeMessage)
+            assertNull(error.cause); assertTrue(body.closed); assertTrue(calls.last.cancelled)
             if (declared > 0) assertEquals(0L, body.readBytes) else assertTrue(body.readBytes <= 8192)
         }
     }
@@ -100,6 +103,8 @@ class AccountHttpTransportTest {
         calls.last.callback.onFailure(calls.last, IOException("fixture-ak fixture-sk private-url"))
         val error = task.await().exceptionOrNull()!!
         assertNull(error.cause); assertFalse(error.toString().contains("fixture")); assertFalse(error.toString().contains("private-url"))
+        assertTrue(error is AccountTransportException)
+        assertEquals("账户请求未确认，请手动查询状态", (error as AccountTransportException).safeMessage)
     }
     private class Calls : Call.Factory {
         lateinit var last: FakeCall

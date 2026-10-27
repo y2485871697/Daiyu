@@ -15,7 +15,7 @@ import okhttp3.Response
 import java.io.IOException
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-private class AccountTransportException(message: String) : IllegalStateException(message),
+internal class AccountTransportException(val safeMessage: String) : IllegalStateException(safeMessage),
     kotlinx.coroutines.CopyableThrowable<AccountTransportException> {
     override fun createCopy(): AccountTransportException? = null
 }

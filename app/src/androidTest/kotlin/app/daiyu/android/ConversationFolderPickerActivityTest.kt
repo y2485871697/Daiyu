@@ -144,8 +144,9 @@ class ConversationFolderPickerActivityTest : WiredActivityTestCase() {
         openPicker(conversation)
         node("dialog-cancel").assertIsDisplayed()
         node("dialog-confirm").assertIsDisplayed()
-        node("folder-picker-list").performScrollToNode(hasTestTag("folder-choice:文件夹59"))
+        node("folder-picker-list").scrollToDescendant(hasTestTag("folder-choice:文件夹59"))
         node("folder-choice:文件夹59").performClick().assertIsSelected()
+        node("dialog-cancel").assertIsDisplayed()
         node("dialog-confirm").assertIsDisplayed().performClick()
         awaitClosed()
         mainThread { assertEquals("文件夹59", current(conversation).folder) }

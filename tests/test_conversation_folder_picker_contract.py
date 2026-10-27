@@ -34,6 +34,21 @@ class ConversationFolderPickerContractTest(unittest.TestCase):
         self.assertIn("onDismiss = { if (valid()) prompt = null }", render)
         self.assertIn("fun valid() = activityUsable() && prompt === current", host)
 
+    def test_long_list_uses_clock_driven_scroll_and_keeps_both_footer_states(self):
+        source = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ConversationFolderPickerActivityTest.kt").read_text()
+        body = source.split("fun testLongFolderListScrollsWithoutHidingFooter()", 1)[1]
+        before, after = body.split('node("folder-picker-list").scrollToDescendant(hasTestTag("folder-choice:文件夹59"))', 1)
+        self.assertIn('repeat(60)', before)
+        for footer in ('node("dialog-cancel").assertIsDisplayed()', 'node("dialog-confirm").assertIsDisplayed()'):
+            self.assertIn(footer, before)
+            self.assertIn(footer, after)
+        for oracle in ('node("folder-choice:文件夹59").performClick().assertIsSelected()',
+                       'node("dialog-confirm").assertIsDisplayed().performClick()',
+                       'awaitClosed()', 'assertEquals("文件夹59", current(conversation).folder)',
+                       'assertEquals(0, fixture.opens.get())'):
+            self.assertIn(oracle, after)
+        self.assertNotIn('performScrollToNode(', source)
+
     def test_picker_reuses_selection_rows_and_only_this_sheet_hides_close(self):
         picker = self.picker()
         for token in ("ChatSelectionSheet(", 'title = "移动到文件夹"', "showCloseButton = false",

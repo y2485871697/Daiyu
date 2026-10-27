@@ -74,5 +74,66 @@ class MessageComposerEditContract(unittest.TestCase):
         self.assertIn('state.text.isNotBlank() || state.editingMessageCanSubmit', composer)
         self.assertIn('val toolbarEnabled = state.enabled && !editing', composer)
 
+    def test_edit_model_and_attachment_controls_are_not_disabled_with_the_toolbar(self):
+        composer = (UI / 'ChatComposer.kt').read_text()
+        self.assertIn('ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,', composer)
+        self.assertIn('val attachmentEnabled = state.enabled', composer)
+        self.assertIn('.testTag("chat-attach"), enabled = attachmentEnabled', composer)
+        self.assertIn('onLongClick = if (editing) null', composer)
+
+    def test_added_images_use_an_independent_draft_and_reach_revision_save(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        host = (SRC / 'MessageEditImageDraft.kt').read_text()
+        self.assertIn('MessageEditImageDraft(target.conversationId.value', main)
+        self.assertIn('messageCallbacks.onSaveEditImages(editor.key, text, editor.additions.ready)', main)
+        self.assertIn('message-edit-${UUID.randomUUID()}', host)
+        self.assertIn('source.import(owner, uri, signal)', host)
+        self.assertIn('source.store.clear(owner)', host)
+        self.assertIn('if (!editingPickerAway) invalidateMessageActionEditor()', main)
+        self.assertIn('request.visit === inlineMessageEditor?.visit', main)
+        self.assertIn('request.editVisit === inlineMessageEditor?.visit', main)
+        self.assertIn('editor.copy(text = next, selectionStart = next.length', main)
+        store = (SRC / 'storage/MessageActionStore.kt').read_text()
+        self.assertIn('appendEditImages(edited, addedImages)', store)
+        self.assertIn('val id = MessageId(java.util.UUID.randomUUID().toString())', store)
+        self.assertIn('images.restore(owner, refs, contents)', store)
+        self.assertIn('original.size + added.size <= limits.maxImages', store)
+        self.assertIn('imageInputSupported = true, isCancelled = cancelled', store)
+        controller = (SRC / 'ChatController.kt').read_text()
+        self.assertIn('if (action == MessageAction.SAVE_EDIT) editImages else emptyList()', controller)
+        self.assertIn('actionRevision = revision', controller)
+
+    def test_unknown_save_keeps_temporary_attachments_and_blocks_resubmit(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        self.assertIn('!uncertain && !additions.blocked', main)
+        self.assertIn('inlineMessageEditor = editor.copy(uncertain = true)', main)
+        uncertain = main.split('private fun retainUncertainMessageEdit()', 1)[1].split('private fun ', 1)[0]
+        self.assertIn('dataRevision = controller.dataRevision', uncertain)
+        self.assertNotIn('clearInlineMessageEditor()', uncertain)
+        self.assertEqual(main.count('retainUncertainMessageEdit()'), 3)
+        self.assertIn('if (outcome.outcome == RegenerationSendOutcome.ACCEPTED)', main)
+        self.assertIn('it.uncertain || it.additions.blocked', main)
+
+
+    def test_picker_return_settles_after_the_activity_is_resumed(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        resumed = main.split('override fun onPostResume()', 1)[1].split('override fun ', 1)[0]
+        self.assertIn('window.decorView.post', resumed)
+        self.assertIn('settleEditImages()', resumed)
+
+    def test_pending_file_reference_blocks_edit_save_until_it_settles(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        self.assertIn('it.live && it.editVisit === editor.visit', main)
+        self.assertIn('editor.canSubmit && !editReferencePending(editor)', main)
+        self.assertIn('it.canSubmit && !editReferencePending(it)', main)
+        settle = main.split('private fun settleChatReference()', 1)[1].split('private fun ', 1)[0]
+        self.assertIn('if (request.editVisit != null) publishChat(rowsChanged = false)', settle)
+        self.assertIn('if (request.editVisit != null && activityUsable()) publishChat(rowsChanged = false)', settle)
+
+    def test_replacing_editor_closes_its_temporary_image_owner(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        edit = main.split('is MessageActionResult.EditDraft ->', 1)[1].split('is MessageActionResult.Branch', 1)[0]
+        self.assertLess(edit.index('clearInlineMessageEditor()'), edit.index('inlineMessageEditor = InlineMessageEditor'))
+
 if __name__ == '__main__':
     unittest.main()

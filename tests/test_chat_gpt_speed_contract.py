@@ -88,7 +88,11 @@ class ChatGptSpeedContractTest(unittest.TestCase):
             self.assertIn(unchanged, composer)
         self.assertIn('state.copy(enabled = visualEnabled).textActionEnabled()', composer)
         self.assertIn('visualEnabled = primaryVisualEnabled', composer)
-        self.assertIn('visualEnabled = toolbarVisualEnabled', composer)
+        model = composer.split('ComposerChip(state.modelLabel', 1)[1].split('if (editing) ComposerCancelEdit', 1)[0]
+        self.assertIn('state.enabled, actions.onModelClick', model)
+        self.assertIn('visualEnabled = visualEnabled)', model)
+        self.assertIn('val attachmentEnabled = state.enabled', composer)
+        self.assertIn('enabled = attachmentEnabled', composer)
         self.assertIn('ComposerReferenceChips(references.references, state.enabled, visualEnabled)', composer)
         model = source('ui/screens/chat/conversation/ChatScreenModels.kt')
         self.assertIn('val gptSpeedSaving: Boolean = false', model)

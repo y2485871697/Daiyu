@@ -106,8 +106,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val editing = actions.editingMessageKey != null
     val toolbarEnabled = state.enabled && !editing
+    val attachmentEnabled = state.enabled
     val visualEnabled = state.enabled || state.gptSpeedSaving
-    val toolbarVisualEnabled = visualEnabled && !editing
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
     val chrome = chatChromeColors().copy(accent = conversationColors().accent)
@@ -129,7 +129,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         return true
     }
     var showContextTokens by rememberSaveable { mutableStateOf(false) }
-    var attachments by remember { mutableStateOf(false) }
+    var attachments by remember(state.editorGeneration, actions.editingMessageKey, state.enabled) { mutableStateOf(false) }
     var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes) { mutableStateOf(false) }
     val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()
     val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
@@ -167,9 +167,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         // Include the transparent 1dp CSS border in the composer box model.
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 4.dp).testTag("chat-composer-header"),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            ComposerChip(state.modelLabel.ifBlank { "模型" }, toolbarEnabled, actions.onModelClick,
+            ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
-                onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, visualEnabled = toolbarVisualEnabled)
+                onLongClick = if (editing) null else ({ actions.onMenuAction(ChatMenuAction.COLLABORATION) }), visualEnabled = visualEnabled)
             if (editing) ComposerCancelEdit(state.enabled, actions.onCancelMessageEdit)
             Row(Modifier.then(if (editing) Modifier.weight(1f).wrapContentWidth(Alignment.End) else Modifier)
                 .widthIn(max = 120.dp).heightIn(min = 22.dp).testTag("chat-context").clip(RoundedCornerShape(11.dp))
@@ -276,7 +276,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(32.dp), enabled = toolbarEnabled, tint = chrome.toolbar, iconSize = 22.5.dp, visualEnabled = toolbarVisualEnabled)
+                                Modifier.size(32.dp).testTag("chat-attach"), enabled = attachmentEnabled, tint = chrome.toolbar, iconSize = 22.5.dp, visualEnabled = visualEnabled)
                             Box(Modifier.size(32.dp).testTag("chat-reasoning")
                                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                                     enabled = toolbarEnabled, role = Role.Button,

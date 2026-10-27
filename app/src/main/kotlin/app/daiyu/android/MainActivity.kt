@@ -720,6 +720,44 @@ class MainActivity : ComponentActivity() {
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         imageHost.picked(uris)
     }
+    private class EditImagePick(val visit: Any, val host: MessageEditImageDraft,
+        val selection: app.daiyu.android.ui.screens.chat.attachments.ImageAttachmentSelection) {
+        var live = true
+        var firstPickerHop = true
+        var pickerAway = false
+        var returned = false
+        var uris: List<Uri> = emptyList()
+    }
+    private var editImagePick: EditImagePick? = null
+    private val editImagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        editImagePick?.let { request ->
+            request.returned = true; request.uris = uris
+            settleEditImages()
+        }
+    }
+    private fun pickEditImages() {
+        val editor = inlineMessageEditor ?: return
+        if (!chatReferenceAvailable() || !generationResumed() || !voiceForeground || editImagePick != null) return
+        val selection = editor.additions.select() ?: return
+        val request = EditImagePick(editor.visit, editor.additions, selection)
+        editImagePick = request
+        try { editImagePicker.launch("image/*") }
+        catch (_: Exception) {
+            editImagePick = null; editor.additions.cancelSelection(selection)
+            toast("无法打开图片选择器；编辑内容保留")
+        }
+    }
+    private fun settleEditImages() {
+        val request = editImagePick ?: return
+        if (!request.returned) return
+        if (!request.live || inlineMessageEditor?.visit !== request.visit) {
+            request.host.cancelSelection(request.selection); editImagePick = null; return
+        }
+        if (!generationResumed() || !voiceForeground) return
+        editImagePick = null
+        if (chatReferenceAvailable()) request.host.picked(request.selection, request.uris)
+        else request.host.cancelSelection(request.selection)
+    }
     private class ComposerShortcutPick(
         val trigger: app.daiyu.android.ui.screens.chat.conversation.ComposerShortcut,
         val text: String, val owner: ChatController.TextSendOwner,
@@ -797,7 +835,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private class ChatReferencePick(val tree: Boolean, val owner: ChatController.TextSendOwner, val text: String) {
+    private class ChatReferencePick(val tree: Boolean, val owner: ChatController.TextSendOwner, val text: String,
+        val editVisit: Any? = null) {
         var live = true
         var firstPickerHop = true
         var pickerAway = false
@@ -820,13 +859,17 @@ class MainActivity : ComponentActivity() {
     }
     private fun chatReferenceAvailable() = activityUsable() && selectionReady && retainedPage == "chat" &&
         !sidebarVisible && controller.ready && !controller.dataBusy && controller.active == null &&
-        pendingTextSend == null && controller.textSendState() == null && !imageHost.busy && !imageHost.hasAttachments &&
-        videoHost.state.items.isEmpty() && !videoSending && !shizukuWritesBlocked &&
+        pendingTextSend == null && controller.textSendState() == null &&
+        (inlineMessageEditor?.let { !it.uncertain } ?: (!imageHost.busy && !imageHost.hasAttachments && videoHost.state.items.isEmpty())) &&
+        !videoSending && !shizukuWritesBlocked &&
         terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
         guiEditor == null && shizukuEditor == null && browserApproval == null && !browserPreparing &&
         generationApproval == null && generationRequest == null && mcpApproval == null && !mcpPreparing && prompt == null
+    private fun editReferencePending(editor: InlineMessageEditor) =
+        chatReferencePick?.let { it.live && it.editVisit === editor.visit } == true
     private fun chatReferenceMatches(request: ChatReferencePick) =
-        request.owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) && request.text == draft
+        request.owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
+            request.editVisit === inlineMessageEditor?.visit && request.text == (inlineMessageEditor?.text ?: draft)
     private fun revokeChatReferencePick() {
         composerShortcutPick = null
         val request = chatReferencePick ?: return
@@ -836,7 +879,8 @@ class MainActivity : ComponentActivity() {
     }
     private fun pickChatReference(tree: Boolean) {
         if (!generationResumed() || !voiceForeground || !chatReferenceAvailable() || chatReferencePick != null) return
-        val request = ChatReferencePick(tree, ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision), draft)
+        val request = ChatReferencePick(tree, ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision),
+            inlineMessageEditor?.text ?: draft, inlineMessageEditor?.visit)
         chatReferencePick = request
         try { chatReferencePicker.launch(app.daiyu.android.platform.PlatformSettingsAccess.pickerIntent(tree)) }
         catch (_: Exception) {
@@ -855,6 +899,7 @@ class MainActivity : ComponentActivity() {
         if (raw.any { it.code < 0x20 || it.code == 0x7f }) { chatReferencePick = null; return }
         val data = request.resultData
         request.settling = true
+        if (request.editVisit != null) publishChat(rowsChanged = false)
         lifecycleScope.launch {
             try {
                 val description = withContext(Dispatchers.IO) {
@@ -878,11 +923,22 @@ class MainActivity : ComponentActivity() {
                     else "用 file_metadata 查看元数据；用 read_text_file 按行或 query 检索，按 next_offset_bytes 续读；勿每轮展开全文。不支持的文档格式应明确说明。"
                 val details = "$reference\n附件信息（按需读取）：$description；$instructions"
                 val next = if (request.text.isEmpty()) details else "${request.text}\n$details"
-                updateDraft(next)
-                if (draft == next) {
-                    selectionStart = next.length; selectionEnd = next.length; publishChat(rowsChanged = false)
-                } else toast("引用未加入；原草稿保留")
-            } finally { if (chatReferencePick === request) chatReferencePick = null }
+                val editor = inlineMessageEditor
+                if (request.editVisit != null && editor?.visit === request.editVisit) {
+                    inlineMessageEditor = editor.copy(text = next, selectionStart = next.length, selectionEnd = next.length)
+                    publishChat(rowsChanged = false)
+                } else if (request.editVisit == null && editor == null) {
+                    updateDraft(next)
+                    if (draft == next) {
+                        selectionStart = next.length; selectionEnd = next.length; publishChat(rowsChanged = false)
+                    } else toast("引用未加入；原草稿保留")
+                }
+            } finally {
+                if (chatReferencePick === request) {
+                    chatReferencePick = null
+                    if (request.editVisit != null && activityUsable()) publishChat(rowsChanged = false)
+                }
+            }
         }
     }
     private val rootExitConfirmation = RootExitConfirmation()
@@ -1172,9 +1228,12 @@ class MainActivity : ComponentActivity() {
         val target: app.daiyu.android.storage.MessageActionTarget,
         val images: List<app.daiyu.android.ui.screens.chat.conversation.MessageContentUi.Image>,
         val videos: List<app.daiyu.android.media.video.MessageVideoReference>,
+        val additions: MessageEditImageDraft,
+        val uncertain: Boolean = false,
         val selectionStart: Int = text.length, val selectionEnd: Int = text.length,
         val visit: Any = Any()) {
-        val canSubmit: Boolean get() = text.isNotBlank() || images.isNotEmpty() || videos.isNotEmpty()
+        val canSubmit: Boolean get() = !uncertain && !additions.blocked &&
+            (text.isNotBlank() || images.isNotEmpty() || videos.isNotEmpty() || additions.ready.isNotEmpty())
     }
     private var inlineMessageEditor by mutableStateOf<InlineMessageEditor?>(null)
     private val messageActionHost by lazy { ControllerMessageActionHost(controller) }
@@ -1185,8 +1244,21 @@ class MainActivity : ComponentActivity() {
     private var messageActionKey: MessageActionRenderKey? = null
     private var messageActionLoading: MessageActionRenderKey? = null
     private var messageActionAttempted: MessageActionRenderKey? = null
-    private fun invalidateMessageActionEditor() {
+    private fun clearInlineMessageEditor() {
+        inlineMessageEditor?.additions?.close()
         inlineMessageEditor = null
+        editImagePick?.live = false
+        if (editImagePick?.returned == true) editImagePick = null
+        if (chatReferencePick?.editVisit != null) revokeChatReferencePick()
+    }
+    private fun retainUncertainMessageEdit() {
+        val editor = inlineMessageEditor ?: return
+        inlineMessageEditor = editor.copy(uncertain = true)
+        // This edit already preserved the normal draft; consume its revision without revoking its temporary attachments.
+        dataRevision = controller.dataRevision
+    }
+    private fun invalidateMessageActionEditor() {
+        clearInlineMessageEditor()
         messageActionHost.invalidate()
         messageActionVisit = Any()
         messageActionSnapshot = null; messageActionKey = null
@@ -2373,8 +2445,16 @@ class MainActivity : ComponentActivity() {
                                             if (editor == null) {
                                                 ImageComposerPanel()
                                                 VideoComposerPanel()
-                                            } else app.daiyu.android.ui.screens.chat.conversation.ComposerEditAttachments(
-                                                editor.images, editor.videos, imageHost.historyLoader)
+                                            } else {
+                                                app.daiyu.android.ui.screens.chat.conversation.ComposerEditAttachments(
+                                                    editor.images, editor.videos, imageHost.historyLoader)
+                                                val additions by editor.additions.attachments.state.collectAsStateWithLifecycle()
+                                                ImageAttachments(additions, editor.additions.actions, editor.additions.loader,
+                                                    enabled = chatState.composer.enabled && !controller.dataBusy && !editor.uncertain, compact = true)
+                                                if (editor.uncertain) top.yukonga.miuix.kmp.basic.Text(
+                                                    "保存结果待核实；保留编辑附件，不会自动重发",
+                                                    modifier = Modifier.testTag("message-edit-unknown"))
+                                            }
                                         } })
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
@@ -2678,18 +2758,25 @@ class MainActivity : ComponentActivity() {
                             val turn = chatState.turns.filterIsInstance<ChatTurnUi.User>().single { it.listKey == key }
                             invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
                             composerShortcutPick = null
+                            clearInlineMessageEditor()
                             inlineMessageEditor = InlineMessageEditor(key, outcome.text, target,
                                 turn.content.filterIsInstance<app.daiyu.android.ui.screens.chat.conversation.MessageContentUi.Image>(),
-                                outcome.videos)
+                                outcome.videos, MessageEditImageDraft(target.conversationId.value,
+                                    turn.content.count { it is app.daiyu.android.ui.screens.chat.conversation.MessageContentUi.Image },
+                                    controller.imageAttachments, lifecycleScope,
+                                    { if (activityUsable()) publishChat(rowsChanged = false) },
+                                    { if (activityUsable()) toast(it) }))
                             publishChat(rowsChanged = false)
                         }
                     }
                     is MessageActionResult.Branch -> select(outcome.conversation)
-                    MessageActionResult.Deleted -> { inlineMessageEditor = null; shown.clear(); refresh() }
+                    MessageActionResult.Deleted -> { clearInlineMessageEditor(); shown.clear(); refresh() }
                     is MessageActionResult.Regenerated -> {
-                        if (outcome.outcome != RegenerationSendOutcome.NOT_SENT) {
-                            inlineMessageEditor = null
+                        if (outcome.outcome == RegenerationSendOutcome.ACCEPTED) {
+                            clearInlineMessageEditor()
                             shown.clear(); select(outcome.conversation); refresh()
+                        } else if (outcome.outcome == RegenerationSendOutcome.UNKNOWN) {
+                            retainUncertainMessageEdit()
                         }
                         when (outcome.outcome) {
                             RegenerationSendOutcome.ACCEPTED -> Unit
@@ -2714,6 +2801,7 @@ class MainActivity : ComponentActivity() {
                         } else toast(outcome.reason)
                     }
                     is MessageActionResult.Unknown -> {
+                        retainUncertainMessageEdit()
                         shown.clear(); refresh(); refreshUnknownBranchOutcome(); toast(outcome.reason)
                     }
                 }
@@ -2836,7 +2924,7 @@ class MainActivity : ComponentActivity() {
         editingMessageKey = inlineMessageEditor?.key,
         onCancelMessageEdit = { if (currentChat() && editorMatches() && renderedInlineVisit != null &&
             inlineMessageEditor?.visit === renderedInlineVisit) {
-            inlineMessageEditor = null; publishChat(rowsChanged = false)
+            clearInlineMessageEditor(); publishChat(rowsChanged = false)
         } },
         onDeleteTurn = { id ->
             prompt = ChoicePrompt("删除这条消息及后面的内容？", listOf("删除", "取消"), { choice ->
@@ -2894,9 +2982,9 @@ class MainActivity : ComponentActivity() {
         onSend = send@{ text ->
             val editor = inlineMessageEditor
             if (editor != null) {
-                if (currentChat() && editorMatches() && !controller.dataBusy && text == editor.text && editor.canSubmit &&
+                if (currentChat() && editorMatches() && !controller.dataBusy && text == editor.text && editor.canSubmit && !editReferencePending(editor) &&
                     editor.target == (actionSnapshot?.renderedTargets?.get(editor.key) ?: actionSnapshot?.targets?.get(editor.key)))
-                    messageCallbacks.onSaveEdit(editor.key, text)
+                    messageCallbacks.onSaveEditImages(editor.key, text, editor.additions.ready)
                 return@send
             }
             if (editorMatches() && terminalEditor == null && !mcpPreparing && mcpApproval == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
@@ -2928,9 +3016,18 @@ class MainActivity : ComponentActivity() {
             val generation = controlTouchGeneration
             window.decorView.post { if (controlTouchGeneration == generation) { controlTouchActive = false; controlTouchOwner = null } }
         },
-        onModelClick = { guard { openChatModels() } }, onReasoningClick = { thinkingPicker = true },
+        onModelClick = { guard { if (currentChat()) openChatModels() } }, onReasoningClick = { thinkingPicker = true },
         onAssistantClick = { openAssistantPicker() }, onCopy = { id -> copyMessage(id) },
-        onMenuAction = { action -> guard { if (inlineMessageEditor == null) when (action) {
+        onMenuAction = { action -> guard {
+            if (inlineMessageEditor != null) {
+                if (currentChat()) when (action) {
+                    ChatMenuAction.ATTACH_IMAGE -> pickEditImages()
+                    ChatMenuAction.ATTACH_FILE -> pickChatReference(false)
+                    ChatMenuAction.ATTACH_FOLDER -> pickChatReference(true)
+                    ChatMenuAction.ATTACH_VIDEO -> toast("原视频编辑重新发送仍需独立上传批准；请用新消息添加视频")
+                    else -> Unit
+                }
+            } else when (action) {
             ChatMenuAction.ATTACH_IMAGE -> {
                 if (editorMatches() && videoHost.state.items.isEmpty() && !videoSending) {
                     pickImages()
@@ -5084,6 +5181,8 @@ class MainActivity : ComponentActivity() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
         if (retainedPage == "session-gateway" && gatewayReloadPending) loadSessionGateway(restore = true)
         chatReferencePick?.pickerAway = false
+        editImagePick?.pickerAway = false
+        settleEditImages()
         subAgentSourceRevision++
         refreshUnknownBranchOutcome()
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
@@ -5131,6 +5230,7 @@ class MainActivity : ComponentActivity() {
             if (generationResumed() && generationInputsDelegate.isInitialized()) generationInputs.resume()
             presentBackupImportResult()
             settleChatReference()
+            settleEditImages()
             consumeOpenedAttachments()
         }
     }
@@ -5159,6 +5259,12 @@ class MainActivity : ComponentActivity() {
                 chatReferenceAvailable() && chatReferenceMatches(request)
             request.firstPickerHop = false; request.pickerAway = preserve
             if (!preserve) revokeChatReferencePick()
+        }
+        editImagePick?.let { request ->
+            val preserve = request.live && request.firstPickerHop && !request.returned &&
+                request.visit === inlineMessageEditor?.visit && chatReferenceAvailable()
+            request.firstPickerHop = false; request.pickerAway = preserve
+            if (!preserve) { request.live = false; request.host.cancelSelection(request.selection) }
         }
         modelSaveOwner?.revoke(); modelSaveOwner = null
         gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null
@@ -5238,7 +5344,14 @@ class MainActivity : ComponentActivity() {
         revokePlatformActionVisit()
         revokeContextManagementEntry(closeRoute = false)
         revokeTerminalJobsVisit()
-        invalidateMessageActionEditor()
+        val editingPickerAway = editImagePick?.let { it.live && it.pickerAway && it.visit === inlineMessageEditor?.visit } == true ||
+            chatReferencePick?.let { it.live && it.pickerAway && it.editVisit != null && it.editVisit === inlineMessageEditor?.visit } == true
+        if (!editingPickerAway) invalidateMessageActionEditor()
+        else {
+            messageActionHost.invalidate(); messageActionVisit = Any()
+            messageActionSnapshot = null; messageActionKey = null
+            messageActionLoading = null; messageActionAttempted = null
+        }
         gatewayOwner?.revoke()
         controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
@@ -6242,12 +6355,12 @@ class MainActivity : ComponentActivity() {
             composer = ComposerUi(text = inlineMessageEditor?.text ?: draft,
                 selectionStart = inlineMessageEditor?.selectionStart ?: selectionStart,
                 selectionEnd = inlineMessageEditor?.selectionEnd ?: selectionEnd,
-                editingMessageCanSubmit = inlineMessageEditor?.canSubmit == true,
+                editingMessageCanSubmit = inlineMessageEditor?.let { it.canSubmit && !editReferencePending(it) } == true,
                 editorGeneration = editorGeneration,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value,
                 imageSendAvailable = inlineMessageEditor == null && imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&
                     videoHost.state.items.isEmpty() && !videoSending && controller.active == null,
-                imageSendBlocked = inlineMessageEditor == null && (imageHost.busy || imageHost.hasAttachments &&
+                imageSendBlocked = inlineMessageEditor?.let { it.uncertain || it.additions.blocked || editReferencePending(it) } ?: (imageHost.busy || imageHost.hasAttachments &&
                     (!imageHost.session.attachments.state.value.canSubmit || state != null)),
                 modelLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = try { ReasoningEffort.textPreference(reasoningPreference.snapshot(selected?.id?.value), model = confirmedReasoningModel).displayName } catch (_: Exception) { "配置无效，需重存" },

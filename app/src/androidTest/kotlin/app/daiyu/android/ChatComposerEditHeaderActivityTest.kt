@@ -20,9 +20,10 @@ import app.daiyu.android.ui.screens.chat.conversation.*
 class ChatComposerEditHeaderActivityTest : WiredActivityTestCase() {
     private var cancelled = 0
     private var modelClicked = 0
+    private val attachmentClicks = mutableListOf<ChatMenuAction>()
     private var density = 1f
     private fun show(width: Dp, font: Float, dark: Boolean, editing: Boolean = true,
-        primary: Long = 0xFF2266AA) {
+        primary: Long = 0xFF2266AA, enabled: Boolean = true) {
         val appearance = AppearanceSettings(primaryAccentColor = primary.toInt(), secondaryAccentColor = 0xFF845CB5.toInt(),
             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT)
         mainThread { activity.setContent {
@@ -32,9 +33,10 @@ class ChatComposerEditHeaderActivityTest : WiredActivityTestCase() {
                     density = LocalDensity.current.density
                     ChatMenuLayer {
                         ChatComposer(ComposerUi(text = "编辑正文", modelLabel = "very-long-model-name".repeat(20),
-                            contextUsageText = "100.0% 上下文", contextTokensText = "131072/131072"),
+                            enabled = enabled, contextUsageText = "100.0% 上下文", contextTokensText = "131072/131072"),
                             ChatScreenActions(editingMessageKey = if (editing) "owned-message" else null,
-                                onCancelMessageEdit = { cancelled++ }, onModelClick = { modelClicked++ }),
+                                onCancelMessageEdit = { cancelled++ }, onModelClick = { modelClicked++ },
+                                onMenuAction = { attachmentClicks.add(it) }),
                             Modifier.requiredWidth(width))
                     }
                 }
@@ -42,6 +44,37 @@ class ChatComposerEditHeaderActivityTest : WiredActivityTestCase() {
         } }
         ui.waitForIdle()
     }
+    fun testEditingModelAndAttachmentsAcceptRealTouchesWithoutDisabledTint() {
+        for (dark in listOf(false, true)) {
+            show(320.dp, 1f, dark, editing = false)
+            fun labelColor(): androidx.compose.ui.graphics.Color {
+                val layouts = mutableListOf<TextLayoutResult>()
+                node("composer-model-label").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                return layouts.single().layoutInput.style.color
+            }
+            val normalColor = labelColor()
+            show(320.dp, 1f, dark)
+            assertCentered()
+            assertEquals(normalColor, labelColor())
+            val modelsBefore = modelClicked
+            node("chat-model").assertIsEnabled().performTouchInput { click(center) }
+            assertEquals(modelsBefore + 1, modelClicked)
+            for (action in listOf(ChatMenuAction.ATTACH_IMAGE, ChatMenuAction.ATTACH_FILE, ChatMenuAction.ATTACH_FOLDER)) {
+                node("chat-attach").assertIsEnabled().performTouchInput { click(center) }
+                node("chat-attachment:${action.name}").performTouchInput { click(center) }
+                assertEquals(action, attachmentClicks.last())
+            }
+            show(320.dp, 1f, dark, enabled = false)
+            val attachmentsBefore = attachmentClicks.size
+            val disabledModelsBefore = modelClicked
+            node("chat-model").assertIsNotEnabled().performTouchInput { click(center) }
+            node("chat-attach").assertIsNotEnabled().performTouchInput { click(center) }
+            assertEquals(disabledModelsBefore, modelClicked)
+            assertEquals(attachmentsBefore, attachmentClicks.size)
+            node("chat-attachment:ATTACH_IMAGE").assertDoesNotExist()
+        }
+    }
+
     private fun assertCentered() {
         val cancel = node("message-edit-cancel").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val surface = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot

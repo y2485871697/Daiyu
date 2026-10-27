@@ -31,7 +31,8 @@ internal class MessageActionStore(private val database: ConversationDatabase,
     private val context: ContextService, private val images: MessageImageAssetStore,
     private val videos: app.daiyu.android.backup.BackupVideoAssets? = null,
     private val staticGeneration: app.daiyu.android.backup.StaticGenerationBranch? = null,
-    private val cancelled: () -> Boolean = { false }) {
+    private val cancelled: () -> Boolean = { false },
+    private val draftImages: app.daiyu.android.media.ImageAttachmentStore? = null) {
     private val transactions = DatabaseTransactions { database.writableDatabase }
 
     fun snapshot(id: ConversationId): MessageActionSnapshot = transactions.run { db ->
@@ -122,7 +123,9 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         commitPrefix(db, target.conversationId, history, retained)
     }
 
-    fun prepareRegeneration(target: MessageActionTarget, replacementText: String? = null): MessageRevision = transactions.run { db ->
+    fun prepareRegeneration(target: MessageActionTarget, replacementText: String? = null,
+        addedImages: List<app.daiyu.android.media.ImageAttachment> = emptyList()): MessageRevision = transactions.run { db ->
+        require(replacementText != null || addedImages.isEmpty()) { "只能为编辑消息添加附件" }
         val history = authorize(db, target)
         val logical = MessageHistory.expand(history)
         val index = MessageHistoryCut.index(history, target)
@@ -135,7 +138,7 @@ internal class MessageActionStore(private val database: ConversationDatabase,
         }
         val selected = logical[userIndex]
         val text = replacementText ?: selected.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
-        require(text.isNotBlank() || selected.blocks.any { it is MessageBlock.Image }) { "消息内容不能为空" }
+        require(text.isNotBlank() || selected.blocks.any { it is MessageBlock.Image } || addedImages.isNotEmpty()) { "消息内容不能为空" }
         val blocks = if (replacementText == null) selected.blocks else buildList {
             if (text.isNotBlank()) add(MessageBlock.Text("edited-user", text))
             addAll(selected.blocks.filterNot { it is MessageBlock.Text })
@@ -149,8 +152,41 @@ internal class MessageActionStore(private val database: ConversationDatabase,
             "原视频重新提交需要新的上传批准；原消息保留"
         }
         context.validateActionArchives(db, target.conversationId)
-        MessageRevision(target, history, prefix, selected.copy(blocks = blocks, protocolItems = emptyList(),
-            historySegments = emptyList(), status = RunStatus.COMPLETED, error = null))
+        val edited = selected.copy(blocks = blocks, protocolItems = emptyList(),
+            historySegments = emptyList(), status = RunStatus.COMPLETED, error = null)
+        MessageRevision(target, history, prefix, if (addedImages.isEmpty()) edited else appendEditImages(edited, addedImages))
+    }
+
+    private fun appendEditImages(user: Message, added: List<app.daiyu.android.media.ImageAttachment>): Message {
+        val source = requireNotNull(draftImages) { "编辑图片存储不可用；原消息保留" }
+        val draftOwner = added.first().owner
+        require(draftOwner.conversationId == user.conversationId.value && added.all { it.owner == draftOwner })
+        val original = user.blocks.filterIsInstance<MessageBlock.Image>().map { it.reference }
+        val limits = app.daiyu.android.media.ImageAttachmentLimits()
+        require(original.size + added.size <= limits.maxImages) { "每条消息最多8张图片" }
+        require(original.sumOf { it.bytes.toLong() } + added.sumOf { it.bytes.toLong() } <= limits.maxDraftBytes) {
+            "图片总大小超过限制；原消息保留"
+        }
+        val frozen = source.freeze(draftOwner, added, imageInputSupported = true, isCancelled = cancelled)
+        // Publish a new immutable batch, never append into or overwrite the historical owner.
+        val id = MessageId(java.util.UUID.randomUUID().toString())
+        val owner = MediaOwner(user.conversationId.value, id.value)
+        val oldMedia = original.map { ref -> MediaReference(MediaOwner(ref.owner.conversationId, ref.owner.messageId),
+            ref.id, ref.mime, ref.bytes, ref.sha256, ref.width, ref.height) }
+        val refs = oldMedia.map { it.copy(owner = owner) } + added.map { image ->
+            MediaReference(owner, image.id, image.mime, image.bytes, image.sha256, image.width, image.height)
+        }
+        require(refs.map { it.id }.distinct().size == refs.size)
+        val contents = oldMedia.map { images.resolver.read(it.owner, it) } + frozen.map { it.bytes() }
+        check(!cancelled())
+        images.restore(owner, refs, contents)
+        val domainOwner = MessageImageOwner(owner.conversationId, owner.messageId)
+        val newBlocks = user.blocks.map { block -> if (block is MessageBlock.Image)
+            MessageBlock.Image(block.reference.copy(owner = domainOwner)) else block } + added.map { image ->
+            MessageBlock.Image(MessageImageReference(domainOwner, image.id, image.mime, image.bytes,
+                image.sha256, image.width, image.height))
+        }
+        return user.copy(id = id, blocks = newBlocks).also(MessageImages::validate)
     }
 
     /** Called inside the existing send transaction after provider preflight and original-history CAS. */

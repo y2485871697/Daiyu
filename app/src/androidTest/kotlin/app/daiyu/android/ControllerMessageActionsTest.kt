@@ -547,6 +547,54 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         finally { release.countDown() }
     }
 
+    fun testEditAddsImagesToNewImmutableOwnerAndKeepsOriginalHistoryAndDraft() {
+        val f = fresh(); val conversation = f.db.create("default")
+        val assets = MessageImageAssetStore(File(f.app.filesDir, "edit-message-images"))
+        val drafts = app.daiyu.android.media.ImageAttachmentStore(File(f.app.filesDir, "edit-draft-images"),
+            app.daiyu.android.media.AndroidImageInspector())
+        val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        val bytes = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        bitmap.recycle()
+        val draftOwner = app.daiyu.android.media.ImageAttachmentOwner(conversation.id.value, "separate-edit")
+        val old = drafts.import(draftOwner, bytes.inputStream())
+        val userId = MessageId(UUID.randomUUID().toString())
+        val original = assets.prepare(MediaOwner(conversation.id.value, userId.value), draftOwner,
+            drafts.freeze(draftOwner, listOf(old), true)).single()
+        val domain = MessageImageReference(MessageImageOwner(original.owner.conversationId, original.owner.messageId),
+            original.id, original.mime, original.bytes, original.sha256, original.width, original.height)
+        val user = Message(userId, conversation.id, RunId(UUID.randomUUID().toString()), Message.USER_ROLE,
+            listOf(MessageBlock.Text("text", "original"), MessageBlock.Image(domain)), RunStatus.COMPLETED)
+        val assistant = user.copy(id = MessageId(UUID.randomUUID().toString()), role = Message.ASSISTANT_ROLE,
+            blocks = listOf(MessageBlock.Text("answer", "original reply")), status = RunStatus.RUNNING)
+        f.db.send(user, assistant); f.db.save(assistant.copy(status = RunStatus.COMPLETED))
+        f.db.draft(conversation.id, "normal draft")
+        val added = drafts.import(draftOwner, bytes.inputStream())
+        val store = MessageActionStore(f.db, ContextService(f.app, f.db), assets, draftImages = drafts)
+        val before = history(f, conversation.id)
+        val target = store.snapshot(conversation.id).targets.getValue(userId.value)
+        val revision = store.prepareRegeneration(target, "edited", listOf(added))
+        assertTrue(revision.user.id != userId)
+        assertEquals(before, history(f, conversation.id))
+        assertEquals("normal draft", f.db.conversations().single { it.id == conversation.id }.draft)
+        val refs = revision.user.blocks.filterIsInstance<MessageBlock.Image>().map { it.reference }
+        assertEquals(listOf(original.id, added.id), refs.map { it.id })
+        refs.forEach { ref ->
+            assertEquals(revision.user.id.value, ref.owner.messageId)
+            val media = MediaReference(MediaOwner(ref.owner.conversationId, ref.owner.messageId), ref.id,
+                ref.mime, ref.bytes, ref.sha256, ref.width, ref.height)
+            assertTrue(bytes.contentEquals(assets.resolver.read(media.owner, media)))
+        }
+        assertTrue(bytes.contentEquals(assets.resolver.read(original.owner, original)))
+        assertTrue(bytes.contentEquals(drafts.read(draftOwner, added)))
+        val imageOnly = store.prepareRegeneration(target, "", listOf(added))
+        assertEquals(2, imageOnly.user.blocks.filterIsInstance<MessageBlock.Image>().size)
+        assertTrue(runCatching { store.prepareRegeneration(target, "edited", List(8) { added }) }.isFailure)
+        val foreign = added.copy(owner = app.daiyu.android.media.ImageAttachmentOwner("other-conversation", "edit"))
+        assertTrue(runCatching { store.prepareRegeneration(target, "edited", listOf(foreign)) }.isFailure)
+        assertEquals(before, history(f, conversation.id))
+        assertEquals(0, f.opens.get())
+    }
+
     fun testImageBranchCopiesOriginalBytesToIndependentOwner() {
         val f = fresh(); val owner = f.db.create("default")
         val assets = MessageImageAssetStore(File(f.app.filesDir, "isolated-test-image-actions"))

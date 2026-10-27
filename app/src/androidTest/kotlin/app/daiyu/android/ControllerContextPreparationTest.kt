@@ -82,6 +82,31 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         assertNull(controller.problem)
         return f
     }
+    fun testMainCompressionSendGateIsConversationScopedAndIgnoresChildrenAndWaiting() {
+        val opens = AtomicInteger()
+        val f = fresh { CatalogFixturePort { opens.incrementAndGet(); session() } }
+        val owner = seed(f)
+        val original = f.db.messages(owner.id, limit = 200)
+        val post = ChatController::class.java.getDeclaredMethod("postCompressionActivity",
+            app.daiyu.android.timeline.CompressionActivity::class.java).apply { isAccessible = true }
+        val activity = app.daiyu.android.timeline.CompressionActivity("gate", owner.id.value, 4, null)
+        fun publish(value: app.daiyu.android.timeline.CompressionActivity) = main { post.invoke(f.controller, value) }
+        publish(activity.copy(taskId = "child"))
+        assertFalse(f.controller.isMainContextCompressing(owner.id))
+        publish(activity.copy(waiting = true))
+        assertFalse(f.controller.isMainContextCompressing(owner.id))
+        publish(activity)
+        assertTrue(f.controller.isMainContextCompressing(owner.id))
+        assertFalse(f.controller.isMainContextCompressing(null))
+        assertFalse(f.controller.isMainContextCompressing(ConversationId("another")))
+        f.db.draft(owner.id, "retained draft")
+        main { assertFalse(f.controller.sendText(owner, 0, 0, "retained draft") { fail("not queued") }) }
+        assertEquals("retained draft", f.db.conversations().single { it.id == owner.id }.draft)
+        assertEquals(original, f.db.messages(owner.id, limit = 200))
+        assertEquals(0, opens.get())
+        publish(activity.copy(running = false))
+        assertFalse(f.controller.isMainContextCompressing(owner.id))
+    }
     fun testCompressionFailureIsVisibleBeforeQueuedDatabaseWriteAndDeduplicatesAfterCommit() {
         val f = fresh { CatalogFixturePort { session() } }
         val owner = seed(f)

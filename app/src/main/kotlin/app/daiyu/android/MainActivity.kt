@@ -2993,7 +2993,9 @@ class MainActivity : ComponentActivity() {
                     selectionStart = start, selectionEnd = end))
             }
         },
+        onCompressionSendBlocked = { toast("正在压缩上下文") },
         onSend = send@{ text ->
+            if (compressionSendBlocked()) return@send
             val editor = inlineMessageEditor
             if (editor != null) {
                 if (currentChat() && editorMatches() && !controller.dataBusy && text == editor.text && editor.canSubmit && !editReferencePending(editor) &&
@@ -3012,7 +3014,9 @@ class MainActivity : ComponentActivity() {
             else if (imageHost.hasAttachments) { stopCascadeVoice(); sendImageDraft(text) }
             else if (!imageHost.busy && !videoSending) sendDraft(text)
         } },
-        onSupplement = { text -> if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
+        onSupplement = supplement@{ text ->
+            if (compressionSendBlocked()) return@supplement
+            if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
             offlineHost.invalidate()
             gestureOwner()?.let { submitSupplement(it, text) }
         } },
@@ -5951,7 +5955,15 @@ class MainActivity : ComponentActivity() {
         childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false
         publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()
     }
+    private fun compressionSendBlocked(conversationId: ConversationId? = selected?.id): Boolean {
+        if (!controller.isMainContextCompressing(conversationId)) return false
+        toast("正在压缩上下文")
+        return true
+    }
     private fun sendDraft(text: String, universal: UniversalSend? = null) {
+        if (compressionSendBlocked()) {
+            universal?.result?.invoke(VoiceControlReceipt.Rejected(universal.turn.requestId)); return
+        }
         if (pendingTextSend != null || text != draft || text.isBlank()) {
             universal?.result?.invoke(VoiceControlReceipt.Rejected(universal.turn.requestId)); return
         }
@@ -6090,6 +6102,7 @@ class MainActivity : ComponentActivity() {
     private fun supplementMediaBlocked() = imageHost.hasAttachments || imageHost.busy ||
         videoHost.state.items.isNotEmpty() || videoSending || videoComposerControls?.blocked == true
     private fun submitSupplement(owner: Message, text: String) {
+        if (compressionSendBlocked(owner.conversationId)) return
         if (text != draft) return
         if (supplementMediaBlocked()) {
             toast("当前任务暂不支持追加图片或原视频；文字与附件已保留，请任务结束后发送")
@@ -6373,6 +6386,7 @@ class MainActivity : ComponentActivity() {
                 selectionEnd = inlineMessageEditor?.selectionEnd ?: selectionEnd,
                 editingMessageCanSubmit = inlineMessageEditor?.let { it.canSubmit && !editReferencePending(it) } == true,
                 editingMessageBlocked = messageEditBlocked,
+                mainContextCompressing = controller.isMainContextCompressing(selected?.id),
                 editorGeneration = editorGeneration,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value,
                 imageSendAvailable = inlineMessageEditor == null && imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&

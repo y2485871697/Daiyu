@@ -37,6 +37,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     private class CompactRequest(val create: (RunContextRuntime) -> RunContextRuntime, val completed: (Boolean, String?) -> Unit)
     private var pendingCompact: CompactRequest? = null
     @Volatile private var compactingRuntime: RunContextRuntime? = null
+    private var compacting = false
+    fun isCompacting(): Boolean = synchronized(terminalLock) { compacting }
 
     /** Maintenance only: never cancel the streaming response or an executing tool batch. */
     fun requestCompaction(create: (RunContextRuntime) -> RunContextRuntime, completed: (Boolean, String?) -> Unit = { _, _ -> }): Boolean {
@@ -214,7 +216,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     fun supplement(message: Message): Boolean {
         val captured = synchronized(terminalLock) {
             val owner = identity ?: return false
-            if (terminal || terminalReserved || stopped.get() || message.role != "user" || message.status != RunStatus.COMPLETED ||
+            if (compacting || terminal || terminalReserved || stopped.get() || message.role != "user" || message.status != RunStatus.COMPLETED ||
                 message.conversationId != owner.conversationId || message.runId != owner.runId ||
                 message.id == owner.id || message.error != null || message.historySegments.isNotEmpty() ||
                 message.blocks.any { it is MessageBlock.Tool } || message.id in supplementIds) return false
@@ -242,7 +244,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             val rawText = frozen.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
             val text = rawText.trim()
             val queued = queuedSupplementMessages()
-            if (owner == null || terminal || terminalReserved || stopped.get() ||
+            if (owner == null || compacting || terminal || terminalReserved || stopped.get() ||
                 options.runtimeStore !is AtomicSupplementRuntimeStore || !options.runtimeStore.durable ||
                 frozen.role != Message.USER_ROLE || frozen.status != RunStatus.COMPLETED ||
                 frozen.conversationId != owner.conversationId || frozen.runId != owner.runId || frozen.id == owner.id ||
@@ -471,7 +473,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             val selected = synchronized(terminalLock) {
                 if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) return false
                 if (pendingCompact == null && (!base.automatic || pressure == null)) return false
-                (pendingCompact to pauseEpoch).also { pendingCompact = null }
+                (pendingCompact to pauseEpoch).also { pendingCompact = null; compacting = true }
             }
             val manual = selected.first
             val compactEpoch = selected.second
@@ -562,6 +564,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 checkpoint()
                 return false
             } finally {
+                synchronized(terminalLock) { compacting = false }
                 try { (runtime ?: base).finishedCompaction() } catch (_: Exception) { }
                 compactingRuntime = null
                 try { manual?.completed?.invoke(applied, error) } catch (_: Exception) { }

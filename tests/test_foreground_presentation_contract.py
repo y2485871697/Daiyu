@@ -52,7 +52,7 @@ class ForegroundPresentationContract(unittest.TestCase):
         self.assertIn('editingMessageBlocked = messageEditBlocked', source)
         self.assertIn('编辑已保留，请复制后重新编辑', source)
         models = (SRC / 'ui/screens/chat/conversation/ChatScreenModels.kt').read_text()
-        self.assertIn('enabled && !editingMessageBlocked && !imageSendBlocked', models)
+        self.assertIn('enabled && !mainContextCompressing && !editingMessageBlocked && !imageSendBlocked', models)
 
     def test_refresh_rate_is_window_owned_not_pause_owned(self):
         source = (SRC / 'MainActivity.kt').read_text()

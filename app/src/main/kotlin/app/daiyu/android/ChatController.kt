@@ -235,6 +235,14 @@ class ChatController internal constructor(private val application:Application,
         get() = synchronized(this) { compressionActivitiesById.values.toList() }
     internal val compressionActivity: app.daiyu.android.timeline.CompressionActivity?
         get() = synchronized(this) { compressionActivitiesById.values.firstOrNull() }
+    @Synchronized internal fun isMainContextCompressing(conversationId: ConversationId?): Boolean {
+        if (conversationId == null) return false
+        return compressionActivitiesById.values.any {
+            it.running && !it.waiting && it.taskId == null && it.conversationId == conversationId.value
+        } || resources?.let {
+            !it.fenced && it.initial.conversationId == conversationId && it.runner.isCompacting()
+        } == true
+    }
     private val contextManagementExecutor = Executors.newSingleThreadExecutor()
     private var contextManagementReaders = 0
     private val reconnectTimeline = linkedMapOf<String, app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
@@ -2115,7 +2123,7 @@ class ChatController internal constructor(private val application:Application,
     fun send(conversation:Conversation?,text:String):Conversation? {
         if(rejectSynchronousMainSend()) return null
         val token = synchronized(this) {
-            if(!idleAvailable() || text.isBlank()) return null
+            if(isMainContextCompressing(conversation?.id) || !idleAvailable() || text.isBlank()) return null
             // Legacy synchronous API; UI hosts should use sendText instead.
             reservePreparation()
         }
@@ -2139,7 +2147,7 @@ class ChatController internal constructor(private val application:Application,
         text: String, ticket: TextSendTicket = TextSendTicket(), complete: (TextSendResult) -> Unit): Boolean {
         val owner = TextSendOwner(conversation?.id, editorGeneration, draftRevision)
         val token = synchronized(this) {
-            if(pendingTextState != null || !idleAvailable() || text.isBlank() || editorGeneration < 0 || draftRevision < 0) return false
+            if(isMainContextCompressing(conversation?.id) || pendingTextState != null || !idleAvailable() || text.isBlank() || editorGeneration < 0 || draftRevision < 0) return false
             reservePreparation(ticket).also {
                 pendingTextState = TextSendState(ticket, owner, text)
                 it.videoEditor = ControllerVideoEditor(conversation?.id?.value, editorGeneration, draftRevision, text, true)
@@ -3384,6 +3392,7 @@ class ChatController internal constructor(private val application:Application,
         videoAttempt:ControllerVideoAttempt?=null,
         platformAction:ControllerPlatformActionPreparation?=null,
         actionRevision: app.daiyu.android.storage.MessageRevision? = null):Conversation? {
+        if (isMainContextCompressing(conversation?.id)) return null
         require(platformAction == null || (platformAction.submitted && !platformAction.cancelled &&
             platformAction.scope != null && imageAttempt == null && shizukuPreparation == null &&
             shizukuAuthorization == null && mcpPreparation == null && browserPreparation == null &&
@@ -5070,7 +5079,7 @@ class ChatController internal constructor(private val application:Application,
     } == true
 
     @Synchronized internal fun canSupplement(owner: Message): Boolean = resources?.let {
-        !it.fenced && it.runner === ownedRunner(owner) && it.browserVisual?.automationHeld != true &&
+        !it.fenced && !isMainContextCompressing(owner.conversationId) && it.runner === ownedRunner(owner) && it.browserVisual?.automationHeld != true &&
             videoSession?.assistant?.runId != owner.runId
     } == true
 

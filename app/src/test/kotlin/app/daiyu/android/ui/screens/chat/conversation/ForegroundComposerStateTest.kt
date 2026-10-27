@@ -26,6 +26,18 @@ class ForegroundComposerStateTest {
                 editingMessageBlocked = true).textActionEnabled())
         }
     }
+    @Test fun mainCompressionBlocksAllSendAlternativesButKeepsEditorAndRestoresEligibility() {
+        val alternatives = listOf(ComposerUi(text = "draft", supplementAvailable = true),
+            ComposerUi(editingMessageCanSubmit = true), ComposerUi(imageSendAvailable = true),
+            ComposerUi(videoSendAvailable = true))
+        for (phase in ComposerPhase.entries) for (draft in alternatives) {
+            val state = draft.copy(phase = phase)
+            val blocked = state.copy(mainContextCompressing = true)
+            assertTrue(blocked.enabled)
+            assertFalse(blocked.textActionEnabled())
+            assertEquals(state.textActionEnabled(), blocked.copy(mainContextCompressing = false).textActionEnabled())
+        }
+    }
     @Test fun ordinaryDraftKeepsExistingSendSemantics() {
         assertTrue(ComposerUi(text = "ordinary").textActionEnabled())
         assertFalse(ComposerUi().textActionEnabled())

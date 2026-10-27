@@ -139,6 +139,7 @@ data class ComposerUi(
     val listening: Boolean = false,
     val enabled: Boolean = true,
     val controlOwnerKey: String? = null,
+    val mainContextCompressing: Boolean = false,
     val supplementAvailable: Boolean = false,
     val supplementPending: Boolean = false,
     /** Ready owned images only; never file/folder/path strings or video approval. Idle only. */
@@ -162,7 +163,7 @@ data class ComposerUi(
     val gptSpeedSaving: Boolean = false,
 )
 
-internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
+internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !mainContextCompressing && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
     ComposerPhase.IDLE -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable
     ComposerPhase.PAUSED, ComposerPhase.RUNNING -> text.isNotBlank() && supplementAvailable
 }

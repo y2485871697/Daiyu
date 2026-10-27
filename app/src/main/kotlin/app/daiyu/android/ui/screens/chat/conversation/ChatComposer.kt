@@ -134,6 +134,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()
     val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
     val textAction = hasText
+    val compressionBlocked = state.mainContextCompressing && (textAction || state.phase == ComposerPhase.IDLE)
     val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
     val primaryVisualEnabled = if (textAction) state.copy(enabled = visualEnabled).textActionEnabled()
         else visualEnabled && state.phase != ComposerPhase.IDLE
@@ -304,7 +305,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     .widthIn(max = 72.dp), animateChanges = true, iconSize = 16.dp,
                                 textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 28.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
-                                if (!textAction) actions.onPrimaryTap()
+                                if (compressionBlocked) actions.onCompressionSendBlocked()
+                                else if (!textAction) actions.onPrimaryTap()
                                 else {
                                     lifecycleDismissInProgress = true
                                     try { hideChatInputIme(focus, keyboard, view) }
@@ -314,10 +316,12 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 }
                             }, Modifier.size(32.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
-                                containerColor = (if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
-                                    .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
-                                enabled = primaryEnabled, containerSize = 28.dp, visualEnabled = primaryVisualEnabled,
-                                tint = if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
+                                containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)
+                                    else (if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
+                                        .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
+                                enabled = primaryEnabled || compressionBlocked, containerSize = 28.dp, visualEnabled = primaryVisualEnabled,
+                                tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface
+                                    else if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (!textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
                                 onLongClick = if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }

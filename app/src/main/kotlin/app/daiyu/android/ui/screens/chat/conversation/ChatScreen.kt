@@ -33,6 +33,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 data class ChatScreenActions(
     val onOpenSidebar: () -> Unit = {},
     val onMore: () -> Unit = {},
+    val onCompressionSendBlocked: () -> Unit = {},
     val onSend: (String) -> Unit = {},
     val onSupplement: (String) -> Unit = {},
     val onTextChange: (String) -> Unit = {},

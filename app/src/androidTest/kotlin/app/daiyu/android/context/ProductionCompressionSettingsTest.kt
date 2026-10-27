@@ -33,6 +33,16 @@ class ProductionCompressionSettingsTest : InstrumentationTestCase() {
         assertFalse(json.has("keepTurns")); assertFalse(json.has("keepRecent"))
     }
 
+    fun testChildAutomaticDoesNotRewriteThePersistedMainSwitchOrWindow() {
+        val store = ProductionCompressionSettingsStore(prefs)
+        val main = ProductionCompressionSettings(false, 128000)
+        store.save(main)
+        val child = app.daiyu.android.storage.ModelSettings("https://example.invalid", "child", "fixture-key", false,
+            contextWindowOverride = 272000).requestSnapshot()
+        assertTrue(ProductionCompressionPolicyResolver.resolve(store.snapshot().childSettings(child)).enabled)
+        assertEquals(main, store.snapshot())
+    }
+
     fun testLegacyRecordsMigrateAtomicallyToTokenTailAndMixedVersionsRequireSave() {
         val store = ProductionCompressionSettingsStore(prefs)
         CompressionSettingsStore(prefs).save(CompressionSettings(keepRecentMessages = 0))

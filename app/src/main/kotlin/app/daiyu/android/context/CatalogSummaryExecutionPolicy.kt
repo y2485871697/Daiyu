@@ -18,6 +18,11 @@ internal object CatalogSummaryExecutionPolicy {
         return configuration(binding, settings.copy(contextWindowOverride = window.toInt()))
     }
 
+    fun childConfiguration(snapshot: app.daiyu.android.model.ProviderSnapshot, window: Long,
+        binding: SummaryModelBinding?, resolve: (SummaryModelBinding) -> SummaryProviderConfiguration?): SummaryProviderConfiguration =
+        if (binding == null) chatConfiguration(snapshot, window)
+        else requireNotNull(resolve(binding)) { "子代理摘要模型不可用" }
+
     /** Project chat-only reasoning/output/tool options onto the existing tool-free summary policy. */
     fun summarySettings(settings: ModelSettings): ModelSettings {
         val options = settings.requestOptions

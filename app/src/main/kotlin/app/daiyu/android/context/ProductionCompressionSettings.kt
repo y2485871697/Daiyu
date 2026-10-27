@@ -25,6 +25,9 @@ data class ProductionCompressionSettings(
         automatic = automatic, contextWindowTokens = contextWindowTokens,
         reserveTokens = reserveTokens, triggerPercent = triggerPercent,
         summaryModel = summaryModel, tokenTail = true)
+
+    internal fun childSettings(snapshot: app.daiyu.android.model.ProviderSnapshot) = coordinatorSettings().copy(
+        automatic = true, contextWindowTokens = snapshot.contextWindowOverride?.toLong())
 }
 
 internal object ProductionCompressionPolicyResolver : CompressionPolicyResolver {

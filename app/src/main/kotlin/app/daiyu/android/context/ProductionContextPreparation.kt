@@ -43,24 +43,17 @@ internal object ProductionContextPreparation {
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): ProductionRunContext? {
         requireWorker()
         val app = context.applicationContext ?: context
-        val saved = ProductionCompressionSettingsStore(app).snapshot()
-        val settings = saved.coordinatorSettings().copy(
-            contextWindowTokens = snapshot.contextWindowOverride?.toLong() ?: saved.contextWindowTokens)
+        val settings = ProductionCompressionSettingsStore(app).snapshot().childSettings(snapshot)
         val policy = ProductionCompressionPolicyResolver.resolve(settings)
         if (policy.contextTokens == null) return null
-        fun configuration(): SummaryProviderConfiguration {
-            val binding = settings.summaryModel
-            return requireNotNull(if (binding == null) CatalogSummaryExecutionPolicy.chatConfiguration(snapshot,
-                checkNotNull(policy.contextTokens)) else {
-                if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).configuration(binding)
-                else catalogSummaryConfiguration(app, binding)
-            }) { "子代理摘要模型不可用" }
+        val configuration = CatalogSummaryExecutionPolicy.childConfiguration(snapshot,
+            checkNotNull(policy.contextTokens), settings.summaryModel) { binding ->
+            if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).configuration(binding)
+            else catalogSummaryConfiguration(app, binding)
         }
-        val frozen = if (policy.enabled) configuration() else null
         return ProductionRunContext(policy, parent, { usage ->
-            val selected = frozen ?: configuration()
-            requireNotNull(ProviderSummaryModelResolver { selected }.resolve(selected.binding, usage)) { "子代理摘要模型不可用" }
-        }, automatic = policy.enabled, agentLabel = agentLabel, taskId = parent.runId.value, progress = progress)
+            requireNotNull(ProviderSummaryModelResolver { configuration }.resolve(configuration.binding, usage)) { "子代理摘要模型不可用" }
+        }, automatic = true, agentLabel = agentLabel, taskId = parent.runId.value, progress = progress)
     }
 
     private fun requireWorker() {

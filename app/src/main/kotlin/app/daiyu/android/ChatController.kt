@@ -423,7 +423,7 @@ class ChatController internal constructor(private val application:Application,
                 }
                 override fun tryReserve(owner: ContextManagementOwner): ContextManagementLease? =
                     synchronized(this@ChatController) reservation@ {
-                        if (!current(owner)) return@reservation null
+                        if (!current(owner) || dataBusy) return@reservation null
                         if (!idleAvailable() || hasLiveChildTasks(owner.conversationId)) {
                             val cancellation = ContextPreparationCancellation()
                             val finished = java.util.concurrent.atomic.AtomicBoolean(false)

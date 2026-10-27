@@ -12,6 +12,8 @@ import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
 import app.daiyu.android.ControllerPlatformActionPreparation
@@ -20,6 +22,9 @@ import app.daiyu.android.platform.actions.PlatformActionKind
 import app.daiyu.android.tasksurface.*
 import app.daiyu.android.ui.screens.settings.TaskSurfaceLocationDialog
 import org.json.JSONObject
+
+internal val RetainedPlatformActionSubmitAction =
+    SemanticsPropertyKey<() -> Unit>("RetainedPlatformActionSubmitAction")
 
 /** Original exact-task form. Submission grants the capability; no second app permission dialog. */
 @Composable internal fun PlatformActionApprovalHost(
@@ -140,10 +145,8 @@ import org.json.JSONObject
                 null -> Unit
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("platform-action-preview-error")) }
-            Button(enabled = editable && selected != null && text.isNotBlank() &&
-                !(selected == PlatformActionKind.WIFI && Build.VERSION.SDK_INT >= 29),
-                modifier = Modifier.testTag("platform-action-preview"), onClick = {
-                    if (!current(owner, text)) { error = "原会话或草稿已变化，未准备"; return@Button }
+            val originalSubmit: () -> Unit = submitOriginal@{
+                    if (!current(owner, text)) { error = "原会话或草稿已变化，未准备"; return@submitOriginal }
                     val arguments = runCatching {
                         val json = JSONObject()
                         when (checkNotNull(selected)) {
@@ -171,7 +174,12 @@ import org.json.JSONObject
                             }
                         }) locationState = TaskSurfaceDecision.NotExecuted("CLOCK_LOCATION_UNAVAILABLE", "位置准备不可用；未执行")
                     }
-                }) { Text("执行本次精确动作") }
+                }
+            Button(enabled = editable && selected != null && text.isNotBlank() &&
+                !(selected == PlatformActionKind.WIFI && Build.VERSION.SDK_INT >= 29),
+                modifier = Modifier.testTag("platform-action-preview").semantics {
+                    this[RetainedPlatformActionSubmitAction] = originalSubmit
+                }, onClick = originalSubmit) { Text("执行本次精确动作") }
         }
     }
     preview?.let { frozen ->

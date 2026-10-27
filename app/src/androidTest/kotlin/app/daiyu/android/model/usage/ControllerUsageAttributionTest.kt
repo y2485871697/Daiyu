@@ -71,7 +71,9 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
             })
         }
         fun prepare() {
-            conversation = database.create("default"); database.draft(conversation.id, "preserve draft")
+            conversation = database.create("default")
+            database.rename(conversation.id, "Usage attribution fixture")
+            database.draft(conversation.id, "preserve draft")
             val owner = SubAgentConfigKey.Conversation(conversation.id.value)
             preferences.createConversation(owner)
             check(preferences.update(owner) { it.copy(enabled = true, profiles = listOf(profile)) } is ConversationSubAgentPreferences.WriteResult.Saved)
@@ -110,6 +112,7 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
         assertEquals(0L, f.controller.recordedRequestUsage(ConversationId("missing")).summary.combined.requestSnapshotCount)
         val rows = f.database.messages(f.conversation.id).map { it.second }
         val again = f.controller.recordedRequestUsage(f.conversation.id)
+        assertEquals(0, stats.parentCoverage.totalTitleRequests)
         assertEquals(stats, again); assertEquals(rows, f.database.messages(f.conversation.id).map { it.second })
         assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
         controlMain {
@@ -122,6 +125,7 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
                 RecordedUsageReader.readAttributed(it, f.conversation.id)
             }
             assertEquals(stats, persisted)
+            assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
         } finally { reopened.close() }
     }
     fun testFailedChildKeepsReportedUsageAndUnknownStateWithoutReplay() {

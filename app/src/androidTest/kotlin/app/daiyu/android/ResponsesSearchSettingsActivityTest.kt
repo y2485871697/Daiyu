@@ -1,21 +1,68 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.state.ToggleableState
 
 class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
-    private fun editCurrentModelSearch(enabled: Boolean) {
+    private fun awaitLocalCatalogReady() {
+        reveal("local-model-add", lazyKey = "catalog-state")
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(hasTestTag("local-model-add") and hasClickAction() and isEnabled())
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+    }
+
+    private fun openCurrentModelSearchEditor(): String {
         selectProviderTab("模型")
         val id = fixture.settings.load().model
-        reveal("local-model-rename:$id").performClick()
+        awaitLocalCatalogReady()
+        reveal("local-model:$id", lazyKey = "local-model:$id")
+        val edit = hasContentDescription("模型设置") and hasClickAction() and
+            hasAnyAncestor(hasTestTag("local-model:$id"))
+        ui.onNode(edit).assertIsDisplayed().assertIsEnabled().performTouchInput { click(center) }
+        awaitUniqueTag("catalog-model-editor")
+        awaitNodeWindowFocus(node("catalog-model-editor"))
+        awaitDialogEnter(node("catalog-model-editor"))
         node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:原生搜索"))
-        val toggle = node("settings-switch:原生搜索")
-        if (enabled) toggle.assertIsOff().performClick().assertIsOn()
-        else toggle.assertIsOn().performClick().assertIsOff()
-        node("dialog-confirm").performClick()
+        return id
+    }
+
+    private fun changeSearchDraft(enabled: Boolean) {
+        val switch = hasTestTag("settings-switch:原生搜索") and
+            hasAnyAncestor(hasTestTag("catalog-model-editor"))
+        val before = if (enabled) ToggleableState.Off else ToggleableState.On
+        val after = if (enabled) ToggleableState.On else ToggleableState.Off
+        ui.onNode(switch).assertIsDisplayed().assertIsEnabled().assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, before))
+        ui.onNode(switch).performTouchInput { click(center) }
+        val expected = switch and SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, after)
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(expected).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        ui.onNode(switch).assert(SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, after))
+    }
+
+    private fun awaitModelSearchEditorClosed() {
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("catalog-model-editor")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
+    }
+
+    private fun editCurrentModelSearch(enabled: Boolean) {
+        val id = openCurrentModelSearchEditor()
+        changeSearchDraft(enabled)
+        node("dialog-confirm").assertIsDisplayed().assertIsEnabled().performTouchInput { click(center) }
         awaitControl("model search saved") {
             fixture.settings.localModelCatalogSnapshot()?.models?.singleOrNull { it.id == id }
                 ?.settings?.requestOptions?.openAiWebSearchEnabled == enabled
         }
+        awaitModelSearchEditorClosed()
+        awaitLocalCatalogReady()
     }
 
     fun testSearchIsModelScopedAndProviderConfigurationHasNoSwitch() {
@@ -29,12 +76,10 @@ class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
         assertTrue(fixture.settings.loadForRun().requestOptions.openAiWebSearchEnabled)
         backToChat(activity)
         assertDraft("search settings unsent")
-        openModels(); selectProviderTab("模型")
-        val id = fixture.settings.load().model
-        reveal("local-model-rename:$id").performClick()
-        node("catalog-model-editor").scrollToDescendant(hasTestTag("settings-switch:原生搜索"))
-        node("settings-switch:原生搜索").assertIsOn().performClick().assertIsOff()
-        node("dialog-cancel").performClick()
+        openModels(); openCurrentModelSearchEditor()
+        changeSearchDraft(false)
+        node("dialog-cancel").assertIsDisplayed().assertIsEnabled().performTouchInput { click(center) }
+        awaitModelSearchEditorClosed()
         assertTrue(fixture.settings.loadForRun().requestOptions.openAiWebSearchEnabled)
         assertEquals(0, fixture.opens.get())
     }

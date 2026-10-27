@@ -103,6 +103,10 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                 }
             } }
             awaitDialogEnter(node("assistant-sheet"))
+            awaitNodeWindowFocus(node("assistant-sheet"))
+            dismissIme()
+            awaitDialogImeFrame(node("assistant-sheet"), visible = false)
+            awaitImeFrame(node("assistant-sheet"), visible = false)
             val expectedHeight = node("assistant-sheet").fetchSemanticsNode().size.height.toFloat()
             val entered = CountDownLatch(1)
             val release = CountDownLatch(1)
@@ -119,6 +123,10 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                 })
                 fun assertSameHeight() {
                     awaitDialogEnter(node("usage-glass-dialog"))
+                    awaitNodeWindowFocus(node("usage-glass-dialog"))
+                    dismissIme()
+                    awaitDialogImeFrame(node("usage-glass-dialog"), visible = false)
+                    awaitImeFrame(node("usage-glass-dialog"), visible = false)
                     assertEquals("History matches assistant: dark=$dark scale=$scale font=$fontScale",
                         expectedHeight, node("usage-glass-dialog").fetchSemanticsNode().size.height.toFloat(), 2f)
                     node("search:query").assertIsDisplayed()

@@ -282,7 +282,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
                 assertFalse(tableExists(source, "message_video_inputs"))
             }
             val helper = f.helper(); val db = helper.writableDatabase
-            assertEquals("source v$version", 28, db.version)
+            assertEquals("source v$version", 29, db.version)
             assertVideoSidecarSchema(db)
             assertEquals(0, count(db, "message_video_inputs"))
             assertTrue(tableExists(db, "generation_attempts")); assertTrue(tableExists(db, "generation_outputs"))

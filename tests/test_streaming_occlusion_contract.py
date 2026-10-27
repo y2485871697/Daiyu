@@ -17,7 +17,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("val obscuredTail = if (currentOcclusionPx > 0)", follow)
         self.assertIn("(last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("maxOf(motion.step(overflow.toFloat(), frameTime, currentDensity), obscuredTail.toFloat())", follow)
-        self.assertLess(follow.index("if (!scrollResumed || !followBottom || currentDragging"), follow.index("val obscuredTail"))
+        self.assertLess(follow.index("if (!canFollowBottom())"), follow.index("val obscuredTail"))
         self.assertIn("if (delta > 0f) listState.scrollBy(delta)", follow)
 
     def test_real_streaming_text_is_checked_before_settling(self):
@@ -26,13 +26,24 @@ class StreamingOcclusionContract(unittest.TestCase):
         for token in ["ui.mainClock.autoAdvance = false", "ui.runOnUiThread", "SemanticsProperties.Text",
                       "hasAnyAncestor(hasTestTag(\"chat-turn:tail\"))", "useUnmergedTree = true",
                       "coordinates.positionInRoot().y + coordinates.size.height", "gap >= 24f",
-                      "ui.mainClock.advanceTimeByFrame()", "var sawNewestLine = assertLiveClearance(marker)",
+                      "ui.mainClock.advanceTimeByFrame()", "sawNewestLine = assertLiveClearance(marker) || sawNewestLine",
                       "Newest streaming line must actually be displayed", "originalComposer.top, composer.top, 2f",
                       "originalComposer.bottom, composer.bottom, 2f", "finally", "ui.mainClock.autoAdvance = true"]:
             self.assertIn(token, live)
         self.assertNotIn("ui.waitUntil", live)
         self.assertNotIn("awaitVisualIdle", live)
         self.assertIn("phase = if (running) ComposerPhase.RUNNING else ComposerPhase.IDLE", source)
+
+    def test_post_layout_clearance_uses_the_same_follow_ownership_and_exact_tail(self):
+        source = CHAT.read_text()
+        correction = source.split("fun correctFollowClearance() {", 1)[1].split("val requestedIndex", 1)[0]
+        for token in ("!canFollowBottom()", "clearanceLayout.correcting", "clearanceLayout.active",
+                      "it.index == currentTailIndex && it.key == currentTailKey",
+                      "last.offset + last.size - visibleBottom", "dispatchRawDelta", "forceRemeasure()",
+                      "finally", "clearanceLayout.correcting = false"):
+            self.assertIn(token, correction)
+        self.assertIn("coordinates.isAttached && turn.listKey == currentTailKey", source)
+        self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running", (DEVICE.parent / "ChatMessageSpacingTest.kt").read_text())
 
     def test_device_sources_use_real_composer_measure_and_unclipped_tail_geometry(self):
         source = DEVICE.read_text()

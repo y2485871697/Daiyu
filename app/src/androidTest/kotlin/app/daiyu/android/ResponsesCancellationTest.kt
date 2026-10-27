@@ -40,6 +40,7 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
     private fun transportFailures()=listOf(SocketTimeoutException("synthetic"),SSLException("synthetic"),IOException("synthetic"))
 
     private enum class Block { NONE, HEADERS, READ }
+    private val sensitiveBody="synthetic-private-provider-body"
     private class Connection(body:String,private val block:Block=Block.NONE,private val readFailure:IOException?=null,
         private val status:Int=200):HttpsURLConnection(URL("https://example.invalid/v1/responses")) {
         val entered=CountDownLatch(1)
@@ -85,6 +86,7 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
         override fun getServerCertificates():Array<Certificate> = emptyArray()
         override fun getOutputStream()=request
         override fun getInputStream()=response
+        override fun getErrorStream()=response
         override fun getResponseCode():Int {
             if(block==Block.HEADERS) {
                 waitForDisconnect()
@@ -263,8 +265,13 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
             is SSLException -> ModelFailure.TLS
             else -> ModelFailure.NETWORK
         }} + listOf(
-            Connection(prefix) to ModelFailure.INCOMPLETE,
-            Connection(prefix+frames(event("response.failed"))) to ModelFailure.REQUEST,
+            Connection(prefix) to ModelFailure.NETWORK,
+            Connection(prefix+frames(event("response.incomplete", "response" to JSONObject()
+                .put("status", "incomplete")
+                .put("incomplete_details", JSONObject().put("reason", "max_output_tokens"))))) to ModelFailure.INCOMPLETE,
+            Connection(prefix+frames(event("response.failed", "response" to JSONObject()
+                .put("status", "failed")
+                .put("error", JSONObject().put("message", "$sensitiveBody ${settings.apiKey}"))))) to ModelFailure.REQUEST,
             Connection(prefix+frames(event("response.completed","response" to JSONObject().put("status","completed")))) to ModelFailure.PROTOCOL)
         for((connection,failure) in cases) {
             val opened=AtomicInteger();var executions=0
@@ -275,6 +282,8 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
             assertTrue(result.protocolItems.isEmpty());assertEquals(0,executions)
             assertEquals(1,opened.get());assertTrue(connection.disconnected.get())
             assertFalse(connection.instanceFollowRedirects)
+            assertFalse(result.toString().contains(sensitiveBody))
+            assertFalse(result.toString().contains(settings.apiKey))
         }
     }
     fun testSinkFailureIdentityWinsEvenWhenSinkCancels() {
@@ -305,12 +314,15 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
         assertTrue(connection.disconnected.get())
     }
     fun testRedirectIsNotFollowedAndRunnerNeverRetries() {
-        val connection=Connection("",status=302)
+        val connection=Connection("$sensitiveBody ${settings.apiKey}",status=302)
         val opened=AtomicInteger();var executions=0
         val result=ChatRunner(model(connection,opened),object:ConversationStore {override fun save(message:Message) {}},
             BatteryTool {executions++;"{}"},{}).run(initial(),emptyList())
-        assertEquals(ModelFailure.REDIRECT.userMessage,result.error);assertEquals(RunStatus.FAILED,result.status)
+        assertEquals(ModelFailure.REDIRECT.userMessage+"（HTTP 302）",result.error);assertEquals(RunStatus.FAILED,result.status)
         assertEquals(1,opened.get());assertEquals(0,executions)
         assertFalse(connection.instanceFollowRedirects);assertTrue(connection.disconnected.get())
+        assertTrue(result.blocks.isEmpty());assertTrue(result.protocolItems.isEmpty())
+        assertFalse(result.toString().contains(sensitiveBody))
+        assertFalse(result.toString().contains(settings.apiKey))
     }
 }

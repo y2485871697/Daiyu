@@ -120,7 +120,14 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
                 it.config.contains(androidx.compose.ui.semantics.SemanticsActions.OnLongClick)
             }
         }
+        val expectedContextLabel = fixture.controller.cloudContextUsage(null).label()
         for (mode in listOf(GptSpeedMode.FAST, GptSpeedMode.ULTRA_FAST, GptSpeedMode.NORMAL)) {
+            ui.waitUntil(5_000) {
+                ui.onAllNodes(hasTestTag("chat-context-label") and hasText(expectedContextLabel),
+                    useUnmergedTree = true).fetchSemanticsNodes().size == 1
+            }
+            awaitImeFrame(node("chat-draft"), visible = false)
+            val beforeModelRevision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
             val beforeMessages = node("chat-messages").fetchSemanticsNode().boundsInRoot
             val beforeComposer = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
             val stableTags = listOf("chat-model", "chat-context", "chat-send")
@@ -158,6 +165,9 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
             assertFalse(holder.isAlive)
             failure.get()?.let { throw it }
             awaitSpeed(mode)
+            ui.waitUntil(5_000) {
+                ui.runOnIdle { (invokeHost(activity, "getContextModelRevision") as Long) > beforeModelRevision }
+            }
             node("chat-status").assertDoesNotExist()
             val afterMessages = node("chat-messages").fetchSemanticsNode().boundsInRoot
             assertEquals(beforeMessages.top, afterMessages.top, 1f)

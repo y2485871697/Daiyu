@@ -98,7 +98,14 @@ internal class ControlledContextManagementAdapter(
         val state = mutable.value
         val expected = state.snapshot ?: return false
         if (!available() || state.requiresRefresh || state.compressionAccepted) return false
-        if (expected.configuration?.contextWindowTokens == null) {
+        val configuration = expected.configuration
+        if (configuration == null) {
+            confirmedSnapshot = null
+            mutable.value = state.copy(confirmingCompression = false, requiresRefresh = true,
+                notice = "压缩配置不可用，请刷新后重新选择")
+            return false
+        }
+        if (configuration.contextWindowTokens == null) {
             mutable.value = state.copy(notice = "请先在模型目录设置上下文窗口")
             return false
         }

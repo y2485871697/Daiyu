@@ -129,7 +129,6 @@ import app.daiyu.android.vdapproval.R08PlanEditor
 import app.daiyu.android.vdapproval.R08FrozenPlan
 import app.daiyu.android.vdapproval.R08CleanupUiOwner
 import app.daiyu.android.vdapproval.R08CleanupApprovalRequest
-import app.daiyu.android.vdapproval.R08CleanupApprovalScreen
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicBoolean
 import androidx.compose.ui.graphics.asImageBitmap
@@ -1103,7 +1102,7 @@ class MainActivity : ComponentActivity() {
             contextManagementEntryEpoch != epoch || contextManagementVisit != null ||
             !activityUsable() || !voiceForeground || !generationResumed() || sidebarVisible ||
             retainedPage != "context-management") return
-        val owner = ContextManagementOwner(conversation, generation)
+        val owner = ContextManagementOwner(conversation, epoch)
         val adapter = controller.openContextManagement(owner)
         if (adapter == null) toast("上下文页面暂不可用；请等待当前任务结束后再试")
         else { contextManagementEntryEpoch++; contextManagementVisit = ContextManagementVisit(owner, adapter) }
@@ -1129,7 +1128,7 @@ class MainActivity : ComponentActivity() {
             }
             if (value != "browser") closeBrowserVisualVisit()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
-            if (value != retainedPageState && revokeContextManagementEntry(closeRoute = false)) editorGeneration++
+            if (value != retainedPageState) revokeContextManagementEntry(closeRoute = false)
             if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
             if (value != retainedPageState) { gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null }
             if (value != "chat") cancelBrowserDownloadVisit()
@@ -2855,7 +2854,7 @@ class MainActivity : ComponentActivity() {
                 renderedContextEntryEpoch == contextManagementEntryEpoch && conversation != null &&
                 !renderedConversation.isNullOrBlank() && conversation.id.value == renderedConversation &&
                 editorGeneration == renderedEditorGeneration) {
-                val owner = ContextManagementOwner(conversation.id, renderedEditorGeneration)
+                val owner = ContextManagementOwner(conversation.id, renderedContextEntryEpoch)
                 val adapter = controller.openContextManagement(owner)
                 if (adapter == null) toast("上下文页面未打开；当前正在准备、运行或执行任务，请稍后再试")
                 else {
@@ -4446,7 +4445,7 @@ class MainActivity : ComponentActivity() {
                 if (request != null && visit.adapter.canPublish(request)) {
                     visit.request = request
                     answerVirtualDisplayCleanup(visit, request, true)
-                } else visit.status = "交付审批未冻结；原状态已改变或选择不可用，不自动重试。"
+                } else visit.status = "交付请求未受理；原状态已改变或选择不可用，不自动重试。"
             } else closeVirtualDisplayCleanup(visit)
         }
     }
@@ -4522,7 +4521,7 @@ class MainActivity : ComponentActivity() {
                         if (visit.request == null) {
                             app.daiyu.android.ui.haptics.material.TextButton(onClick = { prepareVirtualDisplayCleanup(visit) },
                                 enabled = !visit.busy, modifier = Modifier.testTag("vd-cleanup-release-only")) {
-                                androidx.compose.material3.Text("仅申请 Release 收尾（不交付任务）")
+                                androidx.compose.material3.Text("执行一次 Release 收尾（不交付任务）")
                             }
                             app.daiyu.android.ui.haptics.material.TextButton(onClick = { observeVirtualDisplayTasks(visit) },
                                 enabled = !visit.busy && !visit.observationStarted,
@@ -4549,23 +4548,39 @@ class MainActivity : ComponentActivity() {
                                 app.daiyu.android.ui.haptics.material.Button(onClick = { prepareVirtualDisplayTaskHandoff(visit) },
                                     enabled = !visit.busy && visit.selectedTaskIds.isNotEmpty(),
                                     modifier = Modifier.testTag("vd-cleanup-freeze-delivery")) {
-                                    androidx.compose.material3.Text("冻结所选任务交付审批")
+                                    androidx.compose.material3.Text("交付所选任务 → 条件 Release")
                                 }
                                 app.daiyu.android.ui.haptics.material.TextButton(onClick = { prepareVirtualDisplayTaskHandoff(visit, keepNone = true) },
                                     enabled = !visit.busy, modifier = Modifier.testTag("vd-cleanup-freeze-empty")) {
-                                    androidx.compose.material3.Text("不交付任何任务：申请清理 owned 任务 → 条件 Release")
+                                    androidx.compose.material3.Text("清理 owned 任务 → 条件 Release（不交付任何任务）")
                                 }
                             }
                         }
                         visit.request?.let { request ->
-                            R08CleanupApprovalScreen(request,
-                                onDecision = { req, accepted -> answerVirtualDisplayCleanup(visit, req, accepted) },
-                                modifier = Modifier.weight(1f))
+                            val plan = request.review.plan
+                            val binding = remember(request) { plan.binding.json() }
+                            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                                androidx.compose.material3.Text("已请求本次收尾；实际结果以下方状态为准。")
+                                androidx.compose.material3.Text(request.warning)
+                                listOf("session", "task", "conversation", "run", "assistantMessage", "runOwner").forEach {
+                                    androidx.compose.material3.Text("$it: ${binding.getString(it)}")
+                                }
+                                androidx.compose.material3.Text("bindingKey: ${plan.bindingKey}")
+                                androidx.compose.material3.Text("generation: ${plan.generation}")
+                                request.review.rows.forEach { row ->
+                                    androidx.compose.material3.Text("WRITE ${row.stepId} · ${row.operation}")
+                                    androidx.compose.material3.Text("规范生效参数: ${row.effectiveParameters}")
+                                    androidx.compose.material3.Text("namespace: ${row.exactEffect.namespace}")
+                                    androidx.compose.material3.Text("operation: ${row.exactEffect.operation}")
+                                    androidx.compose.material3.Text("target: ${row.exactEffect.target}")
+                                    androidx.compose.material3.Text("change: ${row.exactEffect.change}")
+                                }
+                            }
                         }
                         androidx.compose.material3.Text(visit.status, Modifier.testTag("vd-cleanup-status"))
                         app.daiyu.android.ui.haptics.material.TextButton(onClick = { closeVirtualDisplayCleanup(visit) },
                             modifier = Modifier.testTag("vd-cleanup-close")) {
-                            androidx.compose.material3.Text("关闭此次收尾访问（不释放资源）")
+                            androidx.compose.material3.Text("关闭此次收尾访问（不撤回在途操作，不释放 lease）")
                         }
                     }
                 }

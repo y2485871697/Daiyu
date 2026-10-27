@@ -136,7 +136,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data
         val auth = data?.getStringExtra("oauth-reference")?.let { runCatching { app.daiyu.android.model.oauth.CodexAuth(it) }.getOrNull() }
-        if (oauthAttempt != null && (data == null || data.getStringExtra("attempt") == oauthAttempt) && ownerCheck() && visit.get()) {
+        if (oauthAttempt != null && (data == null || data.getStringExtra("attempt") == oauthAttempt) &&
+            visit.get() && oauthDraft != null && creating === oauthDraft) {
             if (result.resultCode == android.app.Activity.RESULT_OK) oauthResult = auth else discardOAuth(auth)
             oauthReturned = true
         } else { discardOAuth(auth) }

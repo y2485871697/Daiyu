@@ -10,16 +10,23 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.platform.LocalGraphicsContext
+import androidx.compose.ui.unit.IntSize
+import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
@@ -33,12 +40,23 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class ChatInitialPositionTest : WiredActivityTestCase() {
-    private data class Draw(val owner: String, val tail: Boolean, val bottom: Float)
+    private data class Draw(val owner: String, val tail: Boolean, val bottom: Float, val frameOwner: String)
     private var owner by mutableStateOf("first")
     private var request by mutableStateOf(ChatScrollRequest(1))
     private var body by mutableStateOf("")
     private var tailHeight by mutableStateOf(700.dp)
+    private var viewportTop = 0f
     private var viewportBottom = 0f
+    private val pendingCaptures = AtomicInteger()
+    private val captureFailure = AtomicReference<Throwable?>()
+    private val probeColors = mapOf(
+        "first" to (Color(0xFFDE17CF) to Color(0xFF1FDC29)),
+        "second" to (Color(0xFF16CFE2) to Color(0xFFDF6123)),
+        "cold" to (Color(0xFFE42B38) to Color(0xFF395CE1)),
+        "blocked" to (Color(0xFFE2CE19) to Color(0xFF903BDD)),
+        "latest" to (Color(0xFF275BDD) to Color(0xFFC83772)),
+        "stream" to (Color(0xFF21CE67) to Color(0xFFCF7B21)),
+    )
     private val draws = CopyOnWriteArrayList<Draw>()
     private val reads = CopyOnWriteArrayList<Set<String>>()
     private val advances = CopyOnWriteArrayList<String>()
@@ -49,6 +67,8 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     CompositionLocalProvider(LocalMarkdownParser provides parser) {
                         val holder = rememberSaveableStateHolder()
+                        val graphics = LocalGraphicsContext.current
+                        val scope = rememberCoroutineScope()
                         val visit = owner
                         val live = visit == "stream"
                         val turns = List(8) { ChatTurnUi.Assistant("$visit-history-$it") } +
@@ -56,7 +76,47 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                                 status = if (live) RunStatus.RUNNING else RunStatus.COMPLETED,
                                 isStreaming = live)
                         Box(Modifier.size(320.dp, 240.dp).onGloballyPositioned {
-                            viewportBottom = it.positionInRoot().y + it.size.height
+                            viewportTop = it.boundsInRoot().top
+                            viewportBottom = viewportTop + it.size.height
+                        }.drawWithContent {
+                            // Capture the composed viewport, not a child's display-list recording.
+                            val frame = graphics.createGraphicsLayer()
+                            val top = viewportTop
+                            frame.record(this, layoutDirection, IntSize(size.width.roundToInt(), size.height.roundToInt())) {
+                                this@drawWithContent.drawContent()
+                            }
+                            drawLayer(frame)
+                            pendingCaptures.incrementAndGet()
+                            scope.launch {
+                                try {
+                                    val pixels = frame.toImageBitmap().toPixelMap()
+                                    val x = pixels.width / 2
+                                    var recognized = false
+                                    probeColors.forEach { (paintOwner, colors) ->
+                                        listOf(true to colors.first, false to colors.second).forEach { (tail, color) ->
+                                            var bottom = -1
+                                            for (y in 0 until pixels.height) {
+                                                val pixel = pixels[x, y]
+                                                if (abs(pixel.red - color.red) <= 1f / 255f &&
+                                                    abs(pixel.green - color.green) <= 1f / 255f &&
+                                                    abs(pixel.blue - color.blue) <= 1f / 255f && pixel.alpha == 1f) bottom = y
+                                            }
+                                            if (bottom >= 0) {
+                                                recognized = true
+                                                draws += Draw(paintOwner, tail, top + bottom + 1f, visit)
+                                            }
+                                        }
+                                    }
+                                    if (!recognized && pixels.buffer.any { it ushr 24 != 0 }) {
+                                        draws += Draw("unmarked visible content", false, top + pixels.height, visit)
+                                    }
+                                } catch (failure: Throwable) {
+                                    captureFailure.compareAndSet(null, failure)
+                                } finally {
+                                    graphics.releaseGraphicsLayer(frame)
+                                    pendingCaptures.decrementAndGet()
+                                }
+                            }
                         }) {
                             holder.SaveableStateProvider(visit) {
                                 key(visit) {
@@ -64,20 +124,10 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                                         onVisibleCompleted = { reads += it },
                                         onVisibleTextAdvance = { advances += it },
                                     ), scrollRequest = request, turnExtras = { turn ->
-                                        val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
                                         val tail = turn.id == "$visit-tail"
+                                        val colors = probeColors.getValue(visit)
                                         Box(Modifier.fillMaxWidth().height(if (tail) tailHeight else 40.dp)
-                                            .background(Color.Magenta)
-                                            .onGloballyPositioned { coordinates[0] = it }
-                                            .drawWithContent {
-                                                drawContent()
-                                                val placed = checkNotNull(coordinates[0]) { "A drawn probe must be placed" }
-                                                check(placed.isAttached)
-                                                val visible = placed.boundsInRoot()
-                                                if (visible.width > 0f && visible.height > 0f) {
-                                                    draws += Draw(visit, tail, placed.positionInRoot().y + placed.size.height)
-                                                }
-                                            })
+                                            .background(if (tail) colors.first else colors.second))
                                     })
                                 }
                             }
@@ -102,19 +152,28 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         repeat(count) {
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
+            awaitCapturedFrames()
         }
     }
 
+    private fun awaitCapturedFrames() {
+        ui.waitUntil(5_000) { pendingCaptures.get() == 0 }
+        captureFailure.get()?.let { throw AssertionError("Viewport frame capture failed", it) }
+    }
+
     private fun awaitDraw(id: String) {
-        ui.waitUntil(5_000) { draws.any { it.owner == id } }
+        ui.waitUntil(5_000) { draws.any { it.frameOwner == id } }
         ui.waitForIdle()
+        awaitCapturedFrames()
     }
 
     private fun assertOnlyAlignedDraws(id: String) {
-        val samples = draws.filter { it.owner == id }
+        awaitCapturedFrames()
+        val samples = draws.filter { it.frameOwner == id }
         assertTrue("Expected a real drawn frame for $id", samples.isNotEmpty())
         val bottom = viewportBottom - 24f * activity.resources.displayMetrics.density
         samples.forEach {
+            assertEquals("$id exposed another conversation", id, it.owner)
             assertTrue("$id exposed an earlier history row", it.tail)
             assertEquals("$id exposed a partial initial placement", bottom, it.bottom, 2f)
         }
@@ -147,7 +206,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
             switchTo("cold", "# cold heading\n\n" + List(40) { "完整正文第${it}行。\n\n" }.joinToString(""))
             frames()
             ui.waitUntil(5_000) { entered.count == 0L }
-            assertTrue(draws.none { it.owner == "cold" })
+            assertTrue(draws.none { it.frameOwner == "cold" })
             assertTrue(reads.flatten().none { it.startsWith("cold-") })
             assertTrue(advances.none { it.startsWith("cold-") })
             ui.onAllNodesWithTag("chat-turn:cold-tail", useUnmergedTree = true).assertCountEquals(0)
@@ -163,11 +222,13 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
 
     fun testRevisitDoesNotDrawTheSavedHistoryPositionBeforeTheNewBottomRequest() {
         mount()
+        draws.clear()
         ui.onNodeWithTag("chat-messages").performTouchInput { swipeDown() }
         ui.waitForIdle()
+        awaitCapturedFrames()
         val bottom = viewportBottom - 24f * activity.resources.displayMetrics.density
         assertTrue("The saved fixture must actually be away from the bottom",
-            draws.filter { it.owner == "first" }.last().bottom > bottom + 10f)
+            draws.filter { it.frameOwner == "first" }.maxOf { it.bottom } > bottom + 10f)
         switchTo("second")
         awaitDraw("second")
         draws.removeAll { it.owner == "first" }
@@ -200,7 +261,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
             frames()
             ui.mainClock.autoAdvance = true
             awaitDraw("latest")
-            assertTrue(draws.none { it.owner == "blocked" })
+            assertTrue(draws.none { it.frameOwner == "blocked" })
             assertOnlyAlignedDraws("latest")
         } finally {
             release.countDown()
@@ -239,7 +300,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                 frames(2)
             }
             assertTrue("Live content must appear while parsing and generation are still pending",
-                draws.any { it.owner == "stream" })
+                draws.any { it.frameOwner == "stream" })
             assertOnlyAlignedDraws("stream")
             assertTrue(reads.flatten().none { it.startsWith("stream-") })
         } finally {

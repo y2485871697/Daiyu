@@ -56,7 +56,9 @@ class ChatInitialPositionContract(unittest.TestCase):
         self.assertIn('turns.size, tailIndex, touchEpoch, scrollResumed)', request)
         self.assertIn('listState.animateScrollToItem(index)', request)
         follow = chat.split('// Keep a single motion', 1)[1].split('// Read confirmation', 1)[0]
-        self.assertIn('!initialPositionPending &&', follow)
+        self.assertIn('snapshotFlow { canFollowBottom() }', follow)
+        guard = chat.split('fun canFollowBottom(): Boolean =', 1)[1].split('\n\n', 1)[0]
+        self.assertIn('!initialPositionPending &&', guard)
         self.assertIn('motion.step(overflow.toFloat(), frameTime, currentDensity)', follow)
 
 
@@ -68,7 +70,10 @@ class ChatInitialPositionContract(unittest.TestCase):
                       'testFastSwitchRejectsTheLateColdLayoutWithoutDrawingIt',
                       'testStreamingTargetCanAppearWithoutWaitingForGenerationToFinish',
                       'testContinuousStreamingUpdatesDoNotKeepTheEntireConversationHidden',
-                      'drawWithContent', 'boundsInRoot()', 'rememberSaveableStateHolder()',
+                      'drawWithContent', 'frame.toImageBitmap().toPixelMap()', 'this@drawWithContent.drawContent()',
+                      'graphics.releaseGraphicsLayer(frame)', 'it.frameOwner == id',
+                      'pixels.buffer.any { it ushr 24 != 0 }', 'unmarked visible content',
+                      'boundsInRoot()', 'rememberSaveableStateHolder()',
                       'assertOnlyAlignedDraws("first")', 'body +=', 'release.await(5, TimeUnit.SECONDS)'):
             self.assertIn(token, device)
 

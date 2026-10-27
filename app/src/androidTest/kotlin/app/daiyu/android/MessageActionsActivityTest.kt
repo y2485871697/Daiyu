@@ -14,11 +14,11 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
     }
     private fun call(name: String) = MainActivity::class.java.declaredMethods
         .single { it.name == name && it.parameterCount == 0 }.apply { isAccessible = true }.invoke(activity)
-    private fun seed(): Pair<Conversation, Message> {
+    private fun seed(customizeUser: (Message) -> Message = { it }): Pair<Conversation, Message> {
         val conversation = fixture.database.create("default")
         val suffix = UUID.randomUUID().toString()
-        val user = Message(MessageId("user-$suffix"), conversation.id, RunId("run-$suffix"),
-            Message.USER_ROLE, listOf(MessageBlock.Text("body", "original user")), RunStatus.COMPLETED)
+        val user = customizeUser(Message(MessageId("user-$suffix"), conversation.id, RunId("run-$suffix"),
+            Message.USER_ROLE, listOf(MessageBlock.Text("body", "original user")), RunStatus.COMPLETED))
         val assistant = user.copy(id = MessageId("assistant-$suffix"), role = Message.ASSISTANT_ROLE,
             blocks = listOf(MessageBlock.Text("answer", "original answer")), status = RunStatus.RUNNING)
         fixture.database.send(user, assistant)
@@ -129,15 +129,41 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
         mainThread { activity.select(conversation) }; readySnapshot()
         mainThread { retainedControls(activity).onEditUser(user.id.value) }
         awaitControl("edit opened") { !fixture.controller.dataBusy && call("getInlineMessageEditor") != null }
+        val beforeDataRevision = fixture.controller.dataRevision
+        val beforeSnapshotRevision = (field("messageActionSnapshot") as app.daiyu.android.storage.MessageActionSnapshot).revision
+        val completed = java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
         mainThread {
             retainedControls(activity).onTextChange("keep this unsaved text")
             retainedControls(activity).onSelectionChange(1, 6)
-            fixture.controller.dataTask(importing = false, work = {
-                fixture.database.save(user.copy(blocks = listOf(MessageBlock.Text("body", "external revision"))))
+            fixture.controller.dataTask(importing = true, completed = { completed.set(it) }, work = {
+                val replacement = user.copy(blocks = listOf(MessageBlock.Text("body", "external revision")))
+                val db = fixture.database.writableDatabase
+                db.beginTransaction()
+                try {
+                    val blocks = org.json.JSONArray().put(org.json.JSONObject()
+                        .put("type", "text").put("item", "body").put("text", "external revision"))
+                    val changed = db.update("messages", android.content.ContentValues().apply {
+                        put("blocks", blocks.toString())
+                    }, "id=? AND conversation_id=? AND run_id=? AND role='user' AND status='COMPLETED'",
+                        arrayOf(user.id.value, conversation.id.value, user.runId.value))
+                    check(changed == 1)
+                    check(fixture.database.storedMessage(db, conversation.id, user.id.value) == replacement)
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
                 "updated fixture"
             })
         }
-        readySnapshot()
+        awaitControl("external revision write completed") {
+            !fixture.controller.dataBusy && completed.get() != null
+        }
+        assertEquals(true, completed.get())
+        awaitControl("new message revision snapshot complete") {
+            val snapshot = field("messageActionSnapshot") as? app.daiyu.android.storage.MessageActionSnapshot;
+            !fixture.controller.dataBusy && fixture.controller.dataRevision > beforeDataRevision &&
+                snapshot != null && snapshot.revision != beforeSnapshotRevision
+        }
         mainThread {
             val state = field("chatState") as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
             assertEquals("keep this unsaved text", state.composer.text)
@@ -205,11 +231,13 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
     }
 
     fun testOriginalImagesReturnToComposerWithoutChangingHistoryOrDraft() {
-        val (conversation, user) = seed()
-        val images = (0..1).map { index -> MessageBlock.Image(MessageImageReference(
-            MessageImageOwner(conversation.id.value, user.id.value), UUID.randomUUID().toString(),
-            "image/png", 64, (if (index == 0) "a" else "b").repeat(64), 2, 2)) }
-        fixture.database.save(user.copy(blocks = user.blocks + images))
+        val (conversation, user) = seed { original ->
+            val images = (0..1).map { index -> MessageBlock.Image(MessageImageReference(
+                MessageImageOwner(original.conversationId.value, original.id.value), UUID.randomUUID().toString(),
+                "image/png", 64, (if (index == 0) "a" else "b").repeat(64), 2, 2)) }
+            original.copy(blocks = original.blocks + images)
+        }
+        val images = user.blocks.filterIsInstance<MessageBlock.Image>()
         mainThread { activity.select(conversation) }; readySnapshot()
         val before = fixture.database.messages(conversation.id)
         mainThread { retainedControls(activity).onTextChange("kept draft"); retainedControls(activity).onEditUser(user.id.value) }

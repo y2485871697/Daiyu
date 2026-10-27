@@ -40,7 +40,9 @@ class ComposerSurfaceColorContractTest(unittest.TestCase):
     def test_disabled_light_idle_send_does_not_fade_its_background_again(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()
         self.assertIn('.copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f)', composer)
-        self.assertIn('enabled = primaryEnabled, containerSize = 28.dp', composer)
+        self.assertIn('enabled = primaryEnabled || compressionBlocked, containerSize = 28.dp', composer)
+        self.assertIn('containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)', composer)
+        self.assertIn('tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface', composer)
         self.assertIn('state.textActionEnabled()', composer)
         icon = (CHAT / 'ChatTopBar.kt').read_text()
         self.assertIn('enabled = enabled, role = Role.Button', icon)

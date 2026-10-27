@@ -166,9 +166,11 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
         val owner = ChatController.TextSendOwner(fixture.database.conversations().single().id,
             MainActivity::class.java.getDeclaredField("editorGeneration").apply { isAccessible = true }.getLong(activity),
             MainActivity::class.java.getDeclaredField("draftRevision").apply { isAccessible = true }.getLong(activity))
-        val type = MainActivity::class.java.declaredClasses.single { it.simpleName == "ChatReferencePick" }
-        val request = type.declaredConstructors.single().apply { isAccessible = true }.newInstance(tree, owner, original)
-        MainActivity::class.java.getDeclaredField("chatReferencePick").apply { isAccessible = true }.set(activity, request)
+        val slot = MainActivity::class.java.getDeclaredField("chatReferencePick").apply { isAccessible = true }
+        val request = slot.type.getDeclaredConstructor(java.lang.Boolean.TYPE,
+            ChatController.TextSendOwner::class.java, String::class.java, Any::class.java)
+            .apply { isAccessible = true }.newInstance(tree, owner, original, null)
+        slot.set(activity, request)
         return request
     }
     private fun returned(request: Any, tree: Boolean) {

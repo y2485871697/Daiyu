@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import app.daiyu.android.ui.RetainedPlatformActionSubmitAction
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -48,9 +49,8 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
         )
         for (transition in transitions) {
             openMedia()
-            val click = checkNotNull(node("platform-action-preview").fetchSemanticsNode()
-                .config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action)
-            val stale: () -> Unit = { click(); Unit }
+            val stale = node("platform-action-preview").fetchSemanticsNode()
+                .config[RetainedPlatformActionSubmitAction]
             transition { stale(); assertNull(fixture.controller.platformActionPreparation()) }
             ui.waitForIdle()
             mainThread { stale(); assertNull(fixture.controller.platformActionPreparation()) }

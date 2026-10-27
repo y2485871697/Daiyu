@@ -1,6 +1,15 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import app.daiyu.android.storage.ProviderRegistry
 import app.daiyu.android.storage.ProviderRegistrySnapshot
 
@@ -49,6 +58,24 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("page:主模型服务商")
     }
 
+    private fun measuredTextLayout(result: TextLayoutResult, size: IntSize = result.size): TextLayoutResult {
+        val input = result.layoutInput
+        return TextMeasurer(input.fontFamilyResolver, input.density, input.layoutDirection, cacheSize = 0).measure(
+            text = input.text, style = input.style, overflow = input.overflow, softWrap = input.softWrap,
+            maxLines = input.maxLines, placeholders = input.placeholders,
+            constraints = Constraints.fixed(size.width, size.height))
+    }
+
+    private fun actualFirstBaseline(target: SemanticsNodeInteraction): Float {
+        val coordinates = target.fetchSemanticsNode().layoutInfo.coordinates
+        return ui.runOnIdle {
+            assertTrue(coordinates.isAttached)
+            val baseline = coordinates[FirstBaseline]
+            assertTrue(baseline != AlignmentLine.Unspecified)
+            coordinates.positionInRoot().y + baseline
+        }
+    }
+
     private fun assertCountAndSelectAllTypography() {
         val title = reveal("provider-count-title", "模型提供商", "provider-count")
         val selectAll = reveal("provider-select-all", "模型提供商", "provider-count")
@@ -60,11 +87,20 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         val actionLayout = actionLayouts.single()
         assertEquals(titleLayout.layoutInput.style.fontSize, actionLayout.layoutInput.style.fontSize)
         assertEquals(titleLayout.layoutInput.style.fontWeight, actionLayout.layoutInput.style.fontWeight)
-        assertFalse(titleLayout.hasVisualOverflow)
-        assertFalse(actionLayout.hasVisualOverflow)
-        val titleBounds = title.fetchSemanticsNode().boundsInRoot
-        val actionBounds = selectAll.fetchSemanticsNode().boundsInRoot
-        assertEquals(titleBounds.top + titleLayout.firstBaseline, actionBounds.top + actionLayout.firstBaseline, 1f)
+        fun assertFits(target: SemanticsNodeInteraction, raw: TextLayoutResult) {
+            val node = target.fetchSemanticsNode()
+            assertEquals(node.config[SemanticsProperties.Text].single(), raw.layoutInput.text)
+            val verticalPadding = with(raw.layoutInput.density) { 8.dp.roundToPx() }
+            assertEquals(node.size.width, raw.size.width)
+            assertEquals(node.size.height, raw.size.height + 2 * verticalPadding)
+            val measured = measuredTextLayout(raw)
+            assertFalse("${raw.layoutInput.text.text}: box=${raw.size} paragraph=${raw.multiParagraph.width}x${raw.multiParagraph.height}",
+                measured.hasVisualOverflow)
+            assertTrue(measuredTextLayout(raw, IntSize(1, raw.size.height)).hasVisualOverflow)
+        }
+        assertFits(title, titleLayout)
+        assertFits(selectAll, actionLayout)
+        assertEquals(actualFirstBaseline(title), actualFirstBaseline(selectAll), 1f)
     }
 
     fun testSelectAllMatchesCountTypographyAndBaselineInBothStates() {

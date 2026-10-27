@@ -252,9 +252,14 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             val bounds = titleNode.fetchSemanticsNode().boundsInRoot
             val header = node("tool-step-header:readability").fetchSemanticsNode().boundsInRoot
             assertTrue(bounds.right <= state.left || bounds.bottom <= state.top)
-            assertTrue(bounds.left >= header.left && bounds.right <= header.right && bounds.bottom <= header.bottom)
+            assertTrue(bounds.left >= header.left && bounds.right <= header.right &&
+                bounds.top >= header.top && bounds.bottom <= header.bottom)
+            assertTrue(state.top >= header.top && state.bottom <= header.bottom)
             if (fontScale == .9f) {
-                assertEquals(44f * phoneDensity, header.height, 1f)
+                val expectedHeight = with(measured.layoutInput.density) {
+                    maxOf(44.dp.roundToPx().toFloat(), bounds.height + state.height + 2 * 5.dp.roundToPx())
+                }
+                assertEquals(expectedHeight, header.height, 1f)
                 val surface = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                 assertTrue(surface.height <= 98f * phoneDensity + 1f)
             }

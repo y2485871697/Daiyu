@@ -63,7 +63,6 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
         val address = "unfinished address, do not navigate"
         val range = androidx.compose.ui.text.TextRange(2, 9)
         node("browser-visual-address").performTextReplacement(address)
-        node("browser-visual-address").performTextInputSelection(range)
         dismissIme()
         fun presentation(): app.daiyu.android.browser.BrowserSheetUiState {
             val target = checkNotNull(invokeHost(activity, "getBrowserResumeTarget"))
@@ -71,10 +70,22 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
                 .invoke(target) as app.daiyu.android.browser.BrowserSheetUiState
         }
         lateinit var retained: app.daiyu.android.browser.BrowserSheetUiState
-        mainThread { retained = presentation() }
+        node("browser-visual-address").performSemanticsAction(
+            androidx.compose.ui.semantics.SemanticsActions.SetSelection
+        ) { assertTrue(it(range.start, range.end, true)) }
+        ui.waitForIdle()
+        node("browser-visual-address").assert(SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange, range))
+        mainThread { retained = presentation(); assertEquals(range, retained.address.selection) }
         repeat(2) {
             val previous = checkNotNull(visit())
-            realPauseResume(activity)
+            realPauseResume(activity,
+                beforePause = { assertEquals(range, retained.address.selection) },
+                atPause = {
+                    assertSame(retained, presentation())
+                    assertEquals(range, retained.address.selection)
+                    assertNull(visit()); assertFalse(previous.snapshot().live)
+                })
             awaitUniqueTag("browser-visual-page")
             node("browser-visual-address").assertTextContains(address)
             node("browser-visual-address").assert(SemanticsMatcher.expectValue(
@@ -84,6 +95,7 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
                 assertNotSame(previous, visit())
                 assertFalse(previous.snapshot().live)
                 assertEquals(address, retained.address.text)
+                assertEquals(range, retained.address.selection)
             }
         }
         node("browser-visual-history").performClick()

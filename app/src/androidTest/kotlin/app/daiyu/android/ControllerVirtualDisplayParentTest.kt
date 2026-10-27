@@ -15,7 +15,7 @@ import java.util.concurrent.*
 import java.util.concurrent.atomic.*
 
 /** Real Controller + SQLite acceptance + Runner + unique RunCatalogTools + durable Runtime store.
- * Only the process host is substituted: no root, socket, network, or alternate catalog/ledger.
+ * Host and explicit-review policy are fixture-injected: no root, socket, network, or alternate catalog/ledger.
  * These are test sources, not a claim that an emulator/privileged backend was exercised. */
 @Suppress("DEPRECATION")
 class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
@@ -139,7 +139,10 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
                         if (failRelease) throw IOException("test lost release receipt")
                     }
                 }
-                val session = ControllerVirtualDisplayRuntime.assemble(owner, caps, writes, reads, parent,
+                val reviewParent = object : ControllerVirtualDisplayRuntime.Parent by parent {
+                    override val requiresExplicitApproval = true
+                }
+                val session = ControllerVirtualDisplayRuntime.assemble(owner, caps, writes, reads, reviewParent,
                     retention, store) { host }
                 if (throwAfterRetain) throw IOException("test late factory loss")
                 session

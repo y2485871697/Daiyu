@@ -129,7 +129,7 @@ private fun CategoryDocument(document: ToolDisclosureUi) = Document(document)
 @Composable
 private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
     var opened by remember(document) { mutableStateOf(false) }
-    val log = document.title in setOf("标准输出", "标准错误", "已收到输出", "任务日志", "守护日志", "运行回执")
+    val log = document.title in setOf("终端输出", "标准输出", "标准错误", "已收到输出", "任务日志", "守护日志", "运行回执")
     val preview = toolOutputPreview(document.text, tail = log)
     val tappable = preview.truncated
     val colors = conversationColors()

@@ -53,7 +53,7 @@ class ToolRichDetailsTest {
         for (category in listOf("terminal", "background_job")) {
             val value = ToolRichDetails.project(category, "terminal_pty_step", """{"command":"printf hello","cwd":"/tmp"}""",
                 """{"opened":true,"command_completion":"unknown","stdout":""}""")
-            assertEquals(setOf("命令", "工作目录"), value.documents.map { it.title }.toSet())
+            assertEquals(setOf("命令", "工作目录", "标准输出"), value.documents.map { it.title }.toSet())
             assertTrue(value.documents.all { it.code })
             assertEquals("已收到运行回执，未返回输出", value.prose!!.text)
             assertTrue(value.technical.any { it.text.contains("command_completion") })
@@ -62,7 +62,7 @@ class ToolRichDetailsTest {
             assertFalse(logged.documents.any { it.title == "运行回执" })
             val plain = ToolRichDetails.project(category, "terminal_pty_read", "{}", "actual receipt")
             assertEquals("actual receipt", plain.documents.single().text)
-            assertFalse(plain.documents.single().code)
+            assertTrue(plain.documents.single().code)
         }
     }
 
@@ -204,7 +204,7 @@ class ToolRichDetailsTest {
         assertTrue(unknown.documents.any { it.text.contains("new_value") })
     }
     @Test fun hiddenMetadataStillHasAnExplicitReadableReceipt() {
-        for ((category, payload, expected) in listOf(Triple("memory", """{"revision":"r1"}""", "已收到回执，详情见技术详情"),
+        for ((category, payload, expected) in listOf(Triple("memory", """{"revision":"r1"}""", "已收到回执"),
             Triple("files", """{"data":{"scope":"complete"}}""", "读取范围：complete"))) {
             val value = ToolRichDetails.project(category, "fixture", "{}", payload)
             assertEquals(expected, value.prose!!.text)
@@ -214,7 +214,7 @@ class ToolRichDetailsTest {
     }
     @Test fun failedOuterAndInnerReceiptsRestrictCategoryBodiesButKeepDiagnostics() {
         for (category in listOf("apps", "browser", "files", "personal_search", "device_read", "system_action")) {
-            for (state in listOf("\"ok\":false" to "本次调用未完成，详情见技术详情",
+            for (state in listOf("\"ok\":false" to "本次调用未完成",
                 "\"status\":\"permission_denied\"" to "缺少本次操作所需权限")) {
                 for (nested in listOf(false, true)) {
                     val body = "{" + state.first + ",\"text\":\"FAILED_BODY\"}"

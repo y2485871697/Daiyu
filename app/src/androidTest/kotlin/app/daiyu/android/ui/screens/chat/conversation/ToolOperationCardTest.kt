@@ -64,9 +64,10 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("原始等待状态").assertDoesNotExist()
             ui.onNodeWithTag("tool-runtime").assertDoesNotExist()
             ui.onNodeWithText("secret-output", substring = true).assertIsDisplayed()
-            ui.onNodeWithText("技术详情").scrollToVisible().assertIsDisplayed().performClick()
-            ui.onNodeWithText("收起技术详情").assertDoesNotExist()
-            ui.onNodeWithTag("tool-step-technical:card-call").scrollToVisible().performClick()
+            ui.onNodeWithText("技术详情").assertDoesNotExist()
+            ui.onNodeWithTag("tool-step-technical:card-call").assertDoesNotExist()
+            ui.onNodeWithText("调用参数").assertDoesNotExist()
+            ui.onNodeWithText("原始回执").assertDoesNotExist()
             ui.onNodeWithContentDescription("复制安全摘要").assertDoesNotExist()
             ui.onNodeWithContentDescription("重试 读取输出").assertDoesNotExist()
             ui.onNodeWithText("读取输出").scrollToVisible().assertIsDisplayed().performClick()
@@ -94,9 +95,9 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 ui.onNodeWithTag("work-process-header").performClick()
             }
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
-            ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithTag("tool-step-header:card-callordinary-$name-$mixed").scrollToVisible().assertIsDisplayed().assertTextContains(title).performClick()
             ui.onNodeWithText("ordinary-output").scrollToVisible().assertIsDisplayed()
-            ui.onNodeWithText("技术详情").scrollToVisible().performClick()
+            ui.onNodeWithText("技术详情").assertDoesNotExist()
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
             assertEquals(0, executions)
         }
@@ -127,7 +128,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val title = "执行命令 · $label"
             ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed().performClick()
             ui.onNodeWithText("target-output").scrollToVisible().assertIsDisplayed()
-            ui.onNodeWithText("技术详情").scrollToVisible().performClick()
+            ui.onNodeWithText("技术详情").assertDoesNotExist()
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
             assertEquals(0, executions)
         }
@@ -146,6 +147,33 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         }
         assertEquals(0, executions)
     }
+    fun testNonTerminalMemoryHasOneResultAndNoTerminalFieldsInBothProductionPaths() {
+        var executions = 0
+        for (mixed in listOf(false, true)) {
+            val fixture = source(mixed, "memory-$mixed")
+            val message = fixture.copy(blocks = fixture.blocks.map { block ->
+                if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = "memory_get",
+                    arguments = """{"id":"mem-02","command":"not a terminal command"}"""),
+                    result = """{"ok":true,"text":"memory body","revision":"r7","stdout":"not terminal output"}""")
+                else block
+            })
+            val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
+            show(turn, ChatScreenActions(onRetryStep = { executions++ }))
+            if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+            val header = ui.onNodeWithTag("tool-step-header:card-callmemory-$mixed")
+            header.scrollToVisible().performClick()
+            ui.onAllNodesWithText("memory body", useUnmergedTree = true).assertCountEquals(1)
+            for (label in listOf("技术详情", "调用参数", "原始回执", "执行命令", "终端输入", "终端输出")) {
+                ui.onNodeWithText(label).assertDoesNotExist()
+            }
+            ui.onNodeWithText("not a terminal command").assertDoesNotExist()
+            ui.onNodeWithText("not terminal output").assertDoesNotExist()
+            header.scrollToVisible().performClick()
+            ui.onNodeWithText("memory body").assertDoesNotExist()
+        }
+        assertEquals(0, executions)
+    }
+
     fun testTypedCategoryBodiesUseTheSharedReadOnlyDisclosure() {
         ToolCardPresentations.categories.forEach { category ->
             val details = ToolCategoryDetails.project(category, "{}", "{\"count\":0,\"state\":\"unknown\"}")
@@ -183,9 +211,9 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("请求启用").assertDoesNotExist()
             ui.onNodeWithText("已记录返回").assertDoesNotExist()
             ui.onNodeWithText("调用参数").assertDoesNotExist()
-            ui.onNodeWithText("技术详情").scrollToVisible().performClick()
-            ui.onNodeWithText("调用参数").scrollToVisible().assertIsDisplayed()
-            ui.onNodeWithText("原始回执").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("技术详情").assertDoesNotExist()
+            ui.onNodeWithText("调用参数").assertDoesNotExist()
+            ui.onNodeWithText("原始回执").assertDoesNotExist()
         }
         assertEquals(0, executions)
     }
@@ -227,7 +255,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.waitForIdle()
             dismissDesktopEducationTooltip(instrumentation, ui, ui.onNodeWithTag("tool-education-blank"))
             val layoutsByTitle = mutableMapOf<String, androidx.compose.ui.text.TextLayoutResult>()
-            for (tag in listOf("tool-document:命令", "tool-document:标准输出")) {
+            for (tag in listOf("tool-document:执行命令", "tool-document:终端输出")) {
                 val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
                 ui.onNodeWithTag(tag, useUnmergedTree = true).performSemanticsAction(
                     androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
@@ -235,7 +263,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 assertEquals(13.sp, layouts.single().layoutInput.style.fontSize)
                 layoutsByTitle[tag.substringAfter(':')] = layouts.single()
             }
-            for (title in listOf("命令", "标准输出")) {
+            for (title in listOf("执行命令", "终端输出")) {
                 val frame = ui.onNodeWithTag("tool-document-frame:$title", useUnmergedTree = true).scrollToVisible()
                 awaitVisualIdle()
                 val geometry = frame.fetchSemanticsNode()
@@ -355,8 +383,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 assertEquals(sample, expected.green, actual.green, .025f)
                 assertEquals(sample, expected.blue, actual.blue, .025f)
             }
-            ui.onNodeWithTag("tool-output-hint:标准输出").assertDoesNotExist()
-            ui.onNodeWithTag("tool-document:标准输出", useUnmergedTree = true).assertTextEquals("hello")
+            ui.onNodeWithTag("tool-output-hint:终端输出").assertDoesNotExist()
+            ui.onNodeWithTag("tool-document:终端输出", useUnmergedTree = true).assertTextEquals("hello")
             ui.onNodeWithText("运行回执").assertDoesNotExist()
         }
     }
@@ -384,12 +412,12 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onAllNodesWithText("trusted-host-slot").assertCountEquals(1)
             ui.onNodeWithText(body).assertDoesNotExist()
             val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
-            ui.onNodeWithTag("tool-output-preview:标准输出", useUnmergedTree = true)
+            ui.onNodeWithTag("tool-output-preview:终端输出", useUnmergedTree = true)
                 .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
             assertTrue(layouts.single().lineCount <= 3)
-            ui.onNodeWithTag("tool-document:标准输出").performClick()
+            ui.onNodeWithTag("tool-document:终端输出").performClick()
             ui.onNodeWithText(body).assertExists()
-            ui.onNodeWithText("读取输出 · 输出").assertExists()
+            ui.onNode(hasText("终端输出") and hasAnyAncestor(hasTestTag("tool-output-dialog"))).assertExists()
             ui.onNodeWithTag("tool-output-meta").assertTextEquals("1 行 · 成功")
             ui.onNodeWithTag("tool-output-dialog", useUnmergedTree = true).assert(
                 SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsActions.OnClick))
@@ -438,11 +466,11 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.waitForIdle()
             if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
             ui.onNodeWithTag("tool-step-header:card-call$key").scrollToVisible().performClick()
-            ui.onNodeWithText(if (private) "结果未获展示授权" else "本次调用未完成，详情见技术详情").assertIsDisplayed()
+            ui.onNodeWithText(if (private) "结果未获展示授权" else "本次调用未完成").assertIsDisplayed()
             ui.onNodeWithText("restricted-host-content").assertDoesNotExist()
             ui.onNodeWithText("RESTRICTED_PAYLOAD", substring = true).assertDoesNotExist()
             if (private) {
-                ui.onNodeWithTag("tool-step-technical:card-call$key").scrollToVisible().performClick()
+                ui.onNodeWithTag("tool-step-technical:card-call$key").assertDoesNotExist()
                 ui.onNodeWithText("RESTRICTED_PAYLOAD", substring = true).assertDoesNotExist()
             }
             assertEquals(0, hostCompositions)

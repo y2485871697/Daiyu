@@ -127,7 +127,6 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
 internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val colors = conversationColors()
     var expanded by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
-    var technical by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
     val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
         step.state == WorkStepState.FAILED -> colors.error
@@ -190,17 +189,6 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                         if (step.categoryDetails?.rich?.bodyRestricted != true) toolContent(step)
                         if (step.categoryDetails == null) {
                             step.sections.forEach { section -> ToolDetailSection(section, step.category in setOf("terminal", "background_job", "files")) }
-                        }
-                        val inspect = step.categoryDetails?.rich?.technical.orEmpty()
-                        if (inspect.isNotEmpty()) {
-                            Column(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-                                HorizontalDivider(thickness = 1.dp, color = colors.line)
-                                ToolDisclosureHeader("技术详情", technical,
-                                    Modifier.testTag("tool-step-technical:${step.toolCallId}"), compact = true) { technical = !technical }
-                                if (technical) Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    inspect.forEach { ToolDocument(it) }
-                                }
-                            }
                         }
                         if (step.categoryDetails == null && step.sections.isEmpty() && step.detail.isNotBlank()) ToolDetailSection(ToolDetailSectionUi("详情", step.detail), false)
                     }

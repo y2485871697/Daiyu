@@ -23,6 +23,7 @@ data class ToolRichDetailsUi(
     val technical: List<ToolDisclosureUi> = emptyList(),
     val prose: ToolDisclosureUi? = null,
     val bodyRestricted: Boolean = false,
+    val failed: Boolean = false,
 )
 
 /** A bounded, read-only projection. No URI resolving, asset loading or execution lives here. */
@@ -55,8 +56,8 @@ internal object ToolRichDetails {
     fun project(category: String, toolName: String, arguments: String, result: String?): ToolRichDetailsUi {
         val args = json(arguments)
         val encodedScreenshot = toolName == "screen" && args?.optString("operation") == "screenshot"
-        val envelope = if (encodedScreenshot) null else json(result)
-        val output = if (category in setOf("apps", "files", "personal_search", "device_read", "system_action"))
+        val envelope = if (encodedScreenshot) null else json(result, if (category in setOf("terminal", "background_job")) 1_048_576 else MAX_INPUT)
+        val output = if (category in setOf("apps", "files", "personal_search", "device_read", "system_action", "terminal", "background_job"))
             envelope?.optJSONObject("data") ?: envelope else envelope
         val cookies = category == "browser" && (args?.optString("action") in setOf("get_cookies", "set_cookies"))
         val hidden = linkedSetOf<String>()
@@ -97,7 +98,9 @@ internal object ToolRichDetails {
         }
         fun document(source: JSONObject?, key: String, title: String, code: Boolean = false) {
             val value = source?.opt(key) as? String ?: return
-            if (value.isNotBlank()) {
+            val terminalOutput = category in setOf("terminal", "background_job") && source !== args &&
+                title in setOf("标准输出", "标准错误", "已收到输出", "任务日志", "守护日志")
+            if (value.isNotBlank() || terminalOutput) {
                 if (source !== args) outputDocument = true
                 val text = scrub(value, hidden)
                 if (source !== args) {
@@ -164,10 +167,16 @@ internal object ToolRichDetails {
                 field(args, "environment", "环境"); field(args, "identity", "身份")
                 listOf("session_id" to "会话", "job_id" to "任务", "task_id" to "守护任务", "mode" to "模式").forEach { (key, label) -> field(output, key, label); field(args, key, label) }
                 fields(args, "offset" to "读取偏移", "offset_chars" to "字符偏移", "max_chars" to "字符上限", "max_lines" to "行数上限", "tail" to "日志尾行数", "restart_policy" to "重启策略")
-                document(output, "log", "任务日志", true); document(output, "logs", "守护日志", true)
                 field(output, "duration_ms", "运行时长毫秒"); field(output, "last_event", "最近事件")
                 document(args, "cwd", "工作目录", true); document(args, "command", "命令", true); document(args, "text", "会话输入", true)
-                document(output, "stdout", "标准输出", true); document(output, "stderr", "标准错误", true); document(output, "output", "已收到输出", true)
+                if (toolName == "shizuku_execute") document(args, "script", "命令", true)
+                if (output?.opt("stdout") is String || output?.opt("stderr") is String) {
+                    document(output, "stdout", "标准输出", true); document(output, "stderr", "标准错误", true)
+                } else {
+                    listOf("output", "log", "logs").firstOrNull { output?.opt(it) is String }?.let {
+                        document(output, it, "已收到输出", true)
+                    }
+                }
                 field(output, "command_completion", "命令完成确认"); field(output, "exit_code", "退出码")
             }
             "files", "workspace" -> {
@@ -315,11 +324,13 @@ internal object ToolRichDetails {
             if (envelope !== output) documents(envelope, "message" to "操作回执", "error" to "错误回执")
             if (category !in setOf("delegation", "child_control")) document(output, "result", "操作回执")
         }
-        if (!cookies && category != "user_question") {
+        val unreadableTerminalReceipt = category in setOf("terminal", "background_job") && output == null &&
+            result?.trimStart()?.firstOrNull() in setOf('{', '[')
+        if (!cookies && category != "user_question" && !unreadableTerminalReceipt) {
             if (!outputDocument && entries.isEmpty() && result != null && result.isNotBlank() &&
                 (output == null || category !in ToolCardPresentations.categories || category == "generic")) {
                 val cleaned = if (output == null) scrub(result, hidden) else scrub(sanitizedJson(envelope ?: output, 0).toString(2), hidden)
-                docs += ToolDisclosureUi(if (category in setOf("terminal", "background_job")) "操作回执" else "已记录返回", cleaned, category in setOf("files", "workspace", "mcp", "generic"))
+                docs += ToolDisclosureUi(if (category in setOf("terminal", "background_job")) "终端输出" else "已记录返回", cleaned, category in setOf("terminal", "background_job", "files", "workspace", "mcp", "generic"))
             }
         }
         val receiptStates = listOfNotNull(envelope, envelope?.optJSONObject("data")).distinct()
@@ -335,7 +346,7 @@ internal object ToolRichDetails {
             "no_cached_location" -> "没有可用的最近位置缓存"
             "unsupported" -> "设备不支持本次操作"
             "unavailable" -> "本次读取不可用"
-            else -> if (cookies || encodedScreenshot || category == "user_question") "本次调用未完成" else "本次调用未完成，详情见技术详情"
+            else -> "本次调用未完成"
         }
         val technical = if (cookies || encodedScreenshot || category == "user_question") emptyList() else buildList {
             if (arguments.isNotBlank()) add(ToolDisclosureUi("调用参数", if (args == null) scrub(arguments, hidden) else scrub(sanitizedJson(args, 0).toString(2), hidden), true))
@@ -362,18 +373,19 @@ internal object ToolRichDetails {
                         }).joinToString(" · ")
                     listOf("$latitude, $longitude", metadata).filter { it.isNotBlank() }.joinToString("\n")
                 }
+                unreadableTerminalReceipt -> "终端回执无法解析，未展示原始数据"
                 output == null -> scrub(result, hidden)
                 category == "system_action" -> returnedFields.distinct().joinToString("\n", transform = ::readable)
-                    .ifBlank { if (output.opt("accepted") == true) "请求已受理，结果未确认" else "已收到系统回执，详情见技术详情" }
+                    .ifBlank { if (output.opt("accepted") == true) "请求已受理，结果未确认" else "已收到系统回执" }
                 category in setOf("terminal", "background_job") -> "已收到运行回执，未返回输出"
                 category == "device_read" -> fields.filterNot { it.label in setOf("命名空间", "设置键", "读取上限", "快照时间", "时间戳", "本地时间", "位置年龄毫秒") }
                     .distinct().joinToString("\n", transform = ::readable).ifBlank {
-                        if (entries.isNotEmpty() || outputDocument) "" else "已收到设备快照，详情见技术详情"
+                        if (entries.isNotEmpty() || outputDocument) "" else "已收到设备快照"
                     }
                 cookies -> "未返回可展示的 Cookie 属性"
                 category in setOf("files", "workspace", "gui", "mcp", "image_read", "speech") && returnedFields.isNotEmpty() ->
                     returnedFields.distinct().joinToString("\n", transform = ::readable)
-                else -> "已收到回执，详情见技术详情"
+                else -> "已收到回执"
             }
             body.takeIf { it.isNotBlank() }?.let { ToolDisclosureUi("", it) }
         } else null
@@ -388,12 +400,12 @@ internal object ToolRichDetails {
         fun privateText(text: String): String = if (personal) maskPersonal(text) else text
         if (privacyRestricted) return ToolRichDetailsUi(source = source, operation = operation,
             technical = technical.map { it.copy(text = privateText(it.text)) },
-            prose = ToolDisclosureUi("", failure), bodyRestricted = true)
+            prose = ToolDisclosureUi("", failure), bodyRestricted = true, failed = true)
         return ToolRichDetailsUi((if (cookies) fields.filter { it.label in setOf("动作", "标签") } else fields).distinct().map { it.copy(value = privateText(it.value)) },
             (if (cookies) entries.filter { it.group == "Cookie属性" } else entries).map { entry -> entry.copy(fields = entry.fields.map { it.copy(value = privateText(it.value)) },
                 documents = entry.documents.map { it.copy(text = privateText(it.text)) }) },
             (if (cookies) emptyList() else docs).distinctBy { it.title to it.text }.map { it.copy(text = privateText(it.text)) }, source, operation,
-            technical.map { it.copy(text = privateText(it.text)) }, prose?.let { it.copy(text = privateText(it.text)) }, failed)
+            technical.map { it.copy(text = privateText(it.text)) }, prose?.let { it.copy(text = privateText(it.text)) }, failed && category !in setOf("terminal", "background_job"), failed)
     }
 
     private fun formatDeviceTime(value: String, timezone: String?): String {
@@ -451,6 +463,6 @@ internal object ToolRichDetails {
             })
         } }
     }
-    private fun json(value: String?): JSONObject? = value?.takeIf { it.length <= MAX_INPUT && it.trimStart().startsWith('{') }
+    private fun json(value: String?, maxInput: Int = MAX_INPUT): JSONObject? = value?.takeIf { it.length <= maxInput && it.trimStart().startsWith('{') }
         ?.let { runCatching { JSONObject(it) }.getOrNull() }
 }

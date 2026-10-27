@@ -100,7 +100,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
     }
 
     private val phoneDensity = 525f / 160f
-    private val prose = "已收到设备快照，详情见技术详情"
+    private val prose = "已收到设备快照"
     private val title = "查询设备状态和当前系统内存使用情况"
     private val output = "first line\nsecond line\nthird line\nfourth line"
     private var actionCount = 0
@@ -198,22 +198,12 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertEquals(14.sp, body.layoutInput.style.fontSize)
             assertEquals(21.sp, body.layoutInput.style.lineHeight)
             assertFalse(body.hasVisualOverflow)
-            assertTarget("tool-step-technical:readability", scale, minimumHeight = 32f)
-            ui.onNodeWithTag("tool-disclosure-arrow:技术详情", useUnmergedTree = true).assertIsDisplayed()
-            ui.onNodeWithTag("tool-step-technical:readability").assert(
-                SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
-            val technical = ui.onNodeWithTag("tool-step-technical:readability").fetchSemanticsNode().boundsInRoot
-            val surface = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            assertTrue("Collapsed technical section must not leave a bottom spacer", surface.bottom - technical.bottom <= 12f * phoneDensity * scale + 1f)
-            ui.onNodeWithTag("tool-step-technical:readability").performClick()
-            ui.onNodeWithText("收起技术详情").assertDoesNotExist()
-            ui.onNodeWithTag("tool-step-technical:readability").assert(
-                SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
-            val args = layout(ui.onNodeWithTag("tool-document:调用参数", useUnmergedTree = true).scrollToVisible().assertIsDisplayed())
-            assertEquals(13.sp, args.layoutInput.style.fontSize)
-            assertEquals(20.sp, args.layoutInput.style.lineHeight)
-            ui.onNodeWithTag("tool-step-technical:readability").scrollToVisible().performClick()
-            ui.onNodeWithTag("tool-document:调用参数").assertDoesNotExist()
+            ui.onNodeWithTag("tool-step-technical:readability").assertDoesNotExist()
+            ui.onNodeWithText("技术详情").assertDoesNotExist()
+            ui.onNodeWithText("调用参数").assertDoesNotExist()
+            ui.onNodeWithText("原始回执").assertDoesNotExist()
+            ui.onNodeWithText("执行命令").assertDoesNotExist()
+            ui.onNodeWithText("终端输出").assertDoesNotExist()
             assertTarget("readability-action", scale, minimumWidth = true)
         }
         assertEquals("Disclosure must not copy or run an action", 0, actionCount)

@@ -65,7 +65,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn("fontSize = 13.sp, lineHeight = 18.sp", shell)
         self.assertIn("fontSize = 12.sp, lineHeight = 17.sp", shell)
         self.assertIn("rememberSaveable(ownerKey)", shell)
-        self.assertEqual(2, shell.count("rememberSaveable(step.owner, step.toolCallId)"))
+        self.assertEqual(1, shell.count("rememberSaveable(step.owner, step.toolCallId)"))
         self.assertIn("key(ownerKey, step.owner, step.toolCallId)", shell)
         self.assertIn('Text("工具回执未确认 · 不重放"', shell)
         self.assertNotIn("graphicsLayer", shell)
@@ -75,17 +75,22 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn('surface.height <= 98f * phoneDensity + 1f', geometry)
         self.assertIn('titleBounds.bottom <= stateBounds.top', geometry)
 
-    def test_technical_header_uses_arrow_not_alternate_label(self):
+    def test_cards_have_no_technical_drawer_and_terminal_labels_are_category_scoped(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
-        self.assertIn('ToolDisclosureHeader("技术详情", technical,', shell)
-        self.assertNotIn("收起技术详情", shell)
-        self.assertIn("compact = true", shell)
+        for removed in ('ToolDisclosureHeader("技术详情"', 'tool-step-technical:', 'var technical', '.rich?.technical'):
+            self.assertNotIn(removed, shell)
+        self.assertIn('AnimatedVisibility(expanded)', shell)
+        self.assertIn('expanded = !expanded', shell)
+        body = (CHAT / "ToolBodyLayout.kt").read_text()
+        self.assertIn('if (category in setOf("terminal", "background_job"))', body)
+        self.assertIn('"执行命令"', body)
+        self.assertIn('ToolDisclosureUi("终端输出"', body)
         content = (CHAT / "ToolCategoryContent.kt").read_text()
-        self.assertIn("DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight", content)
-        self.assertIn('stateDescription = if (expanded) "已展开" else "已折叠"', content)
+        self.assertIn('val log = document.title in setOf("终端输出",', content)
+        self.assertIn('DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight', content)
         rich = (CHAT / "ToolRichDetails.kt").read_text()
-        self.assertIn('ToolDisclosureUi("原始回执"', rich)
-        self.assertNotIn('ToolDisclosureUi("调用回执"', rich)
+        self.assertNotIn('详情见技术详情', rich)
+        self.assertIn('if (toolName == "shizuku_execute") document(args, "script", "命令", true)', rich)
 
     def test_full_output_removes_close_cross_but_keeps_content_copy_and_shared_dismiss(self):
         dialog = (CHAT / "ToolOutputDialog.kt").read_text()

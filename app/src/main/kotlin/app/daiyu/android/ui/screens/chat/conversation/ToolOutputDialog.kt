@@ -78,7 +78,10 @@ internal fun ToolOutputDialog(document: ToolDisclosureUi, onDismiss: () -> Unit)
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     var copied by remember(document) { mutableStateOf(false) }
-    val title = owner?.operation?.let { "$it · 输出" } ?: "完整输出"
+    val title = when (document.title) {
+        "执行命令", "终端输入", "终端输出" -> document.title
+        else -> owner?.operation?.let { "$it · 输出" } ?: "完整输出"
+    }
     val meta = "${document.text.count { it == '\n' } + 1} 行" + (owner?.state?.let { " · $it" } ?: "")
     PreviewDialog(onDismiss, scrimColor = Color(0xCC16101F), scrimBlurRadius = 4f) {
         val viewportHeight = maxHeight

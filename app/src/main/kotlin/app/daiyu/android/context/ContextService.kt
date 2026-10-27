@@ -193,42 +193,44 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         val prefix = snapshot.take(count); val revision = ContextRevision.digest(prefix)
         // Run model outside the write transaction. Exception/empty/nonshrinking leaves originals untouched.
         checkCancellation(cancelled)
+        val logicalHistory = MessageHistory.expand(snapshot)
         val activity = app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(), id.value,
-            summaryInput.size, summarizer.displayIdentity)
+            summaryInput.size, summarizer.displayIdentity,
+            anchor = app.daiyu.android.timeline.TimelineAnchor.at(logicalHistory, logicalHistory.lastIndex))
         onCompression(activity)
-        val summary = try { summarizer.summarize(CompressionInput(summaryInput, revision)).trim() }
-        finally { onCompression(activity.copy(running = false)) }
-        checkCancellation(cancelled)
-        val reduced = if (policy.tokenTail) TokenTailCompression.messageTokens(summaryMessage(id, "candidate", summary)) <
-            summaryInput.sumOf(TokenTailCompression::messageTokens) else summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)
-        require(summary.isNotEmpty() && reduced) { "压缩未缩小；保留原文" }
-        val archive = UUID.randomUUID().toString()
-        // Validate the actual wrapped summary plus retained tail and new input BEFORE publishing.
-        requireCapacity(policy, listOf(summaryMessage(id, archive, summary)) + tail + pending)
-        val hash = blobs.put(if (logicalCut == null) ArchiveCodec.encode(prefix)
-            else ArchiveCodec.encodeDocument(prefix, logicalCut))
-        transactions.run { db ->
+        try {
+            val summary = summarizer.summarize(CompressionInput(summaryInput, revision)).trim()
             checkCancellation(cancelled)
-            ensureIdle(db, id); require(ContextRevision.digest(read(db, id)) == ContextRevision.digest(snapshot)) { "历史已改变；摘要未应用" }
-            require(prefix.none { app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty() }) {
-                "视频历史已改变；摘要未应用"
+            val reduced = if (policy.tokenTail) TokenTailCompression.messageTokens(summaryMessage(id, "candidate", summary)) <
+                summaryInput.sumOf(TokenTailCompression::messageTokens) else summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)
+            require(summary.isNotEmpty() && reduced) { "压缩未缩小；保留原文" }
+            val archive = activity.id
+            // Validate the actual wrapped summary plus retained tail and new input BEFORE publishing.
+            requireCapacity(policy, listOf(summaryMessage(id, archive, summary)) + tail + pending)
+            val hash = blobs.put(if (logicalCut == null) ArchiveCodec.encode(prefix)
+                else ArchiveCodec.encodeDocument(prefix, logicalCut))
+            transactions.run { db ->
+                checkCancellation(cancelled)
+                ensureIdle(db, id); require(ContextRevision.digest(read(db, id)) == ContextRevision.digest(snapshot)) { "历史已改变；摘要未应用" }
+                require(prefix.none { app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty() }) {
+                    "视频历史已改变；摘要未应用"
+                }
+                db.execSQL("UPDATE context_archives SET active=0 WHERE conversation_id=?", arrayOf(id.value))
+                val inserted = db.insertOrThrow("context_archives", null, ContentValues().apply {
+                    put("id", archive); put("conversation_id", id.value); put("prefix_count", count); put("revision", revision)
+                    put("summary", summary); put("blob_hash", hash); put("created", System.currentTimeMillis()); put("active", 1)
+                })
+                check(inserted != -1L) { "压缩档案未持久化；保留原上下文" }
+                val cut = logicalCut ?: MessageHistory.expand(prefix).size
+                app.daiyu.android.timeline.ChatTimelineStore.write(db, app.daiyu.android.timeline.ChatTimelineEntry.Compression(
+                    archive, checkNotNull(activity.anchor), System.currentTimeMillis(),
+                    summary, summarizer.displayIdentity, cut, estimateTokens(summaryInput),
+                    estimateTokens(listOf(summaryMessage(id, archive, summary)))))
+                app.daiyu.android.storage.CloudContextUsageStore.invalidate(db, id)
+                checkCancellation(cancelled) // Throwing here rolls back both insert and deactivation.
             }
-            db.execSQL("UPDATE context_archives SET active=0 WHERE conversation_id=?", arrayOf(id.value))
-            val inserted = db.insertOrThrow("context_archives", null, ContentValues().apply {
-                put("id", archive); put("conversation_id", id.value); put("prefix_count", count); put("revision", revision)
-                put("summary", summary); put("blob_hash", hash); put("created", System.currentTimeMillis()); put("active", 1)
-            })
-            check(inserted != -1L) { "压缩档案未持久化；保留原上下文" }
-            val logicalHistory = MessageHistory.expand(snapshot)
-            val cut = logicalCut ?: MessageHistory.expand(prefix).size
-            app.daiyu.android.timeline.ChatTimelineStore.write(db, app.daiyu.android.timeline.ChatTimelineEntry.Compression(
-                archive, app.daiyu.android.timeline.TimelineAnchor.at(logicalHistory, cut - 1), System.currentTimeMillis(),
-                summary, summarizer.displayIdentity, cut, estimateTokens(summaryInput),
-                estimateTokens(listOf(summaryMessage(id, archive, summary)))))
-            app.daiyu.android.storage.CloudContextUsageStore.invalidate(db, id)
-            checkCancellation(cancelled) // Throwing here rolls back both insert and deactivation.
-        }
-        return archive
+            return archive
+        } finally { onCompression(activity.copy(running = false)) }
     }
     internal fun publishRunCompression(db: SQLiteDatabase, checkpoint: app.daiyu.android.domain.runtime.RunCheckpoint,
         model: app.daiyu.android.timeline.SummaryModelIdentity?) {
@@ -249,8 +251,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 original.conversationId != projected.conversationId || original.runId != projected.runId ||
                     original.id != projected.id || original.role != projected.role
             }) return
+        val boundary = MessageHistory.expand(listOf(checkpoint.message))
         app.daiyu.android.timeline.ChatTimelineStore.write(db, app.daiyu.android.timeline.ChatTimelineEntry.Compression(
-            archiveId, app.daiyu.android.timeline.TimelineAnchor.at(originals, cut - 1),
+            archiveId, app.daiyu.android.timeline.TimelineAnchor.at(boundary, boundary.lastIndex),
             System.currentTimeMillis(), wrapped.removePrefix(opening).removeSuffix(ending), model, cut,
             estimateTokens(originals.take(cut)), estimateTokens(listOf(summary))))
     }

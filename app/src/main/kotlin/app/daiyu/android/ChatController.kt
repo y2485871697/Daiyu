@@ -252,11 +252,11 @@ class ChatController internal constructor(private val application:Application,
                 problem = "${value.agentLabel}：$failure"
                 val message = active?.takeIf { it.conversationId.value == value.conversationId }
                 val anchor = value.anchor ?: message?.let {
-                    app.daiyu.android.timeline.TimelineAnchor(it.conversationId.value, it.runId.value, it.id.value,
-                        (MessageHistory.expand(listOf(it)).size - 1).coerceAtLeast(0))
+                    val logical = MessageHistory.expand(listOf(it))
+                    app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex)
                 }
                 if (anchor != null) persistReconnect(app.daiyu.android.timeline.ChatTimelineEntry.Compression(
-                    "compression-failed:${value.id}", anchor, System.currentTimeMillis(), failure,
+                    value.id, anchor, System.currentTimeMillis(), failure,
                     value.model, value.messages, null, null, value.agentLabel, failure))
             }
             timelineRevision.incrementAndGet()
@@ -491,9 +491,10 @@ class ChatController internal constructor(private val application:Application,
         val running = runner
         val waiting = app.daiyu.android.timeline.CompressionActivity(java.util.UUID.randomUUID().toString(),
             owner.conversationId.value, 0, null, agentLabel = "主代理", runId = original?.runId?.value, waiting = true,
-            anchor = expected.originals.lastOrNull()?.let { message ->
-                app.daiyu.android.timeline.TimelineAnchor(message.conversationId.value, message.runId.value,
-                    message.id.value, (MessageHistory.expand(listOf(message)).size - 1).coerceAtLeast(0))
+            anchor = MessageHistory.expand(expected.originals).let { logical ->
+                logical.takeIf { it.isNotEmpty() }?.let {
+                    app.daiyu.android.timeline.TimelineAnchor.at(it, it.lastIndex)
+                }
             })
         if (original != null && running != null) {
             val cancellation = ContextPreparationCancellation()

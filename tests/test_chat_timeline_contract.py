@@ -50,10 +50,12 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('summaryIdentity', source('context/ContextPreparationCoordinator.kt'))
         self.assertIn('configuration.apiModel', source('context/ProviderSummaryModel.kt'))
 
-    def test_stable_compression_item_preserves_message_indices_and_extends_tail(self):
+    def test_compression_uses_frozen_anchor_and_only_unanchored_items_extend_tail(self):
         listing = source('ui/screens/chat/conversation/ChatMessageList.kt')
         self.assertIn('item(key = "chat-context-compressing:${activity.id}"', listing)
-        self.assertIn('turns.lastIndex + liveCompressions.size', listing)
+        self.assertIn('turns.lastIndex + tailCompressions.size', listing)
+        self.assertIn('compressionAfter[turn.listKey]', listing)
+        self.assertIn('tailCompressions.forEach', listing)
         self.assertIn('val index = currentTailIndex', listing)
         self.assertIn('fadeInSpec = androidx.compose.animation.core.tween(180)', listing)
         divider = source('ui/screens/chat/conversation/ChatTimelineDivider.kt')

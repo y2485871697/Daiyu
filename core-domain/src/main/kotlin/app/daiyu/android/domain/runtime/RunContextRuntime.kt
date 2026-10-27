@@ -46,6 +46,8 @@ interface RunContextRuntime {
         return compact(history, billedTokens, localTokens, request, { requests.observe(request, it) },
             { requests.admit(request) }, cancelled)
     }
+    fun beginCompaction(boundary: Message) {}
+    fun finishedCompaction() {}
     fun failed(reason: String) {}
     fun cancel() {}
 }

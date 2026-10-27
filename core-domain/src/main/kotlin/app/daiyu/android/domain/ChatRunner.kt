@@ -491,6 +491,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 runtime = selectedRuntime
                 compactingRuntime = selectedRuntime
                 if (cancelled()) return false
+                selectedRuntime.beginCompaction(segmentHistory.project(current))
                 val before = effectiveHistory()
                 val historyLocal = selectedRuntime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
                 val anchor = contextState?.calibration ?: contextState?.input
@@ -547,6 +548,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 checkpoint()
                 return false
             } finally {
+                try { runtime?.finishedCompaction() } catch (_: Exception) { }
                 compactingRuntime = null
                 try { manual?.completed?.invoke(applied, error) } catch (_: Exception) { }
                 if (!admissionAttempted && persistenceFailure == null && pressure != null && !cancelled() && contextState?.pressure == pressure) {

@@ -25,6 +25,15 @@ internal class ProductionRunContext(
     override val sendBudgetTokens = checkNotNull(policy.sendBudgetTokens)
     @Volatile private var cancellation: ContextPreparationCancellation? = null
     @Volatile private var lastActivity: app.daiyu.android.timeline.CompressionActivity? = null
+    private var boundary: app.daiyu.android.timeline.TimelineAnchor? = null
+    override fun beginCompaction(boundary: Message) {
+        val logical = MessageHistory.expand(listOf(boundary))
+        this.boundary = app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex)
+    }
+    override fun finishedCompaction() {
+        lastActivity?.let { progress(it.copy(running = false)) }
+        lastActivity = null
+    }
     override fun cancel() { cancellation?.cancel() }
     override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long =
         MessageHistory.expand(history).sumOf(TokenTailCompression::messageTokens) +
@@ -47,7 +56,7 @@ internal class ProductionRunContext(
     override fun failed(reason: String) {
         progress(lastActivity?.copy(running = false, failure = reason) ?: app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
             parent.conversationId.value, 0, null, running = false, agentLabel = agentLabel,
-            runId = parent.runId.value, taskId = taskId, failure = reason))
+            runId = parent.runId.value, taskId = taskId, failure = reason, anchor = boundary))
     }
 
     override fun compactRequests(history: List<Message>, billedTokens: Long?, localTokens: Long,
@@ -68,16 +77,16 @@ internal class ProductionRunContext(
             val model = checkNotNull(resolve)(usage())
             val prefix = logical.take(cut)
             val activity = app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
-                parent.conversationId.value, prefix.size, model.displayIdentity, agentLabel = agentLabel, runId = parent.runId.value, taskId = taskId)
+                parent.conversationId.value, prefix.size, model.displayIdentity, agentLabel = agentLabel, runId = parent.runId.value, taskId = taskId,
+                anchor = boundary ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex))
             lastActivity = activity
             progress(activity)
-            val text = try { ModelContextSummarizer(model, cancellation, nextModel = {
+            val text = ModelContextSummarizer(model, cancellation, nextModel = {
                 checkNotNull(model.rebind) { "摘要模型不支持分块用量绑定" }.invoke(usage())
             }).summarize(
-                CompressionInput(prefix, ContextRevision.digest(prefix))).trim() }
-            finally { progress(activity.copy(running = false)) }
+                CompressionInput(prefix, ContextRevision.digest(prefix))).trim()
             if (cancelled()) return null
-            val id = "summary-${UUID.randomUUID()}"
+            val id = "summary-${activity.id}"
             val summary = Message(MessageId(id), parent.conversationId, RunId(id), Message.USER_ROLE,
                 listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n$text\n[摘要结束]")), RunStatus.COMPLETED)
             val result = listOf(summary) + logical.drop(cut)

@@ -92,6 +92,7 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         val service = ContextService(context, db)
         val progress = mutableListOf<CompressionActivity>(); service.onCompression = { progress += it }
         val summary = "已完成甲；乙仍待处理\n保留用户约束和失败原因"
+        val originals = MessageHistory.expand(service.displayHistory(owner))
         val archive = service.compress(owner, CompressionPolicy(keepTurns = 1), object : ContextSummarizer {
             override val displayIdentity = model
             override fun summarize(input: CompressionInput) = summary
@@ -102,6 +103,10 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         assertTrue(entry.messages > 0); assertEquals(2, progress.size)
         assertEquals(progress.first().copy(running = false), progress.last())
         assertEquals(model, progress.first().model)
+        assertEquals(entry.id, progress.first().id)
+        assertEquals(TimelineAnchor.at(originals, originals.lastIndex), progress.first().anchor)
+        assertEquals(progress.first().anchor, entry.anchor)
+        assertTrue(entry.messages < originals.size)
         db.writableDatabase.delete("chat_timeline_events", "id=?", arrayOf(checkNotNull(archive)))
         val legacy = service.timeline(owner).single() as ChatTimelineEntry.Compression
         assertEquals(summary, legacy.summary); assertNull(legacy.model)
@@ -120,7 +125,7 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         service.publishRunCompression(db.writableDatabase, checkpoint, model)
         val entry = ChatTimelineStore.read(db.readableDatabase, owner.value).single() as ChatTimelineEntry.Compression
         assertEquals("完整运行摘要", entry.summary); assertEquals(model, entry.model)
-        assertEquals(TimelineAnchor.at(originals, originals.size - projectedTail.size - 1), entry.anchor)
+        assertEquals(TimelineAnchor.at(originals, originals.lastIndex), entry.anchor)
     }
     fun testVersionSevenFullAndConversationBackupRoundTripAndRepeatReceipt() {
         val (context, db) = fresh(); val owner = seed(db); val other = seed(db)

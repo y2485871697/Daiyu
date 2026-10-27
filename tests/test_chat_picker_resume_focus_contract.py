@@ -26,6 +26,32 @@ class ChatPickerResumeFocusContractTest(unittest.TestCase):
         for forbidden in ['Thread.sleep', 'SystemClock.sleep', 'advanceTimeBy', 'performSemanticsAction', 'repeat(']:
             self.assertNotIn(forbidden, body)
 
+    def test_close_waits_for_picker_entry_and_native_focus_before_single_system_back(self):
+        text = SOURCE.read_text(encoding='utf-8')
+        body = text.split('private fun closeChatPicker()', 1)[1].split('private fun reopenChatPicker()', 1)[0]
+        ordered = ['val picker = node("chat-model-picker")', 'awaitDialogEnter(picker)',
+                   'awaitNodeWindowFocus(picker)', 'dismissIme()',
+                   'instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)',
+                   'ui.waitUntil(5_000)', 'fetchSemanticsNodes().isEmpty()']
+        positions = [body.index(step) for step in ordered]
+        self.assertEqual(sorted(positions), positions)
+        self.assertEqual(1, body.count('sendKeyDownUpSync'))
+        for forbidden in ['awaitChatPickerLoaded', 'awaitChatPickerReady', 'Thread.sleep',
+                          'SystemClock.sleep', 'repeat(', 'performSemanticsAction']:
+            self.assertNotIn(forbidden, body)
+
+    def test_pending_catalog_is_released_only_after_real_dismiss_and_retains_safety_oracles(self):
+        text = SOURCE.read_text(encoding='utf-8')
+        body = text.split('fun testDismissedChatModelPickerCannotReviveFromPendingCatalog()', 1)[1].split('fun testChatModelPickerRejectsChangedSettingsAndRunningTask()', 1)[0]
+        self.assertLess(body.index('closeChatPicker()'), body.index('release.countDown()'))
+        self.assertIn('"正在读取模型目录"', body)
+        self.assertIn('completed.await(5, TimeUnit.SECONDS)', body)
+        self.assertIn('node("chat-model-picker").assertDoesNotExist()', body)
+        self.assertIn('assertEquals(database, fixture.database.exportBackup())', body)
+        self.assertIn('assertDraft("本地目录读取取消后保留草稿")', body)
+        self.assertIn('assertChatPickerOffline(calls)', body)
+        self.assertIn('assertEquals(0, fixture.opens.get())', body)
+
     def test_pause_revocation_and_stale_capability_oracles_remain(self):
         body = self.body()
         self.assertIn('stale = retainedChatPickerSelection()', body)

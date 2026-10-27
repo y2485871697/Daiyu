@@ -189,6 +189,9 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         }
     }
     private fun closeChatPicker() {
+        val picker = node("chat-model-picker")
+        awaitDialogEnter(picker)
+        awaitNodeWindowFocus(picker)
         dismissIme()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }

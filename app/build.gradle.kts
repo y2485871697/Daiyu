@@ -178,6 +178,7 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.9.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.google.jimfs:jimfs:1.3.0")
     // The migrated owner tests use Android Intent/Binder at SDK 36; host tests only.
     testImplementation("org.robolectric:robolectric:4.16.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")

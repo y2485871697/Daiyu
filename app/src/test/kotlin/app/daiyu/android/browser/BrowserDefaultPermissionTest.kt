@@ -9,6 +9,8 @@ import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
 import app.daiyu.android.integration.tools.RunBrowserTools
+import com.google.common.jimfs.Configuration
+import com.google.common.jimfs.Jimfs
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -189,39 +191,49 @@ class BrowserDefaultPermissionTest {
     }
 
     @Test fun productionHostDefaultsUsePrivateRunOffloadsAndRevocableOwnerCallbacks() {
-        val base = java.nio.file.Files.createTempDirectory("browser-host-defaults").toRealPath()
-        try {
-            org.junit.Assume.assumeNotNull(java.nio.file.Files.getFileAttributeView(
-                base, java.nio.file.attribute.PosixFileAttributeView::class.java))
-            Fixture(main()).use { f ->
-                val policy = BrowserRunHostDefaults.prepare(f.token, base)
-                assertNotEquals(base, policy.root)
-                val lease = BrowserTabLease(f.session.grant.owner, 0, 1, 1)
-                val sibling = lease.copy(owner = BrowserOwner("sibling", BrowserOwnerKind.CHILD))
-                assertTrue(policy.allowHistory(lease, "https://example.invalid/page"))
-                assertTrue(policy.authorizeCookieName(lease, "https://example.invalid/", "session_name"))
-                assertFalse(policy.authorizeCookieName(lease, "https://example.invalid/", "bad;name"))
-                assertFalse(policy.allowHistory(lease, "javascript:alert(1)"))
-                assertFalse(policy.allowHistory(sibling, "https://example.invalid/"))
-                assertFalse(policy.authorizeCookieName(sibling, "https://example.invalid/", "session_name"))
-                val cookieRoot = java.nio.file.Files.createDirectory(policy.root.resolve("cookie-offloads"))
-                val env = java.nio.file.Files.createFile(cookieRoot.resolve("${java.util.UUID.randomUUID()}.env"),
-                    java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
-                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")))
-                assertEquals(env.toRealPath().toString(), policy.cookieEnvPath(lease, env))
-                rejected { policy.cookieEnvPath(sibling, env) }
-                val other = BrowserRunHostDefaults.prepare(f.token, base)
-                rejected { other.cookieEnvPath(lease, env) }
-                java.nio.file.Files.setPosixFilePermissions(env,
-                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"))
-                rejected { policy.cookieEnvPath(lease, env) }
-                f.token.revoke()
-                assertFalse(policy.allowHistory(lease, "https://example.invalid/"))
-                assertFalse(policy.authorizeCookieName(lease, "https://example.invalid/", "session_name"))
-                rejected { policy.cookieEnvPath(lease, env) }
+        val posixFixture = if ("posix" in java.nio.file.FileSystems.getDefault().supportedFileAttributeViews()) {
+            null
+        } else {
+            Jimfs.newFileSystem(Configuration.unix().toBuilder()
+                .setAttributeViews("basic", "owner", "posix").build())
+        }
+        posixFixture.use { fs ->
+            val base = (if (fs == null) {
+                java.nio.file.Files.createTempDirectory("browser-host-defaults")
+            } else {
+                java.nio.file.Files.createTempDirectory(fs.getPath("/"), "browser-host-defaults")
+            }).toRealPath()
+            try {
+                Fixture(main()).use { f ->
+                    val policy = BrowserRunHostDefaults.prepare(f.token, base)
+                    assertNotEquals(base, policy.root)
+                    val lease = BrowserTabLease(f.session.grant.owner, 0, 1, 1)
+                    val sibling = lease.copy(owner = BrowserOwner("sibling", BrowserOwnerKind.CHILD))
+                    assertTrue(policy.allowHistory(lease, "https://example.invalid/page"))
+                    assertTrue(policy.authorizeCookieName(lease, "https://example.invalid/", "session_name"))
+                    assertFalse(policy.authorizeCookieName(lease, "https://example.invalid/", "bad;name"))
+                    assertFalse(policy.allowHistory(lease, "javascript:alert(1)"))
+                    assertFalse(policy.allowHistory(sibling, "https://example.invalid/"))
+                    assertFalse(policy.authorizeCookieName(sibling, "https://example.invalid/", "session_name"))
+                    val cookieRoot = java.nio.file.Files.createDirectory(policy.root.resolve("cookie-offloads"))
+                    val env = java.nio.file.Files.createFile(cookieRoot.resolve("${java.util.UUID.randomUUID()}.env"),
+                        java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                            java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")))
+                    assertEquals(env.toRealPath().toString(), policy.cookieEnvPath(lease, env))
+                    rejected { policy.cookieEnvPath(sibling, env) }
+                    val other = BrowserRunHostDefaults.prepare(f.token, base)
+                    rejected { other.cookieEnvPath(lease, env) }
+                    java.nio.file.Files.setPosixFilePermissions(env,
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"))
+                    rejected { policy.cookieEnvPath(lease, env) }
+                    f.token.revoke()
+                    assertFalse(policy.allowHistory(lease, "https://example.invalid/"))
+                    assertFalse(policy.authorizeCookieName(lease, "https://example.invalid/", "session_name"))
+                    rejected { policy.cookieEnvPath(lease, env) }
+                }
+            } finally {
+                java.nio.file.Files.walk(base).use { paths -> paths.sorted(java.util.Comparator.reverseOrder()).forEach { java.nio.file.Files.deleteIfExists(it) } }
             }
-        } finally {
-            java.nio.file.Files.walk(base).use { paths -> paths.sorted(java.util.Comparator.reverseOrder()).forEach { java.nio.file.Files.deleteIfExists(it) } }
         }
     }
 

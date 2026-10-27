@@ -4539,7 +4539,7 @@ class ChatController internal constructor(private val application:Application,
                     if (balanceConfiguration != null) balance.store.save(balanceConfiguration) else balance.store.clear()
                 }
             }
-            try { providers.catalogSnapshot(providers.editor(editor.slotId)); "提供商设置已保存" }
+            try { providers.catalogSnapshot(providers.editor(editor.slotId)); null }
             catch (_: Exception) { "提供商设置已保存；模型目录尚不可用，请重新打开详情" }
         })
     }
@@ -4952,12 +4952,12 @@ class ChatController internal constructor(private val application:Application,
     }
 
     @Synchronized internal fun dataTask(importing:Boolean=false,failureNotice:String?=null,
-        completed:(Boolean)->Unit = {},work:()->String) {
+        completed:(Boolean)->Unit = {},work:()->String?) {
         dataTaskWithProgress(importing, failureNotice, completed, initialStatus = null) { _ -> work() }
     }
 
     @Synchronized private fun dataTaskWithProgress(importing:Boolean=false,failureNotice:String?=null,
-        completed:(Boolean)->Unit = {}, initialStatus:String?, work:((String,Boolean)->Unit)->String) {
+        completed:(Boolean)->Unit = {}, initialStatus:String?, work:((String,Boolean)->Unit)->String?) {
         check(idleAvailable() && !hasLiveChildTasks()) { "请等待后台子任务实际结束" }
         val operation = DataOperation()
         dataOperation=operation;dataStatus=initialStatus;dataNotice=null;dataBusy=true;notifyChanged()
@@ -4978,7 +4978,7 @@ class ChatController internal constructor(private val application:Application,
             }
         }
         try {executor.execute {
-            var value=failureNotice ?: if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
+            var value:String?=failureNotice ?: if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
             var success=false
             diagnostics?.record(app.daiyu.android.diagnostics.DiagnosticEvent.DATA_STARTED)
             try {

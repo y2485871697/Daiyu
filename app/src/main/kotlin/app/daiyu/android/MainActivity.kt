@@ -6222,7 +6222,7 @@ class MainActivity : ComponentActivity() {
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
             }, toolReceipt = app.daiyu.android.ui.RetainedToolOutcomes.projectionReader(controller.database, shown.map { it.second }, controller::runState, controller::runStopping)),
                 controlOwner?.takeIf { state?.phase == ExecutionPhase.STREAMING }),
-            statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
+            statusText = controller.problem ?: when { controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = inlineMessageEditor?.text ?: draft,
                 selectionStart = inlineMessageEditor?.selectionStart ?: selectionStart,

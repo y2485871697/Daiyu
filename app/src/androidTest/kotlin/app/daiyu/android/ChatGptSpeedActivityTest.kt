@@ -84,4 +84,50 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
         assertNull(fixture.settings.load().requestOptions.speedMode)
         assertEquals(0, fixture.opens.get())
     }
+    fun testPendingSpeedSaveKeepsChatViewportStableForEveryMode() {
+        setDraft("speed keeps viewport")
+        dismissIme()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("chat-reasoning").fetchSemanticsNodes().any {
+                it.config.contains(androidx.compose.ui.semantics.SemanticsActions.OnLongClick)
+            }
+        }
+        for (mode in listOf(GptSpeedMode.FAST, GptSpeedMode.ULTRA_FAST, GptSpeedMode.NORMAL)) {
+            val beforeMessages = node("chat-messages").fetchSemanticsNode().boundsInRoot
+            val beforeComposer = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+            val entered = java.util.concurrent.CountDownLatch(1)
+            val release = java.util.concurrent.CountDownLatch(1)
+            val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+            val holder = Thread {
+                try { fixture.settings.modelCatalog.configurationChange {
+                    entered.countDown()
+                    check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                } } catch (problem: Throwable) { failure.set(problem) }
+            }.apply { start() }
+            try {
+                assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                node("chat-reasoning").performTouchInput { longClick() }
+                mainThread { assertTrue(fixture.controller.dataBusy) }
+                node("chat-status").assertDoesNotExist()
+                val pendingMessages = node("chat-messages").fetchSemanticsNode().boundsInRoot
+                val pendingComposer = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+                assertEquals(beforeMessages.top, pendingMessages.top, 1f)
+                assertEquals(beforeMessages.bottom, pendingMessages.bottom, 1f)
+                assertEquals(beforeComposer.top, pendingComposer.top, 1f)
+            } finally {
+                release.countDown()
+                holder.join(10_000)
+            }
+            assertFalse(holder.isAlive)
+            failure.get()?.let { throw it }
+            awaitSpeed(mode)
+            node("chat-status").assertDoesNotExist()
+            val afterMessages = node("chat-messages").fetchSemanticsNode().boundsInRoot
+            assertEquals(beforeMessages.top, afterMessages.top, 1f)
+            assertEquals(beforeMessages.bottom, afterMessages.bottom, 1f)
+            assertDraft("speed keeps viewport")
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

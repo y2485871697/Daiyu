@@ -6,9 +6,9 @@ import java.io.Closeable
 
 /** Keep provider-owned exception chains out of transport results, not caller failures. */
 internal fun providerTransportFailure(failure: Exception, configuringRequest: Boolean): Exception = when {
-    failure is ModelRequestException -> ModelRequestException(failure.failure)
+    failure is ModelRequestException -> ModelRequestException(failure.failure, failure.diagnostic)
     configuringRequest && (failure is IllegalArgumentException || failure is IllegalStateException || failure is SecurityException) ->
-        ModelRequestException(ModelFailure.REQUEST)
+        ModelRequestException(ModelFailure.CONFIGURATION)
     failure is SecurityException -> ModelRequestException(ModelFailure.PERMISSION)
     failure is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
     failure is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)

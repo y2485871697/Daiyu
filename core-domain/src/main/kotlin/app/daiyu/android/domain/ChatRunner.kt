@@ -1276,7 +1276,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             val baseError = if (failure is PersistenceException) "保存失败，已显示内容可能未落盘" else
                 if (failure is UnknownToolOutcomeException) "工具结果未知；已停止，禁止重放，请仅使用只读方式核实" else
                 if (failure is TransportReconnectDeadlineException) failure.userMessage else
-                if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.failure.userMessage else "请求失败，请检查模型设置或网络"
+                if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.userMessage else "请求失败，请检查模型设置或网络"
             val next = current.copy(status = status, error = if (status == RunStatus.STOPPED || status == RunStatus.COMPLETED) null else baseError)
             val runtime = options.runtimeStore
             val terminalCommitWasAttempted = wasReserved && status == RunStatus.COMPLETED

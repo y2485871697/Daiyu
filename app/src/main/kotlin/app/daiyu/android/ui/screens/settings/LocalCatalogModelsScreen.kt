@@ -224,12 +224,12 @@ internal fun <T> LocalCatalogModelsScreen(
                 SettingsRow("添加自定义模型", summary = "手动填写展示名称与 Model ID", tag = "local-model-add",
                     leading = { DaiyuIcon(DaiyuIcons.Add, null) }, showChevron = true, onClick = add)
             }
-            SettingsSearch(query, { query = it }, "搜索模型", "local-model-search")
             notice?.let { SettingsNote(it) }
             if (!loaded) SettingsNote("正在读取本地模型")
             if (loaded && snapshot == null) TextButton("重试", enabled = request == null,
                 onClick = { notice = null; reload() }, modifier = Modifier.testTag("local-model-refresh"))
             SettingsSectionTitle("模型列表（共 ${snapshot?.models?.size ?: 0} 个）")
+            SettingsSearch(query, { query = it }, "搜索模型", "local-model-search")
             if (loaded && snapshot?.models.isNullOrEmpty()) SettingsNote("还没有模型，请从远端拉取或添加自定义模型")
         }
         snapshot?.models?.filter { query.isBlank() || it.id.contains(query.trim(), true) || it.displayName.contains(query.trim(), true) }?.forEach { model ->

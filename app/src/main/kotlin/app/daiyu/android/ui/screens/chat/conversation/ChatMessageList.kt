@@ -116,6 +116,7 @@ internal fun ChatMessageList(
     val occlusionPx = with(density) { composerBottomInset.roundToPx() }
     val currentDensity by rememberUpdatedState(density.density)
     val currentOcclusionPx by rememberUpdatedState(occlusionPx)
+    val currentFollowClearancePx by rememberUpdatedState(with(density) { 16.dp.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
     val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
@@ -215,8 +216,8 @@ internal fun ChatMessageList(
                         motion.reset()
                         continue
                     }
-                    val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
-                    // Keep new output above the overlay; only the remaining spacing eases in.
+                    val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+                    // Keep 16dp clear while streaming; ease the last 8dp into the 24dp resting gap.
                     val obscuredTail = if (currentOcclusionPx > 0)
                         (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
                     val delta = maxOf(motion.step(overflow.toFloat(), frameTime, currentDensity), obscuredTail.toFloat())
@@ -267,7 +268,7 @@ internal fun ChatMessageList(
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
             }
         },
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + 12.dp),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + 24.dp),
             verticalArrangement = Arrangement.spacedBy(26.dp)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 Column(Modifier.testTag("chat-turn:${turn.id}")) {

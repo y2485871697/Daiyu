@@ -8,6 +8,7 @@ import app.daiyu.android.context.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.CompressionPolicy
 import app.daiyu.android.domain.context.estimateTokens
+import app.daiyu.android.domain.runtime.ExecutionPhase
 import app.daiyu.android.domain.runtime.UsageRequestSource
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderSnapshot
@@ -190,6 +191,13 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
 
     /** Production Responses serializer/parser and cancellation, with HTTPS replaced only at
      * the connection boundary. disconnect deliberately cannot unblock a held platform read. */
+    private companion object {
+        val summaryText = app.daiyu.android.context.SummaryCheckpoint.marker + "\n" +
+            app.daiyu.android.context.SummaryCheckpoint.sections.joinToString("\n") { section ->
+                "## $section\n" + if (section == "Current Work") "summary text" else "(none)"
+            }
+    }
+
     private class InMemoryWire(private val hold: Boolean, private val main: Boolean = false) :
         HttpsURLConnection(URL("https://example.invalid/fixture")) {
         val posts = AtomicInteger()
@@ -213,21 +221,23 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         override fun getInputStream(): java.io.InputStream {
             entered.countDown()
             if (hold) check(release.await(10, TimeUnit.SECONDS))
-            val text = if (main) "done" else "summary text"
+            val text = if (main) "done" else summaryText
             val input = if (main) 100 else 10
             val output = if (main) 40 else 20
             val cached = if (main) 10 else 5
             return ("event: response.completed\n" +
-                "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"final\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"$text\"}]}],\"usage\":{\"input_tokens\":$input,\"output_tokens\":$output,\"input_tokens_details\":{\"cached_tokens\":$cached}}}}\n\n").byteInputStream()
+                "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"final\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":${org.json.JSONObject.quote(text)}}]}],\"usage\":{\"input_tokens\":$input,\"output_tokens\":$output,\"input_tokens_details\":{\"cached_tokens\":$cached}}}}\n\n").byteInputStream()
         }
     }
 
     private fun scalar(f: Fixture, sql: String, vararg args: String): Long =
         f.database.readableDatabase.rawQuery(sql, args).use { check(it.moveToFirst()); it.getLong(0) }
 
-    private fun checkpoint(f: Fixture, entry: ControllerGuiEntry) =
+    private fun checkpoint(f: Fixture, entry: ControllerGuiEntry) = checkpoint(f, entry.assistantId)
+
+    private fun checkpoint(f: Fixture, assistantId: MessageId) =
         f.database.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",
-            arrayOf(entry.assistantId.value)).use { check(it.moveToFirst()); RunCheckpointCodec.decode(it.getString(0)) }
+            arrayOf(assistantId.value)).use { check(it.moveToFirst()); RunCheckpointCodec.decode(it.getString(0)) }
 
     private fun usage(f: Fixture, owner: ConversationId) = DatabaseTransactions { f.database.writableDatabase }.run {
         RecordedUsageReader.readAttributed(it, owner)
@@ -298,7 +308,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         assertTrue("original preparation cleanup permits storage close", f.closeDone.await(10, TimeUnit.SECONDS))
     }
 
-    fun testPlainDraftFitsButSameDraftWithConfirmedEvidenceRejectsBeforeAcceptanceOrModelOpen() {
+    fun testSmallWindowPlainDraftCapacityPausesButConfirmedGuiRejectsBeforeAcceptanceOrModelOpen() {
         val ordinary = Fixture(window = 1024)
         try {
             ordinary.database.draft(ordinary.draft)
@@ -309,12 +319,30 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             }
             ordinary.awaitReceipt()
             assertTrue(ordinary.receipt.get() is ChatController.TextSendResult.Accepted)
-            assertTrue(ordinary.modelEntered.await(5, TimeUnit.SECONDS))
-            assertTrue(estimateTokens(ordinary.modelInput.get()) <= 1024 - 128)
-            assertEquals(1, ordinary.modelInput.get().size)
-            assertEquals(listOf(ordinary.draft), ordinary.modelInput.get().single().blocks
-                .filterIsInstance<MessageBlock.Text>().map { it.text })
-            assertEquals(1, ordinary.opens.get())
+            val owner = ordinary.database.conversations().single()
+            val rows = ordinary.database.messages(owner.id).map { it.second }
+            val user = rows.single { it.role == Message.USER_ROLE }
+            val assistant = rows.single { it.role == Message.ASSISTANT_ROLE }
+            assertTrue(estimateTokens(listOf(user)) <= 1024 - 128)
+            assertEquals(listOf(ordinary.draft), user.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+            awaitControl("ordinary request durably capacity-paused before model open") {
+                scalar(ordinary, "SELECT COUNT(*) FROM runtime_checkpoints WHERE message_id=?", assistant.id.value) == 1L &&
+                    checkpoint(ordinary, assistant.id).phase == ExecutionPhase.PAUSED
+            }
+            val paused = checkpoint(ordinary, assistant.id)
+            val capacity = checkNotNull(paused.context?.capacity)
+            assertEquals(RunStatus.RUNNING, paused.message.status)
+            assertEquals(1024L, capacity.windowTokens)
+            assertEquals(896L, capacity.budgetTokens)
+            assertTrue(capacity.estimatedTokens > capacity.budgetTokens)
+            assertEquals(user, paused.history.single { it.id == user.id })
+            assertNull(paused.request)
+            assertFalse(paused.requestUnconfirmed)
+            assertTrue(paused.usageRequests.isEmpty())
+            assertEquals(0, ordinary.opens.get())
+            assertNull(ordinary.modelInput.get())
+            assertEquals(1L, ordinary.modelEntered.count)
+            assertEquals("", ordinary.database.draft())
             controlMain { ordinary.controller.close() }
             assertTrue("ordinary run drained", ordinary.closeDone.await(10, TimeUnit.SECONDS))
         } finally { ordinary.dispose() }
@@ -440,7 +468,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             f.database.readableDatabase.rawQuery("SELECT id,prefix_count,summary FROM context_archives WHERE active=1", null).use {
                 assertTrue(it.moveToFirst())
                 assertEquals(6, it.getInt(1)) // four complete old turns, keep one
-                assertEquals("summary text", it.getString(2))
+                assertEquals(summaryText, it.getString(2))
                 assertEquals("summary-${it.getString(0)}", sentHistory.first().id.value)
             }
             assertEquals(f.originalHistory.takeLast(2), sentHistory.drop(1).dropLast(1))

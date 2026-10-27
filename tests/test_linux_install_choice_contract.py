@@ -72,7 +72,7 @@ class LinuxInstallChoiceContract(unittest.TestCase):
         self.assertIn('.background(if (checked) DaiyuPalette.switchTrack else Color(0x28b4aabb))', actual_switch)
         self.assertIn('.border(1.dp, if (checked) DaiyuPalette.switchTrack else colors.line, shape)', actual_switch)
         self.assertIn('val primary = DaiyuPalette.switchTrack', theme)
-        for token in ['val onPrimary = appearance.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White', 'MiuixTheme(colors = MiuixTheme.colorScheme.copy(',
+        for token in ['val onPrimary = if (appearance.paletteSeedColor != null) colorContentColor(primary)\n        else appearance.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White', 'MiuixTheme(colors = MiuixTheme.colorScheme.copy(',
                       'MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(',
                       'primaryVariant = primary', 'disabledPrimaryButton = container',
                       'primaryContainer = container, onPrimaryContainer = onContainer']:
@@ -86,7 +86,7 @@ class LinuxInstallChoiceContract(unittest.TestCase):
     def test_default_primary_restores_white_foreground_without_disabling_custom_contrast(self):
         theme = (SETTINGS / 'LinuxSettingsTheme.kt').read_text()
         self.assertIn('import app.daiyu.android.ui.app.resolvedPrimaryAccent', theme)
-        self.assertIn('val onPrimary = appearance.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White', theme)
+        self.assertIn('val onPrimary = if (appearance.paletteSeedColor != null) colorContentColor(primary)\n        else appearance.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White', theme)
         self.assertNotIn('val onPrimary = colorContentColor(primary)', theme)
         nav = (ANDROID / 'LinuxSettingsNavigationTest.kt').read_text()
         self.assertIn('assertEquals(Color.White, colors.onPrimary)', nav)

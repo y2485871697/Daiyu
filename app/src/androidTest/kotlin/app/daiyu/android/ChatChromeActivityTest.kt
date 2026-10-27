@@ -310,7 +310,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(chip.center.y - density.roundToInt(), label.center.y, 1f)
             assertEquals(10.sp, layout("37% 上下文").layoutInput.style.fontSize)
             assertEquals(14.sp, layout("37% 上下文").layoutInput.style.lineHeight)
-            val placeholder = layout("给代鱼发消息")
+            val placeholder = layout("给代鱼发消息，或使用 @ 和 / 引用")
             assertEquals(16.sp, placeholder.layoutInput.style.fontSize)
             assertEquals(24.sp, placeholder.layoutInput.style.lineHeight)
             assertEquals(.9f, placeholder.layoutInput.density.fontScale, .001f)

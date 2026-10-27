@@ -581,8 +581,10 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         ui.onAllNodesWithText("优先使用已有或免费名额", substring = true).assertCountEquals(0)
         awaitImeFrame(node("settings-field:名额 ID"), visible = true)
         reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
-        reveal("settings-field:名额 ID", "制作声音").performTextReplacement("S_synthetic_slot")
-        awaitImeFrame(node("settings-field:名额 ID"), visible = true)
+        val slotField = reveal("settings-field:名额 ID", "制作声音")
+        slotField.performTouchInput { click() }
+        awaitImeFrame(slotField, visible = true)
+        slotField.performTextReplacement("S_synthetic_slot")
         reveal("settings-row:下一步：选择录音", "制作声音").performClick()
         node("voice-training-sample").assert(hasAnyAncestor(hasTestTag("voice-create-sample-card")))
         ui.onAllNodesWithText("选择文件不会上传", substring = false).assertCountEquals(0)

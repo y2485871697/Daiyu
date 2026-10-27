@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -38,15 +39,16 @@ internal fun FolderDeleteConfirmation(onConfirm: () -> Unit, onDismiss: () -> Un
             )
         },
     ) {
-        Text(
-            text = stringResource(R.string.drawer_delete_folder_message),
-            color = colors.muted,
-            fontSize = 15.sp,
-            lineHeight = 23.sp,
-            textAlign = TextAlign.Start,
-            modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
-                .verticalScroll(rememberScrollState()).padding(top = 6.dp, bottom = 20.dp)
-                .testTag("folder-delete-message"),
-        )
+        Box(Modifier.fillMaxWidth().weight(1f, fill = false)
+            .verticalScroll(rememberScrollState()).padding(top = 6.dp, bottom = 20.dp)) {
+            Text(
+                text = stringResource(R.string.drawer_delete_folder_message),
+                color = colors.muted,
+                fontSize = 15.sp,
+                lineHeight = 23.sp,
+                textAlign = TextAlign.Start,
+                modifier = Modifier.fillMaxWidth().testTag("folder-delete-message"),
+            )
+        }
     }
 }

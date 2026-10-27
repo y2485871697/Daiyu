@@ -24,6 +24,10 @@ import app.daiyu.android.ui.screens.settings.AppearanceColorEditor
 import app.daiyu.android.ui.screens.settings.AppearanceColorSheet
 
 class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
+    private fun capturePicker(target: SemanticsNodeInteraction): ImageBitmap =
+        if (android.os.Build.VERSION.SDK_INT < 28) captureScreenNode(target)
+        else target.captureToImage()
+
     private fun pixel(image: ImageBitmap, x: Float, y: Float) =
         image.toPixelMap()[(image.width * x).toInt(), (image.height * y).toInt()]
 
@@ -66,7 +70,7 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
                     ui.runOnIdle { assertTrue(action.action()) }
                 }
             }
-            val preview = node("appearance-draft-preview").scrollToVisible().captureToImage()
+            val preview = capturePicker(node("appearance-draft-preview").scrollToVisible())
             assertSameColor(fill, pixel(preview, .5f, .02f))
             ui.runOnIdle { assertTrue(requests.isEmpty()) }
             node("appearance-color-confirm").performClick()
@@ -84,11 +88,11 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
             val hue = node("appearance-color-hue:界面色彩")
             hue.scrollToVisible().performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(278.5f)) }
             val pad = node("appearance-color-pad:界面色彩").scrollToVisible()
-            val before = pad.captureToImage()
+            val before = capturePicker(pad)
             pad.performTouchInput {
                 swipe(Offset(width * .7f, height * .2f), Offset(width * .08f, height * .98f), durationMillis = 350)
             }
-            val dragged = pad.captureToImage()
+            val dragged = capturePicker(pad)
             for ((x, y) in listOf(.91f to .11f, .62f to .3f, .91f to .71f)) {
                 assertSameColor(pixel(before, x, y), pixel(dragged, x, y))
             }
@@ -100,12 +104,12 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
             hue.scrollToVisible()
             assertEquals(278.5f, hue.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].current, .001f)
             pad.scrollToVisible()
-            val black = pad.captureToImage()
+            val black = capturePicker(pad)
             assertSameColor(pixel(before, .91f, .11f), pixel(black, .91f, .11f))
             pad.performTouchInput { click(Offset(width * .75f, height * .25f)) }
             hue.scrollToVisible().performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(150f)) }
             pad.scrollToVisible()
-            val changedHue = pad.captureToImage()
+            val changedHue = capturePicker(pad)
             assertTrue(kotlin.math.abs(pixel(before, .91f, .11f).green - pixel(changedHue, .91f, .11f).green) > .3f)
             ui.runOnIdle { assertTrue(requests.isEmpty()) }
             androidx.test.espresso.Espresso.pressBack()
@@ -146,23 +150,23 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
             val requests = mutableListOf<AppearanceSettings>()
             show(AppearanceColorEditor.ACCENTS, dark, requests)
             val confirm = node("appearance-color-confirm")
-            val beforeConfirm = confirm.captureToImage()
+            val beforeConfirm = capturePicker(confirm)
             val preview = node("appearance-draft-preview").scrollToVisible()
-            val beforePreview = preview.captureToImage()
+            val beforePreview = capturePicker(preview)
             val track = node("appearance-color-hue-track:主强调色").scrollToVisible()
-            val beforeTrack = track.captureToImage()
+            val beforeTrack = capturePicker(track)
             node("appearance-swatch:主强调色:${0xFF407FCE}").scrollToVisible().performClick()
-            val afterConfirm = confirm.captureToImage()
+            val afterConfirm = capturePicker(confirm)
             for ((x, y) in listOf(.1f to .5f, .9f to .5f, .5f to .2f)) {
                 assertSameColor(pixel(beforeConfirm, x, y), pixel(afterConfirm, x, y))
             }
             track.scrollToVisible()
-            val afterTrack = track.captureToImage()
+            val afterTrack = capturePicker(track)
             for (x in listOf(.08f, .25f, .4f, .92f)) {
                 assertSameColor(pixel(beforeTrack, x, .5f), pixel(afterTrack, x, .5f))
             }
             preview.scrollToVisible()
-            val afterPreview = preview.captureToImage()
+            val afterPreview = capturePicker(preview)
             val beforePixels = beforePreview.toPixelMap()
             val afterPixels = afterPreview.toPixelMap()
             var changed = 0

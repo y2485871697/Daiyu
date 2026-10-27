@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import java.util.concurrent.atomic.AtomicInteger
 import app.daiyu.android.model.oauth.CodexAuth
 import app.daiyu.android.model.oauth.CodexLoginActivity
 import app.daiyu.android.model.oauth.CodexOAuthProtocol
@@ -15,16 +18,26 @@ class ProviderOAuthCreationActivityTest : WiredActivityTestCase() {
         reveal("provider-auth-oauth", "认证方式").performClick()
         awaitUniqueTag("page:新建提供商")
     }
-    private fun awaitLoginButton(text: String) {
+    private fun awaitLoginButton(text: String, hits: AtomicInteger) {
+        try {
         ui.waitUntil(10_000) {
-            ui.onAllNodes(hasTestTag("provider-oauth-login") and isEnabled() and hasText(text))
+            hits.get() == 1 && ui.onAllNodes(hasTestTag("provider-oauth-login") and isEnabled() and hasText(text))
                 .fetchSemanticsNodes().size == 1
         }
+        } catch (timeout: ComposeTimeoutException) {
+            val buttons = ui.onAllNodesWithTag("provider-oauth-login").fetchSemanticsNodes()
+                .joinToString(prefix = "[", postfix = "]") { button ->
+                    val text = button.config.getOrNull(SemanticsProperties.Text)?.map { it.text }
+                    "{text=$text, enabled=${!button.config.contains(SemanticsProperties.Disabled)}}"
+                }
+            throw AssertionError("OAuth result expected=$text, monitorHits=${hits.get()}, buttons=$buttons", timeout)
+        }
     }
-    private fun loginResult(code: Int, auth: CodexAuth? = null): Instrumentation.ActivityMonitor {
+    private fun loginResult(code: Int, auth: CodexAuth? = null, hits: AtomicInteger): Instrumentation.ActivityMonitor {
         val monitor = object : Instrumentation.ActivityMonitor() {
             override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
                 if (intent.component?.className != CodexLoginActivity::class.java.name) return null
+                hits.incrementAndGet()
                 val data = Intent().putExtra("attempt", intent.getStringExtra("attempt"))
                 auth?.let { data.putExtra("oauth-reference", it.id) }
                 return Instrumentation.ActivityResult(code, data)
@@ -49,11 +62,13 @@ class ProviderOAuthCreationActivityTest : WiredActivityTestCase() {
         val before = fixture.controller.providers.snapshot()
         openOAuthDraft()
         reveal("provider-name", "新建提供商").performTextReplacement("Edited Codex")
-        val monitor = loginResult(Activity.RESULT_CANCELED)
-        try { reveal("provider-oauth-login", "新建提供商").performClick() }
-        finally { instrumentation.removeMonitor(monitor) }
-        awaitUniqueTag("page:新建提供商")
-        awaitLoginButton("使用 OpenAI 登录")
+        val hits = AtomicInteger()
+        val monitor = loginResult(Activity.RESULT_CANCELED, hits = hits)
+        try {
+            reveal("provider-oauth-login", "新建提供商").performClick()
+            awaitUniqueTag("page:新建提供商")
+            awaitLoginButton("使用 OpenAI 登录", hits)
+        } finally { instrumentation.removeMonitor(monitor) }
         reveal("provider-name", "新建提供商").assertEditableText("Edited Codex")
         realPauseResume(activity)
         reveal("provider-name", "新建提供商").assertEditableText("Edited Codex")
@@ -70,11 +85,13 @@ class ProviderOAuthCreationActivityTest : WiredActivityTestCase() {
         val auth = CodexAuth("00000000-0000-0000-0000-000000000007")
         openOAuthDraft()
         reveal("provider-name", "新建提供商").performTextReplacement("Created Codex")
-        val monitor = loginResult(Activity.RESULT_OK, auth)
-        try { reveal("provider-oauth-login", "新建提供商").performClick() }
-        finally { instrumentation.removeMonitor(monitor) }
-        awaitUniqueTag("page:新建提供商")
-        awaitLoginButton("重新登录 OpenAI")
+        val hits = AtomicInteger()
+        val monitor = loginResult(Activity.RESULT_OK, auth, hits = hits)
+        try {
+            reveal("provider-oauth-login", "新建提供商").performClick()
+            awaitUniqueTag("page:新建提供商")
+            awaitLoginButton("重新登录 OpenAI", hits)
+        } finally { instrumentation.removeMonitor(monitor) }
         reveal("provider-name", "新建提供商").assertEditableText("Created Codex")
         reveal("provider-oauth-login", "新建提供商").assertTextContains("重新登录")
         assertEquals(before, fixture.controller.providers.snapshot())

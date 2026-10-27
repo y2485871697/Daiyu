@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerModelPreparationTest : InstrumentationTestCase() {
     private val expectedBaseCatalog = listOf("get_battery_status", "ask_user", "context_usage",
+        "conversation_reference_read",
         "assistant_memory_read", "assistant_memory_search", "inspect_child_tasks", "control_child_task", "get_child_task",
         "terminal_exec", "terminal_read")
     private class FixtureApplication(base: Context) : Application() {

@@ -113,7 +113,10 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
     internal override fun createFixture() = RunControlFixture(instrumentation.targetContext,
         virtualDisplayFactory = ControllerVirtualDisplayFactory { context, owner, caps, writes, reads, parent, retention ->
             val root = context.cacheDir.canonicalFile.toPath().resolve("main-vd-callback-$leaseId")
-            ControllerVirtualDisplayRuntime.assemble(owner, caps, writes, reads, parent, retention,
+            val reviewParent = object : ControllerVirtualDisplayRuntime.Parent by parent {
+                override val requiresExplicitApproval = true
+            }
+            ControllerVirtualDisplayRuntime.assemble(owner, caps, writes, reads, reviewParent, retention,
                 ControllerVirtualDisplayRuntime.LeaseStore({ root }, gate)) { host }
         }).also { check(it.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.BACKGROUND)) }
 

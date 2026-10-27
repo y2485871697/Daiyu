@@ -5,8 +5,13 @@ import java.util.UUID
 
 /** Real Activity callbacks, Controller worker and SQLite; no provider or external tool requests. */
 class MessageActionsActivityTest : WiredActivityTestCase() {
-    private fun field(name: String): Any? = MainActivity::class.java.getDeclaredField(name)
-        .apply { isAccessible = true }.get(activity)
+    private fun field(name: String): Any? = when (name) {
+        "draft" -> call("getDraft")
+        "composerShortcutPick" -> call("getComposerShortcutPick")
+        "chatState" -> call("getChatState")
+        "prompt" -> call("getPrompt")
+        else -> MainActivity::class.java.getDeclaredField(name).apply { isAccessible = true }.get(activity)
+    }
     private fun call(name: String) = MainActivity::class.java.declaredMethods
         .single { it.name == name && it.parameterCount == 0 }.apply { isAccessible = true }.invoke(activity)
     private fun seed(): Pair<Conversation, Message> {

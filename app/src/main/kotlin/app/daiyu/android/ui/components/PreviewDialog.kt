@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 
 // Page section gaps do not belong inside bottom-sheet content.
 internal val LocalBottomSheetContent = staticCompositionLocalOf { false }
@@ -31,6 +32,10 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
             dismissOnBackPress = dismissEnabled, dismissOnClickOutside = dismissEnabled)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect {
+            window?.let { dialogWindow ->
+                WindowCompat.getInsetsController(dialogWindow, dialogWindow.decorView)
+                    .isAppearanceLightStatusBars = false
+            }
             window?.setDimAmount(0f)
             if (bottomSheet) window?.setWindowAnimations(0) else window?.usePlatformDialogFade()
         }

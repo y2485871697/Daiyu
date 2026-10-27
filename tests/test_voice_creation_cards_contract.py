@@ -84,9 +84,32 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
                          'check(current()); resources.voices.create(speech!!, sample, n, slot, confirmed = true)',
                          'finally { sample.clear(); sampleUri = null; agreed = false }'):
             self.assertIn(required, final)
+        self.assertIn('if (slot == null) "\\n\\n须在同一项目另行开通后付费音色服务。', final)
+        self.assertIn('首次正式合成可能产生音色费用', final)
+        self.assertIn('未正式使用的音色可能七天后删除', final)
         self.assertEqual(1, final.count('resources.voices.create('))
         self.assertIn('confirmation === pending && enabled', self.panel)
         self.assertIn('confirmation = null; operation?.cancel(); preview.stop()', self.panel)
+
+    def test_all_creation_steps_omit_static_small_descriptions_but_keep_actual_values(self):
+        for step in self.steps:
+            self.assertNotIn('SettingsNote(', step)
+        self.assertIn('summary = voiceSlotSummary(voice)', self.steps[0])
+        self.assertIn('summary = if (sampleUri == null) null else sampleName', self.steps[1])
+        self.assertNotIn('选择文件不会上传', self.steps[1])
+        self.assertIn('SettingsRow("名称", summary = name)', self.steps[2])
+        self.assertIn('summary = if (postpaid) null else slotId', self.steps[2])
+        self.assertIn('AccountField("名额 ID", slotId, busy)', self.steps[0])
+
+    def test_creation_entry_and_return_do_not_reuse_another_pages_notice(self):
+        begin = block(self.panel, 'fun beginFlow(target: String)')
+        self.assertIn('if (target == "CREATE") notice = ""', begin)
+        back = block(self.panel, 'fun back()')
+        self.assertIn('page = parentPage\n                if (page == "CREATE") notice = ""', back)
+        self.assertIn('if (notice.isNotBlank()) item { SettingsNote(notice) }', self.panel)
+        self.assertIn('previewState.error?.let', self.panel)
+        self.assertIn('if (!latestCurrent(frozenConfiguration)) item', self.panel)
+        self.assertIn('catch (cancelled: CancellationException) { throw cancelled }', self.panel)
 
     def test_import_stays_on_its_original_card_and_query_only_path(self):
         self.assertIn('if (page == "IMPORT") item', self.panel)

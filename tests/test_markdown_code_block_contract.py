@@ -16,18 +16,19 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         branch = self.markdown.split("is MarkdownBlock.Code ->", 1)[1].split("is MarkdownBlock.Quote ->", 1)[0]
         self.assertIn("MarkdownCodeBlock(block, visible, generationComplete)", branch)
         for token in ["Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center)",
-                      "Modifier.padding(horizontal = 4.dp).width(IntrinsicSize.Max)", "RoundedCornerShape(8.dp)",
+                      "Modifier.fillMaxWidth().padding(horizontal = 4.dp)", "RoundedCornerShape(8.dp)",
                       "textAlign = TextAlign.Left", 'testTag("markdown-code-block")', 'testTag("markdown-code-text")']:
             self.assertIn(token, self.code)
 
-    def test_card_wraps_content_while_children_share_its_bounded_width(self):
-        self.assertIn("import androidx.compose.foundation.layout.IntrinsicSize", self.code)
-        self.assertIn("import androidx.compose.foundation.layout.width", self.code)
+    def test_card_keeps_readable_width_and_body_only_caps_its_natural_height(self):
         card = self.code.split("Column(", 1)[1].split('testTag("markdown-code-block")', 1)[0]
-        self.assertIn(".width(IntrinsicSize.Max)", card)
-        self.assertNotIn("fillMaxWidth", card)
+        self.assertIn(".fillMaxWidth().padding(horizontal = 4.dp)", card)
+        self.assertNotIn("IntrinsicSize", self.code)
+        self.assertIn("import androidx.compose.foundation.layout.heightIn", self.code)
         self.assertIn("Row(Modifier.fillMaxWidth()", self.code)
-        self.assertIn("Box(Modifier.fillMaxWidth().height(bodyHeight)", self.code)
+        self.assertIn("Box(Modifier.fillMaxWidth().heightIn(max = maxBodyHeight)", self.code)
+        self.assertNotIn("heightIn(min =", self.code)
+        self.assertNotIn(".height(bodyHeight)", self.code)
         self.assertNotIn("requiredWidth", self.code)
         self.assertNotIn("unbounded = true", self.code)
 
@@ -48,15 +49,15 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn('"复制代码"', self.code)
         self.assertIn("DisableSelection", self.code)
 
-    def test_fixed_viewport_only_locks_vertical_and_contains_unlocked_boundary_and_fling(self):
-        for token in ["screenHeightDp.dp * .25f", ".coerceIn(128.dp, 220.dp)", ".height(bodyHeight)",
+    def test_height_capped_viewport_only_locks_vertical_and_contains_unlocked_boundary_and_fling(self):
+        for token in ["screenHeightDp.dp * .25f", ".coerceIn(128.dp, 220.dp)", ".heightIn(max = maxBodyHeight)",
                       "var unlocked by remember { mutableStateOf(false) }", "verticalScroll(vertical, enabled = verticalScrollEnabled)",
                       "horizontalScroll(horizontal)", "Modifier.nestedScroll(containedScroll)",
                       "onPostScroll", ": Offset = available", "onPostFling", ": Velocity = available", "softWrap = false"]:
             self.assertIn(token, self.code)
         self.assertNotIn("horizontalScroll(horizontal, enabled = unlocked)", self.code)
         self.assertIn('"锁定代码上下滑动" else "解锁代码上下滑动"', self.code)
-        self.assertLess(self.code.index(".height(bodyHeight)"), self.code.index(".verticalScroll(vertical"))
+        self.assertLess(self.code.index(".heightIn(max = maxBodyHeight)"), self.code.index(".verticalScroll(vertical"))
         self.assertNotIn("remember(block.text) { mutableStateOf(false) }\n    var unlocked", self.code)
 
     def test_unlock_is_only_shown_for_measured_vertical_overflow(self):

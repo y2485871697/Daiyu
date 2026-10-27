@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -819,58 +820,86 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue(opened.isEmpty())
     }
 
-    fun testCodeWidthWrapsContentAndCapsAtHostAcrossUpdates() {
-        var code by mutableStateOf("x")
+    fun testCodeKeepsReadableWidthAndAdaptsHeightAcrossUpdates() {
+        var code by mutableStateOf("ls -la")
         val density = activity.resources.displayMetrics.density
+        var maxBodyHeightPx = 0f
         show {
             CompositionLocalProvider(LocalDensity provides Density(density, fontScale = 1f)) {
-                Column(Modifier.width(300.dp).testTag("code-width-host")) {
+                val maximum = (LocalConfiguration.current.screenHeightDp * .25f).coerceIn(128f, 220f)
+                SideEffect { maxBodyHeightPx = maximum * density }
+                Column(Modifier.width(300.dp).testTag("code-size-host")) {
                     MarkdownCodeBlock(MarkdownBlock.Code(code, "sh"), Int.MAX_VALUE, true)
                 }
             }
         }
         awaitNodes(hasTestTag("markdown-code-block"))
-        val host = ui.onNodeWithTag("code-width-host", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val host = ui.onNodeWithTag("code-size-host", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
         fun cardBounds() = ui.onNodeWithTag("markdown-code-block", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        fun viewportHeight() = viewport.fetchSemanticsNode().boundsInRoot.height
         fun horizontalRange() = viewport.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
-        val maximumWidth = host.width - 8f * density
-        val short = cardBounds()
-        assertTrue("short code must not fill the host", short.width < maximumWidth - 1f)
-        assertEquals(host.center.x, short.center.x, 1f)
+        fun verticalRange() = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        fun assertReadableWidth() {
+            val card = cardBounds()
+            assertEquals("code must not collapse to its toolbar width", host.width - 8f * density, card.width, 2f)
+            assertEquals(host.center.x, card.center.x, 1f)
+        }
+        assertReadableWidth()
+        val oneLineHeight = viewportHeight()
+        val textHeight = ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
+        assertEquals("one line needs only its text and padding", textHeight + 24f * density, oneLineHeight, 2f)
+        assertTrue("the cap is not a minimum height", oneLineHeight < 128f * density)
+        assertEquals(0f, verticalRange().maxValue(), 1f)
         assertEquals(0f, horizontalRange().maxValue(), 1f)
         val language = ui.onNodeWithText("sh", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val buttons = listOf("download", "expand", "copy").map {
             ui.onNodeWithTag("markdown-code-$it", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         }
+        val card = cardBounds()
         assertTrue("language remains visible", language.width > 0f && language.right <= buttons.first().left)
-        buttons.forEach { assertTrue(it.left >= short.left && it.right <= short.right + 1f) }
+        buttons.forEach { assertTrue(it.left >= card.left && it.right <= card.right + 1f) }
         buttons.zipWithNext().forEach { (a, b) -> assertTrue(a.right <= b.left + 1f) }
         ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
 
-        mainThread { code = "m".repeat(24) }
+        mainThread { code = "ls\nls -l\nls -a" }
         ui.waitForIdle()
-        val medium = cardBounds()
-        assertTrue("width grows with content", medium.width > short.width + 1f)
-        assertTrue("medium code stays below the cap", medium.width < maximumWidth - 1f)
-        assertEquals(host.center.x, medium.center.x, 1f)
-        assertEquals(0f, horizontalRange().maxValue(), 1f)
+        assertReadableWidth()
+        assertTrue("height grows with the visible lines", viewportHeight() > oneLineHeight + 1f)
+        assertTrue("three lines do not fill the maximum viewport", viewportHeight() < maxBodyHeightPx - 1f)
+        val threeLineTextHeight = ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
+        assertEquals("three lines leave no unused body height", threeLineTextHeight + 24f * density, viewportHeight(), 2f)
+        assertEquals(0f, verticalRange().maxValue(), 1f)
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
 
         mainThread { code = "wide ".repeat(100) }
         ui.waitForIdle()
-        val wide = cardBounds()
-        assertEquals(maximumWidth, wide.width, 2f)
-        assertEquals(host.center.x, wide.center.x, 1f)
-        assertTrue("long line keeps a bounded scrolling viewport", horizontalRange().maxValue() > 0f)
+        assertReadableWidth()
+        assertEquals("a long single line only scrolls horizontally", oneLineHeight, viewportHeight(), 2f)
+        assertTrue(horizontalRange().maxValue() > 0f)
+        assertEquals(0f, verticalRange().maxValue(), 1f)
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
         viewport.performTouchInput { swipeLeft() }
         ui.waitForIdle()
         assertTrue(horizontalRange().value() > 0f)
 
-        mainThread { code = "x" }
+        mainThread { code = (1..80).joinToString("\n") { "echo $it" } }
+        ui.waitUntil(5_000) { verticalRange().maxValue() > 0f }
+        assertReadableWidth()
+        assertEquals("only overflowing content reaches the cap", maxBodyHeightPx, viewportHeight(), 2f)
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertIsDisplayed().performClick()
+        viewport.performTouchInput { swipeUp() }
         ui.waitForIdle()
-        assertEquals("short content shrinks again", short.width, cardBounds().width, 1f)
+        assertTrue(verticalRange().value() > 0f)
+
+        mainThread { code = "ls -la" }
+        ui.waitUntil(5_000) { verticalRange().maxValue() == 0f }
+        assertReadableWidth()
+        assertEquals("shrinking content releases the extra height", oneLineHeight, viewportHeight(), 2f)
+        assertEquals(0f, verticalRange().value(), 1f)
         assertEquals(0f, horizontalRange().maxValue(), 1f)
         assertEquals(0f, horizontalRange().value(), 1f)
+        ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
     }
 
     fun testCodeHeaderOrderAndExpandedOutputHasNoCloseCross() {
@@ -1083,10 +1112,21 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         show { MarkdownCodeBlock(code, visible, terminal) }
         ui.mainClock.autoAdvance = false
         try {
+            val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+            val initialHeight = viewport.fetchSemanticsNode().boundsInRoot.height
+            mainThread { code = code.copy(text = "echo first\necho second\necho third") }
+            ui.mainClock.advanceTimeBy(100)
+            ui.waitForIdle()
+            val growingHeight = viewport.fetchSemanticsNode().boundsInRoot.height
+            assertTrue("stream grows naturally before the cap", growingHeight > initialHeight + 1f)
+            val growingTextHeight = ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
+            assertEquals("stream has no extra height below the cap", growingTextHeight + 24f * activity.resources.displayMetrics.density, growingHeight, 2f)
+            assertEquals(0f, viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue(), 1f)
+            ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
             mainThread { code = code.copy(text = (1..60).joinToString("\n") { "echo $it" }) }
             ui.mainClock.advanceTimeBy(100)
             ui.waitForIdle()
-            val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+            assertTrue("stream reaches the capped viewport", viewport.fetchSemanticsNode().boundsInRoot.height > growingHeight + 1f)
             fun range() = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
             ui.mainClock.advanceTimeBy(100)
             assertTrue(range().value() > 0f)

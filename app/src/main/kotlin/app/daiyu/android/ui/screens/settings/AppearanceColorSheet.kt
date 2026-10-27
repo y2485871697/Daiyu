@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
@@ -42,6 +44,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import app.daiyu.android.data.model.AppearanceAccentColor
 import app.daiyu.android.data.model.AppearancePaletteStyle
 import app.daiyu.android.data.model.AppearanceSettings
@@ -52,6 +56,9 @@ import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.app.resolveUserBubbleColors
 import app.daiyu.android.ui.app.colorContentColor
 import app.daiyu.android.ui.app.resolvedPrimaryAccent
+import app.daiyu.android.ui.components.UsagePalette
+import app.daiyu.android.ui.icons.DaiyuIcon
+import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.haptics.material.Slider
 import app.daiyu.android.ui.haptics.selectable
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
@@ -102,13 +109,30 @@ internal fun AppearanceColorSheet(
                 modifier = Modifier.testTag("appearance-color-save-error"))
             AppearanceDraftPreview(preview)
             if (editor == AppearanceColorEditor.BUBBLES) {
-                UserBubbleMode.entries.forEach { mode ->
-                    SettingsRadioRow(when (mode) {
-                        UserBubbleMode.OFF -> "无气泡"
-                        UserBubbleMode.THEME -> "跟随主题"
-                        UserBubbleMode.CUSTOM -> "自定义颜色"
-                    }, selected = draft.userBubbleMode == mode) {
-                        draft = draft.copy(userBubbleMode = mode)
+                val selection = UsagePalette(buttons.dark, preview)
+                val shape = RoundedCornerShape(12.dp)
+                Column(Modifier.fillMaxWidth().selectableGroup().testTag("appearance-bubble-options"),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    UserBubbleMode.entries.forEach { mode ->
+                        val selected = draft.userBubbleMode == mode
+                        val label = when (mode) {
+                            UserBubbleMode.OFF -> "无气泡"
+                            UserBubbleMode.THEME -> "跟随主题"
+                            UserBubbleMode.CUSTOM -> "自定义颜色"
+                        }
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape)
+                            .background(if (selected) selection.selectionContainer else Color.Transparent)
+                            .testTag("settings-radio:$label")
+                            .selectable(selected, role = Role.RadioButton, onClick = {
+                                draft = draft.copy(userBubbleMode = mode)
+                            }).padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(label, Modifier.weight(1f),
+                                style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium),
+                                color = if (selected) selection.selectionContent else buttons.text)
+                            if (selected) DaiyuIcon(DaiyuIcons.Check, contentDescription = "已选择",
+                                tint = selection.selectionContent, size = 20.dp)
+                        }
                     }
                 }
                 if (draft.userBubbleMode == UserBubbleMode.CUSTOM) {
@@ -165,14 +189,15 @@ private fun AppearanceDraftPreview(draft: AppearanceSettings) {
     val colors = resolveAppearanceColors(draft, dark)
     val actions = resolveAppearanceActions(draft, dark)
     val bubble = resolveUserBubbleColors(draft, dark)
-    val selection = app.daiyu.android.ui.components.ConversationPanePreviewPalette(dark, draft)
+    val selection = UsagePalette(dark, draft)
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().background(colors.surface, shape)
         .border(1.dp, colors.outline, shape).padding(12.dp).testTag("appearance-draft-preview"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("预览", color = colors.onSurface)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("选中项目", Modifier.weight(1f).background(selection.selectionContainer, shape).padding(10.dp),
+            Text("选中项目", Modifier.weight(1f).testTag("appearance-preview-selection")
+                .background(selection.selectionContainer, shape).padding(10.dp),
                 color = selection.selectionContent)
             Text("普通容器", Modifier.weight(1f).background(colors.surfaceContainer, shape).padding(10.dp),
                 color = colors.onSurface)

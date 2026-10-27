@@ -46,7 +46,7 @@ class AppearanceRolesContractTest(unittest.TestCase):
     def test_draft_preview_uses_production_role_resolvers_without_saving(self):
         sheet = source('ui/screens/settings/AppearanceColorSheet.kt')
         preview = sheet.split('private fun AppearanceDraftPreview(', 1)[1].split('private fun AppearanceColorPicker', 1)[0]
-        for name in ('resolveAppearanceColors', 'resolveAppearanceActions', 'resolveUserBubbleColors', 'ConversationPanePreviewPalette'):
+        for name in ('resolveAppearanceColors', 'resolveAppearanceActions', 'resolveUserBubbleColors', 'UsagePalette'):
             self.assertIn(name, preview)
         self.assertNotIn('onChange(', preview)
         self.assertIn('val preview = editor.merge(state, draft)', sheet)

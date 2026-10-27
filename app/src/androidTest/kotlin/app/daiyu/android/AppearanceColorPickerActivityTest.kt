@@ -7,6 +7,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,6 +20,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
+import app.daiyu.android.data.model.UserBubbleMode
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -24,6 +28,7 @@ import app.daiyu.android.ui.screens.settings.AppearanceColorEditor
 import app.daiyu.android.ui.screens.settings.AppearanceColorSheet
 
 class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
+    private var choiceDensity = 1f
     private fun capturePicker(target: SemanticsNodeInteraction): ImageBitmap =
         if (android.os.Build.VERSION.SDK_INT < 28) captureScreenNode(target)
         else target.captureToImage()
@@ -37,23 +42,83 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
         assertEquals(expected.blue, actual.blue, .015f)
     }
 
-    private fun show(editor: AppearanceColorEditor, dark: Boolean, requests: MutableList<AppearanceSettings>) {
+    private fun show(editor: AppearanceColorEditor, dark: Boolean, requests: MutableList<AppearanceSettings>, fontScale: Float? = null, customAccents: Boolean = true) {
         val original = AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-            primaryAccentColor = 0xFF8E7C9E.toInt(), secondaryAccentColor = 0xFF56896C.toInt())
+            primaryAccentColor = if (customAccents) 0xFF8E7C9E.toInt() else null,
+            secondaryAccentColor = if (customAccents) 0xFF56896C.toInt() else null)
         mainThread {
             var state by mutableStateOf(original)
             var visible by mutableStateOf(true)
             activity.setContent {
                 AgentAppTheme(state, true) {
-                    Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface)
-                        .testTag("exact-applied-surface")) {
-                        if (visible) AppearanceColorSheet(editor, state,
-                            onChange = { requests += it; state = it; true }, onDismiss = { visible = false })
+                    val density = LocalDensity.current
+                    choiceDensity = density.density
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale ?: density.fontScale)) {
+                        Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface)
+                            .testTag("exact-applied-surface")) {
+                            if (visible) AppearanceColorSheet(editor, state,
+                                onChange = { requests += it; state = it; true }, onDismiss = { visible = false })
+                        }
                     }
                 }
             }
         }
         awaitDialogEnter(node("assistant-sheet"))
+    }
+
+    fun testBubbleOptionsStayCompactAndMatchPreviewSelection() {
+        val labels = listOf("无气泡", "跟随主题", "自定义颜色")
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (customAccents in listOf(false, true)) {
+            val requests = mutableListOf<AppearanceSettings>()
+            show(AppearanceColorEditor.BUBBLES, dark, requests, fontScale, customAccents)
+            node("appearance-bubble-options").scrollToVisible()
+            val rows = labels.map { node("settings-radio:$it") }
+            val bounds = rows.map { it.fetchSemanticsNode().boundsInRoot }
+            val group = node("appearance-bubble-options").fetchSemanticsNode().boundsInRoot
+            bounds.forEach {
+                assertTrue("48dp touch row", it.height >= 48f * choiceDensity - 1f)
+                assertTrue("compact single-line row", it.height <= 50f * choiceDensity)
+                assertEquals(group.left, it.left, 1f)
+                assertEquals(group.right, it.right, 1f)
+            }
+            bounds.zipWithNext().forEach { (before, after) ->
+                assertEquals(4f * choiceDensity, after.top - before.bottom, 1.5f)
+            }
+            for ((index, row) in rows.withIndex()) {
+                row.scrollToVisible().performTouchInput { click(Offset(width - 2f, height / 2f)) }
+                rows.forEachIndexed { other, item ->
+                    if (other == index) item.assertIsSelected() else item.assertIsNotSelected()
+                }
+                ui.runOnIdle { assertTrue(requests.isEmpty()) }
+                val selected = pixel(captureScreenNode(row), .5f, .85f)
+                val preview = captureScreenNode(node("appearance-preview-selection").scrollToVisible())
+                assertSameColor(pixel(preview, .5f, .85f), selected)
+                if (!customAccents) assertSameColor(Color(if (dark) 0xFF28262F else 0xFFEFEDFB), selected)
+            }
+            node("appearance-color-confirm").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            ui.runOnIdle {
+                assertEquals(UserBubbleMode.CUSTOM, requests.single().userBubbleMode)
+                assertEquals(if (customAccents) 0xFF8E7C9E.toInt() else null, requests.single().primaryAccentColor)
+                assertEquals(if (customAccents) 0xFF56896C.toInt() else null, requests.single().secondaryAccentColor)
+            }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testBubbleOptionCancelAndDefaultDoNotSave() {
+        for (dark in listOf(false, true)) {
+            val requests = mutableListOf<AppearanceSettings>()
+            show(AppearanceColorEditor.BUBBLES, dark, requests)
+            node("settings-radio:无气泡").scrollToVisible().performClick().assertIsSelected()
+            node("appearance-color-default").performClick()
+            node("settings-radio:跟随主题").scrollToVisible().assertIsSelected()
+            node("settings-radio:无气泡").performClick().assertIsSelected()
+            androidx.test.espresso.Espresso.pressBack()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            ui.runOnIdle { assertTrue(requests.isEmpty()) }
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testExactInterfaceDraftAndAppliedSurfaceInBothThemes() {

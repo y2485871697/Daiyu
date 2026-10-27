@@ -47,6 +47,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
@@ -90,6 +92,11 @@ internal fun ChatMessageList(
     var wasDragged by remember { mutableStateOf(false) }
     var touchEpoch by remember { mutableStateOf(0L) }
     var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
+    var initialPositionPending by remember {
+        mutableStateOf(scrollRequest?.let {
+            it.serial != consumedScrollSerial && it.followBottom && it.messageId == null && it.listKey == null
+        } == true)
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var scrollResumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var resumeFollowPending by remember { mutableStateOf(false) }
@@ -124,10 +131,11 @@ internal fun ChatMessageList(
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
-    LaunchedEffect(scrollRequest, requestedIndex, turns.size, touchEpoch, scrollResumed) {
+    LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed) {
         if (!scrollResumed) return@LaunchedEffect
         scrollRequest?.takeIf { it.serial != consumedScrollSerial }?.let { request ->
             followBottom = request.followBottom && request.messageId == null && request.listKey == null
+            if (!followBottom || tailIndex < 0) initialPositionPending = false
             wasDragged = false
             // Subcomposition may start this effect during measurement.
             withFrameNanos { }
@@ -140,6 +148,33 @@ internal fun ChatMessageList(
                 }
             } else if (request.followBottom && tailIndex >= 0) {
                 listState.scrollToItem(tailIndex)
+                if (initialPositionPending) {
+                    // Initial placement is layout restoration, not streaming output to animate.
+                    while (true) {
+                        withFrameNanos { }
+                        if (!scrollResumed) return@LaunchedEffect
+                        val index = currentTailIndex
+                        val layout = listState.layoutInfo
+                        if (layout.viewportSize.height <= 0) continue
+                        val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
+                        if (last == null) {
+                            listState.scrollToItem(index)
+                            continue
+                        }
+                        val visibleKeys = layout.visibleItemsInfo.map { it.key }.toSet()
+                        if (currentTurns.filterIsInstance<ChatTurnUi.Assistant>().any {
+                            it.listKey in visibleKeys && !it.isStreaming &&
+                                (readyTurns[it.listKey] != it || revealedTurns[it.listKey] != it)
+                        }) continue
+                        val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
+                        if (overflow > 0 && listState.canScrollForward) {
+                            listState.scrollBy(overflow.toFloat())
+                            continue
+                        }
+                        initialPositionPending = false
+                        break
+                    }
+                }
                 consumedScrollSerial = request.serial
             }
         }
@@ -160,7 +195,7 @@ internal fun ChatMessageList(
         var previousViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
         var alignViewport = false
         snapshotFlow {
-            scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
+            !initialPositionPending && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
                 (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
         }.collectLatest { canFollow ->
             if (!canFollow) return@collectLatest
@@ -238,9 +273,9 @@ internal fun ChatMessageList(
                     it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
             }.map { it.key }.toSet()
             currentReadAction to currentTurns.filterIsInstance<ChatTurnUi.Assistant>()
-                .filter { it.status == RunStatus.COMPLETED && it.listKey in visibleKeys && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it }
+                .filter { !initialPositionPending && it.status == RunStatus.COMPLETED && it.listKey in visibleKeys && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it }
         }.collect { (readAction, completed) ->
-            if (completed.isNotEmpty()) {
+            if (!initialPositionPending && completed.isNotEmpty()) {
                 // Wait for the formatted terminal body, not a shorter raw-text placeholder.
                 withFrameNanos { }
                 withFrameNanos { }
@@ -252,15 +287,27 @@ internal fun ChatMessageList(
                 }.map { it.key }.toSet()
                 val current = currentTurns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
                 readAction(completed.filter {
-                    it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
+                    !initialPositionPending && it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it && revealedTurns[it.listKey] == it
                 }.map { it.listKey }.toSet())
             }
         }
     }
     Box(modifier.fillMaxSize()) {
-        LazyColumn(state = listState, modifier = Modifier.testTag("chat-messages").fillMaxSize().pointerInput(Unit) {
+        LazyColumn(state = listState, userScrollEnabled = !initialPositionPending,
+            modifier = Modifier.testTag("chat-messages").fillMaxSize()
+                .drawWithContent { if (!initialPositionPending) drawContent() }
+                .then(if (initialPositionPending) Modifier.clearAndSetSemantics {} else Modifier)
+                .pointerInput(Unit) {
             awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                if (initialPositionPending) {
+                    down.consume()
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        event.changes.forEach { it.consume() }
+                    } while (event.changes.any { it.pressed })
+                    return@awaitEachGesture
+                }
                 // A down over a child action also cancels follow and an in-flight user-message jump.
                 followBottom = false; wasDragged = false
                 consumedScrollSerial = currentScrollSerial
@@ -281,7 +328,7 @@ internal fun ChatMessageList(
                                 onVisibleAdvance = {
                                     val layout = listState.layoutInfo
                                     val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
-                                    if (scrollResumed && turn.status in setOf(RunStatus.RUNNING, RunStatus.COMPLETED) &&
+                                    if (!initialPositionPending && scrollResumed && turn.status in setOf(RunStatus.RUNNING, RunStatus.COMPLETED) &&
                                         layout.visibleItemsInfo.any { it.key == turn.listKey && it.size > 0 &&
                                             it.offset < visibleBottom && it.offset + it.size > layout.viewportStartOffset }) {
                                         actions.onVisibleTextAdvance(turn.listKey)

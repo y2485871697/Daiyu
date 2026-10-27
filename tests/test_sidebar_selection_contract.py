@@ -20,7 +20,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('controller.database.draft(id, draft)', select)
         self.assertIn('selections[id] = selectionStart to selectionEnd', select)
         self.assertIn('selected = conversation; selectionReady = true; draft = targetDraft', select)
-        self.assertIn('publishChat(); jumpToBottom(); refresh()', select)
+        self.assertIn('publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()', select)
 
     def test_selection_feedback_precedes_async_history_and_keeps_pending_highlight(self):
         host = (SRC / 'MainActivity.kt').read_text()
@@ -42,7 +42,7 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('prepared?.conversations ?: controller.database.conversations()', selected)
         self.assertIn('prepared?.messages ?: controller.database.messages(conversation.id)', selected)
         self.assertLess(selected.index('paneState = paneState.copy(selectedConversationId = conversation?.id?.value)'),
-                        selected.index('publishChat(); jumpToBottom(); refresh()'))
+                        selected.index('publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()'))
         pane = (SRC / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
         self.assertIn('val rowSelected = if (managing) checked else selected', pane)
         self.assertIn('this.selected = rowSelected', pane)
@@ -79,7 +79,8 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('else onConversationSelected(conversation.id)', pane)
         host = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('onOpen = { openSidebar() }, onDismiss = { dismissSidebar() }', host)
-        self.assertIn('val allowed = !sidebarVisible && controller.ready && !controller.dataBusy', host)
+        self.assertIn('val composerAvailable = !sidebarVisible && controller.ready', host)
+        self.assertIn('val allowed = composerAvailable && !controller.dataBusy', host)
 
     def test_activity_regression_covers_reselection_drafts_filter_and_explicit_close(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneManagementActivityTest.kt').read_text()

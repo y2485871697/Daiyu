@@ -5825,7 +5825,8 @@ class MainActivity : ComponentActivity() {
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
         shown = if (conversation == null) mutableListOf() else (prepared?.messages ?: controller.database.messages(conversation.id)).toMutableList()
-        childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
+        childStatusVisit = null; usageVisit = null; revokeWorkspaceVisit(); collaborationOwner = null; collaborationVisible = false
+        publishChat(rowsChanged = true, scrollRequest = ChatScrollRequest(++scrollSerial)); refresh()
     }
     private fun sendDraft(text: String, universal: UniversalSend? = null) {
         if (pendingTextSend != null || text != draft || text.isBlank()) {
@@ -6187,7 +6188,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun publishChat() = publishChat(rowsChanged = true)
 
-    private fun publishChat(rowsChanged: Boolean) {
+    private fun publishChat(rowsChanged: Boolean, scrollRequest: ChatScrollRequest? = chatState.scrollRequest) {
         if (rowsChanged) refreshTimeline()
         contextReceiptRevision = controller.contextUsageRevision
         conversationUsageRevision = controller.usageRevision
@@ -6224,6 +6225,7 @@ class MainActivity : ComponentActivity() {
             !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
         val allowed = composerAvailable && !controller.dataBusy
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
+            scrollRequest = scrollRequest,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
             timeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty(),
             compressionActivity = null,

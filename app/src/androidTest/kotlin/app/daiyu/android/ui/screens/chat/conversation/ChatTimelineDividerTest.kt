@@ -98,7 +98,7 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         } } }
         ui.onNodeWithTag("timeline:legacy").assertDoesNotExist()
         mainThread { entry = entry.copy(messages = 2) }
-        ui.onNodeWithText("已压缩 2 条消息").performClick()
+        ui.onNodeWithText("主代理 · 已压缩 2 条消息").performClick()
         ui.onNodeWithText("压缩模型：未记录").assertIsDisplayed()
     }
     fun testReconnectClockUpdatesAndTerminalStopsTheClock() {
@@ -128,6 +128,6 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         } } }
         ui.mainClock.advanceTimeBy(400)
         ui.onNodeWithTag("chat-context-compressing").assertIsDisplayed()
-        ui.onNodeWithText("summary-model • 正在压缩上下文").assertIsDisplayed()
+        ui.onNodeWithText("主代理 • 正在压缩上下文").assertIsDisplayed()
     }
 }

@@ -90,7 +90,9 @@ class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
             val defaultPort = videos.wrap(provider, capability, conversation, assistant.id, baseline,
                 "frozen assistant instructions", { false }, postApproval = approval)
             val defaultSession = defaultPort.open(modelRows)
-            assertFalse(defaultSession is ResumableModelSession)
+            assertTrue(defaultSession is RequestRetryModelSession)
+            assertFalse(defaultSession is CheckpointedResumableModelSession)
+            assertFalse((defaultSession as RequestRetryModelSession).canResume)
             val delegate = underlyingResponsesSession(defaultSession)
             val capturedContext = delegate.javaClass.getDeclaredField("sessionContext").apply { isAccessible = true }
                 .get(delegate) as app.daiyu.android.model.sessiongateway.SessionGatewayContext
@@ -129,7 +131,9 @@ class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
             openers.forEachIndexed { index, open ->
                 published = null
                 val session = open()
-                assertFalse(session is ResumableModelSession)
+                assertTrue(session is RequestRetryModelSession)
+                assertFalse(session is CheckpointedResumableModelSession)
+                assertFalse((session as RequestRetryModelSession).canResume)
                 val failure = AtomicReference<Throwable?>()
                 val worker = Thread {
                     try { session.next(emptyList()) {} } catch (caught: Throwable) { failure.set(caught) }

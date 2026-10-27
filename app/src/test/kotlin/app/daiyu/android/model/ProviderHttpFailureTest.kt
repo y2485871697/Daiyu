@@ -58,12 +58,29 @@ class ProviderHttpFailureTest {
             for (status in listOf(400, 422)) {
                 val error = classify(body(code, "model"), status)
                 assertEquals(ModelFailure.REQUEST, error.failure)
-                assertEquals(ModelRequestDiagnostic(status, reason, RequestField.MODEL), error.diagnostic)
+                assertEquals(ModelRequestDiagnostic(status, reason, RequestField.MODEL, providerCode = app.daiyu.android.domain.ProviderErrorCode.entries.single { it.wireName == code }), error.diagnostic)
                 assertTrue(error.userMessage.contains("HTTP $status"))
                 safe(error)
             }
         }
         assertEquals(RequestRejection.MODEL_UNAVAILABLE, classify(body("model_not_found", "model"), 404).diagnostic!!.rejection)
+    }
+
+    @Test fun streamCodesAreClosedActualValuesAndNeverInventHttpStatusesOrOverrideAuthPriority() {
+        for (wire in listOf("server_error", "overloaded_error", "rate_limit_exceeded")) {
+            val failure = ProviderHttpFailure.event(JSONObject().put("code", wire).put("message", secret))
+            assertEquals(wire, failure.diagnostic!!.providerCode!!.wireName)
+            assertNull(failure.diagnostic!!.httpStatus)
+            safe(failure)
+        }
+        val auth = ProviderHttpFailure.event(JSONObject().put("type", "authentication_error")
+            .put("code", "unsupported_value").put("param", "reasoning.effort").put("message", secret))
+        assertEquals(ModelFailure.AUTHENTICATION, auth.failure)
+        assertEquals(RequestRejection.UNSPECIFIED, auth.diagnostic!!.rejection)
+        assertNull(auth.diagnostic!!.field)
+        val unknown = ProviderHttpFailure.event(JSONObject().put("code", secret).put("message", secret))
+        assertNull(unknown.diagnostic!!.providerCode)
+        safe(unknown)
     }
 
     @Test fun fieldAloneDoesNotInventAnUnsupportedCause() {
@@ -206,7 +223,7 @@ class ProviderHttpFailureTest {
             .put("response", JSONObject().put("error", JSONObject(body("context_length_exceeded", "input")).getJSONObject("error"))) + "\n\n"
         try { ResponsesStream.read(wire.reader().buffered(), { false }, events::add); fail("accepted failed event") }
         catch (error: ModelRequestException) {
-            assertEquals(ModelRequestDiagnostic(null, RequestRejection.CONTEXT_LIMIT, RequestField.INPUT), error.diagnostic)
+            assertEquals(ModelRequestDiagnostic(null, RequestRejection.CONTEXT_LIMIT, RequestField.INPUT, providerCode = app.daiyu.android.domain.ProviderErrorCode.CONTEXT_LENGTH_EXCEEDED), error.diagnostic)
             assertFalse(error.userMessage.contains("HTTP")); safe(error)
         }
         assertTrue(events.none { it is ModelEvent.ToolReady || it is ModelEvent.ProtocolOutput })

@@ -53,6 +53,10 @@ sealed interface ChatTimelineEntry {
         val round: Int, val model: String) : ChatTimelineEntry
 }
 
+/** Only the original live budget may resume a stopped display row; terminal owners are fenced. */
+internal fun reconnectTransitionAllowed(previous: String, next: String): Boolean =
+    previous == "running" || previous == "stopped" && next in setOf("stopped", "running")
+
 /** Display evidence only. Never read by request admission, replay, or transport recovery. */
 internal object ChatTimelineStore {
     val revision = java.util.concurrent.atomic.AtomicLong()
@@ -83,11 +87,11 @@ internal object ChatTimelineStore {
             put("payload", encode(entry).toString()); put("created", entry.created)
         }
         if (entry is ChatTimelineEntry.Reconnect) {
-            // A stopped segment is final. Resume receives a new reconnectId from the budget.
+            // Pause and resume update the same row; successful/failed rows remain final.
             val prior = db.rawQuery("SELECT payload FROM chat_timeline_events WHERE id=?", arrayOf(entry.id)).use {
                 if (it.moveToFirst()) decode(entry.id, entry.created, JSONObject(it.getString(0))) as ChatTimelineEntry.Reconnect else null
             }
-            if (prior != null && prior.status != "running") return
+            if (prior != null && !reconnectTransitionAllowed(prior.status, entry.status)) return
         }
         db.insertWithOnConflict("chat_timeline_events", null, values, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
         revision.incrementAndGet()

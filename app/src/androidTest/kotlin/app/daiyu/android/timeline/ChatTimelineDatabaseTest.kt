@@ -91,6 +91,30 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         db.close(); assertEquals(listOf(terminal), ChatTimelineStore.read(db.readableDatabase, owner.value))
         db.delete(owner); assertTrue(ChatTimelineStore.read(db.readableDatabase, owner.value).isEmpty())
     }
+    fun testPauseAndResumeReplaceOneReconnectRowAndPersistItsLatestActualError() {
+        val (_, db) = fresh(); val owner = seed(db)
+        var latest = event(db, owner).copy(reason = "SERVER · HTTP 502\n\n模型服务端发生错误。")
+        ChatTimelineStore.write(db.writableDatabase, latest)
+        repeat(2) {
+            latest = latest.copy(status = "stopped")
+            ChatTimelineStore.write(db.writableDatabase, latest)
+            assertEquals(listOf(latest), ChatTimelineStore.read(db.readableDatabase, owner.value))
+            latest = latest.copy(reason = "SERVER · HTTP 503\n\n模型服务端发生错误。")
+            ChatTimelineStore.write(db.writableDatabase, latest)
+            ChatTimelineStore.write(db.writableDatabase, latest.copy(status = "succeeded"))
+            ChatTimelineStore.write(db.writableDatabase, latest.copy(status = "failed"))
+            assertEquals(listOf(latest), ChatTimelineStore.read(db.readableDatabase, owner.value))
+            latest = latest.copy(status = "running", elapsedMs = latest.elapsedMs + 1000L,
+                reason = "SERVER · HTTP 503\n\n模型服务端发生错误。")
+            ChatTimelineStore.write(db.writableDatabase, latest)
+            assertEquals(listOf(latest), ChatTimelineStore.read(db.readableDatabase, owner.value))
+        }
+        latest = latest.copy(status = "failed")
+        ChatTimelineStore.write(db.writableDatabase, latest)
+        ChatTimelineStore.write(db.writableDatabase, latest.copy(status = "running"))
+        db.close()
+        assertEquals(listOf(latest), ChatTimelineStore.read(db.readableDatabase, owner.value))
+    }
     fun testCompressionKeepsCompleteSummaryActualModelProgressAndLegacyUnknown() {
         val (context, db) = fresh(); val owner = seed(db)
         val service = ContextService(context, db)

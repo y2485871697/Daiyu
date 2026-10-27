@@ -1570,6 +1570,7 @@ class ChatController internal constructor(private val application:Application,
         val summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null,
         val provider: ProviderSnapshot) {
         var browserVisual: ControllerBrowserVisual? = null
+        var reconnectNotice: String? = null
         var childrenPauseRequested = false
         var childPauseEpoch = 0L
         var pausedChildren: ChildPauseCapture? = null
@@ -2081,6 +2082,8 @@ class ChatController internal constructor(private val application:Application,
     private fun fenceRun(lifetime:RunResources) {
         if(lifetime.fenced) return
         lifetime.fenced=true
+        if (problem == lifetime.reconnectNotice) problem = null
+        lifetime.reconnectNotice = null
         reconnectTimeline.values.filter { it.anchor.conversationId == lifetime.initial.conversationId.value &&
             it.anchor.runId == lifetime.initial.runId.value && it.status == "running" }.forEach { previous ->
             val observedAt = reconnectObservedAt.remove(previous.id)
@@ -3702,15 +3705,14 @@ class ChatController internal constructor(private val application:Application,
         // diagnostic only: no open/resume/repost or tool replay; only approved background sessions resume.
         // Both assignment and callback reads of this original lifetime are under our monitor.
         var reconnectResources: RunResources? = null
-        var reconnectNotice: String? = null
         fun postReconnectNotice(message: String?) {
             handler.post { synchronized(this) {
                 val original = reconnectResources
                 if (original != null && resources === original && !original.fenced && !closed &&
                     runner === original.runner && active?.id == assistant.id &&
                     active?.runId == run && active?.conversationId == conversationId) {
-                    if (message != null || problem == reconnectNotice) problem = message
-                    reconnectNotice = message
+                    if (message != null || problem == original.reconnectNotice) problem = message
+                    original.reconnectNotice = message
                     notifyChanged()
                 }
             } }
@@ -3915,12 +3917,12 @@ class ChatController internal constructor(private val application:Application,
                             current.conversationId != conversationId) return@runnerPolicyWithDiagnostics
                         val id = "error-reconnect:${run.value.length}:${run.value}:${event.reconnectId.length}:${event.reconnectId}"
                         val previous = reconnectTimeline[id]
-                        if (previous != null && previous.status != "running") return@runnerPolicyWithDiagnostics
+                        if (previous != null && !app.daiyu.android.timeline.reconnectTransitionAllowed(previous.status, event.status)) return@runnerPolicyWithDiagnostics
                         val logical = MessageHistory.expand(listOf(current))
                         val entry = app.daiyu.android.timeline.ChatTimelineEntry.Reconnect(id,
                             previous?.anchor ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex),
                             previous?.created ?: System.currentTimeMillis(), event.status,
-                            maxOf(previous?.elapsedMs ?: 0, event.elapsedMs), event.reason.name, event.round, provider.model)
+                            maxOf(previous?.elapsedMs ?: 0, event.elapsedMs), app.daiyu.android.model.reconnect.reconnectErrorDetails(event.reason, event.diagnostic), event.round, provider.model)
                         reconnectTimeline[id] = entry
                         if (event.status == "running") reconnectObservedAt[id] = android.os.SystemClock.elapsedRealtime()
                         else reconnectObservedAt.remove(id)

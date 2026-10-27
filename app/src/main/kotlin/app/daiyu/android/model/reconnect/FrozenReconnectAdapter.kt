@@ -30,11 +30,11 @@ class FrozenReconnectAdapter private constructor(
 
     internal fun runnerPolicyWithDiagnostics(emit: (ReconnectChanged) -> Unit): ReconnectPolicy {
         if (!settings.enabled || !capability.supported) return ReconnectPolicy()
-        return ReconnectPolicy(delayMillis = 1_000, failures = setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT, ModelFailure.SERVER, ModelFailure.RATE_LIMIT, ModelFailure.AUTHENTICATION), budgetFactory = app.daiyu.android.domain.runtime.TransportReconnectBudgetFactory { round, reason ->
-            val retained = ModelErrorReconnect(round, windowMillis, SystemReconnectTiming, emit, reason)
+        return ReconnectPolicy(delayMillis = 1_000, failures = setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT, ModelFailure.SERVER, ModelFailure.RATE_LIMIT, ModelFailure.AUTHENTICATION), budgetFactory = app.daiyu.android.domain.runtime.TransportReconnectBudgetFactory { round, reason, diagnostic ->
+            val retained = ModelErrorReconnect(round, windowMillis, SystemReconnectTiming, emit, reason, diagnostic)
             retained.start()
             object : app.daiyu.android.domain.runtime.TransportReconnectBudget {
-                override fun updateReason(reason: ModelFailure) = retained.updateReason(reason)
+                override fun updateReason(reason: ModelFailure, diagnostic: app.daiyu.android.domain.ModelRequestDiagnostic?) = retained.updateReason(reason, diagnostic)
                 override fun check() = retained.check()
                 override fun setPaused(paused: Boolean, revision: Long) = retained.setPaused(paused, revision)
                 override fun attach(disconnect: () -> Unit): AutoCloseable {

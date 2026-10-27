@@ -74,7 +74,7 @@ class ModelErrorReconnectTest {
         assertEquals(1, cancelled)
     }
 
-    @Test fun pauseFreezesTotalBudgetAndResumeUsesNewSegmentAndRejectsStaleTick() {
+    @Test fun pauseFreezesTotalBudgetAndResumeUpdatesSameSegmentAndRejectsStaleTick() {
         val clock = Clock(); val control = Control(); val events = mutableListOf<ReconnectChanged>()
         val reconnect = state(clock, events)
         val binding = reconnect.bind(control)
@@ -87,12 +87,40 @@ class ModelErrorReconnectTest {
         assertEquals(27_000L, reconnect.remainingMs()); assertEquals(count, events.size)
         assertFalse(control.stopped)
         control.resume()
-        assertEquals("running", events.last().status); assertNotEquals(oldId, events.last().reconnectId)
+        assertEquals("running", events.last().status); assertEquals(oldId, events.last().reconnectId)
         val resumedCount = events.size; stale(); assertEquals(resumedCount, events.size)
         clock.advance(26_000); reconnect.check(); assertEquals(1_000L, reconnect.remainingMs())
         clock.advance(1_000)
         assertThrows(ReconnectDeadlineException::class.java) { reconnect.check() }
         reconnect.finish("failed"); binding.close()
+    }
+
+    @Test fun actualErrorChangesPublishImmediatelyWithoutResettingTheBudgetOrChangingTheId() {
+        val clock = Clock(); val events = mutableListOf<ReconnectChanged>()
+        val first = app.daiyu.android.domain.ModelRequestDiagnostic(502)
+        val reconnect = ModelErrorReconnect(0, 30_000L, clock, events::add, ModelFailure.SERVER, first)
+        reconnect.start()
+        assertEquals(first, events.single().diagnostic)
+        val id = events.single().reconnectId
+        clock.advance(250)
+        reconnect.updateReason(ModelFailure.SERVER, app.daiyu.android.domain.ModelRequestDiagnostic(503))
+        assertEquals(503, events.last().diagnostic!!.httpStatus)
+        assertEquals(250L, events.last().elapsedMs)
+        reconnect.setPaused(true)
+        val count = events.size
+        clock.advance(120_000)
+        reconnect.updateReason(ModelFailure.RATE_LIMIT, app.daiyu.android.domain.ModelRequestDiagnostic(429))
+        assertEquals(count + 1, events.size)
+        assertEquals("stopped", events.last().status)
+        assertEquals(250L, events.last().elapsedMs)
+        reconnect.setPaused(false)
+        assertEquals(429, events.last().diagnostic!!.httpStatus)
+        assertEquals("running", events.last().status)
+        assertEquals(29_750L, reconnect.remainingMs())
+        assertTrue(events.all { it.reconnectId == id && it.round == 0 })
+        reconnect.finish("failed")
+        val terminal = events.last(); reconnect.updateReason(ModelFailure.NETWORK)
+        assertEquals(terminal, events.last())
     }
 
     @Test fun retainedFiveTotalWindowsIncludeInflightTimeAndNeverResetOnNewFailureReason() {
@@ -118,7 +146,7 @@ class ModelErrorReconnectTest {
                     assertThrows(ReconnectDeadlineException::class.java) { reconnect.check() }.lastReason)
                 reconnect.finish("failed")
                 assertTrue(events.none { it.status == "succeeded" })
-                assertEquals((0 until window step 1_000).toList(),
+                assertEquals((0 until window step 1_000).toList() + (window - 1_000),
                     events.filter { it.status == "running" }.map { it.elapsedMs })
             }
         }
@@ -146,7 +174,8 @@ class ModelErrorReconnectTest {
             control.pause(); clock.advance(60_000); assertEquals(count, events.size)
             assertFalse(control.stopped); control.resume()
         }
-        assertEquals(3, events.map { it.reconnectId }.distinct().size)
+        assertEquals(1, events.map { it.reconnectId }.distinct().size)
+        assertEquals(2_000L, events.last().elapsedMs)
         reconnect.finish("succeeded"); binding.close()
         assertTrue(control.stops.isEmpty()); assertTrue(control.pauses.isEmpty())
         val count = events.size; control.pause(); control.resume(); clock.advance(60_000)

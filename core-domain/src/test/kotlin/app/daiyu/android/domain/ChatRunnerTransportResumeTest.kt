@@ -48,7 +48,7 @@ class ChatRunnerTransportResumeTest {
     private fun runner(session: ModelSession, runtime: Runtime, budget: TransportReconnectBudget,
                        opens: () -> Unit = {}): ChatRunner = ChatRunner(ModelPort { opens(); session },
         object : ConversationStore { override fun save(message: Message) = error("atomic only") }, BatteryTool { error("no tools") },
-        RunnerOptions(runtimeStore = runtime,reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _ -> budget }))) {}
+        RunnerOptions(runtimeStore = runtime,reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _, _ -> budget }))) {}
 
     @Test fun staleWorkerPauseSnapshotCannotOverrideCompletedUiPause() {
         val workerSnapshot = CountDownLatch(1); val releaseSnapshot = CountDownLatch(1)

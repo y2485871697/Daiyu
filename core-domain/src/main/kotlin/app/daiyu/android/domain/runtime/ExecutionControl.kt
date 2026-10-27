@@ -123,14 +123,14 @@ interface ToolExecutionJournal {
 
 /** Request-thread checks and asynchronous expiry share one retained first-failure budget. */
 interface TransportReconnectBudget {
-    fun updateReason(reason: ModelFailure) {}
+    fun updateReason(reason: ModelFailure, diagnostic: ModelRequestDiagnostic? = null) {}
     fun check()
     fun setPaused(paused: Boolean, revision: Long)
     fun attach(disconnect: () -> Unit): AutoCloseable
     fun finish(status: String)
 }
 fun interface TransportReconnectBudgetFactory {
-    fun create(round: Int, reason: ModelFailure): TransportReconnectBudget
+    fun create(round: Int, reason: ModelFailure, diagnostic: ModelRequestDiagnostic?): TransportReconnectBudget
 }
 
 /** Zero retries is the default. Sessions explicitly opt into cursor resume or current-request replay. */

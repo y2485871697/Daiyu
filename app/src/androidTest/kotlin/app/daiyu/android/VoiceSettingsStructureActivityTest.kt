@@ -545,4 +545,57 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(account, fixture.controller.voiceRuntime.accountConfigurations.value.getValue("DOUBAO"))
         assertEquals(0, fixture.opens.get())
     }
+
+    fun testCreationButtonsMatchOuterSettingsCardsAndKeepDraftGuards() {
+        systemProfiles()
+        runBlocking { fixture.controller.voiceRuntime.saveAccount(VoiceConfiguration(engine = "DOUBAO", provider = "fixture",
+            endpoint = "https://openspeech.bytedance.com", key = "synthetic-only", model = "seed-tts-2.0",
+            voice = app.daiyu.android.voice.providers.DoubaoVoices.DEFAULT_ID)) }
+        val reading = fixture.controller.voiceRuntime.configuration.value
+        val conversation = fixture.controller.voiceRuntime.conversationConfiguration.value
+        val account = fixture.controller.voiceRuntime.accountConfigurations.value.getValue("DOUBAO")
+        enter()
+        val outer = node("voice-recognition-input-card").fetchSemanticsNode().boundsInRoot
+        section("我的声音"); node("voice-account-open").performClick()
+        node("voice-account-add").performClick()
+        ui.onNodeWithTag("voice-personal-action:CREATE").performClick()
+        awaitUniqueTag("page:制作声音")
+        for ((tag, title) in listOf(
+            "name" to null, "advanced" to "高级：新建后付费音色", "sync" to "查找我的音色名额",
+            "manual" to "备用方式：从控制台复制 ID", "next-sample" to "下一步：选择录音",
+        )) {
+            val card = reveal("voice-create-$tag-card", "制作声音").fetchSemanticsNode().boundsInRoot
+            assertEquals(outer.left, card.left, 1f)
+            assertEquals(outer.right, card.right, 1f)
+            if (title != null) reveal("settings-row:$title", "制作声音")
+                .assert(hasAnyAncestor(hasTestTag("voice-create-$tag-card")))
+        }
+        reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
+        reveal("settings-field:声音名称", "制作声音").performTextReplacement("local creation draft")
+        awaitImeFrame(node("settings-field:声音名称"), visible = true)
+        reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
+        reveal("settings-field:名额 ID", "制作声音").performTextReplacement("invalid")
+        awaitImeFrame(node("settings-field:名额 ID"), visible = true)
+        reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
+        reveal("settings-field:名额 ID", "制作声音").performTextReplacement("S_synthetic_slot")
+        awaitImeFrame(node("settings-field:名额 ID"), visible = true)
+        reveal("settings-row:下一步：选择录音", "制作声音").performClick()
+        node("voice-training-sample").assert(hasAnyAncestor(hasTestTag("voice-create-sample-card")))
+        reveal("settings-row:下一步：确认制作", "制作声音")
+            .assert(hasAnyAncestor(hasTestTag("voice-create-next-confirm-card"))).assertHasNoClickAction()
+        for (tag in listOf("sample", "next-confirm")) {
+            val card = reveal("voice-create-$tag-card", "制作声音").fetchSemanticsNode().boundsInRoot
+            assertEquals(outer.left, card.left, 1f)
+            assertEquals(outer.right, card.right, 1f)
+        }
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); ui.waitForIdle()
+        awaitUniqueTag("page:制作声音")
+        reveal("settings-field:声音名称", "制作声音").assertTextContains("local creation draft")
+        reveal("settings-field:名额 ID", "制作声音").assertTextContains("S_synthetic_slot")
+        assertEquals(reading, fixture.controller.voiceRuntime.configuration.value)
+        assertEquals(conversation, fixture.controller.voiceRuntime.conversationConfiguration.value)
+        assertEquals(account, fixture.controller.voiceRuntime.accountConfigurations.value.getValue("DOUBAO"))
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

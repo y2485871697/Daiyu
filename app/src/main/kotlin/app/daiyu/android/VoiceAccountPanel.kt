@@ -235,7 +235,7 @@ internal fun VoiceAccountPanel(
             "SYNC" -> "同步音色名额"; "ACCOUNT" -> "声音复刻账户"
             "IMPORT" -> "导入声音"; "CREATE" -> "制作声音"; else -> "我的声音"
         }
-        VoicePersonalScaffold(title, ::back, enabled = !busy && current(),
+        VoicePersonalScaffold(title, ::back, enabled = !busy && current(), settingsStyle = page == "CREATE",
             onAdd = if (page == "LIST") ({ if (current()) addMenu = true }) else null,
             onSettings = if (page == "LIST") ({ if (current()) menu = true }) else null) {
             if (page == "LIST") {
@@ -320,19 +320,13 @@ internal fun VoiceAccountPanel(
                 androidx.compose.material3.LinearProgressIndicator(progress = { (step + 1) / 3f },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
             }
-            if (page == "IMPORT" || (page == "CREATE" && step == 0)) item {
-                if (page == "CREATE") SettingsSectionTitle("1. 选择名额")
+            if (page == "IMPORT") item {
                 VoiceSettingsCard {
-                    AccountField(if (page == "IMPORT") "备注名称（可空）" else "声音名称", name, busy) { name = it.take(80); confirmation = null }
-                    if (page == "CREATE") {
-                        SettingsRow(if (advancedCreation) "收起高级设置" else "高级：新建后付费音色", onClick = { advancedCreation = !advancedCreation })
-                        if (advancedCreation) SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) { postpaid = it; confirmation = null }
-                    }
-                    personalVoiceSlots(voices, creating = page == "CREATE", postpaid = postpaid).forEachIndexed { index, voice ->
-                        val selected = if (page == "CREATE") slotId == voice.id else existingId == voice.id
-                        SettingsRadioRow(personalVoiceSlotTitle(voice, index), selected,
-                            enabled = enabled && (page != "CREATE" || voice.canTrain), summary = voiceSlotSummary(voice)) {
-                            if (current()) { if (page == "CREATE") { slotId = voice.id; postpaid = false } else existingId = voice.id; confirmation = null }
+                    AccountField("备注名称（可空）", name, busy) { name = it.take(80); confirmation = null }
+                    personalVoiceSlots(voices, creating = false, postpaid = postpaid).forEachIndexed { index, voice ->
+                        SettingsRadioRow(personalVoiceSlotTitle(voice, index), existingId == voice.id,
+                            enabled = enabled, summary = voiceSlotSummary(voice)) {
+                            if (current()) { existingId = voice.id; confirmation = null }
                         }
                     }
                     SettingsRow("查找我的音色名额", showChevron = true, onClick = if (!enabled) null else ({ navigate("SYNC") }))
@@ -340,22 +334,53 @@ internal fun VoiceAccountPanel(
                     if (manualId) {
                         SettingsNote("在豆包控制台进入声音复刻音色列表，将“已复刻”切换为“全部”或“未复刻”，复制 S_ 开头的音色 ID。API Key 与音色须属于同一项目。")
                         SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
-                        if (page == "CREATE") AccountField("名额 ID", slotId, busy) { slotId = it; confirmation = null }
-                        else AccountField("已有音色 ID", existingId, busy) { existingId = it; confirmation = null }
+                        AccountField("已有音色 ID", existingId, busy) { existingId = it; confirmation = null }
                     }
-                    if (page == "CREATE") SettingsRow("下一步：选择录音", showChevron = true, onClick = if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null else ({ step = 1; agreed = false }))
-                    else SettingsRow("导入声音", showChevron = true, onClick = if (!enabled || !existingId.matches(Regex("(?:S_|etaClone)[A-Za-z0-9_-]+"))) null else ({
+                    SettingsRow("导入声音", showChevron = true, onClick = if (!enabled || !existingId.matches(Regex("(?:S_|etaClone)[A-Za-z0-9_-]+"))) null else ({
                         val id = existingId; val n = name
                         ask("用当前语音账户查询已有音色 $id；不上传、不制作") { resources.voices.importExisting(speech!!, id, n); page = "LIST"; notice = "声音已导入；没有重新制作。" }
                     }))
                 }
-                SettingsNote(if (page == "IMPORT") "仅查询已有声音，不上传录音、不重新制作。备注名称最多 80 字。"
-                    else if (postpaid) "须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。"
-                    else "优先使用已有或免费名额；列表为空不代表免费名额已用完。可同步名额，或从豆包控制台复制音色 ID。")
+                SettingsNote("仅查询已有声音，不上传录音、不重新制作。备注名称最多 80 字。")
             }
-            if (page == "CREATE" && step == 1) item {
-                SettingsSectionTitle("2. 选择录音")
-                VoiceSettingsCard {
+            if (page == "CREATE" && step == 0) {
+                item { SettingsSectionTitle("1. 选择名额") }
+                item { SettingsCard(Modifier.testTag("voice-create-name-card")) {
+                    AccountField("声音名称", name, busy) { name = it.take(80); confirmation = null }
+                } }
+                item { SettingsCard(Modifier.testTag("voice-create-advanced-card")) {
+                    SettingsRow(if (advancedCreation) "收起高级设置" else "高级：新建后付费音色", onClick = { advancedCreation = !advancedCreation })
+                    if (advancedCreation) SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) { postpaid = it; confirmation = null }
+                } }
+                val slots = personalVoiceSlots(voices, creating = true, postpaid = postpaid)
+                if (slots.isNotEmpty()) item { SettingsCard(Modifier.testTag("voice-create-slots-card")) {
+                    slots.forEachIndexed { index, voice ->
+                        SettingsRadioRow(personalVoiceSlotTitle(voice, index), slotId == voice.id,
+                            enabled = enabled && voice.canTrain, summary = voiceSlotSummary(voice)) {
+                            if (current()) { slotId = voice.id; postpaid = false; confirmation = null }
+                        }
+                    }
+                } }
+                item { SettingsCard(Modifier.testTag("voice-create-sync-card")) {
+                    SettingsRow("查找我的音色名额", showChevron = true, onClick = if (!enabled) null else ({ navigate("SYNC") }))
+                } }
+                item { SettingsCard(Modifier.testTag("voice-create-manual-card")) {
+                    SettingsRow("备用方式：从控制台复制 ID", showChevron = true, onClick = if (busy) null else ({ manualId = !manualId }))
+                    if (manualId) {
+                        SettingsNote("在豆包控制台进入声音复刻音色列表，将“已复刻”切换为“全部”或“未复刻”，复制 S_ 开头的音色 ID。API Key 与音色须属于同一项目。")
+                        SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
+                        AccountField("名额 ID", slotId, busy) { slotId = it; confirmation = null }
+                    }
+                } }
+                item { SettingsCard(Modifier.testTag("voice-create-next-sample-card")) {
+                    SettingsRow("下一步：选择录音", showChevron = true, onClick = if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null else ({ step = 1; agreed = false }))
+                } }
+                item { SettingsNote(if (postpaid) "须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。"
+                    else "优先使用已有或免费名额；列表为空不代表免费名额已用完。可同步名额，或从豆包控制台复制音色 ID。") }
+            }
+            if (page == "CREATE" && step == 1) {
+                item { SettingsSectionTitle("2. 选择录音") }
+                item { SettingsCard(Modifier.testTag("voice-create-sample-card")) {
                     SettingsRow(if (sampleUri == null) "选择录音" else "重新选择录音", tag = "voice-training-sample",
                         summary = if (sampleUri == null) "选择文件不会上传" else sampleName, showChevron = true, onClick = if (!enabled || pickerPending) null else ({
                             if (samplePicker.begin(frozenConfiguration.revision)) {
@@ -364,16 +389,22 @@ internal fun VoiceAccountPanel(
                                 catch (_: Exception) { samplePicker.deliver(null); pickerPending = samplePicker.pending; pickerResult++; notice = "未能打开录音选择器" }
                             }
                         }))
+                } }
+                item { SettingsCard(Modifier.testTag("voice-create-next-confirm-card")) {
                     SettingsRow("下一步：确认制作", showChevron = true, onClick = if (!enabled || sampleUri == null) null else ({ step = 2; agreed = false }))
-                }
-                SettingsNote("支持 WAV / MP3 / OGG / M4A / AAC，最大 10 MiB。请选择清晰的单人录音，并确认你拥有此声音及录音的使用权。")
+                } }
+                item { SettingsNote("支持 WAV / MP3 / OGG / M4A / AAC，最大 10 MiB。请选择清晰的单人录音，并确认你拥有此声音及录音的使用权。") }
             }
-            if (page == "CREATE" && step == 2) item {
-                SettingsSectionTitle("3. 确认制作")
-                VoiceSettingsCard {
+            if (page == "CREATE" && step == 2) {
+                item { SettingsSectionTitle("3. 确认制作") }
+                item { SettingsCard(Modifier.testTag("voice-create-summary-card")) {
                     SettingsRow("名称", summary = name)
                     SettingsRow(if (postpaid) "新建后付费音色" else "已有名额", summary = if (postpaid) null else slotId)
+                } }
+                item { SettingsCard(Modifier.testTag("voice-create-consent-card")) {
                     SettingsSwitchRow("我有权使用此录音并同意本次上传制作", agreed, enabled = enabled) { agreed = it }
+                } }
+                item { SettingsCard(Modifier.testTag("voice-create-submit-card")) {
                     SettingsRow("确认上传并制作", tag = "voice-training-submit", showChevron = true, onClick = if (!enabled || !agreed || sampleUri == null) null else ({
                         val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else slotId
                         ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。结果未知时只查询原音色，不重复提交。") {
@@ -382,8 +413,8 @@ internal fun VoiceAccountPanel(
                             finally { sample.clear(); sampleUri = null; agreed = false }
                         }
                     }))
-                }
-                SettingsNote("本次会上传录音并消耗训练次数，可能覆盖已有音色或产生费用。")
+                } }
+                item { SettingsNote("本次会上传录音并消耗训练次数，可能覆盖已有音色或产生费用。") }
             }
             if (!latestCurrent(frozenConfiguration)) item { SettingsNote("配置已变化，请退出后重新打开。", error = true) }
             if (notice.isNotBlank()) item { SettingsNote(notice) }

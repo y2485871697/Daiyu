@@ -21,6 +21,7 @@ import app.daiyu.android.ui.haptics.miuix.IconButton
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.settings.SettingsCard
+import app.daiyu.android.ui.screens.settings.SettingsScaffoldPage
 import app.daiyu.android.ui.screens.settings.SettingsRow
 import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 
@@ -29,13 +30,15 @@ internal fun VoicePersonalScaffold(
     title: String,
     onBack: () -> Unit,
     enabled: Boolean,
+    settingsStyle: Boolean = false,
     onAdd: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
     val colors = assistantPreviewPalette()
     Box(Modifier.fillMaxSize().testTag("voice-account")) {
-        MiuixScaffoldPage(title, onBack, compactTitle = true, actions = {
+        if (settingsStyle) SettingsScaffoldPage(title, onBack, compactTitle = true, content = content)
+        else MiuixScaffoldPage(title, onBack, compactTitle = true, actions = {
             if (onSettings != null) IconButton(onClick = onSettings, enabled = enabled,
                 modifier = Modifier.testTag("voice-account-menu")) {
                 DaiyuIcon(DaiyuIcons.Settings, "声音设置")

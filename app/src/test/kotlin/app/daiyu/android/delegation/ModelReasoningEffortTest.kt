@@ -12,10 +12,10 @@ class ModelReasoningEffortTest {
             assertEquals(model, supported, ReasoningEffort.textChoices(model))
     }
 
-    @Test fun missingOffLegacyDefaultAndMinimalResolveToTheLowestValidEffort() {
+    @Test fun unsupportedStoredChoicesArePreservedRatherThanReplaced() {
         for (model in listOf("gpt-6-astra", "gpt-6.1-sol"))
             for (stored in listOf(null, ReasoningEffort.OFF, ReasoningEffort.DEFAULT, ReasoningEffort.MINIMAL))
-                assertEquals(ReasoningEffort.LOW, ReasoningEffort.textPreference(stored, model = model))
+                assertEquals(if (stored == ReasoningEffort.MINIMAL) stored else ReasoningEffort.OFF, ReasoningEffort.textPreference(stored, model = model))
     }
 
     @Test fun supportedChoicesAndInheritedHighRemainUnchanged() {

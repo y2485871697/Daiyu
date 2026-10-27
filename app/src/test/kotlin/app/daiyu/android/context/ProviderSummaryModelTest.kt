@@ -686,7 +686,8 @@ class ProviderSummaryModelTest {
         assertEquals(ModelFailure.REQUEST, error.failure)
         assertEquals(listOf("none", "minimal", "low", "medium", "high", "xhigh", "max"),
             wires.map { it.json().getJSONObject("reasoning").getString("effort") })
-        assertTrue(error.userMessage.contains("400"))
+        assertEquals(400, error.diagnostic!!.httpStatus)
+        assertEquals("模型不支持极高思考", error.userMessage)
         assertFalse(error.userMessage.contains("synthetic secret"))
     }
 

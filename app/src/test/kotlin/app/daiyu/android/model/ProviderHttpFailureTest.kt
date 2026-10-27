@@ -211,4 +211,56 @@ class ProviderHttpFailureTest {
         }
         assertTrue(events.none { it is ModelEvent.ToolReady || it is ModelEvent.ProtocolOutput })
     }
+    @Test fun reasoningValueRejectionsUseOnlyTheExactFinalRequestFieldAndClosedLevel() {
+        val choices = mapOf("none" to "关闭", "minimal" to "最小", "low" to "低", "medium" to "中",
+            "high" to "高", "xhigh" to "超高", "max" to "极高")
+        for ((wire, label) in choices) for (path in listOf("reasoning.effort", "reasoning_effort", "output_config.effort",
+            "generationConfig.thinkingConfig.thinkingLevel")) {
+            val request = when (path) {
+                "reasoning.effort" -> JSONObject().put("reasoning", JSONObject().put("effort", wire))
+                "reasoning_effort" -> JSONObject().put("reasoning_effort", wire)
+                "output_config.effort" -> JSONObject().put("output_config", JSONObject().put("effort", wire))
+                else -> JSONObject().put("generationConfig", JSONObject().put("thinkingConfig", JSONObject().put("thinkingLevel", wire)))
+            }
+            val failure = ProviderHttpFailure.from(Connection(400, body("unsupported_value", path)), 400,
+                { false }, request = request)
+            assertEquals("模型不支持${label}思考", failure.userMessage)
+            assertEquals(RequestField.REASONING, failure.diagnostic!!.field)
+            assertEquals(400, failure.diagnostic!!.httpStatus)
+            safe(failure)
+            val sanitized = providerTransportFailure(failure, false) as ModelRequestException
+            assertEquals(failure.userMessage, sanitized.userMessage)
+            assertEquals(failure.diagnostic, sanitized.diagnostic)
+        }
+        val conflicting = JSONObject("""{"reasoning_effort":"low","reasoning":{"effort":"high"}}""")
+        for ((path, expected) in listOf("reasoning_effort" to "模型不支持低思考", "reasoning.effort" to "模型不支持高思考")) {
+            val failure = ProviderHttpFailure.from(Connection(400, body("unsupported_value", path)), 400,
+                { false }, request = conflicting)
+            assertEquals(expected, failure.userMessage)
+        }
+    }
+
+    @Test fun vagueRejectionsAndUnrelatedReasoningFieldsNeverInventAnUnsupportedLevel() {
+        val request = JSONObject("""{"reasoning":{"effort":"high","summary":"auto"}}""")
+        for (param in listOf("reasoning", "reasoning.summary", "effort", "reasoning_effort", "reasoning.effort.fake")) {
+            val failure = ProviderHttpFailure.from(Connection(400, body("unsupported_value", param)), 400, { false }, request = request)
+            assertNull(failure.diagnostic!!.unsupportedReasoningEffort)
+            assertFalse(failure.userMessage.contains("不支持高思考"))
+            safe(failure)
+        }
+        for (code in listOf("unsupported_parameter", "unknown", "invalid_request_error")) {
+            val failure = ProviderHttpFailure.from(Connection(400, body(code, "reasoning.effort")), 400, { false }, request = request)
+            assertNull(failure.diagnostic!!.unsupportedReasoningEffort)
+        }
+        for (invalid in listOf<Any>(JSONObject.NULL, 2, "HIGH", "default", "secret")) {
+            val malformed = JSONObject().put("reasoning", JSONObject().put("effort", invalid))
+            val failure = ProviderHttpFailure.from(Connection(400, body("unsupported_value", "reasoning.effort")), 400,
+                { false }, request = malformed)
+            assertNull(failure.diagnostic!!.unsupportedReasoningEffort)
+            safe(failure)
+        }
+        assertNull(ProviderHttpFailure.event(JSONObject().put("code", "unsupported_value").put("param", "reasoning.effort"))
+            .diagnostic!!.unsupportedReasoningEffort)
+    }
+
 }

@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class ControllerChildModelsTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() { init { attachBaseContext(base) } }
     private class Fixture(base: Context, val held: Boolean = false, val background: Boolean = false,
-        val sessionAware: Boolean = false) {
+        val sessionAware: Boolean = false, val childModel: String = "child-api") {
         val sessionOwners = java.util.Collections.synchronizedList(mutableListOf<Pair<String, ConversationId>>())
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(base, "controller-child-$id-"))
@@ -28,7 +28,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val settings = ModelSettingsStore(app, alias)
         val childOpened = AtomicInteger(); val parentOpened = AtomicInteger()
         val entered = CountDownLatch(1); val cancelled = CountDownLatch(1); val release = CountDownLatch(if (held) 1 else 0)
-        val child = SubAgentModel(UUID.randomUUID().toString(), "child-api")
+        val child = SubAgentModel(UUID.randomUUID().toString(), childModel)
         val provider = SubAgentProvider("primary", "Fixture", listOf(child))
         val profile = SubAgentProfile("review", "Reviewer", "review", providerId = provider.id, modelId = child.id)
         val preferences = ConversationSubAgentPreferences(app.getSharedPreferences("subagent_configuration", 0))
@@ -46,7 +46,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                 object : CatalogFixturePort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
-                        val isChild = config.model == "child-api"
+                        val isChild = config.model == child.modelId
                         if (isChild) { check(definitions.isEmpty()); childOpened.incrementAndGet() }
                         else { check(config.model == "parent-api"); parentOpened.incrementAndGet(); check(definitions.any { it.name == toolName }) }
                         var rounds = 0
@@ -90,8 +90,8 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         }
     }
     private val fixtures = mutableListOf<Fixture>()
-    private fun fresh(held: Boolean = false, background: Boolean = false, sessionAware: Boolean = false) =
-        Fixture(instrumentation.targetContext, held, background, sessionAware).also {
+    private fun fresh(held: Boolean = false, background: Boolean = false, sessionAware: Boolean = false, childModel: String = "child-api") =
+        Fixture(instrumentation.targetContext, held, background, sessionAware, childModel).also {
         fixtures.add(it); awaitControl("recovery ready") { it.controller.ready }; it.prepare()
     }
     override fun tearDown() { try { fixtures.forEach { it.close() } } finally { super.tearDown() } }
@@ -160,6 +160,18 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
             f.preferences.update(key) { it.copy(profiles = listOf(profile)) }
             assertNull(f.controller.sendWithChildren(f.conversation, "unavailable selection"))
         }
+        assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
+        assertTrue(f.database.messages(f.conversation.id).isEmpty())
+        assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)
+    }
+
+    fun testUnsupportedChildEffortKeepsExactChineseErrorWithoutOpeningParentOrChild() {
+        val f = fresh(childModel = "gpt-6.1-sol")
+        val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
+        f.preferences.update(key) { it.copy(profiles = listOf(f.profile.copy(reasoning = ReasoningEffort.OFF))) }
+        assertNull(f.controller.sendWithChildren(f.conversation, "retain child choice"))
+        assertEquals("模型不支持关闭思考", f.controller.problem)
+        assertEquals(ReasoningEffort.OFF, f.preferences.snapshot(key).profiles.single().reasoning)
         assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
         assertTrue(f.database.messages(f.conversation.id).isEmpty())
         assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)

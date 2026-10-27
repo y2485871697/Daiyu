@@ -42,7 +42,12 @@ internal class SavedSubAgentRuntimeBindings(
             require(model.modelId.isNotBlank() && !model.supportsImageGeneration &&
                 !model.supportsVideoGeneration && !model.supportsSpeechSynthesis) { "Media children are unsupported" }
             val effort = ReasoningEffort.textPreference(profile.reasoning, model.defaultReasoning, model.modelId)
-            require(!model.reasoningMandatory || effort.enablesReasoning) { "This child model requires reasoning" }
+            if (model.reasoningMandatory && !effort.enablesReasoning)
+                throw app.daiyu.android.domain.ModelRequestException(app.daiyu.android.domain.ModelFailure.CONFIGURATION,
+                    app.daiyu.android.domain.ModelRequestDiagnostic(
+                        rejection = app.daiyu.android.domain.RequestRejection.UNSUPPORTED_VALUE,
+                        field = app.daiyu.android.domain.RequestField.REASONING,
+                        unsupportedReasoningEffort = app.daiyu.android.domain.RequestReasoningEffort.OFF))
             val saved = ModelFactory.snapshot(resolveSavedModel(profile.providerId, profile.modelId))
             require(saved.model == model.modelId) { "Saved model record changed" }
             val options = saved.requestOptions

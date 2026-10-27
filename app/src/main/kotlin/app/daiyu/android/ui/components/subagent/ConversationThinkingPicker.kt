@@ -61,7 +61,7 @@ import kotlin.math.roundToInt
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ConversationThinkingMark(Modifier.size(34.dp))
-                Text(choices.getOrNull(selected)?.displayName ?: "选择思考深度", fontSize = 22.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.testTag("subagent-thinking-value").padding(top = 14.dp))
+                Text(choices.getOrNull(selected)?.displayName ?: effort.displayName, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.testTag("subagent-thinking-value").padding(top = 14.dp))
             }
             if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { selected = it }, { index ->
                 if (choices[index] != effort) onEffortChange(choices[index])
@@ -87,7 +87,7 @@ import kotlin.math.roundToInt
                     app.daiyu.android.ui.components.ChatThinkingSpeedIcon(speedMode,
                         tint = colors.strong, modifier = Modifier.size(36.dp).testTag("chat-thinking-speed-icon"))
                 }
-                Text(choices.getOrNull(selected)?.displayName ?: "选择思考深度", fontSize = 22.sp,
+                Text(choices.getOrNull(selected)?.displayName ?: effort.displayName, fontSize = 22.sp,
                     lineHeight = 30.sp, fontWeight = FontWeight(450), color = colors.text,
                     modifier = Modifier.testTag("chat-thinking-value").padding(top = 8.dp, bottom = 13.dp))
                 if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { index ->

@@ -133,14 +133,25 @@ enum class RequestField(val wireName: String) {
     WEB_SEARCH_OPTIONS("web_search_options"),
 }
 
+/** Closed reasoning choices used only for safe, exact mismatch diagnostics. */
+enum class RequestReasoningEffort(val displayName: String) {
+    OFF("关闭"), MINIMAL("最小"), LOW("低"), MEDIUM("中"), HIGH("高"), XHIGH("超高"), MAX("极高");
+    val unsupportedMessage: String get() = "模型不支持${displayName}思考"
+}
+
 /** Only closed values cross the provider boundary; never store a provider message or raw field. */
 data class ModelRequestDiagnostic(
     val httpStatus: Int? = null,
     val rejection: RequestRejection = RequestRejection.UNSPECIFIED,
     val field: RequestField? = null,
+    val unsupportedReasoningEffort: RequestReasoningEffort? = null,
     val reasoningLevelRejected: Boolean = false,
 ) {
-    init { require(httpStatus == null || httpStatus in 300..599) }
+    init {
+        require(httpStatus == null || httpStatus in 300..599)
+        require(unsupportedReasoningEffort == null ||
+            rejection == RequestRejection.UNSUPPORTED_VALUE && field == RequestField.REASONING)
+    }
 }
 
 class ModelRequestException(
@@ -150,6 +161,7 @@ class ModelRequestException(
 ) : RuntimeException("Model request failed") {
     val userMessage: String get() {
         val detail = diagnostic ?: return failure.userMessage
+        detail.unsupportedReasoningEffort?.let { return it.unsupportedMessage }
         val base = if (detail.rejection == RequestRejection.UNSPECIFIED) failure.userMessage else detail.rejection.userMessage
         val status = detail.httpStatus?.takeUnless { base.contains("HTTP $it") }?.let { "（HTTP $it）" }.orEmpty()
         val field = detail.field?.let { "，涉及字段：${it.wireName}" }.orEmpty()

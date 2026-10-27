@@ -173,11 +173,14 @@ class SavedSubAgentRuntimeBindingsTest {
             config to provider.copy(models = listOf(child.copy(supportsImageGeneration = true))),
             config.copy(profiles = listOf(profile.copy(role = "image_generation"))) to provider,
             config.copy(profiles = listOf(profile.copy(role = "implementation"))) to provider,
-            config.copy(profiles = listOf(profile.copy(reasoning = ReasoningEffort.OFF))) to
-                provider.copy(models = listOf(child.copy(reasoningMandatory = true))),
         )) assertThrows(IllegalArgumentException::class.java) {
             bindings.freeze(owner, configured, listOf(source), resolver)
         }
+        val failure = assertThrows(ModelRequestException::class.java) {
+            bindings.freeze(owner, config.copy(profiles = listOf(profile.copy(reasoning = ReasoningEffort.OFF))),
+                listOf(provider.copy(models = listOf(child.copy(reasoningMandatory = true)))), resolver)
+        }
+        assertEquals("模型不支持关闭思考", failure.userMessage)
         assertEquals(0, reads)
     }
 
@@ -255,7 +258,7 @@ class SavedSubAgentRuntimeBindingsTest {
     }
 
     @Test fun changedSpeedOnlyAffectsTheNextFrozenDefinition() {
-        val gpt = child.copy(modelId = "gpt-6.1-sol", supportsGptSpeed = true)
+        val gpt = child.copy(modelId = "gpt-6.1-sol", supportsGptSpeed = true, defaultReasoning = ReasoningEffort.HIGH)
         val key = SubAgentProfile.modelReasoningKey(provider.id, child.id)
         val fast = profile.copy(gptSpeedByModel = mapOf(key to GptSpeedMode.FAST))
         val normal = fast.copy(gptSpeedByModel = mapOf(key to GptSpeedMode.NORMAL))
@@ -300,7 +303,7 @@ class SavedSubAgentRuntimeBindingsTest {
     }
 
     @Test fun absentProfileOverrideInheritsSavedSpeedAndExplicitNormalWins() {
-        val gpt = child.copy(modelId = "gpt-6.1-sol", supportsGptSpeed = true)
+        val gpt = child.copy(modelId = "gpt-6.1-sol", supportsGptSpeed = true, defaultReasoning = ReasoningEffort.HIGH)
         val key = SubAgentProfile.modelReasoningKey(provider.id, child.id)
         for (speed in GptSpeedMode.entries) {
             val settings = saved.copy(model = gpt.modelId, requestOptions = ProviderRequestOptions(speedMode = speed))
@@ -313,4 +316,26 @@ class SavedSubAgentRuntimeBindingsTest {
             assertTrue(profile.gptSpeedByModel.isEmpty())
         }
     }
+    @Test fun unsupportedChildPreferenceIsNotReplacedAndNeverCreatesAPort() {
+        val required = child.copy(modelId = "gpt-6.1-sol")
+        var opens = 0
+        val binding = SavedSubAgentRuntimeBindings { opens++; noNetwork }
+        for (effort in listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL)) {
+            val selected = profile.copy(reasoning = effort)
+            val error = assertThrows(ModelRequestException::class.java) {
+                binding.freeze(owner, config.copy(profiles = listOf(selected)),
+                    listOf(provider.copy(models = listOf(required))), { _, _ -> saved.copy(model = required.modelId) })
+            }
+            assertEquals("模型不支持${effort.displayName}思考", error.userMessage)
+            assertEquals(effort, selected.reasoning)
+            assertEquals(0, opens)
+        }
+        val mandatory = child.copy(reasoningMandatory = true)
+        val error = assertThrows(ModelRequestException::class.java) {
+            binding.freeze(owner, config, listOf(provider.copy(models = listOf(mandatory))), { _, _ -> saved })
+        }
+        assertEquals("模型不支持关闭思考", error.userMessage)
+        assertEquals(0, opens)
+    }
+
 }

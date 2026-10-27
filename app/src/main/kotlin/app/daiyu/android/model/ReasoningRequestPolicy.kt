@@ -2,6 +2,12 @@ package app.daiyu.android.model
 
 import app.daiyu.android.delegation.ReasoningEffort
 import org.json.JSONObject
+import app.daiyu.android.domain.ModelFailure
+import app.daiyu.android.domain.ModelRequestDiagnostic
+import app.daiyu.android.domain.ModelRequestException
+import app.daiyu.android.domain.RequestField
+import app.daiyu.android.domain.RequestReasoningEffort
+import app.daiyu.android.domain.RequestRejection
 
 /** Freeze the chosen wire policy once; validate the final merged body on every tool round. */
 internal object ReasoningRequestPolicy {
@@ -21,10 +27,10 @@ internal object ReasoningRequestPolicy {
         val options = provider.requestOptions
         val body = if (options.customBody.isEmpty()) JSONObject() else MessagesRequest.jsonObject(options.customBody)
         val model = requestModel(provider.model, body)
-        val effort = if (summary || requested == ReasoningEffort.DEFAULT) requested
-            else ReasoningEffort.textPreference(requested, model = model)
-        require(summary || provider.reasoningOverride != false || effort == ReasoningEffort.DEFAULT || effort == ReasoningEffort.OFF) {
-            "当前模型已声明不支持思考；请选择关闭"
+        val effort = requested
+        if (!summary && effort != ReasoningEffort.DEFAULT) {
+            if (effort !in ReasoningEffort.textChoices(model) || provider.reasoningOverride == false && effort != ReasoningEffort.OFF)
+                throw unsupported(effort)
         }
         if (effort != ReasoningEffort.DEFAULT) {
             require(!hasReasoning(body)) { "思考偏好与自定义推理参数冲突；请移除自定义推理参数后重试" }
@@ -61,14 +67,31 @@ internal object ReasoningRequestPolicy {
         return ProviderSnapshot.capture(provider.asModelSettings().copy(requestOptions = options.copy(customBody = body.toString())), provider.protocol, provider.imageInputSupported)
     }
 
+    private fun unsupported(effort: ReasoningEffort) = ModelRequestException(ModelFailure.CONFIGURATION,
+        ModelRequestDiagnostic(rejection = RequestRejection.UNSUPPORTED_VALUE, field = RequestField.REASONING,
+            unsupportedReasoningEffort = RequestReasoningEffort.valueOf(effort.name)))
+
+    fun wireEffort(body: JSONObject, param: String): RequestReasoningEffort? {
+        val value = when (param) {
+            "reasoning.effort" -> body.optJSONObject("reasoning")?.opt("effort")
+            "reasoning_effort" -> body.opt("reasoning_effort")
+            "output_config.effort" -> body.optJSONObject("output_config")?.opt("effort")
+            "generationConfig.thinkingConfig.thinkingLevel" -> body.optJSONObject("generationConfig")?.optJSONObject("thinkingConfig")?.opt("thinkingLevel")
+            else -> null
+        } as? String ?: return null
+        if (value !in efforts) return null
+        val effort = ReasoningEffort.fromWireValue(value) ?: return null
+        return RequestReasoningEffort.valueOf(effort.name)
+    }
+
     fun validate(body: JSONObject, protocol: ProviderProtocol, reasoningOverride: Boolean? = null, model: String? = null) {
         if (!hasReasoning(body)) return
         fun string(value: JSONObject, key: String): String = value.opt(key) as? String ?: throw IllegalArgumentException("推理参数 $key 必须为字符串")
         fun effort(value: JSONObject, key: String): String = string(value, key).also {
             require(it in efforts) { "推理参数 $key 不支持此值" }
-            require(ReasoningEffort.fromWireValue(it) in ReasoningEffort.textChoices(model.orEmpty())) {
-                "当前模型不支持此思考档位，请选择低或更高档位"
-            }
+            val selected = checkNotNull(ReasoningEffort.fromWireValue(it))
+            if (selected !in ReasoningEffort.textChoices(model.orEmpty()) || reasoningOverride == false && selected != ReasoningEffort.OFF)
+                throw unsupported(selected)
         }
         fun boolean(value: JSONObject, key: String) { if (value.has(key)) require(value.opt(key) is Boolean) { "推理参数 $key 必须为布尔值" } }
         fun objectValue(value: JSONObject, key: String): JSONObject = value.opt(key) as? JSONObject ?: throw IllegalArgumentException("推理参数 $key 必须为对象")
@@ -104,7 +127,10 @@ internal object ReasoningRequestPolicy {
                 }
                 if (body.has("output_config")) {
                     val config = objectValue(body, "output_config")
-                    if (config.has("effort")) require(string(config, "effort") in setOf("low", "medium", "high", "xhigh", "max"))
+                    if (config.has("effort")) {
+                        require(string(config, "effort") in setOf("low", "medium", "high", "xhigh", "max"))
+                        effort(config, "effort")
+                    }
                     require(thinking?.opt("type") != "disabled" || !config.has("effort"))
                 }
             }
@@ -132,7 +158,10 @@ internal object ReasoningRequestPolicy {
                 require(!(thinking.has("thinkingBudget") && thinking.has("thinkingLevel"))) { "Gemini 思考预算和档位不能同时设置" }
                 boolean(thinking, "includeThoughts")
                 if (thinking.has("thinkingBudget")) require(thinking.opt("thinkingBudget") is Int && thinking.getInt("thinkingBudget") >= -1)
-                if (thinking.has("thinkingLevel")) require(string(thinking, "thinkingLevel") in setOf("minimal", "low", "medium", "high"))
+                if (thinking.has("thinkingLevel")) {
+                    require(string(thinking, "thinkingLevel") in setOf("minimal", "low", "medium", "high"))
+                    effort(thinking, "thinkingLevel")
+                }
             }
             else -> throw IllegalArgumentException("当前协议尚未接通推理参数")
         }

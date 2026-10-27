@@ -64,13 +64,42 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
         self.assertIn('ReasoningRequestPolicy.freeze(provider, reasoningIntent)', controller)
         self.assertEqual(2, main.count('ReasoningRequestPolicy.requestModel(it.model, it.requestOptions)'))
         self.assertIn('reasoningPreference.retainAccepted(conversationId.value, reasoningIntent)', controller)
-        self.assertIn('ReasoningEffort.textPreference(requested, model = model)', policy)
+        self.assertIn('val effort = requested', policy)
+        self.assertNotIn('ReasoningEffort.textPreference(requested, model = model)', policy)
         self.assertIn('ReasoningEffort.textChoices(config.model)', (SRC / 'ui/components/subagent/SubAgentThinkingPreference.kt').read_text())
         for name in ('ResponsesModel.kt', 'NativeCompletionModel.kt'):
             code = (SRC / 'model' / name).read_text()
             self.assertIn('summaryRequest: Boolean = false', code)
             self.assertIn('if (summaryRequest) null else settings.reasoningOverride,', code)
-            self.assertIn('if (summaryRequest) null else request.opt("model") as? String)', code)
+            self.assertIn('request.opt("model") as? String)', code)
+
+class ReasoningMismatchContractTest(unittest.TestCase):
+    def test_capability_mismatch_never_replaces_the_selected_level(self):
+        source = (SRC / 'delegation/SubAgentModelSource.kt').read_text()
+        preference = source.split('fun textPreference(', 1)[1].split('\n        }', 1)[0]
+        self.assertNotIn('choices.first()', preference)
+        self.assertIn('return preference', preference)
+        picker = (SRC / 'ui/components/subagent/ConversationThinkingPicker.kt').read_text()
+        self.assertEqual(2, picker.count('choices.getOrNull(selected)?.displayName ?: effort.displayName'))
+
+    def test_main_and_child_admission_keep_typed_chinese_failures(self):
+        controller = (SRC / 'ChatController.kt').read_text()
+        prepared = controller.split('val childPreparation = ', 1)[1].split('val requestProvider = try', 1)
+        self.assertIn('failure.userMessage', prepared[0])
+        self.assertIn('failure.userMessage', prepared[1].split('val requestAssistant', 1)[0])
+        refresh = controller.split('private fun freezeSavedChildModels(', 1)[1].split('internal fun savedSubAgentProviders', 1)[0]
+        self.assertIn('problem = failure.userMessage', refresh)
+        self.assertIn('throw failure', refresh)
+
+    def test_post_diagnostic_uses_actual_payload_not_error_message(self):
+        for name in ('ResponsesModel.kt', 'MessagesModel.kt', 'NativeCompletionModel.kt'):
+            source = (SRC / 'model' / name).read_text()
+            self.assertIn('ProviderHttpFailure.from(conn, status, cancelled::get, request = ', source)
+        source = (SRC / 'model/ProviderHttpFailure.kt').read_text()
+        exact = source.split('val effort = if (', 1)[1].split('return ModelRequestDiagnostic', 1)[0]
+        self.assertIn('rejection == RequestRejection.UNSUPPORTED_VALUE', exact)
+        self.assertIn('ReasoningRequestPolicy.wireEffort(request, raw)', exact)
+        self.assertNotIn('message', exact)
 
 if __name__ == '__main__':
     unittest.main()

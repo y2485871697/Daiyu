@@ -51,7 +51,9 @@ class RikkaHubReasoningTest {
     }
     @Test fun falseCapabilityCannotBeBypassedWithConflictingCustomFlags() {
         for (body in listOf("""{"reasoning_effort":"none","enable_thinking":true}""", """{"thinking":{"type":"enabled"}}""", """{"reasoning":{"enabled":true}}""", """{"reasoning":{"effort":"none","enabled":true}}""", """{"reasoning":{"effort":"high","enabled":false}}""", """{"reasoning":{"enabled":false,"max_tokens":100}}"""))
-            assertThrows(IllegalArgumentException::class.java) { ReasoningRequestPolicy.validate(JSONObject(body), ProviderProtocol.CHAT_COMPLETIONS, false) }
+            assertThrows(if (body.contains("\"high\"")) app.daiyu.android.domain.ModelRequestException::class.java else IllegalArgumentException::class.java) {
+                ReasoningRequestPolicy.validate(JSONObject(body), ProviderProtocol.CHAT_COMPLETIONS, false)
+            }
     }
     @Test fun inactiveEndpointPreferencesAreRetainedButNeverEmittedToChat() {
         val options = ProviderRequestOptions(speedMode = GptSpeedMode.FAST, anthropicVersion = "2023-06-01", openAiWebSearchEnabled = true)

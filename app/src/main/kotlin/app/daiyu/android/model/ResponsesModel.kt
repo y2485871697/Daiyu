@@ -411,7 +411,7 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 if (status !in 200..299) {
                     retryAuthentication(status, authentication)
-                    throw ProviderHttpFailure.from(conn, status, cancelled::get)
+                    throw ProviderHttpFailure.from(conn, status, cancelled::get, request = wireRequest)
                 }
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)

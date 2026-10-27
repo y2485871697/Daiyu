@@ -17,7 +17,7 @@ internal object ProviderHttpFailure {
     private val indexedInclude = Regex("include\\[[0-9]{1,4}]")
 
     fun from(connection: HttpURLConnection, status: Int, cancelled: () -> Boolean,
-             diagnosticTimeoutMillis: Long = 1500): ModelRequestException {
+             diagnosticTimeoutMillis: Long = 1500, request: JSONObject? = null): ModelRequestException {
         val failure = when (status) {
             401 -> ModelFailure.AUTHENTICATION
             403 -> ModelFailure.PERMISSION
@@ -59,7 +59,7 @@ internal object ProviderHttpFailure {
                     checkCancelled(cancelled)
                     if (complete && count <= MAX_ERROR_BYTES && !expired.get()) {
                         val root = MessagesRequest.jsonObject(String(bytes, 0, count, Charsets.UTF_8), 16, rejectDuplicateKeys = true)
-                        detail = diagnostic(root.optJSONObject("error"), status)
+                        detail = diagnostic(root.optJSONObject("error"), status, request)
                     }
                 }
             } catch (cancelled: InterruptedException) {
@@ -88,7 +88,7 @@ internal object ProviderHttpFailure {
         return ModelRequestException(failure, if (failure == ModelFailure.REQUEST) diagnostic(error, null) else null)
     }
 
-    private fun diagnostic(error: JSONObject?, status: Int?): ModelRequestDiagnostic {
+    private fun diagnostic(error: JSONObject?, status: Int?, request: JSONObject? = null): ModelRequestDiagnostic {
         val rejection = when (error?.opt("code") as? String) {
             "model_not_found" -> RequestRejection.MODEL_UNAVAILABLE
             "unsupported_parameter" -> RequestRejection.UNSUPPORTED_PARAMETER
@@ -100,7 +100,8 @@ internal object ProviderHttpFailure {
         val field = RequestField.entries.firstOrNull { it.wireName == raw } ?: when {
             raw != null && raw.length <= 32 && indexedTools.matches(raw) -> RequestField.TOOLS
             raw != null && raw.length <= 32 && indexedInclude.matches(raw) -> RequestField.INCLUDE
-            raw in setOf("reasoning.effort", "reasoning.summary") -> RequestField.REASONING
+            raw in setOf("reasoning.effort", "reasoning.summary", "reasoning_effort", "output_config.effort",
+                "generationConfig.thinkingConfig.thinkingLevel") -> RequestField.REASONING
             else -> null
         }
         val effortField = raw in setOf("reasoning", "reasoning.effort", "reasoning_effort", "thinking",
@@ -113,9 +114,12 @@ internal object ProviderHttpFailure {
             listOf("not supported", "unsupported", "supported values", "must be", "cannot be disabled", "only supports").any(message::contains) &&
             listOf("none", "disabled", "unsupported value", "invalid value", "supported values", "only supports", "must be enabled").any(message::contains)
         val reasoningRejected = effortField && rejection == RequestRejection.UNSUPPORTED_VALUE || valueRejected
+        val effort = if (status in setOf(400, 422) && rejection == RequestRejection.UNSUPPORTED_VALUE && request != null && raw != null)
+            ReasoningRequestPolicy.wireEffort(request, raw) else null
         return ModelRequestDiagnostic(status,
             if (valueRejected && rejection == RequestRejection.UNSPECIFIED) RequestRejection.UNSUPPORTED_VALUE else rejection,
-            if (reasoningRejected) RequestField.REASONING else field, reasoningRejected)
+            if (reasoningRejected) RequestField.REASONING else field,
+            unsupportedReasoningEffort = effort, reasoningLevelRejected = reasoningRejected)
     }
 
     private fun checkCancelled(cancelled: () -> Boolean) {

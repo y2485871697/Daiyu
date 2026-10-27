@@ -56,7 +56,7 @@ class SubAgentThinkingPreferenceTest {
         for (stored in listOf(null, ReasoningEffort.DEFAULT, ReasoningEffort.OFF, ReasoningEffort.MINIMAL)) {
             val saved = profile.copy(reasoning = stored)
             val shown = subAgentThinkingPreference(saved, required)
-            assertEquals(ReasoningEffort.LOW, shown.effort)
+            assertEquals(if (stored == ReasoningEffort.MINIMAL) stored else ReasoningEffort.OFF, shown.effort)
             assertEquals(ReasoningEffort.textChoices(required.model), shown.options)
             assertEquals(shown.effort, SubAgentPreferences.applyReasoning(saved, required).effectiveReasoningEffort)
             assertEquals(stored, saved.reasoning)

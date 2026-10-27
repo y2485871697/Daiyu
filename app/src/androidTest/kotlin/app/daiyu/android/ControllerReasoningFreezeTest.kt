@@ -78,6 +78,27 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
             assertTrue(fixture.database.conversations().isEmpty())
         } finally { fixture.close() }
     }
+    fun testUnsupportedMandatoryEffortKeepsExactChineseErrorDraftAndSelectionWithoutFactory() {
+        val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
+        val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            for (model in listOf("gpt-6-astra", "gpt-6.1-sol")) {
+                fixture.settings.save(fixture.settings.load().copy(model = model))
+                for (effort in listOf(ReasoningEffort.OFF, ReasoningEffort.MINIMAL)) {
+                    fixture.controller.reasoningPreference.set(null, effort)
+                    fixture.database.draft("retain exact choice")
+                    assertNull(fixture.controller.send(null, "retain exact choice"))
+                    assertEquals("模型不支持${effort.displayName}思考", fixture.controller.problem)
+                    assertEquals(effort, fixture.controller.reasoningPreference.snapshot(null))
+                    assertEquals("retain exact choice", fixture.database.draft())
+                    assertEquals(0, fixture.opens.get()); assertTrue(frozen.isEmpty())
+                    assertTrue(fixture.database.conversations().isEmpty())
+                }
+            }
+        } finally { fixture.close() }
+    }
+
     fun testChatHighPreferenceReachesSharedProductionFreezeWithoutLocalRejection() {
         val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
         val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })

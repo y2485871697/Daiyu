@@ -57,7 +57,7 @@ internal enum class ReasoningEffort(val wireValue: String, val displayName: Stri
     XHIGH("xhigh", "超高", 6), MAX("max", "极高", 7);
     val enablesReasoning: Boolean get() = this != OFF
     companion object {
-        /** Text controls resolve legacy DEFAULT to a concrete model-valid choice. */
+        /** Preserve the selected text effort; model capability checks must never choose another effort. */
         fun textPreference(requested: ReasoningEffort?, modelDefault: ReasoningEffort = OFF,
             model: String = ""): ReasoningEffort {
             val preference = when (requested) {
@@ -65,8 +65,7 @@ internal enum class ReasoningEffort(val wireValue: String, val displayName: Stri
                 DEFAULT -> OFF
                 else -> requested
             }
-            val choices = textChoices(model)
-            return preference.takeIf { it in choices } ?: choices.first()
+            return preference
         }
 
         // These documented models require reasoning and accept low through max, not none/minimal.

@@ -1708,12 +1708,17 @@ class ChatController internal constructor(private val application:Application,
                     providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it == revision } }
                 }
         }
-        return childBindings.freeze(key, selection, savedSubAgentProviders(), ::readSavedChildProviderModel, bindingsCurrent, runModel,
+        return try { childBindings.freeze(key, selection, savedSubAgentProviders(), ::readSavedChildProviderModel, bindingsCurrent, runModel,
             latestConfig = if (hotUpdates) ({ childPreferences.snapshot(key) }) else null,
             latestModel = if (hotUpdates) ({ id -> freezeSavedChildModels(key, hotUpdates = false,
                 profileId = id, runModel = runModel).getValue(id) }) else null,
             latestModels = if (hotUpdates) ({ freezeSavedChildModels(key, runModel = runModel) }) else null,
             profileCurrent = { id -> childPreferences.profileLifetime(key, id) == lifetimes[id] })
+        } catch (failure: app.daiyu.android.domain.ModelRequestException) {
+            problem = failure.userMessage
+            notifyChanged()
+            throw failure
+        }
     }
     internal fun savedSubAgentProviders(): List<SubAgentProvider> {
         check(Looper.myLooper() != Looper.getMainLooper())
@@ -1824,7 +1829,10 @@ class ChatController internal constructor(private val application:Application,
                         ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                     app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
                 }
-            } catch (_: Exception) { return ChildTaskCommandReceipt.Rejected("child_model_binding_unavailable") }
+            } catch (failure: Exception) {
+                return ChildTaskCommandReceipt.Rejected(if (failure is app.daiyu.android.domain.ModelRequestException)
+                    failure.userMessage else "child_model_binding_unavailable")
+            }
             if (!runCatching { models.isCurrent() }.getOrDefault(false)) return ChildTaskCommandReceipt.Rejected("child_model_configuration_changed")
             if (command.profileId !in models) return ChildTaskCommandReceipt.Rejected("invalid_child_profile")
             if (preparationCancelled(token)) return ChildTaskCommandReceipt.Rejected("cancelled_before_admission")
@@ -3454,8 +3462,10 @@ class ChatController internal constructor(private val application:Application,
                     ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                 app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
             }
-        } catch (_:Exception) {
-            problem="子模型配置不可用、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
+        } catch (failure:Exception) {
+            problem=if (failure is app.daiyu.android.domain.ModelRequestException) failure.userMessage
+                else "子模型配置不可用、已变更或不支持；草稿保留，未切换到主模型"
+            notifyChanged();return null
         }
         val childModels: Map<String, ChildModelDefinition> = childPreparation ?: emptyMap()
         val currentChildModels: () -> Map<String, ChildModelDefinition> = {
@@ -3482,7 +3492,8 @@ class ChatController internal constructor(private val application:Application,
         catch (_: Exception) { problem="思考偏好无效或读取失败；请重新保存，草稿保留";notifyChanged();return null }
         val requestProvider = try { app.daiyu.android.model.ReasoningRequestPolicy.freeze(provider, reasoningIntent) }
         catch (failure: Exception) {
-            problem=if (failure is IllegalArgumentException) failure.message ?: "当前模型协议不支持此思考配置；草稿保留"
+            problem=if (failure is app.daiyu.android.domain.ModelRequestException) failure.userMessage
+                else if (failure is IllegalArgumentException) failure.message ?: "当前模型协议不支持此思考配置；草稿保留"
                 else "推理参数格式无效；Responses 使用 reasoning 对象，Messages 仅支持 enabled/disabled thinking；草稿保留"
             notifyChanged();return null
         }

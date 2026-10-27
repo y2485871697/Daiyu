@@ -98,7 +98,8 @@ class MessagesModel internal constructor(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
                 assistantInstructions,
             )
-            ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, if (summaryRequest) null else settings.reasoningOverride)
+            ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, if (summaryRequest) null else settings.reasoningOverride,
+                if (summaryRequest) null else request.opt("model") as? String)
             settings.requestOptions.sessionGateway.requireExecutable()
             SessionGateway.applyAnthropic(request, sessionContext)
             val sessionHeaders = SessionGateway.headers(endpoint, sessionContext)
@@ -131,7 +132,7 @@ class MessagesModel internal constructor(
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
-                if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get)
+                if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get, request = request)
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResponse { reader ->

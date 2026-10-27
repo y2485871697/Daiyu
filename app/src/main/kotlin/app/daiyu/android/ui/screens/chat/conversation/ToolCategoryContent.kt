@@ -5,8 +5,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -152,12 +150,6 @@ private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
                 .padding(start = 9.dp, end = 9.dp, top = 8.dp, bottom = 12.dp)
                 .testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = colors.text)
-            val hintBackground = if (colors.dark) Color(0xFF191B23) else Color(0xFFFAF9FC)
-            Text("点按查看完整输出", Modifier.align(Alignment.BottomEnd).fillMaxWidth().testTag("tool-output-hint:${document.title}")
-                .background(Brush.verticalGradient(listOf(Color.Transparent, hintBackground)))
-                .padding(start = 9.dp, end = 9.dp, top = 7.dp, bottom = 5.dp),
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.End), color = colors.muted)
         } else SelectionContainer {
             if (code) Box(surface.testTag("tool-document-frame:${document.title}")) {
                 Text(document.text, Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)

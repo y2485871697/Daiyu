@@ -247,21 +247,15 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         assertEquals(1, actionCount)
     }
 
-    fun testOutputHintOverlaysPreviewAndFullOutputStillOpens() {
+    fun testOutputPreviewHasNoHintAndFullOutputStillOpens() {
         for (dark in listOf(false, true)) for (fontScale in listOf(.9f, 1.3f)) {
             show(dark = dark, scale = 1f, fontScale = fontScale, narrow = true)
             val preview = ui.onNodeWithTag("tool-output-preview:标准输出", useUnmergedTree = true).scrollToVisible()
             val previewLayout = layout(preview)
             assertEquals(13.sp, previewLayout.layoutInput.style.fontSize)
             assertEquals(3, previewLayout.lineCount)
-            val hint = ui.onNodeWithTag("tool-output-hint:标准输出", useUnmergedTree = true).scrollToVisible()
-            val previewBounds = preview.fetchSemanticsNode().boundsInRoot
-            val hintBounds = hint.fetchSemanticsNode().boundsInRoot
-            assertTrue(hintBounds.top < previewBounds.bottom)
-            val documentBounds = ui.onNodeWithTag("tool-document:标准输出").fetchSemanticsNode().boundsInRoot
-            assertTrue("Hint must stay inside the output surface", hintBounds.bottom <= documentBounds.bottom + 1f)
-            assertTrue("The first two preview lines must stay clear",
-                hintBounds.top + 1f >= previewBounds.top + previewLayout.getLineBottom(1))
+            ui.onNodeWithText("点按查看完整输出", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithTag("tool-output-hint:标准输出", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithTag("tool-document:标准输出").performClick()
             val full = ui.onNodeWithTag("tool-output-text", useUnmergedTree = true).assertTextEquals(output)
             assertEquals(13.sp, layout(full).layoutInput.style.fontSize)

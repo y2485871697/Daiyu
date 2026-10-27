@@ -66,11 +66,18 @@ class ToolCardHtmlContractTest(unittest.TestCase):
                       'clipboard.setText(AnnotatedString(document.text))', 'Text("复制全文"']:
             self.assertIn(token, dialog)
 
-    def test_output_preview_uses_overlay_and_shared_dialog(self):
+    def test_output_preview_has_no_hint_or_fade_but_keeps_shared_dialog(self):
         content = (CHAT / "ToolCategoryContent.kt").read_text()
         self.assertIn("if (tappable) Box(surface", content)
-        self.assertIn('Text("点按查看完整输出", Modifier.align(Alignment.BottomEnd)', content)
+        for removed in ("点按查看完整输出", "tool-output-hint:", "hintBackground", "Brush.verticalGradient"):
+            self.assertNotIn(removed, content)
+        self.assertIn('.conversationClickable(onClickLabel = "查看${document.title}") { opened = true }', content)
+        self.assertIn('testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3', content)
         self.assertIn("if (opened) ToolOutputDialog(document", content)
+        regression = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt").read_text()
+        self.assertIn("fun testOutputPreviewHasNoHintAndFullOutputStillOpens", regression)
+        self.assertIn('onNodeWithText("点按查看完整输出", useUnmergedTree = true).assertDoesNotExist()', regression)
+        self.assertIn('onNodeWithTag("tool-output-hint:标准输出", useUnmergedTree = true).assertDoesNotExist()', regression)
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         self.assertIn("LocalToolOutputContext provides ToolOutputContext(step.name, stateLabel)", shell)
         dialog = (CHAT / "ToolOutputDialog.kt").read_text()

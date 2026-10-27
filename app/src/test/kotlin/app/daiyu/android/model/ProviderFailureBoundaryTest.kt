@@ -96,7 +96,7 @@ class ProviderFailureBoundaryTest {
                 }
             }
             val session = port(protocol) { calls++; if (atFactory) throw poisoned(kind) else conn }.open(emptyList())
-            sanitized(failure { session.next(emptyList()) {} }, ModelFailure.REQUEST)
+            sanitized(failure { session.next(emptyList()) {} }, ModelFailure.CONFIGURATION)
             assertTrue(failure { session.next(emptyList()) {} } is IllegalStateException)
             assertEquals(1, calls)
             assertEquals(0, conn.reads)
@@ -237,12 +237,29 @@ class ProviderFailureBoundaryTest {
         }
     }
 
+    @Test fun resumeHttpRejectionKeepsDiagnosticWithoutPostingAgain() {
+        val get = object : Connection(code = 422) {
+            override fun getErrorStream() = """{"error":{"code":"unsupported_parameter","param":"include[0]","message":"synthetic-provider-secret-never-log"}}""".byteInputStream()
+        }
+        var calls = 0
+        val session = resumable { if (++calls == 1) Connection(created) else get }
+        failure { session.nextAcknowledged(emptyList()) { ModelDeliveryAck.ACCEPTED } }
+        val rejected = failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } } as ModelRequestException
+        sanitized(rejected, ModelFailure.REQUEST)
+        assertEquals(ModelRequestDiagnostic(422, RequestRejection.UNSUPPORTED_PARAMETER, RequestField.INCLUDE), rejected.diagnostic)
+        assertEquals("GET", get.requestMethod)
+        assertTrue(get.disconnected)
+        assertFalse(session.canResume)
+        assertTrue(failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } } is IllegalStateException)
+        assertEquals(2, calls)
+    }
+
     @Test fun resumeFactoryAndAcknowledgedSinkPreserveTheSameSecretBoundary() {
         for (kind in 0..2) {
             var calls = 0
             val session = resumable { if (++calls == 1) Connection(created) else throw poisoned(kind) }
             failure { session.nextAcknowledged(emptyList()) { ModelDeliveryAck.ACCEPTED } }
-            sanitized(failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } }, ModelFailure.REQUEST)
+            sanitized(failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } }, ModelFailure.CONFIGURATION)
             assertFalse(session.canResume)
             assertEquals(2, calls)
         }

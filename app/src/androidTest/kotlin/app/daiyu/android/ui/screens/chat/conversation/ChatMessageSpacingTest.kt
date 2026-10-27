@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
@@ -36,7 +37,8 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 ChatTurnUi.User("question", "请写一篇长回复"),
                 ChatTurnUi.Assistant("tail", finalText = answer("初始末尾"),
                     status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED)),
-                composer = ComposerUi(modelLabel = "gpt-6.1-sol"), scrollRequest = ChatScrollRequest(1))
+                composer = ComposerUi(modelLabel = "gpt-6.1-sol",
+                    phase = if (running) ComposerPhase.RUNNING else ComposerPhase.IDLE), scrollRequest = ChatScrollRequest(1))
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(interfaceScale = scale,
                     themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), true) {
@@ -74,7 +76,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     val displayed = ui.onNodeWithText(marker, substring = true).isDisplayed()
                     lastGeometry = "tailTop=${tail.positionInRoot().y} tailHeight=${tail.size.height} " +
                         "surface=$surface viewport=$viewport density=$density gapDp=$gap markerDisplayed=$displayed"
-                    displayed && gap in 8f..28f
+                    displayed && gap in 30f..40f
                 }
             }
         } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
@@ -89,7 +91,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         assertTrue("Fixture must overflow the actual viewport", tail.size.height > viewport.height)
         val fullTailBottom = tail.positionInRoot().y + tail.size.height
         val gap = (surface.top - fullTailBottom) / density
-        assertTrue("Tail must clear the composer without the old empty strip: gap=${gap}dp", gap in 8f..28f)
+        assertTrue("Tail must clear the composer without the old empty strip: gap=${gap}dp", gap in 30f..40f)
         ui.onNodeWithContentDescription("上一条用户消息").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
@@ -147,6 +149,65 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             mainThread { screen = screen.copy(turns = listOf(screen.turns.first(), terminal.copy(status = RunStatus.COMPLETED))) }
             assertCompactTail("触摸后末尾")
             ui.onNode(hasContentDescription("复制回答") and hasAnyAncestor(hasTestTag("chat-turn:tail"))).assertIsDisplayed()
+        }
+    }
+
+    fun testRealStreamingTextKeepsClearanceDuringIntermediateFrames() {
+        for (scale in listOf(1f, .8f)) {
+            show(scale, running = true)
+            val originalComposer = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+            ui.mainClock.autoAdvance = false
+            try {
+                fun assertLiveClearance(marker: String): Boolean {
+                    val textNodes = ui.onAllNodes(
+                        SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and
+                            hasAnyAncestor(hasTestTag("chat-turn:tail")),
+                        useUnmergedTree = true,
+                    ).fetchSemanticsNodes()
+                    assertTrue("Running reply must expose actual text", textNodes.isNotEmpty())
+                    val lastTextBottom = textNodes.maxOf { node ->
+                        val coordinates = node.layoutInfo.coordinates
+                        coordinates.positionInRoot().y + coordinates.size.height
+                    }
+                    val composer = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+                    val gap = (composer.top - lastTextBottom) / density
+                    assertTrue("Live final text must clear the composer: gap=${gap}dp", gap >= 24f)
+                    assertEquals("Text growth must not move composer left", originalComposer.left, composer.left, 2f)
+                    assertEquals("Text growth must not move composer top", originalComposer.top, composer.top, 2f)
+                    assertEquals("Text growth must not move composer right", originalComposer.right, composer.right, 2f)
+                    assertEquals("Text growth must not move composer bottom", originalComposer.bottom, composer.bottom, 2f)
+                    return ui.onNode(hasText(marker, substring = true) and
+                        hasAnyAncestor(hasTestTag("chat-turn:tail")), useUnmergedTree = true).isDisplayed()
+                }
+                repeat(6) { line ->
+                    val marker = "流式安全间距第${line + 1}行"
+                    ui.runOnUiThread {
+                        val tail = screen.turns.last() as ChatTurnUi.Assistant
+                        screen = screen.copy(turns = listOf(screen.turns.first(),
+                            tail.copy(finalText = tail.finalText + "\n" + marker)))
+                    }
+                    // Allow a layout frame and a follow frame before checking live geometry.
+                    repeat(2) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                    var sawNewestLine = assertLiveClearance(marker)
+                    repeat(6) {
+                        ui.mainClock.advanceTimeByFrame()
+                        ui.waitForIdle()
+                        sawNewestLine = assertLiveClearance(marker) || sawNewestLine
+                    }
+                    var revealFrames = 0
+                    while (!sawNewestLine && revealFrames++ < 90) {
+                        ui.mainClock.advanceTimeByFrame()
+                        ui.waitForIdle()
+                        sawNewestLine = assertLiveClearance(marker)
+                    }
+                    assertTrue("Newest streaming line must actually be displayed: $marker", sawNewestLine)
+                }
+            } finally {
+                ui.mainClock.autoAdvance = true
+            }
+            ui.waitForIdle()
+            assertCompactTail("流式安全间距第6行")
+            assertEquals(0, fixture.opens.get())
         }
     }
 

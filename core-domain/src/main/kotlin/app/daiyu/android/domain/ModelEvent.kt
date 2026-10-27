@@ -108,14 +108,53 @@ enum class ModelFailure(val userMessage: String) {
     REDIRECT("接口返回重定向；未转发密钥，请填写最终 HTTPS 地址"),
     RATE_LIMIT("服务限制请求或额度不足（HTTP 429），请检查配额或稍后手动重试"),
     SERVER("模型服务端发生错误，请检查服务状态；未自动重试"),
-    REQUEST("服务拒绝本次请求，请检查模型名称及所选协议能力"),
+    CONFIGURATION("无法准备模型请求，请检查服务地址及请求头设置"),
+    REQUEST("服务拒绝本次请求，具体原因未识别；未自动重发"),
     PROTOCOL("服务未返回兼容的事件流，请检查所选接口协议"),
     INCOMPLETE("回复未完整结束；已接收内容保留，未执行未确认工具"),
     TIMEOUT("请求超时，远端结果尚未确认；已接收内容保留，未自动重发"),
     TLS("HTTPS 安全连接失败，请检查服务证书和网络"),
     NETWORK("网络连接失败，请检查服务地址和网络；未自动重试")
 }
-class ModelRequestException(val failure: ModelFailure, val transportInterrupted: Boolean = false) : RuntimeException("Model request failed")
+enum class RequestRejection(val userMessage: String) {
+    UNSPECIFIED(""),
+    MODEL_UNAVAILABLE("当前服务无法提供所选模型，请核对模型标识和访问权限"),
+    UNSUPPORTED_PARAMETER("服务不支持该请求参数"),
+    UNSUPPORTED_VALUE("服务不支持该参数取值"),
+    CONTEXT_LIMIT("请求超过模型上下文限制，请压缩上下文或调整输出上限"),
+    PAYLOAD_TOO_LARGE("请求内容超过服务大小限制，请缩减附件或输入"),
+}
+
+enum class RequestField(val wireName: String) {
+    MODEL("model"), TOOLS("tools"), INCLUDE("include"), INPUT("input"), MESSAGES("messages"),
+    TOOL_CHOICE("tool_choice"), REASONING("reasoning"), TEMPERATURE("temperature"), TOP_P("top_p"),
+    MAX_OUTPUT_TOKENS("max_output_tokens"), MAX_TOKENS("max_tokens"),
+    MAX_COMPLETION_TOKENS("max_completion_tokens"), SERVICE_TIER("service_tier"),
+    WEB_SEARCH_OPTIONS("web_search_options"),
+}
+
+/** Only closed values cross the provider boundary; never store a provider message or raw field. */
+data class ModelRequestDiagnostic(
+    val httpStatus: Int? = null,
+    val rejection: RequestRejection = RequestRejection.UNSPECIFIED,
+    val field: RequestField? = null,
+) {
+    init { require(httpStatus == null || httpStatus in 300..599) }
+}
+
+class ModelRequestException(
+    val failure: ModelFailure,
+    val diagnostic: ModelRequestDiagnostic? = null,
+    val transportInterrupted: Boolean = false,
+) : RuntimeException("Model request failed") {
+    val userMessage: String get() {
+        val detail = diagnostic ?: return failure.userMessage
+        val base = if (detail.rejection == RequestRejection.UNSPECIFIED) failure.userMessage else detail.rejection.userMessage
+        val status = detail.httpStatus?.takeUnless { base.contains("HTTP $it") }?.let { "（HTTP $it）" }.orEmpty()
+        val field = detail.field?.let { "，涉及字段：${it.wireName}" }.orEmpty()
+        return base + status + field
+    }
+}
 
 /** A local reconnect budget expiry, never a retryable provider/network failure. */
 open class TransportReconnectDeadlineException(lateSuccess: Boolean = false) : RuntimeException(

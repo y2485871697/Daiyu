@@ -65,7 +65,6 @@ class EmbeddedInputPlaceholderContractTest(unittest.TestCase):
             'screens/settings/SkillManagementScreen.kt': ('https://github.com/owner/repo',),
             'components/SubAgentParallelLimitRow.kt': ('0 为不限，或输入正整数',),
             'screens/conversation/ChildTaskCommandDialog.kt': ('已绑定的子模型配置 ID', '本次指令'),
-            'screens/chat/conversation/InlineMessageEdit.kt': ('编辑消息',),
         }
         for path, titles in fields.items():
             source = (UI / path).read_text()
@@ -73,8 +72,9 @@ class EmbeddedInputPlaceholderContractTest(unittest.TestCase):
                 with self.subTest(path=path, title=title):
                     self.assertRegex(source, r'label = \{ (?:androidx\.compose\.material3\.)?Text\("' + re.escape(title) + r'"\) \}')
             self.assertNotIn('placeholder = {', source)
-        inline = (UI / 'screens/chat/conversation/InlineMessageEdit.kt').read_text()
-        self.assertIn('保存后将重新生成，并删除后续内容及失效摘要', inline)
+        composer = (UI / 'screens/chat/conversation/ChatComposer.kt').read_text()
+        self.assertIn('editing -> "保存并重新生成"', composer)
+        self.assertFalse((UI / 'screens/chat/conversation/InlineMessageEdit.kt').exists())
         child = (UI / 'screens/conversation/ChildTaskCommandDialog.kt').read_text()
         for retained in ('child-command-execution-warning', 'this[ChildTaskCommandDialogAction] = confirm', 'enabled = valid && !busy && !consumed'):
             self.assertIn(retained, child)

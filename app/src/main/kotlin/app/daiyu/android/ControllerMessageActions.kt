@@ -8,7 +8,8 @@ internal enum class MessageAction { EDIT_USER, SAVE_EDIT, BRANCH, DELETE_TURN, R
 /** Receipt for THIS preparation, not inferred from a later history refresh or another send. */
 internal enum class RegenerationSendOutcome { NOT_SENT, ACCEPTED, UNKNOWN }
 internal sealed interface MessageActionResult {
-    data class EditDraft(val text: String, val target: MessageActionTarget? = null) : MessageActionResult
+    data class EditDraft(val text: String, val target: MessageActionTarget? = null,
+        val videos: List<app.daiyu.android.media.video.MessageVideoReference> = emptyList()) : MessageActionResult
     data class Branch(val conversation: Conversation) : MessageActionResult
     data object Deleted : MessageActionResult
     data class Regenerated(val conversation: Conversation, val outcome: RegenerationSendOutcome) : MessageActionResult

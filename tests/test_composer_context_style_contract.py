@@ -10,10 +10,10 @@ COMPOSER = SRC / "ui/screens/chat/conversation/ChatComposer.kt"
 class ComposerContextStyleContractTest(unittest.TestCase):
     def setUp(self):
         self.text = COMPOSER.read_text()
-        self.badge = self.text.split('Row(Modifier.widthIn(max = 120.dp)', 1)[1].split('Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp)', 1)[0]
+        self.badge = self.text.split('.widthIn(max = 120.dp).heightIn(min = 22.dp)', 1)[1].split('Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp)', 1)[0]
 
     def test_badge_wraps_its_content_inside_compact_limits(self):
-        self.assertIn('heightIn(min = 22.dp).testTag("chat-context")', self.badge)
+        self.assertIn('.testTag("chat-context")', self.badge)
         self.assertIn('.padding(1.dp).padding(horizontal = 3.dp, vertical = 2.dp)', self.badge)
         self.assertIn('Arrangement.spacedBy(4.dp)', self.badge)
         self.assertIn('modifier = Modifier.weight(1f, fill = false)', self.badge)

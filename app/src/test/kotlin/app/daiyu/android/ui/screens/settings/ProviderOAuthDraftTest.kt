@@ -28,7 +28,7 @@ class ProviderOAuthDraftTest {
     @Test fun loginAttachesToSameDraftOwnerAndPreservesUserConfiguration() {
         val owner = draft()
         owner.draft = owner.draft.copy(providerName = "My Codex", customBody = "{\"temperature\":0.7}",
-            providerEnabled = true, openAiWebSearchEnabled = true)
+            providerEnabled = true)
         val before = owner.draft
         owner.attachOAuth(first)
         assertEquals(before.copy(oauth = first), owner.draft)

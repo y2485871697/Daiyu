@@ -224,12 +224,12 @@ internal fun <T> LocalCatalogModelsScreen(
                 SettingsRow("添加自定义模型", summary = "手动填写展示名称与 Model ID", tag = "local-model-add",
                     leading = { DaiyuIcon(DaiyuIcons.Add, null) }, showChevron = true, onClick = add)
             }
-            SettingsSearch(query, { query = it }, "搜索模型", "local-model-search")
             notice?.let { SettingsNote(it) }
             if (!loaded) SettingsNote("正在读取本地模型")
             if (loaded && snapshot == null) TextButton("重试", enabled = request == null,
                 onClick = { notice = null; reload() }, modifier = Modifier.testTag("local-model-refresh"))
             SettingsSectionTitle("模型列表（共 ${snapshot?.models?.size ?: 0} 个）")
+            SettingsSearch(query, { query = it }, "搜索模型", "local-model-search")
             if (loaded && snapshot?.models.isNullOrEmpty()) SettingsNote("还没有模型，请从远端拉取或添加自定义模型")
         }
         snapshot?.models?.filter { query.isBlank() || it.id.contains(query.trim(), true) || it.displayName.contains(query.trim(), true) }?.forEach { model ->
@@ -254,7 +254,8 @@ internal fun <T> LocalCatalogModelsScreen(
                             val context = form?.contextWindow?.toIntOrNull()
                             val labels = listOfNotNull(
                                 if (context == null) "上下文未知" else if (context % 1000 == 0) "${context / 1000}K 上下文" else "$context 上下文",
-                                "支持推理".takeIf { form?.reasoning == true }, "支持视觉".takeIf { form?.vision == true },
+                                "推理".takeIf { form?.reasoning == true }, "视觉".takeIf { form?.vision == true },
+                                "搜索".takeIf { form?.nativeSearch == true },
                                 "当前".takeIf { selected })
                             labels.forEach { label ->
                                 Text(label, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onPrimary,

@@ -18,8 +18,8 @@ class ModelCapabilityAccentContractTest(unittest.TestCase):
             self.assertNotIn(old_or_fixed_color, self.tags)
 
     def test_all_labels_keep_their_conditions_and_compact_noninteractive_layout(self):
-        for fragment in ('"上下文未知"', '"支持推理".takeIf { form?.reasoning == true }',
-                         '"支持视觉".takeIf { form?.vision == true }', '"当前".takeIf { selected }',
+        for fragment in ('"上下文未知"', '"推理".takeIf { form?.reasoning == true }',
+                         '"视觉".takeIf { form?.vision == true }', '"搜索".takeIf { form?.nativeSearch == true }', '"当前".takeIf { selected }',
                          "horizontalArrangement = Arrangement.spacedBy(6.dp)",
                          "verticalArrangement = Arrangement.spacedBy(4.dp)"):
             self.assertIn(fragment, self.source)

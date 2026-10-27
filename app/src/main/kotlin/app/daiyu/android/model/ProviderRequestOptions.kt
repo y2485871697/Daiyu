@@ -122,7 +122,7 @@ data class ProviderRequestOptions(
         const val MAX_BODY_BYTES = 64 * 1024
         private const val MAX_BODY_DEPTH = 64
         // History, advertised tools, and continuation state must match the local runner.
-        private val OWNED_FIELDS = setOf("input", "messages", "tools", "stream", "store", "include",
+        private val OWNED_FIELDS = setOf("input", "messages", "tools", "stream", "store", "include", "web_search_options",
             "previous_response_id", "conversation", "background", "tool_choice", "parallel_tool_calls",
             "contents", "systemInstruction", "toolConfig", "stream_options", "candidateCount")
 

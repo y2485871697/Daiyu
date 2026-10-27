@@ -29,6 +29,16 @@ class ComposerTextActionTest {
         assertFalse(video.copy(phase = ComposerPhase.PAUSED, supplementAvailable = true).textActionEnabled())
         assertFalse(video.copy(phase = ComposerPhase.RUNNING).textActionEnabled())
     }
+    @Test fun borrowedMessageAttachmentsEnableOnlyExplicitIdleEditSubmission() {
+        val edit = ComposerUi(editingMessageCanSubmit = true)
+        assertTrue(edit.textActionEnabled())
+        assertFalse(edit.imageSendAvailable)
+        assertFalse(edit.videoSendAvailable)
+        assertFalse(edit.copy(enabled = false).textActionEnabled())
+        assertFalse(edit.copy(editingMessageCanSubmit = false).textActionEnabled())
+        assertFalse(edit.copy(phase = ComposerPhase.RUNNING, supplementAvailable = true).textActionEnabled())
+        assertFalse(edit.copy(phase = ComposerPhase.PAUSED, supplementAvailable = true).textActionEnabled())
+    }
     @Test fun idleTextCanSendWithoutSupplementCapability() {
         assertTrue(composer.textActionEnabled())
     }

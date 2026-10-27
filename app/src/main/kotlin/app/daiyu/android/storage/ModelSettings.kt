@@ -68,7 +68,7 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
         }
         requestOptions.validate(protocol)
         require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }
-        if (hasModelOverrides && requestOptions.customBody.isNotEmpty()) {
+        if ((hasModelOverrides || requestOptions.openAiWebSearchEnabled) && requestOptions.customBody.isNotEmpty()) {
             val body = app.daiyu.android.model.MessagesRequest.jsonObject(requestOptions.customBody)
             require(!body.has("model") || body.opt("model") == model) { "自定义请求体 model 与能力声明所选模型冲突" }
         }
@@ -142,7 +142,10 @@ class ModelSettingsStore internal constructor(
     internal fun loadForRun(modelId: String? = null): ModelSettings = modelCatalog.readConfiguration {
         val current = load()
         val selected = modelCatalog.readRegisteredModel(modelId ?: current.model)
-        if (modelId == null) current.copy(contextWindowOverride = selected?.settings?.contextWindowOverride,
+        if (modelId == null) current.copy(
+            requestOptions = current.requestOptions.copy(openAiWebSearchEnabled =
+                selected?.settings?.requestOptions?.openAiWebSearchEnabled ?: current.requestOptions.openAiWebSearchEnabled),
+            contextWindowOverride = selected?.settings?.contextWindowOverride,
             reasoningOverride = selected?.settings?.reasoningOverride, visionOverride = selected?.settings?.visionOverride,
             defaultVisionSupported = true)
         else checkNotNull(selected) { "摘要模型不在本地目录中" }.let { it.settings.applyTo(current, it.id) }

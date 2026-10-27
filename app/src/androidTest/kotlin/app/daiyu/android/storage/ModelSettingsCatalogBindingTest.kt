@@ -34,6 +34,44 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         try { root.deleteRecursively() } finally { super.tearDown() }
     }
 
+    fun testPerModelSearchSurvivesRunProjectionProviderSaveSwitchAndReopen() {
+        val current = store.load().copy(endpoint = "https://models.example.invalid", model = "search-a", apiKey = "synthetic",
+            requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = true))
+        store.save(current, protocolChangeAuthorized = true)
+        val migrated = store.modelCatalogSnapshot()
+        assertTrue(migrated.models.single().settings.requestOptions.openAiWebSearchEnabled)
+        val extra = CatalogModelParameters.newModel(RemoteModel("search-b"))
+        assertEquals(CatalogCommitResult.COMMITTED, store.modelCatalog.compareAndAppend(
+            migrated.providerIdentity, migrated.revision, listOf(extra)) { false })
+        val snapshot = store.modelCatalogSnapshot()
+        val ticket = snapshot.selectionFor("search-a")!!
+        val disabled = app.daiyu.android.model.catalog.CatalogModelEdit.from(ticket.record)
+            .copy(nativeSearch = false).applyTo(ticket.record)
+        assertEquals(app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED,
+            store.modelCatalog.replaceSelection(ticket, disabled) { false })
+        assertFalse(store.loadForRun().requestOptions.openAiWebSearchEnabled)
+        assertTrue(store.load().requestOptions.openAiWebSearchEnabled)
+        store.save(store.load().copy(batteryEnabled = true))
+        assertFalse(store.loadForRun().requestOptions.openAiWebSearchEnabled)
+        store.selectCatalogModel(store.load(), store.modelCatalogSnapshot().selectionFor("search-b")!!)
+        assertFalse(store.loadForRun().requestOptions.openAiWebSearchEnabled)
+        store.selectCatalogModel(store.load(), store.modelCatalogSnapshot().selectionFor("search-a")!!)
+        assertFalse(store.loadForRun().requestOptions.openAiWebSearchEnabled)
+        val enableTicket = store.modelCatalogSnapshot().selectionFor("search-a")!!
+        assertEquals(CatalogLocalEditResult.APPLIED, store.modelCatalog.replaceSelection(enableTicket,
+            CatalogModelEdit.from(enableTicket.record).copy(nativeSearch = true).applyTo(enableTicket.record)) { false })
+        assertTrue(store.loadForRun().requestOptions.openAiWebSearchEnabled)
+        store.save(store.load().copy(deviceStatusEnabled = true))
+        assertTrue(store.loadForRun().requestOptions.openAiWebSearchEnabled)
+        store.selectCatalogModel(store.load(), store.modelCatalogSnapshot().selectionFor("search-b")!!)
+        assertFalse(store.loadForRun().requestOptions.openAiWebSearchEnabled)
+        val reopened = ModelSettingsStore(context, prefix)
+        assertFalse(reopened.loadForRun().requestOptions.openAiWebSearchEnabled)
+        reopened.selectCatalogModel(reopened.load(), reopened.modelCatalogSnapshot().selectionFor("search-a")!!)
+        assertTrue(reopened.loadForRun().requestOptions.openAiWebSearchEnabled)
+        assertFalse(reopened.modelCatalogSnapshot().models.single { it.id == "search-b" }.settings.requestOptions.openAiWebSearchEnabled)
+    }
+
     fun testSavedCustomModelRemainsUsableWithDefaultCapabilities() {
         store.save(initial.copy(model = "catalog-model", requestOptions = ProviderRequestOptions(
             customBody = "{\"model\":\"relay/actual-model\"}")))

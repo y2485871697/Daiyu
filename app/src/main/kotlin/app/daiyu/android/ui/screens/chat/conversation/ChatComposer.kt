@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -103,6 +104,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val editing = actions.editingMessageKey != null
+    val toolbarEnabled = state.enabled && !editing
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
     val chrome = chatChromeColors().copy(accent = conversationColors().accent)
@@ -112,7 +115,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
     val currentEditorEnabled by rememberUpdatedState(state.enabled)
     val currentDraft by rememberUpdatedState(state.text)
-    var composingSource by remember(state.editorGeneration) { mutableStateOf<Pair<String, TextRange>?>(null) }
+    var composingSource by remember(state.editorGeneration, actions.editingMessageKey) { mutableStateOf<Pair<String, TextRange>?>(null) }
     val references = remember(state.text, composingSource) {
         ComposerReferences(state.text, composingSource?.takeIf { it.first == state.text }?.second?.let { it.min until it.max })
     }
@@ -126,8 +129,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     var showContextTokens by rememberSaveable { mutableStateOf(false) }
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes) { mutableStateOf(false) }
-    val voiceMenuEnabled = state.enabled && state.voiceModes.isNotEmpty()
-    val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
+    val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()
+    val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
     val textAction = hasText
     val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
     val primaryIcon = when {
@@ -141,6 +144,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
         textAction && state.supplementPending -> "正在追加"
         textAction && state.phase != ComposerPhase.IDLE -> "追加消息"
+        editing -> "保存并重新生成"
         textAction -> "发送"
         state.phase == ComposerPhase.RUNNING -> "暂停"
         else -> "发送"
@@ -157,12 +161,14 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         key(state.editorGeneration) { ComposerWorkspacePullUpArea(workspacePointers, openWorkspace) }
         // The original top padding is now a content-side blank drag strip.
         // Include the transparent 1dp CSS border in the composer box model.
-        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 4.dp),
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 4.dp).testTag("chat-composer-header"),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
+            ComposerChip(state.modelLabel.ifBlank { "模型" }, toolbarEnabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
-            Row(Modifier.widthIn(max = 120.dp).heightIn(min = 22.dp).testTag("chat-context").clip(RoundedCornerShape(11.dp))
+            if (editing) ComposerCancelEdit(state.enabled, actions.onCancelMessageEdit)
+            Row(Modifier.then(if (editing) Modifier.weight(1f).wrapContentWidth(Alignment.End) else Modifier)
+                .widthIn(max = 120.dp).heightIn(min = 22.dp).testTag("chat-context").clip(RoundedCornerShape(11.dp))
                 .border(1.dp, chrome.line, RoundedCornerShape(11.dp))
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     role = Role.Button,
@@ -205,7 +211,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         }
                     }
                     attachmentContent()
-                    key(state.editorGeneration) {
+                    key(state.editorGeneration, actions.editingMessageKey) {
                         val mountedGeneration = state.editorGeneration
                         var editingValue by remember {
                             mutableStateOf(TextFieldValue(references.text).forComposer(references.text, references.toVisible(state.selectionStart), references.toVisible(state.selectionEnd)))
@@ -265,10 +271,10 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 22.5.dp)
+                                Modifier.size(32.dp), enabled = toolbarEnabled, tint = chrome.toolbar, iconSize = 22.5.dp)
                             Box(Modifier.size(32.dp).testTag("chat-reasoning")
                                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                    enabled = state.enabled, role = Role.Button,
+                                    enabled = toolbarEnabled, role = Role.Button,
                                     onClickLabel = "调整思考深度",
                                     onLongClickLabel = if (state.gptSpeedMode != null && state.gptSpeedEnabled) "切换 GPT 速度" else null,
                                     onLongClick = if (state.gptSpeedMode != null && state.gptSpeedEnabled) actions.onCycleGptSpeed else null,
@@ -279,7 +285,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     tint = chrome.accent.copy(alpha = if (state.enabled) 1f else .38f), modifier = Modifier.size(24.dp))
                             }
                             Box(Modifier.size(32.dp).testTag("chat-assistant").clip(CircleShape)
-                                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button,
+                                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = toolbarEnabled, role = Role.Button,
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
                                 contentAlignment = Alignment.Center) {

@@ -11,7 +11,7 @@ class RikkaHubProtocolPortContractTest(unittest.TestCase):
         self.assertIn('if (selected == protocol) this', switch)
         self.assertIn('protocol = selected', switch)
         self.assertIn('protocolChangeAuthorized = false', switch)
-        for field in ('apiKey', 'customHeaders', 'responsesPath', 'headerFieldsValid', 'bodyFieldsValid', 'headerFieldRows', 'bodyFieldRows', 'anthropicVersion', 'openAiWebSearchEnabled'):
+        for field in ('apiKey', 'customHeaders', 'responsesPath', 'headerFieldsValid', 'bodyFieldsValid', 'headerFieldRows', 'bodyFieldRows', 'anthropicVersion'):
             self.assertNotIn(field+' =', switch)
 
     def test_only_explicit_save_grants_protocol_change_authority(self):

@@ -117,12 +117,7 @@ class NativeCompletionModel internal constructor(
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
-                if (status !in 200..299) throw ModelRequestException(when (status) {
-                    401 -> ModelFailure.AUTHENTICATION; 403 -> ModelFailure.PERMISSION
-                    404, 405 -> ModelFailure.ENDPOINT; 429 -> ModelFailure.RATE_LIMIT
-                    in 300..399 -> ModelFailure.REDIRECT; in 500..599 -> ModelFailure.SERVER
-                    else -> ModelFailure.REQUEST
-                })
+                if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get)
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResponse { reader ->

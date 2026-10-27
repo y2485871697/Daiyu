@@ -143,15 +143,7 @@ class ResponsesModel internal constructor(
                 if (status !in 200..299) {
                     val retryAuth = retryAuthentication(status, authentication)
                     if (retryAuth == null && status != 429 && status !in 500..599) resumeAllowed = false
-                    throw ModelRequestException(retryAuth ?: when(status) {
-                        401 -> ModelFailure.AUTHENTICATION
-                        403 -> ModelFailure.PERMISSION
-                        404, 405, 410 -> ModelFailure.ENDPOINT
-                        429 -> ModelFailure.RATE_LIMIT
-                        in 500..599 -> ModelFailure.SERVER
-                        in 300..399 -> ModelFailure.REDIRECT
-                        else -> ModelFailure.PROTOCOL
-                    })
+                    throw ProviderHttpFailure.from(conn, status, cancelled::get)
                 }
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", true) != true) {
                     resumeAllowed = false
@@ -414,15 +406,10 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
-                if (status !in 200..299) throw ModelRequestException(retryAuthentication(status, authentication) ?: when (status) {
-                    401 -> ModelFailure.AUTHENTICATION
-                    403 -> ModelFailure.PERMISSION
-                    404, 405 -> ModelFailure.ENDPOINT
-                    429 -> ModelFailure.RATE_LIMIT
-                    in 300..399 -> ModelFailure.REDIRECT
-                    in 500..599 -> ModelFailure.SERVER
-                    else -> ModelFailure.REQUEST
-                })
+                if (status !in 200..299) {
+                    retryAuthentication(status, authentication)
+                    throw ProviderHttpFailure.from(conn, status, cancelled::get)
+                }
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResponse { reader ->

@@ -60,7 +60,6 @@ import app.daiyu.android.data.repository.ModelUsageModelUi
 import app.daiyu.android.data.repository.ModelUsageSnapshot
 import app.daiyu.android.data.repository.UsageStatsSnapshot
 import app.daiyu.android.data.repository.UsageTokenMetrics
-import app.daiyu.android.data.repository.formatUsageTokens
 import app.daiyu.android.data.repository.formatStatCount
 import app.daiyu.android.data.repository.formatTokenCount
 import app.daiyu.android.data.repository.heatmapAlpha
@@ -294,7 +293,7 @@ private fun ModelUsagePane(
                 UsageTokenRows(tokens)
                 ModelMetricRow(stringResource(R.string.stats_model_cache_hit_rate),
                     if (stats.tokenAccountingAvailable && tokens.input != null && tokens.cached != null && tokens.input > 0L)
-                        formatCacheHitRate(tokens.cached, tokens.input) else "—")
+                        formatCacheHitRate(tokens.cached, tokens.input) else "0")
             }
         }
         if (stats.unattributedUsageRequests > 0 || stats.accountingFailure) Text(
@@ -613,35 +612,35 @@ private fun ModelUsageRow(
             ) {
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_token_total),
-                    value = formatUsageTokens(model.totalTokens.takeIf { model.inputComplete && model.outputComplete }),
+                    value = formatStatsTokens(model.totalTokens.takeIf { model.inputComplete && model.outputComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_fresh_input_tokens),
-                    value = formatUsageTokens(model.freshInputTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
+                    value = formatStatsTokens(model.freshInputTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_output_tokens),
-                    value = formatUsageTokens(model.outputTokens.takeIf { model.outputComplete }),
+                    value = formatStatsTokens(model.outputTokens.takeIf { model.outputComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_cached_tokens),
-                    value = formatUsageTokens(model.cachedTokens.takeIf { model.cachedComplete }),
+                    value = formatStatsTokens(model.cachedTokens.takeIf { model.cachedComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_cache_creation_tokens),
-                    value = formatUsageTokens(model.cacheCreationTokens.takeIf { model.creationComplete }),
+                    value = formatStatsTokens(model.cacheCreationTokens.takeIf { model.creationComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_cache_hit_rate),
-                    value = if (model.cachedComplete && model.inputComplete) formatCacheHitRate(model.cachedTokens, model.inputTokens) else "—",
+                    value = if (model.cachedComplete && model.inputComplete && model.inputTokens > 0L) formatCacheHitRate(model.cachedTokens, model.inputTokens) else "0",
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_daily_avg),
-                    value = formatUsageTokens(model.dailyAverageTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
+                    value = formatStatsTokens(model.dailyAverageTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_conversation_avg),
-                    value = formatUsageTokens(model.conversationAverageTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
+                    value = formatStatsTokens(model.conversationAverageTokens.takeIf { model.inputComplete && model.cachedComplete && model.creationComplete }),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_conversations),
@@ -659,7 +658,7 @@ private fun ModelUsageRow(
 @Composable
 private fun ModelMetricRow(label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("usage-model-metric:$label"),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -803,20 +802,20 @@ private fun HeatmapCell(
 
 @Composable
 private fun UsageTokenRows(tokens: UsageTokenMetrics) {
-    ModelMetricRow(stringResource(R.string.stats_page_token_total), formatUsageTokens(tokens.total))
-    ModelMetricRow("输入（含缓存）", formatUsageTokens(tokens.input))
-    ModelMetricRow(stringResource(R.string.stats_page_fresh_input_tokens), formatUsageTokens(freshInput(tokens)))
-    ModelMetricRow(stringResource(R.string.stats_page_output_tokens), formatUsageTokens(tokens.output))
-    ModelMetricRow(stringResource(R.string.stats_page_cached_tokens), formatUsageTokens(tokens.cached))
-    ModelMetricRow(stringResource(R.string.stats_page_cache_creation_tokens), formatUsageTokens(tokens.creation))
+    ModelMetricRow(stringResource(R.string.stats_page_token_total), formatStatsTokens(tokens.total))
+    ModelMetricRow("输入（含缓存）", formatStatsTokens(tokens.input))
+    ModelMetricRow(stringResource(R.string.stats_page_fresh_input_tokens), formatStatsTokens(freshInput(tokens)))
+    ModelMetricRow(stringResource(R.string.stats_page_output_tokens), formatStatsTokens(tokens.output))
+    ModelMetricRow(stringResource(R.string.stats_page_cached_tokens), formatStatsTokens(tokens.cached))
+    ModelMetricRow(stringResource(R.string.stats_page_cache_creation_tokens), formatStatsTokens(tokens.creation))
 }
 
 @Composable
 private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
     val tokens = stats.overviewTokens
     val currentTokens = stats.currentAccountingTokens
-    fun scoped(current: Long?, lifetime: Long?): String = if (currentTokens == null) formatUsageTokens(lifetime)
-        else formatCurrentLifetime(formatUsageTokens(current), formatUsageTokens(lifetime))
+    fun scoped(current: Long?, lifetime: Long?): String = if (currentTokens == null) formatStatsTokens(lifetime)
+        else formatCurrentLifetime(formatStatsTokens(current), formatStatsTokens(lifetime))
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -830,8 +829,8 @@ private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) 
                 icon = Icons.Rounded.Forum,
                 label = stringResource(R.string.stats_page_total_conversations),
                 value = formatCurrentLifetime(
-                    current = if (stats.currentDataAvailable) formatStatCount(stats.currentConversations.toLong()) else "—",
-                    lifetime = if (stats.lifetimeAccountingAvailable) formatStatCount(stats.lifetimeConversations.toLong()) else "—",
+                    current = if (stats.currentDataAvailable) formatStatCount(stats.currentConversations.toLong()) else "0",
+                    lifetime = if (stats.lifetimeAccountingAvailable) formatStatCount(stats.lifetimeConversations.toLong()) else "0",
                 ),
             )
             StatCard(
@@ -839,8 +838,8 @@ private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) 
                 icon = Icons.Rounded.ChatBubbleOutline,
                 label = stringResource(R.string.stats_page_total_messages),
                 value = formatCurrentLifetime(
-                    current = if (stats.currentDataAvailable) formatStatCount(stats.currentMessages.toLong()) else "—",
-                    lifetime = if (stats.lifetimeAccountingAvailable) formatStatCount(stats.lifetimeMessages.toLong()) else "—",
+                    current = if (stats.currentDataAvailable) formatStatCount(stats.currentMessages.toLong()) else "0",
+                    lifetime = if (stats.lifetimeAccountingAvailable) formatStatCount(stats.lifetimeMessages.toLong()) else "0",
                 ),
             )
         }
@@ -869,10 +868,12 @@ private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) 
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             icon = Icons.Rounded.RocketLaunch,
             label = stringResource(R.string.stats_page_launch_count),
-            value = if (stats.lifetimeAccountingAvailable) formatStatCount(stats.launchCount.toLong()) else "—",
+            value = if (stats.lifetimeAccountingAvailable) formatStatCount(stats.launchCount.toLong()) else "0",
         )
     }
 }
+
+private fun formatStatsTokens(value: Long?): String = formatTokenCount(value ?: 0L)
 
 private fun freshInput(tokens: UsageTokenMetrics): Long? {
     val input = tokens.input ?: return null

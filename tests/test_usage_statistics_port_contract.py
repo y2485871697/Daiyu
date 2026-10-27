@@ -96,4 +96,35 @@ class UsageStatisticsPortContractTest(unittest.TestCase):
         self.assertIn('UsageStatisticsStore.snapshot',ui)
         self.assertIn('currentAccountingTokens',read('data/repository/UsageStatsSnapshot.kt'))
         self.assertIn('usage-model-coverage',read('ui/screens/stats/UsageStatsScreen.kt'))
+    def test_statistics_missing_tokens_display_zero_without_changing_shared_semantics(self):
+        source = read('ui/screens/stats/UsageStatsScreen.kt')
+        self.assertIn('private fun formatStatsTokens(value: Long?): String = formatTokenCount(value ?: 0L)', source)
+        self.assertNotIn('formatUsageTokens', source)
+        self.assertNotIn('"—"', source)
+        self.assertIn('value?.let(::formatTokenCount) ?: "—"', read('data/repository/RecordedUsageProjection.kt'))
+        for value in ('model.totalTokens', 'model.freshInputTokens', 'model.outputTokens',
+                      'model.cachedTokens', 'model.cacheCreationTokens',
+                      'model.dailyAverageTokens', 'model.conversationAverageTokens'):
+            self.assertIn('formatStatsTokens(' + value + '.takeIf {', source)
+        self.assertIn('val input = tokens.input ?: return null', source)
+        self.assertIn('val cached = tokens.cached ?: return null', source)
+        self.assertIn('val creation = tokens.creation ?: return null', source)
+
+    def test_statistics_unavailable_counts_display_zero(self):
+        source = read('ui/screens/stats/UsageStatsScreen.kt')
+        for flag, value in (('currentDataAvailable', 'currentConversations'),
+                            ('lifetimeAccountingAvailable', 'lifetimeConversations'),
+                            ('currentDataAvailable', 'currentMessages'),
+                            ('lifetimeAccountingAvailable', 'lifetimeMessages'),
+                            ('lifetimeAccountingAvailable', 'launchCount')):
+            self.assertIn(f'if (stats.{flag}) formatStatCount(stats.{value}.toLong()) else "0"', source)
+
+    def test_statistics_missing_cache_rate_and_zero_denominator_display_zero(self):
+        source = read('ui/screens/stats/UsageStatsScreen.kt')
+        self.assertIn('tokens.input != null && tokens.cached != null && tokens.input > 0L)', source)
+        self.assertIn('formatCacheHitRate(tokens.cached, tokens.input) else "0"', source)
+        self.assertIn('if (model.cachedComplete && model.inputComplete && model.inputTokens > 0L)', source)
+        self.assertIn('formatCacheHitRate(model.cachedTokens, model.inputTokens) else "0"', source)
+        self.assertIn('Modifier.fillMaxWidth().testTag("usage-model-metric:$label")', source)
+
 if __name__=='__main__': unittest.main()

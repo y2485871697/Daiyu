@@ -156,18 +156,64 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testMissingAccountingKeepsOriginalStructureWithoutInventedZeroValues() {
+    fun testMissingAccountingDisplaysZeroWithoutChangingAvailability() {
         show { empty() }
         node("usage-heatmap").assertExists()
         listOf(R.string.stats_page_total_conversations, R.string.stats_page_total_messages,
             R.string.stats_page_token_total, R.string.stats_page_output_tokens,
             R.string.stats_page_cached_tokens, R.string.stats_page_cache_creation_tokens,
-            R.string.stats_page_launch_count).forEach { assertMetric(it, "—") }
-        assertMetric("输入（含缓存）", "—")
+            R.string.stats_page_launch_count).forEach { assertMetric(it, "0") }
+        assertMetric("输入（含缓存）", "0")
+        assertMetric(R.string.stats_page_fresh_input_tokens, "0")
         selectTab(R.string.stats_tab_models)
+        ui.onAllNodes(hasText("0") and hasAnyAncestor(hasTestTag("usage-model-total")),
+            useUnmergedTree = true).assertCountEquals(7)
+        ui.onAllNodesWithText("—").assertCountEquals(0)
         node("usage-model-filter").assertExists()
         ui.onAllNodesWithText("0%").assertCountEquals(0)
         ui.onAllNodesWithText("0.0%").assertCountEquals(0)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testIncompleteModelMetricsShowZeroAndKeepReportedValues() {
+        val model = ModelUsageModelUi("incomplete", "Incomplete model", 200, 70, 1, 1,
+            cachedTokens = 40, cacheCreationTokens = 10,
+            cachedComplete = false, creationComplete = false)
+        val stats = empty().copy(tokenAccountingAvailable = true,
+            modelUsage = ModelUsageSnapshot(listOf(ModelUsageProviderUi("provider", "Provider", listOf(model)))))
+        show { stats }
+        selectTab(R.string.stats_tab_models)
+        usagePage().scrollToDescendant(hasText("Incomplete model"))
+        ui.onNode(hasText("Incomplete model") and hasClickAction()).performClick()
+        awaitVisualIdle()
+        for (label in listOf(R.string.stats_model_daily_avg, R.string.stats_model_conversation_avg)) {
+            val metric = hasText("0") and hasAnyAncestor(hasTestTag("usage-model-metric:${activity.getString(label)}"))
+            usagePage().scrollToDescendant(metric)
+            ui.onNode(metric, useUnmergedTree = true).assertIsDisplayed()
+        }
+        ui.onAllNodes(hasText("0") and hasAnyAncestor(hasTestTag("usage-model-metric:${activity.getString(R.string.stats_page_cache_creation_tokens)}")),
+            useUnmergedTree = true).assertCountEquals(2)
+        ui.onAllNodes(hasText("70") and hasAnyAncestor(hasTestTag("usage-model-metric:${activity.getString(R.string.stats_page_output_tokens)}")),
+            useUnmergedTree = true).assertCountEquals(2)
+        ui.onAllNodesWithText("—").assertCountEquals(0)
+        assertFalse(model.cachedComplete)
+        assertFalse(model.creationComplete)
+        assertEquals(40L, model.cachedTokens)
+        assertEquals(10L, model.cacheCreationTokens)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testZeroInputModelCacheRateDisplaysZero() {
+        val model = ModelUsageModelUi("zero-input", "Zero input model", 0, 0, 0, 0)
+        show { empty().copy(tokenAccountingAvailable = true,
+            modelUsage = ModelUsageSnapshot(listOf(ModelUsageProviderUi("provider", "Provider", listOf(model))))) }
+        selectTab(R.string.stats_tab_models)
+        usagePage().scrollToDescendant(hasText("Zero input model"))
+        ui.onNode(hasText("Zero input model") and hasClickAction()).performClick()
+        awaitVisualIdle()
+        ui.onAllNodes(hasText("0") and hasAnyAncestor(hasTestTag("usage-model-metric:${activity.getString(R.string.stats_model_cache_hit_rate)}")),
+            useUnmergedTree = true).assertCountEquals(2)
+        ui.onAllNodesWithText("—").assertCountEquals(0)
         assertEquals(0, fixture.opens.get())
     }
 

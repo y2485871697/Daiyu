@@ -17,7 +17,7 @@ import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.Text
 
 @Composable
-internal fun ComposerReferenceChips(references: List<ComposerReferences.Reference>, enabled: Boolean,
+internal fun ComposerReferenceChips(references: List<ComposerReferences.Reference>, enabled: Boolean, visualEnabled: Boolean = enabled,
     onRemove: (ComposerReferences.Reference) -> Unit) {
     if (references.isEmpty()) return
     val colors = chatChromeColors()
@@ -34,7 +34,7 @@ internal fun ComposerReferenceChips(references: List<ComposerReferences.Referenc
                     fontSize = 10.sp, lineHeight = 14.sp, color = colors.text,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 ChatIconButton(DaiyuIcons.Close, "移除${reference.kind}引用：${reference.label}", { onRemove(reference) },
-                    Modifier.size(22.dp).testTag("chat-reference-remove:$index"), enabled = enabled,
+                    Modifier.size(22.dp).testTag("chat-reference-remove:$index"), enabled = enabled, visualEnabled = visualEnabled,
                     iconSize = 11.dp, tint = colors.muted)
             }
         }

@@ -157,6 +157,8 @@ data class ComposerUi(
     val editorGeneration: Long = 0,
     val voiceMode: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
     val voiceModes: Set<ChatMenuAction> = setOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO),
+    /** Keep colors steady during the owned speed write; enabled still gates every operation. */
+    val gptSpeedSaving: Boolean = false,
 )
 
 internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {

@@ -39,12 +39,13 @@ class ComposerSurfaceColorContractTest(unittest.TestCase):
 
     def test_disabled_light_idle_send_does_not_fade_its_background_again(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()
-        self.assertIn('.copy(alpha = if (primaryEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f)', composer)
+        self.assertIn('.copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f)', composer)
         self.assertIn('enabled = primaryEnabled, containerSize = 28.dp', composer)
         self.assertIn('state.textActionEnabled()', composer)
         icon = (CHAT / 'ChatTopBar.kt').read_text()
         self.assertIn('enabled = enabled, role = Role.Button', icon)
-        self.assertIn('tint = if (enabled) tint else tint.copy(alpha = 0.38f)', icon)
+        self.assertIn('visualEnabled: Boolean = enabled', icon)
+        self.assertIn('tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f)', icon)
         for enabled in (False, True):
             for dark in (False, True):
                 for phase in ('IDLE', 'RUNNING', 'PAUSED'):

@@ -22,7 +22,7 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertIn('maxLines = 1, overflow = TextOverflow.Ellipsis', self.badge)
 
     def test_local_ink_is_shared_by_icon_and_text(self):
-        self.assertIn('val contextColor = if (state.enabled) chatChromeColors().accent else colors.disabledOnSurface', self.text)
+        self.assertIn('val contextColor = if (visualEnabled) chatChromeColors().accent else colors.disabledOnSurface', self.text)
         self.assertIn('ChatContextMark(fraction, contextColor,', self.badge)
         self.assertIn('color = contextColor', self.badge)
         appearance = (SRC / 'ui/screens/chat/conversation/ChatAppearance.kt').read_text()

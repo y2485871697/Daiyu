@@ -94,6 +94,7 @@ internal fun ChatIconButton(
     containerSize: androidx.compose.ui.unit.Dp = 20.dp,
     shape: Shape = CircleShape,
     indication: Indication? = LocalIndication.current,
+    visualEnabled: Boolean = enabled,
 ) {
     Box(modifier.size(48.dp).clip(shape).combinedClickable(
         enabled = enabled, role = Role.Button, onClickLabel = label,
@@ -103,7 +104,7 @@ internal fun ChatIconButton(
         Box(if (containerColor == null) Modifier else Modifier.size(containerSize).background(containerColor, CircleShape),
             contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize ?: if (containerColor == null) 20.dp else 12.dp),
-                tint = if (enabled) tint else tint.copy(alpha = 0.38f))
+                tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f))
         }
     }
 }

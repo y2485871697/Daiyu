@@ -106,10 +106,12 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val editing = actions.editingMessageKey != null
     val toolbarEnabled = state.enabled && !editing
+    val visualEnabled = state.enabled || state.gptSpeedSaving
+    val toolbarVisualEnabled = visualEnabled && !editing
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
     val chrome = chatChromeColors().copy(accent = conversationColors().accent)
-    val contextColor = if (state.enabled) chatChromeColors().accent else colors.disabledOnSurface
+    val contextColor = if (visualEnabled) chatChromeColors().accent else colors.disabledOnSurface
     val dark = colors.background.luminance() < .3f
     val dividerColor = if (dark) Color(0xFFC8B5EB).copy(alpha = .12f) else Color(0xFF9280B5).copy(alpha = .14f)
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
@@ -133,6 +135,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
     val textAction = hasText
     val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
+    val primaryVisualEnabled = if (textAction) state.copy(enabled = visualEnabled).textActionEnabled()
+        else visualEnabled && state.phase != ComposerPhase.IDLE
     val primaryIcon = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> ChatPreviewIcons.Play
         textAction && state.phase != ComposerPhase.IDLE -> ChatPreviewIcons.Append
@@ -165,7 +169,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(state.modelLabel.ifBlank { "模型" }, toolbarEnabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
-                onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
+                onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, visualEnabled = toolbarVisualEnabled)
             if (editing) ComposerCancelEdit(state.enabled, actions.onCancelMessageEdit)
             Row(Modifier.then(if (editing) Modifier.weight(1f).wrapContentWidth(Alignment.End) else Modifier)
                 .widthIn(max = 120.dp).heightIn(min = 22.dp).testTag("chat-context").clip(RoundedCornerShape(11.dp))
@@ -203,7 +207,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     animationSpec = spring(dampingRatio = 1f, stiffness = 500f),
                     alignment = Alignment.BottomCenter,
                 )) {
-                    ComposerReferenceChips(references.references, state.enabled) { reference ->
+                    ComposerReferenceChips(references.references, state.enabled, visualEnabled) { reference ->
                         if (state.editorGeneration == currentEditorGeneration && references.source == currentDraft) {
                             val next = references.remove(reference)
                             val projected = ComposerReferences(next)
@@ -272,7 +276,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(32.dp), enabled = toolbarEnabled, tint = chrome.toolbar, iconSize = 22.5.dp)
+                                Modifier.size(32.dp), enabled = toolbarEnabled, tint = chrome.toolbar, iconSize = 22.5.dp, visualEnabled = toolbarVisualEnabled)
                             Box(Modifier.size(32.dp).testTag("chat-reasoning")
                                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                                     enabled = toolbarEnabled, role = Role.Button,
@@ -283,7 +287,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 .semantics { contentDescription = "推理强度，当前为 ${state.reasoningLabel}" },
                                 contentAlignment = Alignment.Center) {
                                 app.daiyu.android.ui.components.ChatThinkingSpeedIcon(state.gptSpeedMode,
-                                    tint = chrome.accent.copy(alpha = if (state.enabled) 1f else .38f), modifier = Modifier.size(24.dp))
+                                    tint = chrome.accent.copy(alpha = if (visualEnabled) 1f else .38f), modifier = Modifier.size(24.dp))
                             }
                             Box(Modifier.size(32.dp).testTag("chat-assistant").clip(CircleShape)
                                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = toolbarEnabled, role = Role.Button,
@@ -311,8 +315,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }, Modifier.size(32.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = (if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
-                                    .copy(alpha = if (primaryEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
-                                enabled = primaryEnabled, containerSize = 28.dp,
+                                    .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
+                                enabled = primaryEnabled, containerSize = 28.dp, visualEnabled = primaryVisualEnabled,
                                 tint = if (textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (!textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
                                 onLongClick = if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
@@ -352,21 +356,21 @@ private fun Modifier.controlGesture(actions: ChatScreenActions, enabled: Boolean
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ComposerChip(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
+internal fun ComposerChip(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null, visualEnabled: Boolean = enabled) {
     val colors = MiuixTheme.colorScheme
     val chrome = chatChromeColors().copy(accent = conversationColors().accent)
-    val contentColor = if (enabled) chrome.toolbar else colors.disabledOnSurface
+    val contentColor = if (visualEnabled) chrome.toolbar else colors.disabledOnSurface
     val modelColor = chrome.accent
     Row(modifier.heightIn(min = 26.dp).clip(RoundedCornerShape(12.dp))
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
             onClick = onClick, onLongClick = onLongClick),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        ModelBrandIcon(label, Modifier.size(13.dp).alpha(if (enabled) 1f else .45f), tint = if (enabled) modelColor else contentColor)
+        ModelBrandIcon(label, Modifier.size(13.dp).alpha(if (visualEnabled) 1f else .45f), tint = if (visualEnabled) modelColor else contentColor)
         Text(label, Modifier.weight(1f, fill = false).modelNameOpticalAlignment().testTag("composer-model-label"),
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp,
                 platformStyle = PlatformTextStyle(includeFontPadding = false),
                 lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Icon(ChatPreviewIcons.Chevron, null, Modifier.size(12.dp), tint = if (enabled) chrome.muted else contentColor)
+        Icon(ChatPreviewIcons.Chevron, null, Modifier.size(12.dp), tint = if (visualEnabled) chrome.muted else contentColor)
     }
 }

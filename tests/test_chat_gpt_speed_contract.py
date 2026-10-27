@@ -73,6 +73,40 @@ class ChatGptSpeedContractTest(unittest.TestCase):
         self.assertIn('previewIcon("ThoughtFast")', glyphs)
         self.assertIn('previewIcon("ThoughtUltraFast")', glyphs)
 
+    def test_speed_save_retains_only_visual_enablement_and_not_interaction(self):
+        host = source('MainActivity.kt')
+        self.assertIn('val composerAvailable =', host)
+        projection = host.split('val composerAvailable =', 1)[1].split('private fun cycleChatGptSpeed(', 1)[0]
+        self.assertIn('val allowed = composerAvailable && !controller.dataBusy', projection)
+        self.assertIn('gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null', projection)
+        self.assertIn('enabled = allowed', projection)
+        composer = source('ui/screens/chat/conversation/ChatComposer.kt')
+        self.assertIn('val visualEnabled = state.enabled || state.gptSpeedSaving', composer)
+        for unchanged in ('val toolbarEnabled = state.enabled && !editing', 'enabled = state.enabled,',
+                          '.controlGesture(actions, primaryEnabled)', 'enabled = primaryEnabled,',
+                          'mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled'):
+            self.assertIn(unchanged, composer)
+        self.assertIn('state.copy(enabled = visualEnabled).textActionEnabled()', composer)
+        self.assertIn('visualEnabled = primaryVisualEnabled', composer)
+        self.assertIn('visualEnabled = toolbarVisualEnabled', composer)
+        self.assertIn('ComposerReferenceChips(references.references, state.enabled, visualEnabled)', composer)
+        model = source('ui/screens/chat/conversation/ChatScreenModels.kt')
+        self.assertIn('val gptSpeedSaving: Boolean = false', model)
+        self.assertIn('fun ComposerUi.textActionEnabled(): Boolean = enabled &&', model)
+
+    def test_optional_visual_enablement_is_not_used_as_an_action_gate(self):
+        icon = source('ui/screens/chat/conversation/ChatTopBar.kt').split('internal fun ChatIconButton(', 1)[1]
+        self.assertIn('visualEnabled: Boolean = enabled', icon)
+        self.assertIn('enabled = enabled, role = Role.Button', icon)
+        self.assertIn('tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f)', icon)
+        chip = source('ui/screens/chat/conversation/ChatComposer.kt').split('internal fun ComposerChip(', 1)[1]
+        self.assertIn('visualEnabled: Boolean = enabled', chip)
+        self.assertIn('indication = null, enabled = enabled, role = Role.Button', chip)
+        self.assertIn('val contentColor = if (visualEnabled) chrome.toolbar else colors.disabledOnSurface', chip)
+        references = source('ui/screens/chat/conversation/ComposerReferenceChips.kt')
+        self.assertIn('visualEnabled: Boolean = enabled', references)
+        self.assertIn('enabled = enabled, visualEnabled = visualEnabled', references)
+
     def test_reference_proportions_are_local_and_slider_stays_unchanged(self):
         picker = source('ui/components/subagent/ConversationThinkingPicker.kt')
         subagent, main = picker.split('ConversationAgentTypography {', 1)

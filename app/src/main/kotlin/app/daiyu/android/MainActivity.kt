@@ -6209,7 +6209,10 @@ class MainActivity : ComponentActivity() {
         }
         val state = controlOwner?.let { controller.runState(it) }
         val phase = composerPhaseForRun(state?.pauseRequested)
-        val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true
+        val composerAvailable = !sidebarVisible && controller.ready && controller.problem?.startsWith("会话恢复失败") != true &&
+            controller.textSendState() == null && pendingTextSend == null && !imageHost.sending &&
+            !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
+        val allowed = composerAvailable && !controller.dataBusy
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
             timeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty(),
@@ -6237,10 +6240,11 @@ class MainActivity : ComponentActivity() {
                 modelLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
                 gptSpeedMode = confirmedGptSpeed?.mode,
+                gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null,
                 gptSpeedEnabled = allowed && controller.active == null && !controller.hasLiveChildTasks() &&
                     gptSpeedSaveOwner == null && pendingTextSend == null &&
                     !imageHost.sending && !videoSending && inlineMessageEditor == null,
-                assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null,
+                assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed,
                 supplementAvailable = controlOwner?.let(controller::canSupplement) == true &&
                     supplementDraft.pending == null && !supplementMediaBlocked(),
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&

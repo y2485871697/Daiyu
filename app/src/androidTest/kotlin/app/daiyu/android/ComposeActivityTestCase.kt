@@ -8,6 +8,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import kotlin.math.ceil
 import kotlin.math.floor
 import android.test.InstrumentationTestCase
+import androidx.compose.ui.MotionDurationScale
+import kotlin.coroutines.EmptyCoroutineContext
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInParent
@@ -25,9 +27,11 @@ import org.junit.runners.model.Statement
  * AndroidJUnitRunner registers the instrumentation and its arguments before tests run.
  */
 @Suppress("DEPRECATION")
-abstract class ComposeActivityTestCase : InstrumentationTestCase() {
+abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale? = null) : InstrumentationTestCase() {
     @OptIn(ExperimentalTestApi::class)
-    protected val ui = createEmptyComposeRule(effectContext = StandardTestDispatcher())
+    protected val ui = createEmptyComposeRule(
+        effectContext = StandardTestDispatcher() + (motionDurationScale ?: EmptyCoroutineContext)
+    )
     private var currentHost: MainActivity? = null
     private var voicePreferenceSnapshot: Pair<Boolean, String?>? = null
     protected open val engineeringUi: Boolean = false
@@ -1102,7 +1106,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
 
 /** Shared real-controller fixture; tests still assert database bytes and model-call counts. */
 @Suppress("DEPRECATION")
-abstract class WiredActivityTestCase : ComposeActivityTestCase() {
+abstract class WiredActivityTestCase(motionDurationScale: MotionDurationScale? = null) : ComposeActivityTestCase(motionDurationScale) {
     private var fixtureRef: RunControlFixture? = null
     internal var fixture: RunControlFixture
         get() = checkNotNull(fixtureRef)

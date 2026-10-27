@@ -325,13 +325,16 @@ class SearchHostActivityTest : WiredActivityTestCase() {
 
     fun testSearchNavigationDoesNotPauseStopOrResendActiveRun() {
         val session = fixture.session(holdSeconds = 120)
-        setDraft("运行中的提问")
-        node("chat-send").performClick()
-        awaitTextSendResult(activity)
-        assertTrue(session.entered.await(5, TimeUnit.SECONDS))
-        val owner = checkNotNull(fixture.controller.active)
-        setDraft("保留追加草稿")
         try {
+            setDraft("运行中的提问")
+            ui.waitUntil(5_000) {
+                ui.onAllNodes(hasTestTag("chat-send") and isEnabled()).fetchSemanticsNodes().size == 1
+            }
+            node("chat-send").performClick()
+            awaitTextSendResult(activity)
+            ui.waitUntil(5_000) { session.entered.count == 0L }
+            val owner = checkNotNull(fixture.controller.active)
+            setDraft("保留追加草稿")
             openMessages()
             assertEquals(owner.id, fixture.controller.active!!.id)
             assertFalse(fixture.controller.runState(owner)!!.pauseRequested)

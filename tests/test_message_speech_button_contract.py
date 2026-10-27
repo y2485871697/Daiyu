@@ -84,6 +84,16 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         self.assertIn('assertEquals(beforeBounds, button.fetchSemanticsNode().boundsInRoot)', body)
         self.assertIn('changed > 0', body)
 
+    def test_wave_fixture_explicitly_enables_its_own_motion_without_changing_system_settings(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageSpeechButtonTest.kt').read_text()
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
+        self.assertIn('WiredActivityTestCase(object : MotionDurationScale', test)
+        self.assertIn('override val scaleFactor = 1f', test)
+        self.assertIn('StandardTestDispatcher() + (motionDurationScale ?: EmptyCoroutineContext)', fixture)
+        self.assertIn('ComposeActivityTestCase(motionDurationScale)', fixture)
+        self.assertNotIn('settings put', test)
+        self.assertNotIn('Settings.Global.put', test)
+
 
 if __name__ == '__main__':
     unittest.main()

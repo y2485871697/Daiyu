@@ -2,6 +2,10 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,11 +17,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
@@ -47,6 +55,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 class ConversationPaneVisualTest : WiredActivityTestCase() {
     private val density = AtomicReference<Density>()
+    private val menuSafeInsets = AtomicReference<Rect>()
     private var action: String? = null
     private var generation = 0
     private val conversations = listOf(
@@ -72,6 +81,14 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                             applyInterfaceScale = true) {
                             density.set(LocalDensity.current)
+                            val insets = WindowInsets.safeDrawing.union(WindowInsets.ime)
+                            val layoutDirection = LocalLayoutDirection.current
+                            menuSafeInsets.set(Rect(
+                                insets.getLeft(LocalDensity.current, layoutDirection).toFloat(),
+                                insets.getTop(LocalDensity.current).toFloat(),
+                                insets.getRight(LocalDensity.current, layoutDirection).toFloat(),
+                                insets.getBottom(LocalDensity.current).toFloat(),
+                            ))
                             var visible by remember { mutableStateOf(initiallyVisible) }
                             var state by remember { mutableStateOf(ConversationPaneUiState(
                                 conversations = rows, selectedConversationId = "first", searchQuery = query,
@@ -469,6 +486,88 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             ui.onNodeWithText(text(R.string.action_rename)).performClick()
             assertEquals("rename:first", action)
             node("drawer-selection-count").assertTextEquals("已选择 1 项")
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testLongPressMenuFollowsTouchAfterScrollingAndReopeningWithinNarrowHost() {
+        val rows = (0 until 36).map { index ->
+            ConversationSummaryUi("touch-$index", "Touch chat $index", "", "",
+                mode = ConversationModeUi.Chat, isToday = true)
+        }
+        for (compact in listOf(false, true)) {
+            show(compact = compact, fontScale = 1.3f, rows = rows)
+            awaitNodeWindowFocus(node("drawer-host"))
+            dismissIme()
+            awaitImeFrame(node("drawer-host"), visible = false)
+            val host = bounds("drawer-host")
+            val insets = menuSafeInsets.get()
+            val safeHost = Rect(host.left + insets.left, host.top + insets.top,
+                host.right - insets.right, host.bottom - insets.bottom)
+            val margin = with(density.get()) { 9.dp.toPx() }
+            fun menuBounds(): Rect {
+                val menu = ui.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "会话菜单"),
+                    useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().layoutInfo.coordinates
+                assertTrue(menu.isAttached)
+                val origin = menu.positionInRoot()
+                return Rect(origin.x, origin.y, origin.x + menu.size.width, origin.y + menu.size.height)
+            }
+            fun assertPlacement(anchor: Rect, menu: Rect) {
+                val label = "compact=$compact anchor=$anchor menu=$menu safeHost=$safeHost"
+                assertTrue(label, menu.width > 0f && menu.height > 0f)
+                assertTrue(label, menu.left >= safeHost.left && menu.right <= safeHost.right &&
+                    menu.top >= safeHost.top && menu.bottom <= safeHost.bottom)
+                val expectedX = (anchor.right - menu.width).coerceIn(safeHost.left + margin,
+                    (safeHost.right - menu.width - margin).coerceAtLeast(safeHost.left + margin))
+                val fitsBelow = anchor.bottom + menu.height + margin <= safeHost.bottom
+                val wantedY = if (fitsBelow) anchor.bottom else anchor.top - menu.height
+                val expectedY = wantedY.coerceIn(safeHost.top + margin,
+                    (safeHost.bottom - menu.height - margin).coerceAtLeast(safeHost.top + margin))
+                assertEquals(label, expectedX, menu.left, 1.5f)
+                assertEquals(label, expectedY, menu.top, 1.5f)
+            }
+            fun dismissMenu() {
+                mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                ui.mainClock.advanceTimeBy(200)
+                ui.waitForIdle()
+                ui.onNodeWithText(text(R.string.action_rename)).assertDoesNotExist()
+            }
+            fun longPress(id: Int, xFraction: Float, yFraction: Float): Rect {
+                val tag = "drawer-conversation:touch-$id"
+                node(tag).assertIsDisplayed()
+                val before = bounds(tag)
+                val touch = Offset(before.left + before.width * xFraction, before.top + before.height * yFraction)
+                node(tag).performTouchInput { longClick(Offset(width * xFraction, height * yFraction)) }
+                node("drawer-conversation-menu:touch-$id").assertIsDisplayed()
+                ui.mainClock.advanceTimeBy(1000)
+                ui.waitForIdle()
+                val menu = menuBounds()
+                assertPlacement(Rect(touch, touch), menu)
+                assertEquals(before, bounds(tag))
+                assertNull(action)
+                for (resource in listOf(R.string.action_rename, R.string.conversation_pin,
+                    R.string.conversation_export, R.string.drawer_move_to_folder, R.string.action_delete)) {
+                    ui.onNodeWithText(text(resource)).assertIsDisplayed().assertHasClickAction()
+                }
+                dismissMenu()
+                return before
+            }
+            longPress(0, .2f, .25f)
+            node("drawer-list").performScrollToKey("touch-8")
+            val firstPosition = longPress(8, .9f, .75f)
+            node("drawer-list").performScrollToKey("touch-6")
+            val movedPosition = longPress(8, .9f, .25f)
+            assertTrue("Same row must move before reopening", kotlin.math.abs(firstPosition.top - movedPosition.top) > 1f)
+            node("drawer-list").performScrollToKey("touch-35")
+            longPress(35, .9f, .75f)
+            val row = bounds("drawer-conversation:touch-35")
+            node("drawer-conversation:touch-35").performSemanticsAction(SemanticsActions.OnLongClick) { assertTrue(it()) }
+            ui.mainClock.advanceTimeBy(1000)
+            ui.waitForIdle()
+            val accessibleMenu = menuBounds()
+            assertPlacement(row, accessibleMenu)
+            assertNull(action)
+            dismissMenu()
         }
         assertEquals(0, fixture.opens.get())
     }

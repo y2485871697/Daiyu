@@ -12,6 +12,8 @@ import androidx.compose.foundation.border
 import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,6 +69,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.dropShadow
@@ -891,7 +898,10 @@ private fun ConversationTextRow(
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showActionMenu by remember(managing) { mutableStateOf(false) }
+    var showActionMenu by remember(managing, conversation.id) { mutableStateOf(false) }
+    var rowCoordinates by remember(conversation.id) { mutableStateOf<LayoutCoordinates?>(null) }
+    var pressedPosition by remember(conversation.id) { mutableStateOf<Offset?>(null) }
+    var actionMenuAnchor by remember(conversation.id) { mutableStateOf<Rect?>(null) }
     val view = LocalView.current
     val rowSelected = if (managing) checked else selected
 
@@ -911,6 +921,20 @@ private fun ConversationTextRow(
                 .border(1.dp, if (selected) conversationPanePreviewPalette().selectionBorder else Color.Transparent,
                     RoundedCornerShape(DrawerMetrics.RowCornerRadius))
                 .testTag("drawer-conversation:${conversation.id}")
+                .onGloballyPositioned { rowCoordinates = it }
+                .pointerInput(conversation.id) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        pressedPosition = down.position
+                        try {
+                            do {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                            } while (event.changes.any { it.pressed })
+                        } finally {
+                            pressedPosition = null
+                        }
+                    }
+                }
                 .semantics {
                     if (managing) role = Role.Checkbox
                     this.selected = rowSelected
@@ -923,6 +947,10 @@ private fun ConversationTextRow(
                     },
                     onLongClick = {
                         TouchHaptics.longPress(view)
+                        actionMenuAnchor = rowCoordinates?.takeIf { it.isAttached }?.let { coordinates ->
+                            val point = pressedPosition?.let { coordinates.localToRoot(it) }
+                            if (point != null) Rect(point, point) else coordinates.boundsInRoot()
+                        }
                         showActionMenu = true
                     },
                 )
@@ -983,6 +1011,8 @@ private fun ConversationTextRow(
         DrawerGlassMenu(
             expanded = showActionMenu,
             onDismissRequest = { showActionMenu = false },
+            anchorBounds = actionMenuAnchor,
+            modifier = Modifier.testTag("drawer-conversation-menu:${conversation.id}"),
         ) {
             DropdownMenuItem(
                 modifier = DrawerMenuItemModifier,
@@ -1263,8 +1293,15 @@ private fun ConversationDrawerGroup.localizedLabel(): String = when (val value =
 }
 
 @Composable
-private fun DrawerGlassMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    ChatAnchoredMenu(expanded = expanded, onDismiss = onDismissRequest) {
+private fun DrawerGlassMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    anchorBounds: Rect? = null,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ChatAnchoredMenu(expanded = expanded, onDismiss = onDismissRequest,
+        anchorBounds = anchorBounds, modifier = modifier) {
         Column(content = content)
     }
 }

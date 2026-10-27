@@ -208,6 +208,7 @@ internal fun ChatAnchoredMenu(
     maxHeight: Dp? = 336.dp,
     offset: DpOffset = DpOffset.Zero,
     screenMargin: Dp = 9.dp,
+    anchorBounds: Rect? = null,
     content: @Composable () -> Unit,
 ) {
     val layer = LocalMenuLayer.current
@@ -215,6 +216,7 @@ internal fun ChatAnchoredMenu(
     val latestContent by rememberUpdatedState(content)
     val latestDismiss by rememberUpdatedState(onDismiss)
     val latestExpanded by rememberUpdatedState(expanded)
+    val latestAnchorBounds by rememberUpdatedState(anchorBounds)
     var mounted by remember { mutableStateOf(expanded) }
     LaunchedEffect(expanded) {
         if (expanded) mounted = true
@@ -227,7 +229,7 @@ internal fun ChatAnchoredMenu(
         anchor = coordinates.parentLayoutCoordinates?.boundsInRoot() ?: coordinates.boundsInRoot()
     })
     if ((expanded || mounted) && layer != null) {
-        val menu = remember(maxHeight, offset, screenMargin) { MenuOverlay({ latestExpanded }, { anchor }, { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin) { Box(modifier) { latestContent() } } }
+        val menu = remember(maxHeight, offset, screenMargin) { MenuOverlay({ latestExpanded }, { latestAnchorBounds ?: anchor }, { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin) { Box(modifier) { latestContent() } } }
         LaunchedEffect(layer, menu, expanded) {
             if (expanded) {
                 layer.active?.takeIf { it !== menu }?.onDismiss?.invoke()

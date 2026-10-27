@@ -16,9 +16,10 @@ import kotlinx.coroutines.withContext
 /** No history scan on text deltas: reload only actual receipts, history/model changes or a new owner. */
 @Composable
 internal fun rememberChatContextUsage(controller: ChatController, conversation: ConversationId?,
-    receiptRevision: Long, dataRevision: Long, modelRevision: Long, phase: ComposerPhase): CloudContextUsageUi {
-    var usage by remember(controller, conversation, dataRevision, modelRevision) { mutableStateOf(CloudContextUsageUi()) }
-    LaunchedEffect(controller, conversation, receiptRevision, dataRevision, modelRevision, phase) {
+    receiptRevision: Long, dataRevision: Long, modelRevision: Long, phase: ComposerPhase, ready: Boolean): CloudContextUsageUi {
+    var usage by remember(controller, conversation, dataRevision, modelRevision, ready) { mutableStateOf(CloudContextUsageUi()) }
+    LaunchedEffect(controller, conversation, receiptRevision, dataRevision, modelRevision, phase, ready) {
+        if (!ready) return@LaunchedEffect
         usage = withContext(Dispatchers.IO) {
             try { controller.cloudContextUsage(conversation) }
             catch (cancelled: CancellationException) { throw cancelled }

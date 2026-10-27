@@ -3723,7 +3723,8 @@ class ChatController internal constructor(private val application:Application,
             // GUI evidence is already frozen in preparedContext.messages; do not append it again.
             checkNotNull(runtimeStore).bindContextUsage(assistant, app.daiyu.android.ui.model.ContextUsageModel(
                 frozenProvider.editor.slotId, provider.model, frozenProvider.configurationRevision,
-                provider.contextWindowOverride?.toLong(), frozenProvider.editor.registryRevision))
+                provider.contextWindowOverride?.toLong(), frozenProvider.editor.registryRevision,
+                frozenProvider.contextReceiptIdentity))
             checkNotNull(runtimeStore).bindCompressionModel(assistant, preparedContext.frozen.summaryIdentity)
             val owned = ChatRunner(observedModel, database, tools,
                 RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics { event ->

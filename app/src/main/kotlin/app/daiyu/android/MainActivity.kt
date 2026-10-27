@@ -2331,7 +2331,7 @@ class MainActivity : ComponentActivity() {
                             }
                             val contextUsage = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage(
                                 controller, selected?.id, contextReceiptRevision, controller.dataRevision,
-                                contextModelRevision, chatState.composer.phase)
+                                contextModelRevision, chatState.composer.phase, ready = controller.ready)
                             BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
                                 val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
                                 Column(Modifier.fillMaxSize()) {

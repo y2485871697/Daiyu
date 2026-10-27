@@ -6,7 +6,24 @@ import java.util.Locale
 
 /** Non-secret identity of the configuration that actually sent the request. */
 internal data class ContextUsageModel(val provider: String, val model: String,
-    val configuration: Long, val windowTokens: Long?, val registryRevision: Long = 0)
+    val configuration: Long, val windowTokens: Long?, val registryRevision: Long = 0,
+    val receiptIdentity: String? = null) {
+    fun accepts(receipt: ContextUsageModel): Boolean = provider == receipt.provider && model == receipt.model &&
+        if (receipt.receiptIdentity != null) receiptIdentity == receipt.receiptIdentity
+        else configuration == receipt.configuration && registryRevision == receipt.registryRevision
+}
+
+/** Stable receipt scope; editor revisions remain separate admission/optimistic-lock tokens. */
+internal fun contextReceiptIdentity(providerIdentity: String, localIdentity: String, protocol: String,
+    endpoint: String, customBody: String): String {
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    listOf("daiyu-context-receipt-v1", providerIdentity, localIdentity, protocol, endpoint, customBody).forEach { value ->
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.size).array())
+        digest.update(bytes)
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
 
 internal data class CloudContextUsageUi(val inputTokens: Long? = null, val windowTokens: Long? = null) {
     val fraction: Float? get() = inputTokens?.takeIf { it >= 0 }?.let { input ->

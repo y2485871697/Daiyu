@@ -56,6 +56,36 @@ class CloudContextUsageStoreTest : InstrumentationTestCase() {
             }
         } finally { database.close(); context.deleteDatabase("conversations.db") }
     }
+    fun testFileReopenRestoresStableActualWithoutRelaxingLegacyOrInvalidation() {
+        val file = java.io.File(instrumentation.targetContext.cacheDir, "context-reopen-${UUID.randomUUID()}.db")
+        val scoped = model.copy(configuration = 52, registryRevision = 4, receiptIdentity = "a".repeat(64))
+        var db = SQLiteDatabase.openOrCreateDatabase(file, null)
+        try {
+            db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY)")
+            db.execSQL("INSERT INTO conversations VALUES('context-conversation')")
+            CloudContextUsageStore.installSchema(db)
+            transaction(db) { CloudContextUsageStore.record(db, checkpoint(input = 8_162), scoped) }
+            db.close()
+            db = SQLiteDatabase.openOrCreateDatabase(file, null)
+            val reopened = scoped.copy(configuration = 82, registryRevision = 9)
+            assertEquals(8_162L, CloudContextUsageStore.read(db, conversation, reopened).inputTokens)
+            assertNull(CloudContextUsageStore.read(db, conversation, reopened.copy(provider = "other")).inputTokens)
+            assertNull(CloudContextUsageStore.read(db, conversation, reopened.copy(model = "other")).inputTokens)
+            assertNull(CloudContextUsageStore.read(db, conversation, reopened.copy(receiptIdentity = "b".repeat(64))).inputTokens)
+            assertNull(CloudContextUsageStore.read(db, conversation, reopened.copy(receiptIdentity = null)).inputTokens)
+            transaction(db) { CloudContextUsageStore.invalidate(db, conversation) }
+            assertNull(CloudContextUsageStore.read(db, conversation, reopened).inputTokens)
+            transaction(db) { CloudContextUsageStore.record(db, checkpoint(input = 0), scoped) }
+            db.close()
+            db = SQLiteDatabase.openOrCreateDatabase(file, null)
+            assertEquals(0L, CloudContextUsageStore.read(db, conversation, reopened).inputTokens)
+            transaction(db) { CloudContextUsageStore.record(db, checkpoint(input = 40_000), model) }
+            db.close()
+            db = SQLiteDatabase.openOrCreateDatabase(file, null)
+            assertEquals(40_000L, CloudContextUsageStore.read(db, conversation, model).inputTokens)
+            assertNull(CloudContextUsageStore.read(db, conversation, model.copy(configuration = 2)).inputTokens)
+        } finally { db.close(); SQLiteDatabase.deleteDatabase(file) }
+    }
     fun testActualPersistsWhilePartialDecreasesAndModelChangesRemainScoped() = database().use { db ->
         transaction(db) { CloudContextUsageStore.record(db, checkpoint(), model) }
         assertEquals(40_000L, CloudContextUsageStore.read(db, conversation, model).inputTokens)

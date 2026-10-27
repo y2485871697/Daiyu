@@ -39,9 +39,41 @@ class ContextUsageWiringContractTest(unittest.TestCase):
     def test_restore_requires_actual_receipt_provenance_and_configuration(self):
         source = text('storage/CloudContextUsageStore.kt')
         for token in ('"cloud_actual"', '"version"', '"conversation"', '"epoch"', '"requestOwner"', '"requestId"',
-                      'it.model.provider == model.provider', 'it.model.model == model.model',
-                      'it.model.configuration == model.configuration', 'it.model.registryRevision == model.registryRevision'):
+                      'model.accepts(it.model)', '"identity"'):
             self.assertIn(token, source)
+        model = text('ui/model/CloudContextUsage.kt')
+        for token in ('provider == receipt.provider', 'model == receipt.model',
+                      'configuration == receipt.configuration', 'registryRevision == receipt.registryRevision',
+                      'receiptIdentity == receipt.receiptIdentity'):
+            self.assertIn(token, model)
+
+    def test_receipt_identity_is_frozen_at_send_and_rebuilt_from_read_only_model_scope(self):
+        repository = text('storage/ProviderRepository.kt')
+        self.assertIn('contextReceiptIdentity(store, metadata)', repository)
+        self.assertIn('contextReceiptIdentity(store, settings)', repository)
+        helper = repository.split('private fun contextReceiptIdentity(', 1)[1].split('fun isCurrentActive(', 1)[0]
+        for token in ('localModelCatalogSnapshot()', 'catalog.providerIdentity', 'record.settings.localIdentity',
+                      'settings.protocol.wireName', 'settings.requestEndpoint()', 'settings.requestOptions.customBody'):
+            self.assertIn(token, helper)
+        for forbidden in ('apiKey', 'loadForRun', 'loadForEditing', '.save(', 'configurationChange'):
+            self.assertNotIn(forbidden, helper)
+        binding = text('ChatController.kt').split('bindContextUsage(assistant,', 1)[1].split('val owned = ChatRunner', 1)[0]
+        self.assertIn('frozenProvider.contextReceiptIdentity', binding)
+        self.assertIn('revision == frozen.configurationRevision', repository)
+        self.assertIn('state.revision == editor.registryRevision', repository)
+
+    def test_recovery_read_is_rearmed_by_ready_without_polling_or_writes(self):
+        helper = text('ui/screens/chat/conversation/ChatContextUsage.kt')
+        self.assertIn('phase: ComposerPhase, ready: Boolean', helper)
+        self.assertIn('phase, ready)', helper)
+        self.assertIn('if (!ready) return@LaunchedEffect', helper)
+        self.assertIn('ready = controller.ready', text('MainActivity.kt'))
+        for forbidden in ('delay(', '.save(', 'while (', 'NonCancellable'):
+            self.assertNotIn(forbidden, helper)
+        self.assertIn('testFileReopenRestoresStableActualWithoutRelaxingLegacyOrInvalidation',
+            (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/storage/CloudContextUsageStoreTest.kt').read_text())
+        self.assertIn('testReadyTransitionAndRemountReadSavedActualWithoutANewRequest',
+            (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatContextUsageRestoreTest.kt').read_text())
 
     def test_history_edits_and_successful_summary_revoke_in_the_write_transaction(self):
         service = text('context/ContextService.kt')

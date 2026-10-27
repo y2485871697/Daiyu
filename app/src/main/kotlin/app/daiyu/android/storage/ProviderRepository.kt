@@ -7,7 +7,8 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 internal data class ProviderEditorSlot(val slotId: String, val registryRevision: Long)
-internal data class ProviderRunConfiguration(val editor: ProviderEditorSlot, val settings: ModelSettings, val configurationRevision: Long = -1)
+internal data class ProviderRunConfiguration(val editor: ProviderEditorSlot, val settings: ModelSettings, val configurationRevision: Long = -1,
+    val contextReceiptIdentity: String? = null)
 
 /** Fixed-slot access over the existing credential and catalog stores.
  * Worker lock order is registry -> catalog -> settings. Never do network IO or acquire the
@@ -169,7 +170,8 @@ internal class ProviderRepository(
             val metadata = store.summaryRequestMetadata()
             check(metadata.model.isNotBlank())
             val window = store.modelCatalog.readRegisteredModel(metadata.model)?.settings?.contextWindowOverride
-            app.daiyu.android.ui.model.ContextUsageModel(id, metadata.model, revision, window?.toLong(), state.revision)
+            app.daiyu.android.ui.model.ContextUsageModel(id, metadata.model, revision, window?.toLong(), state.revision,
+                contextReceiptIdentity(store, metadata))
         }
     }
     fun freezeActive(): ProviderRunConfiguration = registry.access { state ->
@@ -177,8 +179,17 @@ internal class ProviderRepository(
         check(requireProvider(state, id).enabled) { "提供商未启用" }
         val store = resolveStore(id)
         store.modelCatalog.readConfiguration { revision ->
-            ProviderRunConfiguration(ProviderEditorSlot(id, state.revision), store.loadForRun().also { it.validate() }.copy(usageIdentity = app.daiyu.android.model.UsageModelIdentity(id, requireProvider(state, id).name)), revision)
+            val settings = store.loadForRun().also { it.validate() }
+            ProviderRunConfiguration(ProviderEditorSlot(id, state.revision), settings.copy(
+                usageIdentity = app.daiyu.android.model.UsageModelIdentity(id, requireProvider(state, id).name)), revision,
+                contextReceiptIdentity(store, settings))
         }
+    }
+    private fun contextReceiptIdentity(store: ModelSettingsStore, settings: ModelSettings): String? {
+        val catalog = store.localModelCatalogSnapshot() ?: return null
+        val record = catalog.models.singleOrNull { it.id == settings.model } ?: return null
+        return app.daiyu.android.ui.model.contextReceiptIdentity(catalog.providerIdentity,
+            record.settings.localIdentity, settings.protocol.wireName, settings.requestEndpoint(), settings.requestOptions.customBody)
     }
     fun isCurrentActive(frozen: ProviderRunConfiguration): Boolean = try {
         registry.access { state ->

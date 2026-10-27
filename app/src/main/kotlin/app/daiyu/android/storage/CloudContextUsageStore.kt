@@ -22,8 +22,7 @@ internal object CloudContextUsageStore {
 
     fun read(db: SQLiteDatabase, conversation: ConversationId, model: ContextUsageModel): CloudContextUsageUi {
         val state = load(db, conversation)
-        val receipt = state.receipt?.takeIf { it.epoch == state.epoch && it.model.provider == model.provider && it.model.model == model.model &&
-            it.model.configuration == model.configuration && it.model.registryRevision == model.registryRevision }
+        val receipt = state.receipt?.takeIf { it.epoch == state.epoch && model.accepts(it.model) }
         return CloudContextUsageUi(receipt?.input, model.windowTokens)
     }
 
@@ -69,7 +68,10 @@ internal object CloudContextUsageStore {
             val epoch = json.getLong("epoch").also { require(it >= 0) }
             val receipt = if (json.isNull("receipt")) null else json.getJSONObject("receipt").let { r ->
                 val model = ContextUsageModel(r.getString("provider"), r.getString("model"),
-                    r.getLong("configuration"), if (r.isNull("window")) null else r.getLong("window"), r.getLong("registry"))
+                    r.getLong("configuration"), if (r.isNull("window")) null else r.getLong("window"), r.getLong("registry"),
+                    if (!r.has("identity") || r.isNull("identity")) null else r.getString("identity").also {
+                        require(it.matches(Regex("[0-9a-f]{64}")))
+                    })
                 require(model.provider.isNotBlank() && model.model.isNotBlank() && model.configuration >= 0 &&
                     (model.windowTokens == null || model.windowTokens > 0))
                 Receipt(model, r.getLong("epoch"), r.getLong("input"), r.getString("requestOwner"), r.getString("requestId")).also {
@@ -86,6 +88,7 @@ internal object CloudContextUsageStore {
         val receipt = state.receipt?.let { r -> JSONObject().put("provider", r.model.provider)
             .put("model", r.model.model).put("configuration", r.model.configuration)
             .put("window", r.model.windowTokens ?: JSONObject.NULL).put("registry", r.model.registryRevision)
+            .put("identity", r.model.receiptIdentity ?: JSONObject.NULL)
             .put("epoch", r.epoch).put("input", r.input).put("requestOwner", r.requestOwner).put("requestId", r.requestId) }
         val json = JSONObject().put("version", 1).put("source", "cloud_actual")
             .put("conversation", conversation.value).put("epoch", state.epoch).put("run", state.run)

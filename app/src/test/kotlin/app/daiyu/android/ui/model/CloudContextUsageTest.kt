@@ -44,4 +44,37 @@ class CloudContextUsageTest {
         assertNull(acceptedContextInput(ModelEvent.Usage(120, 0, 101), 100))
         assertEquals(130L, acceptedContextInput(ModelEvent.Usage(130, 0), 100))
     }
+    @Test fun stableReceiptSurvivesEditorAndRegistryRevisionsButNotAnotherAccountOrModel() {
+        val identity = contextReceiptIdentity("account", "local-model", "responses", "https://example.test/v1/responses", "")
+        val sent = ContextUsageModel("provider", "model", 52, 272_000, 4, identity)
+        val reopened = sent.copy(configuration = 82, registryRevision = 9)
+        assertTrue(reopened.accepts(sent))
+        assertFalse(reopened.copy(provider = "other").accepts(sent))
+        assertFalse(reopened.copy(model = "other").accepts(sent))
+        assertFalse(reopened.copy(receiptIdentity = contextReceiptIdentity("replacement", "local-model", "responses",
+            "https://example.test/v1/responses", "")).accepts(sent))
+        assertFalse(reopened.copy(receiptIdentity = null).accepts(sent))
+    }
+    @Test fun legacyReceiptStillRequiresTheExactSavedConfiguration() {
+        val legacy = ContextUsageModel("provider", "model", 52, 272_000, 4)
+        assertTrue(legacy.accepts(legacy))
+        assertTrue(legacy.copy(receiptIdentity = "a".repeat(64)).accepts(legacy))
+        assertFalse(legacy.copy(configuration = 82).accepts(legacy))
+        assertFalse(legacy.copy(registryRevision = 5).accepts(legacy))
+        assertFalse(legacy.copy(provider = "other").accepts(legacy))
+        assertFalse(legacy.copy(model = "other").accepts(legacy))
+    }
+    @Test fun receiptScopeIsStableAndSeparatesAccountRecordProtocolEndpointAndCustomBody() {
+        val identity = contextReceiptIdentity("account", "record", "responses", "https://example.test/responses", "")
+        assertEquals(identity, contextReceiptIdentity("account", "record", "responses", "https://example.test/responses", ""))
+        assertTrue(identity.matches(Regex("[0-9a-f]{64}")))
+        assertNotEquals(identity, contextReceiptIdentity("new-account", "record", "responses", "https://example.test/responses", ""))
+        assertNotEquals(identity, contextReceiptIdentity("account", "new-record", "responses", "https://example.test/responses", ""))
+        assertNotEquals(identity, contextReceiptIdentity("account", "record", "messages", "https://example.test/responses", ""))
+        assertNotEquals(identity, contextReceiptIdentity("account", "record", "responses", "https://other.test/responses", ""))
+        assertNotEquals(identity, contextReceiptIdentity("account", "record", "responses", "https://example.test/responses", "{}"))
+        assertNotEquals(contextReceiptIdentity("ab", "c", "responses", "https://example.test", ""),
+            contextReceiptIdentity("a", "bc", "responses", "https://example.test", ""))
+    }
+
 }

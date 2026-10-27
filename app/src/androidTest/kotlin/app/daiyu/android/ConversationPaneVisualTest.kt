@@ -39,6 +39,10 @@ import app.daiyu.android.ui.model.ConversationFolderUi
 import app.daiyu.android.ui.model.ConversationModeUi
 import app.daiyu.android.ui.model.ConversationPaneUiState
 import app.daiyu.android.ui.model.ConversationSummaryUi
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.concurrent.atomic.AtomicReference
 
 class ConversationPaneVisualTest : WiredActivityTestCase() {
@@ -171,6 +175,41 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         assertEquals(size, input.style.fontSize)
         assertEquals(lineHeight, input.style.lineHeight)
         assertEquals(.9f, input.density.fontScale, .001f)
+    }
+
+    fun testDrawerGroupsDifferentTimesUnderOneLocalDateAndFiltersEmptyDays() {
+        val date = LocalDate.of(2026, 10, 26)
+        val previous = date.minusDays(1)
+        val zone = ZoneId.systemDefault()
+        val rows = listOf(
+            ConversationSummaryUi("day-new", "match new", "", "2026/10/26 20:34",
+                updatedAtMillis = date.atTime(20, 34).atZone(zone).toInstant().toEpochMilli(), mode = ConversationModeUi.Chat),
+            ConversationSummaryUi("day-old", "match old", "", "2026/10/26 08:14",
+                updatedAtMillis = date.atTime(8, 14).atZone(zone).toInstant().toEpochMilli(), mode = ConversationModeUi.Chat),
+            ConversationSummaryUi("previous-day", "other", "", "2026/10/25 22:10",
+                updatedAtMillis = previous.atTime(22, 10).atZone(zone).toInstant().toEpochMilli(), mode = ConversationModeUi.Chat),
+        )
+        val heading = "drawer-heading:section-Dated(date=$date)"
+        val olderHeading = "drawer-heading:section-Dated(date=$previous)"
+        for (dark in listOf(false, true)) {
+            show(dark = dark, rows = rows)
+            ui.onAllNodesWithTag(heading, useUnmergedTree = true).assertCountEquals(1)
+            node(heading).assertIsDisplayed().assertTextEquals(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)))
+            assertTrue(bounds(heading).bottom <= bounds("drawer-conversation:day-new").top)
+            assertTrue(bounds("drawer-conversation:day-new").bottom <= bounds("drawer-conversation:day-old").top)
+            assertTrue(bounds("drawer-conversation:day-old").bottom <= bounds(olderHeading).top)
+            node("drawer-conversation:previous-day").assertIsDisplayed()
+            rows.forEach { ui.onNodeWithText(it.timeLabel).assertDoesNotExist() }
+            node("drawer-conversation:day-old").performClick()
+            assertEquals("conversation:day-old", action)
+            show(dark = dark, rows = rows, query = "match")
+            ui.onAllNodesWithTag(heading, useUnmergedTree = true).assertCountEquals(1)
+            node("drawer-conversation:day-new").assertIsDisplayed()
+            node("drawer-conversation:day-old").assertIsDisplayed()
+            node(olderHeading).assertDoesNotExist()
+            node("drawer-conversation:previous-day").assertDoesNotExist()
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testEmptyAndSearchMessagesRequireACompletedSnapshot() {

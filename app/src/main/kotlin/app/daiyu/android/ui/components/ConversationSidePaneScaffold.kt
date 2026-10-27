@@ -1256,40 +1256,11 @@ private fun DrawerState.applyEtaDrawerMotion() {
     DrawerMotionSetters.apply(this)
 }
 
-internal data class ConversationDrawerGroup(
-    val section: ConversationDrawerSection,
-    val items: List<ConversationSummaryUi>,
-) {
-    val key: String get() = "section-$section"
-}
-
-internal sealed interface ConversationDrawerSection {
-    data object Pinned : ConversationDrawerSection
-    data object Today : ConversationDrawerSection
-    data class Dated(val label: String) : ConversationDrawerSection
-}
-
 @Composable
 private fun ConversationDrawerGroup.localizedLabel(): String = when (val value = section) {
     ConversationDrawerSection.Pinned -> stringResource(R.string.conversation_section_pinned)
     ConversationDrawerSection.Today -> stringResource(R.string.conversation_section_today)
     is ConversationDrawerSection.Dated -> value.label
-}
-
-internal fun List<ConversationSummaryUi>.groupForDrawer(): List<ConversationDrawerGroup> {
-    // A cached label or a differently ordered input can put the same section in disjoint
-    // runs. Merge all of them, keeping the first section occurrence and row order stable.
-    val groups = linkedMapOf<ConversationDrawerSection, MutableList<ConversationSummaryUi>>()
-    for (conversation in this) {
-        groups.getOrPut(conversation.drawerSection()) { mutableListOf() } += conversation
-    }
-    return groups.map { (section, items) -> ConversationDrawerGroup(section, items.toList()) }
-}
-
-private fun ConversationSummaryUi.drawerSection(): ConversationDrawerSection = when {
-    isPinned -> ConversationDrawerSection.Pinned
-    isToday -> ConversationDrawerSection.Today
-    else -> ConversationDrawerSection.Dated(timeLabel)
 }
 
 @Composable

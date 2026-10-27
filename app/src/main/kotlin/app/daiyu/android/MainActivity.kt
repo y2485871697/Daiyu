@@ -1858,11 +1858,13 @@ class MainActivity : ComponentActivity() {
                     contentKey = when (retainedPage) {
                         "assistant-edit" -> assistantEditReturnPage
                         "context-management" -> "chat"
+                        "history-search" -> "chat"
+                        "browser" -> "chat"
                         else -> retainedPage
                     },
                     captureFromContent = retainedPage == "chat" && !sidebarVisible,
                     animateBackEnabled = retainedPage != "assistant-edit" && retainedPage != "history-search" &&
-                        retainedPage != "context-management",
+                        retainedPage != "context-management" && retainedPage != "browser",
                     canNavigateBack = retainedPage != "chat",
                     swipeDismissEnabled = appearance.swipeDismissEnabled,
                     predictiveBackEnabled = appearance.predictiveBackEnabled,

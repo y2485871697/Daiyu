@@ -747,6 +747,83 @@ class MainActivity : ComponentActivity() {
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         imageHost.picked(uris)
     }
+    private class ComposerShortcutPick(
+        val trigger: app.daiyu.android.ui.screens.chat.conversation.ComposerShortcut,
+        val text: String, val owner: ChatController.TextSendOwner,
+    ) {
+        var choices by mutableStateOf<List<app.daiyu.android.ui.screens.chat.conversation.ComposerShortcutChoice>?>(null)
+        var error by mutableStateOf<String?>(null)
+    }
+    private var composerShortcutPick by mutableStateOf<ComposerShortcutPick?>(null)
+    private fun composerShortcutAvailable() = activityUsable() && selectionReady && retainedPage == "chat" &&
+        !sidebarVisible && controller.ready && !controller.dataBusy && chatState.composer.enabled &&
+        pendingTextSend == null && controller.textSendState() == null && !imageHost.sending && !videoSending &&
+        !shizukuWritesBlocked && terminalEditor == null && virtualDisplayEditor == null && guiEditor == null
+    private fun shortcutPickCurrent(pick: ComposerShortcutPick) = composerShortcutPick === pick &&
+        composerShortcutAvailable() && voiceForeground && generationResumed() &&
+        selected?.id == pick.owner.conversationId && editorGeneration == pick.owner.editorGeneration &&
+        draftRevision == pick.owner.draftRevision && draft == pick.text
+
+    private fun openComposerShortcut(trigger: app.daiyu.android.ui.screens.chat.conversation.ComposerShortcut, expected: String) {
+        if (!composerShortcutAvailable() || !voiceForeground || !generationResumed() || draft != expected) return
+        val pick = ComposerShortcutPick(trigger, expected,
+            ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision))
+        composerShortcutPick = pick
+        lifecycleScope.launch {
+            try {
+                val choices = withContext(Dispatchers.IO) {
+                    if (trigger.kind == app.daiyu.android.ui.screens.chat.conversation.ComposerShortcutKind.CONVERSATION) {
+                        val attached = app.daiyu.android.references.PromptReferences.conversations(listOf(expected)).map { it.id }.toSet()
+                        controller.database.readableDatabase.rawQuery(
+                            "SELECT id,title FROM conversations ORDER BY updated DESC,id", null).use { cursor ->
+                            buildList {
+                                while (cursor.moveToNext()) {
+                                    val id = cursor.getString(0)
+                                    if (id != pick.owner.conversationId?.value && id !in attached)
+                                        add(app.daiyu.android.ui.screens.chat.conversation.ComposerShortcutChoice(id,
+                                            cursor.getString(1).ifBlank { "新会话" }))
+                                }
+                            }
+                        }
+                    } else {
+                        val state = controller.skillManagement().snapshot()
+                        val selected = app.daiyu.android.references.PromptReferences.skillIds(expected)
+                        val assistantId = pick.owner.conversationId?.let { controller.database.assistantId(it) }
+                            ?: assistantStore.selectedId.value
+                        val enabled = assistantStore.read(assistantId)?.enabledSkillIds.orEmpty().toSet()
+                        if (!state.enabled) emptyList() else state.entries.filter {
+                            it.skill.enabled && it.id !in selected && (it.id in enabled || it.skill.name in enabled)
+                        }
+                            .map { app.daiyu.android.ui.screens.chat.conversation.ComposerShortcutChoice(
+                                it.id, it.skill.name, it.skill.description) }
+                    }
+                }
+                if (shortcutPickCurrent(pick)) pick.choices = choices
+            } catch (_: Exception) { if (shortcutPickCurrent(pick)) pick.error = "读取失败，请重新选择" }
+        }
+    }
+    private fun chooseComposerShortcut(pick: ComposerShortcutPick,
+        choice: app.daiyu.android.ui.screens.chat.conversation.ComposerShortcutChoice) {
+        if (!shortcutPickCurrent(pick) || pick.choices?.none { it.id == choice.id } != false) return
+        val projection = ComposerReferences(pick.text)
+        val trigger = pick.trigger
+        if (trigger.start !in 0..trigger.end || trigger.end > projection.text.length) return
+        val conversation = trigger.kind == app.daiyu.android.ui.screens.chat.conversation.ComposerShortcutKind.CONVERSATION
+        if (conversation && projection.references.count { it.kind == "会话" } >= 16) { toast("最多引用16个会话"); return }
+        val replacement = if (conversation) "" else "/skill:${choice.id} "
+        val body = projection.text.replaceRange(trigger.start, trigger.end, replacement)
+        var next = projection.edit(body)
+        if (conversation) next = next + (if (next.isEmpty()) "" else "\n") +
+            app.daiyu.android.references.PromptReferences.encode(choice.id, choice.title)
+        composerShortcutPick = null
+        updateDraft(next)
+        if (draft == next) {
+            selectionStart = ComposerReferences(next).toSource(trigger.start + replacement.length)
+            selectionEnd = selectionStart
+            publishChat(rowsChanged = false)
+        }
+    }
+
     private class ChatReferencePick(val tree: Boolean, val owner: ChatController.TextSendOwner, val text: String) {
         var live = true
         var firstPickerHop = true
@@ -778,6 +855,7 @@ class MainActivity : ComponentActivity() {
     private fun chatReferenceMatches(request: ChatReferencePick) =
         request.owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) && request.text == draft
     private fun revokeChatReferencePick() {
+        composerShortcutPick = null
         val request = chatReferencePick ?: return
         request.live = false; request.uri = null
         // Keep an unreturned slot reserved so its ActivityResult cannot enter a newer request.
@@ -2430,8 +2508,14 @@ class MainActivity : ComponentActivity() {
                         onSelectOtherProvider = { providerId, ticket -> selectChatModel(ticket, owner, session, providerId) },
                         onDismiss = dismiss)
                 }
+                composerShortcutPick?.let { pick ->
+                    app.daiyu.android.ui.screens.chat.conversation.ComposerShortcutPicker(
+                        pick.trigger.kind, pick.trigger.query, pick.choices, pick.error,
+                        onChoose = { chooseComposerShortcut(pick, it) },
+                        onDismiss = { if (composerShortcutPick === pick) composerShortcutPick = null })
+                }
                 assistantSelectionOwner?.let { owner -> key(owner) {
-                    AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
+                AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
                         selectedId = owner.expectedAssistantId, useGlobalSelection = false,
                         editing = retainedPage == "assistant-edit",
                         canMutate = { assistantOwnerMatches(owner) && !controller.dataBusy },
@@ -2637,6 +2721,10 @@ class MainActivity : ComponentActivity() {
         val renderedSpeedConversation = selected?.id?.value
         return ChatScreenActions(
         onOpenWorkspace = { if (currentChat()) openConversationWorkspace() },
+        onReferenceShortcut = { trigger, expected ->
+            if (editorMatches() && chatState.composer.enabled && draft == expected)
+                openComposerShortcut(trigger, expected)
+        },
         onCycleGptSpeed = { cycleChatGptSpeed(renderedSpeed, renderedSpeedConversation) },
         onVisibleCompleted = completionReadAction(),
         onVisibleTextAdvance = { key ->
@@ -5108,6 +5196,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
+        composerShortcutPick = null
         closeBrowserVisualVisit(clearTarget = false)
         if (chatReferencePick?.pickerAway != true) revokeChatReferencePick()
         revokePlatformActionVisit()

@@ -1,12 +1,14 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import java.net.URLDecoder
+import app.daiyu.android.references.PromptReferences
 
 /** Presentation of the existing literal-reference draft format. Does not resolve or read a URI. */
 internal class ComposerReferences(val source: String, composing: IntRange? = null) {
     data class Reference(val line: Int, val kind: String, val value: String, val serialized: String,
         val details: String? = null) {
         val label: String get() {
+            if (kind == "会话") return PromptReferences.conversation(serialized)?.title?.ifBlank { "会话" } ?: "会话"
             details?.let { return it.substringBefore('；').take(200) }
             val tail = value.trimEnd('/').substringAfterLast('/').substringAfterLast('\\')
             val decoded = runCatching { URLDecoder.decode(tail.replace("+", "%2B"), "UTF-8") }.getOrDefault(tail)
@@ -21,6 +23,8 @@ internal class ComposerReferences(val source: String, composing: IntRange? = nul
         parsedOffset += line.length + 1
         if (composing != null && !composing.isEmpty() && composing.first < start + line.length && composing.last >= start)
             return@mapIndexedNotNull null
+        val conversation = PromptReferences.conversation(line)
+        if (conversation != null) return@mapIndexedNotNull Reference(index, "会话", conversation.id, line)
         val kind = listOf("文件", "目录", "路径").firstOrNull { line.startsWith("${it}引用（未读取）：") }
             ?: return@mapIndexedNotNull null
         val value = line.substringAfter('：')

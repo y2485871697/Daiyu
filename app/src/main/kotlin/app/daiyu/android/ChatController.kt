@@ -3563,9 +3563,12 @@ class ChatController internal constructor(private val application:Application,
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null
         val prepared = try {
+            val referenceTexts = user.blocks.filterIsInstance<MessageBlock.Text>().map { it.text }
+            val referenceReader = app.daiyu.android.references.ConversationReferenceReader(database,
+                application.filesDir, app.daiyu.android.references.PromptReferences.conversations(referenceTexts), conversationId)
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
-                run, preparedContext.archiveId)
+                run, preparedContext.archiveId) + referenceReader.tools()
             val childTaskAccess = app.daiyu.android.integration.tools.RunChildTaskAccess(conversationId.value,
                 records = { childTasks(conversationId) },
                 source = { owner -> checkNotNull(childSupervisor).source(owner) },
@@ -3630,7 +3633,7 @@ class ChatController internal constructor(private val application:Application,
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
                 backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope,
-                workspacePin = workspace,
+                workspacePin = workspace, referenceReader = referenceReader,
                 platformAction=platformAction?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
                     grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->

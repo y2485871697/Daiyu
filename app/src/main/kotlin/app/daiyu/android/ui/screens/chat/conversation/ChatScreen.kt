@@ -37,6 +37,7 @@ data class ChatScreenActions(
     val onSupplement: (String) -> Unit = {},
     val onTextChange: (String) -> Unit = {},
     val onSelectionChange: (Int, Int) -> Unit = { _, _ -> },
+    val onReferenceShortcut: (ComposerShortcut, String) -> Unit = { _, _ -> },
     val onProjectedDraftEdit: ((String, String, Int, Int) -> Boolean)? = null,
     val onControlPress: () -> Unit = {},
     val onControlRelease: () -> Unit = {},

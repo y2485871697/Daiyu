@@ -233,6 +233,13 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     if (accepted) {
                                         composingSource = rawComposition?.let { next to it }
                                         editingValue = TextFieldValue(projected.text, selection, composition)
+                                        if (selection.collapsed) {
+                                            ComposerShortcut.afterEdit(references.text, projected.text, selection.start,
+                                                composition != null,
+                                                renderedValue.composition != null && composition == null)?.let {
+                                                actions.onReferenceShortcut(it, next)
+                                            }
+                                        }
                                     }
                                 }
                             },
@@ -243,7 +250,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             cursorBrush = SolidColor(if (WindowInsets.isImeVisible) chrome.accent else Color.Unspecified),
                             decorationBox = { inner ->
                                 Box {
-                                    if (references.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
+                                    if (references.text.isEmpty()) Text("给代鱼发消息，或使用 @ 和 / 引用", color = chrome.muted,
                                         style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 24.sp))
                                     inner()
                                 }

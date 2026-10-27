@@ -72,6 +72,7 @@ internal class RunCatalogTools(
     private val commandFactory: ((RunExecutionOwner, TaskAuthorization) -> RunCommandTools)? = null,
     private val childTaskAccess: RunChildTaskAccess? = null,
     private val workspacePin: AutoCloseable? = null,
+    private val referenceReader: app.daiyu.android.references.ConversationReferenceReader? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -435,7 +436,7 @@ internal class RunCatalogTools(
             generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
             // R08 close is revocation only. Never synthesize a release/shutdown operation.
-            claimStops(listOfNotNull(mcp, gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, commands, shizuku, platformAction, background, children, deviceResources, skills))
+            claimStops(listOfNotNull(mcp, gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, commands, shizuku, platformAction, background, children, deviceResources, skills, referenceReader))
         }
         browser?.revoke()
         stopClaimed(resources)

@@ -28,7 +28,7 @@ internal fun ComposerReferenceChips(references: List<ComposerReferences.Referenc
                 .background(colors.accent.copy(alpha = .08f), RoundedCornerShape(10.dp))
                 .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Icon(if (reference.kind == "目录") DaiyuIcons.Folder else DaiyuIcons.File,
+                Icon(when (reference.kind) { "目录" -> DaiyuIcons.Folder; "会话" -> DaiyuIcons.Context; else -> DaiyuIcons.File },
                     null, Modifier.size(14.dp), tint = colors.accent)
                 Text("${reference.kind} · ${reference.label}", Modifier.weight(1f, fill = false),
                     fontSize = 10.sp, lineHeight = 14.sp, color = colors.text,

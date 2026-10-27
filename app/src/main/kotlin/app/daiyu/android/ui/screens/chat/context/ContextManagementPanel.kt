@@ -26,6 +26,7 @@ internal fun ContextManagementRoute(
 ) {
     val state by adapter.state.collectAsState()
     LaunchedEffect(adapter) { adapter.refresh() }
+    LaunchedEffect(state.compressionAccepted) { if (state.compressionAccepted) onClose() }
     DisposableEffect(adapter) { onDispose { adapter.close() } }
     val dismiss = { adapter.close(); onClose() }
     val initial = remember(adapter, state.snapshot?.savedConfiguration) {
@@ -61,19 +62,21 @@ internal fun ContextManagementRoute(
                         ProviderCatalogRunTarget(choice.provider, choice.selection.providerIdentity,
                             choice.selection.expectedRevision, choice.selection.record.settings.localIdentity,
                             choice.selection.record.id, choice.protocol))
-                if (draft.customModel && binding == null) notice = "请先选择压缩模型"
-                else if (draft.customModel && choice == null && binding?.let(CatalogSummaryBindings::decode) == null)
-                    adapter.requestCompression()
-                else if (!adapter.selectCompression(ContextManagementSelection(binding, draft.protocol)))
-                    notice = "当前不可准备压缩，请刷新后重试"
+                when {
+                    state.snapshot?.configuration?.contextWindowTokens == null -> notice = "请先在模型目录设置上下文窗口"
+                    draft.customModel && binding == null -> notice = "请先选择压缩模型"
+                    else -> {
+                        val selection = if (draft.customModel && choice == null &&
+                            binding?.let(CatalogSummaryBindings::decode) == null) null
+                            else ContextManagementSelection(binding, draft.protocol)
+                        if (!adapter.submitCompression(selection)) notice = "当前不可准备压缩，请刷新后重试"
+                    }
+                }
             }, enabled = state.operation == null && !state.confirmingCompression,
             notice = notice ?: state.notice, requiresRefresh = state.requiresRefresh,
             onRefresh = {
                 adapter.dismissCompression(); picked = null; draft = initial; notice = null; adapter.refresh()
             },
-            operation = state.operation, cancellationRequested = state.cancellationRequested,
-            confirmation = state.snapshot?.takeIf { state.confirmingCompression },
-            onStart = adapter::confirmCompression, onEditSelection = adapter::dismissCompression,
-            onCancelOperation = adapter::cancel)
+            operation = state.operation)
     }
 }

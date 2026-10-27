@@ -29,7 +29,7 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('timelineExecutor.execute', persist)
         self.assertIn('timelineWriters++', persist)
         self.assertIn('timelineWriters--', persist)
-        self.assertIn('timelineWriters!=0 || closingStorage', controller)
+        self.assertIn('timelineWriters!=0 || contextManagementReaders!=0 || closingStorage', controller)
         self.assertIn('timelineExecutor.shutdown()', controller)
         callback = controller.split('RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics', 1)[1].split('runtimeStore=checkNotNull', 1)[0]
         self.assertNotIn('handler.post', callback)
@@ -52,12 +52,12 @@ class ChatTimelineContractTest(unittest.TestCase):
 
     def test_stable_compression_item_preserves_message_indices_and_extends_tail(self):
         listing = source('ui/screens/chat/conversation/ChatMessageList.kt')
-        self.assertIn('item(key = "chat-context-compressing"', listing)
-        self.assertIn('turns.lastIndex + if (compressionVisible) 1 else 0', listing)
+        self.assertIn('item(key = "chat-context-compressing:${activity.id}"', listing)
+        self.assertIn('turns.lastIndex + liveCompressions.size', listing)
         self.assertIn('val index = currentTailIndex', listing)
         self.assertIn('fadeInSpec = androidx.compose.animation.core.tween(180)', listing)
         divider = source('ui/screens/chat/conversation/ChatTimelineDivider.kt')
-        self.assertIn('entry.messages <= 0) return', divider)
+        self.assertIn('entry.messages <= 0 && entry.failure == null) return', divider)
         self.assertIn('indication = null', divider)
 
     def test_backup_v7_validates_display_payload_and_authoritative_anchor(self):
@@ -67,7 +67,7 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('spool.write(8, payload)', backup)
         self.assertIn('require(entry.anchor.listKey in anchors)', backup)
         codec = source('timeline/ChatTimelineStore.kt')
-        self.assertIn('row.keys().asSequence().toSet() == common + detail', codec)
+        self.assertIn('keys == common + detail', codec)
         self.assertIn('setOf("provider", "model", "protocol")', codec)
         self.assertIn('require(it in 0..50000)', codec)
 

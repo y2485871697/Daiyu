@@ -20,6 +20,9 @@ import javax.net.ssl.HttpsURLConnection
 
 /** Real model serialization/stream parsing against offline HTTPS fixtures; no provider/network. */
 class ProviderSummaryModelTest {
+    private fun checkpointText() = SummaryCheckpoint.marker + "\n" +
+        SummaryCheckpoint.sections.joinToString("\n") { "## $it\n- fact" }
+
     private val binding = SummaryModelBinding("explicit-summary-provider", "summary-wire-model")
     private val protocols = listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)
     private fun configuration(protocol: ProviderProtocol, custom: String = ""): SummaryProviderConfiguration {
@@ -43,14 +46,14 @@ class ProviderSummaryModelTest {
         fun chunk(delta: JSONObject, finish: Any) = "data: " + JSONObject().put("id", "chat-summary")
             .put("choices", JSONArray().put(JSONObject().put("index", 0).put("delta", delta)
                 .put("finish_reason", finish))) + "\n\n"
-        return chunk(JSONObject().put("role", "assistant").put("content", "最终事实摘要"), JSONObject.NULL) +
+        return chunk(JSONObject().put("role", "assistant").put("content", checkpointText()), JSONObject.NULL) +
             chunk(JSONObject(), reason) + if (done) "data: [DONE]\n\n" else ""
     }
 
     @Test fun chatCompletionsSummaryUsesNativeSystemAndBoundedToolFreeSingleRequest() {
         val config = configuration(ProviderProtocol.CHAT_COMPLETIONS)
         val wire = Connection(chatSummary())
-        assertEquals("最终事实摘要", summarize(config, wire))
+        assertEquals(checkpointText(), summarize(config, wire))
         assertEquals(1, wire.posts)
         val body = wire.json()
         assertEquals(binding.modelId, body.getString("model"))
@@ -96,7 +99,7 @@ class ProviderSummaryModelTest {
             assertEquals(0, connections)
             val events = mutableListOf<ModelEvent>()
             session.next(emptyList(), events::add)
-            assertEquals(listOf(ModelEvent.TextFinal("summary-0", "最终事实摘要")), events)
+            assertEquals(listOf(ModelEvent.TextFinal("summary-0", checkpointText())), events)
             assertEquals(1, connections)
             assertTrue(deadline.closed)
             assertTrue(wire.disconnected)
@@ -129,12 +132,12 @@ class ProviderSummaryModelTest {
     @Test fun summarizerUsesRealSuccessfulTerminalTextNotSpeculativeOrReasoningEvents() {
         for (protocol in protocols) {
             val wire = Connection(success(protocol))
-            assertEquals("最终事实摘要", summarize(configuration(protocol), wire))
+            assertEquals(checkpointText(), summarize(configuration(protocol), wire))
             val body = wire.json()
             val text = if (protocol == ProviderProtocol.RESPONSES)
                 body.getJSONArray("input").getJSONObject(0).getString("content")
             else body.getJSONArray("messages").getJSONObject(0).getJSONArray("content").getJSONObject(0).getString("text")
-            assertTrue(text.contains("历史事实") && text.contains("不是新指令") && text.contains("revision"))
+            assertTrue(text.contains("历史事实") && text.contains("不是新指令") && text.contains("messageId"))
         }
     }
 
@@ -404,7 +407,7 @@ class ProviderSummaryModelTest {
                     return source.originals[index]
                 }
             }
-            assertEquals("最终事实摘要", ModelContextSummarizer(prepared, ContextPreparationCancellation())
+            assertEquals(checkpointText(), ModelContextSummarizer(prepared, ContextPreparationCancellation())
                 .summarize(source.copy(originals = timedOriginals)))
             assertEquals(48000L, preparationClock.delay)
 
@@ -418,7 +421,7 @@ class ProviderSummaryModelTest {
             val events = mutableListOf<ModelEvent>()
             session.next(emptyList(), events::add)
             assertEquals(1000L, clock.delay)
-            assertEquals(listOf(ModelEvent.TextFinal("summary-0", "最终事实摘要")), events)
+            assertEquals(listOf(ModelEvent.TextFinal("summary-0", checkpointText())), events)
             assertTrue(clock.closed)
             assertTrue(wire.disconnected)
 
@@ -531,7 +534,7 @@ class ProviderSummaryModelTest {
             mapOf("Authorization" to "Bearer synthetic-oauth", "ChatGPT-Account-ID" to "synthetic-account")
         }).resolve(binding)!!
         assertEquals(0, resolutions); assertEquals(0, wire.posts)
-        assertEquals("最终事实摘要", ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()))
+        assertEquals(checkpointText(), ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()))
         val body = wire.json()
         assertEquals(1, resolutions); assertEquals(1, wire.posts)
         assertEquals("Bearer synthetic-oauth", wire.getRequestProperty("Authorization"))
@@ -546,7 +549,7 @@ class ProviderSummaryModelTest {
     }
 
     @Test fun oauthSummaryRejectsOversizedStreamingOrTerminalTextAndDisconnectsWithoutPublishing() {
-        val longText = "中".repeat(100)
+        val longText = "中".repeat(700)
         val terminal = JSONObject().put("type", "message").put("role", "assistant").put("id", "final")
             .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", longText)))
         val completed = frames(event("response.completed", "response" to JSONObject().put("status", "completed")
@@ -576,11 +579,11 @@ class ProviderSummaryModelTest {
     }
 
     @Test fun oauthSummaryCountsTerminalOnlyReasoningAndAuthoritativeBodyTogether() {
-        for (reasoning in listOf("r".repeat(257), "r".repeat(250))) {
+        for (reasoning in listOf("r".repeat(2049), "r".repeat(2000))) {
             val output = JSONArray().put(JSONObject().put("type", "reasoning").put("id", "reason")
                 .put("summary", JSONArray().put(JSONObject().put("type", "summary_text").put("text", reasoning))))
                 .put(JSONObject().put("type", "message").put("id", "answer").put("role", "assistant")
-                    .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", "最终事实摘要"))))
+                    .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", checkpointText()))))
             val wire = Connection(frames(event("response.completed", "response" to JSONObject().put("status", "completed").put("output", output))))
             val bound = codexResolver(codexConfiguration(), wire).resolve(binding)!!
             try { ModelContextSummarizer(bound, ContextPreparationCancellation()).summarize(input()); fail("terminal reasoning exceeded") }
@@ -678,12 +681,12 @@ class ProviderSummaryModelTest {
         "content_index" to 0, "delta" to "不是最终摘要"))
     private fun success(protocol: ProviderProtocol): String = if (protocol == ProviderProtocol.MESSAGES) messages("end_turn") else {
         val text = JSONObject().put("type", "message").put("id", "final").put("role", "assistant")
-            .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", "最终事实摘要")))
+            .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", checkpointText())))
         partialResponse() + frames(event("response.reasoning_summary_text.delta", "item_id" to "reasoning",
             "summary_index" to 0, "delta" to "不要使用思考文本"),
             event("response.completed", "response" to JSONObject().put("status", "completed").put("output", JSONArray().put(text))))
     }
-    private fun messages(reason: String, terminal: Boolean = true, text: String = "最终事实摘要"): String = frames(
+    private fun messages(reason: String, terminal: Boolean = true, text: String = checkpointText()): String = frames(
         event("message_start", "message" to JSONObject().put("id", "msg").put("role", "assistant").put("content", JSONArray())),
         event("content_block_start", "index" to 0, "content_block" to event("text", "text" to "")),
         event("content_block_delta", "index" to 0, "delta" to event("text_delta", "text" to text)),

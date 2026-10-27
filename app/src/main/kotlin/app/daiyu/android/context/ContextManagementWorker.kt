@@ -70,6 +70,10 @@ internal interface ContextManagementBackend {
         offset: Int): ContextManagementArchive
     fun compress(lease: ContextManagementLease,
         expected: ContextManagementSnapshot): ContextCompressionReceipt
+    fun runCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
+        selection: ContextManagementSelection?, parent: Message,
+        progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): app.daiyu.android.domain.runtime.RunContextRuntime =
+        throw UnsupportedOperationException("运行中压缩不可用")
 }
 
 /** Worker-only implementation. UI receives neither this object nor a ContextService.
@@ -128,6 +132,22 @@ internal class ContextManagementWorker(
         }
     }
 
+    override fun runCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
+        selection: ContextManagementSelection?, parent: Message,
+        progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): app.daiyu.android.domain.runtime.RunContextRuntime {
+        checkLease(lease)
+        require(parent.conversationId == lease.owner.conversationId)
+        val saved = requireNotNull(expected.savedConfiguration)
+        require(settings() == saved) { "压缩设置已改变，请重新选择" }
+        val target = if (selection == null) requireNotNull(expected.summaryTarget) else profiles.describeSelection(selection)
+        val policy = policies.resolve(saved.copy(automatic = true, summaryModel = target.binding))
+        return ProductionRunContext(policy, parent, resolve = { usage ->
+            checkLease(lease)
+            require(settings() == saved) { "压缩设置已改变，请重新选择" }
+            requireNotNull(profiles.freeze(target, usage)) { "压缩模型不可用" }
+        }, automatic = false, progress = progress)
+    }
+
     override fun compress(lease: ContextManagementLease,
         expected: ContextManagementSnapshot): ContextCompressionReceipt {
         checkLease(lease)
@@ -141,13 +161,18 @@ internal class ContextManagementWorker(
         // Existing coordinator still freezes/validates the exact independent candidate and cancellation.
         val target = requireNotNull(expected.summaryTarget)
         val operation = service.manualSummaryUsage(lease)
+        val operations = mutableListOf(operation)
         var success = false
         var failure: Throwable? = null
         try {
             val policy = policies.resolve(selected.copy(automatic = true))
             val bound = requireNotNull(profiles.freeze(target, operation.port)) { "所选摘要模型不可用，请重新选择" }
             require(bound.binding == target.binding) { "摘要目标不匹配；请刷新后重新确认" }
-            val summarizer = ModelContextSummarizer(bound, lease.cancellation)
+            val summarizer = ModelContextSummarizer(bound, lease.cancellation, nextModel = {
+                checkLease(lease)
+                val next = service.manualSummaryUsage(lease).also { operations += it }
+                checkNotNull(bound.rebind) { "摘要模型不支持分块用量绑定" }.invoke(next.port)
+            })
             checkLease(lease)
             require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
             val archive = service.compress(expected.conversationId, policy, summarizer,
@@ -161,10 +186,13 @@ internal class ContextManagementWorker(
             throw caught
         } finally {
             // No Runner follows manual compression; its own worker must close every admitted attempt.
-            try { operation.finish(success) }
-            catch (closeFailure: Throwable) {
-                if (failure != null) failure.addSuppressed(closeFailure) else throw closeFailure
+            var closeError: Throwable? = failure
+            operations.forEach { current ->
+                try { current.finish(success) } catch (caught: Throwable) {
+                    if (closeError == null) closeError = caught else closeError?.addSuppressed(caught)
+                }
             }
+            if (failure == null) closeError?.let { throw it }
         }
     }
 

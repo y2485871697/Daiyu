@@ -105,7 +105,8 @@ class ContextPreparationCoordinator(
     fun freeze(conversationId: ConversationId, pendingMessages: List<Message>,
         cancellation: ContextPreparationCancellation = ContextPreparationCancellation(),
         summaryUsage: BoundSummaryUsagePort? = null, contextWindowOverride: Int? = null,
-        chatProvider: ProviderSnapshot? = null): FrozenContextPreparation {
+        chatProvider: ProviderSnapshot? = null,
+        nextSummaryUsage: (() -> BoundSummaryUsagePort)? = null): FrozenContextPreparation {
         cancellation.check()
         val pending = freezeContextMessages(pendingMessages)
         require(pending.all { it.conversationId == conversationId }) { "待发送消息不属于当前会话" }
@@ -129,7 +130,9 @@ class ContextPreparationCoordinator(
         require(binding == null || bound == null || bound.binding == binding) { "摘要模型绑定已变化；未回退主模型" }
         cancellation.check()
         return FrozenContextPreparation(this, conversationId, settings, policy, pending,
-            bound?.let { ModelContextSummarizer(it, cancellation) }, cancellation, bound?.rebind, bound?.displayIdentity)
+            bound?.let { first -> ModelContextSummarizer(first, cancellation, nextModel = nextSummaryUsage?.let { next ->
+                { checkNotNull(first.rebind) { "摘要模型不支持分块用量绑定" }.invoke(next()) }
+            }) }, cancellation, bound?.rebind, bound?.displayIdentity)
     }
 
     fun prepare(frozen: FrozenContextPreparation): PreparedSendContext {

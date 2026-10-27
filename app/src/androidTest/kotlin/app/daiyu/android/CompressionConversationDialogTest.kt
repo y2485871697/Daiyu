@@ -24,8 +24,6 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
     private var confirms = 0
     private var cancels = 0
     private var picks = 0
-    private var operationCancels = 0
-    private var cancellationRequested by mutableStateOf(false)
     private fun initial() = CompressionDialogDraft(true, "deepseek-v4-1-flash", "fixture/model",
         ProviderProtocol.CHAT_COMPLETIONS)
     private fun api(protocol: ProviderProtocol) = node("compression-dialog-api:${protocol.wireName}")
@@ -33,7 +31,6 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
         operation: ContextManagementOperation? = null) {
         mainThread {
             draft = initial()
-            cancellationRequested = false
             activity.setContent {
                 val platform = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
@@ -42,9 +39,7 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
                         applyInterfaceScale = true) {
                         CompressionConversationDialog(draft, onChange = { draft = it },
                             onChooseModel = { picks++ }, onConfirm = { confirms++ }, onDismiss = { cancels++ },
-                            enabled = operation == null, operation = operation,
-                            cancellationRequested = cancellationRequested,
-                            onCancelOperation = { operationCancels++; cancellationRequested = true })
+                            enabled = operation == null, operation = operation)
                     }
                 }
             }
@@ -112,24 +107,19 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
             node("context-close").assertIsEnabled().performClick()
         }
         assertEquals(4, cancels)
-        assertEquals(0, operationCancels)
         assertEquals(0, confirms)
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testOnlyActualCompressionShowsProgressAndDispatchesOneCancellation() {
+    fun testCompressionProgressIsNotRenderedInsideTheConfigurationDialog() {
         show(dark = true, operation = ContextManagementOperation.COMPRESS)
         node("context-management").performScrollToIndex(0)
-        node("compression-dialog-operation").assertIsDisplayed()
-        ui.onNode(hasText("正在压缩会话…") and
-            hasAnyAncestor(hasTestTag("compression-dialog-operation")), useUnmergedTree = true).assertIsDisplayed()
-        node("context-cancel").scrollToVisible().assertIsDisplayed().assertTextContains("取消压缩").performClick()
-        node("context-cancel").assertIsNotEnabled()
+        node("compression-dialog-operation").assertDoesNotExist()
+        node("context-compression-confirmation").assertDoesNotExist()
+        node("context-cancel").assertDoesNotExist()
         node("context-compress").assertIsNotEnabled()
-        node("context-close").assertIsEnabled()
-        ui.onNodeWithText("取消并等待退出").assertDoesNotExist()
-        assertEquals(1, operationCancels)
-        assertEquals(0, cancels)
+        node("context-close").assertIsEnabled().performClick()
+        assertEquals(1, cancels)
         assertEquals(0, confirms)
         assertEquals(0, fixture.opens.get())
     }

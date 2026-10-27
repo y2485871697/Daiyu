@@ -146,7 +146,7 @@ class MessageVideoDatabaseTest : InstrumentationTestCase() {
         database.writableDatabase.version = 11
         assertEquals(11, database.readableDatabase.version)
         reopen()
-        assertEquals(28, database.readableDatabase.version)
+        assertEquals(29, database.readableDatabase.version)
         assertEquals(retained, snapshot().filterKeys { it != "message_video_inputs" })
         assertTrue(table("message_video_inputs").isEmpty())
         database.readableDatabase.rawQuery("PRAGMA foreign_key_list(message_video_inputs)", null).use {
@@ -177,7 +177,7 @@ class MessageVideoDatabaseTest : InstrumentationTestCase() {
             assertEquals(if (newConversation) "" else "composer survives existing send", database.draft())
             val wire = payload(user)
             reopen()
-            assertEquals(28, database.readableDatabase.version)
+            assertEquals(29, database.readableDatabase.version)
             assertEquals(listOf(user, assistant), physicalHistory(id))
             assertEquals(projection(videos), projection(database.videoInputs(physicalHistory(id))))
             assertEquals(wire, payload(user))

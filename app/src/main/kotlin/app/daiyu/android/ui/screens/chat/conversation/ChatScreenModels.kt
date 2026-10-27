@@ -18,6 +18,7 @@ data class ChatScreenState(
     val automaticCompressionPending: Boolean = false,
     val timeline: List<app.daiyu.android.timeline.ChatTimelineEntry> = emptyList(),
     val compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null,
+    val compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
 )
 
 /** A new serial consumes a host navigation request, never a model execution state. */

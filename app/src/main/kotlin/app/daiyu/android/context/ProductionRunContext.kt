@@ -7,10 +7,22 @@ import app.daiyu.android.domain.runtime.*
 import java.util.UUID
 
 /** A narrow live-run projection. Original rows and the tool journal are never replaced. */
-internal class ProductionRunContext(private val frozen: FrozenContextPreparation, private val parent: Message,
-    private val progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {}) : RunContextRuntime {
-    override val windowTokens = checkNotNull(frozen.policy.contextTokens)
+internal class ProductionRunContext(
+    private val policy: app.daiyu.android.domain.context.CompressionPolicy,
+    private val parent: Message,
+    private val resolve: ((BoundSummaryUsagePort) -> BoundSummaryModel)?,
+    override val automatic: Boolean,
+    private val agentLabel: String = "主代理",
+    private val taskId: String? = null,
+    private val progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {},
+) : RunContextRuntime {
+    constructor(frozen: FrozenContextPreparation, parent: Message,
+        progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {}) :
+        this(frozen.policy, parent, frozen.runtimeModel, frozen.policy.enabled && frozen.runtimeModel != null,
+            progress = progress)
+    override val windowTokens = checkNotNull(policy.contextTokens)
     @Volatile private var cancellation: ContextPreparationCancellation? = null
+    @Volatile private var lastActivity: app.daiyu.android.timeline.CompressionActivity? = null
     override fun cancel() { cancellation?.cancel() }
     override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long =
         MessageHistory.expand(history).sumOf(TokenTailCompression::messageTokens) +
@@ -19,22 +31,47 @@ internal class ProductionRunContext(private val frozen: FrozenContextPreparation
     override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
         request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
         admit: () -> Unit, cancelled: () -> Boolean): List<Message>? {
+        var created = false
+        return compactRequests(history, billedTokens, localTokens, object : RunSummaryRequests {
+            override fun create(): RequestCheckpoint {
+                check(!created) { "摘要需要独立分块用量准入" }; created = true
+                return request
+            }
+            override fun admit(request: RequestCheckpoint) = admit()
+            override fun observe(request: RequestCheckpoint, usage: ModelEvent.Usage) = observe(usage)
+        }, cancelled)
+    }
+
+    override fun failed(reason: String) {
+        progress(lastActivity?.copy(running = false, failure = reason) ?: app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
+            parent.conversationId.value, 0, null, running = false, agentLabel = agentLabel,
+            runId = parent.runId.value, taskId = taskId, failure = reason))
+    }
+
+    override fun compactRequests(history: List<Message>, billedTokens: Long?, localTokens: Long,
+        requests: RunSummaryRequests, cancelled: () -> Boolean): List<Message>? {
         val logical = MessageHistory.expand(history)
         val cut = TokenTailCompression.selectStart(logical, windowTokens, billedTokens, localTokens)
         if (cut <= 0 || cancelled()) return null
-        val usage = BoundSummaryUsagePort(ParentSummaryUsage(parent.conversationId.value,
-            parent.runId.value, parent.id.value, request), beforeClaim = admit,
-            sink = SummaryUsagePort { _, value -> observe(value.snapshot) })
+        fun usage(): BoundSummaryUsagePort {
+            val request = requests.create()
+            return BoundSummaryUsagePort(ParentSummaryUsage(parent.conversationId.value,
+                parent.runId.value, parent.id.value, request), beforeClaim = { requests.admit(request) },
+                sink = SummaryUsagePort { _, value -> requests.observe(request, value.snapshot) })
+        }
         val cancellation = ContextPreparationCancellation()
         this.cancellation = cancellation
         try {
             if (cancelled()) return null
-            val model = checkNotNull(frozen.runtimeModel)(usage)
+            val model = checkNotNull(resolve)(usage())
             val prefix = logical.take(cut)
             val activity = app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
-                parent.conversationId.value, prefix.size, model.displayIdentity)
+                parent.conversationId.value, prefix.size, model.displayIdentity, agentLabel = agentLabel, runId = parent.runId.value, taskId = taskId)
+            lastActivity = activity
             progress(activity)
-            val text = try { ModelContextSummarizer(model, cancellation).summarize(
+            val text = try { ModelContextSummarizer(model, cancellation, nextModel = {
+                checkNotNull(model.rebind) { "摘要模型不支持分块用量绑定" }.invoke(usage())
+            }).summarize(
                 CompressionInput(prefix, ContextRevision.digest(prefix))).trim() }
             finally { progress(activity.copy(running = false)) }
             if (cancelled()) return null
@@ -43,7 +80,7 @@ internal class ProductionRunContext(private val frozen: FrozenContextPreparation
                 listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n$text\n[摘要结束]")), RunStatus.COMPLETED)
             val result = listOf(summary) + logical.drop(cut)
             require(this.localTokens(result, emptyList()) < this.localTokens(history, emptyList())) { "压缩未缩小；保留原文" }
-            require(frozen.policy.fitsSendBudget(estimateTokens(result))) { "压缩后仍超出发送预算" }
+            require(policy.fitsSendBudget(this.localTokens(result, emptyList()))) { "压缩后仍超出发送预算" }
             return result
         } finally { this.cancellation = null }
     }

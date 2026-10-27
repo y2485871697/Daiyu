@@ -175,4 +175,108 @@ class RunnerContextRuntimeTest {
         assertNull(last.context!!.pressure)
         assertEquals(RequestUsageCheckpoint(request, ModelEvent.Usage(100, 12)), last.usage.single())
     }
+    @Test fun manualCompressionIsDeferredPastToolsAndBeforeReopenEvenWithSupplementAndAutoDisabled() {
+        val store = Store(); var opens = 0; var tools = 0; var compactions = 0; var completed = 0
+        lateinit var runner: ChatRunner
+        val marker = user("summary", "retained")
+        val runtime = object : RunContextRuntime {
+            override val automatic = false
+            override val windowTokens = 1000L
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message> {
+                assertEquals(1, tools); assertEquals(1, opens)
+                assertTrue(history.any { it.id == MessageId("supplement") })
+                assertTrue(history.any { row -> row.blocks.any { it is MessageBlock.Tool && it.result == "done" } })
+                admit(); observe(ModelEvent.Usage(10, 4)); compactions++
+                return listOf(marker) + history.takeLast(1)
+            }
+        }
+        val model = ModelPort { history ->
+            opens++
+            if (opens == 2) { assertEquals(1, compactions); assertEquals(marker, history.first()) }
+            object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    sink(ModelEvent.InputEstimate(100)); sink(ModelEvent.Usage(900, 1))
+                    if (tools == 0) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("call"), "read", "{}")))
+                    else sink(ModelEvent.TextFinal("answer", "ok"))
+                }
+                override fun cancel() {}
+            }
+        }
+        runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool {
+                assertTrue(runner.requestCompaction({ runtime }) { applied, error ->
+                    assertTrue(applied); assertNull(error); completed++
+                })
+                assertEquals(0, compactions)
+                assertTrue(runner.supplement(user("supplement", "also keep this")))
+                tools++; "done"
+            }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}
+        assertEquals(RunStatus.COMPLETED, runner.run(initial, listOf(user("old", "history"))).status)
+        assertEquals(2, opens); assertEquals(1, compactions); assertEquals(1, completed)
+    }
+
+    @Test fun stopSettlesQueuedManualCompressionExactlyOnceWithoutOpeningSummary() {
+        var summaries = 0; var completions = 0
+        lateinit var runner: ChatRunner
+        val runtime = object : RunContextRuntime {
+            override val windowTokens = 1000L
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? { summaries++; return null }
+        }
+        val model = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("call"), "read", "{}")))
+            }
+            override fun cancel() {}
+        } }
+        runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool {
+            assertTrue(runner.requestCompaction({ summaries++; runtime }) { applied, _ ->
+                assertFalse(applied); completions++; error("observer failure")
+            }); runner.stop(); "done"
+        }, RunnerOptions(runtimeStore = Store(), contextRuntime = runtime)) {}
+        assertEquals(RunStatus.STOPPED, runner.run(initial, emptyList()).status)
+        assertEquals(0, summaries); assertEquals(1, completions)
+    }
+
+    @Test fun swallowedSummaryAdmissionFailureStillStopsFurtherWritesAndRequests() {
+        var commits = 0; var failedAt = -1; var opens = 0
+        val store = object : AtomicRuntimeStore {
+            override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+                commits++
+                if (checkpoint.context?.summaries?.isNotEmpty() == true) {
+                    failedAt = commits; error("disk failure")
+                }
+            }
+            override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint = error("no recovery")
+        }
+        lateinit var runner: ChatRunner
+        val runtime = object : RunContextRuntime {
+            override val automatic = false
+            override val windowTokens = 1000L
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message> {
+                try { admit() } catch (_: PersistenceException) {}
+                return listOf(user("forged", "must not apply"))
+            }
+        }
+        runner = ChatRunner(ModelPort { opens++; object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                assertTrue(runner.requestCompaction({ runtime }))
+                sink(ModelEvent.TextFinal("answer", "ok"))
+            }
+            override fun cancel() {}
+        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { "unused" },
+            RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}
+        val result = runner.run(initial, emptyList())
+        assertEquals(RunStatus.FAILED, result.status)
+        assertTrue(failedAt > 0); assertEquals(failedAt, commits); assertEquals(1, opens)
+    }
+
 }

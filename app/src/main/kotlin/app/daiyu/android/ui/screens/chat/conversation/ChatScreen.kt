@@ -123,7 +123,7 @@ internal fun DaiyuChatScreen(
             androidx.compose.runtime.key(state.conversationKey) {
                 ChatMessageList(state.turns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
-                    speechMessageId = speechMessageId)
+                    speechMessageId = speechMessageId, compressionActivities = state.compressionActivities)
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,

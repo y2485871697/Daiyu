@@ -44,7 +44,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         val owner = database.create("default").id
         repeat(4) { n ->
             val user = Message(MessageId("old-u-$n-${owner.value}"), owner, RunId("old-$n-${owner.value}"), "user",
-                listOf(MessageBlock.Text("u", "fact $n ".repeat(1200))), RunStatus.COMPLETED)
+                listOf(MessageBlock.Text("u", "fact $n ".repeat(3000))), RunStatus.COMPLETED)
             val assistant = user.copy(id = MessageId("old-a-$n-${owner.value}"), role = "assistant", status = RunStatus.RUNNING)
             database.send(user, assistant); database.save(assistant.copy(status = RunStatus.COMPLETED))
         }
@@ -53,16 +53,17 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
     private data class Submission(val user: Message, val assistant: Message, val cancellation: ContextPreparationCancellation,
         val usage: RuntimeSummaryPreparation, val coordinator: ContextPreparationCoordinator, val frozen: FrozenContextPreparation,
         val wire: Wire)
-    private fun submission(owner: ConversationId): Submission {
+    private fun submission(owner: ConversationId, invalidFirst: Boolean = false): Submission {
         val run = RunId(UUID.randomUUID().toString())
         val user = Message(MessageId("new-u-${run.value}"), owner, run, "user",
             listOf(MessageBlock.Text("body", "pending once")), RunStatus.COMPLETED)
         val assistant = user.copy(id = MessageId("new-a-${run.value}"), role = "assistant", status = RunStatus.RUNNING, blocks = emptyList())
         val cancellation = ContextPreparationCancellation()
         val usage = runtime.summaryPreparation(owner, run, assistant.id, cancellation)
-        val wire = Wire {
+        val wire = Wire(invalidFirst) { post ->
             // Observe durable admission from the actual transport boundary, not a memory flag.
             assertEquals("ADMITTED", state(assistant.id))
+            if (post > 0) assertEquals(post.toLong(), scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=?", assistant.id.value))
             assertEquals(0L, scalar("SELECT COUNT(*) FROM messages WHERE id=?", assistant.id.value))
             assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_checkpoints WHERE message_id=?", assistant.id.value))
         }
@@ -74,7 +75,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
             ProductionCompressionPolicyResolver,
             ProviderSummaryModelResolver({ config }, { wire }, deadlines))
         return Submission(user, assistant, cancellation, usage, coordinator,
-            coordinator.freeze(owner, listOf(user), cancellation, usage.usagePort), wire)
+            coordinator.freeze(owner, listOf(user), cancellation, usage.usagePort, nextSummaryUsage = usage.nextUsagePort), wire)
     }
     private fun scalar(sql: String, vararg args: String): Long = database.readableDatabase.rawQuery(sql, args).use {
         it.moveToFirst(); it.getLong(0)
@@ -198,6 +199,84 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         assertEquals(0L, read(owner).summary.combined.cached.reportedTokens)
     }
 
+    fun testFormatRepairUsesTwoDurableRequestsAndTransfersBothWithoutDoubleCounting() {
+        val owner = seed(); val s = submission(owner, invalidFirst = true)
+        val prepared = s.coordinator.prepare(s.frozen)
+        assertNotNull(prepared.archiveId); assertEquals(2, s.wire.posts)
+        assertEquals(1L, scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=? AND has_usage=1", s.assistant.id.value))
+        val staged = read(owner).requests
+        assertEquals(2, staged.size)
+        assertEquals(2, staged.map { it.request.requestId }.distinct().size)
+        assertEquals(2, staged.map { it.request.attemptId }.distinct().size)
+        assertTrue(staged.all { it.source == UsageRequestSource.SUMMARY })
+        s.usage.seal(); database.send(s.user, s.assistant)
+        val model = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { sink(ModelEvent.TextFinal("main", "done")) }
+            override fun cancel() {}
+        } }
+        val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { error("no tools") }, RunnerOptions(runtimeStore = runtime)) {}.run(s.assistant, prepared.messages)
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(20L, read(owner).summary.combined.input.reportedTokens)
+        assertEquals(2, checkpoint(s.assistant.id).usage.count { it.source == UsageRequestSource.SUMMARY })
+        assertEquals(1L, scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=? AND has_usage=1 AND input_tokens IS NULL", s.assistant.id.value))
+        assertEquals("HANDED", state(s.assistant.id))
+        assertEquals(2, s.wire.posts)
+    }
+
+    fun testIgnoredRepairAdmissionCannotOpenSecondPost() {
+        for (action in listOf("ABORT", "IGNORE")) {
+            val owner = seed(); val s = submission(owner, invalidFirst = true)
+            database.writableDatabase.execSQL("CREATE TRIGGER reject_chunk BEFORE INSERT ON runtime_preparation_chunks BEGIN SELECT RAISE($action${if (action == "ABORT") ", 'fixture'" else ""}); END")
+            try {
+                var failed = false
+                try { s.coordinator.prepare(s.frozen) } catch (_: Exception) { failed = true }
+                assertTrue(failed)
+                assertEquals(1, s.wire.posts)
+                assertEquals(10L, read(owner).summary.combined.input.reportedTokens)
+                assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=?", s.assistant.id.value))
+                assertEquals(0L, scalar("SELECT COUNT(*) FROM messages WHERE id=?", s.assistant.id.value))
+                assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_checkpoints WHERE message_id=?", s.assistant.id.value))
+            } finally {
+                database.writableDatabase.execSQL("DROP TRIGGER reject_chunk")
+                s.usage.close()
+            }
+        }
+    }
+
+    fun testChunksHaveIndependentDurableAdmissionAndMissingUsageSurvivesClose() {
+        val owner = seed(); val s = submission(owner)
+        s.usage.usagePort.claim()
+        s.usage.usagePort.observe(ModelEvent.Usage(10, 20, 5))
+        val reportedNull = s.usage.nextUsagePort().also { it.claim() }
+        reportedNull.observe(ModelEvent.Usage(null, null, null))
+        val missing = s.usage.nextUsagePort().also { it.claim() }
+        assertEquals(2L, scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=?", s.assistant.id.value))
+        assertEquals(1L, scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=? AND has_usage=0", s.assistant.id.value))
+        assertEquals(2, read(owner).requests.size)
+        s.usage.close()
+        reject { missing.observe(ModelEvent.Usage(1, 1)) }
+        restart()
+        assertEquals(2, read(owner).requests.size)
+        assertEquals(1L, scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=? AND has_usage=0", s.assistant.id.value))
+    }
+
+    fun testIgnoredChunkAdmissionDoesNotAcknowledgeOrAdvanceRevision() {
+        val owner = seed(); val s = submission(owner)
+        s.usage.usagePort.claim()
+        val before = scalar("SELECT revision FROM runtime_preparations WHERE message_id=?", s.assistant.id.value)
+        database.writableDatabase.execSQL("CREATE TRIGGER ignore_chunk BEFORE INSERT ON runtime_preparation_chunks BEGIN SELECT RAISE(IGNORE); END")
+        try {
+            reject { s.usage.nextUsagePort().claim() }
+            assertEquals(before, scalar("SELECT revision FROM runtime_preparations WHERE message_id=?", s.assistant.id.value))
+            assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=?", s.assistant.id.value))
+            assertEquals(0, s.wire.posts)
+        } finally {
+            database.writableDatabase.execSQL("DROP TRIGGER ignore_chunk")
+            s.usage.close()
+        }
+    }
+
     fun testIgnoredAdmissionNeverOpensSummaryTransport() {
         val owner = seed(); val s = submission(owner)
         database.writableDatabase.execSQL("CREATE TRIGGER ignore_summary BEFORE INSERT ON runtime_preparations BEGIN SELECT RAISE(IGNORE); END")
@@ -214,7 +293,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         }
     }
 
-    private class Wire(private val beforePost: () -> Unit) : HttpsURLConnection(URL("https://example.invalid/fixture")) {
+    private class Wire(private val invalidFirst: Boolean = false, private val beforePost: (Int) -> Unit) : HttpsURLConnection(URL("https://example.invalid/fixture")) {
         var posts = 0
         override fun connect() {}
         override fun disconnect() {}
@@ -222,10 +301,10 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         override fun getCipherSuite() = "fixture"
         override fun getLocalCertificates(): Array<Certificate>? = null
         override fun getServerCertificates(): Array<Certificate> = emptyArray()
-        override fun getOutputStream(): ByteArrayOutputStream { beforePost(); posts++; return ByteArrayOutputStream() }
+        override fun getOutputStream(): ByteArrayOutputStream { beforePost(posts); posts++; return ByteArrayOutputStream() }
         override fun getResponseCode() = 200
         override fun getContentType() = "text/event-stream"
         override fun getInputStream() = ("event: response.completed\n" +
-            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"final\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"summary text\"}]}],\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"input_tokens_details\":{\"cached_tokens\":5}}}}\n\n").byteInputStream()
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"final\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":${org.json.JSONObject.quote(if (invalidFirst && posts == 1) "invalid checkpoint" else summaryCheckpointFixture())}}]}],\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"input_tokens_details\":{\"cached_tokens\":5}}}}\n\n").byteInputStream()
     }
 }

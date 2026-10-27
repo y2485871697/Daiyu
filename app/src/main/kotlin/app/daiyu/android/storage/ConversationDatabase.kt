@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 28), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 29), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -62,7 +62,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..27 && newVersion == 28) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..28 && newVersion == 29) { "不支持此数据库版本，保留原数据" }
         // Preserve installed receipts, including an authoritative empty v8 import.
         val needsUsageReceiptBackfill = !db.rawQuery(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -113,6 +113,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         if (oldVersion < 14) SQLiteChildTaskStore.installCommandSchema(db)
         SQLiteChildTaskStore.installDisplaySchema(db)
         installUsageCreationColumns(db)
+        app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
         CloudContextUsageStore.installSchema(db)
         ConversationUsageStore.installSchema(db)
         if (needsUsageReceiptBackfill) ConversationUsageStore.backfill(db)

@@ -492,32 +492,31 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         }
         node("context-management").assertDoesNotExist()
         val old = openAndAwait()
-        mainThread { offerConfirmationMetadata(old); old.requestCompression() }
-        awaitUniqueTag("context-confirm-compress")
-        mainThread { assertTrue(old.state.value.confirmingCompression) }
-        // This is the same adapter method retained by the actual dialog's confirmation button.
-        val oldConfirm: () -> Unit = old::confirmCompression
+        mainThread { offerConfirmationMetadata(old) }
+        node("context-confirm-compress").assertDoesNotExist()
+        // Retain the actual one-step submit callback without issuing a paid request.
+        val oldSubmit: () -> Boolean = { old.submitCompression(null) }
         stopped {
             assertNoVisit()
             assertNull(old.state.value.snapshot)
             assertFalse(old.state.value.confirmingCompression)
-            old.refresh(); old.requestCompression(); oldConfirm(); oldClick()
+            old.refresh(); old.requestCompression(); assertFalse(oldSubmit()); oldClick()
             assertNull(old.state.value.operation)
             assertNoVisit()
         }
         mainThread {
-            old.refresh(); old.requestCompression(); oldConfirm(); oldClick(); backgroundClick()
+            old.refresh(); old.requestCompression(); assertFalse(oldSubmit()); oldClick(); backgroundClick()
             assertNull(old.state.value.snapshot)
             assertFalse(old.state.value.confirmingCompression)
             assertNoVisit()
         }
         assertPausedContextRoute()
-        mainThread { oldClick(); backgroundClick(); oldConfirm(); assertNoVisit() }
+        mainThread { oldClick(); backgroundClick(); assertFalse(oldSubmit()); assertNoVisit() }
         val next = continueAndAwait()
         assertNotSame(old, next)
         assertEquals(conversation.id, next.state.value.owner.conversationId)
         mainThread {
-            old.refresh(); oldConfirm(); oldClick(); backgroundClick()
+            old.refresh(); assertFalse(oldSubmit()); oldClick(); backgroundClick()
             assertSame(next, adapter())
             assertNotNull(next.state.value.snapshot)
         }

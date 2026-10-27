@@ -36,7 +36,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val base = testContext(instrumentation.targetContext, "typed-backup-${UUID.randomUUID()}-")
         val files = File(base.cacheDir, "typed-backup-${UUID.randomUUID()}").apply { check(mkdirs()) }
         val context = object : ContextWrapper(base) { override fun getFilesDir() = files }
-        return Fixture(context, ConversationDatabase(context)).also { fixtures.add(it); assertEquals(28, it.db.writableDatabase.version) }
+        return Fixture(context, ConversationDatabase(context)).also { fixtures.add(it); assertEquals(29, it.db.writableDatabase.version) }
     }
     override fun tearDown() {
         try { fixtures.forEach { it.db.close(); it.context.deleteDatabase("conversations.db"); it.context.filesDir.deleteRecursively() } }
@@ -105,7 +105,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val original = JSONObject(exported)
         val oldPayload = JSONObject(original.getString("payload"))
         oldPayload.getJSONObject("tables").getJSONArray("context_usage").let { rows ->
-            repeat(rows.length()) { rows.getJSONObject(it).remove("cache_creation_tokens") }
+            repeat(rows.length()) { rows.getJSONObject(it).apply { remove("cache_creation_tokens"); remove("has_usage") } }
         }
         downgradeCreation(oldPayload)
         val raw = oldPayload.toString()
@@ -123,6 +123,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         strip(data.getJSONObject("tables").getJSONArray("context_usage"))
         data.optJSONObject("child_task_history")?.let { child ->
             child.put("version", 3); strip(child.getJSONArray("usage"))
+            child.getJSONArray("usage").let { rows -> repeat(rows.length()) { rows.getJSONObject(it).remove("has_usage") } }
         }
         data.optJSONObject("runtime_usage_history")?.let { runtime ->
             runtime.put("version", 1); strip(runtime.getJSONArray("requests"))
@@ -340,7 +341,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         source.db.writableDatabase.execSQL("DROP TABLE recorded_usage_requests")
         source.db.writableDatabase.execSQL("DROP TABLE recorded_usage_checkpoints")
         source.db.writableDatabase.version = 19; source.reopen()
-        assertEquals(28, source.db.writableDatabase.version); assertEquals(retained, checkpointPayloads(source))
+        assertEquals(29, source.db.writableDatabase.version); assertEquals(retained, checkpointPayloads(source))
         assertEquals(runtime(current).toString(), runtime(source.service().exportPackage()).toString())
         assertEquals(0L, runtimeRow(current, "legacy-missing").getLong("has_usage"))
         val old = JSONObject(mutate(current) { data ->
@@ -354,7 +355,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         target.db.writableDatabase.execSQL("DROP TABLE recorded_usage_requests")
         target.db.writableDatabase.execSQL("DROP TABLE recorded_usage_checkpoints")
         target.db.writableDatabase.version = 19; target.reopen()
-        assertEquals(28, target.db.writableDatabase.version)
+        assertEquals(29, target.db.writableDatabase.version)
         assertEquals(0, target.count("recorded_usage_requests")); assertEquals(0, target.count("recorded_usage_checkpoints"))
         assertTrue(target.service().importPackage(old).alreadyImported)
         val imported = fresh(); imported.service().importPackage(current)
@@ -366,7 +367,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val exported = source.service().exportPackage()
         assertEquals(8, JSONObject(exported).getInt("version")); assertEquals(original, physical(source))
         assertEquals(exported, source.service().exportPackage())
-        assertEquals(4, payload(exported).getJSONObject("child_task_history").getInt("version"))
+        assertEquals(5, payload(exported).getJSONObject("child_task_history").getInt("version"))
         assertEquals(0L, row(exported, "title-zero").getLong("input_tokens"))
         assertEquals(1L, row(exported, "vision-null").getLong("has_usage"))
         assertTrue(row(exported, "vision-null").isNull("input_tokens"))
@@ -426,7 +427,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
                         listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot").forEach { childTasks.getJSONObject(index).remove(it) }
                     }
                     val childUsage = child.getJSONArray("usage")
-                    repeat(childUsage.length()) { childUsage.getJSONObject(it).apply { remove("usage_source"); remove("cache_creation_tokens") } }
+                    repeat(childUsage.length()) { childUsage.getJSONObject(it).apply { remove("usage_source"); remove("cache_creation_tokens"); remove("has_usage") } }
                 }
             }
             val old = JSONObject(oldPayload).put("version", version).toString()
@@ -440,6 +441,51 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
                 assertEquals(2, childUsage.length()); repeat(childUsage.length()) { assertEquals("MAIN", childUsage.getJSONObject(it).getString("usage_source")) }
             }
         }
+    }
+
+    fun testPreparationChunksRoundTripAsInertDistinctReportedAndUnknownRequests() {
+        val source = fresh(); val p = parent(source)
+        val req = request("chunk-parent")
+        preparation(source, p, "chunk-message", "chunk-run", "TERMINAL", req, true, ModelEvent.Usage(10, 20, 5))
+        source.tx { db ->
+            listOf("chunk-reported", "chunk-unknown").forEach { id ->
+                BackupHistoryRows.insert(db, "runtime_preparation_chunks", JSONObject().put("message_id", "chunk-message")
+                    .put("request_id", id).put("request_owner", req.owner).put("attempt_id", "attempt-$id")
+                    .put("has_usage", if (id == "chunk-reported") 1 else 0)
+                    .put("input_tokens", if (id == "chunk-reported") 7 else JSONObject.NULL)
+                    .put("output_tokens", JSONObject.NULL).put("cached_tokens", JSONObject.NULL).put("cache_creation_tokens", JSONObject.NULL))
+            }
+        }
+        val exported = source.service().exportPackage()
+        assertEquals(3, runtimeRows(exported).length())
+        assertEquals(1L, runtimeRow(exported, "chunk-reported").getLong("has_usage"))
+        assertEquals(0L, runtimeRow(exported, "chunk-unknown").getLong("has_usage"))
+        val target = fresh(); target.service().importPackage(exported)
+        assertEquals(0, target.count("runtime_preparations")); assertEquals(0, target.count("runtime_preparation_chunks"))
+        assertEquals(0, target.count("runtime_checkpoints"))
+        assertEquals(runtimeRows(exported).toString(), runtimeRows(target.service().exportPackage()).toString())
+        assertTrue(target.service().importPackage(exported).alreadyImported)
+    }
+
+    fun testUnknownChildSummaryAdmissionRoundTripsWithoutReportedUsageOrRuntimeAuthority() {
+        val source = fresh(); val p = parent(source); children(source, p)
+        source.tx { db ->
+            db.execSQL("INSERT INTO child_request_usage(task_id,request_id,request_owner,attempt_id,operation,checkpoint_revision,usage_source,has_usage) VALUES('child','child-missing','child-owner','missing-attempt','NEXT',2,'SUMMARY',0)")
+        }
+        val exported = source.service().exportPackage()
+        val history = payload(exported).getJSONObject("child_task_history")
+        assertEquals(5, history.getInt("version"))
+        val target = fresh(); target.service().importPackage(exported)
+        target.tx { db ->
+            db.rawQuery("SELECT has_usage,input_tokens FROM child_request_usage WHERE request_id='child-missing'", null).use {
+                assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertTrue(it.isNull(1))
+            }
+            assertEquals(0, target.count("runtime_checkpoints"))
+            val usage = RecordedUsageReader.readAttributed(db, p.conversationId)
+            assertEquals(2, usage.requests.size)
+            assertEquals(1, usage.childCoverage.tasksWithoutReportedUsage)
+        }
+        assertTrue(target.service().importPackage(exported).alreadyImported)
     }
 
     fun testTamperingAndInvalidStorageClassesAreRejectedWithoutPublishing() {
@@ -525,7 +571,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         assertEquals(0, target.count("conversation_usage_receipts"))
         val before = payload(target.service().exportPackage()).getJSONObject("statistics").toString()
         target.db.writableDatabase.version = 20; target.reopen()
-        assertEquals(28, target.db.readableDatabase.version)
+        assertEquals(29, target.db.readableDatabase.version)
         assertEquals(0, target.count("conversation_usage_receipts"))
         assertEquals(before, payload(target.service().exportPackage()).getJSONObject("statistics").toString())
         assertTrue(target.service().importPackage(text).alreadyImported)
@@ -533,11 +579,11 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val legacy = fresh(); seed(legacy)
         legacy.tx { it.execSQL("DROP TABLE conversation_usage_receipts") }
         legacy.db.writableDatabase.version = 20; legacy.reopen()
-        assertEquals(28, legacy.db.readableDatabase.version)
+        assertEquals(29, legacy.db.readableDatabase.version)
         assertTrue("Missing legacy receipt schema must still backfill", legacy.count("conversation_usage_receipts") > 0)
         val backfilled = payload(legacy.service().exportPackage()).getJSONObject("statistics").toString()
         legacy.db.writableDatabase.version = 20; legacy.reopen()
-        assertEquals(28, legacy.db.readableDatabase.version)
+        assertEquals(29, legacy.db.readableDatabase.version)
         assertEquals(backfilled, payload(legacy.service().exportPackage()).getJSONObject("statistics").toString())
     }
 
@@ -545,7 +591,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val source = fresh(); seed(source)
         val old = mutate(source.service().exportPackage()) { data ->
             val history = data.getJSONObject("child_task_history").put("version", 2)
-            history.getJSONArray("usage").let { rows -> repeat(rows.length()) { rows.getJSONObject(it).remove("cache_creation_tokens") } }
+            history.getJSONArray("usage").let { rows -> repeat(rows.length()) { rows.getJSONObject(it).apply { remove("cache_creation_tokens"); remove("has_usage") } } }
             val tasks = history.getJSONArray("tasks")
             repeat(tasks.length()) { index ->
                 listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot").forEach { tasks.getJSONObject(index).remove(it) }
@@ -566,11 +612,11 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val authoritativeStatistics = payload(target.service().exportPackage()).getJSONObject("statistics").toString()
         target.db.writableDatabase.version = 20
         target.reopen()
-        assertEquals(28, target.db.readableDatabase.version)
+        assertEquals(29, target.db.readableDatabase.version)
         assertEquals(authoritativeStatistics, payload(target.service().exportPackage()).getJSONObject("statistics").toString())
         assertTrue(target.service().importPackage(old).alreadyImported)
         val exported = payload(target.service().exportPackage()).getJSONObject("child_task_history")
-        assertEquals(4, exported.getInt("version"))
+        assertEquals(5, exported.getInt("version"))
         assertTrue(exported.getJSONArray("tasks").getJSONObject(0).isNull("model_id_snapshot"))
         target.tx { db ->
             val row = db.rawQuery("SELECT identity,payload FROM neutral_backup_history WHERE kind='child_task' LIMIT 1", null).use { c ->

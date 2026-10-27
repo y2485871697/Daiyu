@@ -15,12 +15,26 @@ data class RunContextCheckpoint(
     val compactions: Int = 0,
 )
 
+interface RunSummaryRequests {
+    fun create(): RequestCheckpoint
+    fun admit(request: RequestCheckpoint)
+    fun observe(request: RequestCheckpoint, usage: ModelEvent.Usage)
+}
+
 /** Runs only at a completed protocol/tool boundary, on the original checkpoint writer. */
 interface RunContextRuntime {
+    val automatic: Boolean get() = true
     val windowTokens: Long
     fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long
     fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
         request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
         admit: () -> Unit, cancelled: () -> Boolean): List<Message>?
+    fun compactRequests(history: List<Message>, billedTokens: Long?, localTokens: Long,
+        requests: RunSummaryRequests, cancelled: () -> Boolean): List<Message>? {
+        val request = requests.create()
+        return compact(history, billedTokens, localTokens, request, { requests.observe(request, it) },
+            { requests.admit(request) }, cancelled)
+    }
+    fun failed(reason: String) {}
     fun cancel() {}
 }

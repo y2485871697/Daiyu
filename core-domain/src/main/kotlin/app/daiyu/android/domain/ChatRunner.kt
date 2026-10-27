@@ -34,6 +34,21 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     @Volatile private var terminal = false
     @Volatile private var terminalReserved = false
     private var started = false
+    private class CompactRequest(val create: () -> RunContextRuntime, val completed: (Boolean, String?) -> Unit)
+    private var pendingCompact: CompactRequest? = null
+    @Volatile private var compactingRuntime: RunContextRuntime? = null
+
+    /** Maintenance only: never cancel the streaming response or an executing tool batch. */
+    fun requestCompaction(create: () -> RunContextRuntime, completed: (Boolean, String?) -> Unit = { _, _ -> }): Boolean {
+        val waiter = synchronized(terminalLock) {
+            if (options.contextRuntime == null || terminal || terminalReserved || stopped.get() || pendingCompact != null) return false
+            pendingCompact = CompactRequest(create, completed)
+            boundaryWaiter
+        }
+        waiter?.let { LockSupport.unpark(it) }
+        return true
+    }
+
     @Volatile private var pauseRequested = false
     @Volatile private var reasoningInterruptedAtNanos: Long? = null
     @Volatile private var breakStream = false
@@ -145,6 +160,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         reconnectBudget?.finish("stopped")
         cancelSession(captured.first)
         options.contextRuntime?.cancel()
+        compactingRuntime?.cancel()
     }
     /** Nonblocking control call. A tool already executing is allowed to finish its batch. */
     fun pause(): Boolean {
@@ -169,6 +185,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             captured.third?.invoke() ?: resumable.disconnectTransport()
         } else cancelSession(captured.first)
         options.contextRuntime?.cancel()
+        compactingRuntime?.cancel()
         return true
     }
     /** Releases the user pause without changing the running owner. */
@@ -250,6 +267,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         captured.second?.let { LockSupport.unpark(it) }
         cancelSession(captured.first)
         options.contextRuntime?.cancel()
+        compactingRuntime?.cancel()
         return true
     }
     private fun completeAdmission(pending: PendingSupplement, result: SupplementAdmission) {
@@ -437,30 +455,56 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             return acceptedUsers != null
         }
         fun compactAtBoundary(): Boolean {
-            val runtime = contextRuntime ?: return false
-            val pressure = contextState?.pressure ?: return false
-            if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) return false
-            val before = effectiveHistory()
-            val historyLocal = runtime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
-            val anchor = contextState?.calibration
-            val local = anchor?.let { (it.localTokens + historyLocal - it.historyTokens).coerceAtLeast(0) } ?: historyLocal
-            val billed = anchor?.billedTokens?.let { (it + local - anchor.localTokens).coerceAtLeast(0) }
-            val summary = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
-            var admitted = false
-            val compactEpoch = pauseEpoch
+            val base = contextRuntime ?: return false
+            val pressure = contextState?.pressure
+            val selected = synchronized(terminalLock) {
+                if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) return false
+                if (pendingCompact == null && (!base.automatic || pressure == null)) return false
+                (pendingCompact to pauseEpoch).also { pendingCompact = null }
+            }
+            val manual = selected.first
+            val compactEpoch = selected.second
             val cancelled = { compactEpoch != pauseEpoch || stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() }
+            var applied = false
+            var error: String? = null
+            var runtime: RunContextRuntime? = null
+            var admissionAttempted = false
+            var persistenceFailure: PersistenceException? = null
+            val admittedRequests = hashSetOf<String>()
+            fun persistSummary(value: RunCheckpoint? = null) {
+                try { if (value == null) checkpoint() else checkpoint(value) }
+                catch (failure: PersistenceException) { persistenceFailure = failure; throw failure }
+            }
             try {
-                val candidate = runtime.compact(before, billed, local, summary, observe = { event ->
-                    check(admitted)
-                    val accepted = RequestUsageCheckpoint(summary, event, UsageRequestSource.SUMMARY)
-                    val next = usage.filterNot { it.request.owner == owner && it.request.requestId == summary.requestId } + accepted
-                    checkpoint(snapshot(usageSnapshot = next)); usage = next
-                }, admit = {
-                    check(!admitted && !cancelled())
-                    contextState = checkNotNull(contextState).copy(pressure = null,
-                        summaries = checkNotNull(contextState).summaries + summary)
-                    checkpoint(); admitted = true
-                }, cancelled = cancelled)
+                val selectedRuntime = manual?.create?.invoke() ?: base
+                runtime = selectedRuntime
+                compactingRuntime = selectedRuntime
+                if (cancelled()) return false
+                val before = effectiveHistory()
+                val historyLocal = selectedRuntime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
+                val anchor = contextState?.calibration
+                val local = anchor?.let { (it.localTokens + historyLocal - it.historyTokens).coerceAtLeast(0) } ?: historyLocal
+                val billed = anchor?.billedTokens?.let { (it + local - anchor.localTokens).coerceAtLeast(0) }
+                if (cancelled()) return false
+                val candidate = selectedRuntime.compactRequests(before, billed, local, object : RunSummaryRequests {
+                    override fun create() = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
+                    override fun admit(request: RequestCheckpoint) {
+                        persistenceFailure?.let { throw it }
+                        check(!cancelled() && admittedRequests.add(request.requestId))
+                        admissionAttempted = true
+                        contextState = checkNotNull(contextState).copy(pressure = null,
+                            summaries = checkNotNull(contextState).summaries + request)
+                        persistSummary()
+                    }
+                    override fun observe(request: RequestCheckpoint, event: ModelEvent.Usage) {
+                        persistenceFailure?.let { throw it }
+                        check(request.requestId in admittedRequests)
+                        val accepted = RequestUsageCheckpoint(request, event, UsageRequestSource.SUMMARY)
+                        val next = usage.filterNot { it.request.owner == owner && it.request.requestId == request.requestId } + accepted
+                        persistSummary(snapshot(usageSnapshot = next)); usage = next
+                    }
+                }, cancelled)
+                persistenceFailure?.let { throw it }
                 if (candidate == null || cancelled()) return false
                 require(candidate.all { it.conversationId == initial.conversationId })
                 val sealed = segmentHistory.sealSession(current, emptyList())
@@ -476,21 +520,25 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 val store = options.runtimeStore
                 try { checkpoint(expected) } catch (failure: PersistenceException) {
                     val committed = try { (store as? AtomicRuntimeStore)?.readCommittedCheckpoint(expected) } catch (_: Exception) { null }
-                    if (committed != expected) throw failure
+                    if (committed != expected) { persistenceFailure = failure; throw failure }
                     revision = expected.revision
                 }
                 reopenAfterCompaction = true
+                applied = true
                 return true
             } catch (failure: Exception) {
+                persistenceFailure?.let { throw it }
                 if (failure is PersistenceException) throw failure
-                if (!admitted && cancelled()) return false
-                if (stopped.get() || terminalReserved) throw InterruptedException()
-                // Soft maintenance failure retains the accepted context and cannot replay this attempt.
+                if (cancelled()) return false
+                error = failure.message ?: "压缩失败，原始上下文保留"
+                try { (runtime ?: base).failed(error) } catch (_: Exception) { }
                 contextState = checkNotNull(contextState).copy(pressure = null)
                 checkpoint()
                 return false
             } finally {
-                if (!admitted && !cancelled() && contextState?.pressure == pressure) {
+                compactingRuntime = null
+                try { manual?.completed?.invoke(applied, error) } catch (_: Exception) { }
+                if (!admissionAttempted && persistenceFailure == null && pressure != null && !cancelled() && contextState?.pressure == pressure) {
                     contextState = checkNotNull(contextState).copy(pressure = null)
                     checkpoint()
                 }
@@ -503,6 +551,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     options.receiptBatchExecutor?.bindOwner(executionOwner)
                     ownerBound = true
                 }
+                compactAtBoundary()
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
                     if (pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream) null
@@ -546,7 +595,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             if (stopped.get()) { cancelSession(active); throw InterruptedException() }
             while (round < options.maxRounds) {
                 if (boundary()) { cancelSession(active); active = open() }
-                if (round > 0 && contextState?.pressure != null && compactAtBoundary()) {
+                if (round > 0 && compactAtBoundary()) {
                     cancelSession(active); active = open()
                 }
                 if (stopped.get()) throw InterruptedException()
@@ -664,7 +713,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 contextState = state.copy(
                                     calibration = if (plausible && local?.request == request) local?.copy(billedTokens = billed)
                                         else state.calibration?.takeUnless { it.request == request },
-                                    pressure = if (plausible && checkNotNull(billed) >= window * 80 / 100) request
+                                    pressure = if (contextRuntime.automatic && plausible &&
+                                        checkNotNull(billed) >= window * 80 / 100) request
                                         else state.pressure?.takeUnless { it == request })
                             }
                             checkpoint(snapshot(usageSnapshot = nextUsage))
@@ -962,14 +1012,20 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
                 if (pending.isEmpty()) {
                     if (boundary()) { cancelSession(active); active = open(); continue }
-                    compactAtBoundary()
-                    if (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) continue
-                    // Reserve normal completion before leaving the control section. stop() then
-                    // cannot race this terminal outcome, while the actual transaction stays outside.
-                    val completed = synchronized(terminalLock) {
-                        if (stopped.get() || terminalReserved) throw InterruptedException()
-                        if (pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream) false
-                        else { terminalReserved = true; true }
+                    var completed = false
+                    while (true) {
+                        compactAtBoundary()
+                        val decision = synchronized(terminalLock) {
+                            if (stopped.get() || terminalReserved) throw InterruptedException()
+                            when {
+                                pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream -> 0
+                                pendingCompact != null -> 1
+                                else -> { terminalReserved = true; 2 }
+                            }
+                        }
+                        if (decision == 1) continue
+                        completed = decision == 2
+                        break
                     }
                     if (completed) {
                         apply(current.copy(status = RunStatus.COMPLETED))
@@ -1207,6 +1263,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 pendingSupplements.toList().also { pendingSupplements.clear() }
             }
             rejected.forEach { completeAdmission(it, SupplementAdmission.Rejected(it.message.id)) }
+            val abandoned = synchronized(terminalLock) { pendingCompact.also { pendingCompact = null } }
+            try { abandoned?.completed?.invoke(false, "运行已结束；未执行压缩，原始上下文保留") } catch (_: Exception) { }
         }
     }
 }

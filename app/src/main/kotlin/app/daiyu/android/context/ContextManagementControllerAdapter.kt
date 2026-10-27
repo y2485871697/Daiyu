@@ -13,6 +13,7 @@ internal data class ContextManagementState(
     val archive: ContextManagementArchive? = null,
     val operation: ContextManagementOperation? = null,
     val confirmingCompression: Boolean = false,
+    val compressionAccepted: Boolean = false,
     val cancellationRequested: Boolean = false,
     val requiresRefresh: Boolean = false,
     val notice: String? = null,
@@ -26,6 +27,7 @@ internal interface ContextManagementControllerAdapter : AutoCloseable {
     fun nextArchivePage()
     fun previousArchivePage()
     fun selectCompression(selection: ContextManagementSelection): Boolean = false
+    fun submitCompression(selection: ContextManagementSelection?): Boolean = false
     fun requestCompression()
     fun dismissCompression()
     fun confirmCompression()
@@ -40,6 +42,8 @@ internal interface ContextManagementControllerAdapter : AutoCloseable {
 internal interface ContextManagementAdmission {
     fun isCurrent(owner: ContextManagementOwner): Boolean
     fun tryReserve(owner: ContextManagementOwner): ContextManagementLease?
+    fun submitCompression(owner: ContextManagementOwner, expected: ContextManagementSnapshot,
+        selection: ContextManagementSelection?): Boolean = false
 }
 
 /** UI-thread confined commands/completions; worker uses the parent's executor. A stale callback
@@ -88,7 +92,23 @@ internal class ControlledContextManagementAdapter(
         }
     }
 
-    override fun selectCompression(selection: ContextManagementSelection): Boolean {
+    override fun selectCompression(selection: ContextManagementSelection): Boolean = selectCompressionLegacy(selection)
+
+    override fun submitCompression(selection: ContextManagementSelection?): Boolean {
+        val state = mutable.value
+        val expected = state.snapshot ?: return false
+        if (!available() || state.requiresRefresh || state.compressionAccepted) return false
+        if (expected.configuration?.contextWindowTokens == null) {
+            mutable.value = state.copy(notice = "请先在模型目录设置上下文窗口")
+            return false
+        }
+        if (!admission.submitCompression(state.owner, expected, selection)) return false
+        confirmedSnapshot = null
+        mutable.value = state.copy(confirmingCompression = false, compressionAccepted = true, notice = null)
+        return true
+    }
+
+    private fun selectCompressionLegacy(selection: ContextManagementSelection): Boolean {
         val state = mutable.value
         val expected = state.snapshot ?: return false
         if (!available() || state.requiresRefresh) return false

@@ -9,6 +9,7 @@ internal class RuntimeSummaryPreparation internal constructor(
     cancellation: ContextPreparationCancellation,
     private val sealReservation: () -> Unit,
     private val revokeReservation: () -> Unit,
+    val nextUsagePort: () -> BoundSummaryUsagePort = { error("summary_preparation_chunks_unavailable") },
 ) : AutoCloseable {
     private val registration = cancellation.register { revokeReservation() }
     fun seal() = sealReservation()

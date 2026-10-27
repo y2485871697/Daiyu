@@ -5,9 +5,14 @@ import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.domain.*
 import org.json.JSONObject
 
-data class SummaryModelIdentity(val providerId: String, val model: String, val protocol: String)
+data class SummaryModelIdentity(val providerId: String, val model: String, val protocol: String,
+    val providerName: String? = null) {
+    val displayLabel: String get() = "${providerName?.takeIf { it.isNotBlank() } ?: providerId.takeUnless { it.contains(":v1:") || it == "frozen-chat-summary" } ?: "供应商未记录"} · $model"
+}
 data class CompressionActivity(val id: String, val conversationId: String,
-    val messages: Int, val model: SummaryModelIdentity?, val running: Boolean = true)
+    val messages: Int, val model: SummaryModelIdentity?, val running: Boolean = true,
+    val agentLabel: String = "主代理", val runId: String? = null, val taskId: String? = null,
+    val waiting: Boolean = false, val failure: String? = null, val anchor: TimelineAnchor? = null)
 
 data class TimelineAnchor(val conversationId: String, val runId: String,
     val messageId: String, val segment: Int) {
@@ -38,7 +43,8 @@ sealed interface ChatTimelineEntry {
     val created: Long
     data class Compression(override val id: String, override val anchor: TimelineAnchor,
         override val created: Long, val summary: String, val model: SummaryModelIdentity?,
-        val messages: Int, val beforeTokens: Long?, val afterTokens: Long?) : ChatTimelineEntry
+        val messages: Int, val beforeTokens: Long?, val afterTokens: Long?,
+        val agentLabel: String = "主代理", val failure: String? = null) : ChatTimelineEntry
     data class Reconnect(override val id: String, override val anchor: TimelineAnchor,
         override val created: Long, val status: String, val elapsedMs: Long, val reason: String,
         val round: Int, val model: String) : ChatTimelineEntry
@@ -79,8 +85,9 @@ internal object ChatTimelineStore {
         .apply { when (entry) {
             is ChatTimelineEntry.Compression -> {
                 put("kind", "compression"); put("summary", entry.summary); put("messages", entry.messages)
+                put("agentLabel", entry.agentLabel); put("failure", entry.failure ?: JSONObject.NULL)
                 put("before", entry.beforeTokens ?: JSONObject.NULL); put("after", entry.afterTokens ?: JSONObject.NULL)
-                put("model", entry.model?.let { JSONObject().put("provider", it.providerId).put("model", it.model).put("protocol", it.protocol) } ?: JSONObject.NULL)
+                put("model", entry.model?.let { JSONObject().put("provider", it.providerId).put("model", it.model).put("protocol", it.protocol).put("providerName", it.providerName ?: JSONObject.NULL) } ?: JSONObject.NULL)
             }
             is ChatTimelineEntry.Reconnect -> {
                 put("kind", "reconnect"); put("status", entry.status); put("elapsed", entry.elapsedMs)
@@ -98,18 +105,23 @@ internal object ChatTimelineStore {
             "reconnect" -> setOf("status", "elapsed", "reason", "round", "model")
             else -> error("unknown_timeline_kind")
         }
-        require(row.keys().asSequence().toSet() == common + detail)
+        val keys = row.keys().asSequence().toSet()
+        require(keys == common + detail || (kind == "compression" && keys == common + detail + setOf("agentLabel", "failure")))
         val anchor = TimelineAnchor(text("conversation"), text("run"), text("message"), number("segment").also { require(it <= Int.MAX_VALUE) }.toInt())
         return when (kind) {
             "compression" -> {
                 val model = if (row.isNull("model")) null else row.getJSONObject("model").let {
-                    require(it.keys().asSequence().toSet() == setOf("provider", "model", "protocol"))
+                    require(it.keys().asSequence().toSet() in setOf(setOf("provider", "model", "protocol"),
+                        setOf("provider", "model", "protocol", "providerName")))
                     fun field(key: String) = (it.get(key) as? String ?: error("timeline_model_text_required")).also { require(it.isNotBlank()) }
-                    SummaryModelIdentity(field("provider"), field("model"), field("protocol"))
+                    SummaryModelIdentity(field("provider"), field("model"), field("protocol"),
+                        if (it.has("providerName") && !it.isNull("providerName")) field("providerName") else null)
                 }
                 ChatTimelineEntry.Compression(id, anchor, created, text("summary"), model,
                     number("messages").also { require(it in 0..50000) }.toInt(),
-                    if (row.isNull("before")) null else number("before"), if (row.isNull("after")) null else number("after"))
+                    if (row.isNull("before")) null else number("before"), if (row.isNull("after")) null else number("after"),
+                    if (row.has("agentLabel")) text("agentLabel") else "主代理",
+                    if (row.has("failure") && !row.isNull("failure")) text("failure") else null)
             }
             "reconnect" -> ChatTimelineEntry.Reconnect(id, anchor, created,
                 text("status").also { require(it in setOf("running", "succeeded", "failed", "stopped")) },

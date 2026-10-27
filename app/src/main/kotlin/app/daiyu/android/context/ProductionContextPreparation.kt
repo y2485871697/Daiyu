@@ -38,6 +38,28 @@ internal object ProductionContextPreparation {
         )
     }
 
+    fun childRuntime(context: Context, parent: app.daiyu.android.domain.Message,
+        snapshot: app.daiyu.android.model.ProviderSnapshot, agentLabel: String,
+        progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): ProductionRunContext? {
+        requireWorker()
+        val app = context.applicationContext ?: context
+        val settings = ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings().copy(
+            contextWindowTokens = snapshot.contextWindowOverride?.toLong())
+        val policy = ProductionCompressionPolicyResolver.resolve(settings)
+        if (!policy.enabled || policy.contextTokens == null) return null
+        val binding = settings.summaryModel
+        val configuration = if (binding == null) CatalogSummaryExecutionPolicy.chatConfiguration(snapshot,
+            checkNotNull(policy.contextTokens)) else {
+            if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).configuration(binding)
+            else catalogSummaryConfiguration(app, binding)
+        }
+        requireNotNull(configuration) { "子代理摘要模型不可用" }
+        val resolver = ProviderSummaryModelResolver { configuration }
+        return ProductionRunContext(policy, parent, { usage ->
+            requireNotNull(resolver.resolve(configuration.binding, usage)) { "子代理摘要模型不可用" }
+        }, automatic = true, agentLabel = agentLabel, taskId = parent.runId.value, progress = progress)
+    }
+
     private fun requireWorker() {
         check(Looper.myLooper() != Looper.getMainLooper()) { "压缩配置和摘要密钥必须在准备工作线程读取" }
     }

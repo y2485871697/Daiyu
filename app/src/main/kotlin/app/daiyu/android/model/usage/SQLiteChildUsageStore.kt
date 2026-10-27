@@ -18,7 +18,19 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
     private val transactions = DatabaseTransactions { database.writableDatabase }
 
     override fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint) {
-        val records = childRequestUsage(task, checkpoint)
+        val reported = childRequestUsage(task, checkpoint)
+        val requests = reported.associateBy { it.request.requestId }
+        val summaries = checkpoint.context?.summaries.orEmpty()
+        require(summaries.map { it.requestId }.distinct().size == summaries.size)
+        summaries.forEach { request ->
+            require(request.owner == checkpoint.owner && request.operation == RequestOperation.NEXT)
+            requests[request.requestId]?.let { require(it.request == request && it.source == app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY) }
+        }
+        val records = reported.map { Observation(it.request, it.source, it.snapshot) } +
+            summaries.filter { it.requestId !in requests }.map {
+                Observation(it, app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY, null)
+            }
+        require(records.size <= 100) { "child_usage_request_limit" }
         if (records.isEmpty()) return
         transactions.run { db ->
             db.rawQuery("SELECT 1 FROM child_tasks WHERE task_id=? AND conversation_id=? AND parent_run_id=?" +
@@ -31,13 +43,15 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
             }
             val priorIds = mutableSetOf<String>()
             val priorSources = mutableMapOf<String, String>()
-            db.rawQuery("SELECT request_id,request_owner,checkpoint_revision,usage_source FROM $TABLE WHERE task_id=?",
+            val priorReported = mutableSetOf<String>()
+            db.rawQuery("SELECT request_id,request_owner,checkpoint_revision,usage_source,has_usage FROM $TABLE WHERE task_id=?",
                 arrayOf(task.owner.childRunId)).use { rows ->
                 while (rows.moveToNext()) {
                     check(rows.getString(1) == checkpoint.owner && rows.getLong(2) < checkpoint.revision) {
                         "child_usage_stale_owner_or_revision"
                     }
                     priorIds.add(rows.getString(0)); priorSources[rows.getString(0)] = rows.getString(3)
+                    if (rows.getInt(4) == 1) priorReported.add(rows.getString(0))
                 }
             }
             check(records.map { it.request.requestId }.containsAll(priorIds)) { "child_usage_snapshot_lost_request" }
@@ -45,22 +59,29 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 check(priorSources[record.request.requestId]?.let { it == record.source.name } != false) {
                     "child_usage_request_source_changed"
                 }
+                check(record.snapshot != null || record.request.requestId !in priorReported) { "child_usage_report_lost" }
                 val values = ContentValues().apply {
                     put("task_id", task.owner.childRunId); put("request_id", record.request.requestId)
                     put("request_owner", record.request.owner); put("attempt_id", record.request.attemptId)
                     put("operation", record.request.operation.name); put("checkpoint_revision", checkpoint.revision)
-                    put("input_tokens", record.snapshot.inputTokens); put("output_tokens", record.snapshot.outputTokens)
-                    put("cached_tokens", record.snapshot.cachedTokens); put("cache_creation_tokens", record.snapshot.cacheCreationTokens); put("usage_source", record.source.name)
+                    put("has_usage", if (record.snapshot == null) 0 else 1)
+                    put("input_tokens", record.snapshot?.inputTokens); put("output_tokens", record.snapshot?.outputTokens)
+                    put("cached_tokens", record.snapshot?.cachedTokens); put("cache_creation_tokens", record.snapshot?.cacheCreationTokens); put("usage_source", record.source.name)
                 }
                 if (record.request.requestId in priorIds) {
                     check(db.update(TABLE, values, "task_id=? AND request_id=?",
                         arrayOf(task.owner.childRunId, record.request.requestId)) == 1)
-                } else db.insertOrThrow(TABLE, null, values)
-                app.daiyu.android.storage.ConversationUsageStore.record(db, task.owner.conversationId,
-                    record.request.owner, record.request.requestId, record.snapshot)
+                } else check(db.insertOrThrow(TABLE, null, values) != -1L) { "child_usage_admission_not_persisted" }
+                record.snapshot?.let { snapshot ->
+                    app.daiyu.android.storage.ConversationUsageStore.record(db, task.owner.conversationId,
+                        record.request.owner, record.request.requestId, snapshot)
+                }
             }
         }
     }
+
+    private data class Observation(val request: RequestCheckpoint,
+        val source: app.daiyu.android.domain.runtime.UsageRequestSource, val snapshot: ModelEvent.Usage?)
 
     companion object {
         private const val TABLE = "child_request_usage"
@@ -71,7 +92,13 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 "request_id TEXT NOT NULL,request_owner TEXT NOT NULL,attempt_id TEXT NOT NULL," +
                 "operation TEXT NOT NULL,checkpoint_revision INTEGER NOT NULL," +
                 "input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER,cache_creation_tokens INTEGER,usage_source TEXT NOT NULL DEFAULT 'MAIN'," +
-                "PRIMARY KEY(task_id,request_id))")
+                "has_usage INTEGER NOT NULL DEFAULT 1 CHECK(has_usage IN (0,1)),PRIMARY KEY(task_id,request_id))")
+            val hasPresence = db.rawQuery("PRAGMA table_info($TABLE)", null).use { columns ->
+                var found = false
+                while (columns.moveToNext()) if (columns.getString(1) == "has_usage") found = true
+                found
+            }
+            if (!hasPresence) db.execSQL("ALTER TABLE $TABLE ADD COLUMN has_usage INTEGER NOT NULL DEFAULT 1 CHECK(has_usage IN (0,1))")
         }
 
         /** Shares the caller's read transaction with parent checkpoint reading. */
@@ -103,8 +130,10 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                     if (count == 0) { missing++; continue }
                     if (count > 100) { unreadable++; continue }
                     if (count > maxRequests - result.size) { deferred++; continue }
+                    var missingSummary = false
+                    val requestOwners = mutableSetOf<String>()
                     val snapshots = try {
-                        db.rawQuery("SELECT request_id,request_owner,attempt_id,operation,input_tokens,output_tokens,cached_tokens,usage_source,cache_creation_tokens" +
+                        db.rawQuery("SELECT request_id,request_owner,attempt_id,operation,input_tokens,output_tokens,cached_tokens,usage_source,cache_creation_tokens,has_usage" +
                             " FROM $TABLE WHERE task_id=? ORDER BY rowid", arrayOf(taskId)).use { usage ->
                             buildList {
                                 while (usage.moveToNext()) {
@@ -116,17 +145,26 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                                     val request = RequestCheckpoint(usage.getString(0), usage.getString(2),
                                         usage.getString(1), RequestOperation.valueOf(usage.getString(3)))
                                     require(request.operation != RequestOperation.OPEN)
+                                    requestOwners.add(request.owner)
+                                    val source = app.daiyu.android.domain.runtime.UsageRequestSource.valueOf(usage.getString(7))
+                                    require(usage.getType(9) == android.database.Cursor.FIELD_TYPE_INTEGER && usage.getInt(9) in 0..1)
+                                    if (usage.getInt(9) == 0) {
+                                        require(source == app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY && listOf(4, 5, 6, 8).all(usage::isNull))
+                                        missingSummary = true
+                                        continue
+                                    }
                                     add(AttributedRequestUsage(tasks.getString(1), tasks.getString(2), tasks.getString(3),
                                         taskId, tasks.getString(4), UsageOrigin.Child(taskId, tasks.getString(5), tasks.getString(6)),
                                         request, ModelEvent.Usage(token(4), token(5), token(6), token(8)),
                                         app.daiyu.android.domain.runtime.UsageRequestSource.valueOf(usage.getString(7))))
                                 }
                             }
-                        }.also { require(it.map { row -> row.request.owner }.distinct().size == 1) }
+                        }.also { require(requestOwners.size == 1) }
                     } catch (failure: Exception) {
                         if (failure is SQLiteException || failure is CancellationException) throw failure
                         unreadable++; continue
                     }
+                    if (missingSummary) missing++
                     result.addAll(snapshots)
                 }
             }

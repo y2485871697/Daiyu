@@ -2,7 +2,7 @@ package app.daiyu.android.context
 
 import android.database.sqlite.SQLiteDatabase
 
-/** Called ONLY by the unique ConversationDatabase helper in onCreate / v16 -> v17 upgrade.
+/** Installed by the unique ConversationDatabase helper on creation and upgrade (chunks added in v29).
  * Not a parallel usage ledger: a row is the runtime authority before a real message exists.
  * The first checkpoint transfers tokens in the SAME transaction, keeping report-presence metadata.
  * Terminal preparations retain usage even if the parent send was never accepted. */
@@ -17,6 +17,12 @@ internal object RuntimePreparationSchema {
             "has_usage INTEGER NOT NULL DEFAULT 0," +
             "input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER,cache_creation_tokens INTEGER)")
         db.execSQL("CREATE INDEX IF NOT EXISTS runtime_preparations_conversation ON runtime_preparations(conversation_id,state)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS runtime_preparation_chunks(" +
+            "request_id TEXT PRIMARY KEY NOT NULL," +
+            "message_id TEXT NOT NULL REFERENCES runtime_preparations(message_id) ON DELETE CASCADE," +
+            "request_owner TEXT NOT NULL,attempt_id TEXT NOT NULL,has_usage INTEGER NOT NULL DEFAULT 0," +
+            "input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER,cache_creation_tokens INTEGER)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS runtime_preparation_chunks_parent ON runtime_preparation_chunks(message_id)")
         val childColumns = db.rawQuery("PRAGMA table_info(child_request_usage)", null).use { c ->
             buildSet { while (c.moveToNext()) add(c.getString(1)) }
         }

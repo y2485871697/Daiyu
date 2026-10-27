@@ -57,7 +57,7 @@ internal fun reconnectLabel(status: String, elapsedMs: Long): String = when (sta
 
 @Composable
 internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = SystemClock::elapsedRealtime) {
-    if (entry is ChatTimelineEntry.Compression && entry.messages <= 0) return
+    if (entry is ChatTimelineEntry.Compression && entry.messages <= 0 && entry.failure == null) return
     var entered by remember(entry.id) { mutableStateOf(false) }
     LaunchedEffect(entry.id) { entered = true }
     val alpha by animateFloatAsState(if (entered) 1f else 0f, tween(180), label = "timeline-enter")
@@ -78,10 +78,11 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
         }
     }
     val label = when (entry) {
-        is ChatTimelineEntry.Compression -> "已压缩 ${entry.messages} 条消息"
+        is ChatTimelineEntry.Compression -> if (entry.failure != null) "${entry.agentLabel} · 压缩失败"
+            else "${entry.agentLabel} · 已压缩 ${entry.messages} 条消息"
         is ChatTimelineEntry.Reconnect -> reconnectLabel(entry.status, elapsed)
     }
-    val title = if (entry is ChatTimelineEntry.Compression) "压缩摘要" else "错误详情"
+    val title = if (entry is ChatTimelineEntry.Compression && entry.failure == null) "压缩摘要" else "错误详情"
     val line = MiuixTheme.colorScheme.outline.copy(alpha = .55f)
     val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
     Row(Modifier.fillMaxWidth().alpha(alpha).testTag("timeline:${entry.id}").padding(horizontal = 20.dp, vertical = 10.dp),
@@ -112,6 +113,6 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
         }
         val model = (entry as? ChatTimelineEntry.Compression)?.model
         TimelineDetailsSheet(summary, { showDetails = false }, title,
-            if (entry is ChatTimelineEntry.Compression) model?.let { "${it.providerId} · ${it.model} · ${it.protocol}" } ?: "压缩模型：未记录" else "")
+            if (entry is ChatTimelineEntry.Compression) model?.displayLabel ?: "压缩模型：未记录" else "")
     }
 }

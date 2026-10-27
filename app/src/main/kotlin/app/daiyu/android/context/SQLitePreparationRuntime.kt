@@ -83,6 +83,46 @@ internal class SQLitePreparationRuntime(
                 revision = committedRevision // no optimistic receipt on failed write
             }
         }
+        fun nextPort(): BoundSummaryUsagePort {
+            val next = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
+            val nextParent = ParentSummaryUsage(conversation.value, run.value, message.value, next)
+            return BoundSummaryUsagePort(nextParent, beforeClaim = {
+                access {
+                    transactions.run { db ->
+                        val row = live(db)
+                        check(db.rawQuery("SELECT COUNT(*) FROM $CHUNKS WHERE message_id=?", arrayOf(message.value)).use {
+                            it.moveToFirst(); it.getInt(0) < 63
+                        }) { "summary_preparation_request_limit" }
+                        check(db.insertOrThrow(CHUNKS, null, ContentValues().apply {
+                            put("message_id", message.value); put("request_id", next.requestId)
+                            put("request_owner", next.owner); put("attempt_id", next.attemptId); put("has_usage", 0)
+                        }) != -1L) { "summary_preparation_chunk_admission_not_persisted" }
+                        update(db, row, ContentValues().apply { put("revision", row.revision + 1) })
+                    }
+                    revision++
+                }
+            }) { supplied, usage ->
+                access {
+                    check(supplied == nextParent && usage.request == next && usage.source == UsageRequestSource.SUMMARY)
+                    val committed = transactions.run { db ->
+                        val row = live(db)
+                        val chunk = requireNotNull(readChunk(db, row, next.requestId))
+                        check(chunk.request == next) { "summary_preparation_chunk_attempt_conflict" }
+                        if (chunk.usage == usage.snapshot) row.revision else {
+                            check(db.update(CHUNKS, usageValues(usage.snapshot),
+                                "message_id=? AND request_id=? AND request_owner=? AND attempt_id=?",
+                                arrayOf(message.value, next.requestId, next.owner, next.attemptId)) == 1)
+                            update(db, row, ContentValues().apply { put("revision", row.revision + 1) })
+                            row.revision + 1
+                        }.also {
+                            app.daiyu.android.storage.ConversationUsageStore.record(db, conversation.value,
+                                next.owner, next.requestId, usage.snapshot)
+                        }
+                    }
+                    revision = committed
+                }
+            }
+        }
         // BoundSummaryUsagePort must not hide late duplicate observations behind an in-memory cache.
         return RuntimeSummaryPreparation(port, cancellation, sealReservation = {
             access {
@@ -111,7 +151,7 @@ internal class SQLitePreparationRuntime(
                     revoked = true
                 }
             }
-        })
+        }, nextUsagePort = ::nextPort)
     }
 
     /** Seed is read, not ownership transfer. First checkpoint repeats all checks in its transaction. */
@@ -119,7 +159,7 @@ internal class SQLitePreparationRuntime(
         val row = read(db, initial.id.value) ?: return emptyList()
         identity(row, initial)
         check(row.process == processOwner && row.state == "READY") { "summary_preparation_not_sealed_or_cancelled" }
-        return row.snapshots()
+        return snapshots(db, row)
     }
 
     fun transfer(db: SQLiteDatabase, checkpoint: RunCheckpoint) {
@@ -127,9 +167,12 @@ internal class SQLitePreparationRuntime(
         val supplied = checkpoint.usage.filter { it.source == UsageRequestSource.SUMMARY }
         if (row == null) { check(supplied.isEmpty()) { "summary_usage_without_admission" }; return }
         identity(row, checkpoint.message)
-        check(row.process == processOwner && row.state == "READY" && supplied == row.snapshots()) {
+        check(row.process == processOwner && row.state == "READY" && supplied == snapshots(db, row)) {
             "summary_preparation_transfer_conflict"
         }
+        db.update(CHUNKS, ContentValues().apply {
+            putNull("input_tokens"); putNull("output_tokens"); putNull("cached_tokens"); putNull("cache_creation_tokens")
+        }, "message_id=?", arrayOf(row.message))
         update(db, row, ContentValues().apply {
             put("state", "HANDED"); put("owner", checkpoint.owner); put("revision", row.revision + 1)
             // Keep the report-presence bit as coverage evidence after transferring the tokens.
@@ -182,6 +225,31 @@ internal class SQLitePreparationRuntime(
 
     companion object {
         private const val TABLE = "runtime_preparations"
+        private const val CHUNKS = "runtime_preparation_chunks"
+        private fun usageValues(usage: ModelEvent.Usage) = ContentValues().apply {
+            put("has_usage", 1); put("input_tokens", usage.inputTokens); put("output_tokens", usage.outputTokens)
+            put("cached_tokens", usage.cachedTokens); put("cache_creation_tokens", usage.cacheCreationTokens)
+        }
+        private fun readChunk(db: SQLiteDatabase, parent: Row, requestId: String): Row? = db.rawQuery(
+            "SELECT request_id,attempt_id,request_owner,has_usage,input_tokens,output_tokens,cached_tokens,cache_creation_tokens " +
+                "FROM $CHUNKS WHERE message_id=? AND request_id=?", arrayOf(parent.message, requestId)).use { c ->
+            if (!c.moveToFirst()) null else {
+                require((0..2).all { c.getType(it) == android.database.Cursor.FIELD_TYPE_STRING &&
+                    c.getString(it).isNotBlank() && c.getString(it).length <= 200 })
+                require(c.getType(3) == android.database.Cursor.FIELD_TYPE_INTEGER && c.getLong(3) in 0L..1L)
+                fun token(i: Int): Long? {
+                    if (c.isNull(i)) return null
+                    require(c.getType(i) == android.database.Cursor.FIELD_TYPE_INTEGER)
+                    return c.getLong(i)
+                }
+                parent.copy(request = RequestCheckpoint(c.getString(0), c.getString(1), c.getString(2), RequestOperation.NEXT),
+                    usage = if (c.getLong(3) == 0L) null else ModelEvent.Usage(token(4), token(5), token(6), token(7)))
+            }
+        }
+        private fun snapshots(db: SQLiteDatabase, parent: Row): List<RequestUsageCheckpoint> = parent.snapshots() +
+            db.rawQuery("SELECT request_id FROM $CHUNKS WHERE message_id=? ORDER BY rowid", arrayOf(parent.message)).use { c ->
+                buildList { while (c.moveToNext()) addAll(requireNotNull(readChunk(db, parent, c.getString(0))).snapshots()) }
+            }
         private fun read(db: SQLiteDatabase, id: String): Row? = db.rawQuery(
             "SELECT conversation_id,run_id,message_id,owner,process_owner,revision,state,request_id,request_owner,attempt_id," +
                 "has_usage,input_tokens,output_tokens,cached_tokens,cache_creation_tokens FROM $TABLE WHERE message_id=?", arrayOf(id)).use { c ->
@@ -212,18 +280,24 @@ internal class SQLitePreparationRuntime(
          * Counts are preparation coverage, not fictitious assistant messages. */
         fun readUsage(db: SQLiteDatabase, conversationId: ConversationId?, limit: Int): PreparationUsageRead {
             check(db.inTransaction())
-            val filter = "NOT (p.state='HANDED' AND typeof(p.has_usage)='integer' AND p.has_usage=1)" +
-                if (conversationId == null) "" else " AND p.conversation_id=?"
-            val args = conversationId?.let { arrayOf(it.value) } ?: emptyArray()
-            val from = " FROM $TABLE p JOIN conversations c ON c.id=p.conversation_id WHERE $filter"
-            val total = db.rawQuery("SELECT COUNT(*)$from", args).use { it.moveToFirst(); it.getInt(0) }
+            val scope = if (conversationId == null) "" else " AND p.conversation_id=?"
+            val scopedArgs = conversationId?.let { arrayOf(it.value) } ?: emptyArray()
+            val args = scopedArgs + scopedArgs
+            val entries = "SELECT p.message_id,p.request_id,0 AS chunk,p.rowid AS ordering FROM $TABLE p " +
+                "JOIN conversations c ON c.id=p.conversation_id " +
+                "WHERE NOT (p.state='HANDED' AND typeof(p.has_usage)='integer' AND p.has_usage=1)$scope UNION ALL " +
+                "SELECT p.message_id,q.request_id,1 AS chunk,p.rowid AS ordering FROM $CHUNKS q " +
+                "JOIN $TABLE p ON p.message_id=q.message_id JOIN conversations c ON c.id=p.conversation_id " +
+                "WHERE NOT (p.state='HANDED' AND typeof(q.has_usage)='integer' AND q.has_usage=1)$scope"
+            val total = db.rawQuery("SELECT COUNT(*) FROM ($entries)", args).use { it.moveToFirst(); it.getInt(0) }
             val result = mutableListOf<AttributedRequestUsage>()
             var inspected = 0; var missing = 0; var unreadable = 0
-            db.rawQuery("SELECT p.message_id$from ORDER BY p.rowid DESC LIMIT ?", args + limit.toString()).use { c ->
+            db.rawQuery("SELECT message_id,request_id,chunk FROM ($entries) ORDER BY ordering DESC,chunk,request_id LIMIT ?", args + limit.toString()).use { c ->
                 while (c.moveToNext()) {
                     inspected++
                     try {
-                        val row = requireNotNull(read(db, c.getString(0)))
+                        val parent = requireNotNull(read(db, c.getString(0)))
+                        val row = if (c.getInt(2) == 0) parent else requireNotNull(readChunk(db, parent, c.getString(1)))
                         // Validate identity even when Usage is missing. Conversion belongs INSIDE
                         // the per-row boundary too; a malformed parent must not abort all stats.
                         require(listOf(row.conversation, row.run, row.message, row.owner, row.process)

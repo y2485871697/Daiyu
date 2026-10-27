@@ -79,7 +79,10 @@ internal class ControllerChildBrowserPlan private constructor(
      */
     fun launch(context: Context, owner: RunExecutionOwner, capabilities: SessionCapabilities,
         authorization: TaskAuthorization, ledger: ToolLedger, store: ChildTaskStore,
-        capacity: Semaphore, model: () -> ModelPort, onChanged: () -> Unit) {
+        capacity: Semaphore, model: () -> ModelPort, onChanged: () -> Unit,
+        childUsage: app.daiyu.android.domain.usage.ChildUsageRecorder? = null,
+        contextRuntime: app.daiyu.android.domain.runtime.RunContextRuntime? = null,
+        onCheckpoint: (app.daiyu.android.domain.runtime.RunCheckpoint) -> Unit = {}) {
         val retained = synchronized(gate) {
             check(approved && !closed && !launched) { "child_plan_unavailable" }
             require(owner.conversationId == parent.identity.conversationId && owner.runId == parent.identity.runId &&
@@ -91,7 +94,16 @@ internal class ControllerChildBrowserPlan private constructor(
                 parent.assistant.id, prompt)
             // Retain both resource owners BEFORE start/prepare/native constructor can run.
             val assembly = CatalogChildBrowserAssembly(context, session, ledger)
-            ToolEnabledChildRun(scope, record, owner, assembly, model, store, capacity, onChanged).also {
+            require(contextRuntime == null || childUsage != null) { "child_compression_requires_usage_writer" }
+            val usageStore = childUsage?.let { recorder -> object : app.daiyu.android.domain.runtime.RuntimeStore {
+                override fun save(checkpoint: app.daiyu.android.domain.runtime.RunCheckpoint) {
+                    scope.requireOwner(checkpoint.message)
+                    recorder.record(record, checkpoint)
+                    onCheckpoint(checkpoint)
+                }
+            } }
+            ToolEnabledChildRun(scope, record, owner, assembly, model, store, capacity, onChanged,
+                runtimeStore = usageStore, contextRuntime = contextRuntime).also {
                 child = it
                 if (pauseRequested) it.pause()
             }

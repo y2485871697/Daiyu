@@ -60,6 +60,79 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         DatabaseTransactions { database.readableDatabase }.run { RecordedUsageReader.readAttributed(it, conversation, budget) }
     private fun rejects(work: () -> Unit) { try { work(); fail("must reject") } catch (_: Exception) {} }
 
+    fun testSummaryAdmissionOnlyIsMissingNotUnreadableAndIgnoredInsertFailsClosed() {
+        val owner = parent(); val child = task(owner)
+        val initial = checkpoint(child)
+        val summary = RequestCheckpoint("summary-only", "summary-attempt", initial.owner, RequestOperation.NEXT)
+        val admitted = initial.copy(usage = emptyList(), context = RunContextCheckpoint(summaries = listOf(summary)))
+        database.writableDatabase.execSQL("CREATE TRIGGER ignore_child BEFORE INSERT ON child_request_usage BEGIN SELECT RAISE(IGNORE); END")
+        try { rejects { runtime.childUsage.record(child, admitted) } }
+        finally { database.writableDatabase.execSQL("DROP TRIGGER ignore_child") }
+        runtime.childUsage.record(child, admitted)
+        val missing = read(owner.conversationId)
+        assertEquals(0, missing.requests.size)
+        assertEquals(1, missing.childCoverage.tasksWithoutReportedUsage)
+        assertEquals(0, missing.childCoverage.unreadableTasks)
+        runtime.childUsage.record(child, admitted.copy(revision = 2, usage =
+            listOf(RequestUsageCheckpoint(summary, ModelEvent.Usage(null, null, null), UsageRequestSource.SUMMARY))))
+        assertEquals(1, read(owner.conversationId).requests.size)
+        assertEquals(0, read(owner.conversationId).childCoverage.tasksWithoutReportedUsage)
+    }
+
+    fun testSummaryAdmissionPersistsBeforeUsageAndReportedNullRemainsDistinct() {
+        val owner = parent(); val child = task(owner)
+        val initial = checkpoint(child)
+        val summary = RequestCheckpoint("summary-request", "summary-attempt", initial.owner, RequestOperation.NEXT)
+        val admitted = initial.copy(context = RunContextCheckpoint(summaries = listOf(summary)))
+        runtime.childUsage.record(child, admitted)
+        database.readableDatabase.rawQuery("SELECT has_usage FROM child_request_usage WHERE request_id=?", arrayOf(summary.requestId)).use {
+            assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+        }
+        val missing = read(owner.conversationId)
+        assertEquals(1, missing.requests.size)
+        assertEquals(1, missing.childCoverage.tasksWithoutReportedUsage)
+        val reported = admitted.copy(revision = 2, usage = admitted.usage +
+            RequestUsageCheckpoint(summary, ModelEvent.Usage(null, null, null), UsageRequestSource.SUMMARY))
+        runtime.childUsage.record(child, reported)
+        val known = read(owner.conversationId)
+        assertEquals(2, known.requests.size)
+        assertEquals(0, known.childCoverage.tasksWithoutReportedUsage)
+        assertNull(known.requests.single { it.source == UsageRequestSource.SUMMARY }.snapshot.inputTokens)
+        rejects { runtime.childUsage.record(child, admitted.copy(revision = 3)) }
+    }
+
+    fun testV28UpgradeAddsAdmissionPresenceWithoutInventingReportedNullUsage() {
+        val owner = parent(); val child = task(owner)
+        runtime.childUsage.record(child, checkpoint(child, value = ModelEvent.Usage(null, null, null)))
+        runtime.close(); database.close()
+        android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath("conversations.db").path,
+            null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use { db ->
+            val sql = db.rawQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name='child_request_usage'", null).use {
+                check(it.moveToFirst()); it.getString(0)
+            }
+            val columns = db.rawQuery("PRAGMA table_info(child_request_usage)", null).use { c -> buildList {
+                while (c.moveToNext()) if (c.getString(1) != "has_usage") add(c.getString(1))
+            } }.joinToString(",")
+            db.execSQL(sql.replace("child_request_usage", "legacy_child_request_usage")
+                .replace("has_usage INTEGER NOT NULL DEFAULT 1 CHECK(has_usage IN (0,1)),", ""))
+            db.execSQL("INSERT INTO legacy_child_request_usage($columns) SELECT $columns FROM child_request_usage")
+            db.execSQL("DROP TABLE child_request_usage")
+            db.execSQL("ALTER TABLE legacy_child_request_usage RENAME TO child_request_usage")
+            db.execSQL("DROP TABLE runtime_preparation_chunks")
+            db.version = 28
+        }
+        database = ConversationDatabase(context)
+        runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
+        assertEquals(29, database.readableDatabase.version)
+        database.readableDatabase.rawQuery("SELECT has_usage FROM child_request_usage", null).use {
+            assertTrue(it.moveToFirst()); assertEquals(1, it.getInt(0))
+        }
+        assertEquals(1, read(owner.conversationId).requests.size)
+        database.readableDatabase.rawQuery("SELECT COUNT(*) FROM runtime_preparation_chunks", null).use {
+            assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+        }
+    }
+
     fun testCacheCreationSurvivesReopening() {
         val owner = parent(); val child = task(owner)
         val first = checkpoint(child, value = ModelEvent.Usage(17, 8, 5, 2))
@@ -100,7 +173,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         }
         database = ConversationDatabase(context)
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(28, database.readableDatabase.version)
+        assertEquals(29, database.readableDatabase.version)
         tables.forEach { table ->
             database.readableDatabase.rawQuery("SELECT cache_creation_tokens FROM $table", null).use { c ->
                 while (c.moveToNext()) assertTrue(c.isNull(0))
@@ -210,7 +283,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         app.daiyu.android.removeAssistantSchemaForLegacyFixture(database.writableDatabase)
         database.writableDatabase.version = 8; database.close()
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(28, database.readableDatabase.version)
+        assertEquals(29, database.readableDatabase.version)
         assertEquals(1, read().childCoverage.tasksWithoutReportedUsage)
         assertNull(read().summary.child.input.reportedTokens)
     }

@@ -72,7 +72,9 @@ class ProviderSummaryModelResolver internal constructor(
         val adapter = ProviderSummaryModelPort(configuration, connect, deadlines, usage, oauthHeaders)
         return BoundSummaryModel(binding, adapter, configuration.contextWindowTokens, configuration.inputBudgetTokens,
             startDeadline = { SummaryRequestDeadline(configuration.deadlineMillis, deadlines::nanoTime) },
-            displayIdentity = app.daiyu.android.timeline.SummaryModelIdentity(binding.providerId, configuration.apiModel, configuration.provider.protocol.name)).also { bound ->
+            displayIdentity = app.daiyu.android.timeline.SummaryModelIdentity(configuration.provider.usageIdentity?.providerId ?: binding.providerId,
+                configuration.apiModel, configuration.provider.protocol.name, configuration.provider.usageIdentity?.providerName),
+            requireCheckpointFormat = true).also { bound ->
                 bound.rebind = { fresh -> requireNotNull(ProviderSummaryModelResolver({ configuration }, connect, deadlines, oauthHeaders = oauthHeaders).resolve(binding, fresh)) }
             }
     }

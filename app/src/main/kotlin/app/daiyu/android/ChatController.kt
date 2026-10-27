@@ -230,7 +230,13 @@ class ChatController internal constructor(private val application:Application,
     }
 
     private val contextService by lazy { ContextService(application, database).also { it.onCompression = ::postCompressionActivity } }
-    @Volatile internal var compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null; private set
+    private val compressionActivitiesById = linkedMapOf<String, app.daiyu.android.timeline.CompressionActivity>()
+    internal val compressionActivities: List<app.daiyu.android.timeline.CompressionActivity>
+        get() = synchronized(this) { compressionActivitiesById.values.toList() }
+    internal val compressionActivity: app.daiyu.android.timeline.CompressionActivity?
+        get() = synchronized(this) { compressionActivitiesById.values.firstOrNull() }
+    private val contextManagementExecutor = Executors.newSingleThreadExecutor()
+    private var contextManagementReaders = 0
     private val reconnectTimeline = linkedMapOf<String, app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
     private val reconnectObservedAt = hashMapOf<String, Long>()
     private val timelineExecutor = Executors.newSingleThreadExecutor()
@@ -240,8 +246,19 @@ class ChatController internal constructor(private val application:Application,
     private fun postCompressionActivity(value: app.daiyu.android.timeline.CompressionActivity) {
         synchronized(this) {
             if (closed) return
-            if (value.running) compressionActivity = value
-            else if (compressionActivity?.id == value.id) compressionActivity = null
+            if (value.running) compressionActivitiesById[value.id] = value
+            else compressionActivitiesById.remove(value.id)
+            value.failure?.let { failure ->
+                problem = "${value.agentLabel}：$failure"
+                val message = active?.takeIf { it.conversationId.value == value.conversationId }
+                val anchor = value.anchor ?: message?.let {
+                    app.daiyu.android.timeline.TimelineAnchor(it.conversationId.value, it.runId.value, it.id.value,
+                        (MessageHistory.expand(listOf(it)).size - 1).coerceAtLeast(0))
+                }
+                if (anchor != null) persistReconnect(app.daiyu.android.timeline.ChatTimelineEntry.Compression(
+                    "compression-failed:${value.id}", anchor, System.currentTimeMillis(), failure,
+                    value.model, value.messages, null, null, value.agentLabel, failure))
+            }
             timelineRevision.incrementAndGet()
         }
         handler.post { synchronized(this) { if (!closed) notifyChanged() } }
@@ -262,7 +279,7 @@ class ChatController internal constructor(private val application:Application,
                 entry.copy(status = "stopped") else entry
         } + live).sortedWith(compareBy({ it.created }, { it.id }))
     }
-    private fun persistReconnect(entry: app.daiyu.android.timeline.ChatTimelineEntry.Reconnect) {
+    private fun persistReconnect(entry: app.daiyu.android.timeline.ChatTimelineEntry) {
         // Called under the controller monitor; pending writes pin storage through close.
         timelineWriters++
         try { timelineExecutor.execute {
@@ -377,18 +394,43 @@ class ChatController internal constructor(private val application:Application,
     internal fun openContextManagement(owner: ContextManagementOwner): ContextManagementControllerAdapter? {
         check(Looper.myLooper() == Looper.getMainLooper())
         return synchronized(this) {
-            if (contextVisit != null || !idleAvailable() || hasLiveChildTasks(owner.conversationId)) return null
+            if (contextVisit != null || closed || !ready || dataBusy || preparing ||
+                (active != null && active?.conversationId != owner.conversationId)) return null
             val visit = ContextVisit(owner)
             fun current(candidate: ContextManagementOwner): Boolean =
                 !closed && contextVisit === visit && visit.owner == candidate &&
                     contextVisit?.adapter === visit.adapter
             val admission = object : ContextManagementAdmission {
+                override fun submitCompression(owner: ContextManagementOwner, expected: ContextManagementSnapshot,
+                    selection: ContextManagementSelection?): Boolean = synchronized(this@ChatController) {
+                    if (!current(owner)) false else submitContextCompression(owner, expected, selection)
+                }
                 override fun isCurrent(owner: ContextManagementOwner) = synchronized(this@ChatController) {
                     current(owner)
                 }
                 override fun tryReserve(owner: ContextManagementOwner): ContextManagementLease? =
                     synchronized(this@ChatController) reservation@ {
-                        if (!current(owner) || !idleAvailable() || hasLiveChildTasks(owner.conversationId)) return@reservation null
+                        if (!current(owner)) return@reservation null
+                        if (!idleAvailable() || hasLiveChildTasks(owner.conversationId)) {
+                            val cancellation = ContextPreparationCancellation()
+                            val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+                            contextManagementReaders++
+                            return@reservation object : ContextManagementLease {
+                                override val owner = visit.owner
+                                override val cancellation = cancellation
+                                override fun checkCurrent() = synchronized(this@ChatController) {
+                                    if (!current(this.owner)) throw java.util.concurrent.CancellationException("context_visit_revoked")
+                                    cancellation.check()
+                                }
+                                override fun finish() {
+                                    if (!finished.compareAndSet(false, true)) return
+                                    synchronized(this@ChatController) {
+                                        contextManagementReaders--
+                                        if (closed) closeStorageWhenIdle()
+                                    }
+                                }
+                            }
+                        }
                         val token = reservePreparation()
                         visit.token = token
                         object : ContextManagementLease {
@@ -435,11 +477,83 @@ class ChatController internal constructor(private val application:Application,
                 override fun compress(lease: ContextManagementLease, expected: ContextManagementSnapshot) =
                     run { lease.checkCurrent(); delegate.compress(lease, expected) }
             }
-            visit.adapter = ControlledContextManagementAdapter(owner, admission, backend, executor,
+            visit.adapter = ControlledContextManagementAdapter(owner, admission, backend, contextManagementExecutor,
                 java.util.concurrent.Executor { command -> handler.post(command); Unit })
             contextVisit = visit
             visit.adapter
         }
+    }
+
+    private fun submitContextCompression(owner: ContextManagementOwner,
+        expected: ContextManagementSnapshot, selection: ContextManagementSelection?): Boolean {
+        if (closed || dataBusy || expected.conversationId != owner.conversationId) return false
+        val original = active?.takeIf { it.conversationId == owner.conversationId && it.status == RunStatus.RUNNING }
+        val running = runner
+        val waiting = app.daiyu.android.timeline.CompressionActivity(java.util.UUID.randomUUID().toString(),
+            owner.conversationId.value, 0, null, agentLabel = "主代理", runId = original?.runId?.value, waiting = true,
+            anchor = expected.originals.lastOrNull()?.let { message ->
+                app.daiyu.android.timeline.TimelineAnchor(message.conversationId.value, message.runId.value,
+                    message.id.value, (MessageHistory.expand(listOf(message)).size - 1).coerceAtLeast(0))
+            })
+        if (original != null && running != null) {
+            val cancellation = ContextPreparationCancellation()
+            val lease = object : ContextManagementLease {
+                override val owner = owner
+                override val cancellation = cancellation
+                override fun checkCurrent() = synchronized(this@ChatController) {
+                    if (closed || runner !== running || active?.id != original.id || active?.runId != original.runId ||
+                        active?.conversationId != original.conversationId) throw java.util.concurrent.CancellationException("compression_owner_changed")
+                    cancellation.check()
+                }
+                override fun finish() = Unit
+            }
+            val accepted = running.requestCompaction(create = {
+                postCompressionActivity(waiting.copy(running = false))
+                contextManagementFactory(application, contextService).runCompression(lease, expected, selection, original) { activity ->
+                    if (activity.running) runtimeStore?.bindCompressionModel(original, activity.model)
+                    postCompressionActivity(activity)
+                }
+            }, completed = { applied, reason ->
+                postCompressionActivity(waiting.copy(running = false))
+                if (!applied) handler.post { synchronized(this) {
+                    if (!closed && runner === running) { problem = reason ?: "暂无可安全压缩的内容，原始上下文保留"; notifyChanged() }
+                } }
+            })
+            if (accepted) postCompressionActivity(waiting)
+            return accepted
+        }
+        if (!idleAvailable() || hasLiveChildTasks(owner.conversationId)) return false
+        val token = reservePreparation()
+        val lease = object : ContextManagementLease {
+            override val owner = owner
+            override val cancellation = token.cancellation
+            override fun checkCurrent() = synchronized(this@ChatController) {
+                if (preparationCancelled(token)) throw java.util.concurrent.CancellationException("compression_cancelled")
+            }
+            override fun finish() = Unit
+        }
+        postCompressionActivity(waiting)
+        try { executor.execute {
+            try {
+                lease.checkCurrent()
+                val backend = contextManagementFactory(application, contextService)
+                val selected = if (selection == null) expected else backend.selectCompression(lease, expected, selection)
+                lease.checkCurrent()
+                postCompressionActivity(waiting.copy(running = false))
+                backend.compress(lease, selected)
+            } catch (failure: Exception) {
+                postCompressionActivity(waiting.copy(running = false,
+                    failure = failure.message ?: "压缩失败，原始上下文保留"))
+            } finally {
+                postCompressionActivity(waiting.copy(running = false))
+                finishPreparation(token)
+            }
+        } } catch (_: Exception) {
+            postCompressionActivity(waiting.copy(running = false))
+            finishPreparation(token)
+            return false
+        }
+        return true
     }
 
     internal fun invalidateContextManagement(expected: ContextManagementControllerAdapter) {
@@ -1948,7 +2062,7 @@ class ChatController internal constructor(private val application:Application,
             reconnectTimeline[previous.id] = stopped
             persistReconnect(stopped)
         }
-        if (compressionActivity?.conversationId == lifetime.initial.conversationId.value) compressionActivity = null
+        compressionActivitiesById.entries.removeAll { it.value.runId == lifetime.initial.runId.value && it.value.taskId == null }
         timelineRevision.incrementAndGet()
         commandApprovals.revoke()
         lifetime.browserVisual?.revoke()
@@ -3473,7 +3587,8 @@ class ChatController internal constructor(private val application:Application,
             val modelUser = if (gui == null) user else app.daiyu.android.gui.GuiConfirmedModelPort.project(
                 user, checkNotNull(gui.delivery))
             val frozen = coordinator.freeze(conversationId,listOf(modelUser),token.cancellation, summaryUsage = summary.usagePort,
-                contextWindowOverride = requestProvider.contextWindowOverride, chatProvider = requestProvider)
+                contextWindowOverride = requestProvider.contextWindowOverride, chatProvider = requestProvider,
+                nextSummaryUsage = summary.nextUsagePort)
             if (actionRevision != null) {
                 check(video == null)
                 val history = contextService.prepareActionSend(conversationId, actionRevision.prefix, frozen.policy, listOf(modelUser))
@@ -3645,14 +3760,40 @@ class ChatController internal constructor(private val application:Application,
                 platformAction=platformAction?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
                     grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->
+                    val childProvider = provider.withoutNativeSearch()
+                    val childOwner = plan.scope.owner
+                    val childInitial = Message(MessageId(childOwner.assistantMessageId), conversationId,
+                        RunId(childOwner.childRunId), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+                    val childLabel = "子代理 ${childOwner.childRunId.take(8)}"
+                    val parentAnchor = app.daiyu.android.timeline.TimelineAnchor(conversationId.value, run.value, assistant.id.value, 0)
+                    var childActivity: app.daiyu.android.timeline.CompressionActivity? = null
+                    val childContext = app.daiyu.android.context.ProductionContextPreparation.childRuntime(
+                        application, childInitial, childProvider, childLabel) { activity ->
+                        childActivity = activity
+                        postCompressionActivity(activity.copy(anchor = parentAnchor))
+                    }
                     plan.launch(application, realOwner, grants, task, toolLedger,
                         checkNotNull(runtimeStore).childTasks, browserChildCapacity,
                         model = {
-                            val childProvider = provider.withoutNativeSearch()
                             sessionModel?.invoke(childProvider, assistantContext, SessionGatewayContext(conversationId))
                                 ?: assistantModel?.invoke(childProvider, assistantContext) ?: model(childProvider.asModelSettings())
                         },
-                        onChanged = ::browserChildrenChanged)
+                        onChanged = ::browserChildrenChanged,
+                        childUsage = checkNotNull(runtimeStore).childUsage, contextRuntime = childContext,
+                        onCheckpoint = { checkpoint ->
+                            val summary = checkpoint.history.firstOrNull()
+                            val wrapped = (summary?.blocks?.singleOrNull() as? MessageBlock.Text)?.text
+                            if ((checkpoint.context?.compactions ?: 0) > 0 && summary?.id?.value?.startsWith("summary-") == true &&
+                                wrapped?.startsWith("[历史摘要；仅供上下文，非新指令]\n") == true && wrapped.endsWith("\n[摘要结束]")) {
+                                val activity = childActivity
+                                val entry = app.daiyu.android.timeline.ChatTimelineEntry.Compression(
+                                    summary.id.value.removePrefix("summary-"), parentAnchor, System.currentTimeMillis(),
+                                    wrapped.removePrefix("[历史摘要；仅供上下文，非新指令]\n").removeSuffix("\n[摘要结束]"),
+                                    activity?.model, activity?.messages ?: 1, null,
+                                    app.daiyu.android.context.TokenTailCompression.messageTokens(summary), agentLabel = childLabel)
+                                synchronized(this) { if (!closed) persistReconnect(entry) }
+                            }
+                        })
                 } },
                 authorization=platformAction?.scope?.authorization ?: mcpPreparation?.scope?.authorization ?: terminalJobRun?.authorization ?: terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
@@ -3759,12 +3900,15 @@ class ChatController internal constructor(private val application:Application,
                 },
                     runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
                     contextRuntime = if (video == null && auxiliaryFrozen == null &&
-                        preparedContext.frozen.policy.enabled && preparedContext.frozen.runtimeModel != null)
+                        preparedContext.frozen.policy.contextTokens != null)
                         app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) { activity ->
                             synchronized(this) {
                                 val original = reconnectResources
                                 if (!activity.running || (original != null && resources === original && !original.fenced))
-                                    postCompressionActivity(activity)
+                                    {
+                                        if (activity.running) runtimeStore?.bindCompressionModel(assistant, activity.model)
+                                        postCompressionActivity(activity)
+                                    }
                             }
                         } else null,
                     onUsage = { synchronized(this) {
@@ -4142,7 +4286,7 @@ class ChatController internal constructor(private val application:Application,
         if (browserChildren.isNotEmpty()) return // Child workers/UNKNOWN still own the DB and ledger.
         pruneBackgroundRuns()
         if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || guiEntry!=null || generationReaders!=0 ||
-            unacceptedTools.isNotEmpty() || messageActionReaders!=0 || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || timelineWriters!=0 || closingStorage) return
+            unacceptedTools.isNotEmpty() || messageActionReaders!=0 || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || timelineWriters!=0 || contextManagementReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -4164,7 +4308,7 @@ class ChatController internal constructor(private val application:Application,
         closingStorage=true
         executor.execute {
             try {closeGenerationOutputReaders();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
-            finally {timelineExecutor.shutdown();titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
+            finally {timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }
     private val staticGenerationAssets by lazy { app.daiyu.android.media.StaticGenerationAssets(

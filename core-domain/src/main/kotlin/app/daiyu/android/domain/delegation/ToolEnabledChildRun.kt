@@ -37,6 +37,8 @@ class ToolEnabledChildRun(
     private val store: ChildTaskStore,
     private val capacity: Semaphore,
     private val onChanged: () -> Unit = {},
+    private val runtimeStore: RuntimeStore? = null,
+    private val contextRuntime: RunContextRuntime? = null,
 ) : AutoCloseable {
     private val gate = Any()
     private var attempted = false
@@ -114,8 +116,6 @@ class ToolEnabledChildRun(
                 override fun open(history: List<Message>): ModelSession = error("child_schema_required")
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                     check(!stopped() && definitions.isNotEmpty())
-                    store.started(record)
-                    observed = record.copy(status = ChildTaskStatus.RUNNING)
                     check(!stopped())
                     check(pauseControl.awaitBoundary() && !stopped())
                     val port = model()
@@ -152,13 +152,15 @@ class ToolEnabledChildRun(
                 }
             }
             val childRunner = ChatRunner(selected, memory, assembly.tools,
-                RunnerOptions(receiptBatchExecutor = receipts)) { message ->
+                RunnerOptions(receiptBatchExecutor = receipts, runtimeStore = runtimeStore, contextRuntime = contextRuntime)) { message ->
                     scope.requireOwner(message)
                     progress = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }.take(16 * 1024)
                     changed()
                 }
             synchronized(gate) { runner = childRunner }
             if (stopped()) childRunner.stop() else {
+                store.started(record)
+                observed = record.copy(status = ChildTaskStatus.RUNNING)
                 val result = childRunner.run(initial, listOf(user))
                 scope.requireOwner(result)
                 val text = result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }

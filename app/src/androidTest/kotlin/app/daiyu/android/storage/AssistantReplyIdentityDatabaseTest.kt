@@ -18,7 +18,7 @@ class AssistantReplyIdentityDatabaseTest : InstrumentationTestCase() {
             database.writableDatabase.version = 23
             database.close()
             database = ConversationDatabase(context)
-            assertEquals(28, database.readableDatabase.version)
+            assertEquals(29, database.readableDatabase.version)
             database.readableDatabase.rawQuery("SELECT count(*) FROM assistant_reply_identities", null).use {
                 assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
             }

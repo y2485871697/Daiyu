@@ -133,6 +133,8 @@ internal object RecordedUsageReader {
         // A live preparation or checkpoint takes precedence over an imported observation.
         val historyFilter = "kind='PREPARATION' AND NOT EXISTS (SELECT 1 FROM runtime_preparations p WHERE " +
             "p.message_id=recorded_usage_requests.message_id OR (p.request_owner=recorded_usage_requests.request_owner AND p.request_id=recorded_usage_requests.request_id))" +
+            " AND NOT EXISTS (SELECT 1 FROM runtime_preparation_chunks q WHERE " +
+            "q.request_owner=recorded_usage_requests.request_owner AND q.request_id=recorded_usage_requests.request_id)" +
             " AND NOT EXISTS (SELECT 1 FROM runtime_checkpoints r WHERE r.message_id=recorded_usage_requests.message_id)" +
             if (conversationId == null) "" else " AND conversation_id=?"
         val historyTotal = db.rawQuery("SELECT count(*) FROM recorded_usage_requests WHERE $historyFilter", args).use { it.moveToFirst(); it.getInt(0) }

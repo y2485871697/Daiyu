@@ -6181,7 +6181,8 @@ class MainActivity : ComponentActivity() {
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
             timeline = timelineEntries.takeIf { timelineConversation == selected?.id }.orEmpty(),
-            compressionActivity = controller.compressionActivity?.takeIf { it.conversationId == selected?.id?.value },
+            compressionActivity = null,
+            compressionActivities = controller.compressionActivities.filter { it.conversationId == selected?.id?.value },
             turns = ChatTurnMapper.withStreamingOwner(if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                 val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey

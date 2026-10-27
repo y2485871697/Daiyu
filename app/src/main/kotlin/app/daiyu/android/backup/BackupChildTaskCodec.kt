@@ -20,7 +20,8 @@ internal object BackupChildTaskCodec {
     private val legacyUsageColumns = listOf("task_id", "request_id", "request_owner", "attempt_id", "operation", "checkpoint_revision",
         "input_tokens", "output_tokens", "cached_tokens")
     private val typedUsageColumns = legacyUsageColumns + "usage_source"
-    private val usageColumns = typedUsageColumns + "cache_creation_tokens"
+    private val v4UsageColumns = typedUsageColumns + "cache_creation_tokens"
+    private val usageColumns = v4UsageColumns + "has_usage"
     data class Validated(val tasks: List<JSONObject>, val commands: List<JSONObject>, val usage: List<JSONObject>)
     fun export(db: SQLiteDatabase, conversation: String?): JSONObject {
         require(listOf("child_tasks", "child_task_commands", "child_request_usage").all { BackupHistoryRows.exists(db, it) }) {
@@ -41,24 +42,25 @@ internal object BackupChildTaskCodec {
             if (conversation == null) "" else " WHERE source_id IN (SELECT task_id FROM child_tasks WHERE conversation_id=?)", args)
         val usage = BackupHistoryRows.read(db, "child_request_usage", usageColumns,
             if (conversation == null) "" else " WHERE task_id IN (SELECT task_id FROM child_tasks WHERE conversation_id=?)", args)
-        return JSONObject().put("version", 4).put("tasks", JSONArray(tasks)).put("commands", JSONArray(commands)).put("usage", JSONArray(usage))
+        return JSONObject().put("version", 5).put("tasks", JSONArray(tasks)).put("commands", JSONArray(commands)).put("usage", JSONArray(usage))
     }
     fun validate(value: JSONObject?, messages: JSONArray): Validated {
         if (value == null) return Validated(emptyList(), emptyList(), emptyList())
         with(BackupHistoryRows) {
-            fields(value, listOf("version", "tasks", "commands", "usage")); val version = number(value, "version"); require(version in 1L..4L)
+            fields(value, listOf("version", "tasks", "commands", "usage")); val version = number(value, "version"); require(version in 1L..5L)
             val tasks = rows(value.getJSONArray("tasks")).map { row ->
                 fields(row, if (version < 3L) legacyTaskColumns else taskColumns)
                 withDisplayColumns(row)
             }; val commands = rows(value.getJSONArray("commands"))
             val usage = rows(value.getJSONArray("usage")).map { row ->
-                fields(row, if (version == 1L) legacyUsageColumns else if (version < 4L) typedUsageColumns else usageColumns)
+                fields(row, if (version == 1L) legacyUsageColumns else if (version < 4L) typedUsageColumns else if (version == 4L) v4UsageColumns else usageColumns)
                 // Copy values, not serialized JSON: numberToString could normalize 1.0 to
                 // an integer before the strict storage-type validator gets to inspect it.
                 JSONObject().apply {
                     row.keys().forEach { key -> put(key, row.get(key)) }
                     if (version == 1L) put("usage_source", "MAIN")
                     if (version < 4L) put("cache_creation_tokens", JSONObject.NULL)
+                    if (version < 5L) put("has_usage", 1)
                 }
             }
             val messagesById = messageMap(messages); val byId = linkedMapOf<String, ChildTaskRecord>(); val groups = mutableSetOf<Pair<String, Int>>()
@@ -102,6 +104,9 @@ internal object BackupChildTaskCodec {
                 val task = id(row, "task_id"); require(task in byId && requests.add(task to id(row, "request_id")))
                 id(row, "request_owner"); id(row, "attempt_id"); require(text(row, "operation") in setOf("OPEN", "NEXT", "RESUME"))
                 require(number(row, "checkpoint_revision") > 0)
+                val hasUsage = number(row, "has_usage"); require(hasUsage in 0..1)
+                if (hasUsage == 0L) require(text(row, "usage_source") == "SUMMARY" &&
+                    listOf("input_tokens", "output_tokens", "cached_tokens", "cache_creation_tokens").all(row::isNull))
                 listOf("input_tokens", "output_tokens", "cached_tokens", "cache_creation_tokens").forEach { if (!row.isNull(it)) require(number(row, it) >= 0) }
                 if (!row.isNull("input_tokens") && !row.isNull("cached_tokens"))
                     require(number(row, "cached_tokens") <= number(row, "input_tokens"))

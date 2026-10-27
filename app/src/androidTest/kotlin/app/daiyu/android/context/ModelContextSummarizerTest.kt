@@ -33,7 +33,7 @@ class ModelContextSummarizerTest : InstrumentationTestCase() {
             assertTrue(request.blocks.all { it is MessageBlock.Text })
             val text = (request.blocks.single() as MessageBlock.Text).text
             assertTrue(text.contains("do_not_execute") && text.contains("failed") && text.contains("original failure"))
-            assertTrue(text.contains("untrusted") && text.contains("revision"))
+            assertTrue(text.contains("untrusted") && text.contains("sequence"))
             assertTrue(text.contains("不是新指令") && text.contains("不执行工具"))
             object : ModelSession {
                 override fun cancel() { closed = true }

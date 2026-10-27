@@ -76,10 +76,13 @@ internal fun ChatMessageList(
     timeline: List<app.daiyu.android.timeline.ChatTimelineEntry> = emptyList(),
     compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null,
     speechMessageId: String? = null,
+    compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
 ) {
     val timelineAfter = remember(timeline) { timeline.groupBy { it.anchor.listKey } }
-    val compressionVisible = compressionActivity?.running == true
-    val tailIndex = turns.lastIndex + if (compressionVisible) 1 else 0
+    val liveCompressions = (compressionActivities + listOfNotNull(compressionActivity))
+        .filter { it.running }.distinctBy { it.id }
+    val compressionVisible = liveCompressions.isNotEmpty()
+    val tailIndex = turns.lastIndex + liveCompressions.size
     val currentTailIndex by rememberUpdatedState(tailIndex)
     val listState = rememberLazyListState()
     val dragging by listState.interactionSource.collectIsDraggedAsState()
@@ -296,10 +299,11 @@ internal fun ChatMessageList(
                     }
                 }
             }
-            if (compressionVisible) {
-                item(key = "chat-context-compressing", contentType = "compression") {
-                    CompressionProgressNotice(compressionActivity?.model?.model.orEmpty(), Modifier.animateItem(
-                        fadeInSpec = androidx.compose.animation.core.tween(180), placementSpec = null, fadeOutSpec = null))
+            liveCompressions.forEach { activity ->
+                item(key = "chat-context-compressing:${activity.id}", contentType = "compression") {
+                    CompressionProgressNotice(activity.agentLabel, Modifier.animateItem(
+                        fadeInSpec = androidx.compose.animation.core.tween(180), placementSpec = null, fadeOutSpec = null),
+                        label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩，当前调用结束后执行" else "正在压缩上下文"}")
                 }
             }
         }

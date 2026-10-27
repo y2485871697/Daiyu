@@ -95,11 +95,14 @@ internal object ConversationUsageStore {
         }
         numeric("SELECT p.conversation_id,p.request_owner,p.request_id,p.input_tokens,p.output_tokens,p.cached_tokens,p.cache_creation_tokens " +
             "FROM runtime_preparations p JOIN conversations c ON c.id=p.conversation_id WHERE p.has_usage=1")
+        numeric("SELECT p.conversation_id,q.request_owner,q.request_id,q.input_tokens,q.output_tokens,q.cached_tokens,q.cache_creation_tokens " +
+            "FROM runtime_preparation_chunks q JOIN runtime_preparations p ON p.message_id=q.message_id " +
+            "JOIN conversations c ON c.id=p.conversation_id WHERE q.has_usage=1 AND p.state!='HANDED'")
         numeric("SELECT u.branch_id,u.request_owner,u.request_id,u.input_tokens,u.output_tokens,u.cached_tokens,u.cache_creation_tokens " +
             "FROM context_usage u JOIN conversations c ON c.id=u.branch_id WHERE u.has_usage=1 AND u.usage_source IN ('AUXILIARY_VISION','TITLE','MANUAL_SUMMARY')")
         numeric("SELECT t.conversation_id,u.request_owner,u.request_id,u.input_tokens,u.output_tokens,u.cached_tokens,u.cache_creation_tokens " +
             "FROM child_request_usage u JOIN child_tasks t ON t.task_id=u.task_id JOIN messages m ON m.id=t.parent_message_id " +
-            "AND m.conversation_id=t.conversation_id AND m.run_id=t.parent_run_id")
+            "AND m.conversation_id=t.conversation_id AND m.run_id=t.parent_run_id WHERE u.has_usage=1")
         db.rawQuery("SELECT r.message_id,r.conversation_id,r.run_id FROM runtime_checkpoints r JOIN messages m " +
             "ON m.id=r.message_id AND m.conversation_id=r.conversation_id AND m.run_id=r.run_id", null).use { rows ->
             while (rows.moveToNext()) {

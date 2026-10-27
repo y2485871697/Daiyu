@@ -59,6 +59,12 @@ internal object BackupRuntimeUsageCodec {
                     add(observation("CHECKPOINT", m.id.value, m.conversationId.value, m.runId.value, m.id.value,
                         request, UsageRequestSource.MAIN, report?.snapshot))
                 }
+                saved.context?.summaries.orEmpty().forEach { request ->
+                    val report = reports[request.owner to request.requestId]
+                    require(report == null || report.request == request && report.source == UsageRequestSource.SUMMARY)
+                    add(observation("CHECKPOINT", m.id.value, m.conversationId.value, m.runId.value, m.id.value,
+                        request, UsageRequestSource.SUMMARY, report?.snapshot))
+                }
                 saved.usage.forEach { report ->
                     require(report.source in setOf(UsageRequestSource.MAIN, UsageRequestSource.SUMMARY))
                     if (admitted.none { it.owner == report.request.owner && it.requestId == report.request.requestId })
@@ -69,7 +75,7 @@ internal object BackupRuntimeUsageCodec {
         }
         val preparationColumns = listOf("message_id", "conversation_id", "run_id", "owner", "process_owner", "revision", "state",
             "request_id", "request_owner", "attempt_id", "has_usage") + tokens
-        read(db, "runtime_preparations", preparationColumns, where, args, "message_id").forEach { p ->
+        fun exportPreparation(p: JSONObject) {
             val message = id(p, "message_id"); val owner = id(p, "conversation_id"); val run = id(p, "run_id")
             id(p, "owner"); id(p, "process_owner"); require(number(p, "revision") in 1L until Long.MAX_VALUE)
             val state = text(p, "state"); require(state in setOf("ADMITTED", "READY", "TERMINAL", "HANDED"))
@@ -85,7 +91,7 @@ internal object BackupRuntimeUsageCodec {
             if (state == "HANDED" && presence == 1L) {
                 // The live ledger also excludes this receipt after its parent was deleted.
                 // No retained checkpoint means there are no retained tokens to manufacture.
-                if (parent == null) return@forEach
+                if (parent == null) return
                 val report = requireNotNull(requests[request.owner to request.requestId]) { "摘要交接缺少checkpoint用量" }
                 require(text(report, "kind") == "CHECKPOINT" && text(report, "message_id") == message &&
                     text(report, "conversation_id") == owner && text(report, "run_id") == run &&
@@ -98,6 +104,17 @@ internal object BackupRuntimeUsageCodec {
                     if (p.isNull("cached_tokens")) null else number(p, "cached_tokens"),
                     if (p.isNull("cache_creation_tokens")) null else number(p, "cache_creation_tokens"))
                 add(observation("PREPARATION", message, owner, run, parent, request, UsageRequestSource.SUMMARY, snapshot))
+            }
+        }
+        read(db, "runtime_preparations", preparationColumns, where, args, "message_id").forEach { p ->
+            exportPreparation(p)
+            val chunkColumns = listOf("message_id", "request_id", "request_owner", "attempt_id", "has_usage") + tokens
+            read(db, "runtime_preparation_chunks", chunkColumns, " WHERE message_id=?",
+                arrayOf(id(p, "message_id")), "request_id").forEach { chunk ->
+                require(id(chunk, "request_owner") == id(p, "request_owner")) { "摘要分块请求owner冲突" }
+                val projected = JSONObject(p.toString())
+                chunkColumns.forEach { projected.put(it, chunk.get(it)) }
+                exportPreparation(projected)
             }
         }
         JSONObject().put("version", 2).put("checkpoints", JSONArray(parents.toSortedMap().values.toList()))
@@ -131,7 +148,7 @@ internal object BackupRuntimeUsageCodec {
             require(parentMap.put(id(p, "message_id"), p) == null)
         }
         val identities = mutableSetOf<Pair<String, String>>()
-        val preparations = mutableSetOf<String>()
+        val preparations = mutableMapOf<String, Triple<String, String, String?>>()
         requests.forEach { r ->
             fields(r, requestColumns)
             val message = id(r, "message_id"); val conversation = id(r, "conversation_id"); val run = id(r, "run_id")
@@ -154,7 +171,10 @@ internal object BackupRuntimeUsageCodec {
                 val p = requireNotNull(parentMap[message]); require(text(p, "conversation_id") == conversation && text(p, "run_id") == run)
                 require(!r.isNull("parent_message_id"))
             } else {
-                require(source == "SUMMARY" && text(r, "operation") == "NEXT" && preparations.add(message))
+                require(source == "SUMMARY" && text(r, "operation") == "NEXT")
+                val identity = Triple(conversation, run, if (r.isNull("parent_message_id")) null else id(r, "parent_message_id"))
+                val previous = preparations.put(message, identity)
+                require(previous == null || previous == identity) { "摘要准备父身份冲突" }
             }
         }
         Validated(parents, requests, conversations.toSet())

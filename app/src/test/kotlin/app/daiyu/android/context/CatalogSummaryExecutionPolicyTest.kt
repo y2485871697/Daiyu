@@ -47,7 +47,7 @@ class CatalogSummaryExecutionPolicyTest {
             assertFalse(result.provider.requestOptions.openAiWebSearchEnabled)
             assertFalse(result.provider.requestOptions.customBody.contains("reasoning"))
             assertTrue(snapshot.requestOptions.customBody.contains("reasoning"))
-            assertEquals(CatalogSummaryExecutionPolicy.OUTPUT_CAP_TOKENS, result.maxOutputTokens)
+            assertEquals(minOf(CatalogSummaryExecutionPolicy.OUTPUT_CAP_TOKENS, (result.contextWindowTokens / 2).toInt()), result.maxOutputTokens)
         }
     }
 
@@ -90,7 +90,7 @@ class CatalogSummaryExecutionPolicyTest {
     }
 
     @Test fun InsufficientCapacityAndCustomOverridesAreRejected() {
-        val invalid = listOf(settings().copy(contextWindowOverride = 4096),
+        val invalid = listOf(settings().copy(contextWindowOverride = 512),
             settings().copy(requestOptions = ProviderRequestOptions(customBody = """{"max_output_tokens":99999}""")),
             settings().copy(requestOptions = ProviderRequestOptions(customBody = """{"model":"other"}""")))
         for (source in invalid) {
@@ -99,6 +99,6 @@ class CatalogSummaryExecutionPolicyTest {
             assertTrue(rejected)
         }
         val large = CatalogSummaryExecutionPolicy.configuration(binding, settings().copy(contextWindowOverride = Int.MAX_VALUE))
-        assertTrue(large.inputBudgetTokens > Int.MAX_VALUE.toLong() - 10000)
+        assertEquals(large.contextWindowTokens - large.maxOutputTokens - large.providerOverheadTokens, large.inputBudgetTokens)
     }
 }

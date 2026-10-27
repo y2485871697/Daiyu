@@ -315,7 +315,7 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         db.execSQL("INSERT INTO context_usage(request_id,run_id,branch_id,input_tokens,output_tokens) VALUES('legacy','history-0',?,NULL,0)", arrayOf(owner))
         db.version = 16
         database.close(); database = ConversationDatabase(context); service = ContextService(context, database)
-        assertEquals(28, database.writableDatabase.version)
+        assertEquals(29, database.writableDatabase.version)
         assertEquals("LEGACY", text("SELECT usage_source FROM context_usage"))
         assertEquals(1L, scalar("SELECT COUNT(*) FROM context_usage WHERE request_id='legacy' AND input_tokens IS NULL AND output_tokens=0 AND run_id='history-0'"))
         val wire = Wire(); val worker = worker(wire)
@@ -345,7 +345,7 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         override fun getInputStream(): java.io.InputStream {
             beforeInput()
             val optionalUsage = usage?.let { ",$it" } ?: ""
-            return (bodyOverride ?: "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"final\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"retained summary\"}]}]$optionalUsage}}\n\n").byteInputStream()
+            return (bodyOverride ?: "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"final\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":${org.json.JSONObject.quote(summaryCheckpointFixture())}}]}]$optionalUsage}}\n\n").byteInputStream()
         }
     }
 }

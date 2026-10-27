@@ -22,7 +22,8 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         return ContextManagementSnapshot(owner.conversationId, ContextRevision.digest(listOf(message)),
             listOf(message), PreparedContext(listOf(message), 1234, null), configuration, null)
     }
-    private inner class Actions(private val holdRefresh: Boolean = false) : ContextManagementControllerAdapter {
+    private var routeCloses = 0
+    private inner class Actions(private val holdRefresh: Boolean = false, private val accepts: Boolean = true) : ContextManagementControllerAdapter {
         override val state = MutableStateFlow(ContextManagementState(owner,
             snapshot = if (holdRefresh) null else snapshot()))
         val events = mutableListOf<String>()
@@ -33,18 +34,13 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
                 operation = if (holdRefresh) ContextManagementOperation.REFRESH else null,
                 requiresRefresh = false, notice = null)
         }
-        override fun selectCompression(selection: ContextManagementSelection): Boolean {
-            events.add("select"); this.selection = selection
-            state.value = state.value.copy(operation = ContextManagementOperation.SELECT)
+        override fun selectCompression(selection: ContextManagementSelection): Boolean = error("no legacy selection step")
+        override fun submitCompression(selection: ContextManagementSelection?): Boolean {
+            if (state.value.compressionAccepted) return false
+            events.add("submit"); this.selection = selection
+            if (!accepts) return false
+            state.value = state.value.copy(compressionAccepted = true, confirmingCompression = false)
             return true
-        }
-        fun selected() {
-            val binding = SummaryModelBinding("fixture-target", "opaque-model-uuid")
-            val before = state.value.snapshot!!
-            state.value = state.value.copy(operation = null, confirmingCompression = true,
-                snapshot = before.copy(configuration = before.configuration!!.copy(summaryModel = binding),
-                    summaryTarget = SummaryProfileDescriptor(binding, "revision-1",
-                        "https://summary.invalid/v1/responses", "actual-api-model")))
         }
         override fun requestCompression() { error("route must select first") }
         override fun dismissCompression() {
@@ -64,7 +60,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ContextManagementRoute(actions,
-                    SettingsModelSource(fixture.application, fixture.controller.providers), onClose = {})
+                    SettingsModelSource(fixture.application, fixture.controller.providers), onClose = { routeCloses++ })
             }
         } }
         awaitUniqueTag("context-management")
@@ -96,32 +92,29 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         assertNull(actions.selection)
         assertEquals(0, fixture.opens.get())
     }
-    fun testSelectionAndSeparateConfirmationRetainExactTargetAndCancellation() {
+    fun testOneConfirmationSubmitsExactSelectionAndClosesWithoutAnotherConfirmation() {
         val actions = Actions(); show(actions)
         node("context-compress").performClick()
         awaitVisualIdle()
         assertEquals(ContextManagementSelection(null, ProviderProtocol.CHAT_COMPLETIONS), actions.selection)
-        assertEquals(listOf("refresh", "select"), actions.events)
-        node("context-management").performScrollToIndex(0)
-        node("compression-dialog-operation").assertDoesNotExist()
-        node("context-cancel").assertDoesNotExist()
-        node("context-compress").assertIsNotEnabled()
-        mainThread { actions.selected() }
-        node("context-management").scrollToDescendant(hasTestTag("context-confirm-compress"))
-        ui.onNodeWithText("模型：actual-api-model\n地址：https://summary.invalid/v1/responses").assertExists()
-        ui.onNodeWithText("opaque-model-uuid", substring = true).assertDoesNotExist()
-        node("context-dismiss-compress").scrollToVisible().performClick()
-        awaitVisualIdle()
+        assertEquals(listOf("refresh", "submit"), actions.events)
+        assertTrue(actions.state.value.compressionAccepted)
+        assertEquals(1, routeCloses)
         node("context-compression-confirmation").assertDoesNotExist()
+        node("context-confirm-compress").assertDoesNotExist()
+        node("compression-dialog-operation").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testRejectedSubmissionKeepsConfigurationAndDoesNotOpenSecondaryConfirmation() {
+        val actions = Actions(accepts = false); show(actions)
         node("context-compress").performClick()
-        mainThread { actions.selected() }
-        node("context-confirm-compress").scrollToVisible().performClick()
         awaitVisualIdle()
-        node("context-cancel").scrollToVisible().performClick()
-        awaitVisualIdle()
-        node("context-cancel").assertIsNotEnabled()
-        node("context-compress").assertIsNotEnabled()
-        assertEquals(listOf("refresh", "select", "dismiss", "select", "confirm", "cancel"), actions.events)
+        assertEquals(listOf("refresh", "submit"), actions.events)
+        assertFalse(actions.state.value.compressionAccepted)
+        assertEquals(0, routeCloses)
+        node("context-management").assertExists()
+        node("context-compression-confirmation").assertDoesNotExist()
+        ui.onNodeWithText("当前不可准备压缩，请刷新后重试").assertExists()
         assertEquals(0, fixture.opens.get())
     }
     fun testFailureRefreshNeverSelectsOrConfirmsAutomatically() {

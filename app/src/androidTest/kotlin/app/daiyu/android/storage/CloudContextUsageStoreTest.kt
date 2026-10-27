@@ -47,7 +47,7 @@ class CloudContextUsageStoreTest : InstrumentationTestCase() {
             database.writableDatabase.version = 24
             database.close()
             database = ConversationDatabase(context)
-            assertEquals(28, database.readableDatabase.version)
+            assertEquals(29, database.readableDatabase.version)
             val usage = ConversationUsageStore.read(database.readableDatabase, owner.value)!!
             assertEquals(130L, usage.totalTokens); assertEquals(100L, usage.freshInputTokens)
             assertNull(CloudContextUsageStore.read(database.readableDatabase, owner, model).inputTokens)

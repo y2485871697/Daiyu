@@ -155,7 +155,7 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         database.writableDatabase.version = 6
         database.close(); database = ConversationDatabase(scoped)
         data = RetainedConversationData(database, ContextService(scoped, database))
-        assertEquals(28, database.readableDatabase.version)
+        assertEquals(29, database.readableDatabase.version)
         val restored = database.conversations().single()
         assertEquals(conversation.id, restored.id); assertEquals("迁移草稿", restored.draft)
         assertEquals("已有目录", restored.folder); assertTrue(restored.pinned)

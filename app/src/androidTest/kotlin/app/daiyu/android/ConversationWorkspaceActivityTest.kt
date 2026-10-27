@@ -7,6 +7,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -16,6 +18,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.ui.app.resolveAppearanceActions
+import kotlin.math.abs
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.ConversationWorkspaceSheet
 import app.daiyu.android.ui.components.WorkspaceSourceOption
@@ -240,9 +245,9 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
             if (next == "/") null else next.substringBeforeLast('/').ifEmpty { "/" }, listOf("项目 空格", "second"))
     }
 
-    private fun showSheet() {
+    private fun showSheet(appearance: AppearanceSettings = AppearanceSettings()) {
         mainThread { activity.setContent {
-            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AgentAppTheme(appearance, applyInterfaceScale = false) {
                 ConversationWorkspaceSheet(visible = visible,
                     sources = listOf(
                         WorkspaceSourceOption("private", "应用私有", "/private", original),
@@ -315,11 +320,59 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("workspace-save").assertIsNotEnabled()
         node("workspace-parent").assertIsNotEnabled()
         node("workspace-cancel").assertIsNotEnabled()
-        node("workspace-close").performClick()
+        node("workspace-close").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        ui.waitUntil(5_000) { !visible }
         ui.runOnIdle { assertEquals(0, saves); assertEquals(1, dismisses) }
     }
 
+    fun testPickerUsesIndependentSavedAccentsAndHasNoCloseInBothThemes() {
+        for (dark in listOf(false, true)) {
+            for ((primary, secondary) in listOf(
+                null to null,
+                0xff006b3c.toInt() to 0xffffa500.toInt(),
+                0xffffffff.toInt() to 0xff000000.toInt(),
+                0xff000000.toInt() to 0xffffffff.toInt(),
+            )) {
+                val appearance = AppearanceSettings(
+                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                    primaryAccentColor = primary, secondaryAccentColor = secondary)
+                ui.runOnIdle { visible = true; choosing = false; busy = false; listing = false; directory = null; path = original }
+                showSheet(appearance)
+                node("workspace-close").assertExists()
+                node("workspace-path-card").performTouchInput { click() }
+                node("workspace-close").assertDoesNotExist()
+                ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+                val actions = resolveAppearanceActions(appearance, dark)
+                assertPickerColorPair(node("workspace-save"), actions.primary, actions.onPrimary)
+                assertPickerColorPair(node("workspace-cancel"), actions.secondaryContainer, actions.onSecondary)
+                node("workspace-cancel").performTouchInput { click() }
+                node("workspace-path-card").assertExists()
+                ui.runOnIdle { assertEquals(original, path); assertEquals(0, saves); assertEquals(0, dismisses) }
+            }
+        }
+    }
+
+    private fun assertPickerColorPair(target: SemanticsNodeInteraction, background: Color, foreground: Color) {
+        val pixels = target.captureToImage().toPixelMap()
+        fun Color.matches(expected: Color) = abs(red - expected.red) < .035f &&
+            abs(green - expected.green) < .035f && abs(blue - expected.blue) < .035f
+        var backgroundCount = 0
+        var foregroundCount = 0
+        for (y in 0 until pixels.height) for (column in 0 until pixels.width) {
+            val pixel = pixels[column, y]
+            if (pixel.matches(background)) backgroundCount++
+            if (pixel.matches(foreground)) foregroundCount++
+        }
+        if (background.alpha == 1f) {
+            assertTrue("Missing picker button fill $background", backgroundCount > pixels.width * pixels.height * .04f)
+        }
+        assertTrue("Missing picker button content $foreground", foregroundCount > 8)
+    }
+
     fun testBackAndOutsideDismissNeverSaveEvenWhenBusy() {
+        choosing = true
+        setDirectory("$original/unsaved")
         busy = true
         showSheet()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)

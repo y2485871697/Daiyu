@@ -32,7 +32,9 @@ import app.daiyu.android.ui.components.subagent.ConversationAgentSheet
 import app.daiyu.android.ui.components.subagent.ConversationAgentTypography
 import app.daiyu.android.ui.components.subagent.conversationAgentColors
 import app.daiyu.android.ui.haptics.clickable
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import app.daiyu.android.ui.app.LocalAppearanceDark
+import app.daiyu.android.ui.app.LocalAppearanceSettings
+import app.daiyu.android.ui.app.resolveAppearanceActions
 
 /** Display-only metadata; filesystem access and the draft belong to the conversation owner. */
 data class WorkspaceSourceOption(val id: String, val title: String, val rootPath: String, val initialPath: String)
@@ -61,7 +63,7 @@ fun ConversationWorkspaceSheet(
     WithoutPressRipple {
         ConversationAgentTypography {
             val colors = conversationAgentColors()
-            val theme = MiuixTheme.colorScheme
+            val actions = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)
             ConversationAgentSheet(onDismiss, useDefaultHeight = choosing,
                 modifier = Modifier.testTag("conversation-workspace-sheet")) {
                 Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
@@ -69,7 +71,7 @@ fun ConversationWorkspaceSheet(
                     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(if (choosing) "选择工作目录" else "工作区", style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f))
-                        ConversationAgentIconButton(onClick = onDismiss,
+                        if (!choosing) ConversationAgentIconButton(onClick = onDismiss,
                             modifier = Modifier.size(48.dp).testTag("workspace-close")) {
                             Icon(Icons.Rounded.Close, contentDescription = "关闭", modifier = Modifier.size(20.dp))
                         }
@@ -126,10 +128,10 @@ fun ConversationWorkspaceSheet(
                         HorizontalDivider(color = colors.line)
                         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             ConversationAgentButton("取消", enabled = !busy, primary = true,
-                                primaryColor = theme.secondary, onPrimaryColor = theme.onSecondary,
+                                primaryColor = actions.secondaryContainer, onPrimaryColor = actions.onSecondary,
                                 modifier = Modifier.weight(1f).testTag("workspace-cancel"), onClick = onCancel)
                             ConversationAgentButton("使用", enabled = !busy && !listing && directory?.selectable == true,
-                                primary = true, primaryColor = theme.primary, onPrimaryColor = theme.onPrimary,
+                                primary = true, primaryColor = actions.primary, onPrimaryColor = actions.onPrimary,
                                 modifier = Modifier.weight(1f).testTag("workspace-save"), onClick = onSave)
                         }
                     }

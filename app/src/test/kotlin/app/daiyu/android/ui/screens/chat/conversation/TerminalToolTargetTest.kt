@@ -24,6 +24,9 @@ class TerminalToolTargetTest {
             assertEquals(label, value.targetLabel)
             assertEquals("执行命令 · $label", value.title)
             assertTrue(value.details.fields.contains(ToolFieldUi("执行环境", label)))
+            for (category in listOf("terminal", "background_job")) {
+                assertFalse(toolBodyLayout(category, value.details).fields.any { it.label == "执行环境" })
+            }
         }
     }
 
@@ -32,8 +35,7 @@ class TerminalToolTargetTest {
         assertEquals("Debian • root（PRoot）", proot.targetLabel)
         assertTrue(proot.details.fields.contains(ToolFieldUi("Android 宿主权限", "user")))
         val body = toolBodyLayout(proot.category, proot.details)
-        assertTrue(body.fields.contains(ToolFieldUi("执行环境", "Debian • root（PRoot）")))
-        assertTrue(body.fields.contains(ToolFieldUi("Android 宿主权限", "user")))
+        assertEquals(listOf(ToolFieldUi("Android 宿主权限", "user")), body.fields)
         val guestUser = card("""{"backend":"linux:alpine","uid":1000,"guest_uid":1000,"host_root":true,"host_uid":10444}""")
         assertEquals("Alpine • user", guestUser.targetLabel)
         assertTrue(guestUser.details.fields.contains(ToolFieldUi("Android 宿主权限", "root")))
@@ -106,7 +108,8 @@ class TerminalToolTargetTest {
         assertTrue(shizuku.length < 2_097_152)
         val shizukuCard = card(shizuku, name = "shizuku_execute")
         assertEquals("Android • Shizuku", shizukuCard.targetLabel)
-        assertTrue(toolBodyLayout(shizukuCard.category, shizukuCard.details).fields.contains(ToolFieldUi("执行环境", "Android • Shizuku")))
+        assertTrue(shizukuCard.details.fields.contains(ToolFieldUi("执行环境", "Android • Shizuku")))
+        assertTrue(toolBodyLayout(shizukuCard.category, shizukuCard.details).fields.isEmpty())
         assertNull(TerminalToolTarget.fromResult("terminal_read", " ".repeat(2_097_153)))
         val oversizedBrowserArgs = JSONObject().put("action", "navigate").put("url", "x".repeat(65_537)).toString()
         assertEquals("generic", ToolCardPresentations.present("browser_write", oversizedBrowserArgs, "{}").category)

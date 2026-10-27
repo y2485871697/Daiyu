@@ -128,6 +128,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val title = "执行命令 · $label"
             ui.onNodeWithText(title).scrollToVisible().assertIsDisplayed().performClick()
             ui.onNodeWithText("target-output").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("执行环境", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithText("技术详情").assertDoesNotExist()
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
             assertEquals(0, executions)

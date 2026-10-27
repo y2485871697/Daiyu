@@ -24,7 +24,7 @@ internal fun toolBodyLayout(category: String, details: ToolCategoryDetailsUi): T
         }
         val prose = rich.prose?.takeIf { output == null || rich.failed }
         val targetFields = details.fields.filter {
-            it.label in setOf("执行环境", "Android 宿主权限")
+            it.label == "Android 宿主权限"
         }.distinct()
         return ToolBodyLayout(targetFields, emptyList(), commands + listOfNotNull(output), prose, false)
     }

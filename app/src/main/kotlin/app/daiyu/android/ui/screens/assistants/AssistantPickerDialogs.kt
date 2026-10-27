@@ -1,8 +1,5 @@
 package app.daiyu.android.ui.screens.assistants
 
-import app.daiyu.android.ui.components.imeCursorBrush
-import app.daiyu.android.ui.components.managedInput
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -12,15 +9,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -99,25 +93,10 @@ fun AssistantPickerDialog(
             AssistantPreviewButton(stringResource(R.string.assistant_done), onDismiss,
                 Modifier.weight(1f).testTag("assistant-done"), primary = true)
         }) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp * s).testTag("assistant-search")
-            .clip(RoundedCornerShape(13.dp * s)).background(colors.soft)
-            .border(1.dp, if (searchFocused) colors.accent else colors.line, RoundedCornerShape(13.dp * s))
-            .padding(1.dp).padding(horizontal = 11.dp * s),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
-            Icon(AssistantPreviewIcons.Search, null, Modifier.size(18.dp * s), tint = colors.muted)
-            BasicTextField(searchQuery, { searchQuery = it }, singleLine = true,
-                modifier = Modifier.managedInput().weight(1f).heightIn(min = 42.dp * s)
-                    .testTag("assistant-search-input").onFocusChanged { searchFocused = it.isFocused },
-                cursorBrush = imeCursorBrush(colors.accent),
-                textStyle = TextStyle(color = colors.text, fontSize = (14f * s).sp, lineHeight = (20f * s).sp),
-                decorationBox = { innerTextField ->
-                    Box(Modifier.padding(horizontal = 2.dp * s, vertical = 1.dp * s), contentAlignment = Alignment.CenterStart) {
-                        if (searchQuery.isEmpty()) Text(stringResource(R.string.assistant_search), color = colors.muted,
-                            fontSize = (14f * s).sp, lineHeight = (20f * s).sp)
-                        innerTextField()
-                    }
-                })
-        }
+        AssistantSearchField(searchQuery, { searchQuery = it }, stringResource(R.string.assistant_search),
+            focused = searchFocused, onFocusChanged = { searchFocused = it },
+            modifier = Modifier.testTag("assistant-search"),
+            fieldModifier = Modifier.testTag("assistant-search-input"))
         Row(Modifier.fillMaxWidth().testTag("assistant-list-meta")
             .padding(horizontal = 2.dp * s, vertical = 8.dp * s),
             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

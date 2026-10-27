@@ -4,6 +4,7 @@ import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -39,7 +40,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.R
 import app.daiyu.android.ui.components.UsageGlassDialog
 import app.daiyu.android.ui.model.MessageSearchHit
-import app.daiyu.android.ui.screens.assistants.AssistantPreviewField
+import app.daiyu.android.ui.screens.assistants.AssistantSearchField
 import app.daiyu.android.ui.screens.search.MessageSearchPageReader
 import app.daiyu.android.ui.screens.search.MessageSearchRequest
 import app.daiyu.android.ui.screens.search.MessageSearchRequestState
@@ -76,6 +77,7 @@ internal fun SearchHistoryDialog(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var resumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var query by remember(conversationId) { mutableStateOf("") }
+    var searchFocused by remember(conversationId) { mutableStateOf(false) }
     val request = MessageSearchRequest(query.trim(), conversationId)
     val listState = remember(request) { LazyListState() }
     val loadingListState = rememberLazyListState()
@@ -153,9 +155,9 @@ internal fun SearchHistoryDialog(
     fun cancelSearch() { if (requestCurrent()) requests.cancel() }
     val exit = { if (available()) { requests.cancel(); onDismiss() } }
 
-    UsageGlassDialog(title = stringResource(R.string.action_search_history), onDismiss = exit) {
-        Column(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("search-history-dialog")) {
-            AssistantPreviewField(query, onValueChange = {
+    UsageGlassDialog(title = stringResource(R.string.action_search_history), onDismiss = exit, useDefaultHeight = true) {
+        Column(Modifier.fillMaxWidth().weight(1f).testTag("search-history-dialog")) {
+            AssistantSearchField(query, onValueChange = {
                 if (available() && query != it.take(1000)) {
                     val next = it.take(1000)
                     if (next.trim() != request.query) {
@@ -164,16 +166,16 @@ internal fun SearchHistoryDialog(
                     requests.cancel()
                     query = next
                 }
-            }, label = "", placeholder = stringResource(R.string.search_history_hint),
-                fieldModifier = Modifier.testTag("search:query"), minHeight = 44.dp, bottomSpacing = 8.dp)
-            Box(Modifier.fillMaxWidth().weight(1f, fill = false)) {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)
+            }, placeholder = stringResource(R.string.search_history_hint),
+                focused = searchFocused, onFocusChanged = { searchFocused = it },
+                modifier = Modifier.padding(bottom = 8.dp).testTag("search-history-search"),
+                fieldModifier = Modifier.testTag("search:query"))
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                LazyColumn(Modifier.fillMaxSize()
                     .testTag("search-history-results"),
                     state = if (useResultsPosition) listState else loadingListState) {
                     when {
-                        request.query.isBlank() -> item("prompt") {
-                            SearchNotice(stringResource(R.string.search_history_empty), "search:prompt")
-                        }
+                        request.query.isBlank() -> Unit
                         conversationId == null -> item("empty-draft") {
                             SearchNotice(stringResource(R.string.search_history_no_results), "search:empty")
                         }

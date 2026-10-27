@@ -58,6 +58,7 @@ internal fun UsageGlassDialog(
     onDismiss: () -> Unit,
     compact: Boolean = false,
     adaptiveWidth: Boolean = false,
+    useDefaultHeight: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
@@ -70,7 +71,8 @@ internal fun UsageGlassDialog(
             Modifier.align(if (compact) Alignment.Center else Alignment.BottomCenter)
                 .padding(10.dp)
                 .widthIn(max = if (compact) cardWidth else 550.dp).fillMaxWidth()
-                .heightIn(max = minOf(if (compact) 620.dp else 550.dp, available))
+                .then(if (useDefaultHeight && !compact) Modifier.height(defaultBottomSheetHeight(maxHeight))
+                    else Modifier.heightIn(max = minOf(if (compact) 620.dp else 550.dp, available)))
                 .testTag("usage-glass-dialog").clip(shape)
                 .previewGlassBlur(shape)
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) }

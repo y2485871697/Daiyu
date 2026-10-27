@@ -17,6 +17,7 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.SearchHistoryDialog
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewDialog
 import app.daiyu.android.ui.model.MessageSearchHit
 import app.daiyu.android.ui.model.MessageSearchPage
 import app.daiyu.android.ui.model.MessageSearchCursor
@@ -58,7 +59,7 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
-    fun testOriginalPromptCompactRowsAndExactHitInBothThemesAndScales() {
+    fun testSilentBlankCompactRowsAndExactHitInBothThemesAndScales() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             val reads = AtomicInteger()
             show(dark, scale, reader = { request, _, _ ->
@@ -68,8 +69,9 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                 MessageSearchPage(listOf(hit))
             })
             ui.onNodeWithText(activity.getString(R.string.action_search_history)).assertIsDisplayed()
-            node("search:query").assertIsDisplayed().assertHeightIsAtLeast(44.dp)
-            node("search:prompt").assertIsDisplayed()
+            node("search:query").assertIsDisplayed().assertHeightIsAtLeast(42.dp)
+            node("search-history-search").assertIsDisplayed().assertHeightIsAtLeast(44.dp)
+            node("search:prompt").assertDoesNotExist()
             assertEquals(0, reads.get())
             node("search:query").performTextReplacement("历史")
             dismissIme()
@@ -77,13 +79,77 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
             node(tag).assertIsDisplayed().assertHeightIsAtLeast(44.dp)
                 .assertTextContains("助手 · 可点击的历史正文")
             ui.onNodeWithText("当前会话", substring = false).assertDoesNotExist()
-            val field = node("search:query").fetchSemanticsNode().boundsInRoot
+            val field = node("search-history-search").fetchSemanticsNode().boundsInRoot
             val row = node(tag).fetchSemanticsNode().boundsInRoot
             assertTrue(row.top >= field.bottom)
             assertTrue(row.left >= field.left - 1f && row.right <= field.right + 1f)
             node(tag).performClick()
             assertEquals(hit, opened)
             node("search-history-dialog").assertDoesNotExist()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSameAssistantHeightAcrossBlankLoadingResultsEmptyAndClear() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) for (fontScale in listOf(.9f, 1.3f)) {
+            mainThread { activity.setContent {
+                val density = LocalDensity.current
+                CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                    AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                        themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = true) {
+                        AssistantPreviewDialog(true, "高度参考", {}) {}
+                    }
+                }
+            } }
+            awaitDialogEnter(node("assistant-sheet"))
+            val expectedHeight = node("assistant-sheet").fetchSemanticsNode().size.height.toFloat()
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val reads = AtomicInteger()
+            try {
+                show(dark, scale, fontScale, reader = { request, _, signal ->
+                    reads.incrementAndGet()
+                    if (request.query == "历史") {
+                        entered.countDown()
+                        check(release.await(10, TimeUnit.SECONDS))
+                    }
+                    signal.throwIfCanceled()
+                    MessageSearchPage(if (request.query == "历史") listOf(hit) else emptyList())
+                })
+                fun assertSameHeight() {
+                    awaitDialogEnter(node("usage-glass-dialog"))
+                    assertEquals("History matches assistant: dark=$dark scale=$scale font=$fontScale",
+                        expectedHeight, node("usage-glass-dialog").fetchSemanticsNode().size.height.toFloat(), 2f)
+                    node("search:query").assertIsDisplayed()
+                }
+                assertSameHeight()
+                node("search:prompt").assertDoesNotExist()
+                node("search:loading").assertDoesNotExist()
+                assertEquals(0, reads.get())
+                node("search:query").performTextReplacement("历史")
+                dismissIme()
+                ui.mainClock.advanceTimeBy(200)
+                ui.waitUntil(5_000) { entered.count == 0L }
+                node("search:loading").assertIsDisplayed()
+                assertSameHeight()
+                release.countDown()
+                awaitUniqueTag(tag)
+                assertSameHeight()
+                node("search:query").performTextReplacement("无结果")
+                dismissIme()
+                awaitUniqueTag("search:empty")
+                assertSameHeight()
+                node("search:query").performTextClearance()
+                dismissIme()
+                assertSameHeight()
+                node("search:query").assertEditableText("")
+                node("search:prompt").assertDoesNotExist()
+                node("search:loading").assertDoesNotExist()
+                node("search:empty").assertDoesNotExist()
+                node(tag).assertDoesNotExist()
+                assertEquals(2, reads.get())
+            } finally { release.countDown() }
         }
         assertEquals(0, fixture.opens.get())
     }
@@ -136,7 +202,7 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
             ui.waitForIdle()
             node(tag).assertTextEquals("助手 · 新查询")
             node("search:query").performTextClearance()
-            node("search:prompt").assertIsDisplayed()
+            node("search:prompt").assertDoesNotExist()
             node(tag).assertDoesNotExist()
         } finally { release.countDown() }
         assertEquals(0, fixture.opens.get())

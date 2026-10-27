@@ -36,7 +36,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             screen = ChatScreenState("间距回归", turns = listOf(
                 ChatTurnUi.User("question", "请写一篇长回复"),
                 ChatTurnUi.Assistant("tail", finalText = answer("初始末尾"),
-                    status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED)),
+                    status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running)),
                 composer = ComposerUi(modelLabel = "gpt-6.1-sol",
                     phase = if (running) ComposerPhase.RUNNING else ComposerPhase.IDLE), scrollRequest = ChatScrollRequest(1))
             activity.setContent {
@@ -146,7 +146,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             mainThread { screen = screen.copy(scrollRequest = ChatScrollRequest(2)) }
             assertCompactTail("触摸后末尾")
             val terminal = screen.turns.last() as ChatTurnUi.Assistant
-            mainThread { screen = screen.copy(turns = listOf(screen.turns.first(), terminal.copy(status = RunStatus.COMPLETED))) }
+            mainThread { screen = screen.copy(turns = listOf(screen.turns.first(), terminal.copy(status = RunStatus.COMPLETED, isStreaming = false))) }
             assertCompactTail("触摸后末尾")
             ui.onNode(hasContentDescription("复制回答") and hasAnyAncestor(hasTestTag("chat-turn:tail"))).assertIsDisplayed()
         }
@@ -186,9 +186,12 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                         screen = screen.copy(turns = listOf(screen.turns.first(),
                             tail.copy(finalText = tail.finalText + "\n" + marker)))
                     }
-                    // Allow a layout frame and a follow frame before checking live geometry.
-                    repeat(2) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
-                    var sawNewestLine = assertLiveClearance(marker)
+                    var sawNewestLine = false
+                    repeat(2) {
+                        ui.mainClock.advanceTimeByFrame()
+                        ui.waitForIdle()
+                        sawNewestLine = assertLiveClearance(marker) || sawNewestLine
+                    }
                     repeat(6) {
                         ui.mainClock.advanceTimeByFrame()
                         ui.waitForIdle()

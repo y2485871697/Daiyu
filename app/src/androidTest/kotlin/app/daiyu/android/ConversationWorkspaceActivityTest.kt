@@ -358,7 +358,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
     }
 
     private fun assertPickerColorPair(target: SemanticsNodeInteraction, background: Color, foreground: Color) {
-        val pixels = target.captureToImage().toPixelMap()
+        val pixels = captureScreenNode(target).toPixelMap()
         fun Color.matches(expected: Color) = abs(red - expected.red) < .035f &&
             abs(green - expected.green) < .035f && abs(blue - expected.blue) < .035f
         var backgroundCount = 0

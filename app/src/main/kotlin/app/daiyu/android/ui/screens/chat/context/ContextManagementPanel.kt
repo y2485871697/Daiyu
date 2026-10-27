@@ -62,14 +62,16 @@ internal fun ContextManagementRoute(
                         ProviderCatalogRunTarget(choice.provider, choice.selection.providerIdentity,
                             choice.selection.expectedRevision, choice.selection.record.settings.localIdentity,
                             choice.selection.record.id, choice.protocol))
+                val configuration = state.snapshot?.configuration
                 when {
-                    state.snapshot?.configuration?.contextWindowTokens == null -> notice = "请先在模型目录设置上下文窗口"
-                    draft.customModel && binding == null -> notice = "请先选择压缩模型"
+                    configuration != null && configuration.contextWindowTokens == null -> notice = "请先在模型目录设置上下文窗口"
+                    configuration != null && draft.customModel && binding == null -> notice = "请先选择压缩模型"
                     else -> {
                         val selection = if (draft.customModel && choice == null &&
                             binding?.let(CatalogSummaryBindings::decode) == null) null
                             else ContextManagementSelection(binding, draft.protocol)
-                        if (!adapter.submitCompression(selection)) notice = "当前不可准备压缩，请刷新后重试"
+                        if (!adapter.submitCompression(selection))
+                            notice = adapter.state.value.notice ?: "当前不可准备压缩，请刷新后重试"
                     }
                 }
             }, enabled = state.operation == null && !state.confirmingCompression,

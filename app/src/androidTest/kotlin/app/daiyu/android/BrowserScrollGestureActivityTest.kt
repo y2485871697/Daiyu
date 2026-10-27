@@ -30,6 +30,7 @@ class BrowserScrollGestureActivityTest : WiredActivityTestCase() {
         mainThread {
             loaded = false
             view = WebView(activity).apply {
+                settings.javaScriptEnabled = true
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String) { loaded = true }
                 }
@@ -151,8 +152,59 @@ class BrowserScrollGestureActivityTest : WiredActivityTestCase() {
         }
     }
 
+    private var visualRequest = 0L
+
+    private fun pageObject(body: String): org.json.JSONObject {
+        val result = java.util.concurrent.atomic.AtomicReference<String?>()
+        mainThread { view.evaluateJavascript("(function(){ $body })()") { result.set(it ?: "null") } }
+        ui.waitUntil(5_000) { result.get() != null }
+        return org.json.JSONObject(checkNotNull(result.get()))
+    }
+
+    private fun resetRendererToTop() {
+        pageObject("""
+            var root = document.scrollingElement || document.body;
+            root.scrollLeft = 0;
+            root.scrollTop = 0;
+            window.scrollTo(0, 0);
+            return {};
+        """.trimIndent())
+        val request = ++visualRequest
+        val ready = java.util.concurrent.atomic.AtomicBoolean(false)
+        mainThread {
+            view.postVisualStateCallback(request, object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) {
+                    if (requestId == request) ready.set(true)
+                }
+            })
+            view.postInvalidateOnAnimation()
+        }
+        awaitStableWindowFrame(view) { true.takeIf { ready.get() } }
+    }
+
+    private fun assertRendererTop(label: String) {
+        val position = pageObject("""
+            var root = document.scrollingElement || document.body;
+            var viewport = window.visualViewport;
+            return {windowY: window.scrollY, rootY: root.scrollTop,
+                viewport: viewport ? {pageY: viewport.pageTop, offsetY: viewport.offsetTop} : null};
+        """.trimIndent())
+        mainThread { position.put("nativeY", view.scrollY) }
+        android.util.Log.i("DaiyuBrowserScroll", "$label position=$position")
+        for (key in listOf("windowY", "rootY")) {
+            assertEquals("$label $key: $position", 0.0, position.getDouble(key), 0.0)
+        }
+        position.optJSONObject("viewport")?.let { viewport ->
+            for (key in listOf("pageY", "offsetY")) {
+                assertEquals("$label viewport.$key: $position", 0.0, viewport.getDouble(key), 0.0)
+            }
+        }
+    }
+
     fun testLongPageScrollsBothWaysWithoutDraggingOrClosingBrowser() {
         show(20_000)
+        awaitSettledScrollY("initial top") { view.scrollY == 0 }
+        assertRendererTop("initial top")
         val container = node("browser-visual-container")
         val before = container.fetchSemanticsNode().boundsInRoot
         swipeUp()
@@ -161,16 +213,16 @@ class BrowserScrollGestureActivityTest : WiredActivityTestCase() {
         swipeDown()
         val up = awaitSettledScrollY("real WebView scrolled back up from $down") { view.scrollY < down }
         assertTrue("real WebView scrolled back up: down=$down up=$up", up < down)
-        mainThread { view.scrollTo(0, 0) }
+        resetRendererToTop()
         awaitSettledScrollY("top setup") { view.scrollY == 0 }
+        assertRendererTop("renderer reset")
         swipeDown()
-        awaitSettledScrollY("downward gesture at page top") { view.scrollY == 0 }
-        mainThread {
-            assertEquals(0, view.scrollY)
-            assertEquals(0, dismissals)
-        }
+        val top = awaitSettledScrollY("downward gesture at page top")
+        mainThread { assertEquals(0, dismissals) }
         assertEquals(before, container.fetchSemanticsNode().boundsInRoot)
         node("browser-visual-page").assertIsDisplayed()
+        assertRendererTop("downward gesture at page top")
+        mainThread { assertEquals(0, top); assertEquals(0, view.scrollY) }
         node("browser-visual-back").performClick()
         mainThread { assertEquals(1, dismissals) }
         assertEquals(0, fixture.opens.get())

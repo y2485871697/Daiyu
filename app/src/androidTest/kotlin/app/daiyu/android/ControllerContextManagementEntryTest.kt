@@ -130,7 +130,7 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
         val f = fresh { c, s -> creations.incrementAndGet(); ContextManagementWorker.production(c, s) }
         val adapter = open(f)
         val queued = CountDownLatch(1); val unblock = release()
-        (field(f.controller, "executor") as Executor).execute { queued.countDown(); await(unblock) }
+        (field(f.controller, "contextManagementExecutor") as Executor).execute { queued.countDown(); await(unblock) }
         await(queued)
         var token: Any? = null
         controlMain {
@@ -168,15 +168,24 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
         val secondEntered = CountDownLatch(1); val secondUnblock = release()
         controlMain {
             f.controller.dataTask(work = { secondEntered.countDown(); await(secondUnblock); "fixture local work" })
+            assertTrue(f.controller.dataBusy)
             adapter.refresh()
             assertNull(preparation(f))
             assertNull(adapter.state.value.operation)
+            assertNull(adapter.state.value.snapshot)
             assertNotNull(adapter.state.value.notice)
+            assertEquals(0, creations.get())
         }
         await(secondEntered)
         secondUnblock.countDown()
         awaitControl("second data work drained") { !f.controller.dataBusy }
         assertEquals(0, creations.get()) // No hidden retry when idle returns.
+        controlMain {
+            assertNull(preparation(f))
+            assertNull(adapter.state.value.operation)
+            assertNull(adapter.state.value.snapshot)
+        }
+        assertEquals(0, f.calls.get())
         controlMain { adapter.refresh() }
         awaitControl("explicit local refresh") { adapter.state.value.snapshot != null && adapter.state.value.operation == null }
         assertEquals(1, creations.get())

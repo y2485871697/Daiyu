@@ -45,6 +45,9 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Remeasurement
+import androidx.compose.ui.layout.RemeasurementModifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -63,6 +66,16 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+private class FollowClearanceLayout : RemeasurementModifier {
+    var remeasurement: Remeasurement? = null
+    var correcting = false
+    var active = false
+
+    override fun onRemeasurementAvailable(remeasurement: Remeasurement) {
+        this.remeasurement = remeasurement
+    }
+}
 
 @Composable
 internal fun ChatMessageList(
@@ -87,6 +100,8 @@ internal fun ChatMessageList(
     val compressionVisible = compressionAfter.isNotEmpty()
     val tailIndex = turns.lastIndex + tailCompressions.size
     val currentTailIndex by rememberUpdatedState(tailIndex)
+    val currentTailKey by rememberUpdatedState(
+        tailCompressions.lastOrNull()?.let { "chat-context-compressing:${it.id}" } ?: turns.lastOrNull()?.listKey)
     val listState = rememberLazyListState()
     val dragging by listState.interactionSource.collectIsDraggedAsState()
     var followBottom by rememberSaveable { mutableStateOf(true) }
@@ -131,6 +146,43 @@ internal fun ChatMessageList(
     val revealedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
+    val clearanceLayout = remember(listState) { FollowClearanceLayout() }
+    DisposableEffect(clearanceLayout) {
+        clearanceLayout.active = true
+        onDispose {
+            clearanceLayout.active = false
+            clearanceLayout.remeasurement = null
+        }
+    }
+    fun canFollowBottom(): Boolean =
+        !initialPositionPending && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
+            (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
+
+    fun correctFollowClearance() {
+        if (!clearanceLayout.active || clearanceLayout.correcting || !canFollowBottom() ||
+            currentOcclusionPx <= 0 || !listState.canScrollForward) return
+        val remeasurement = clearanceLayout.remeasurement ?: return
+        val layout = listState.layoutInfo
+        if (layout.viewportSize.height <= 0) return
+        val last = layout.visibleItemsInfo.lastOrNull {
+            it.index == currentTailIndex && it.key == currentTailKey
+        } ?: return
+        val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
+        if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
+            (readyTurns[tail.listKey] != tail || !tail.isStreaming && revealedTurns[tail.listKey] != tail)) return
+        val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
+        val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
+        if (correction == 0) return
+        clearanceLayout.correcting = true
+        try {
+            if (listState.dispatchRawDelta(correction.toFloat()) > 0f && clearanceLayout.active) {
+                // Raw delta may defer placement; finish it after the previous layout pass.
+                remeasurement.forceRemeasure()
+            }
+        } finally {
+            clearanceLayout.correcting = false
+        }
+    }
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
     LaunchedEffect(scrollRequest, requestedIndex, turns.size, tailIndex, touchEpoch, scrollResumed) {
         if (!scrollResumed) return@LaunchedEffect
@@ -195,18 +247,14 @@ internal fun ChatMessageList(
     LaunchedEffect(listState, revealResetEpoch) {
         var previousViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
         var alignViewport = false
-        snapshotFlow {
-            !initialPositionPending && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
-                (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial)
-        }.collectLatest { canFollow ->
+        snapshotFlow { canFollowBottom() }.collectLatest { canFollow ->
             if (!canFollow) return@collectLatest
             val motion = BottomFollowMotion()
             try {
                 while (true) {
                     // Layout notifications may arrive during measurement; scroll only on a frame.
                     val frameTime = withFrameNanos { it }
-                    if (!scrollResumed || !followBottom || currentDragging || currentTailIndex < 0 ||
-                        (currentScrollSerial != null && currentScrollSerial != consumedScrollSerial)) {
+                    if (!canFollowBottom()) {
                         motion.reset()
                         continue
                     }
@@ -296,6 +344,7 @@ internal fun ChatMessageList(
     Box(modifier.fillMaxSize()) {
         LazyColumn(state = listState, userScrollEnabled = !initialPositionPending,
             modifier = Modifier.testTag("chat-messages").fillMaxSize()
+                .then(clearanceLayout)
                 .drawWithContent { if (!initialPositionPending) drawContent() }
                 .then(if (initialPositionPending) Modifier.clearAndSetSemantics {} else Modifier)
                 .pointerInput(Unit) {
@@ -319,7 +368,9 @@ internal fun ChatMessageList(
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + 24.dp),
             verticalArrangement = Arrangement.spacedBy(26.dp)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
-                Column(Modifier.testTag("chat-turn:${turn.id}")) {
+                Column(Modifier.testTag("chat-turn:${turn.id}").onGloballyPositioned { coordinates ->
+                    if (coordinates.isAttached && turn.listKey == currentTailKey) correctFollowClearance()
+                }) {
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
@@ -355,7 +406,9 @@ internal fun ChatMessageList(
             tailCompressions.forEach { activity ->
                 item(key = "chat-context-compressing:${activity.id}", contentType = "compression") {
                     CompressionProgressNotice(activity.agentLabel, Modifier.animateItem(
-                        fadeInSpec = androidx.compose.animation.core.tween(180), placementSpec = null, fadeOutSpec = null),
+                        fadeInSpec = androidx.compose.animation.core.tween(180), placementSpec = null, fadeOutSpec = null).onGloballyPositioned { coordinates ->
+                        if (coordinates.isAttached && currentTailKey == "chat-context-compressing:${activity.id}") correctFollowClearance()
+                    },
                         label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩，当前调用结束后执行" else "正在压缩上下文"}")
                 }
             }

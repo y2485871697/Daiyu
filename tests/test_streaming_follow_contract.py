@@ -11,12 +11,15 @@ class StreamingFollowContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = CHAT.read_text()
+        cls.guard = cls.source.split("fun canFollowBottom(): Boolean =", 1)[1].split("\n\n", 1)[0]
         cls.follow = cls.source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]
 
     def test_height_updates_do_not_restart_the_motion_collector(self):
         observe, animate = self.follow.split("}.collectLatest { canFollow ->", 1)
         self.assertNotIn("layoutInfo", observe)
-        self.assertIn("followBottom && !currentDragging", observe)
+        self.assertIn("snapshotFlow { canFollowBottom()", observe)
+        self.assertIn("followBottom && !currentDragging", self.guard)
+        self.assertNotIn("layoutInfo", self.guard)
         self.assertNotIn("index to overflow", observe)
         self.assertIn("val motion = BottomFollowMotion()", animate)
         self.assertLess(animate.index("val motion = BottomFollowMotion()"), animate.index("while (true)"))
@@ -37,9 +40,10 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("finally {\n                motion.reset()", self.follow)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
-        self.assertIn("currentScrollSerial != null && currentScrollSerial != consumedScrollSerial", self.follow)
-        self.assertIn("currentScrollSerial == null || currentScrollSerial == consumedScrollSerial", self.follow)
-        self.assertIn("if (!scrollResumed || !followBottom || currentDragging || currentTailIndex < 0", self.follow)
+        self.assertLess(self.follow.index("if (!canFollowBottom())"), self.follow.index("motion.reset()"))
+        self.assertIn("currentScrollSerial == null || currentScrollSerial == consumedScrollSerial", self.guard)
+        self.assertIn("if (!canFollowBottom())", self.follow)
+        self.assertIn("!initialPositionPending && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0", self.guard)
         self.assertIn("followBottom = false; wasDragged = false", self.source)
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)
         self.assertIn("listState.animateScrollToItem(index)", self.source)

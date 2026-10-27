@@ -49,7 +49,8 @@ class ChatComposerEditHeaderActivityTest : WiredActivityTestCase() {
             show(320.dp, 1f, dark, editing = false)
             fun labelColor(): androidx.compose.ui.graphics.Color {
                 val layouts = mutableListOf<TextLayoutResult>()
-                node("composer-model-label").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                ui.onNodeWithTag("composer-model-label", useUnmergedTree = true)
+                    .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
                 return layouts.single().layoutInput.style.color
             }
             val normalColor = labelColor()

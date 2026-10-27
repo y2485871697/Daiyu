@@ -9,6 +9,27 @@ class OAuthContract(unittest.TestCase):
  def test_one_shot_result_resumes_with_new_permit(self):
   s=read('ui/screens/settings/ProviderManagementRoute.kt');a=s.index('LaunchedEffect(resumed, permit, oauthReturned)');b=s.index('LaunchedEffect(resumed, permit, busy',a);body=s[a:b]
   self.assertLess(body.index('withContext(Dispatchers.IO)'),body.index('oauthReturned = false'));self.assertIn('sameRegistry && current(permit) &&',body);self.assertIn('oauthAttempt == null && !oauthReturned',s)
+  self.assertIn('if (resumed && current(permit) && oauthReturned)',body)
+  self.assertIn('oauthAttempt != attempt || oauthDraft !== target || oauthResult != auth || !oauthReturned',body)
+  self.assertIn('repo.snapshot().revision == revision',body)
+  self.assertIn('auth != null && attempt != null && sameRegistry && current(permit) &&',body)
+  self.assertIn('target != null && creating === target && target.oauthOnly && target.registration.registeredSlot == null',body)
+  self.assertIn('} else discardOAuth(auth)',body)
+  self.assertLess(body.index('target.attachOAuth(auth)'),body.index('oauthReturned = false'))
+ def test_oauth_receipt_binds_visit_and_draft_without_resume_authority(self):
+  s=read('ui/screens/settings/ProviderManagementRoute.kt')
+  receipt=s.split('ActivityResultContracts.StartActivityForResult()) { result ->',1)[1].split('fun current(',1)[0]
+  self.assertIn('oauthAttempt != null && (data == null || data.getStringExtra("attempt") == oauthAttempt)',receipt)
+  self.assertIn('visit.get() && oauthDraft != null && creating === oauthDraft',receipt)
+  self.assertIn('if (result.resultCode == android.app.Activity.RESULT_OK) oauthResult = auth else discardOAuth(auth)',receipt)
+  self.assertIn('oauthReturned = true',receipt);self.assertIn('} else { discardOAuth(auth) }',receipt)
+  for gate in ('ownerCheck(', 'current(', 'resumed', 'permit', 'attachOAuth('):self.assertNotIn(gate,receipt)
+  self.assertIn('lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()',s)
+  back=s.split('fun back() {',1)[1].split('PageBackStack(',1)[0]
+  self.assertIn('oauthAttempt = null; oauthRegistryRevision = null; oauthReturned = false; oauthDraft = null',back)
+  self.assertIn('discardOAuth(oauthResult); oauthResult = null',back);self.assertIn('clearPrompts()',back)
+  dispose=s.split('DisposableEffect(lifecycle)',1)[1].split('LaunchedEffect(resumed, permit, oauthReturned)',1)[0].split('onDispose {',1)[1]
+  for cleanup in ('oauthAttempt = null', 'oauthDraft = null', 'discardOAuth(oauthResult)', 'oauthResult = null', 'visit.set(false)', 'permit.revoke()', 'creating?.revoke()'):self.assertIn(cleanup,dispose)
  def test_settings_vault_ref_is_not_backup_field(self):
   s=read('storage/ModelSettings.kt');self.assertIn('previousConnection.oauth != settings.oauth',s);self.assertIn('listOf("oauth-reference", "request-options"',s)
   keys=s.split('private val configurationFields = ',1)[1].split('\n',1)[0];self.assertNotIn('oauth',keys)
@@ -16,7 +37,7 @@ class OAuthContract(unittest.TestCase):
  def test_snapshot_both_directions(self):
   s=read('model/ProviderSnapshot.kt');self.assertIn('oauth = oauth,',s);self.assertIn('oauth = settings.oauth,',s);self.assertIn('oauth == other.oauth',s)
  def test_every_post_uses_same_auth_and_codex_policy(self):
-  s=read('model/ResponsesModel.kt');self.assertEqual(2,s.count('val authentication = authHeaders()'));self.assertIn('CodexRequestPolicy.apply(request, settings.requestOptions.speedMode)',s)
+  s=read('model/ResponsesModel.kt');self.assertEqual(2,s.count('val authentication = authHeaders()'));self.assertIn('if (settings.oauth != null) app.daiyu.android.model.oauth.CodexRequestPolicy.apply(request, settings.requestOptions.speedMode, preserveReasoning = summaryRequest)',s)
   self.assertLess(s.index('val authentication = authHeaders()',s.index('val pendingPost = post')),s.index('val conn = connect(URL(finalUrl))'))
  def test_catalog_propagates_auth_and_exact_url(self):
   s=read('model/catalog/ModelCatalogService.kt');self.assertIn('oauth = settings.oauth',s)

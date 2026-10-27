@@ -49,9 +49,17 @@ class ContextRouteLifecycleContractTest(unittest.TestCase):
 
     def test_navigation_keeps_its_requested_destination_without_reentrant_close(self):
         setter = self.main.split('private var retainedPage: String', 1)[1].split('private var paneState', 1)[0]
-        self.assertIn('if (value != retainedPageState && revokeContextManagementEntry(closeRoute = false)) editorGeneration++', setter)
+        self.assertIn('if (value != retainedPageState) revokeContextManagementEntry(closeRoute = false)', setter)
+        self.assertNotIn('editorGeneration++', setter)
         self.assertIn('retainedPageState = value', setter)
         self.assertEqual(1, setter.count('revokeContextManagementEntry(closeRoute = false)'))
+
+    def test_context_visit_epoch_does_not_remount_chat_editor(self):
+        self.assertIn('ContextManagementOwner(conversation.id, renderedContextEntryEpoch)', self.main)
+        self.assertIn('ContextManagementOwner(conversation, epoch)', self.main)
+        revoke = self.main.split('private fun revokeContextManagementEntry(', 1)[1].split('private var legacyPage', 1)[0]
+        self.assertIn('contextManagementEntryEpoch++', revoke)
+        self.assertNotIn('editorGeneration++', revoke)
 
     def test_pause_stop_and_editor_changes_still_revoke_not_restore(self):
         for method, end in [('onPause()', 'override fun onStop()'), ('onStop()', 'override fun onDestroy()')]:

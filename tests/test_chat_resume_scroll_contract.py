@@ -37,8 +37,10 @@ class ChatResumeScrollContract(unittest.TestCase):
     def test_geometry_correction_is_separate_from_foreground_stream_motion(self):
         follow = self.chat.split('// Keep a single motion', 1)[1].split('// Read confirmation', 1)[0]
         self.assertIn('LaunchedEffect(listState, revealResetEpoch)', follow)
-        self.assertIn('scrollResumed && followBottom && !currentDragging', follow)
-        self.assertIn('if (!scrollResumed || !followBottom', follow)
+        guard = self.chat.split('fun canFollowBottom(): Boolean =', 1)[1].split('\n\n', 1)[0]
+        self.assertIn('scrollResumed && followBottom && !currentDragging', guard)
+        self.assertIn('snapshotFlow { canFollowBottom() }', follow)
+        self.assertIn('if (!canFollowBottom())', follow)
         self.assertIn('layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding', follow)
         correction = follow.split('if (resumeFollowPending || alignViewport) {', 1)[1].split('val visibleBottom', 1)[0]
         self.assertIn('listState.scrollBy(overflow.toFloat())', correction)

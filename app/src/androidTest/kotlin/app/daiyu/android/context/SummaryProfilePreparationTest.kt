@@ -9,6 +9,7 @@ import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.storage.SQLiteRuntimeStore
 import app.daiyu.android.testContext
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -108,26 +109,34 @@ class SummaryProfilePreparationTest : InstrumentationTestCase() {
         val original = service.displayHistory(owner)
         val wire = Wire()
         val coordinator = coordinator(wire)
-        val frozen = coordinator.freeze(owner, emptyList())
-        assertTrue(frozen.policy.enabled)
-        assertFalse(frozen.policy.fitsSendBudget(
-            app.daiyu.android.domain.MessageHistory.expand(original).sumOf(TokenTailCompression::messageTokens)))
-        assertEquals(0, connections)
-        // Editing after freeze must not change the detached provider configuration.
-        store.save(profile(ProviderProtocol.RESPONSES, "{\"temperature\":1.2}"))
-        val prepared = coordinator.prepare(frozen)
-        assertEquals(1, connections)
-        assertNotNull(prepared.archiveId)
-        assertTrue(prepared.history.messages.any { message -> message.blocks.any {
-            it is MessageBlock.Text && it.text.contains("最终事实摘要")
-        } })
-        assertEquals(original, service.displayHistory(owner))
-        val request = JSONObject(wire.sent.toString("UTF-8"))
-        assertEquals("wire-summary", request.getString("model"))
-        assertEquals(0.4, request.getDouble("temperature"), 0.0)
-        assertEquals(0.8, request.getDouble("top_p"), 0.0)
-        assertEquals(2000, request.getInt("max_output_tokens"))
-        assertTrue(!request.has("tools") || request.getJSONArray("tools").length() == 0)
+        SQLiteRuntimeStore.acquire(db).use { runtime ->
+            runtime.recoverPending()
+            val cancellation = ContextPreparationCancellation()
+            runtime.summaryPreparation(owner, RunId("pending-send"), MessageId("pending-assistant"), cancellation).use { usage ->
+                val frozen = coordinator.freeze(owner, emptyList(), cancellation, usage.usagePort,
+                    nextSummaryUsage = usage.nextUsagePort)
+                assertTrue(frozen.policy.enabled)
+                assertFalse(frozen.policy.fitsSendBudget(
+                    app.daiyu.android.domain.MessageHistory.expand(original).sumOf(TokenTailCompression::messageTokens)))
+                assertEquals(0, connections)
+                // Editing after freeze must not change the detached provider configuration.
+                store.save(profile(ProviderProtocol.RESPONSES, "{\"temperature\":1.2}"))
+                val prepared = coordinator.prepare(frozen)
+                assertEquals(1, connections)
+                assertNotNull(prepared.archiveId)
+                assertTrue(prepared.history.messages.any { message -> message.blocks.any {
+                    it is MessageBlock.Text && it.text.contains("最终事实摘要")
+                } })
+                assertEquals(original, service.displayHistory(owner))
+                val request = JSONObject(wire.sent.toString("UTF-8"))
+                assertEquals("wire-summary", request.getString("model"))
+                assertEquals(0.4, request.getDouble("temperature"), 0.0)
+                assertEquals(0.8, request.getDouble("top_p"), 0.0)
+                assertEquals("auto", request.getString("service_tier"))
+                assertEquals(2000, request.getInt("max_output_tokens"))
+                assertTrue(!request.has("tools") || request.getJSONArray("tools").length() == 0)
+            }
+        }
     }
 
     private fun installLegacyProvider(provider: ModelSettings) {
@@ -156,6 +165,6 @@ class SummaryProfilePreparationTest : InstrumentationTestCase() {
         override fun getContentType() = "text/event-stream"
         override fun getInputStream() = ("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[" +
             "{\"type\":\"message\",\"id\":\"final\",\"role\":\"assistant\",\"content\":[" +
-            "{\"type\":\"output_text\",\"text\":\"最终事实摘要\"}]}]}}\n\n").byteInputStream()
+            "{\"type\":\"output_text\",\"text\":${JSONObject.quote(summaryCheckpointFixture().replace("retained summary fact", "最终事实摘要"))}}]}]}}\n\n").byteInputStream()
     }
 }

@@ -24,7 +24,7 @@ class ProviderSearchSaveContractTest(unittest.TestCase):
     def test_validation_errors_belong_to_the_current_editor(self):
         source = (UI / 'ProviderManagementRoute.kt').read_text()
         detail = source.split('private class ProviderDetail(', 1)[1].split('private class PausedProviderDraft', 1)[0]
-        new = source.split('private class NewProviderDraft(', 1)[1].split('private class ProviderConfirm', 1)[0]
+        new = source.split('internal class NewProviderDraft(', 1)[1].split('private class ProviderConfirm', 1)[0]
         for owner in (detail, new):
             self.assertIn('var error by mutableStateOf<String?>(null)', owner)
         self.assertIn('newProvider.error = "未保存', source)

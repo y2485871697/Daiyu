@@ -12,7 +12,7 @@ class ProviderSaveValidationContractTest(unittest.TestCase):
         source = (SRC / 'ModelSettingsScreen.kt').read_text()
         self.assertIn('var fieldsSaveError by remember(draft) { mutableStateOf<String?>(null) }', source)
         submit = source.split('val submit: () -> Unit = {', 1)[1].split('val changeDraft:', 1)[0]
-        self.assertIn('if (latestEnabled && latestDraft === draft)', submit)
+        self.assertIn('if (latestEnabled && latestDraft === draft && (!oauthOnly || draft.oauth != null))', submit)
         self.assertIn('connection.cancel(); balance.cancel()', submit)
         self.assertIn('fieldsSaveError = draft.inlineFieldsSaveError()', submit)
         self.assertIn('if (fieldsSaveError == null) onSave(draft)', submit)
@@ -48,7 +48,8 @@ class ProviderSaveValidationContractTest(unittest.TestCase):
         self.assertIn('else if (!errorText.isNullOrBlank())', footer)
         self.assertLess(footer.index('SettingsNote(fieldError'), footer.index('val saveModifier'))
         self.assertIn('this[RetainedModelSaveAction] = submit', footer)
-        self.assertEqual(2, footer.count('enabled = enabled,'))
+        self.assertEqual(1, footer.count('enabled = enabled,'))
+        self.assertIn('enabled = enabled && (!oauthOnly || draft.oauth != null),', footer)
         self.assertNotIn('&& draft.headerFieldsValid', footer)
         self.assertNotIn('&& draft.bodyFieldsValid', footer)
 

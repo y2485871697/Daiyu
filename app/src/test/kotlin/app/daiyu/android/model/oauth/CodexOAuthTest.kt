@@ -19,6 +19,12 @@ class CodexOAuthTest {
         val verifier = CodexOAuthProtocol.nonce(64); assertEquals(86, verifier.length)
         assertTrue(verifier.matches(Regex("[A-Za-z0-9_-]+"))); assertNotEquals(verifier, CodexOAuthProtocol.nonce(64))
     }
+    @Test fun browserUserAgentMatchesTheOriginalLoginWithoutWebViewMarkers() {
+        val ua = "Mozilla/5.0 (Linux; Android 16; Phone; wv) AppleWebKit/537.36 Version/4.0 Chrome/145.0 Mobile Safari/537.36"
+        assertEquals("Mozilla/5.0 (Linux; Android 16; Phone) AppleWebKit/537.36 Chrome/145.0 Mobile Safari/537.36", CodexOAuthProtocol.browserUserAgent(ua))
+        assertEquals("custom-agent/1.0", CodexOAuthProtocol.browserUserAgent("custom-agent/1.0"))
+        assertEquals(CodexOAuthProtocol.browserUserAgent(ua), CodexOAuthProtocol.browserUserAgent(CodexOAuthProtocol.browserUserAgent(ua)))
+    }
     @Test fun authorizationUsesOriginalPublicClientAndExactRedirect() {
         val url = URI(CodexOAuthProtocol.authorizationUrl("verifier", "state"))
         assertEquals("https", url.scheme); assertEquals("auth.openai.com", url.host)

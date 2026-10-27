@@ -50,6 +50,7 @@ internal object CodexOAuthProtocol {
     const val TOKEN_URL = "https://auth.openai.com/oauth/token"
     const val REDIRECT_URI = "http://localhost:1455/auth/callback"
     private const val SCOPES = "openid profile email offline_access api.connectors.read api.connectors.invoke"
+    fun browserUserAgent(default: String): String = default.replace("; wv", "").replace(" Version/4.0", "")
     fun nonce(bytes: Int = 32): String = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(bytes).also { SecureRandom().nextBytes(it) })
     fun challenge(verifier: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(
         MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)))
@@ -75,7 +76,7 @@ internal object CodexOAuthProtocol {
             fields[key] = URLDecoder.decode(pair.getOrElse(1) { "" }, "UTF-8")
         }
         require(expectedState.isNotBlank() && fields["state"] == expectedState) { "OAuth state 不匹配" }
-        check(fields["error"].isNullOrEmpty()) { "登录未授权，请重试" }
+        fields["error"]?.takeIf { it.isNotEmpty() }?.let { throw CodexOAuthFailure.server(it, stage = "authorization") }
         return checkNotNull(fields["code"]?.takeIf { it.isNotBlank() && it.length <= 8192 }) { "登录回调缺少授权码" }
     }
     fun requireEndpoint(endpoint: String, path: String) {

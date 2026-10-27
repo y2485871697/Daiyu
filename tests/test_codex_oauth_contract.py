@@ -8,7 +8,7 @@ class OAuthContract(unittest.TestCase):
   s=read('ui/screens/settings/ProviderManagementRoute.kt');self.assertIn('onOAuth = {',s);self.assertIn('oauthLauncher.launch(',s);self.assertIn('.putExtra("attempt", oauthAttempt)',s)
  def test_one_shot_result_resumes_with_new_permit(self):
   s=read('ui/screens/settings/ProviderManagementRoute.kt');a=s.index('LaunchedEffect(resumed, permit, oauthReturned)');b=s.index('LaunchedEffect(resumed, permit, busy',a);body=s[a:b]
-  self.assertLess(body.index('withContext(Dispatchers.IO)'),body.index('oauthReturned = false'));self.assertIn('sameRegistry && current(permit)',body);self.assertIn('oauthAttempt == null && !oauthReturned',s)
+  self.assertLess(body.index('withContext(Dispatchers.IO)'),body.index('oauthReturned = false'));self.assertIn('sameRegistry && current(permit) &&',body);self.assertIn('oauthAttempt == null && !oauthReturned',s)
  def test_settings_vault_ref_is_not_backup_field(self):
   s=read('storage/ModelSettings.kt');self.assertIn('previousConnection.oauth != settings.oauth',s);self.assertIn('listOf("oauth-reference", "request-options"',s)
   keys=s.split('private val configurationFields = ',1)[1].split('\n',1)[0];self.assertNotIn('oauth',keys)

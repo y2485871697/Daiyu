@@ -88,7 +88,7 @@ class ProviderVisualContractTest(unittest.TestCase):
         self.assertIn('semantics { this[RetainedModelSaveAction] = submit }', footer)
         provider, normal = footer.split('if (providerName != null)', 1)[1].split('} else {', 1)
         self.assertIn('ProviderActionButton(', provider)
-        self.assertIn('text = "保存配置"', provider)
+        self.assertIn('text = if (onOAuthLogin != null) "创建" else "保存配置"', provider)
         self.assertIn('onClick = submit', provider)
         self.assertIn('enabled = enabled', provider)
         self.assertIn('padding(horizontal = 20.dp, vertical = 4.dp)', provider)

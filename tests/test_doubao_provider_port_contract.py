@@ -77,7 +77,7 @@ class DoubaoProviderPortContractTest(unittest.TestCase):
         self.assertIn('豆包语音提供商不能用于聊天', validate)
 
     def test_official_base_is_not_silently_retargetable(self):
-        self.assertIn('enabled = enabled && !speechOnly && draft.oauth == null, compact = true)', source('ui/screens/settings/ModelSettingsScreen.kt'))
+        self.assertIn('enabled = enabled && !speechOnly && !oauthOnly, compact = true)', source('ui/screens/settings/ModelSettingsScreen.kt'))
         endpoint = source('voice/providers/DoubaoSpeech.kt').split('fun validateBaseUrl(', 1)[1].split('fun request(', 1)[0]
         self.assertIn('uri.port in setOf(-1, 443)', endpoint)
         self.assertIn('uri.rawPath.orEmpty() in setOf("", "/")', endpoint)

@@ -3,6 +3,9 @@ package app.daiyu.android.model.oauth
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import androidx.activity.addCallback
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -33,6 +36,7 @@ class CodexLoginActivity : ComponentActivity() {
         setResult(Activity.RESULT_CANCELED)
         val attempt = intent.getStringExtra("attempt")
         if (savedInstanceState != null || runCatching { UUID.fromString(attempt).toString() == attempt }.getOrDefault(false).not()) { finish(); return }
+        setResult(Activity.RESULT_CANCELED, Intent().putExtra("attempt", attempt))
         CodexOAuthRuntime.initialize(this)
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val close = Button(this).apply { text = "取消登录"; setHapticClickListener { finish() } }
@@ -40,15 +44,32 @@ class CodexLoginActivity : ComponentActivity() {
         val browser = WebView(this)
         web = browser
         layout.addView(close); layout.addView(status); layout.addView(browser, LinearLayout.LayoutParams(-1, 0, 1f)); setContentView(layout)
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(browser, true)
         browser.settings.apply {
-            javaScriptEnabled = true; domStorageEnabled = true
+            javaScriptEnabled = true; domStorageEnabled = true; databaseEnabled = true
+            javaScriptCanOpenWindowsAutomatically = true
+            userAgentString = CodexOAuthProtocol.browserUserAgent(WebSettings.getDefaultUserAgent(this@CodexLoginActivity))
             allowFileAccess = false; allowContentAccess = false
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             setSupportMultipleWindows(false)
         }
+        fun fail(failure: CodexOAuthFailure) {
+            if (isFinishing || isDestroyed) return
+            consumed = true; server?.close(); browser.stopLoading()
+            val data = Intent().putExtra("attempt", attempt).putExtra("oauth-failure", failure.reason.name)
+                .putExtra("oauth-failure-stage", failure.stage)
+            failure.httpStatus?.let { data.putExtra("oauth-http-status", it) }
+            failure.serverCode?.let { data.putExtra("oauth-server-code", it) }
+            setResult(Activity.RESULT_CANCELED, data)
+            android.util.Log.w("DaiyuOAuth", "${failure.stage}/${failure.reason}; HTTP ${failure.httpStatus ?: "none"}")
+            android.widget.Toast.makeText(this, failure.message, android.widget.Toast.LENGTH_LONG).show()
+            finish()
+        }
         fun callback(url: String) {
             if (consumed || isFinishing || isDestroyed) return
             val code = try { CodexOAuthProtocol.code(url, state) }
+            catch (failure: CodexOAuthFailure) { fail(failure); return }
             catch (_: Exception) { status.text = "登录回调无效，请取消后重试"; return }
             consumed = true; server?.close(); browser.stopLoading(); status.text = "正在完成登录"
             lifecycleScope.launch {
@@ -60,13 +81,23 @@ class CodexLoginActivity : ComponentActivity() {
                         returned = true; finish()
                     }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                catch (_: Exception) { status.text = "登录失败，请取消后重试" }
+                catch (failure: CodexOAuthFailure) { fail(failure) }
+                catch (_: Exception) { fail(CodexOAuthFailure(CodexOAuthFailureReason.INVALID_RESPONSE, "login")) }
                 finally {
                     if (!returned) auth?.let { unused -> withContext(Dispatchers.IO + NonCancellable) { runCatching { CodexOAuthRuntime.clear(unused) } } }
                 }
             }
         }
+        onBackPressedDispatcher.addCallback(this) {
+            if (!consumed && browser.canGoBack()) browser.goBack() else finish()
+        }
         browser.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                if (CodexOAuthProtocol.isCallback(url)) callback(url)
+            }
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (request.isForMainFrame && CodexOAuthProtocol.isCallback(request.url.toString())) callback(request.url.toString())
+            }
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
                 if (CodexOAuthProtocol.isCallback(url)) { callback(url); return true }
@@ -79,7 +110,7 @@ class CodexLoginActivity : ComponentActivity() {
             }
         }
         server = CodexCallbackServer { url -> runOnUiThread { callback(url) } }.also { it.start() }
-        timeout.postDelayed({ if (!returned && !isFinishing) finish() }, 300_000)
+        timeout.postDelayed({ if (!returned && !isFinishing) fail(CodexOAuthFailure(CodexOAuthFailureReason.TIMEOUT, "authorization")) }, 300_000)
         browser.loadUrl(CodexOAuthProtocol.authorizationUrl(verifier, state))
     }
     override fun onDestroy() {

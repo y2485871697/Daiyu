@@ -43,7 +43,7 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
 
     def test_new_provider_tabs_and_positions_share_visit_memory(self):
         route = source('ProviderManagementRoute.kt')
-        self.assertIn('val pageUi = ProviderPageUiState()', route.split('private class NewProviderDraft', 1)[1])
+        self.assertIn('val pageUi by lazy { ProviderPageUiState() }', route.split('internal class NewProviderDraft', 1)[1])
         self.assertIn('var modelTab by newProvider.pageUi.modelTab', route)
         for retained in ('configurationListState', 'modelListState', 'modelQuery'):
             self.assertIn('newProvider.pageUi.' + retained, route)
@@ -143,7 +143,7 @@ class HostBackgroundRetentionContractTest(unittest.TestCase):
 
     def test_expired_provider_error_is_visible_above_all_tabs_without_rearming(self):
         route = source('ProviderManagementRoute.kt')
-        body = route.split('if (d != null && !d.live.get()) d.error?.let { message ->', 1)[1].split('val managed = managing', 1)[0]
+        body = route.split('if (d != null && !d.live.get()) d.error?.let { message ->', 1)[1].split('val confirm = confirmation', 1)[0]
         self.assertIn('DaiyuConfirmDialog("提供商设置", message', body)
         self.assertIn('if (detail === d && d.error == message) d.error = null', body)
         self.assertNotIn('.resume()', body)

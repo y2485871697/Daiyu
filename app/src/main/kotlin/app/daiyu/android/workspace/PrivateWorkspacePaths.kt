@@ -25,6 +25,9 @@ internal class PrivateWorkspacePaths private constructor(private val filesDir: F
     }
 
     companion object {
+        /** Read-only source chooser root; never a selectable workspace or an import target. */
+        fun storageRoot(filesDir: File): PrivateWorkspacePaths = PrivateWorkspacePaths(filesDir, emptyList(), false)
+
         /** The caller supplies an approved Rootfs; missing directories are never created. */
         fun existingRoot(filesDir: File, root: File): PrivateWorkspacePaths {
             val storage = filesDir.canonicalFile.toPath()

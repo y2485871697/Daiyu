@@ -47,6 +47,24 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
         }
     }
 
+    /** Folder picker reads names only through the same pinned, no-follow directory walk. */
+    fun directoryNames(cancelled: () -> Boolean = { false }): List<String> = pinned(null, cancelled) { descriptor, _ ->
+        val names = mutableListOf<String>()
+        java.nio.file.Files.newDirectoryStream(File(fdPath(descriptor)).toPath()).use { children ->
+            for (child in children) {
+                active(cancelled)
+                val name = child.fileName.toString()
+                if (name.startsWith(STAGING)) continue
+                val stat = try { Os.lstat(child.toString()) } catch (failure: android.system.ErrnoException) {
+                    if (failure.errno == OsConstants.ENOENT) continue else throw failure
+                }
+                if (OsConstants.S_ISDIR(stat.st_mode)) names += name
+            }
+        }
+        active(cancelled)
+        names.sortedWith(compareBy<String> { it.lowercase(java.util.Locale.ROOT) }.thenBy { it })
+    }
+
     fun parent(directory: Entry, cancelled: () -> Boolean = { false }): Listing {
         check(directory.directory && directory.relative.isNotEmpty()) { "workspace_no_parent" }
         val relative = directory.relative.substringBeforeLast('/', "")

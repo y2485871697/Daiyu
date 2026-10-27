@@ -6,35 +6,40 @@ import org.junit.Test
 
 /** Structural guards complement device gesture/callback tests; these do not simulate Compose. */
 class ConversationWorkspaceSourceTest {
-    @Test fun sheetRemainsControlledAndDoesNotAcquireFilesystemOrOwnerState() {
+    @Test fun cardAndFolderPickerRemainControlledAndUseOurTheme() {
         val source = source("components/ConversationWorkspaceSheet.kt")
         assertTrue(source.contains("if (!visible) return"))
         assertTrue(source.contains("ConversationAgentSheet(onDismiss"))
         assertTrue(source.contains("ConversationAgentHandle()"))
-        assertTrue(source.contains(".verticalScroll(rememberScrollState())"))
+        assertTrue(source.contains("if (!choosing)"))
+        assertTrue(source.contains("workspace-path-card"))
+        assertTrue(source.contains("LazyColumn"))
         assertTrue(source.contains("onClick = onSave"))
-        assertTrue(source.contains("enabled = !busy"))
+        assertTrue(source.contains("onClick = onCancel"))
         assertTrue(source.contains("onSourceChange(source.id)"))
-        assertTrue(source.contains("onValueChange = onPathChange"))
+        assertTrue(source.contains("primaryColor = theme.secondary, onPrimaryColor = theme.onSecondary"))
+        assertTrue(source.contains("primaryColor = theme.primary, onPrimaryColor = theme.onPrimary"))
         for (forbidden in listOf("java.io", "java.nio", "LocalContext", "filesDir", "SharedPreferences",
-            "ChatController", "rememberSaveable", "LaunchedEffect", "mutableStateOf", "onDismiss(); onSave")) {
-            assertFalse("UI must not own persistence or a stale conversation draft: $forbidden", source.contains(forbidden))
+            "ChatController", "rememberSaveable", "LaunchedEffect", "mutableStateOf", "BasicTextField", "bodySmall", "Color(0x")) {
+            assertFalse("UI must not own filesystem, persistence or screenshot colors: $forbidden", source.contains(forbidden))
         }
     }
 
-    @Test fun gestureIsDedicatedContentSiblingAndRetainsImeDismissalProtection() {
+    @Test fun editorAndStripShareInitialPassWithoutClaimingControls() {
         val composer = source("screens/chat/conversation/ChatComposer.kt")
         val surface = source("screens/chat/conversation/ChatComposerSurface.kt")
         val actions = source("screens/chat/conversation/ChatScreen.kt")
         assertTrue(actions.contains("val onOpenWorkspace: () -> Unit = {}"))
         assertTrue(composer.contains("onOpenWorkspace: () -> Unit = actions.onOpenWorkspace"))
-        assertTrue(composer.contains("ComposerWorkspacePullUpArea {\n            lifecycleDismissInProgress = true"))
+        assertTrue(composer.contains("key(state.editorGeneration) { ComposerWorkspacePullUpArea(workspacePointers, openWorkspace) }"))
         assertTrue(composer.contains("try { hideChatInputIme(focus, keyboard, view) }\n            finally { lifecycleDismissInProgress = false }\n            onOpenWorkspace()"))
-        assertTrue(composer.indexOf("ComposerWorkspacePullUpArea") < composer.indexOf("BasicTextField("))
-        val background = surface.substringBefore("internal fun ComposerWorkspacePullUpArea")
-        assertFalse("Background shield is not the opener", background.contains("latestOpenWorkspace()"))
-        assertTrue(surface.contains("max(48.dp.toPx(), viewConfiguration.touchSlop * 3f)"))
-        assertTrue(surface.contains("!change.pressed && change.previousPressed && !rejected && upward"))
+        assertTrue(composer.contains("testTag(\"chat-draft\").workspacePullUpGesture(workspacePointers, openWorkspace)"))
+        assertTrue(surface.contains("requireUnconsumed = true, pass = PointerEventPass.Initial"))
+        assertTrue(surface.contains("awaitPointerEvent(PointerEventPass.Initial)"))
+        assertFalse(surface.contains("down.consume()"))
+        assertTrue(surface.contains("event.changes.any { it.isConsumed }"))
+        assertTrue(surface.contains("PointerEventType.Release && !change.pressed && change.previousPressed"))
+        assertTrue(surface.contains("longPressTimeoutMillis"))
         assertTrue(surface.contains("event.changes.size != 1"))
     }
 

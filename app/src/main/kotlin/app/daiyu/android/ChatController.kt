@@ -530,6 +530,8 @@ class ChatController internal constructor(private val application:Application,
     internal fun workspaceEditorOnWorker(owner: ConversationId?) =
         conversationWorkspaces.editor(database.workspaceBinding(owner))
 
+    internal fun workspaceDirectoryOnWorker(source: String, path: String) = conversationWorkspaces.directory(source, path)
+
     internal fun saveWorkspaceOnWorker(owner: ConversationId?, expected: String?, source: String, path: String): Boolean {
         val token = synchronized(this) {
             if (!idleAvailable() || hasLiveChildTasks()) return false

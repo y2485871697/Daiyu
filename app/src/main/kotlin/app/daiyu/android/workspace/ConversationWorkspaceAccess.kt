@@ -12,6 +12,9 @@ internal data class ConversationWorkspaceSource(val id: String, val title: Strin
 internal data class ConversationWorkspaceEditor(val binding: String?, val sources: List<ConversationWorkspaceSource>,
     val selectedSourceId: String, val path: String)
 
+internal data class ConversationWorkspaceDirectory(val path: String, val parentPath: String?,
+    val folders: List<String>, val selectable: Boolean = true)
+
 /** Resolves only the owner-supplied binding; it never changes the global Linux selection. */
 internal class ConversationWorkspaceAccess(private val context: Context,
     private val terminal: () -> LinuxSettingsApplication?) {
@@ -48,6 +51,26 @@ internal class ConversationWorkspaceAccess(private val context: Context,
             ConversationWorkspaceBinding.Rootfs(root.environmentId, root.generation, trimmed)
         }
     }
+    fun directory(sourceId: String, path: String): ConversationWorkspaceDirectory {
+        val storage = context.filesDir.canonicalFile
+        if (sourceId == "private" && path in listOf(context.filesDir.absolutePath, storage.path)) {
+            val files = PrivateWorkspaceFiles(PrivateWorkspacePaths.storageRoot(context.filesDir))
+            return ConversationWorkspaceDirectory(storage.path, null, files.directoryNames(), selectable = false)
+        }
+        val raw = ConversationWorkspaceCodec.encode(binding(sourceId, path))
+        return freeze(raw).use { run ->
+            val resolved = run.resolved
+            val host = resolved.hostDirectory
+            val guest = resolved.guestDirectory
+            val current = guest ?: host.path
+            val parent = if (guest == "/") null else if (guest != null) {
+                guest.substringBeforeLast('/', "").ifEmpty { "/" }
+            } else checkNotNull(host.parentFile).path
+            val files = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(context.filesDir, host))
+            ConversationWorkspaceDirectory(current, parent, files.directoryNames())
+        }
+    }
+
     fun resolve(raw: String?): ResolvedConversationWorkspace {
         val binding = ConversationWorkspaceCodec.decode(raw)
         val approved = (binding as? ConversationWorkspaceBinding.Rootfs)?.let { selected ->

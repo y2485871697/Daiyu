@@ -17,6 +17,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -54,47 +56,67 @@ internal fun ChatComposerSurface(backdrop: LayerBackdrop? = null, content: @Comp
     }
 }
 
-/** Content-side blank strip only: never an ancestor of text, attachments or voice controls. */
+/** Shares the editor gesture without making voice or attachment controls descendants. */
 @Composable
-internal fun ComposerWorkspacePullUpArea(onOpenWorkspace: () -> Unit) {
-    val latestOpenWorkspace by rememberUpdatedState(onOpenWorkspace)
+internal fun ComposerWorkspacePullUpArea(pointers: WorkspacePullUpPointers, onOpenWorkspace: () -> Unit) {
     Box(Modifier.fillMaxWidth().height(12.dp).testTag("chat-workspace-gesture-area")
         .semantics {
             contentDescription = "会话工作区"
-            onClick(label = "打开会话工作区") { latestOpenWorkspace(); true }
-        }
-        .pointerInput(Unit) {
-            val threshold = max(48.dp.toPx(), viewConfiguration.touchSlop * 3f)
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = true)
-                val origin = down.position
-                var upward = false
-                var rejected = false
-                down.consume()
-                do {
-                    val event = awaitPointerEvent()
-                    val change = event.changes.firstOrNull { it.id == down.id }
-                    if (change == null || event.changes.size != 1 || event.changes.any { it.isConsumed }) rejected = true
-                    if (change != null) {
-                        val delta = change.position - origin
-                        // A horizontal/downward start cannot become an opener later.
-                        if (!upward && !rejected && delta.getDistance() > viewConfiguration.touchSlop) {
-                            if (-delta.y > abs(delta.x) * 1.5f) upward = true else rejected = true
-                        }
-                        if (abs(delta.x) > threshold || delta.y > viewConfiguration.touchSlop) rejected = true
-                        // Commit only on a normal up. Cancellation does not reach this
-                        // branch, and one pointer stream can commit at most once.
-                        if (!change.pressed && change.previousPressed && !rejected && upward &&
-                            -delta.y >= threshold && -delta.y > abs(delta.x) * 1.5f) {
-                            latestOpenWorkspace()
-                        }
-                    }
-                    event.changes.forEach { it.consume() }
-                } while (event.changes.any { it.pressed })
-            }
-        })
+            onClick(label = "打开会话工作区") { onOpenWorkspace(); true }
+        }.workspacePullUpGesture(pointers, onOpenWorkspace))
 }
 
+/** A passive ancestor sees pointers split across the strip, editor and controls. */
+internal class WorkspacePullUpPointers {
+    var rejected: Boolean = false
+        private set
+    fun update(previouslyPressed: Int, pointerCount: Int) {
+        if (previouslyPressed == 0) rejected = false
+        if (pointerCount > 1) rejected = true
+    }
+}
+
+internal fun Modifier.observeWorkspacePointers(pointers: WorkspacePullUpPointers): Modifier = pointerInput(pointers) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            pointers.update(event.changes.count { it.previousPressed }, event.changes.size)
+        }
+    }
+}
+
+@Composable
+internal fun Modifier.workspacePullUpGesture(pointers: WorkspacePullUpPointers, onOpenWorkspace: () -> Unit): Modifier {
+    val latestOpenWorkspace by rememberUpdatedState(onOpenWorkspace)
+    return pointerInput(pointers) {
+        val threshold = max(48.dp.toPx(), viewConfiguration.touchSlop * 3f)
+        awaitEachGesture {
+            // TextField consumes taps in Main; observe Initial without stealing its down.
+            val down = awaitFirstDown(requireUnconsumed = true, pass = PointerEventPass.Initial)
+            val origin = down.position
+            var upward = false
+            var rejected = false
+            do {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id }
+                if (pointers.rejected || change == null || event.changes.size != 1 || event.changes.any { it.isConsumed }) rejected = true
+                if (change != null) {
+                    val delta = change.position - origin
+                    if (!upward && change.uptimeMillis - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis) rejected = true
+                    if (!upward && !rejected && delta.getDistance() > viewConfiguration.touchSlop) {
+                        if (-delta.y > abs(delta.x) * 1.5f) upward = true else rejected = true
+                    }
+                    if (abs(delta.x) > threshold || delta.y > viewConfiguration.touchSlop) rejected = true
+                    if (!rejected && upward) {
+                        change.consume()
+                        if (event.type == PointerEventType.Release && !change.pressed && change.previousPressed &&
+                            -delta.y >= threshold && -delta.y > abs(delta.x) * 1.5f) latestOpenWorkspace()
+                    }
+                }
+            } while (event.changes.any { it.pressed })
+        }
+    }
+}
 
 /** Capture messages only; the editor is a separate, sharp overlay above the shared backdrop. */
 @Composable

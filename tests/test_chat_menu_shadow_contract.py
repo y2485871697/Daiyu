@@ -27,19 +27,28 @@ class ChatMenuShadowContract(unittest.TestCase):
         self.assertIn("ChatMenuShadows(motion, dark, Modifier.matchParentSize())", self.surface)
         self.assertLess(self.surface.index("ChatMenuShadows("), self.surface.index("Column(Modifier"))
         self.assertNotIn(".dropShadow(", self.surface)
-        self.assertEqual(2, self.shadows.count(".dropShadow(shadowShape) {"))
-        self.assertNotIn(".graphicsLayer", self.shadows)
+        self.assertEqual(2, self.shadows.count(".dropShadow(shape) {"))
+        self.assertLess(self.shadows.index(".graphicsLayer {"), self.shadows.index(".dropShadow(shape) {"))
         self.assertNotIn(".etaMenuClipReveal", self.shadows)
         self.assertLess(self.surface.index(".graphicsLayer {"), self.surface.index(".etaMenuClipReveal("))
         self.assertLess(self.surface.index(".etaMenuClipReveal("), self.surface.index(".clip(shape).then(blur)"))
         self.assertNotIn("ModulateAlpha", self.source)
 
-    def test_shadow_outline_tracks_reveal_and_retains_exit_outline(self):
+    def test_shadow_caches_one_outline_and_reveals_only_in_the_graphics_layer(self):
         self.assertIn("if (motion?.visibleState?.targetState == false) 1f", self.source)
-        for token in ["remember(shape, revealFraction, radius)", "if (revealFraction == 1f) shape",
-                      "GenericShape { size, _ ->", "if (revealFraction > 0f)",
-                      "size.height * revealFraction", "CornerRadius(radius)"]:
-            self.assertIn(token, self.shadows)
+        self.assertIn("val shape = remember { RoundedCornerShape(19.dp) }", self.shadows)
+        self.assertIn(".graphicsLayer {", self.shadows)
+        prefix, layer_and_shadows = self.shadows.split(".graphicsLayer {", 1)
+        layer, shadows = layer_and_shadows.split(".dropShadow(", 1)
+        self.assertIn("scaleY = menuRevealFraction(motion)", layer)
+        self.assertIn("transformOrigin = TransformOrigin(.5f, 0f)", layer)
+        self.assertNotIn("menuRevealFraction(", prefix)
+        self.assertNotIn(".fraction.value", prefix)
+        self.assertNotIn(".alpha.value", prefix)
+        self.assertNotIn("alpha =", layer)
+        for token in ["GenericShape", "shadowShape", "val revealFraction =", "size.height *", "LocalDensity"]:
+            self.assertNotIn(token, self.shadows)
+        self.assertNotIn("menuRevealFraction(", shadows)
         self.assertIn("fractionProgress = { menuRevealFraction(motion) }", self.surface)
 
     def test_shadow_opacity_is_read_by_each_draw_block_not_composition(self):
@@ -80,7 +89,7 @@ class ChatMenuShadowContract(unittest.TestCase):
                       "listOf(false, true)", "Frame(.25f, .5f)", "Frame(.999f, .999f)",
                       "Frame(1f, .999f)", "Frame(.75f, .7f, false)", "Frame(0f, 0f, false)",
                       '"outside shadow missing:', '"hidden menu leaves no shadow:',
-                      '"body still reveals from the top:', '"revealed body is visible:',
+                      '"body still reveals from the top:', '"shadow must not reveal the full-height menu:', '"revealed body is visible:',
                       '"shadow is continuous at full opacity:', "motion = motion",
                       "bounds.left - hostBounds.left - 3f * density"]:
             self.assertIn(token, test)

@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -43,7 +42,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.dropShadow
@@ -263,7 +261,7 @@ internal fun ChatGlassMenuSurface(
     val shades = if (dark) listOf(Color(0xE62C2739), Color(0xDB1B1924))
         else listOf(Color(0xE6FFFFFF), Color(0xD4FAF7FF))
     Box(modifier.width(IntrinsicSize.Max), propagateMinConstraints = true) {
-        // Only the shadow outline depends on reveal geometry in composition.
+        // Keep the shadow raster independent of the animated reveal geometry.
         ChatMenuShadows(motion, dark, Modifier.matchParentSize())
         Column(Modifier
             .graphicsLayer { alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f) }
@@ -308,24 +306,18 @@ private fun menuRevealFraction(motion: PopupMotion?): Float =
 @Composable
 private fun ChatMenuShadows(motion: PopupMotion?, dark: Boolean, modifier: Modifier) {
     val shape = remember { RoundedCornerShape(19.dp) }
-    val revealFraction = menuRevealFraction(motion)
-    val radius = with(LocalDensity.current) { 19.dp.toPx() }
-    val shadowShape = remember(shape, revealFraction, radius) {
-        if (revealFraction == 1f) shape else GenericShape { size, _ ->
-            if (revealFraction > 0f) {
-                addRoundRect(RoundRect(Rect(0f, 0f, size.width, size.height * revealFraction),
-                    CornerRadius(radius)))
-            }
-        }
-    }
     Box(modifier
-        .dropShadow(shadowShape) {
+        .graphicsLayer {
+            scaleY = menuRevealFraction(motion)
+            transformOrigin = TransformOrigin(.5f, 0f)
+        }
+        .dropShadow(shape) {
             this.radius = (if (dark) 35.dp else 34.dp).toPx()
             offset = Offset(0f, (if (dark) 14.dp else 12.dp).toPx())
             color = if (dark) Color(0x55000000) else Color(0x164C3A6B)
             alpha = (motion?.alpha?.value ?: 1f).coerceIn(0f, 1f)
         }
-        .dropShadow(shadowShape) {
+        .dropShadow(shape) {
             this.radius = 6.dp.toPx()
             offset = Offset(0f, 2.dp.toPx())
             color = if (dark) Color(0x22000000) else Color(0x05342048)

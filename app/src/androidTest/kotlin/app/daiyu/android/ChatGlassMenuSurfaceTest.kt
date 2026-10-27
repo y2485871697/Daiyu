@@ -140,6 +140,8 @@ class ChatGlassMenuSurfaceTest : WiredActivityTestCase() {
                     val hiddenY = (bounds.bottom - hostBounds.top - 4f * density).roundToInt()
                     assertEquals("body still reveals from the top: dark=$dark frame=$frame",
                         background.luminance(), pixels[centerX, hiddenY].luminance(), .002f)
+                    assertEquals("shadow must not reveal the full-height menu: dark=$dark frame=$frame",
+                        background.luminance(), pixels[x, hiddenY].luminance(), .002f)
                 }
             }
         }

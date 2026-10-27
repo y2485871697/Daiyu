@@ -48,7 +48,7 @@ internal fun chatChromeColors(): ChatChromeColors {
         val theme = resolveAppearanceColors(appearance, dark)
         return base.copy(text = theme.onSurface, muted = readableAccent(theme.onSurfaceSecondary, dark, theme.surface),
             toolbar = readableAccent(theme.onSurfaceSecondary, dark, theme.surface), line = theme.dividerLine,
-            accent = readableAccent(appearance.resolvedPrimaryAccent ?: base.accent, dark, theme.surface))
+            accent = appearance.resolvedPrimaryAccent ?: readableAccent(base.accent, dark, theme.surface))
     }
-    return base.copy(accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: base.accent, line = appearance.styleColor(base.line))
+    return base.copy(accent = appearance.resolvedPrimaryAccent ?: base.accent, line = appearance.styleColor(base.line))
 }

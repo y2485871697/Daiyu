@@ -42,9 +42,9 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
         assertEquals(expected.blue, actual.blue, .015f)
     }
 
-    private fun show(editor: AppearanceColorEditor, dark: Boolean, requests: MutableList<AppearanceSettings>, fontScale: Float? = null, customAccents: Boolean = true) {
+    private fun show(editor: AppearanceColorEditor, dark: Boolean, requests: MutableList<AppearanceSettings>, fontScale: Float? = null, customAccents: Boolean = true, primaryAccent: Int = 0xFF8E7C9E.toInt()) {
         val original = AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-            primaryAccentColor = if (customAccents) 0xFF8E7C9E.toInt() else null,
+            primaryAccentColor = if (customAccents) primaryAccent else null,
             secondaryAccentColor = if (customAccents) 0xFF56896C.toInt() else null)
         mainThread {
             var state by mutableStateOf(original)
@@ -64,6 +64,45 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
             }
         }
         awaitDialogEnter(node("assistant-sheet"))
+    }
+
+    fun testPaleAccentKeepsPreviewButtonTextAndSwitchThumbInsteadOfBlack() {
+        for (dark in listOf(false, true)) {
+            val requests = mutableListOf<AppearanceSettings>()
+            show(AppearanceColorEditor.ACCENTS, dark, requests)
+            val pad = node("appearance-color-pad:主强调色").scrollToVisible()
+            // Touch near white but not at the edge: still a real selected color, not a default reset.
+            pad.performTouchInput { click(Offset(width * .15f, height * .08f)) }
+            val expected = if (dark) Color(0xFF261F30) else Color.White
+            node("appearance-preview-primary-action").scrollToVisible().performSemanticsAction(SemanticsActions.GetTextLayoutResult) { get ->
+                val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                assertTrue(get(layouts))
+                assertEquals(expected, layouts.single().layoutInput.style.color)
+            }
+            val thumb = capturePicker(node("appearance-preview-switch-thumb").scrollToVisible())
+            assertSameColor(Color.White, pixel(thumb, .5f, .5f))
+            ui.runOnIdle { assertTrue(requests.isEmpty()) }
+            node("appearance-color-confirm").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            ui.runOnIdle { assertEquals(1, requests.size) }
+            val savedAccent = Color(requests.single().primaryAccentColor!!)
+            assertFalse(savedAccent == Color(0xFF8E7C9E))
+            assertTrue(savedAccent.red > .7f && savedAccent.green > .7f && savedAccent.blue > .7f)
+            show(AppearanceColorEditor.ACCENTS, dark, mutableListOf(), primaryAccent = requests.single().primaryAccentColor!!)
+            node("appearance-preview-primary-action").scrollToVisible().performSemanticsAction(SemanticsActions.GetTextLayoutResult) { get ->
+                val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                assertTrue(get(layouts))
+                assertEquals(expected, layouts.single().layoutInput.style.color)
+            }
+            assertSameColor(Color.White, pixel(capturePicker(node("appearance-preview-switch-thumb").scrollToVisible()), .5f, .5f))
+            node("appearance-preview-selection").scrollToVisible().performSemanticsAction(SemanticsActions.GetTextLayoutResult) { get ->
+                val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                assertTrue(get(layouts))
+                assertEquals(savedAccent, layouts.single().layoutInput.style.color)
+            }
+            androidx.test.espresso.Espresso.pressBack()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+        }
     }
 
     fun testBubbleOptionsStayCompactAndMatchPreviewSelection() {

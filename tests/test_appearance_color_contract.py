@@ -95,7 +95,7 @@ class AppearanceColorContractTest(unittest.TestCase):
 
     def test_theme_keeps_default_primary_container_foreground_and_black_mode(self):
         resolver = source('ui/app/AppearanceColors.kt')
-        self.assertIn('onPrimaryContainer = readableAccent(primary, dark, container)', resolver)
+        self.assertIn('onPrimaryContainer = primary', resolver)
         self.assertIn('if (primary != null)', resolver)
         self.assertIn('if (dark && appearance.pureBlackEnabled) Color.Black', resolver)
         self.assertIn('val fill = Color(appearance.paletteSeedColor).copy(alpha = 1f)', resolver)
@@ -105,11 +105,12 @@ class AppearanceColorContractTest(unittest.TestCase):
         self.assertIn('LocalAppearanceSettings provides appearance', theme)
         self.assertEqual(2, theme.count('primary = miuixColors.primary'))
 
-    def test_custom_text_accents_use_readable_color_without_changing_button_fill(self):
+    def test_custom_text_accents_keep_selected_rgb_without_changing_button_fill(self):
         for path in ('ui/components/ConversationPanePreview.kt', 'ui/components/subagent/ConversationAgentStyle.kt',
                      'ui/screens/chat/conversation/ChatAppearance.kt',
                      'ui/screens/chat/conversation/ConversationAppearance.kt'):
-            self.assertIn('appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) }', source(path), path)
+            self.assertIn('appearance.resolvedPrimaryAccent ?:', source(path), path)
+            self.assertNotIn('appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) }', source(path), path)
         self.assertIn('val primary = appearance.resolvedPrimaryAccent?.copy(alpha = 1f)', source('ui/app/AppearanceColors.kt'))
         self.assertIn('color = colors.onPrimaryContainer, modifier = Modifier.testTag("appearance-scale-value")',
                       source('ui/screens/settings/AppearanceSettingsScreen.kt'))

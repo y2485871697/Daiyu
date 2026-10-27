@@ -18,7 +18,7 @@ internal data class ConversationPanePreviewPalette(val dark: Boolean, val appear
     private val customSurface = appearance.paletteSeedColor != null
     private val theme = resolveAppearanceColors(appearance, dark)
     val text = if (customSurface) theme.onSurface else if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
-    val accent = if (customSurface) readableAccent(appearance.resolvedPrimaryAccent ?: (if (dark) Color(0xFFC6B7D5) else Color(0xFF655A72)), dark, theme.surface) else appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: if (dark) Color(0xFFC6B7D5) else Color(0xFF655A72)
+    val accent = appearance.resolvedPrimaryAccent ?: if (customSurface) readableAccent((if (dark) Color(0xFFC6B7D5) else Color(0xFF655A72)), dark, theme.surface) else if (dark) Color(0xFFC6B7D5) else Color(0xFF655A72)
     val toolbar = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else if (dark) Color(0xFFC0B4CD) else Color(0xFF6F647C)
     val muted = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else if (dark) Color(0xFF9890A3) else Color(0xFF8C8394)
     val selectionContainer = if (appearance.primaryAccentColor != null) theme.primaryContainer

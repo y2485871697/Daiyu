@@ -110,17 +110,14 @@ internal fun resolveAppearanceColors(appearance: AppearanceSettings, dark: Boole
     val primary = appearance.resolvedPrimaryAccent?.copy(alpha = 1f)
     val secondary = appearance.secondaryAccentColor?.let { Color(it).copy(alpha = 1f) }
     fun tint(accent: Color, amount: Float): Color = lerp(surface, accent, amount)
-    fun mutedContent(fill: Color): Color = lerp(fill, colorContentColor(fill), .38f)
     if (primary != null) {
         val container = tint(primary, .12f)
-        val disabledContent = mutedContent(container)
-        val onFill = colorContentColor(primary)
         colors = colors.copy(
-            primary = primary, onPrimary = onFill,
-            primaryVariant = primary, onPrimaryVariant = onFill,
-            primaryContainer = container, onPrimaryContainer = readableAccent(primary, dark, container),
-            disabledPrimary = container, disabledOnPrimary = disabledContent,
-            disabledPrimaryButton = container, disabledOnPrimaryButton = disabledContent,
+            primary = primary,
+            primaryVariant = primary,
+            primaryContainer = container, onPrimaryContainer = primary,
+            disabledPrimary = container,
+            disabledPrimaryButton = container,
             disabledPrimarySlider = tint(primary, .38f),
             sliderKeyPoint = primary.copy(alpha = .30f), sliderKeyPointForeground = primary,
         )
@@ -130,19 +127,18 @@ internal fun resolveAppearanceColors(appearance: AppearanceSettings, dark: Boole
         val variant = tint(secondary, .10f)
         val disabledVariant = tint(secondary, .08f)
         colors = colors.copy(
-            secondary = secondary, onSecondary = colorContentColor(secondary),
-            secondaryVariant = variant, onSecondaryVariant = readableAccent(secondary, dark, variant),
-            secondaryContainer = container, onSecondaryContainer = readableAccent(secondary, dark, container),
-            secondaryContainerVariant = variant, onSecondaryContainerVariant = readableAccent(secondary, dark, variant),
+            secondary = secondary,
+            secondaryVariant = variant, onSecondaryVariant = secondary,
+            secondaryContainer = container, onSecondaryContainer = secondary,
+            secondaryContainerVariant = variant, onSecondaryContainerVariant = secondary,
             disabledSecondary = tint(secondary, .12f), disabledSecondaryVariant = disabledVariant,
-            disabledOnSecondaryVariant = mutedContent(disabledVariant),
         )
     }
     val tertiary = secondary ?: primary
     if (tertiary != null) {
         val container = tint(tertiary, .12f)
         colors = colors.copy(tertiaryContainer = container,
-            onTertiaryContainer = readableAccent(tertiary, dark, container), tertiaryContainerVariant = container)
+            onTertiaryContainer = tertiary, tertiaryContainerVariant = container)
     }
     return colors
 }
@@ -164,18 +160,17 @@ internal fun resolveAppearanceActions(appearance: AppearanceSettings, dark: Bool
         else appearance.secondaryAccentColor?.let { lerp(surface, Color(it), .14f) }
         ?: appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9))
     return AppearanceActionColors(primary,
-        if (appearance.primaryAccentColor != null || appearance.paletteSeedColor != null) colorContentColor(primary)
-            else if (dark) Color(0xFF261F30) else Color.White,
+        if (dark) Color(0xFF261F30) else Color.White,
         secondary,
-        if (appearance.secondaryAccentColor != null || appearance.paletteSeedColor != null)
-            readableAccent(secondary, dark, container) else secondary,
+        appearance.secondaryAccentColor?.let(::Color)
+            ?: if (appearance.paletteSeedColor != null) readableAccent(secondary, dark, container) else secondary,
         container,
         if (appearance.paletteSeedColor != null) lerp(surface, primary, .12f)
             else appearance.primaryAccentColor?.let { lerp(surface, Color(it), .12f) }
             ?: appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9)),
-        if (appearance.paletteSeedColor != null) readableAccent(primary, dark, lerp(surface, primary, .12f))
-            else appearance.primaryAccentColor?.let { readableAccent(Color(it), dark, lerp(surface, Color(it), .12f)) }
-            ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F))
+        appearance.resolvedPrimaryAccent
+            ?: if (appearance.paletteSeedColor != null) readableAccent(primary, dark, lerp(surface, primary, .12f))
+            else if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F))
 }
 
 internal data class DestructiveColors(val container: Color, val content: Color, val border: Color)

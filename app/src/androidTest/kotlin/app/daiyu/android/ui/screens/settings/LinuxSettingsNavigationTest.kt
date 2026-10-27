@@ -108,11 +108,10 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
         }
     }
 
-    fun testCustomPrimaryStillUsesReadableForegroundInBothThemes() {
+    fun testCustomPrimaryKeepsOriginalWhiteForegroundInBothThemes() {
         for (dark in listOf(false, true)) {
-            for ((accent, foreground) in listOf(
-                0xff000000.toInt() to Color.White, 0xffffffff.toInt() to Color.Black,
-            )) {
+            for (accent in listOf(0xff000000.toInt(), 0xffe6c7f2.toInt(), 0xffffffff.toInt())) {
+                val foreground = Color.White
                 show(dark = dark, primaryAccentColor = accent)
                 ui.waitForIdle()
                 assertEquals(Color(accent), colors.primary)

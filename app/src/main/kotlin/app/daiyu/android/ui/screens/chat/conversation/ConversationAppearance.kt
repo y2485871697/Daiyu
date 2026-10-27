@@ -56,11 +56,11 @@ internal fun conversationColors(): ConversationColors {
     if (appearance.paletteSeedColor != null) {
         val theme = resolveAppearanceColors(appearance, dark)
         return base.copy(text = theme.onSurface, muted = readableAccent(theme.onSurfaceSecondary, dark, theme.surface),
-            accent = readableAccent(appearance.resolvedPrimaryAccent ?: base.accent, dark, theme.surface),
+            accent = appearance.resolvedPrimaryAccent ?: readableAccent(base.accent, dark, theme.surface),
             bubble = bubble.container, bubbleText = bubble.content, surface = theme.surfaceContainer,
             line = theme.dividerLine, soft = actions.secondaryContainer)
     }
-    return base.copy(accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: base.accent,
+    return base.copy(accent = appearance.resolvedPrimaryAccent ?: base.accent,
         bubble = bubble.container, bubbleText = bubble.content, surface = appearance.styleColor(base.surface),
         line = appearance.styleColor(base.line),
         soft = if (appearance.secondaryAccentColor != null) actions.secondaryContainer else appearance.styleColor(base.soft))

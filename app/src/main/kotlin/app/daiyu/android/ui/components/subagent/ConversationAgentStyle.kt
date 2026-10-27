@@ -3,7 +3,6 @@ package app.daiyu.android.ui.components.subagent
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.LocalAppearanceDark
-import app.daiyu.android.ui.app.colorContentColor
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.readableAccent
@@ -55,12 +54,12 @@ internal data class ConversationAgentColors(val dark: Boolean, val appearance: A
     private val actions = resolveAppearanceActions(appearance, dark)
     val text = if (customSurface) theme.onSurface else Color(if (dark) 0xffe0dce8 else 0xff36333f)
     val muted = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else Color(if (dark) 0xff9d92aa else 0xff938a9b)
-    val accent = if (customSurface) readableAccent(appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xffc6b7d5 else 0xff756980), dark, theme.surface) else appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: Color(if (dark) 0xffc6b7d5 else 0xff756980)
-    val strong = if (customSurface) readableAccent(appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xffb4a3f7 else 0xff7663bd), dark, theme.surface) else appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: Color(if (dark) 0xffb4a3f7 else 0xff7663bd)
+    val accent = appearance.resolvedPrimaryAccent ?: if (customSurface) readableAccent(Color(if (dark) 0xffc6b7d5 else 0xff756980), dark, theme.surface) else Color(if (dark) 0xffc6b7d5 else 0xff756980)
+    val strong = appearance.resolvedPrimaryAccent ?: if (customSurface) readableAccent(Color(if (dark) 0xffb4a3f7 else 0xff7663bd), dark, theme.surface) else Color(if (dark) 0xffb4a3f7 else 0xff7663bd)
     val line = if (customSurface) theme.dividerLine else appearance.styleColor(Color(if (dark) 0x28c3b0d9 else 0x2681738e))
     val field = if (customSurface) theme.surfaceContainer else Color(if (dark) 0x06ffffff else 0x60ffffff)
     val soft = if (customSurface) actions.secondaryContainer else if (appearance.secondaryAccentColor != null) actions.secondaryContainer else appearance.styleColor(Color(if (dark) 0x14c0acd7 else 0x1281738e))
-    val onSoft = readableAccent(actions.secondary, dark, soft)
+    val onSoft = appearance.secondaryAccentColor?.let(::Color) ?: readableAccent(actions.secondary, dark, soft)
     val taskLine = if (customSurface) theme.outline else appearance.styleColor(Color(if (dark) 0xff2b283a else 0xffece7f5))
     val taskMuted = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else Color(if (dark) 0xff7a7786 else 0xffa19aa9)
     val gradient = if (customSurface) listOf(theme.surface, theme.surface) else (if (dark) listOf(Color(0xf22e283b), Color(0xf21b1825)) else listOf(Color(0xf0ffffff), Color(0xf0f8f4ff))).map(appearance::styleColor)
@@ -116,8 +115,7 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
 @Composable internal fun ConversationAgentButton(text: String, enabled: Boolean = true, primary: Boolean = false,
     modifier: Modifier = Modifier, primaryColor: Color = assistantPreviewPalette().primary,
     onPrimaryColor: Color = if (LocalAppearanceSettings.current.paletteSeedColor != null) assistantPreviewPalette().onPrimary
-        else LocalAppearanceSettings.current.resolvedPrimaryAccent?.let(::colorContentColor)
-            ?: if (conversationAgentColors().dark) Color(0xff211735) else Color.White, onClick: () -> Unit) {
+        else if (conversationAgentColors().dark) Color(0xff211735) else Color.White, onClick: () -> Unit) {
     val colors = conversationAgentColors()
     Box(modifier.defaultMinSize(minHeight = 48.dp).alpha(if (enabled) 1f else .4f)
         .squircleSurface(color = if (primary) primaryColor else colors.soft,

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.resolvedPrimaryAccent
+
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.app.DaiyuPalette
@@ -170,8 +172,9 @@ internal fun SettingsRadioRow(title: String, selected: Boolean, enabled: Boolean
         SettingsRow(title = title, summary = summary, trailing = {
             if (selected) {
                 DaiyuIcon(DaiyuIcons.Check, contentDescription = "已选择",
-                    tint = app.daiyu.android.ui.app.readableAccent(MiuixTheme.colorScheme.primary,
-                        app.daiyu.android.ui.app.LocalAppearanceDark.current, MiuixTheme.colorScheme.surface), size = 24.dp)
+                    tint = app.daiyu.android.ui.app.LocalAppearanceSettings.current.resolvedPrimaryAccent
+                        ?: app.daiyu.android.ui.app.readableAccent(MiuixTheme.colorScheme.primary,
+                            app.daiyu.android.ui.app.LocalAppearanceDark.current, MiuixTheme.colorScheme.surface), size = 24.dp)
             }
         })
     }

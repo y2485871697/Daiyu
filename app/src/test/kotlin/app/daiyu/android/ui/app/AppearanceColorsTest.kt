@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.app
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import app.daiyu.android.data.model.AppearancePaletteStyle
@@ -97,19 +96,14 @@ class AppearanceColorsTest {
         assertNotEquals(resolveAppearanceColors(custom.copy(secondaryAccentColor = null), true).secondaryContainer,
             resolved.secondaryContainer)
     }
-    @Test fun extremeCustomAccentsKeepContainerTextReadableWithoutChangingTheFill() {
+    @Test fun extremeCustomAccentsKeepSelectedRgbForFillAndAccentText() {
         for (dark in listOf(false, true)) for (accent in listOf(Color.White, Color.Black)) {
             val custom = AppearanceSettings(primaryAccentColor = accent.toArgb())
             val palette = resolveAppearanceColors(custom, dark)
             assertEquals(accent, palette.primary)
-            val base = if (dark) Color(0xFF191B23) else Color.White
-            val background = palette.primaryContainer.compositeOver(base)
-            val foreground = palette.onPrimaryContainer
-            val ratio = (maxOf(foreground.luminance(), background.luminance()) + .05f) /
-                (minOf(foreground.luminance(), background.luminance()) + .05f)
-            assertTrue("dark=$dark accent=$accent ratio=$ratio", ratio >= 4.5f)
-            assertEquals(readableAccent(accent, dark), app.daiyu.android.ui.components.ConversationPanePreviewPalette(dark, custom).accent)
-            assertEquals(readableAccent(accent, dark), app.daiyu.android.ui.components.subagent.ConversationAgentColors(dark, custom).accent)
+            assertEquals(accent, palette.onPrimaryContainer)
+            assertEquals(accent, app.daiyu.android.ui.components.ConversationPanePreviewPalette(dark, custom).accent)
+            assertEquals(accent, app.daiyu.android.ui.components.subagent.ConversationAgentColors(dark, custom).accent)
         }
     }
 
@@ -174,19 +168,19 @@ class AppearanceColorsTest {
         }
     }
 
-    @Test fun customActionFillsAndBothContainersHaveReadableContent() {
+    @Test fun customActionRolesKeepSelectedAccentsAndOriginalFilledForeground() {
         for (dark in listOf(false, true)) for (accent in listOf(Color.Black, Color.White, Color.Yellow, Color(0xFF767676))) {
             val appearance = AppearanceSettings(primaryAccentColor = accent.toArgb(), secondaryAccentColor = accent.toArgb(),
                 paletteSeedColor = 0xFF449977.toInt(), paletteStyle = AppearancePaletteStyle.VIBRANT)
             val actions = resolveAppearanceActions(appearance, dark)
             assertEquals(accent, actions.primary)
-            assertTrue(contrast(actions.onPrimary, actions.primary) >= 4.5f)
-            assertTrue(contrast(actions.onSecondary, actions.secondaryContainer) >= 4.5f)
-            assertTrue(contrast(actions.onPrimaryContainer, actions.primaryContainer) >= 4.5f)
+            assertEquals(resolveAppearanceActions(AppearanceSettings(), dark).onPrimary, actions.onPrimary)
+            assertEquals(accent, actions.onSecondary)
+            assertEquals(accent, actions.onPrimaryContainer)
             val theme = resolveAppearanceColors(appearance, dark)
             assertEquals(accent, theme.secondary)
-            assertTrue(contrast(theme.onSecondary, theme.secondary) >= 4.5f)
-            assertTrue(contrast(theme.onTertiaryContainer, theme.tertiaryContainer) >= 4.5f)
+            assertEquals((if (dark) DaiyuPalette.dark else DaiyuPalette.light).onSecondary, theme.onSecondary)
+            assertEquals(accent, theme.onTertiaryContainer)
             assertNotEquals((if (dark) DaiyuPalette.dark else DaiyuPalette.light).disabledPrimary, theme.disabledPrimary)
         }
     }
@@ -222,7 +216,7 @@ class AppearanceColorsTest {
             assertNotEquals(original.selectionContainer, changed.selectionContainer)
             assertEquals(original.utilityContainer, changed.utilityContainer)
             assertEquals(original.action, changed.action)
-            assertTrue(contrast(changed.selectionContent, changed.selectionContainer) >= 4.5f)
+            assertEquals(Color.Red, changed.selectionContent)
             assertEquals(original.danger, changed.danger)
         }
     }

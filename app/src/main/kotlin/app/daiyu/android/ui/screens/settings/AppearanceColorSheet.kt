@@ -54,7 +54,7 @@ import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.app.resolveUserBubbleColors
-import app.daiyu.android.ui.app.colorContentColor
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.resolvedPrimaryAccent
 import app.daiyu.android.ui.components.UsagePalette
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -203,11 +203,11 @@ private fun AppearanceDraftPreview(draft: AppearanceSettings) {
                 color = colors.onSurface)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("主操作", Modifier.background(actions.primary, CircleShape).padding(10.dp), color = actions.onPrimary)
-            Text("次操作", Modifier.background(actions.secondaryContainer, CircleShape).padding(10.dp), color = actions.onSecondary)
+            Text("主操作", Modifier.testTag("appearance-preview-primary-action").background(actions.primary, CircleShape).padding(10.dp), color = actions.onPrimary)
+            Text("次操作", Modifier.testTag("appearance-preview-secondary-action").background(actions.secondaryContainer, CircleShape).padding(10.dp), color = actions.onSecondary)
             val track = draft.resolvedPrimaryAccent ?: Color(0xFF82728F)
             Box(Modifier.size(38.dp, 24.dp).background(track, CircleShape).padding(3.dp), contentAlignment = Alignment.CenterEnd) {
-                Box(Modifier.size(18.dp).background(draft.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White, CircleShape))
+                Box(Modifier.size(18.dp).testTag("appearance-preview-switch-thumb").background(DaiyuPalette.switchThumb, CircleShape))
             }
         }
         Text("我的消息", Modifier.align(Alignment.End).background(bubble.container, shape).padding(10.dp), color = bubble.content)

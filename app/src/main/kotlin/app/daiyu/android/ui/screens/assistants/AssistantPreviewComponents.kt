@@ -71,7 +71,7 @@ internal data class AssistantPreviewPalette(val dark: Boolean, val appearance: A
     val text = if (customSurface) theme.onSurface else if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
     val toolbar = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else if (dark) Color(0xFFB2A9C7) else Color(0xFF716A82)
     val muted = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else if (dark) Color(0xFF9C92A8) else Color(0xFF968B9F)
-    val accent = if (customSurface) readableAccent(appearance.resolvedPrimaryAccent ?: (if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)), dark, theme.surface) else appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
+    val accent = appearance.resolvedPrimaryAccent ?: if (customSurface) readableAccent((if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)), dark, theme.surface) else if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
     val line = if (customSurface) theme.dividerLine else appearance.styleColor(if (dark) Color(0x29C5B1DB) else Color(0x299B89AA))
     val soft = if (customSurface) theme.surfaceContainer else appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9))
     val secondary = appearance.secondaryAccentColor?.let(::Color) ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)

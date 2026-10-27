@@ -11,8 +11,7 @@ internal object DaiyuPalette {
     val switchTrack: Color
         @Composable get() = LocalAppearanceSettings.current.resolvedPrimaryAccent ?: Color(0xFF82728F)
 
-    val switchThumb: Color
-        @Composable get() = LocalAppearanceSettings.current.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White
+    val switchThumb: Color = Color.White
 
     val light: Colors = lightColorScheme(
         primary = Color(0xFF7563B4),

@@ -1,6 +1,12 @@
 package app.daiyu.android.model
 
 import app.daiyu.android.delegation.ReasoningEffort
+import app.daiyu.android.domain.ModelFailure
+import app.daiyu.android.domain.ModelRequestDiagnostic
+import app.daiyu.android.domain.ModelRequestException
+import app.daiyu.android.domain.RequestField
+import app.daiyu.android.domain.RequestReasoningEffort
+import app.daiyu.android.domain.RequestRejection
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.storage.ModelSettings
 import org.json.JSONObject
@@ -11,6 +17,18 @@ class RuntimeModelOverridesTest {
     private fun settings() = ModelSettings("https://example.invalid", "model-a", "synthetic-key", false)
     private fun rejected(action: () -> Unit) {
         try { action(); fail("must reject") } catch (_: IllegalArgumentException) { }
+    }
+
+    private fun reasoningRejected(effort: RequestReasoningEffort, message: String, action: () -> Unit) {
+        try { action(); fail("must reject") } catch (error: ModelRequestException) {
+            assertEquals(ModelFailure.CONFIGURATION, error.failure)
+            assertEquals(ModelRequestDiagnostic(
+                rejection = RequestRejection.UNSUPPORTED_VALUE,
+                field = RequestField.REASONING,
+                unsupportedReasoningEffort = effort
+            ), error.diagnostic)
+            assertEquals(message, error.userMessage)
+        }
     }
 
     @Test fun snapshotAndSearchCopiesPreserveAllThreeStates() {
@@ -55,9 +73,15 @@ class RuntimeModelOverridesTest {
         val snapshot = ProviderSnapshot.capture(settings().copy(reasoningOverride = false))
         assertEquals(snapshot, ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.DEFAULT))
         assertEquals(false, ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.OFF).reasoningOverride)
-        rejected { ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.HIGH) }
-        rejected { ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.MAX) }
-        rejected { ReasoningRequestPolicy.validate(JSONObject("""{"reasoning":{"effort":"high"}}"""), ProviderProtocol.RESPONSES, false) }
+        reasoningRejected(RequestReasoningEffort.HIGH, "模型不支持高思考") {
+            ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.HIGH)
+        }
+        reasoningRejected(RequestReasoningEffort.MAX, "模型不支持极高思考") {
+            ReasoningRequestPolicy.freeze(snapshot, ReasoningEffort.MAX)
+        }
+        reasoningRejected(RequestReasoningEffort.HIGH, "模型不支持高思考") {
+            ReasoningRequestPolicy.validate(JSONObject("""{"reasoning":{"effort":"high"}}"""), ProviderProtocol.RESPONSES, false)
+        }
         ReasoningRequestPolicy.validate(JSONObject("""{"thinking":{"type":"disabled"}}"""), ProviderProtocol.MESSAGES, false)
         rejected { ReasoningRequestPolicy.validate(JSONObject("""{"thinking":{"type":"enabled","budget_tokens":1024}}"""), ProviderProtocol.MESSAGES, false) }
         val allowed = ProviderSnapshot.capture(settings().copy(reasoningOverride = true))

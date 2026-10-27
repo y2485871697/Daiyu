@@ -113,6 +113,35 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         assertFalse(runtime.automatic)
     }
 
+    fun testLiveDefaultSelectionUsesFrozenRunModelWithoutConsultingGlobalProfiles() {
+        val current = ModelSettings("https://running.invalid/v1", "running-B", "synthetic-run-key", false,
+            protocol = ProviderProtocol.RESPONSES).requestSnapshot()
+        var captured: app.daiyu.android.model.ProviderSnapshot? = null
+        val stop = IllegalStateException("captured before any provider request")
+        val worker = ContextManagementWorker(service,
+            { ProductionCompressionSettings(contextWindowTokens = 32_000).coordinatorSettings() },
+            ProductionCompressionPolicyResolver, object : ContextManagementSummaryProfiles {
+                override fun describe(binding: SummaryModelBinding): SummaryProfileDescriptor? = error("no custom model")
+                override fun describeSelection(selection: ContextManagementSelection): SummaryProfileDescriptor = error("must not resolve global active")
+                override fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel? = error("must not freeze global active")
+            }, chatModel = { frozen, window, _ ->
+                assertEquals(32_000L, window); captured = frozen; throw stop
+            })
+        val snapshot = worker.snapshot(lease)
+        val parent = Message(MessageId("live"), lease.owner.conversationId, RunId("live-run"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        val runtime = worker.runCompression(lease, snapshot,
+            ContextManagementSelection(null, ProviderProtocol.RESPONSES), parent, 32_000, 30_000, current) {}
+        val large = snapshot.originals.map { it.copy(blocks = listOf(MessageBlock.Text("large", "evidence ".repeat(10_000)))) }
+        try {
+            runtime.compact(large, 200_000, 200_000,
+                app.daiyu.android.domain.runtime.RequestCheckpoint("summary", "owner", "attempt",
+                    app.daiyu.android.domain.runtime.RequestOperation.NEXT), {}, {}, { false })
+            fail("summary model was not resolved")
+        } catch (failure: IllegalStateException) { assertSame(stop, failure) }
+        assertEquals(current, captured)
+    }
+
     fun testActualPostHasDurableOperationNoParentAndFinallyKeepsParserUsageWithoutCheckpoint() {
         val before = historyRows()
         val wire = Wire(beforePost = ::assertAdmission)

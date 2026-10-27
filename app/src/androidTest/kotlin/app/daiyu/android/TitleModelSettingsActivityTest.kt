@@ -20,6 +20,13 @@ class TitleModelSettingsActivityTest : WiredActivityTestCase() {
         }
         return result
     }
+    fun testCustomOffDisplaysCurrentModelWithoutMakingARequest() {
+        enter()
+        node("title-model-configure").assertExists()
+        ui.onNodeWithText("当前使用的模型").assertExists()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testP08AndSettingsRouteAreRealLocalOnlyEntry() {
         assertEquals(FeatureRoute.TITLE_MODEL_SETTINGS, FeatureCatalog.groups.flatMap { it.entries }.single { it.id == "P08" }.route)
         assertEquals(FeatureRoute.TITLE_MODEL_SETTINGS, SettingsCatalog.entry("title_model").route)

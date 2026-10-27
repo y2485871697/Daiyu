@@ -62,8 +62,12 @@ class TitleModelSettingsStore internal constructor(
     }
 
     /** Serialize the final DB CAS with local disable/rebind; never silently use a new profile. */
-    fun <T> whileCurrent(binding: TitleModelBinding, frozen: ProviderSnapshot, revision: String, commit: () -> T): T = synchronized(lock) {
-        if (read().first.revision != revision || resolve(binding) != frozen) unavailable()
+    fun <T> whileCurrent(binding: TitleModelBinding?, frozen: ProviderSnapshot, revision: String?, commit: () -> T): T = synchronized(lock) {
+        val current = read().first
+        if (current.revision != revision) unavailable()
+        if (binding == null) {
+            if (current.enabled) unavailable()
+        } else if (resolve(binding) != frozen) unavailable()
         commit()
     }
 

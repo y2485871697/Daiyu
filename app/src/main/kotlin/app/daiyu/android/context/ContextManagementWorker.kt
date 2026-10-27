@@ -73,6 +73,7 @@ internal interface ContextManagementBackend {
     fun runCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
         selection: ContextManagementSelection?, parent: Message,
         windowTokens: Long, sendBudgetTokens: Long,
+        currentProvider: app.daiyu.android.model.ProviderSnapshot? = null,
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): app.daiyu.android.domain.runtime.RunContextRuntime =
         throw UnsupportedOperationException("运行中压缩不可用")
 }
@@ -84,6 +85,10 @@ internal class ContextManagementWorker(
     private val settings: () -> CompressionSettings,
     private val policies: CompressionPolicyResolver,
     private val profiles: ContextManagementSummaryProfiles,
+    private val chatModel: (app.daiyu.android.model.ProviderSnapshot, Long, BoundSummaryUsagePort) -> BoundSummaryModel = { snapshot, window, usage ->
+        val configuration = CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, window)
+        requireNotNull(ProviderSummaryModelResolver { configuration }.resolve(configuration.binding, usage))
+    },
 ) : ContextManagementBackend {
     override fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot {
         checkLease(lease)
@@ -136,19 +141,27 @@ internal class ContextManagementWorker(
     override fun runCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
         selection: ContextManagementSelection?, parent: Message,
         windowTokens: Long, sendBudgetTokens: Long,
+        currentProvider: app.daiyu.android.model.ProviderSnapshot?,
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): app.daiyu.android.domain.runtime.RunContextRuntime {
         checkLease(lease)
         require(parent.conversationId == lease.owner.conversationId)
         val saved = requireNotNull(expected.savedConfiguration)
         require(settings() == saved) { "压缩设置已改变，请重新选择" }
-        val target = if (selection == null) requireNotNull(expected.summaryTarget) else profiles.describeSelection(selection)
+        val useCurrent = if (selection == null) expected.configuration?.summaryModel == null else selection.binding == null
+        val frozenCurrent = if (useCurrent) {
+            val provider = requireNotNull(currentProvider) { "当前运行模型不可用" }
+            if (selection == null) provider else ManualSummaryTargets.forSummary(provider.asModelSettings(), selection.protocol).requestSnapshot()
+        } else null
+        val target = if (useCurrent) null else if (selection == null) requireNotNull(expected.summaryTarget)
+            else profiles.describeSelection(selection)
         require(sendBudgetTokens > 0 && sendBudgetTokens <= windowTokens)
-        val policy = policies.resolve(saved.copy(automatic = true, summaryModel = target.binding,
+        val policy = policies.resolve(saved.copy(automatic = true, summaryModel = target?.binding,
             contextWindowTokens = windowTokens, reserveTokens = windowTokens - sendBudgetTokens))
         return ProductionRunContext(policy, parent, resolve = { usage ->
             checkLease(lease)
             require(settings() == saved) { "压缩设置已改变，请重新选择" }
-            requireNotNull(profiles.freeze(target, usage)) { "压缩模型不可用" }
+            if (frozenCurrent != null) chatModel(frozenCurrent, windowTokens, usage)
+            else requireNotNull(profiles.freeze(checkNotNull(target), usage)) { "压缩模型不可用" }
         }, automatic = false, progress = progress)
     }
 

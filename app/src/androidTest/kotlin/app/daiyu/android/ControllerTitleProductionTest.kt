@@ -39,7 +39,7 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
         main { f.controller.observe(listener); listener() }
         try { await(done) } finally { main { f.controller.unobserve(listener) } }
     }
-    private fun fresh(parentStatus: RunStatus = RunStatus.COMPLETED): Fixture {
+    private fun fresh(parentStatus: RunStatus = RunStatus.COMPLETED, customTitle: Boolean = true): Fixture {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(instrumentation.targetContext, "controller-title-$id-"))
         val db = ConversationDatabase(app)
@@ -48,7 +48,7 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
         var stored: ModelSettings? = null
         val titleStore = TitleModelSettingsStore(app.getSharedPreferences("title-fixture", 0),
             { checkNotNull(stored) }, { p, _, _ -> stored = p }, "title-fixture-$id")
-        titleStore.save(TitleModelProfile(TitleModelBinding("synthetic-title", "fixed"),
+        if (customTitle) titleStore.save(TitleModelProfile(TitleModelBinding("synthetic-title", "fixed"),
             ModelSettings("https://title.invalid", "synthetic-title", "synthetic-key", false)))
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         val cancelled = AtomicInteger(); val calls = AtomicInteger()
@@ -60,7 +60,7 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
                 }
                 override fun cancel() { }
             } } }, titleModelFactory = { frozen ->
-                assertEquals("synthetic-title", frozen.model)
+                assertEquals(if (customTitle) "synthetic-title" else "synthetic-main", frozen.model)
                 CatalogFixturePort { object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                         calls.incrementAndGet(); entered.countDown(); await(release)
@@ -90,6 +90,14 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
             it.release.countDown(); it.controller.close(); it.db.close()
             it.app.deleteDatabase("conversations.db"); it.app.filesDir.deleteRecursively()
         } } finally { super.tearDown() }
+    }
+
+    fun testUnconfiguredTitleUsesTheAcceptedChatModelAfterPersist() {
+        val f = fresh(customTitle = false)
+        send(f); await(f.entered)
+        f.release.countDown(); state(f) { f.controller.titleRevision == 1L }
+        assertEquals("生产标题", f.db.conversations().single().title)
+        assertEquals(1, f.calls.get())
     }
 
     fun testNewFirstTurnRunsExactlyOnceAfterPersistAndSurvivesNormalCleanup() {

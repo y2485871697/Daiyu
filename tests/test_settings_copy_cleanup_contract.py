@@ -25,7 +25,7 @@ class SettingsCopyCleanupContractTest(unittest.TestCase):
         self.assertNotIn("为新会话自动生成简短标题。", screen)
         self.assertNotIn('item("title-model-intro")', screen)
         for text in ('item("title-model-status")', 'SettingsSwitchRow("使用自定义模型"',
-                     'summary = modelLabel ?: "选择模型"', "else onDisable()", "else onChooseModel"):
+                     'summary = if (settings.enabled) modelLabel ?: "选择模型" else "当前使用的模型"', "else onDisable()", "else onChooseModel"):
             self.assertIn(text, screen)
 
     def test_task_surface_both_static_notes_removed_while_selection_and_failures_remain(self):

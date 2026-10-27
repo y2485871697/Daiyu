@@ -97,7 +97,7 @@ internal fun CompressionSettingsForm(
                     busy = saving, tag = "settings-switch:使用独立摘要配置", summary = "关闭时沿用对话模型。") {
                     if (it && !hasSummarySelection) onChooseModel() else onSave(draft.copy(configureSummary = it))
                 }
-                SettingsRow("压缩模型", summary = modelLabel ?: "选择模型", tag = "compression-summary-config",
+                SettingsRow("压缩模型", summary = if (draft.configureSummary) modelLabel ?: "选择模型" else "当前使用的模型", tag = "compression-summary-config",
                     showChevron = true, onClick = if (enabled && !saving) onChooseModel else null)
             }
         }

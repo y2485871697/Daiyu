@@ -497,6 +497,7 @@ class ChatController internal constructor(private val application:Application,
                 }
             })
         if (original != null && running != null) {
+            val currentProvider = resources?.takeIf { it.runner === running && it.initial.id == original.id }?.provider ?: return false
             val cancellation = ContextPreparationCancellation()
             val lease = object : ContextManagementLease {
                 override val owner = owner
@@ -510,7 +511,7 @@ class ChatController internal constructor(private val application:Application,
             }
             val accepted = running.requestCompaction(create = { capacity ->
                 postCompressionActivity(waiting.copy(running = false))
-                contextManagementFactory(application, contextService).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens) { activity ->
+                contextManagementFactory(application, contextService).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens, currentProvider) { activity ->
                     if (activity.running) runtimeStore?.bindCompressionModel(original, activity.model)
                     postCompressionActivity(activity)
                 }
@@ -1549,7 +1550,8 @@ class ChatController internal constructor(private val application:Application,
 
     private class RunResources(val initial:Message,val runner:ChatRunner,val tools:RunCatalogTools,
         val auxiliary: ControllerAuxiliaryVision? = null,
-        val summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null) {
+        val summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null,
+        val provider: ProviderSnapshot) {
         var browserVisual: ControllerBrowserVisual? = null
         var childrenPauseRequested = false
         var childPauseEpoch = 0L
@@ -4048,7 +4050,7 @@ class ChatController internal constructor(private val application:Application,
                 val coordinator = titleCoordinator
                 if (synchronized(this) { closed }) coordinator.close()
                 else {
-                    val preparedTitle = coordinator.prepare(saved.id, run)
+                    val preparedTitle = coordinator.prepare(saved.id, run, requestProvider)
                     pendingTitle.set(preparedTitle.job)
                     if (preparedTitle.outcome == app.daiyu.android.title.TitleOutcome.BINDING_UNAVAILABLE)
                         synchronized(this) { titleNotice = "独立标题模型失绑定或配置不可用；聊天已保存，未使用主模型" }
@@ -4060,7 +4062,7 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) { virtualDisplay?.accepted = true; gui?.accepted = true }
         video?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
-        val lifetime=RunResources(assistant,owned,tools,auxiliaryPort,token.summaryPreparation)
+        val lifetime=RunResources(assistant,owned,tools,auxiliaryPort,token.summaryPreparation, requestProvider)
         if (browserBinding?.visibleSupported == true) {
             lifetime.browserVisual = ControllerBrowserVisual(assistant, browserBinding,
                 ownerCurrent = { isRunUnfenced(assistant) },

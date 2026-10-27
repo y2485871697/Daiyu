@@ -5,7 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /** Migrated assertions from frozen source blob a0f18d83a7fa3c8ecdfad8cbc28638cff1a71ee5.
- * Removed legacy main-model fallback assertion: P08 requires strict independent binding instead. */
+ * Explicit custom profiles keep strict binding; the unset profile follows the frozen chat model. */
 class ConversationTitleModelTest {
     @Test fun lateResponseCannotOverwriteRenameDeleteOrEditedFirstMessage() {
         assertTrue(ConversationTitleModel.mayApply(true, false, "old", "old", "m1", "m1"))

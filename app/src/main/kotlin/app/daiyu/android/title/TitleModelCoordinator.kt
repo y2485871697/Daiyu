@@ -18,9 +18,9 @@ enum class TitleOutcome {
 class TitleJob internal constructor(
     internal val coordinatorIdentity: Any,
     internal val original: TitleRevision,
-    internal val binding: TitleModelBinding,
+    internal val binding: TitleModelBinding?,
     internal val provider: ProviderSnapshot,
-    internal val configurationRevision: String,
+    internal val configurationRevision: String?,
     val parentRunId: RunId,
     val requestId: String,
 ) {
@@ -59,14 +59,17 @@ class TitleModelCoordinator internal constructor(
         }
     }
 
-    fun prepare(conversationId: ConversationId, parentRunId: RunId): TitlePreparation = synchronized(gate) {
+    fun prepare(conversationId: ConversationId, parentRunId: RunId,
+        currentProvider: ProviderSnapshot? = null): TitlePreparation = synchronized(gate) {
         if (closed) return@synchronized TitlePreparation(TitleOutcome.OWNER_REVOKED)
         val config = try { settings.snapshot() } catch (_: Exception) {
             return@synchronized TitlePreparation(TitleOutcome.BINDING_UNAVAILABLE)
         }
-        if (!config.enabled) return@synchronized TitlePreparation(TitleOutcome.DISABLED)
-        val selected = config.binding ?: return@synchronized TitlePreparation(TitleOutcome.BINDING_UNAVAILABLE)
-        val provider = try { settings.resolve(selected) } catch (_: Exception) {
+        val selected = if (config.enabled) config.binding
+            ?: return@synchronized TitlePreparation(TitleOutcome.BINDING_UNAVAILABLE) else null
+        val provider = if (selected == null) currentProvider
+            ?: return@synchronized TitlePreparation(TitleOutcome.BINDING_UNAVAILABLE)
+        else try { settings.resolve(selected) } catch (_: Exception) {
             return@synchronized TitlePreparation(TitleOutcome.BINDING_UNAVAILABLE)
         }
         val original = commits.capture(conversationId) ?: return@synchronized TitlePreparation(TitleOutcome.STALE)
@@ -74,7 +77,7 @@ class TitleModelCoordinator internal constructor(
         // the unchanged ConversationDatabase initial title may be automatically named.
         if (original.titleTouched || original.originalTitle != "新会话" || original.firstRunId != parentRunId.value)
             return@synchronized TitlePreparation(TitleOutcome.INELIGIBLE)
-        val job = TitleJob(identity, original, selected, provider, checkNotNull(config.revision), parentRunId, "title:${UUID.randomUUID()}")
+        val job = TitleJob(identity, original, selected, provider, config.revision, parentRunId, "title:${UUID.randomUUID()}")
         jobs.add(job)
         TitlePreparation(null, job)
     }
@@ -217,8 +220,11 @@ class TitleModelCoordinator internal constructor(
                 ProviderProtocol.GEMINI -> "{\"generationConfig\":{\"maxOutputTokens\":$limit}}"
                 ProviderProtocol.UNKNOWN -> throw TitleModelUnavailableException()
             }
-            return provider.asModelSettings().copy(requestOptions = ProviderRequestOptions(
-                customBody = body),
+            return provider.asModelSettings().copy(
+                model = app.daiyu.android.model.ReasoningRequestPolicy.requestModel(provider.model, provider.requestOptions),
+                requestOptions = ProviderRequestOptions(
+                    customBody = body, codex = provider.requestOptions.codex,
+                    anthropicVersion = provider.requestOptions.anthropicVersion),
                 batteryEnabled = false, deviceStatusEnabled = false).requestSnapshot()
         }
     }

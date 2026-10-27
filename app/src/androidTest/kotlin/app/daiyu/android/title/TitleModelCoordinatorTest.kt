@@ -40,8 +40,8 @@ class TitleModelCoordinatorTest : InstrumentationTestCase() {
         calls = 0; savedUsage = null
     }
     override fun tearDown() { db.close(); super.tearDown() }
-    private fun coordinator(during: () -> Unit = {}, fail: Boolean = false) = TitleModelCoordinator(settings, commits) { frozen ->
-        assertEquals("title-model", frozen.model)
+    private fun coordinator(during: () -> Unit = {}, fail: Boolean = false, expectedModel: String = "title-model") = TitleModelCoordinator(settings, commits) { frozen ->
+        assertEquals(expectedModel, frozen.model)
         object : ModelPort {
             override fun open(history: List<Message>): ModelSession = error("must explicitly disable tools")
             override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
@@ -226,10 +226,30 @@ class TitleModelCoordinatorTest : InstrumentationTestCase() {
         assertEquals("新会话", title("a")); c.close()
     }
 
-    fun testDisabledBindingFailsExplicitlyWithoutModelCalls() {
+    fun testCustomOffUsesTheFrozenCurrentModelInsteadOfTheSavedCustomProfile() {
+        settings.disable()
+        val current = ModelSettings("https://current.invalid", "current-model", "synthetic-current-key", false).requestSnapshot()
+        val c = coordinator(expectedModel = "current-model")
+        val job = c.prepare(owner, run, current).job!!
+        assertNull(job.binding)
+        assertEquals(current, job.provider)
+        assertEquals(TitleOutcome.SAVED, c.generate(job, turn()))
+        assertEquals(1, calls); c.close()
+    }
+
+    fun testExplicitCustomStillWinsOverTheCurrentModel() {
+        val current = ModelSettings("https://current.invalid", "current-model", "synthetic-current-key", false).requestSnapshot()
+        val c = coordinator()
+        val job = c.prepare(owner, run, current).job!!
+        assertEquals(binding, job.binding)
+        assertEquals(TitleOutcome.SAVED, c.generate(job, turn()))
+        assertEquals(1, calls); c.close()
+    }
+
+    fun testMissingCurrentModelDoesNotChooseAnotherProvider() {
         val c = TitleModelCoordinator(settings, commits) { calls++; error("must not create") }
         settings.disable()
-        assertEquals(TitleOutcome.DISABLED, c.prepare(owner, run).outcome)
+        assertEquals(TitleOutcome.BINDING_UNAVAILABLE, c.prepare(owner, run).outcome)
         assertEquals(0, calls); c.close()
     }
 }

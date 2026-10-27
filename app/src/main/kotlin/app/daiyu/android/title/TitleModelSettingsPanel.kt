@@ -46,7 +46,7 @@ fun TitleModelSettingsPanel(
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("使用自定义模型", settings.enabled, !busy || saving,
                     busy = busy && saving, tag = "title-model-enabled") { requested -> if (requested) onChooseModel() else onDisable() }
-                SettingsRow("选择模型", summary = modelLabel ?: "选择模型", tag = "title-model-configure",
+                SettingsRow("选择模型", summary = if (settings.enabled) modelLabel ?: "选择模型" else "当前使用的模型", tag = "title-model-configure",
                     showChevron = true, onClick = if (busy) null else onChooseModel)
             }
         }

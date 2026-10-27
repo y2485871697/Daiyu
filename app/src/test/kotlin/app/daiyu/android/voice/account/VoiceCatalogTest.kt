@@ -1,6 +1,5 @@
 package app.daiyu.android.voice.account
 
-import android.app.Application
 import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import okio.Buffer
@@ -9,12 +8,7 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.junit.Assert.*
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [34])
 class VoiceCatalogTest {
     @Test fun retainedIamSigningMatchesIndependentFrozenVector() {
         val request = VoiceProjectCatalog.signedRequest("test-ak", "test-secret", 0, Instant.parse("2026-09-20T03:00:00Z"))
@@ -154,7 +148,7 @@ class VoiceCatalogTest {
         }
     }
 
-    @Test fun slotCatalogRejectsDuplicatesWithinPageAcrossPagesAndAcrossStates() = runBlocking {
+    @Test fun slotCatalogRejectsSameStateDuplicatesButMergesStateTransitions() = runBlocking {
         assertTrue(runCatching {
             slotCatalog { _, _ -> slotPage(2, listOf("S_same", "S_same")) }.list("ak", "sk", "p")
         }.isFailure)
@@ -164,13 +158,29 @@ class VoiceCatalogTest {
             }.list("ak", "sk", "p")
         }.isFailure)
         val states = mutableListOf<String>()
-        assertTrue(runCatching {
-            slotCatalog { state, _ -> states += state; slotPage(1, listOf("S_same")) }.list("ak", "sk", "p")
-        }.isFailure)
-        assertEquals(listOf("Unknown", "Training"), states)
+        val merged = slotCatalog { state, _ ->
+            states += state
+            slotPage(1, listOf("S_same"))
+        }.list("ak", "sk", "p")
+        assertEquals(listOf("Unknown", "Training", "Success", "Active"), states)
+        assertEquals(listOf("S_same"), merged.map { it.id })
+        assertEquals("Active", merged.single().state)
         assertTrue(runCatching {
             slotCatalog { _, _ -> slotPage(1, listOf("invalid")) }.list("ak", "sk", "p")
         }.isFailure)
+    }
+
+    @Test fun stateTransitionUsesTheLaterNameAndQuota() = runBlocking {
+        val states = listOf("Unknown", "Training", "Success", "Active")
+        val result = slotCatalog { state, _ ->
+            val item = JSONObject().put("SpeakerID", "S_transition").put("State", state)
+                .put("Alias", "name-$state").put("AvailableTrainingTimes", 10 - states.indexOf(state))
+            AccountResponse(200, JSONObject().put("Result", JSONObject().put("TotalCount", 1)
+                .put("Statuses", JSONArray().put(item))).toString().toByteArray())
+        }.list("ak", "sk", "p").single()
+        assertEquals("Active", result.state)
+        assertEquals("name-Active", result.name)
+        assertEquals(7, result.remaining)
     }
 
     @Test fun slotCatalogReturnsOnlyCompleteMultiPageAndStateSpecificResults() = runBlocking {

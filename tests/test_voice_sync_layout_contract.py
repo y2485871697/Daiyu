@@ -60,7 +60,7 @@ class VoiceSyncLayoutContractTest(unittest.TestCase):
         refresh = body(self.panel, 'suspend fun refreshProjects(')
         self.assertIn('projects = emptyList(); projectPicker = false', refresh)
         markers = ['resources.projects.list(a, s)', 'currentCoroutineContext().ensureActive()',
-                   'check(current() && page == "SYNC" && ak == a && sk == s)',
+                   'check(current() && page == "SYNC" && ak == a && sk == s && feedback.visit == origin)',
                    'VoiceProjectCatalog.selectProject(fetched, preferred)',
                    'projects = fetched; project = selected.name', 'return selected.name']
         self.assertEqual(sorted(refresh.index(marker) for marker in markers),
@@ -78,14 +78,14 @@ class VoiceSyncLayoutContractTest(unittest.TestCase):
         markers = ['val p = refreshProjects(a, s, preferred)', 'withContext(Dispatchers.IO)',
                    'currentCoroutineContext().ensureActive()',
                    'resources.preferences.save(account!!.fingerprint, a, s, p)',
-                   'notice = "账户信息已加密保存在本机"']
+                   'report("账户信息已加密保存在本机")']
         self.assertEqual(sorted(storage.index(marker) for marker in markers),
                          [storage.index(marker) for marker in markers])
         self.assertNotIn('resources.preferences.clear(', self.panel)
         self.assertIn('账户保存未确认', storage)
         self.assertIn('catch (cancelled: CancellationException) { throw cancelled }', self.panel)
-        self.assertIn('else failureNotice ?:', self.panel)
-        self.assertIn('execute(block = pending.second)', self.panel)
+        self.assertIn('else voiceAccountFailure(failure, failureNotice)', self.panel)
+        self.assertIn('execute(pending.failureNotice, block = pending.action)', self.panel)
 
     def test_query_and_console_keep_existing_functionality(self):
         read = body(self.sync, 'SettingsCard(Modifier.testTag("voice-sync-read-card"))')
@@ -100,8 +100,8 @@ class VoiceSyncLayoutContractTest(unittest.TestCase):
 
     def test_static_descriptions_are_removed_but_results_errors_and_confirmation_remain(self):
         self.assertNotIn('SettingsNote(', self.sync)
-        self.assertIn('notice = if (count == 0)', self.sync)
-        self.assertIn('notice = "账户信息已加密保存在本机"', self.sync)
+        self.assertIn('report(if (count == 0)', self.sync)
+        self.assertIn('report("账户信息已加密保存在本机")', self.sync)
         self.assertIn('if (notice.isNotBlank()) item { SettingsNote(notice) }', self.panel)
         self.assertIn('previewState.error?.let', self.panel)
         self.assertIn('confirmation === pending && enabled', self.panel)

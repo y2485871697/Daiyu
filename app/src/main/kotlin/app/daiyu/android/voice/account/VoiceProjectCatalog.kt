@@ -12,8 +12,7 @@ internal class VoiceProjectCatalog(private val transport: AccountHttpTransport) 
         require(ak.isNotBlank() && sk.isNotBlank()) { "请先填写 AK 和 SK" }
         return collectPages { offset ->
             val response = transport.execute(signedRequest(ak, sk, offset, Instant.now()), 2 * 1024 * 1024)
-            val root = JSONObject(response.bytes.toString(Charsets.UTF_8))
-            DoubaoVoiceCatalog.responseError(response.status, root, listOf(ak, sk))?.let { error(it) }
+            val root = DoubaoVoiceCatalog.readResponse(response, listOf(ak, sk))
             parsePage(root)
         }
     }

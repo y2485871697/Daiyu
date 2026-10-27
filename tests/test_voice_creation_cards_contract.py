@@ -81,13 +81,16 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
         for required in ('SettingsSwitchRow("我有权使用此录音并同意本次上传制作", agreed, enabled = enabled)',
                          'tag = "voice-training-submit"', 'if (!enabled || !agreed || sampleUri == null) null',
                          'ask("上传所选录音', 'PersonalVoices.readSample(context, uri)',
-                         'check(current()); resources.voices.create(speech!!, sample, n, slot, confirmed = true)',
+                         'if (!current() || feedback.visit != origin) throw CancellationException("account_page_changed")',
+                         'resources.voices.create(speech!!, sample, n, slot, confirmed = true)',
                          'finally { sample.clear(); sampleUri = null; agreed = false }'):
             self.assertIn(required, final)
         self.assertIn('if (slot == null) "\\n\\n须在同一项目另行开通后付费音色服务。', final)
         self.assertIn('首次正式合成可能产生音色费用', final)
         self.assertIn('未正式使用的音色可能七天后删除', final)
         self.assertEqual(1, final.count('resources.voices.create('))
+        self.assertIn('本次未提交制作', final)
+        self.assertLess(final.index('return@ask'), final.index('resources.voices.create('))
         self.assertIn('confirmation === pending && enabled', self.panel)
         self.assertIn('confirmation = null; operation?.cancel(); preview.stop()', self.panel)
 
@@ -103,9 +106,11 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
 
     def test_creation_entry_and_return_do_not_reuse_another_pages_notice(self):
         begin = block(self.panel, 'fun beginFlow(target: String)')
-        self.assertIn('if (target == "CREATE") notice = ""', begin)
+        self.assertIn('navigate(target)', begin)
+        self.assertIn('clearPageFeedback()', block(self.panel, 'fun navigate(target: String)'))
         back = block(self.panel, 'fun back()')
-        self.assertIn('page = parentPage\n                if (page == "CREATE") notice = ""', back)
+        self.assertIn('clearPageFeedback()', back)
+        self.assertIn('page = parentPage', back)
         self.assertIn('if (notice.isNotBlank()) item { SettingsNote(notice) }', self.panel)
         self.assertIn('previewState.error?.let', self.panel)
         self.assertIn('if (!latestCurrent(frozenConfiguration)) item', self.panel)

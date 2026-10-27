@@ -61,6 +61,18 @@ class PersonalVoicePreviewTest {
         assertFalse(preview.state.value.active); assertNull(preview.state.value.error)
         assertEquals(1, entries[1].stopped)
     }
+    @Test fun leavingAfterAnAlreadyFailedPreviewClearsErrorAndFencesItsLateCallback() {
+        val entries = mutableListOf<Entry>(); val preview = owner(entries)
+        preview.toggle(config, voice())
+        entries.single().listener.failed()
+        assertNotNull(preview.state.value.error)
+        assertFalse(preview.state.value.active)
+        preview.stop()
+        assertNull(preview.state.value.error)
+        entries.single().listener.failed(); entries.single().listener.started()
+        assertNull(preview.state.value.error)
+        assertFalse(preview.state.value.active)
+    }
     @Test fun unknownWrongAccountAndUnsafeUrlsNeverReachPort() {
         val entries = mutableListOf<Entry>(); val preview = owner(entries)
         listOf(voice().copy(uncertain = true), voice().copy(account = "wrong"),

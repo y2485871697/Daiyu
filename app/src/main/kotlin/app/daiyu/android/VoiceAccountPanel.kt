@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
@@ -69,6 +70,11 @@ internal class AccountLeafPreviewGuard(port: VoiceAccountPreviewPort) {
     }
 }
 
+private data class AccountConfirmation(
+    val label: String, val failureNotice: String?, val visit: Long,
+    val action: suspend ((String) -> Unit) -> Unit,
+)
+
 /**
  * Independently mounted leaf. frozenConfiguration MUST be a saved runtime snapshot (not a draft).
  * Selection is only a callback; the parent decides whether/how to save a new configuration.
@@ -87,6 +93,7 @@ internal fun VoiceAccountPanel(
     stopPreviewStrictly: () -> Boolean = { false },
     onAccountKeyChange: (suspend (String) -> Unit)? = null,
     onPreviewRequest: () -> Unit = {},
+    onPageChanged: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -94,6 +101,7 @@ internal fun VoiceAccountPanel(
     val lifecycleState by lifecycle.currentStateFlow.collectAsState()
     val latestCurrent by rememberUpdatedState(isCurrent)
     val latestStrictStop by rememberUpdatedState(stopPreviewStrictly)
+    val latestPageChanged by rememberUpdatedState(onPageChanged)
     val speech = remember(frozenConfiguration.revision) { runCatching { frozenConfiguration.speech() }.getOrNull() }
     val account = remember(speech) { speech?.let { runCatching { VoiceAccountIdentity.from(it) }.getOrNull() } }
     val allVoices by resources.voices.state.collectAsState()
@@ -104,10 +112,12 @@ internal fun VoiceAccountPanel(
     val preview = previewGuard.preview
     val previewState by preview.state.collectAsState()
     var loaded by remember(resources, frozenConfiguration.revision) { mutableStateOf(false) }
-    var notice by remember(frozenConfiguration.revision) { mutableStateOf("") }
+    var feedback by remember(frozenConfiguration.revision) { mutableStateOf(AccountPageFeedback()) }
+    val notice = feedback.text
+    fun clearPageFeedback() { preview.stop(); feedback = feedback.nextVisit(); latestPageChanged() }
     var busy by remember { mutableStateOf(false) }
     var operation by remember { mutableStateOf<Job?>(null) }
-    var confirmation by remember(frozenConfiguration.revision) { mutableStateOf<Pair<String, suspend () -> Unit>?>(null) }
+    var confirmation by remember(frozenConfiguration.revision) { mutableStateOf<AccountConfirmation?>(null) }
     var ak by remember(frozenConfiguration.revision) { mutableStateOf("") }
     var sk by remember(frozenConfiguration.revision) { mutableStateOf("") }
     var project by remember(frozenConfiguration.revision) { mutableStateOf("default") }
@@ -123,22 +133,30 @@ internal fun VoiceAccountPanel(
     var projects by remember(frozenConfiguration.revision) { mutableStateOf(emptyList<VoiceProjectCatalog.Project>()) }
     fun current() = latestCurrent(frozenConfiguration) && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     val enabled = loaded && !busy && account != null && current() && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    fun execute(failureNotice: String? = null, block: suspend () -> Unit) {
+    fun execute(failureNotice: String? = null, block: suspend ((String) -> Unit) -> Unit) {
         if (!current() || busy) return
-        confirmation = null; notice = ""; busy = true
+        feedback = feedback.nextVisit()
+        val origin = feedback.visit
+        fun operationCurrent() = current() && feedback.visit == origin
+        confirmation = null; busy = true
         operation = scope.launch {
+            val operationContext = currentCoroutineContext()
+            fun report(message: String) { if (operationContext.isActive && current()) feedback = feedback.report(origin, message) }
             try {
-                previewGuard.execute(::current, { latestStrictStop() }, block = block)
-                if (current() && notice.isBlank()) notice = "操作完成"
+                previewGuard.execute(::operationCurrent, { latestStrictStop() }) { block(::report) }
+                currentCoroutineContext().ensureActive()
+                if (operationCurrent() && feedback.text.isBlank()) report("操作完成")
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) {
-                if (current()) notice = if (previewGuard.stopUnconfirmed)
+            catch (failure: Exception) {
+                if (currentCoroutineContext().isActive && operationCurrent()) report(if (previewGuard.stopUnconfirmed)
                     "试听停止未确认，已拒绝本次操作。请退出账户页面并核对语音输出状态。"
-                else failureNotice ?: "操作未确认。请核对账户、槽位和权限；若已提交训练，只查询原音色，不要重复训练。"
+                else voiceAccountFailure(failure, failureNotice))
             } finally { busy = false }
         }
     }
-    fun ask(label: String, action: suspend () -> Unit) { if (enabled) confirmation = label to action }
+    fun ask(label: String, failureNotice: String? = null, action: suspend ((String) -> Unit) -> Unit) {
+        if (enabled) confirmation = AccountConfirmation(label, failureNotice, feedback.visit, action)
+    }
     DisposableEffect(lifecycle, frozenConfiguration.revision, preview) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
@@ -152,6 +170,7 @@ internal fun VoiceAccountPanel(
         }
     }
     LaunchedEffect(resources, frozenConfiguration.revision) {
+        val origin = feedback.visit
         preview.stop(); confirmation = null; sampleUri = null
         try {
             withContext(Dispatchers.IO) { resources.voices.load() }
@@ -159,7 +178,7 @@ internal fun VoiceAccountPanel(
             val credentials = account?.let { withContext(Dispatchers.IO) { resources.preferences.load(it.fingerprint) } }
             if (credentials != null) { ak = credentials.keyId; sk = credentials.secret; project = credentials.project }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { notice = "本机账户资料或控制面凭据不可读；请重新填写 AK 和 SK 后保存。" }
+        catch (_: Exception) { feedback = feedback.report(origin, "本机账户资料或控制面凭据不可读；请重新填写 AK 和 SK 后保存。") }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         samplePicker.deliver(uri); pickerResult++
@@ -196,15 +215,17 @@ internal fun VoiceAccountPanel(
     var accountKey by remember(frozenConfiguration.revision) { mutableStateOf(frozenConfiguration.key) }
     fun navigate(target: String) {
         if (!current() || busy) return
-        confirmation = null; preview.stop(); menu = false; addMenu = false
+        clearPageFeedback()
+        confirmation = null; menu = false; addMenu = false
         if (target == "SYNC" || target == "ACCOUNT") parentPage = page
         page = target
     }
     suspend fun refreshProjects(a: String, s: String, preferred: String): String {
+        val origin = feedback.visit
         projects = emptyList(); projectPicker = false
         val fetched = resources.projects.list(a, s)
         currentCoroutineContext().ensureActive()
-        check(current() && page == "SYNC" && ak == a && sk == s)
+        check(current() && page == "SYNC" && ak == a && sk == s && feedback.visit == origin)
         val selected = VoiceProjectCatalog.selectProject(fetched, preferred)
         projects = fetched; project = selected.name
         return selected.name
@@ -213,18 +234,17 @@ internal fun VoiceAccountPanel(
         if (!current() || busy) return
         name = ""; existingId = ""; slotId = ""; postpaid = false; sampleUri = null
         manualId = false; advancedCreation = false; agreed = false; step = 0
-        if (target == "CREATE") notice = ""
         samplePicker.invalidate(); pickerPending = false
         navigate(target)
     }
     fun back() {
-        if (busy) { operation?.cancel(); notice = "正在停止等待。若已提交制作，请查询原音色，不要重复提交。"; return }
+        if (busy) { operation?.cancel(); feedback = feedback.report(feedback.visit, "正在停止等待，请稍候。"); return }
+        clearPageFeedback()
         samplePicker.invalidate()
-        confirmation = null; preview.stop(); menu = false; addMenu = false; voiceMenu = null
+        confirmation = null; menu = false; addMenu = false; voiceMenu = null
         when {
             page == "SYNC" || page == "ACCOUNT" -> {
                 page = parentPage
-                if (page == "CREATE") notice = ""
             }
             page == "CREATE" && step > 0 -> { step--; agreed = false }
             page != "LIST" -> page = "LIST"
@@ -290,40 +310,41 @@ internal fun VoiceAccountPanel(
             }
             if (page == "SYNC") {
                 item { SettingsCard(Modifier.testTag("voice-sync-credentials-card")) {
-                    SettingsTextField("AK", ak, { if (!busy && current()) { ak = it; sk = ""; project = "default"; projects = emptyList(); projectPicker = false; confirmation = null } },
+                    SettingsTextField("AK", ak, { if (!busy && current()) { ak = it; sk = ""; project = "default"; projects = emptyList(); projectPicker = false; confirmation = null; feedback = feedback.clear() } },
                         password = true, enabled = !busy, compact = true)
-                    SettingsTextField("SK", sk, { if (!busy && current()) { sk = it; project = "default"; projects = emptyList(); projectPicker = false; confirmation = null } },
+                    SettingsTextField("SK", sk, { if (!busy && current()) { sk = it; project = "default"; projects = emptyList(); projectPicker = false; confirmation = null; feedback = feedback.clear() } },
                         password = true, enabled = !busy, compact = true)
                 } }
                 item { SettingsCard(Modifier.testTag("voice-sync-project-card")) {
                     SettingsRow("当前项目", summary = project, showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
                         val a = ak; val s = sk; val p = project
-                        execute("项目获取失败或没有可访问的项目，请核对 AK／SK 与项目权限后重试。") {
+                        execute("项目获取失败或没有可访问的项目，请核对 AK／SK 与项目权限后重试。") { report ->
                             refreshProjects(a, s, p)
                             projectPicker = true
-                            notice = "请选择与语音 API Key 相同的项目。"
+                            report("请选择与语音 API Key 相同的项目。")
                         }
                     }))
                 } }
                 item { SettingsCard(Modifier.testTag("voice-sync-read-card")) {
                     SettingsRow("读取我的名额", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
                         val a = ak; val s = sk; val p = project
-                        ask("查询项目 $p 的槽位；已制作槽位将用当前语音 Key 校验，不制作、不合成") {
+                        ask("查询项目 $p 的槽位；已制作槽位将用当前语音 Key 校验，不制作、不合成",
+                            "名额读取失败，请核对控制面 AK／SK、当前项目与 IAM 权限后重试。") { report ->
                             val count = resources.voices.importPurchased(speech!!, a, s, p)
-                            notice = if (count == 0) "本项目未找到名额；请核对项目与语音 API Key。" else "已同步 $count 个名额；未使用的名额在制作声音时选择。"
+                            report(if (count == 0) "本项目未找到名额；请核对项目与语音 API Key。" else "已同步 $count 个名额；未使用的名额在制作声音时选择。")
                         }
                     }))
                 } }
                 item { SettingsCard(Modifier.testTag("voice-sync-storage-card")) {
                     SettingsRow("保存账户信息", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
                         val a = ak; val s = sk; val preferred = project
-                        execute("账户保存未确认，请核对 AK／SK、项目访问权限及本机存储后重试。") {
+                        execute("账户保存未确认，请核对 AK／SK、项目访问权限及本机存储后重试。") { report ->
                             val p = refreshProjects(a, s, preferred)
                             withContext(Dispatchers.IO) {
                                 currentCoroutineContext().ensureActive()
                                 resources.preferences.save(account!!.fingerprint, a, s, p)
                             }
-                            notice = "账户信息已加密保存在本机"
+                            report("账户信息已加密保存在本机")
                         }
                     }))
                 } }
@@ -354,7 +375,14 @@ internal fun VoiceAccountPanel(
                     }
                     SettingsRow("导入声音", showChevron = true, onClick = if (!enabled || !existingId.matches(Regex("(?:S_|etaClone)[A-Za-z0-9_-]+"))) null else ({
                         val id = existingId; val n = name
-                        ask("用当前语音账户查询已有音色 $id；不上传、不制作") { resources.voices.importExisting(speech!!, id, n); page = "LIST"; notice = "声音已导入；没有重新制作。" }
+                        ask("用当前语音账户查询已有音色 $id；不上传、不制作") {
+                            val origin = feedback.visit
+                            resources.voices.importExisting(speech!!, id, n)
+                            currentCoroutineContext().ensureActive()
+                            check(current() && feedback.visit == origin)
+                            clearPageFeedback(); page = "LIST"
+                            feedback = feedback.report(feedback.visit, "声音已导入；没有重新制作。")
+                        }
                     }))
                 }
                 SettingsNote("仅查询已有声音，不上传录音、不重新制作。备注名称最多 80 字。")
@@ -388,7 +416,7 @@ internal fun VoiceAccountPanel(
                     }
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-next-sample-card")) {
-                    SettingsRow("下一步：选择录音", showChevron = true, onClick = if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null else ({ step = 1; agreed = false }))
+                    SettingsRow("下一步：选择录音", showChevron = true, onClick = if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null else ({ clearPageFeedback(); step = 1; agreed = false }))
                 } }
             }
             if (page == "CREATE" && step == 1) {
@@ -399,12 +427,12 @@ internal fun VoiceAccountPanel(
                             if (samplePicker.begin(frozenConfiguration.revision)) {
                                 pickerPending = true
                                 try { picker.launch("audio/*") }
-                                catch (_: Exception) { samplePicker.deliver(null); pickerPending = samplePicker.pending; pickerResult++; notice = "未能打开录音选择器" }
+                                catch (_: Exception) { samplePicker.deliver(null); pickerPending = samplePicker.pending; pickerResult++; feedback = feedback.report(feedback.visit, "未能打开录音选择器") }
                             }
                         }))
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-next-confirm-card")) {
-                    SettingsRow("下一步：确认制作", showChevron = true, onClick = if (!enabled || sampleUri == null) null else ({ step = 2; agreed = false }))
+                    SettingsRow("下一步：确认制作", showChevron = true, onClick = if (!enabled || sampleUri == null) null else ({ clearPageFeedback(); step = 2; agreed = false }))
                 } }
             }
             if (page == "CREATE" && step == 2) {
@@ -419,10 +447,23 @@ internal fun VoiceAccountPanel(
                 item { SettingsCard(Modifier.testTag("voice-create-submit-card")) {
                     SettingsRow("确认上传并制作", tag = "voice-training-submit", showChevron = true, onClick = if (!enabled || !agreed || sampleUri == null) null else ({
                         val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else slotId
-                        ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。结果未知时只查询原音色，不重复提交。${if (slot == null) "\n\n须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。" else ""}") {
-                            val sample = PersonalVoices.readSample(context, uri)
-                            try { check(current()); resources.voices.create(speech!!, sample, n, slot, confirmed = true); page = "LIST"; step = 0; notice = "已提交制作，请在原音色菜单查询状态，不要重复提交。" }
-                            finally { sample.clear(); sampleUri = null; agreed = false }
+                        ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。结果未知时只查询原音色，不重复提交。${if (slot == null) "\n\n须在同一项目另行开通后付费音色服务。首次正式合成可能产生音色费用，未正式使用的音色可能七天后删除。请核对费用与有效期后再制作。" else ""}", "制作结果未确认，请在原音色菜单查询状态，不要重复提交。") { report ->
+                            val origin = feedback.visit
+                            val sample = try { PersonalVoices.readSample(context, uri) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) {
+                                report("录音读取失败，请检查文件格式、大小与访问权限；本次未提交制作。")
+                                return@ask
+                            }
+                            try {
+                                currentCoroutineContext().ensureActive()
+                                if (!current() || feedback.visit != origin) throw CancellationException("account_page_changed")
+                                resources.voices.create(speech!!, sample, n, slot, confirmed = true)
+                                currentCoroutineContext().ensureActive()
+                                check(current() && feedback.visit == origin)
+                                clearPageFeedback(); page = "LIST"; step = 0
+                                feedback = feedback.report(feedback.visit, "已提交制作，请在原音色菜单查询状态，不要重复提交。")
+                            } finally { sample.clear(); sampleUri = null; agreed = false }
                         }
                     }))
                 } }
@@ -444,7 +485,7 @@ internal fun VoiceAccountPanel(
                         "无此项目访问权限".takeIf { !item.allowed },
                     ).joinToString(" · ").ifBlank { null }) {
                     if (current() && !busy && page == "SYNC" && projects.any { it.name == item.name && it.allowed }) {
-                        project = item.name; projectPicker = false; confirmation = null; notice = ""
+                        project = item.name; projectPicker = false; confirmation = null; feedback = feedback.clear()
                     }
                 } }
             }
@@ -471,8 +512,8 @@ internal fun VoiceAccountPanel(
             DaiyuConfirmDialog("错误详情", message, "关闭", false, onConfirm = { detail = null }, onDismiss = { detail = null })
         }
         confirmation?.let { pending ->
-            DaiyuConfirmDialog("确认本次操作", pending.first, "确认", false,
-                onConfirm = { if (confirmation === pending && enabled) execute(block = pending.second) }, onDismiss = { confirmation = null })
+            DaiyuConfirmDialog("确认本次操作", pending.label, "确认", false,
+                onConfirm = { if (confirmation === pending && enabled && feedback.visit == pending.visit) execute(pending.failureNotice, block = pending.action) }, onDismiss = { confirmation = null })
         }
     }
 }

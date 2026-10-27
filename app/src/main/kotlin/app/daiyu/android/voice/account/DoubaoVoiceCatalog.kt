@@ -5,6 +5,7 @@ import kotlinx.coroutines.ensureActive
 import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONException
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.time.Instant
@@ -12,6 +13,12 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+
+internal class VoiceCatalogFailure(val safeMessage: String) : IllegalStateException(safeMessage)
+
+private inline fun checkCatalog(valid: Boolean, message: () -> String) {
+    if (!valid) throw VoiceCatalogFailure(message())
+}
 
 /** Retained from frozen doubao/DoubaoVoiceCatalog; control plane, never synthesis credentials. */
 internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
@@ -21,36 +28,37 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
         val result = linkedMapOf<String, Slot>()
         for (state in listOf("Unknown", "Training", "Success", "Active")) {
             var expectedTotal: Int? = null
+            val stateIds = hashSetOf<String>()
             for (page in 1..20) {
                 currentCoroutineContext().ensureActive()
                 val body = JSONObject().put("ProjectName", project).put("State", state)
                     .put("PageNumber", page).put("PageSize", 100).toString()
                 val response = transport.execute(signedRequest(ak, sk, body, Instant.now()), AccountHttpTransportLimit)
-                val root = JSONObject(response.bytes.toString(Charsets.UTF_8))
-                responseError(response.status, root, listOf(ak, sk))?.let { error(it) }
+                val root = readResponse(response, listOf(ak, sk))
                 val data = root.getJSONObject("Result")
                 // optInt coerces strings/fractions and invents totals when absent. None prove completeness.
                 val rawTotal = data.opt("TotalCount")
-                check(rawTotal is Int || rawTotal is Long) { "音色列表 TotalCount 缺失或不是非负整数，未取得完整列表" }
+                checkCatalog(rawTotal is Int || rawTotal is Long) { "音色列表 TotalCount 缺失或不是非负整数，未取得完整列表" }
                 val totalLong = (rawTotal as Number).toLong()
-                check(totalLong in 0L..2000L) { "音色列表总数无效或超过 2000 条，请按项目缩小查询范围" }
+                checkCatalog(totalLong in 0L..2000L) { "音色列表总数无效或超过 2000 条，请按项目缩小查询范围" }
                 val total = totalLong.toInt()
-                check(expectedTotal == null || expectedTotal == total) { "音色列表总数在分页中变化，未取得完整列表" }
+                checkCatalog(expectedTotal == null || expectedTotal == total) { "音色列表总数在分页中变化，未取得完整列表" }
                 expectedTotal = total
                 val items = data.getJSONArray("Statuses")
                 val offset = (page - 1) * 100
                 val expectedCount = (total - offset).coerceIn(0, 100)
-                check(offset <= total && items.length() == expectedCount) { "音色列表页数或条数不完整，请重新查询" }
+                checkCatalog(offset <= total && items.length() == expectedCount) { "音色列表页数或条数不完整，请重新查询" }
                 for (i in 0 until items.length()) {
                     val item = items.getJSONObject(i)
                     val id = item.getString("SpeakerID")
-                    check(id.matches(Regex("S_[A-Za-z0-9_-]+"))) { "音色列表包含无效槽位，未取得完整列表" }
-                    check(!result.containsKey(id)) { "音色列表包含重复槽位，未取得完整列表" }
+                    checkCatalog(id.matches(Regex("S_[A-Za-z0-9_-]+"))) { "音色列表包含无效槽位，未取得完整列表" }
+                    checkCatalog(stateIds.add(id)) { "音色列表包含重复槽位，未取得完整列表" }
+                    // Separate state requests are not one snapshot: keep the latest observation, as in Eta.
                     result[id] = Slot(id, item.optString("Alias").ifBlank { id }, item.optString("State", state),
                         item.optInt("AvailableTrainingTimes", -1))
                 }
                 if (offset + items.length() == total) break
-                check(page < 20) { "音色超过 2000 条，请按项目缩小查询范围" }
+                checkCatalog(page < 20) { "音色超过 2000 条，请按项目缩小查询范围" }
             }
         }
         return result.values.toList()
@@ -70,6 +78,15 @@ internal class DoubaoVoiceCatalog(private val transport: AccountHttpTransport) {
                 .header("Content-Type", CONTENT_TYPE).header("X-Date", date).header("X-Content-Sha256", digest)
                 .header("Authorization", "HMAC-SHA256 Credential=$ak/$scope, SignedHeaders=$headers, Signature=$signature")
                 .post(body.toByteArray(Charsets.UTF_8).toRequestBody(CONTENT_TYPE.toMediaType())).build()
+        }
+        internal fun readResponse(response: AccountResponse, secrets: List<String>): JSONObject {
+            val root = try { JSONObject(response.bytes.toString(Charsets.UTF_8)) }
+            catch (_: JSONException) {
+                throw VoiceCatalogFailure(responseError(response.status, JSONObject(), secrets)
+                    ?: "服务响应格式无效，未取得列表。请重新查询。")
+            }
+            responseError(response.status, root, secrets)?.let { throw VoiceCatalogFailure(it) }
+            return root
         }
         internal fun responseError(http: Int, root: JSONObject, secrets: List<String>): String? {
             val meta = root.optJSONObject("ResponseMetadata")

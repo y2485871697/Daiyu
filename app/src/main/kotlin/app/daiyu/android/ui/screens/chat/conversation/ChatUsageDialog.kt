@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -66,7 +67,7 @@ internal fun ChatUsageDialog(
             val usage = projection
             when {
                 conversationId == null || usage?.hasUsage == false -> {
-                    Box(Modifier.fillMaxWidth().heightIn(min = 100.dp).testTag("chat-usage-empty"),
+                    Box(Modifier.fillMaxWidth().padding(vertical = 12.dp).testTag("chat-usage-empty"),
                         contentAlignment = Alignment.Center) {
                         Text("暂无用量", fontSize = 13.sp, color = colors.muted, textAlign = TextAlign.Center)
                     }

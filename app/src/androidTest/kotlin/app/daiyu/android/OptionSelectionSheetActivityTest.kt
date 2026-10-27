@@ -18,6 +18,7 @@ import app.daiyu.android.ui.components.OptionSelectionSheet
 import java.util.concurrent.atomic.AtomicInteger
 
 class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
+    private var menuDensity = 1f
     private fun mount(
         options: Int = 2,
         selected: Int = 0,
@@ -32,6 +33,7 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(themeMode = mode), applyInterfaceScale = false) {
                 val density = LocalDensity.current
+                menuDensity = density.density
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                     key(visit) {
                         var open by remember { mutableStateOf(true) }
@@ -74,6 +76,12 @@ class OptionSelectionSheetActivityTest : WiredActivityTestCase() {
                 val viewport = node("preview-dialog-viewport").fetchSemanticsNode().boundsInRoot
                 assertTrue("two choices should wrap rather than fill the viewport", sheet.height < viewport.height * .75f)
                 assertTrue(sheet.top > viewport.top)
+                val title = ui.onNodeWithText("选择接口").fetchSemanticsNode().boundsInRoot
+                val bounds = (0..1).map { node("choice:$it").fetchSemanticsNode().boundsInRoot }
+                assertTrue("title and first option must not overlap", bounds.first().top - title.bottom >= -1f)
+                assertTrue("hidden close must not reserve a title row", bounds.first().top - title.bottom <= 8f * menuDensity + 1f)
+                assertTrue("last option must stay inside the surface", sheet.bottom - bounds.last().bottom >= -1f)
+                assertTrue("short content must not leave a minimum-height tail", sheet.bottom - bounds.last().bottom <= 17f * menuDensity + 1f)
                 node("choice:1").performClick()
                 awaitClosed()
                 assertEquals(1, selections.get())

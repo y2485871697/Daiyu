@@ -98,7 +98,7 @@ internal fun AssistantPreviewDialog(
     onBack: (() -> Unit)? = null,
     showCloseButton: Boolean = true,
     onOutsideDismiss: () -> Unit = onDismiss,
-    footer: @Composable RowScope.() -> Unit = {},
+    footer: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (!show) return
@@ -120,7 +120,7 @@ internal fun AssistantPreviewSheet(
     onClose: () -> Unit,
     onBack: (() -> Unit)? = null,
     showCloseButton: Boolean = true,
-    footer: @Composable RowScope.() -> Unit = {},
+    footer: (@Composable RowScope.() -> Unit)? = null,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -139,8 +139,9 @@ internal fun AssistantPreviewSheet(
         .padding(1.dp).padding(start = 15.dp * s, end = 15.dp * s, top = 10.dp * s, bottom = 16.dp * s)) {
         Box(Modifier.align(Alignment.CenterHorizontally).width(29.dp * s).height(3.dp * s)
             .clip(CircleShape).background(colors.toolbar.copy(alpha = .24f)))
-        Spacer(Modifier.height(17.dp * s))
-        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 13.dp * s).heightIn(min = 40.dp * s), verticalAlignment = Alignment.CenterVertically,
+        Spacer(Modifier.height(8.dp * s))
+        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 6.dp * s)
+            .heightIn(min = if (onBack != null || showCloseButton) 40.dp * s else 0.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
             if (onBack != null) AssistantPreviewIcon(AssistantPreviewIcons.Back, "返回", onBack)
             Text(title, modifier = Modifier.weight(1f), color = colors.text,
@@ -149,9 +150,11 @@ internal fun AssistantPreviewSheet(
             if (showCloseButton) AssistantPreviewIcon(AssistantPreviewIcons.Close, "关闭", onClose)
         }
         Column(Modifier.fillMaxWidth().weight(1f), content = content)
-        Spacer(Modifier.height(10.dp * s))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
-        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-footer").padding(top = 10.dp * s), horizontalArrangement = Arrangement.spacedBy(8.dp * s), content = footer)
+        if (footer != null) {
+            Spacer(Modifier.height(10.dp * s))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
+            Row(Modifier.fillMaxWidth().testTag("assistant-sheet-footer").padding(top = 10.dp * s), horizontalArrangement = Arrangement.spacedBy(8.dp * s), content = footer)
+        }
     }
 }
 

@@ -4,6 +4,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.app.DaiyuPalette
 
+import app.daiyu.android.ui.components.LocalBottomSheetContent
 import app.daiyu.android.ui.components.etaInputContainerColor
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
@@ -70,13 +71,15 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun SettingsSectionTitle(title: String) {
     val grouped = LocalSettingsPageStyle.current
+    val inSheet = LocalBottomSheetContent.current
     Text(
         text = title,
         style = MiuixTheme.textStyles.body2.copy(fontSize = if (grouped) 13.sp else 14.sp,
             fontWeight = if (grouped) FontWeight.Medium else FontWeight.SemiBold),
         color = if (grouped) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.onSurface,
         modifier = Modifier.padding(start = 24.dp, end = 24.dp,
-            top = if (grouped) 24.dp else 28.dp, bottom = if (grouped) 9.dp else 10.dp),
+            top = if (inSheet) 8.dp else if (grouped) 24.dp else 28.dp,
+            bottom = if (inSheet) 6.dp else if (grouped) 9.dp else 10.dp),
     )
 }
 

@@ -210,6 +210,8 @@ class ChatUsageDialogTest : WiredActivityTestCase() {
                 val body = node("chat-usage-empty").fetchSemanticsNode().boundsInRoot
                 assertEquals(body.center.x, text.center.x, 1f)
                 assertEquals(body.center.y, text.center.y, 1f)
+                val bodyDensity = node("chat-usage-empty").fetchSemanticsNode().layoutInfo.density.density
+                assertTrue("empty usage must not reserve a 100dp work area", body.height < 80f * bodyDensity)
                 ui.onNodeWithText("输入 Token").assertDoesNotExist()
                 ui.onNodeWithText("已报告小计；缺报显示 —").assertDoesNotExist()
             }

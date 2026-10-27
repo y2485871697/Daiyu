@@ -37,16 +37,16 @@ class VoicePersonalMenuContractTest(unittest.TestCase):
         self.assertNotIn("resources.", menu)
         self.assertNotIn("execute(", menu)
 
-    def test_voice_menus_only_opt_into_compact_shared_header(self):
+    def test_voice_menus_inherit_content_sized_shared_header(self):
         menu = (SRC / "VoicePersonalMenus.kt").read_text()
-        self.assertIn('titleFontSize = 20.sp, compact = true', menu)
+        self.assertIn('titleFontSize = 20.sp', menu)
+        self.assertNotIn('compact =', menu)
         self.assertNotIn('height =', menu)
         shell = (SRC / "ui/screens/chat/conversation/ChatSelectionSheet.kt").read_text()
-        for token in ('compact: Boolean = false',
-                      'min = if (compact) 0.dp else minOf(180.dp, available)',
-                      'padding(bottom = if (compact) 8.dp else 17.dp)',
-                      'padding(bottom = if (compact) 6.dp else 13.dp)',
-                      'heightIn(min = if (compact && !showCloseButton) 0.dp else 40.dp)',
+        for token in ('if (height == null) Modifier.heightIn(max = available)',
+                      'padding(bottom = 8.dp)',
+                      'padding(bottom = 6.dp)',
+                      'heightIn(min = if (showCloseButton) 40.dp else 0.dp)',
                       'Column(Modifier.fillMaxWidth().weight(1f, fill = height != null)',
                       'if (showCloseButton) Box(Modifier.size(40.dp)',
                       'PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled)'):

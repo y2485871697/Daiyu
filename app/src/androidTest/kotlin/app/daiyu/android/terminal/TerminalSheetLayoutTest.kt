@@ -155,6 +155,7 @@ class TerminalSheetLayoutTest : WiredActivityTestCase() {
             show(dark, fontScale, tasks = 20)
             node("terminal-tasks").performClick()
             assertNoCloseIcon()
+            tagged("assistant-sheet-footer").assertDoesNotExist()
             node("terminal-task-read:0").assertHeightIsAtLeast(48.dp).performTouchInput {
                 click(androidx.compose.ui.geometry.Offset(center.x, 1f))
             }

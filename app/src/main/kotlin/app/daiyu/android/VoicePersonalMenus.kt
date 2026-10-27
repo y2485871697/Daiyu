@@ -48,7 +48,7 @@ internal fun VoiceAccountSettingsSheet(onSelect: (String) -> Unit, onDismiss: ()
 private fun VoiceActionSheet(title: String, items: List<VoiceActionItem>,
     onSelect: (String) -> Unit, onDismiss: () -> Unit, isEnabled: (String) -> Boolean) {
     val colors = usagePalette()
-    ChatSelectionSheet(title, onDismiss = onDismiss, showCloseButton = false, titleFontSize = 20.sp, compact = true) {
+    ChatSelectionSheet(title, onDismiss = onDismiss, showCloseButton = false, titleFontSize = 20.sp) {
         Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
             .testTag("voice-action-sheet")) {
             items.forEach { item ->

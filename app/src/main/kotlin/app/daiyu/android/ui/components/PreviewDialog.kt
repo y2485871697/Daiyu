@@ -13,6 +13,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 
+// Page section gaps do not belong inside bottom-sheet content.
+internal val LocalBottomSheetContent = staticCompositionLocalOf { false }
+
 /** Shared window coordinates for preview overlays; design insets are applied by each surface. */
 @Composable
 internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scrimBlurRadius: Float = 0f,
@@ -40,7 +43,7 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
                         clickFeedback = false, onClick = {
                         if (dismissEnabled) motion?.requestDismiss(BottomSheetDismissSource.Outside) ?: onOutsideDismiss()
                     }))
-                CompositionLocalProvider(LocalDensity provides density) {
+                CompositionLocalProvider(LocalDensity provides density, LocalBottomSheetContent provides bottomSheet) {
                     val motion = if (bottomSheet) Modifier.dialogEnterMotion() else Modifier
                     BoxWithConstraints(motion.fillMaxSize()
                         .windowInsetsPadding(WindowInsets.safeDrawing).imePadding(), content = content)

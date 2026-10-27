@@ -88,10 +88,10 @@ internal fun UsageGlassDialog(
                 .padding(horizontal = if (compact) 14.dp else 15.dp)
                 .padding(top = if (compact) 8.dp else 14.dp, bottom = if (compact) 10.dp else 15.dp),
         ) {
-            if (!compact) Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
+            if (!compact) Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp)
                 .size(29.dp, 3.dp).clip(RoundedCornerShape(4.dp)).background(colors.toolbar.copy(alpha = .24f)))
             Text(title, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
-                modifier = Modifier.padding(bottom = if (compact) 10.dp else 10.dp))
+                modifier = Modifier.padding(bottom = if (compact) 10.dp else 6.dp))
             content()
         }
     }

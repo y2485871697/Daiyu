@@ -25,6 +25,11 @@ class SummaryRequestDeadline(timeoutMillis: Long, private val nanoTime: () -> Lo
  * disable all tool advertisement (including built-ins) and must open lazily without I/O. */
 fun interface SummaryModelTransport {
     fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline): ModelSession
+    fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
+        reasoning: app.daiyu.android.model.SummaryReasoningLevel): ModelSession {
+        require(reasoning == app.daiyu.android.model.SummaryReasoningLevel.OFF)
+        return openWithoutTools(history, deadline)
+    }
 }
 
 /**
@@ -43,13 +48,18 @@ data class BoundSummaryModel(
     val startDeadline: () -> SummaryRequestDeadline,
     internal val displayIdentity: app.daiyu.android.timeline.SummaryModelIdentity? = null,
     internal val requireCheckpointFormat: Boolean = false,
+    val reasoningLevels: List<app.daiyu.android.model.SummaryReasoningLevel> = listOf(app.daiyu.android.model.SummaryReasoningLevel.OFF),
 ) {
     internal var rebind: ((BoundSummaryUsagePort) -> BoundSummaryModel)? = null
-    init { require(contextWindowTokens > 0 && inputBudgetTokens in 1..contextWindowTokens) }
+    init {
+        require(contextWindowTokens > 0 && inputBudgetTokens in 1..contextWindowTokens)
+        require(reasoningLevels.isNotEmpty() && reasoningLevels.first() == app.daiyu.android.model.SummaryReasoningLevel.OFF)
+        require(reasoningLevels.zipWithNext().all { (a, b) -> a.ordinal < b.ordinal })
+    }
 }
 
 /**
- * One text-only, read-only request; no retry, main-model fallback or tool continuation.
+ * Text-only read-only requests; only rejected thinking levels negotiate, never network retry or main-model fallback.
  * Existing ArchiveCodec supplies lossless textual evidence, not executable protocol replay.
  * ContextService alone chooses the prefix, estimates send capacity and publishes the archive.
  */
@@ -76,38 +86,46 @@ class ModelContextSummarizer(
         val task = "保留所给历史前缀的真实进度；未压缩的后续尾部优先。"
         var requests = 0
         fun request(evidence: String, taskText: String): String {
-            checkLive()
-            require(fits(evidence, taskText)) { "摘要模型输入预算不足；保留原文" }
-            check(requests < 64) { "摘要请求数量超过上限；保留原文" }
-            val model = if (requests++ == 0) bound else requireNotNull(nextModel) { "摘要需要独立分块用量准入" }.invoke()
-            require(model.binding == bound.binding && model.inputBudgetTokens == bound.inputBudgetTokens)
-            val id = UUID.randomUUID().toString()
-            val rows = listOf(Message(MessageId("summary-input-$id"), conversation, RunId("summary-request-$id"),
-                Message.USER_ROLE, listOf(MessageBlock.Text("evidence", prompt(evidence, taskText))), RunStatus.COMPLETED))
-            val session = model.transport.openWithoutTools(rows, deadline)
-            val registration = cancellation.register { session.cancel() }
-            try {
-                val text = linkedMapOf<String, StringBuilder>()
-                session.next(emptyList()) { event ->
-                    checkLive()
-                    when (event) {
-                        is ModelEvent.TextDelta -> text.getOrPut(event.itemId) { StringBuilder() }.append(event.text)
-                        is ModelEvent.TextFinal -> text[event.itemId] = StringBuilder(event.text)
-                        is ModelEvent.ToolReady -> error("摘要模型请求了工具；未执行，保留原文")
-                        else -> Unit
+            var reasoningIndex = 0
+            while (true) {
+                checkLive()
+                require(fits(evidence, taskText)) { "摘要模型输入预算不足；保留原文" }
+                check(requests < 64) { "摘要请求数量超过上限；保留原文" }
+                val model = if (requests++ == 0) bound else requireNotNull(nextModel) { "摘要需要独立分块用量准入" }.invoke()
+                require(model.binding == bound.binding && model.inputBudgetTokens == bound.inputBudgetTokens &&
+                    model.reasoningLevels == bound.reasoningLevels)
+                checkLive()
+                val id = UUID.randomUUID().toString()
+                val rows = listOf(Message(MessageId("summary-input-$id"), conversation, RunId("summary-request-$id"),
+                    Message.USER_ROLE, listOf(MessageBlock.Text("evidence", prompt(evidence, taskText))), RunStatus.COMPLETED))
+                val session = model.transport.openWithoutTools(rows, deadline, bound.reasoningLevels[reasoningIndex])
+                val registration = cancellation.register { session.cancel() }
+                try {
+                    val text = linkedMapOf<String, StringBuilder>()
+                    session.next(emptyList()) { event ->
+                        checkLive()
+                        when (event) {
+                            is ModelEvent.TextDelta -> text.getOrPut(event.itemId) { StringBuilder() }.append(event.text)
+                            is ModelEvent.TextFinal -> text[event.itemId] = StringBuilder(event.text)
+                            is ModelEvent.ToolReady -> error("摘要模型请求了工具；未执行，保留原文")
+                            else -> Unit
+                        }
                     }
+                    checkLive()
+                    return text.values.joinToString("\n").trim().also { require(it.isNotEmpty()) { "摘要模型返回为空" } }
+                } catch (interrupted: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw CancellationException("摘要准备已取消").also { it.initCause(interrupted) }
+                } catch (failure: Exception) {
+                    checkLive()
+                    if (failure is ModelRequestException && failure.failure == ModelFailure.REQUEST &&
+                        failure.diagnostic?.reasoningLevelRejected == true && reasoningIndex < bound.reasoningLevels.lastIndex) {
+                        reasoningIndex++
+                    } else throw failure
+                } finally {
+                    registration.close()
+                    runCatching { session.cancel() }
                 }
-                checkLive()
-                return text.values.joinToString("\n").trim().also { require(it.isNotEmpty()) { "摘要模型返回为空" } }
-            } catch (interrupted: InterruptedException) {
-                Thread.currentThread().interrupt()
-                throw CancellationException("摘要准备已取消").also { it.initCause(interrupted) }
-            } catch (failure: Exception) {
-                checkLive()
-                throw failure
-            } finally {
-                registration.close()
-                runCatching { session.cancel() }
             }
         }
         fun checkpoint(evidence: String, taskText: String): String {

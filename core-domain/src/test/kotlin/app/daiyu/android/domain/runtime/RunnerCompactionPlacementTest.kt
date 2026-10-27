@@ -64,6 +64,58 @@ class RunnerCompactionPlacementTest {
         assertTrue(segments.first().blocks.any { it is MessageBlock.Text && it.text == "before compression" })
         assertTrue(segments.last().blocks.any { it is MessageBlock.Text && it.text == "after compression" })
     }
+    @Test fun failedCompressionFreezesBoundaryAndReopensWithRetainedToolResultWithoutReexecutingIt() {
+        var opens = 0; var nexts = 0; var tools = 0; var failures = 0; var finished = 0
+        var capturedBoundary: Message? = null
+        val checkpoints = mutableListOf<RunCheckpoint>()
+        val runtime = object : RunContextRuntime {
+            override val windowTokens = 1000L
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+            override fun beginCompaction(boundary: Message) { capturedBoundary = boundary }
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? {
+                admit(); throw ModelRequestException(ModelFailure.NETWORK)
+            }
+            override fun failed(reason: String) { failures++; assertEquals(ModelFailure.NETWORK.userMessage, reason) }
+            override fun finishedCompaction() { finished++ }
+        }
+        val model = ModelPort { history ->
+            opens++
+            if (opens == 2) {
+                assertEquals(1, failures); assertEquals(1, finished)
+                assertEquals(1, history.flatMap { it.blocks }.filterIsInstance<MessageBlock.Tool>().count { it.result == "done" })
+            }
+            object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    nexts++
+                    assertTrue(outputs.isEmpty()) // The reopened history contains the confirmed tool result.
+                    if (nexts == 1) {
+                        sink(ModelEvent.TextFinal("before", "before failed compression"))
+                        sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "read", "{}")))
+                        sink(ModelEvent.Usage(900, 10))
+                    } else sink(ModelEvent.TextFinal("after", "after failed compression"))
+                }
+                override fun cancel() {}
+            }
+        }
+        val store = object : AtomicRuntimeStore {
+            override fun commitCheckpoint(checkpoint: RunCheckpoint) { checkpoints += checkpoint }
+            override fun reconcileCheckpoint(checkpoint: RunCheckpoint) = error("no recovery")
+        }
+        val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { tools++; "done" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, listOf(user))
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(2, opens); assertEquals(2, nexts); assertEquals(1, tools)
+        assertEquals(1, failures); assertEquals(1, finished)
+        assertTrue(checkpoints.all { it.context?.compactions == 0 })
+        val segments = MessageHistory.expand(listOf(result))
+        assertEquals(2, segments.size)
+        assertEquals(MessageHistory.expand(listOf(capturedBoundary!!)).single().blocks, segments.first().blocks)
+        assertTrue(segments.first().blocks.any { it is MessageBlock.Text && it.text == "before failed compression" })
+        assertTrue(segments.last().blocks.any { it is MessageBlock.Text && it.text == "after failed compression" })
+    }
+
     @Test fun failedCandidateStillClosesActivityWithoutPublishingSuccessfulCompaction() {
         var began = false; var failed = false; var finished = false
         val runtime = object : RunContextRuntime {

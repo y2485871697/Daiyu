@@ -481,6 +481,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             var runtime: RunContextRuntime? = null
             var admissionAttempted = false
             var persistenceFailure: PersistenceException? = null
+            val compactionBoundary = segmentHistory.project(current)
             val admittedRequests = hashSetOf<String>()
             fun persistSummary(value: RunCheckpoint? = null) {
                 try { if (value == null) checkpoint() else checkpoint(value) }
@@ -491,7 +492,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 runtime = selectedRuntime
                 compactingRuntime = selectedRuntime
                 if (cancelled()) return false
-                selectedRuntime.beginCompaction(segmentHistory.project(current))
+                selectedRuntime.beginCompaction(compactionBoundary)
                 val before = effectiveHistory()
                 val historyLocal = selectedRuntime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
                 val anchor = contextState?.calibration ?: contextState?.input
@@ -542,13 +543,26 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 persistenceFailure?.let { throw it }
                 if (failure is PersistenceException) throw failure
                 if (cancelled()) return false
-                error = failure.message ?: "压缩失败，原始上下文保留"
-                try { (runtime ?: base).failed(error) } catch (_: Exception) { }
+                error = (failure as? ModelRequestException)?.userMessage ?: failure.message ?: "压缩失败，原始上下文保留"
+                val failedRuntime = runtime ?: base
+                try {
+                    if (runtime == null) failedRuntime.beginCompaction(compactionBoundary)
+                    failedRuntime.failed(error)
+                } catch (_: Exception) { }
+                // Keep the failure divider at this boundary; the next session replays history, not tools.
+                val sealed = segmentHistory.sealSession(current, emptyList())
+                segmentHistory = RunnerHistorySegments(sealed) { reasoningInterruptedAtNanos ?: System.nanoTime() }
+                current = sealed
+                modelHistory = effectiveHistory()
+                acceptedContextSegments = sealed.historySegments.size
+                outputs = emptyList()
+                transportCheckpoint = null
+                reopenAfterCompaction = true
                 contextState = checkNotNull(contextState).copy(pressure = null)
                 checkpoint()
                 return false
             } finally {
-                try { runtime?.finishedCompaction() } catch (_: Exception) { }
+                try { (runtime ?: base).finishedCompaction() } catch (_: Exception) { }
                 compactingRuntime = null
                 try { manual?.completed?.invoke(applied, error) } catch (_: Exception) { }
                 if (!admissionAttempted && persistenceFailure == null && pressure != null && !cancelled() && contextState?.pressure == pressure) {

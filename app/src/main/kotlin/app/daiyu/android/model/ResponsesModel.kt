@@ -26,12 +26,13 @@ class ResponsesModel internal constructor(
     private val backgroundResume: app.daiyu.android.model.reconnect.FrozenResponsesBackground? = null,
     private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
     private val oauthRefresh: (app.daiyu.android.model.oauth.CodexAuth, String) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::refreshHeaders,
+    private val summaryRequest: Boolean = false,
 ) : ModelPort {
     /** Preserve the assembled model/media/approval context; never bypass its approved open. */
     fun withBackgroundResume(capability: app.daiyu.android.model.reconnect.FrozenResponsesBackground): ResponsesModel {
         capability.requireMatches(settings)
         return ResponsesModel(settings, connect, imageInputSupported, assistantInstructions,
-            videoInputCapability, videoPostApprovalProvider, sessionContext, capability, oauthHeaders, oauthRefresh)
+            videoInputCapability, videoPostApprovalProvider, sessionContext, capability, oauthHeaders, oauthRefresh, summaryRequest)
     }
     private fun exposed(session: Session): ModelSession = if (backgroundResume != null) session else object : RequestRetryModelSession {
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = session.next(outputs, sink)
@@ -54,10 +55,10 @@ class ResponsesModel internal constructor(
     })
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, null, assistantInstructions,
-            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh))
+            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh, summaryRequest = summaryRequest))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions,
-            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh))
+            sessionContext = sessionContext, backgroundResume = backgroundResume, oauthHeaders = oauthHeaders, oauthRefresh = oauthRefresh, summaryRequest = summaryRequest))
 
     /** Explicit OpenRouter extension only. Generic ModelPort/ModelFactory paths remain unchanged.
      * Pass the same run-local capability used to freeze videos to this model's constructor.
@@ -67,7 +68,7 @@ class ResponsesModel internal constructor(
     fun open(history: List<Message>, definitions: List<ToolDefinition>, videos: FrozenMessageVideoPlan,
              images: ModelImagePlan? = null): ModelSession =
         exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images,
-            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext, backgroundResume, oauthHeaders, oauthRefresh))
+            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext, backgroundResume, oauthHeaders, oauthRefresh, summaryRequest))
 
     private class Session(
         private val settings: ModelSettings,
@@ -84,6 +85,7 @@ class ResponsesModel internal constructor(
         private val backgroundResume: app.daiyu.android.model.reconnect.FrozenResponsesBackground? = null,
         private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String>,
         private val oauthRefresh: (app.daiyu.android.model.oauth.CodexAuth, String) -> Map<String, String>,
+        private val summaryRequest: Boolean = false,
     ) : CheckpointedResumableModelSession, RequestRetryModelSession {
         private var decoder = ResponsesStream.State()
         private var resumeAllowed = false
@@ -299,11 +301,12 @@ class ResponsesModel internal constructor(
                 backgroundResume.requireMatches(settings)
                 request.put("background", true).put("stream", true).put("store", false)
             } else require(!request.has("background") || request.opt("background") == false) { "Background mode requires explicit informed opt-in" }
-            if (settings.oauth != null) app.daiyu.android.model.oauth.CodexRequestPolicy.apply(request, settings.requestOptions.speedMode)
+            if (settings.oauth != null) app.daiyu.android.model.oauth.CodexRequestPolicy.apply(request, settings.requestOptions.speedMode, preserveReasoning = summaryRequest)
             val finalUrl = settings.requestEndpoint()
             SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
             if (videoPlan != null) app.daiyu.android.model.videos.VideoRequestPolicy.disableReasoning(request)
-            ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES, settings.reasoningOverride, request.opt("model") as? String)
+            ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES, if (summaryRequest) null else settings.reasoningOverride,
+                if (summaryRequest) null else request.opt("model") as? String)
             val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext)
             // Video-only allowlist and exact history binding apply to the final merged payload
             // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.

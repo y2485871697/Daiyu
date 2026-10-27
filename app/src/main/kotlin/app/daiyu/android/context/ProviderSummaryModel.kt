@@ -74,7 +74,8 @@ class ProviderSummaryModelResolver internal constructor(
             startDeadline = { SummaryRequestDeadline(configuration.deadlineMillis, deadlines::nanoTime) },
             displayIdentity = app.daiyu.android.timeline.SummaryModelIdentity(configuration.provider.usageIdentity?.providerId ?: binding.providerId,
                 configuration.apiModel, configuration.provider.protocol.name, configuration.provider.usageIdentity?.providerName),
-            requireCheckpointFormat = true).also { bound ->
+            requireCheckpointFormat = true,
+            reasoningLevels = SummaryProviderFactory.reasoningLevels(configuration.provider, configuration.maxOutputTokens)).also { bound ->
                 bound.rebind = { fresh -> requireNotNull(ProviderSummaryModelResolver({ configuration }, connect, deadlines, oauthHeaders = oauthHeaders).resolve(binding, fresh)) }
             }
     }
@@ -121,7 +122,11 @@ internal class ProviderSummaryModelPort(
         require(definitions.isEmpty()) { "摘要禁止工具" }
         return open(history)
     }
-    override fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline): ModelSession {
+    override fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline): ModelSession =
+        openWithoutTools(history, deadline, app.daiyu.android.model.SummaryReasoningLevel.OFF)
+
+    override fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
+        reasoning: app.daiyu.android.model.SummaryReasoningLevel): ModelSession {
         deadline.check()
         // Do not let callers replay protocol/tool history or use the summary adapter for images.
         require(history.isNotEmpty() && history.all { message ->
@@ -145,7 +150,7 @@ internal class ProviderSummaryModelPort(
             val connection = connect(url)
             try { deadline.check(); connection }
             catch (failure: Exception) { runCatching { connection.disconnect() }; throw failure }
-        }, oauthHeaders = oauthHeaders)
+        }, oauthHeaders = oauthHeaders, reasoning = reasoning)
         deadline.check()
         val session = app.daiyu.android.model.usage.UsageRecorder.wrap(provider, configuration.provider,
             usagePort?.conversationId ?: frozen.first().conversationId.value).open(frozen, emptyList<ToolDefinition>())

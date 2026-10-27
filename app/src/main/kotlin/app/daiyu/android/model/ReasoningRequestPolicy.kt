@@ -17,13 +17,13 @@ internal object ReasoningRequestPolicy {
         (body.opt("model") as? String)?.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException("model 必须为非空字符串")
 
-    fun freeze(provider: ProviderSnapshot, requested: ReasoningEffort): ProviderSnapshot {
+    fun freeze(provider: ProviderSnapshot, requested: ReasoningEffort, summary: Boolean = false): ProviderSnapshot {
         val options = provider.requestOptions
         val body = if (options.customBody.isEmpty()) JSONObject() else MessagesRequest.jsonObject(options.customBody)
         val model = requestModel(provider.model, body)
-        val effort = if (requested == ReasoningEffort.DEFAULT) requested
+        val effort = if (summary || requested == ReasoningEffort.DEFAULT) requested
             else ReasoningEffort.textPreference(requested, model = model)
-        require(provider.reasoningOverride != false || effort == ReasoningEffort.DEFAULT || effort == ReasoningEffort.OFF) {
+        require(summary || provider.reasoningOverride != false || effort == ReasoningEffort.DEFAULT || effort == ReasoningEffort.OFF) {
             "当前模型已声明不支持思考；请选择关闭"
         }
         if (effort != ReasoningEffort.DEFAULT) {
@@ -31,7 +31,7 @@ internal object ReasoningRequestPolicy {
             when (provider.protocol) {
                 ProviderProtocol.RESPONSES -> body.put("reasoning", JSONObject()
                     .put("effort", if (effort == ReasoningEffort.OFF) "none" else effort.wireValue)
-                    .also { if (effort != ReasoningEffort.OFF && java.net.URI(provider.asModelSettings().endpoint).host != "ark.cn-beijing.volces.com") it.put("summary", "auto") })
+                    .also { if (!summary && effort != ReasoningEffort.OFF && java.net.URI(provider.asModelSettings().endpoint).host != "ark.cn-beijing.volces.com") it.put("summary", "auto") })
                 ProviderProtocol.MESSAGES -> {
                     when (effort) {
                         ReasoningEffort.OFF -> body.put("thinking", JSONObject().put("type", "disabled"))
@@ -46,12 +46,17 @@ internal object ReasoningRequestPolicy {
                         }
                     }
                 }
-                ProviderProtocol.CHAT_COMPLETIONS -> RikkaHubReasoning.chat(body, provider.asModelSettings().endpoint, model, effort)
+                ProviderProtocol.CHAT_COMPLETIONS -> {
+                    RikkaHubReasoning.chat(body, provider.asModelSettings().endpoint, model, effort)
+                    if (summary && effort == ReasoningEffort.OFF &&
+                        java.net.URI(provider.endpoint).host.equals("integrate.api.nvidia.com", true))
+                        body.put("reasoning_effort", "none")
+                }
                 ProviderProtocol.GEMINI -> RikkaHubReasoning.gemini(body, model, effort)
                 else -> throw IllegalArgumentException("当前协议尚未接通思考偏好")
             }
         }
-        validate(body, provider.protocol, provider.reasoningOverride, model)
+        validate(body, provider.protocol, if (summary) null else provider.reasoningOverride, if (summary) null else model)
         if (body.toString() == "{}" && options.customBody.isEmpty()) return provider
         return ProviderSnapshot.capture(provider.asModelSettings().copy(requestOptions = options.copy(customBody = body.toString())), provider.protocol, provider.imageInputSupported)
     }

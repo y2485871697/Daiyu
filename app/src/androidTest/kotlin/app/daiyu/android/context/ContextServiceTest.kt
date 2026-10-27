@@ -36,6 +36,29 @@ class ContextServiceTest : InstrumentationTestCase() {
         return owner
     }
     private fun reject(block: () -> Unit) { try { block(); fail("must reject") } catch (_: IllegalArgumentException) {} }
+    fun testCompressionFailureUsesTheRunningIdentityAndKeepsTheOriginalHistory() {
+        val owner = seed(6)
+        val original = service.displayHistory(owner)
+        val events = mutableListOf<app.daiyu.android.timeline.CompressionActivity>()
+        service.onCompression = { events += it }
+        var started = false
+        val failure = ModelRequestException(ModelFailure.RATE_LIMIT, ModelRequestDiagnostic(429))
+        val summarizer = ContextSummarizer { throw failure }
+        try {
+            service.compress(owner, CompressionPolicy(true, 10000, reserveTokens = 500, tokenTail = true), summarizer,
+                onStarted = { started = true })
+            fail("must reject")
+        } catch (caught: ModelRequestException) { assertSame(failure, caught) }
+        assertTrue(started)
+        assertEquals(2, events.size)
+        assertTrue(events[0].running)
+        assertEquals(events[0].id, events[1].id)
+        assertEquals(events[0].anchor, events[1].anchor)
+        assertEquals(failure.userMessage, events[1].failure)
+        assertFalse(events[1].running)
+        assertEquals(original, service.displayHistory(owner))
+    }
+
     fun testRuntimeSummaryCommitsWithTerminalAndSurvivesNextTurnAndReopen() {
         val owner = seed(6)
         val source = service.displayHistory(owner)

@@ -8,6 +8,46 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProductionCompactionPlacementTest {
+    @Test fun failureKeepsTheOriginalBoundaryAndPublishesOneTerminalActivity() {
+        val parent = Message(MessageId("assistant"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        val events = mutableListOf<CompressionActivity>()
+        val runtime = ProductionRunContext(CompressionPolicy(true, 4096, reserveTokens = 64, tokenTail = true),
+            parent, null, automatic = false, progress = { events += it })
+        runtime.beginCompaction(parent)
+        runtime.failed("连接网络失败")
+        runtime.finishedCompaction()
+        runtime.finishedCompaction()
+        val failed = events.single()
+        assertFalse(failed.running)
+        assertEquals("连接网络失败", failed.failure)
+        assertEquals(TimelineAnchor("c", "r", "assistant", 0), failed.anchor)
+    }
+
+    @Test fun startedCompressionFailureRetainsItsActivityIdAndDoesNotEmitAnotherTerminal() {
+        val parent = Message(MessageId("assistant"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        val history = (0..7).map { index -> parent.copy(id = MessageId("u$index"), role = Message.USER_ROLE,
+            status = RunStatus.COMPLETED, blocks = listOf(MessageBlock.Text("body", "original evidence ".repeat(120)))) }
+        val events = mutableListOf<CompressionActivity>()
+        val failure = ModelRequestException(ModelFailure.NETWORK)
+        val runtime = ProductionRunContext(CompressionPolicy(true, 4096, reserveTokens = 64, tokenTail = true), parent, {
+            BoundSummaryModel(SummaryModelBinding("provider", "summary"), SummaryModelTransport { _, _ -> object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { throw failure }
+                override fun cancel() {}
+            } }, 20000, 15000, { SummaryRequestDeadline(10000) })
+        }, automatic = false, progress = { events += it })
+        runtime.beginCompaction(parent)
+        val request = RequestCheckpoint("summary", "attempt", "owner", RequestOperation.NEXT)
+        assertSame(failure, assertThrows(ModelRequestException::class.java) {
+            runtime.compact(history, null, runtime.localTokens(history, emptyList()), request, {}, {}, { false })
+        })
+        val started = events.single()
+        runtime.failed(compressionFailureMessage(failure))
+        runtime.finishedCompaction()
+        assertEquals(listOf(started, started.copy(running = false, failure = failure.userMessage)), events)
+    }
+
     @Test fun candidateKeepsFrozenOriginalSegmentAndActivityUntilRunnerAcceptsIt() {
         val parent = Message(MessageId("assistant"), ConversationId("c"), RunId("r"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)

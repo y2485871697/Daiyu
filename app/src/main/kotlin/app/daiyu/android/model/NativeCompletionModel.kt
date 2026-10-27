@@ -16,6 +16,7 @@ class NativeCompletionModel internal constructor(
     private val instructions: String? = null,
     private val sessionContext: SessionGatewayContext? = null,
     private val imageInputSupported: Boolean? = null,
+    private val summaryRequest: Boolean = false,
 ) : ModelPort {
     internal constructor(snapshot: ProviderSnapshot, instructions: String? = null, sessionContext: SessionGatewayContext? = null) :
         this(snapshot.asModelSettings(), { it.openConnection() as HttpsURLConnection }, instructions, sessionContext,
@@ -87,7 +88,8 @@ class NativeCompletionModel internal constructor(
             if (settings.protocol == ProviderProtocol.CHAT_COMPLETIONS)
                 SessionGateway.applyResponses(request, endpoint, settings.requestOptions.sessionGateway, sessionContext)
             else require(!settings.requestOptions.sessionGateway.matches(settings.model, endpoint)) { "Gemini 不支持 OpenAI 会话网关请求字段" }
-            ReasoningRequestPolicy.validate(request, settings.protocol, settings.reasoningOverride, request.opt("model") as? String)
+            ReasoningRequestPolicy.validate(request, settings.protocol, if (summaryRequest) null else settings.reasoningOverride,
+                if (summaryRequest) null else request.opt("model") as? String)
             val headers = SessionGateway.headers(endpoint, sessionContext)
             val bytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null

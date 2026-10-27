@@ -59,6 +59,7 @@ internal interface ContextManagementLease {
     val cancellation: ContextPreparationCancellation
     fun checkCurrent()
     fun finish()
+    fun compressionStarted() = Unit
 }
 
 internal interface ContextManagementBackend {
@@ -193,7 +194,8 @@ internal class ContextManagementWorker(
             checkLease(lease)
             require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
             val archive = service.compress(expected.conversationId, policy, summarizer,
-                pendingMessages = emptyList(), cancelled = { lease.cancellation.isCancelled })
+                pendingMessages = emptyList(), cancelled = { lease.cancellation.isCancelled },
+                onStarted = lease::compressionStarted)
             // No post-publication history check or second request. Usage close remains in finally;
             // a close failure is an accounting error, never permission to repeat paid work.
             success = true

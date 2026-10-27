@@ -95,6 +95,21 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         ui.onNodeWithTag("timeline-close").performClick()
         ui.onNodeWithTag("timeline-details").assertDoesNotExist()
     }
+    fun testCompressionFailureUsesFailureDetailsNotTheUnrelatedSummary() {
+        val error = "服务不支持该参数取值（HTTP 400），涉及字段：reasoning"
+        val entry = ChatTimelineEntry.Compression("failed", anchor, 1L, "not the error", null,
+            0, null, null, failure = error)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            ChatTimelineDivider(entry)
+        } } }
+        ui.onNodeWithText("主代理 · 压缩失败").assertIsDisplayed().performClick()
+        ui.onNodeWithText("错误详情").assertIsDisplayed()
+        ui.onNodeWithText(error).assertIsDisplayed()
+        ui.onNodeWithText("not the error").assertDoesNotExist()
+        ui.onNodeWithTag("timeline-copy").performClick()
+        ui.onNodeWithContentDescription("已复制").assertExists()
+    }
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testDetailsSurfaceTouchesNeverReachTheOutsideScrim() {
         var dismissals = 0

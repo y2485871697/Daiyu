@@ -104,7 +104,7 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
     }
     if (showDetails && entry !is ChatTimelineEntry.ContextLimit) {
         val summary = when (entry) {
-            is ChatTimelineEntry.Compression -> entry.summary
+            is ChatTimelineEntry.Compression -> entry.failure ?: entry.summary
             is ChatTimelineEntry.ContextLimit -> ""
             is ChatTimelineEntry.Reconnect -> {
                 val reason = app.daiyu.android.domain.ModelFailure.entries.firstOrNull { it.name == entry.reason }?.userMessage

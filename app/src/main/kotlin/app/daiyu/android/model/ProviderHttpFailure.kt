@@ -76,8 +76,17 @@ internal object ProviderHttpFailure {
         return ModelRequestException(failure, detail)
     }
 
-    fun event(error: JSONObject?): ModelRequestException =
-        ModelRequestException(ModelFailure.REQUEST, diagnostic(error, null))
+    fun event(error: JSONObject?): ModelRequestException {
+        val kinds = setOf(error?.opt("type") as? String, error?.opt("code") as? String)
+        val failure = when {
+            kinds.any { it in setOf("authentication_error", "invalid_api_key") } -> ModelFailure.AUTHENTICATION
+            kinds.any { it in setOf("permission_error", "permission_denied") } -> ModelFailure.PERMISSION
+            kinds.any { it in setOf("rate_limit_error", "rate_limit_exceeded", "insufficient_quota") } -> ModelFailure.RATE_LIMIT
+            kinds.any { it in setOf("api_error", "server_error", "overloaded_error") } -> ModelFailure.SERVER
+            else -> ModelFailure.REQUEST
+        }
+        return ModelRequestException(failure, if (failure == ModelFailure.REQUEST) diagnostic(error, null) else null)
+    }
 
     private fun diagnostic(error: JSONObject?, status: Int?): ModelRequestDiagnostic {
         val rejection = when (error?.opt("code") as? String) {
@@ -94,7 +103,19 @@ internal object ProviderHttpFailure {
             raw in setOf("reasoning.effort", "reasoning.summary") -> RequestField.REASONING
             else -> null
         }
-        return ModelRequestDiagnostic(status, rejection, field)
+        val effortField = raw in setOf("reasoning", "reasoning.effort", "reasoning_effort", "thinking",
+            "thinking.type", "output_config.effort", "enable_thinking", "thinking_mode")
+        val message = (error?.opt("message") as? String).orEmpty().take(MAX_ERROR_BYTES).lowercase()
+        val invalidThinkingValue = error?.isNull("code") == true && error.opt("type") == "invalid_request_error" ||
+            error?.opt("code") in setOf("invalid_request_error", "invalid_value", "invalid_parameter_value")
+        val valueRejected = rejection == RequestRejection.UNSPECIFIED && invalidThinkingValue &&
+            (effortField || raw == null && listOf("reasoning.effort", "reasoning_effort", "thinking").any(message::contains)) &&
+            listOf("not supported", "unsupported", "supported values", "must be", "cannot be disabled", "only supports").any(message::contains) &&
+            listOf("none", "disabled", "unsupported value", "invalid value", "supported values", "only supports", "must be enabled").any(message::contains)
+        val reasoningRejected = effortField && rejection == RequestRejection.UNSUPPORTED_VALUE || valueRejected
+        return ModelRequestDiagnostic(status,
+            if (valueRejected && rejection == RequestRejection.UNSPECIFIED) RequestRejection.UNSUPPORTED_VALUE else rejection,
+            if (reasoningRejected) RequestField.REASONING else field, reasoningRejected)
     }
 
     private fun checkCancelled(cancelled: () -> Boolean) {

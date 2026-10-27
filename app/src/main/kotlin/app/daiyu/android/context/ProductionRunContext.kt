@@ -31,7 +31,7 @@ internal class ProductionRunContext(
         this.boundary = app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex)
     }
     override fun finishedCompaction() {
-        lastActivity?.let { progress(it.copy(running = false)) }
+        lastActivity?.takeIf { it.failure == null }?.let { progress(it.copy(running = false)) }
         lastActivity = null
     }
     override fun cancel() { cancellation?.cancel() }
@@ -54,9 +54,11 @@ internal class ProductionRunContext(
     }
 
     override fun failed(reason: String) {
-        progress(lastActivity?.copy(running = false, failure = reason) ?: app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
+        val failed = lastActivity?.copy(running = false, failure = reason) ?: app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
             parent.conversationId.value, 0, null, running = false, agentLabel = agentLabel,
-            runId = parent.runId.value, taskId = taskId, failure = reason, anchor = boundary))
+            runId = parent.runId.value, taskId = taskId, failure = reason, anchor = boundary)
+        lastActivity = failed
+        progress(failed)
     }
 
     override fun compactRequests(history: List<Message>, billedTokens: Long?, localTokens: Long,

@@ -37,8 +37,28 @@ internal object SummaryProviderFactory {
         return body
     }
 
+    fun reasoningLevels(snapshot: ProviderSnapshot, maxOutputTokens: Int): List<SummaryReasoningLevel> {
+        val bodies = mutableSetOf<String>()
+        return SummaryReasoningLevel.entries.filter { level ->
+            val body = validatedCustomBody(snapshot)
+            if (snapshot.oauth == null) body.put(if (snapshot.protocol == ProviderProtocol.RESPONSES)
+                "max_output_tokens" else "max_tokens", maxOutputTokens)
+            try {
+                val provider = ProviderSnapshot.capture(snapshot.asModelSettings().copy(
+                    requestOptions = snapshot.requestOptions.copy(customBody = body.toString())))
+                val frozen = ReasoningRequestPolicy.freeze(provider,
+                    app.daiyu.android.delegation.ReasoningEffort.valueOf(level.name), summary = true)
+                bodies.add(frozen.requestOptions.customBody)
+            } catch (invalid: IllegalArgumentException) {
+                if (level == SummaryReasoningLevel.OFF) throw invalid
+                false
+            }
+        }
+    }
+
     fun create(snapshot: ProviderSnapshot, maxOutputTokens: Int, instructions: String,
         oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
+        reasoning: SummaryReasoningLevel = SummaryReasoningLevel.OFF,
         connect: (URL) -> HttpsURLConnection,
     ): ModelPort {
         require(maxOutputTokens > 0 && instructions.isNotBlank())
@@ -47,13 +67,15 @@ internal object SummaryProviderFactory {
         // Codex rejects the wire cap; its summary adapter enforces local output and deadline limits.
         if (snapshot.oauth == null) body.put(if (snapshot.protocol == ProviderProtocol.RESPONSES) "max_output_tokens" else "max_tokens",
             maxOutputTokens)
-        val settings = snapshot.asModelSettings().copy(batteryEnabled = false, deviceStatusEnabled = false,
+        val base = snapshot.asModelSettings().copy(batteryEnabled = false, deviceStatusEnabled = false,
             requestOptions = options.copy(customBody = body.toString(), openAiWebSearchEnabled = false))
+        val settings = ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(base),
+            app.daiyu.android.delegation.ReasoningEffort.valueOf(reasoning.name), summary = true).asModelSettings()
         settings.validate()
         return when (snapshot.protocol) {
-            ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, instructions, oauthHeaders = oauthHeaders)
-            ProviderProtocol.MESSAGES -> MessagesModel(settings, maxOutputTokens, connect, null, instructions)
-            ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionModel(settings, connect, instructions, null)
+            ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, instructions, oauthHeaders = oauthHeaders, summaryRequest = true)
+            ProviderProtocol.MESSAGES -> MessagesModel(settings, maxOutputTokens, connect, null, instructions, summaryRequest = true)
+            ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionModel(settings, connect, instructions, null, summaryRequest = true)
             ProviderProtocol.GEMINI -> throw IllegalArgumentException("摘要模型尚不支持 ${snapshot.protocol.wireName}")
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
         }

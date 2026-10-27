@@ -18,6 +18,7 @@ class MessagesModel internal constructor(
     private val imageInputSupported: Boolean?,
     private val assistantInstructions: String? = null,
     private val sessionContext: SessionGatewayContext? = null,
+    private val summaryRequest: Boolean = false,
 ) : ModelPort {
     internal constructor(settings: ModelSettings, maxTokens: Int, connect: (URL) -> HttpsURLConnection) :
         this(settings, maxTokens, connect, null)
@@ -32,9 +33,9 @@ class MessagesModel internal constructor(
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession =
         open(history, MessagesRequest.definitions(tools))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null, assistantInstructions, sessionContext)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null, assistantInstructions, sessionContext, summaryRequest)
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images, assistantInstructions, sessionContext)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images, assistantInstructions, sessionContext, summaryRequest)
 
     private class Session(
         private val settings: ModelSettings,
@@ -46,6 +47,7 @@ class MessagesModel internal constructor(
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
         private val sessionContext: SessionGatewayContext?,
+        private val summaryRequest: Boolean,
     ) : RequestRetryModelSession {
         private val endpoint = MessagesRequest.endpoint(settings)
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
@@ -96,7 +98,7 @@ class MessagesModel internal constructor(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
                 assistantInstructions,
             )
-            ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, settings.reasoningOverride)
+            ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, if (summaryRequest) null else settings.reasoningOverride)
             settings.requestOptions.sessionGateway.requireExecutable()
             SessionGateway.applyAnthropic(request, sessionContext)
             val sessionHeaders = SessionGateway.headers(endpoint, sessionContext)

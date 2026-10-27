@@ -542,7 +542,7 @@ class ProviderSummaryModelTest {
         assertFalse(body.has("max_output_tokens")); assertFalse(body.getBoolean("store"))
         assertFalse(body.has("tools")); assertFalse(body.has("tool_choice"))
         assertTrue(body.getString("instructions").contains("只生成历史摘要"))
-        assertEquals("medium", body.getJSONObject("reasoning").getString("effort"))
+        assertEquals("none", body.getJSONObject("reasoning").getString("effort"))
         assertEquals("", config.provider.apiKey)
         assertTrue(config.provider.batteryEnabled && config.provider.deviceStatusEnabled)
         assertTrue(wire.disconnected)
@@ -627,6 +627,213 @@ class ProviderSummaryModelTest {
         assertTrue(wire.disconnected); assertEquals(1, wire.posts)
     }
 
+    private fun rejection(param: String = "reasoning.effort", code: String = "unsupported_value") =
+        JSONObject().put("error", JSONObject().put("code", code).put("param", param)
+            .put("message", "synthetic secret must not escape")).toString()
+
+    private fun negotiated(config: SummaryProviderConfiguration, wires: List<Connection>,
+        onNext: () -> Unit = {}): Pair<() -> String, () -> Int> {
+        var connections = 0
+        var admissions = 0
+        val deadline = ManualDeadline()
+        fun bind(): BoundSummaryModel {
+            val port = BoundSummaryUsagePort("owner", beforeClaim = { admissions++ }, record = {})
+            return ProviderSummaryModelResolver({ config }, {
+                if (connections > 0) assertTrue(wires[connections - 1].disconnected)
+                wires[connections++]
+            }, deadline, port).resolve(binding)!!
+        }
+        val first = bind()
+        return ({ ModelContextSummarizer(first, ContextPreparationCancellation(), nextModel = {
+            onNext(); bind()
+        }).summarize(input()) }) to { admissions }
+    }
+
+    @Test fun allSummaryProtocolsExplicitlyDisableThinkingWithoutChangingTheOriginalProfile() {
+        for (protocol in protocols + ProviderProtocol.CHAT_COMPLETIONS) {
+            val config = configuration(protocol)
+            val wire = Connection(if (protocol == ProviderProtocol.CHAT_COMPLETIONS) chatSummary() else success(protocol))
+            assertEquals(checkpointText(), summarize(config, wire))
+            val body = wire.json()
+            when (protocol) {
+                ProviderProtocol.RESPONSES -> assertEquals("none", body.getJSONObject("reasoning").getString("effort"))
+                ProviderProtocol.MESSAGES -> assertEquals("disabled", body.getJSONObject("thinking").getString("type"))
+                else -> assertEquals("none", body.getString("reasoning_effort"))
+            }
+            assertEquals("", config.provider.requestOptions.customBody)
+        }
+    }
+
+    @Test fun requiredThinkingModelStartsOffThenEscalatesOneLevelWithFreshAdmission() {
+        val base = configuration(ProviderProtocol.RESPONSES)
+        val config = base.copy(apiModel = "gpt-6.1-sol", provider = ProviderSnapshot.capture(
+            base.provider.asModelSettings().copy(model = "gpt-6.1-sol")))
+        val wires = listOf(Connection(rejection(), 400), Connection(rejection(), 422), Connection(success(ProviderProtocol.RESPONSES)))
+        val (call, admissions) = negotiated(config, wires)
+        assertEquals(checkpointText(), call())
+        assertEquals(3, admissions())
+        assertEquals(listOf("none", "minimal", "low"), wires.map { it.json().getJSONObject("reasoning").getString("effort") })
+        assertEquals(1, wires.map { it.json().getJSONArray("input").toString() }.distinct().size)
+        wires.forEach { assertEquals(1, it.posts); assertFalse(it.json().has("tools")); assertTrue(it.disconnected) }
+        assertEquals("", config.provider.requestOptions.customBody)
+    }
+
+    @Test fun thinkingLevelExhaustionStopsAfterSevenDistinctRequests() {
+        val wires = (1..7).map { Connection(rejection(), 400) }
+        val (call, admissions) = negotiated(configuration(ProviderProtocol.RESPONSES), wires)
+        val error = assertThrows(ModelRequestException::class.java) { call() }
+        assertEquals(7, admissions())
+        assertEquals(ModelFailure.REQUEST, error.failure)
+        assertEquals(listOf("none", "minimal", "low", "medium", "high", "xhigh", "max"),
+            wires.map { it.json().getJSONObject("reasoning").getString("effort") })
+        assertTrue(error.userMessage.contains("400"))
+        assertFalse(error.userMessage.contains("synthetic secret"))
+    }
+
+    @Test fun unrelatedHttpErrorsUnsupportedParametersAndSummaryFieldsNeverEscalate() {
+        val cases = listOf(401 to rejection(), 403 to rejection(), 429 to rejection(), 500 to rejection(),
+            400 to rejection("temperature"), 400 to rejection("reasoning.summary"),
+            400 to rejection(code = "unsupported_parameter"),
+            400 to rejection("thinking.budget_tokens"),
+            400 to """{"error":{"type":"invalid_request_error","code":"invalid_api_key","param":"thinking","message":"thinking none is not supported"}}""",
+            400 to """{"error":{"type":"invalid_request_error","code":"unsupported_parameter","param":"thinking","message":"Unsupported parameter: thinking. This endpoint only supports disabled thinking."}}""",
+            400 to "<html>unavailable</html>")
+        for ((status, body) in cases) {
+            val wire = Connection(body, status)
+            val (call, admissions) = negotiated(configuration(ProviderProtocol.RESPONSES), listOf(wire)) {
+                fail("non-thinking failure cannot obtain another admission: $status $body")
+            }
+            val error = assertThrows(ModelRequestException::class.java) { call() }
+            assertEquals(status, error.diagnostic?.httpStatus)
+            assertEquals(1, admissions()); assertEquals(1, wire.posts)
+        }
+    }
+
+    @Test fun missingOrNullThinkingErrorCodeNegotiatesButUnknownAndAuthCodesDoNot() {
+        for (protocol in protocols + ProviderProtocol.CHAT_COMPLETIONS) {
+            val param = if (protocol == ProviderProtocol.MESSAGES) "thinking.type" else "reasoning.effort"
+            for (code in listOf<Any?>(null, JSONObject.NULL, "unknown_error", "invalid_api_key")) {
+                val error = JSONObject().put("type", "invalid_request_error").put("param", param)
+                    .put("message", "Unsupported value: none is not supported; supported values are low, medium, high")
+                if (code != null) error.put("code", code)
+                val response = if (protocol == ProviderProtocol.CHAT_COMPLETIONS) chatSummary() else success(protocol)
+                val wires = listOf(Connection(JSONObject().put("error", error).toString(), 400), Connection(response))
+                val (call, admissions) = negotiated(configuration(protocol), wires)
+                if (code == null || code === JSONObject.NULL) {
+                    assertEquals(checkpointText(), call()); assertEquals(2, admissions())
+                } else {
+                    assertThrows(ModelRequestException::class.java) { call() }; assertEquals(1, admissions())
+                    assertEquals(0, wires[1].posts)
+                }
+            }
+        }
+    }
+
+    @Test fun streamingNullCodeThinkingRejectionNegotiatesAcrossProtocols() {
+        for (protocol in protocols + ProviderProtocol.CHAT_COMPLETIONS) {
+            val error = JSONObject().put("type", "invalid_request_error").put("code", JSONObject.NULL)
+                .put("param", "reasoning.effort").put("message", "Unsupported value: none is not supported; supported values are low, medium, high")
+            val response = if (protocol == ProviderProtocol.CHAT_COMPLETIONS) chatSummary() else success(protocol)
+            val wires = listOf(Connection(frames(JSONObject().put("type", "error").put("error", error))), Connection(response))
+            val (call, admissions) = negotiated(configuration(protocol), wires)
+            assertEquals(checkpointText(), call()); assertEquals(2, admissions())
+        }
+    }
+
+    @Test fun explicitStreamingAuthRateLimitAndServerErrorsNeverNegotiateEvenWithConflictingEffortCode() {
+        for (protocol in protocols + ProviderProtocol.CHAT_COMPLETIONS) {
+            for ((kind, expected) in listOf("authentication_error" to ModelFailure.AUTHENTICATION,
+                "permission_error" to ModelFailure.PERMISSION, "rate_limit_error" to ModelFailure.RATE_LIMIT,
+                "api_error" to ModelFailure.SERVER)) {
+                for (code in listOf<String?>(null, "unsupported_value")) {
+                    val error = JSONObject().put("type", kind).put("param", "reasoning.effort")
+                        .put("message", "thinking none is not supported")
+                    if (code != null) error.put("code", code)
+                    val wire = Connection(frames(JSONObject().put("type", "error").put("error", error)))
+                    val (call, admissions) = negotiated(configuration(protocol), listOf(wire)) {
+                        fail("non-request streaming error cannot obtain another admission")
+                    }
+                    val failure = assertThrows(ModelRequestException::class.java) { call() }
+                    assertEquals(expected, failure.failure); assertEquals(1, admissions()); assertEquals(1, wire.posts)
+                }
+            }
+        }
+    }
+
+    @Test fun networkFailureAfterThinkingRejectionStopsAtThatAttempt() {
+        val wires = listOf(Connection(rejection(), 400), Connection("", readFailure = IOException("synthetic network failure")))
+        val (call, admissions) = negotiated(configuration(ProviderProtocol.RESPONSES), wires)
+        val error = assertThrows(ModelRequestException::class.java) { call() }
+        assertEquals(ModelFailure.NETWORK, error.failure)
+        assertEquals(2, admissions())
+        assertEquals(listOf("none", "minimal"), wires.map { it.json().getJSONObject("reasoning").getString("effort") })
+    }
+
+    @Test fun nvidiaSummaryStartsAtNoneWhileConversationMappingStaysUnchanged() {
+        val base = configuration(ProviderProtocol.CHAT_COMPLETIONS)
+        val config = base.copy(provider = ProviderSnapshot.capture(base.provider.asModelSettings()
+            .copy(endpoint = "https://integrate.api.nvidia.com/v1")))
+        val wires = listOf(Connection(rejection("reasoning_effort"), 400), Connection(chatSummary()))
+        val (call, admissions) = negotiated(config, wires)
+        assertEquals(checkpointText(), call()); assertEquals(2, admissions())
+        assertEquals(listOf("none", "minimal"), wires.map { it.json().getString("reasoning_effort") })
+        val chat = ReasoningRequestPolicy.freeze(config.provider, app.daiyu.android.delegation.ReasoningEffort.OFF)
+        assertEquals("low", JSONObject(chat.requestOptions.customBody).getString("reasoning_effort"))
+    }
+
+    @Test fun booleanThinkingBackendDoesNotPostDuplicateEnabledLevels() {
+        val base = configuration(ProviderProtocol.CHAT_COMPLETIONS)
+        val config = base.copy(provider = ProviderSnapshot.capture(base.provider.asModelSettings().copy(endpoint = "https://api.moonshot.cn/v1")))
+        val wires = listOf(Connection(rejection("thinking.type"), 400), Connection(rejection("thinking.type"), 400))
+        val (call, admissions) = negotiated(config, wires)
+        assertThrows(ModelRequestException::class.java) { call() }
+        assertEquals(2, admissions())
+        assertEquals(listOf("disabled", "enabled"), wires.map { it.json().getJSONObject("thinking").getString("type") })
+    }
+
+    @Test fun messagesStreamingDisabledRejectionNegotiatesOnlyTheSummary() {
+        val error = JSONObject().put("type", "error").put("error", JSONObject()
+            .put("type", "invalid_request_error").put("message", "thinking cannot be disabled; only supports adaptive"))
+        val wires = listOf(Connection(frames(error)), Connection(success(ProviderProtocol.MESSAGES)))
+        val (call, admissions) = negotiated(configuration(ProviderProtocol.MESSAGES), wires)
+        assertEquals(checkpointText(), call()); assertEquals(2, admissions())
+        assertEquals("disabled", wires[0].json().getJSONObject("thinking").getString("type"))
+        assertEquals("adaptive", wires[1].json().getJSONObject("thinking").getString("type"))
+        assertEquals("low", wires[1].json().getJSONObject("output_config").getString("effort"))
+        assertEquals(256, wires[1].json().getInt("max_tokens"))
+    }
+
+    @Test fun cancellationBetweenAttemptsDoesNotOpenTheNextProviderRequest() {
+        val wire = Connection(rejection(), 400)
+        val cancellation = ContextPreparationCancellation()
+        var opens = 0
+        val config = configuration(ProviderProtocol.RESPONSES)
+        val resolver = ProviderSummaryModelResolver({ config }, { opens++; wire }, ManualDeadline())
+        val bound = resolver.resolve(binding)!!
+        assertThrows(CancellationException::class.java) {
+            ModelContextSummarizer(bound, cancellation, nextModel = {
+                cancellation.cancel(); resolver.resolve(binding)!!
+            }).summarize(input())
+        }
+        assertEquals(1, opens); assertEquals(1, wire.posts)
+    }
+
+    @Test fun reasoningEscalationSharesTheOriginalAbsoluteDeadline() {
+        val config = configuration(ProviderProtocol.RESPONSES)
+        val wire = Connection(rejection(), 400)
+        var opens = 0
+        val clock = ManualDeadline()
+        val resolver = ProviderSummaryModelResolver({ config }, { opens++; wire }, clock)
+        val bound = resolver.resolve(binding)!!
+        val error = assertThrows(ModelRequestException::class.java) {
+            ModelContextSummarizer(bound, ContextPreparationCancellation(), nextModel = {
+                clock.advanceMillis(config.deadlineMillis); resolver.resolve(binding)!!
+            }).summarize(input())
+        }
+        assertEquals(ModelFailure.TIMEOUT, error.failure)
+        assertEquals(1, opens); assertEquals(1, wire.posts)
+    }
+
     private class ManualDeadline : SummaryDeadlineScheduler {
         @Volatile var nowNanos = 0L
         override fun nanoTime(): Long = nowNanos
@@ -660,6 +867,7 @@ class ProviderSummaryModelTest {
         override fun getOutputStream(): ByteArrayOutputStream { posts++; return sent }
         override fun getResponseCode() = status
         override fun getContentType() = mime
+        override fun getErrorStream(): InputStream? = if (status >= 300) response else null
         override fun getInputStream(): InputStream {
             onRead()
             if (block) {

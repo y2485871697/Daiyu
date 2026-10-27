@@ -138,6 +138,7 @@ data class ModelRequestDiagnostic(
     val httpStatus: Int? = null,
     val rejection: RequestRejection = RequestRejection.UNSPECIFIED,
     val field: RequestField? = null,
+    val reasoningLevelRejected: Boolean = false,
 ) {
     init { require(httpStatus == null || httpStatus in 300..599) }
 }

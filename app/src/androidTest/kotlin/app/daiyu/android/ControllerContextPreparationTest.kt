@@ -82,6 +82,39 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         assertNull(controller.problem)
         return f
     }
+    fun testCompressionFailureIsVisibleBeforeQueuedDatabaseWriteAndDeduplicatesAfterCommit() {
+        val f = fresh { CatalogFixturePort { session() } }
+        val owner = seed(f)
+        val history = f.db.messages(owner.id, limit = 200).map { it.second }
+        val anchor = app.daiyu.android.timeline.TimelineAnchor.at(history, history.lastIndex)
+        val lane = ChatController::class.java.getDeclaredField("timelineExecutor").apply { isAccessible = true }
+            .get(f.controller) as java.util.concurrent.ExecutorService
+        val blocked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        lane.execute { blocked.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
+        await(blocked)
+        val failure = app.daiyu.android.timeline.CompressionActivity("failed-${UUID.randomUUID()}", owner.id.value,
+            4, null, running = false, failure = "模型网络连接失败", anchor = anchor)
+        val post = ChatController::class.java.getDeclaredMethod("postCompressionActivity",
+            app.daiyu.android.timeline.CompressionActivity::class.java).apply { isAccessible = true }
+        try {
+            main { post.invoke(f.controller, failure) }
+            assertTrue(app.daiyu.android.timeline.ChatTimelineStore.read(f.db.readableDatabase, owner.id.value).isEmpty())
+            val visible = f.controller.timelineHistory(owner.id).filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Compression>()
+            assertEquals(1, visible.size)
+            assertEquals(failure.id, visible.single().id)
+            assertEquals(anchor, visible.single().anchor)
+            assertEquals(failure.failure, visible.single().failure)
+            assertTrue(f.controller.compressionActivities.isEmpty())
+        } finally { release.countDown() }
+        val committed = CountDownLatch(1)
+        lane.execute { committed.countDown() }
+        await(committed)
+        val persisted = app.daiyu.android.timeline.ChatTimelineStore.read(f.db.readableDatabase, owner.id.value)
+        assertEquals(1, persisted.count { it.id == failure.id })
+        assertEquals(1, f.controller.timelineHistory(owner.id).count { it.id == failure.id })
+    }
+
     fun testSummaryCleanupFailureFencesNewSendsWithoutEscapingCleanupCaller() {
         val opens = AtomicInteger()
         val f = fresh { CatalogFixturePort { opens.incrementAndGet(); session() } }

@@ -239,6 +239,7 @@ class ChatController internal constructor(private val application:Application,
     private var contextManagementReaders = 0
     private val reconnectTimeline = linkedMapOf<String, app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
     private val reconnectObservedAt = hashMapOf<String, Long>()
+    private val compressionFailureTimeline = linkedMapOf<String, app.daiyu.android.timeline.ChatTimelineEntry.Compression>()
     private val timelineExecutor = Executors.newSingleThreadExecutor()
     private var timelineWriters = 0
     internal val timelineRevision = java.util.concurrent.atomic.AtomicLong()
@@ -255,9 +256,13 @@ class ChatController internal constructor(private val application:Application,
                     val logical = MessageHistory.expand(listOf(it))
                     app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex)
                 }
-                if (anchor != null) persistReconnect(app.daiyu.android.timeline.ChatTimelineEntry.Compression(
-                    value.id, anchor, System.currentTimeMillis(), failure,
-                    value.model, value.messages, null, null, value.agentLabel, failure))
+                if (anchor != null) {
+                    val entry = app.daiyu.android.timeline.ChatTimelineEntry.Compression(
+                        value.id, anchor, System.currentTimeMillis(), failure,
+                        value.model, value.messages, null, null, value.agentLabel, failure)
+                    compressionFailureTimeline[entry.id] = entry
+                    persistReconnect(entry)
+                }
             }
             timelineRevision.incrementAndGet()
         }
@@ -271,7 +276,7 @@ class ChatController internal constructor(private val application:Application,
                 val delta = reconnectObservedAt[entry.id]?.let { (now - it).coerceAtLeast(0L) } ?: 0L
                 if (entry.status == "running") entry.copy(elapsedMs = entry.elapsedMs + delta.coerceAtMost(Long.MAX_VALUE - entry.elapsedMs))
                 else entry
-            }
+            } + compressionFailureTimeline.values.filter { it.anchor.conversationId == id.value }
         }
         val liveIds = live.map { it.id }.toSet()
         return (contextService.timeline(id).filterNot { it.id in liveIds }.map { entry ->
@@ -526,6 +531,7 @@ class ChatController internal constructor(private val application:Application,
         }
         if (!idleAvailable() || hasLiveChildTasks(owner.conversationId)) return false
         val token = reservePreparation()
+        var compressionStarted = false
         val lease = object : ContextManagementLease {
             override val owner = owner
             override val cancellation = token.cancellation
@@ -533,6 +539,7 @@ class ChatController internal constructor(private val application:Application,
                 if (preparationCancelled(token)) throw java.util.concurrent.CancellationException("compression_cancelled")
             }
             override fun finish() = Unit
+            override fun compressionStarted() { compressionStarted = true }
         }
         postCompressionActivity(waiting)
         try { executor.execute {
@@ -544,8 +551,10 @@ class ChatController internal constructor(private val application:Application,
                 postCompressionActivity(waiting.copy(running = false))
                 backend.compress(lease, selected)
             } catch (failure: Exception) {
-                postCompressionActivity(waiting.copy(running = false,
-                    failure = failure.message ?: "压缩失败，原始上下文保留"))
+                if (!compressionStarted && !token.cancellation.isCancelled &&
+                    failure !is java.util.concurrent.CancellationException && failure !is InterruptedException)
+                    postCompressionActivity(waiting.copy(running = false,
+                        failure = app.daiyu.android.context.compressionFailureMessage(failure)))
             } finally {
                 postCompressionActivity(waiting.copy(running = false))
                 finishPreparation(token)

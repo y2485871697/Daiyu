@@ -156,7 +156,8 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         return PreparedContext(original, estimateTokens(original), null)
     }
     fun compress(id: ConversationId, policy: CompressionPolicy, summarizer: ContextSummarizer,
-        pendingMessages: List<Message> = emptyList(), cancelled: () -> Boolean = { false }): String? {
+        pendingMessages: List<Message> = emptyList(), cancelled: () -> Boolean = { false },
+        onStarted: () -> Unit = {}): String? {
         checkCancellation(cancelled)
         val pending = pendingMessages.toList()
         require(pending.all { it.conversationId == id }) { "待发送消息不属于当前会话" }
@@ -198,7 +199,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             summaryInput.size, summarizer.displayIdentity,
             anchor = app.daiyu.android.timeline.TimelineAnchor.at(logicalHistory, logicalHistory.lastIndex))
         onCompression(activity)
+        var terminal = activity.copy(running = false)
         try {
+            onStarted()
             val summary = summarizer.summarize(CompressionInput(summaryInput, revision)).trim()
             checkCancellation(cancelled)
             val reduced = if (policy.tokenTail) TokenTailCompression.messageTokens(summaryMessage(id, "candidate", summary)) <
@@ -230,7 +233,11 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 checkCancellation(cancelled) // Throwing here rolls back both insert and deactivation.
             }
             return archive
-        } finally { onCompression(activity.copy(running = false)) }
+        } catch (failure: Exception) {
+            if (!cancelled() && failure !is java.util.concurrent.CancellationException && failure !is InterruptedException)
+                terminal = terminal.copy(failure = compressionFailureMessage(failure))
+            throw failure
+        } finally { onCompression(terminal) }
     }
     internal fun publishRunCompression(db: SQLiteDatabase, checkpoint: app.daiyu.android.domain.runtime.RunCheckpoint,
         model: app.daiyu.android.timeline.SummaryModelIdentity?) {

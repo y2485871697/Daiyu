@@ -67,7 +67,10 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
         self.assertIn('ReasoningEffort.textPreference(requested, model = model)', policy)
         self.assertIn('ReasoningEffort.textChoices(config.model)', (SRC / 'ui/components/subagent/SubAgentThinkingPreference.kt').read_text())
         for name in ('ResponsesModel.kt', 'NativeCompletionModel.kt'):
-            self.assertIn('settings.reasoningOverride, request.opt("model") as? String)', (SRC / 'model' / name).read_text())
+            code = (SRC / 'model' / name).read_text()
+            self.assertIn('summaryRequest: Boolean = false', code)
+            self.assertIn('if (summaryRequest) null else settings.reasoningOverride,', code)
+            self.assertIn('if (summaryRequest) null else request.opt("model") as? String)', code)
 
 if __name__ == '__main__':
     unittest.main()

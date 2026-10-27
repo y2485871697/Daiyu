@@ -14,6 +14,11 @@ class ChatTimelineCodecTest {
         val entry = compression()
         assertEquals(entry, ChatTimelineStore.decode(entry.id, entry.created, ChatTimelineStore.encode(entry)))
     }
+    @Test fun failedCompressionKeepsItsOriginalAnchorAndSafeDetailsAcrossRoundTrip() {
+        val entry = compression().copy(anchor = anchor.copy(segment = 2), messages = 0,
+            failure = "模型网络连接失败（HTTP 503）", summary = "not the failure details")
+        assertEquals(entry, ChatTimelineStore.decode(entry.id, entry.created, ChatTimelineStore.encode(entry)))
+    }
     @Test fun legacyUnknownModelAndUnknownTokenCountsStayUnknown() {
         val entry = compression().copy(model = null, beforeTokens = null, afterTokens = null)
         val decoded = ChatTimelineStore.decode(entry.id, entry.created, ChatTimelineStore.encode(entry))

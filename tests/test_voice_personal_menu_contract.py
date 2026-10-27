@@ -37,6 +37,29 @@ class VoicePersonalMenuContractTest(unittest.TestCase):
         self.assertNotIn("resources.", menu)
         self.assertNotIn("execute(", menu)
 
+    def test_voice_menus_only_opt_into_compact_shared_header(self):
+        menu = (SRC / "VoicePersonalMenus.kt").read_text()
+        self.assertIn('titleFontSize = 20.sp, compact = true', menu)
+        self.assertNotIn('height =', menu)
+        shell = (SRC / "ui/screens/chat/conversation/ChatSelectionSheet.kt").read_text()
+        for token in ('compact: Boolean = false',
+                      'min = if (compact) 0.dp else minOf(180.dp, available)',
+                      'padding(bottom = if (compact) 8.dp else 17.dp)',
+                      'padding(bottom = if (compact) 6.dp else 13.dp)',
+                      'heightIn(min = if (compact && !showCloseButton) 0.dp else 40.dp)',
+                      'Column(Modifier.fillMaxWidth().weight(1f, fill = height != null)',
+                      'if (showCloseButton) Box(Modifier.size(40.dp)',
+                      'PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled)'):
+            self.assertIn(token, shell)
+
+    def test_android_spacing_regression_measures_local_gap_not_the_scrim(self):
+        visual = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoicePersonalVisualActivityTest.kt').read_text()
+        for token in ('bounds.first().top - title.bottom', '8f * menuDensity',
+                      'sheet.bottom - bounds.last().bottom', '17f * menuDensity',
+                      'listOf(false, true)', 'listOf(1f, 1.3f)',
+                      'assertHeightIsAtLeast(56.dp)', 'testDisabledSyncAndBackOrOutsideNeverDispatchAnAction'):
+            self.assertIn(token, visual)
+
     def test_action_ids_icons_order_and_disabled_guard_are_kept(self):
         menu = (SRC / "VoicePersonalMenus.kt").read_text() if (SRC / "VoicePersonalMenus.kt").exists() else ""
         for token in ('"CREATE", "用录音制作声音", DaiyuIcons.Voice',

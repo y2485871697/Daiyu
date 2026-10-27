@@ -41,6 +41,7 @@ internal fun ChatSelectionSheet(
     subtitleFontSize: TextUnit = 12.sp,
     footer: @Composable RowScope.() -> Unit = {},
     dismissEnabled: Boolean = true,
+    compact: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
@@ -48,15 +49,16 @@ internal fun ChatSelectionSheet(
         val available = (maxHeight - if (height == null) 70.dp else 88.dp).coerceAtLeast(0.dp)
         val shape = RoundedCornerShape(25.dp)
         Column(Modifier.align(Alignment.BottomCenter).padding(10.dp).fillMaxWidth()
-            .then(if (height == null) Modifier.heightIn(min = minOf(180.dp, available), max = available)
+            .then(if (height == null) Modifier.heightIn(min = if (compact) 0.dp else minOf(180.dp, available), max = available)
                 else Modifier.height(minOf(height, available)))
             .testTag("chat-selection-sheet").clip(shape).previewGlassBlur(shape, 28f, 1.3f)
             .background(Brush.linearGradient(colors.sheet)).border(1.dp, colors.edge, shape)
             .pointerInput(Unit) { detectTapGestures(onTap = {}) }
             .padding(start = 15.dp, end = 15.dp, top = 11.dp, bottom = 15.dp)) {
-            Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
+            Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = if (compact) 8.dp else 17.dp)
                 .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))
-            Row(Modifier.fillMaxWidth().padding(bottom = 13.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.Top) {
+            Row(Modifier.fillMaxWidth().padding(bottom = if (compact) 6.dp else 13.dp)
+                .heightIn(min = if (compact && !showCloseButton) 0.dp else 40.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text(title, modifier = Modifier.fillMaxWidth(), color = colors.text, fontSize = titleFontSize, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
                     subtitle?.let { Text(it, color = colors.muted, fontSize = subtitleFontSize, lineHeight = 18.sp,

@@ -19,6 +19,7 @@ import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import java.util.concurrent.atomic.AtomicInteger
 
 class VoicePersonalVisualActivityTest : WiredActivityTestCase() {
+    private var menuDensity = 1f
     private fun mountMenu(settings: Boolean, dark: Boolean = false, fontScale: Float = 1f,
         disabledSync: Boolean = false, selected: MutableList<String>, dismissed: AtomicInteger) {
         val visit = Any()
@@ -26,6 +27,7 @@ class VoicePersonalVisualActivityTest : WiredActivityTestCase() {
             AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                 applyInterfaceScale = false) {
                 val density = LocalDensity.current
+                menuDensity = density.density
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                     key(visit) {
                         var open by remember { mutableStateOf(true) }
@@ -71,6 +73,12 @@ class VoicePersonalVisualActivityTest : WiredActivityTestCase() {
             }
             assertTrue("actions keep their original order", bounds[0].bottom <= bounds[1].top + 1f)
             val sheet = node("chat-selection-sheet").fetchSemanticsNode().boundsInRoot
+            val title = ui.onNodeWithText(if (settings) "声音设置" else "添加声音")
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val titleGap = bounds.first().top - title.bottom
+            assertTrue("title stays close to the first action", titleGap >= -1f && titleGap <= 8f * menuDensity + 1f)
+            val bottomGap = sheet.bottom - bounds.last().bottom
+            assertTrue("short menus do not reserve empty bottom space", bottomGap >= -1f && bottomGap <= 17f * menuDensity + 1f)
             val viewport = node("preview-dialog-viewport").fetchSemanticsNode().boundsInRoot
             assertTrue("two actions wrap rather than fill the viewport", sheet.height < viewport.height * .75f)
             ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)

@@ -1059,6 +1059,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val classified = (failure as? ModelRequestException)?.failure
                                 ?: if (failure is ModelDeliveryRejectedException && (active is CheckpointedResumableModelSession || active is RequestRetryModelSession))
                                     ModelFailure.NETWORK else null
+                            val reported = failure as? ModelRequestException
+                            // A paused attempt's cancellation is not a new provider error, even after fast resume.
+                            val controlInterruption = reported?.transportInterrupted == true ||
+                                reported?.diagnostic == null && attemptFence != pauseEpoch &&
+                                classified in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)
+                            if (reported != null && !controlInterruption)
+                                reconnectBudget?.updateReason(reported.failure, reported.diagnostic)
                             val factory = options.reconnect.budgetFactory.takeIf { active is CheckpointedResumableModelSession || active is RequestRetryModelSession }
                             val canResume = try { resumable?.canResume == true } catch (_: Exception) { false }
                             if ((factory == null && attempt >= options.reconnect.maxAttempts) ||
@@ -1067,9 +1074,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             segmentHistory.finishReasoning()
                             apply(current)
                             if (factory != null) {
-                                if (reconnectBudget == null) reconnectBudget = factory.create(round, checkNotNull(classified))
+                                if (reconnectBudget == null) reconnectBudget = factory.create(round, checkNotNull(classified), reported?.diagnostic)
                                 val budget = checkNotNull(reconnectBudget)
-                                budget.updateReason(checkNotNull(classified))
                                 syncReconnectPause()
                                 budget.check()
                                 if (pauseRequested) awaitPause()

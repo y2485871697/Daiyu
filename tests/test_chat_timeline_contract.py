@@ -71,6 +71,49 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('.padding(horizontal = 20.dp, vertical = 10.dp)', divider)
         self.assertIn('style = MiuixTheme.textStyles.footnote2, color = color', divider)
 
+    def test_reconnect_notice_is_run_owned_and_cleared_when_that_owner_is_fenced(self):
+        controller = source('ChatController.kt')
+        fence = controller.split('private fun fenceRun(', 1)[1].split('compressionActivitiesById.entries', 1)[0]
+        self.assertIn('if (problem == lifetime.reconnectNotice) problem = null', fence)
+        self.assertIn('lifetime.reconnectNotice = null', fence)
+        notice = controller.split('fun postReconnectNotice(', 1)[1].split('val observedModel', 1)[0]
+        self.assertIn('problem == original.reconnectNotice', notice)
+        self.assertIn('original.reconnectNotice = message', notice)
+        self.assertIn('!original.fenced', notice)
+
+    def test_reconnect_timer_only_runs_in_running_state_and_resume_reuses_the_same_segment(self):
+        divider = source('ui/screens/chat/conversation/ChatTimelineDivider.kt')
+        self.assertIn('LaunchedEffect(entry.id, status, supplied)', divider)
+        self.assertIn('elapsed = if (status == "running") maxOf(elapsed, supplied) else supplied', divider)
+        self.assertIn('if (status == "running")', divider)
+        self.assertIn('delay(1000)', divider)
+        self.assertIn('"running" -> "正在重连：${formatReconnectElapsed(elapsedMs)}"', divider)
+        self.assertIn('"succeeded" -> "已重连"', divider)
+        self.assertIn('"stopped" -> "已停止重连"', divider)
+        budget = source('model/reconnect/ModelErrorReconnect.kt')
+        self.assertIn('sendLocked("stopped")', budget)
+        self.assertIn('private val id = UUID.randomUUID().toString()', budget)
+        self.assertEqual(1, budget.count('UUID.randomUUID().toString()'))
+        callback = source('ChatController.kt').split('RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics', 1)[1].split('runtimeStore=checkNotNull', 1)[0]
+        self.assertIn('reconnectTransitionAllowed(previous.status, event.status)', callback)
+        self.assertIn('reconnectTransitionAllowed(prior.status, entry.status)', source('timeline/ChatTimelineStore.kt'))
+        self.assertIn('pausedDurationMs += (timing.nowMs() - pauseStart).coerceAtLeast(0)', budget)
+
+    def test_reconnect_details_use_live_actual_errors_without_lifecycle_text(self):
+        divider = source('ui/screens/chat/conversation/ChatTimelineDivider.kt')
+        body = divider.split('if (showDetails && entry !is ChatTimelineEntry.ContextLimit)', 1)[1]
+        self.assertIn('?: entry.reason', body)
+        self.assertNotIn('reconnectLabel(', body)
+        self.assertNotIn('累计耗时', body)
+        self.assertIn('TimelineDetailsSheet(summary', body)
+        controller = source('ChatController.kt')
+        self.assertIn('reconnectErrorDetails(event.reason, event.diagnostic)', controller)
+        runner = (ROOT / 'core-domain/src/main/kotlin/app/daiyu/android/domain/ChatRunner.kt').read_text()
+        self.assertIn('reconnectBudget?.updateReason(reported.failure, reported.diagnostic)', runner)
+        self.assertLess(runner.index('reconnectBudget?.updateReason(reported.failure, reported.diagnostic)'),
+                        runner.index('classified !in options.reconnect.failures'))
+        self.assertIn('attemptFence != pauseEpoch', runner)
+
     def test_backup_v7_validates_display_payload_and_authoritative_anchor(self):
         backup = source('backup/NeutralBackupService.kt')
         self.assertIn('columnsFor(8)', backup)

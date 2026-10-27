@@ -32,6 +32,25 @@ class ChatTimelineCodecTest {
             assertEquals(entry, ChatTimelineStore.decode(entry.id, entry.created, ChatTimelineStore.encode(entry)))
         }
     }
+    @Test fun pausedReconnectRowsCanResumeWhileSuccessAndFailureStayTerminal() {
+        for (next in listOf("running", "stopped", "succeeded", "failed")) {
+            assertTrue(reconnectTransitionAllowed("running", next))
+            assertEquals(next in setOf("running", "stopped"), reconnectTransitionAllowed("stopped", next))
+            assertFalse(reconnectTransitionAllowed("succeeded", next))
+            assertFalse(reconnectTransitionAllowed("failed", next))
+        }
+    }
+    @Test fun latestActualErrorDetailsRoundTripWithoutChangingTheRowIdentity() {
+        val original = ChatTimelineEntry.Reconnect("same-id", anchor, 456L, "running", 100L,
+            "SERVER · HTTP 502\n\n模型服务端发生错误。", 0, "model")
+        val resumed = original.copy(status = "running", elapsedMs = 200L,
+            reason = "SERVER · HTTP 503\n\n模型服务端发生错误。")
+        val decoded = ChatTimelineStore.decode(resumed.id, resumed.created, ChatTimelineStore.encode(resumed))
+        assertEquals(resumed, decoded)
+        assertEquals(original.id, decoded.id)
+        assertEquals(original.anchor, decoded.anchor)
+        assertEquals(original.created, decoded.created)
+    }
     @Test fun segmentAnchorUsesTheSameLengthPrefixedTurnKeyAndSeparatesOwners() {
         val first = Message(MessageId("message"), ConversationId("conversation"), RunId("run"),
             "assistant", emptyList(), RunStatus.COMPLETED)

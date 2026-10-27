@@ -24,11 +24,12 @@ class ProviderVisualContractTest(unittest.TestCase):
             self.assertNotIn('modelField("Anthropic 版本"', regression)
             self.assertNotIn('reveal("settings-field:Anthropic 版本"', regression)
 
-    def test_tabs_share_confirm_cancel_colors_and_keep_selection_semantics(self):
+    def test_tabs_use_collaboration_secondary_colors_and_keep_selection_semantics(self):
         source = (SRC / 'ProviderSettingsComponents.kt').read_text()
         tabs = source.split('internal fun ProviderSettingsTabs(', 1)[1].split('internal fun ProviderProtocolFields(', 1)[0]
         for fragment in ('if (selected) ButtonDefaults.textButtonColorsPrimary()',
-                         'else ButtonDefaults.textButtonColors()',
+                         'val secondary = conversationAgentColors()',
+                         'else ButtonDefaults.textButtonColors(color = secondary.soft, textColor = secondary.onSoft)',
                          '.background(if (enabled) buttonColors.color else buttonColors.disabledColor)',
                          'color = if (enabled) buttonColors.textColor else buttonColors.disabledTextColor',
                          'listOf("配置", "模型")', 'val selected = modelTab == (index == 1)',
@@ -37,6 +38,7 @@ class ProviderVisualContractTest(unittest.TestCase):
                          '.selectable(selected = selected, enabled = enabled, role = Role.Tab,',
                          'onClick = { onSelect(index == 1) }'):
             self.assertIn(fragment, tabs)
+        self.assertIn('import app.daiyu.android.ui.components.subagent.conversationAgentColors', source)
         for forbidden in ('.border(', 'colors.surfaceVariant', 'colors.onSurface', 'Color('):
             self.assertNotIn(forbidden, tabs)
 

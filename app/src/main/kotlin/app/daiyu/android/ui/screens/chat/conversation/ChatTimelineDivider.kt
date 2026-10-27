@@ -66,7 +66,7 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
     var elapsed by remember(entry.id) { mutableLongStateOf(supplied) }
     val status = (entry as? ChatTimelineEntry.Reconnect)?.status
     LaunchedEffect(entry.id, status, supplied) {
-        elapsed = maxOf(elapsed, supplied)
+        elapsed = if (status == "running") maxOf(elapsed, supplied) else supplied
         if (status == "running") {
             val base = elapsed
             val started = nowMs()
@@ -107,10 +107,8 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
             is ChatTimelineEntry.Compression -> entry.failure ?: entry.summary
             is ChatTimelineEntry.ContextLimit -> ""
             is ChatTimelineEntry.Reconnect -> {
-                val reason = app.daiyu.android.domain.ModelFailure.entries.firstOrNull { it.name == entry.reason }?.userMessage
-                listOf(entry.reason, reason.orEmpty(), "状态：${reconnectLabel(entry.status, elapsed)}",
-                    "累计耗时：${formatReconnectElapsed(elapsed)}", "轮次：${entry.round + 1}", "模型：${entry.model}")
-                    .filter { it.isNotBlank() }.joinToString("\n\n")
+                val legacy = app.daiyu.android.domain.ModelFailure.entries.firstOrNull { it.name == entry.reason }
+                legacy?.let { app.daiyu.android.model.reconnect.reconnectErrorDetails(it) } ?: entry.reason
             }
         }
         val model = (entry as? ChatTimelineEntry.Compression)?.model

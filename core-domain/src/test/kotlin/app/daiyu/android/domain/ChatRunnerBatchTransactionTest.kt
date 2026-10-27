@@ -43,7 +43,7 @@ class ChatRunnerBatchTransactionTest {
         ChatRunner(port, object : ConversationStore {
             override fun save(message: Message) = error("atomic store only")
         }, tool, RunnerOptions(runtimeStore = runtime,
-            reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _ -> budget }),
+            reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _, _ -> budget }),
             onUsage = onUsage, onReasoning = onReasoning)) {}
 
     private fun dirtyEvents() = listOf<ModelEvent>(

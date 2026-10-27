@@ -3,6 +3,7 @@ package app.daiyu.android.model
 import app.daiyu.android.domain.ModelFailure
 import app.daiyu.android.domain.ModelRequestDiagnostic
 import app.daiyu.android.domain.ModelRequestException
+import app.daiyu.android.domain.ProviderErrorCode
 import app.daiyu.android.domain.RequestField
 import app.daiyu.android.domain.RequestRejection
 import org.json.JSONObject
@@ -85,7 +86,8 @@ internal object ProviderHttpFailure {
             kinds.any { it in setOf("api_error", "server_error", "overloaded_error") } -> ModelFailure.SERVER
             else -> ModelFailure.REQUEST
         }
-        return ModelRequestException(failure, if (failure == ModelFailure.REQUEST) diagnostic(error, null) else null)
+        return ModelRequestException(failure, if (failure == ModelFailure.REQUEST) diagnostic(error, null)
+            else ModelRequestDiagnostic(providerCode = providerCode(error)))
     }
 
     private fun diagnostic(error: JSONObject?, status: Int?, request: JSONObject? = null): ModelRequestDiagnostic {
@@ -119,8 +121,13 @@ internal object ProviderHttpFailure {
         return ModelRequestDiagnostic(status,
             if (valueRejected && rejection == RequestRejection.UNSPECIFIED) RequestRejection.UNSUPPORTED_VALUE else rejection,
             if (reasoningRejected) RequestField.REASONING else field,
-            unsupportedReasoningEffort = effort, reasoningLevelRejected = reasoningRejected)
+            unsupportedReasoningEffort = effort, reasoningLevelRejected = reasoningRejected,
+            providerCode = providerCode(error))
     }
+
+    private fun providerCode(error: JSONObject?): ProviderErrorCode? =
+        sequenceOf(error?.opt("code"), error?.opt("type"))
+            .mapNotNull { rawCode -> ProviderErrorCode.entries.firstOrNull { it.wireName == rawCode } }.firstOrNull()
 
     private fun checkCancelled(cancelled: () -> Boolean) {
         if (cancelled() || Thread.currentThread().isInterrupted) throw InterruptedException()

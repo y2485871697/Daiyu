@@ -139,6 +139,19 @@ enum class RequestReasoningEffort(val displayName: String) {
     val unsupportedMessage: String get() = "模型不支持${displayName}思考"
 }
 
+/** Only known wire codes cross the provider boundary; arbitrary provider text stays private. */
+enum class ProviderErrorCode(val wireName: String) {
+    AUTHENTICATION_ERROR("authentication_error"), INVALID_API_KEY("invalid_api_key"),
+    PERMISSION_ERROR("permission_error"), PERMISSION_DENIED("permission_denied"),
+    RATE_LIMIT_ERROR("rate_limit_error"), RATE_LIMIT_EXCEEDED("rate_limit_exceeded"),
+    INSUFFICIENT_QUOTA("insufficient_quota"), API_ERROR("api_error"),
+    SERVER_ERROR("server_error"), OVERLOADED_ERROR("overloaded_error"),
+    MODEL_NOT_FOUND("model_not_found"), UNSUPPORTED_PARAMETER("unsupported_parameter"),
+    UNSUPPORTED_VALUE("unsupported_value"), CONTEXT_LENGTH_EXCEEDED("context_length_exceeded"),
+    INVALID_REQUEST_ERROR("invalid_request_error"), INVALID_VALUE("invalid_value"),
+    INVALID_PARAMETER_VALUE("invalid_parameter_value"),
+}
+
 /** Only closed values cross the provider boundary; never store a provider message or raw field. */
 data class ModelRequestDiagnostic(
     val httpStatus: Int? = null,
@@ -146,6 +159,7 @@ data class ModelRequestDiagnostic(
     val field: RequestField? = null,
     val unsupportedReasoningEffort: RequestReasoningEffort? = null,
     val reasoningLevelRejected: Boolean = false,
+    val providerCode: ProviderErrorCode? = null,
 ) {
     init {
         require(httpStatus == null || httpStatus in 300..599)

@@ -35,7 +35,7 @@ class ChatRunnerRequestRetryTest {
     private fun runner(session: ModelSession, runtime: Runtime, tools: BatteryTool = BatteryTool { error("no tools") },
         budget: () -> TransportReconnectBudget = { Budget() }) = ChatRunner(port(session),
         object : ConversationStore { override fun save(message: Message) = error("atomic only") }, tools,
-        RunnerOptions(runtimeStore = runtime, reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _ -> budget() }))) {}
+        RunnerOptions(runtimeStore = runtime, reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _, _ -> budget() }))) {}
 
     @Test fun currentRequestRetriesBeyondTwentyWithoutAppendingFailedAttempts() {
         var retries = 0; var budgets = 0

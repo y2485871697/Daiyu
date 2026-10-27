@@ -185,15 +185,98 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         } } }
         ui.mainClock.advanceTimeBy(32)
         ui.onNodeWithText("正在重连：0:00").assertExists()
-        mainThread { now = 2100L }; ui.mainClock.advanceTimeBy(1100)
-        ui.onNodeWithText("正在重连：0:02").assertExists()
-        mainThread { entry = entry.copy(status = "succeeded", elapsedMs = 2100L) }
+        mainThread { now = 623_000L }; ui.mainClock.advanceTimeBy(1100)
+        ui.onNodeWithText("正在重连：10:23").assertExists()
+        mainThread { now = 624_000L }; ui.mainClock.advanceTimeBy(1100)
+        ui.onNodeWithText("正在重连：10:24").assertExists()
+        mainThread { entry = entry.copy(status = "succeeded", elapsedMs = 624_000L) }
         ui.mainClock.advanceTimeBy(32)
         ui.onNodeWithText("已重连").performClick(); ui.mainClock.advanceTimeBy(32)
         ui.onNodeWithTag("timeline-details").assertExists()
-        mainThread { now = 50_000L }; ui.mainClock.advanceTimeBy(2000)
-        ui.onNodeWithText("正在重连：0:50").assertDoesNotExist()
+        mainThread { now = 900_000L }; ui.mainClock.advanceTimeBy(2000)
+        ui.onNodeWithText("正在重连：15:00").assertDoesNotExist()
+        ui.onNodeWithText("NETWORK", substring = true).assertExists()
     }
+    fun testEveryReconnectTerminalUsesTheFinalRecordedTimeAndStopsTicking() {
+        for ((status, label) in listOf("succeeded" to "已重连", "stopped" to "已停止重连", "failed" to "重连失败")) {
+            ui.mainClock.autoAdvance = false
+            var now = 0L
+            var entry by mutableStateOf(ChatTimelineEntry.Reconnect("terminal-$status", anchor, 1L,
+                "running", 0L, "NETWORK", 0, "main-model"))
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ChatTimelineDivider(entry) { now }
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            mainThread { now = 5000L }; ui.mainClock.advanceTimeBy(1100)
+            ui.onNodeWithText("正在重连：0:05").assertExists()
+            mainThread { entry = entry.copy(status = status, elapsedMs = 4200L) }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithText(label).assertIsDisplayed().performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("NETWORK", substring = true).assertExists()
+            mainThread { now = 90_000L }; ui.mainClock.advanceTimeBy(2000)
+            ui.onNodeWithText("NETWORK", substring = true).assertExists()
+            ui.onNodeWithText("正在重连：1:30").assertDoesNotExist()
+            ui.onNodeWithTag("timeline-close").performClick()
+            if (status == "stopped") {
+                mainThread { entry = entry.copy(status = "running") }
+                ui.mainClock.advanceTimeBy(32)
+                ui.onNodeWithText("正在重连：0:04").assertExists()
+            }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPauseResumeReusesTheDividerAndLiveErrorDetailsWithoutCountingPausedTime() {
+        ui.mainClock.autoAdvance = false
+        var now = 0L
+        val network = app.daiyu.android.model.reconnect.reconnectErrorDetails(app.daiyu.android.domain.ModelFailure.NETWORK)
+        val server = app.daiyu.android.model.reconnect.reconnectErrorDetails(app.daiyu.android.domain.ModelFailure.SERVER,
+            app.daiyu.android.domain.ModelRequestDiagnostic(503))
+        val limited = app.daiyu.android.model.reconnect.reconnectErrorDetails(app.daiyu.android.domain.ModelFailure.RATE_LIMIT,
+            app.daiyu.android.domain.ModelRequestDiagnostic(429))
+        var entry by mutableStateOf(ChatTimelineEntry.Reconnect("same-reconnect", anchor, 1L,
+            "running", 623_000L, network, 0, "main-model"))
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            ChatTimelineDivider(entry) { now }
+        } } }
+        ui.mainClock.advanceTimeBy(300)
+        ui.onNodeWithText("正在重连：10:23").performClick()
+        ui.mainClock.advanceTimeBy(300)
+        ui.onNodeWithText("错误详情").assertExists()
+        ui.onNodeWithText(network).assertExists()
+        mainThread { entry = entry.copy(status = "stopped") }
+        ui.mainClock.advanceTimeBy(32)
+        ui.onNodeWithText(network).assertExists()
+        ui.onNodeWithText("从停止继续", substring = true).assertDoesNotExist()
+        mainThread { now = 120_000L }
+        ui.mainClock.advanceTimeBy(2000)
+        ui.onNodeWithText(network).assertExists()
+        mainThread { entry = entry.copy(reason = server) }
+        ui.mainClock.advanceTimeBy(32)
+        ui.onNodeWithText(server).assertExists()
+        ui.onNodeWithText(network).assertDoesNotExist()
+        mainThread { entry = entry.copy(status = "running") }
+        ui.mainClock.advanceTimeBy(300)
+        ui.onAllNodesWithTag("timeline:same-reconnect").assertCountEquals(1)
+        ui.onAllNodesWithTag("timeline-details").assertCountEquals(1)
+        ui.onNodeWithText(server).assertExists()
+        mainThread { now = 121_000L; entry = entry.copy(reason = limited, elapsedMs = 624_000L) }
+        ui.mainClock.advanceTimeBy(1100)
+        ui.onNodeWithText(limited).assertExists()
+        ui.onNodeWithText(server).assertDoesNotExist()
+        ui.onNodeWithTag("timeline-copy").performClick()
+        mainThread {
+            val clipboard = activity.getSystemService(android.content.ClipboardManager::class.java)
+            assertEquals(limited, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+        }
+        ui.onNodeWithTag("timeline-close").performClick()
+        ui.mainClock.advanceTimeBy(300)
+        ui.onNodeWithText("正在重连：10:24").assertExists()
+        ui.onNodeWithText("已停止重连").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testCompressionProgressRendersWithoutAnyMessageRows() {
         ui.mainClock.autoAdvance = false
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {

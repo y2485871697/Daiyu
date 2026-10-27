@@ -1,6 +1,7 @@
 package app.daiyu.android.model.reconnect
 
 import app.daiyu.android.domain.ModelFailure
+import app.daiyu.android.domain.ModelRequestDiagnostic
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -38,7 +39,7 @@ internal fun interface ReconnectTransportScope { fun cancelTransport() }
 
 /** Safe, fixed diagnostic. No raw provider exception body or credentials cross this boundary. */
 internal data class ReconnectChanged(val round: Int, val reconnectId: String, val status: String,
-    val elapsedMs: Long, val reason: ModelFailure)
+    val elapsedMs: Long, val reason: ModelFailure, val diagnostic: ModelRequestDiagnostic? = null)
 
 internal class ReconnectDeadlineException(val lastReason: ModelFailure, lateSuccess: Boolean = false) :
     app.daiyu.android.domain.TransportReconnectDeadlineException(lateSuccess)
@@ -52,10 +53,11 @@ internal class ModelErrorReconnect(
     private val timing: ReconnectTiming,
     private val emit: (ReconnectChanged) -> Unit,
     reason: ModelFailure,
+    diagnostic: ModelRequestDiagnostic? = null,
 ) {
     private val lock = Any()
     private val startedMs = timing.nowMs()
-    private var id = UUID.randomUUID().toString()
+    private val id = UUID.randomUUID().toString()
     private var pausedAtMs: Long? = null
     private var pauseRevision = -1L
     private var pausedDurationMs = 0L
@@ -66,6 +68,7 @@ internal class ModelErrorReconnect(
     private var wakeup: AutoCloseable? = null
     private var transport: ReconnectTransportScope? = null
     private var lastReason = reason
+    private var lastDiagnostic = diagnostic
     @Volatile var expired = false
         private set
     @Volatile private var observerFailure: Throwable? = null
@@ -94,7 +97,7 @@ internal class ModelErrorReconnect(
         return AutoCloseable { try { pauseBinding.close() } finally { stopBinding.close() } }
     }
 
-    /** Pause closes the visible segment and freezes its budget, not task/tool owners. */
+    /** Pause freezes the same visible segment and budget, not task/tool owners. */
     fun setPaused(paused: Boolean) = applyPause(paused, null)
 
     fun setPaused(paused: Boolean, revision: Long) = applyPause(paused, revision)
@@ -119,8 +122,6 @@ internal class ModelErrorReconnect(
                 val pauseStart = pausedAtMs ?: return
                 pausedDurationMs += (timing.nowMs() - pauseStart).coerceAtLeast(0)
                 pausedAtMs = null
-                // Stopped IDs are terminal in projection. Resume uses a new visible segment.
-                id = UUID.randomUUID().toString()
                 if (started) { sendLocked("running"); scheduleLocked() }
                 null
             }
@@ -130,7 +131,12 @@ internal class ModelErrorReconnect(
         interruptedScope?.cancelTransport()
     }
 
-    fun updateReason(reason: ModelFailure) = synchronized(lock) { lastReason = reason }
+    fun updateReason(reason: ModelFailure, diagnostic: ModelRequestDiagnostic? = null) = synchronized(lock) {
+        if (terminal || lastReason == reason && lastDiagnostic == diagnostic) return@synchronized
+        lastReason = reason
+        lastDiagnostic = diagnostic
+        if (started) sendLocked(if (pausedAtMs != null) "stopped" else "running")
+    }
 
     fun attach(scope: ReconnectTransportScope) {
         val cancel = synchronized(lock) {
@@ -174,7 +180,7 @@ internal class ModelErrorReconnect(
         return elapsedMs
     }
     private fun sendLocked(status: String) {
-        emit(ReconnectChanged(round, id, status, elapsedLocked(), lastReason))
+        emit(ReconnectChanged(round, id, status, elapsedLocked(), lastReason, lastDiagnostic))
     }
     private fun finishLocked(status: String) {
         terminal = true

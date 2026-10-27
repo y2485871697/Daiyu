@@ -246,7 +246,8 @@ class ProviderFailureBoundaryTest {
         failure { session.nextAcknowledged(emptyList()) { ModelDeliveryAck.ACCEPTED } }
         val rejected = failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } } as ModelRequestException
         sanitized(rejected, ModelFailure.REQUEST)
-        assertEquals(ModelRequestDiagnostic(422, RequestRejection.UNSUPPORTED_PARAMETER, RequestField.INCLUDE), rejected.diagnostic)
+        assertEquals(ModelRequestDiagnostic(422, RequestRejection.UNSUPPORTED_PARAMETER, RequestField.INCLUDE,
+            providerCode = ProviderErrorCode.UNSUPPORTED_PARAMETER), rejected.diagnostic)
         assertEquals("GET", get.requestMethod)
         assertTrue(get.disconnected)
         assertFalse(session.canResume)

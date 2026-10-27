@@ -26,6 +26,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.ui.components.subagent.conversationAgentColors
 import app.daiyu.android.ui.components.OptionSelectionSheet
 import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -35,12 +36,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun ProviderSettingsTabs(modelTab: Boolean, enabled: Boolean, onSelect: (Boolean) -> Unit) {
+    val secondary = conversationAgentColors()
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         listOf("配置", "模型").forEachIndexed { index, title ->
             val selected = modelTab == (index == 1)
             val buttonColors = if (selected) ButtonDefaults.textButtonColorsPrimary()
-                else ButtonDefaults.textButtonColors()
+                else ButtonDefaults.textButtonColors(color = secondary.soft, textColor = secondary.onSoft)
             val shape = RoundedCornerShape(14.dp)
             Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(shape)
                 .background(if (enabled) buttonColors.color else buttonColors.disabledColor)

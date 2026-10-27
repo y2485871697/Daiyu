@@ -310,6 +310,69 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
         assertTrue(f.controller.problem!!.contains("错误重连配置"))
     }
 
+    fun testRealRunnerPauseResumeUpdatesOneDividerAndKeepsItsActualErrorThroughPersistence() {
+        val entered = List(3) { CountDownLatch(1) }
+        val released = List(3) { CountDownLatch(1) }
+        val currentRead = AtomicInteger(-1)
+        val opens = AtomicInteger()
+        val succeed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val session = object : RequestRetryModelSession {
+            override val canResume = true
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                throw ModelRequestException(ModelFailure.SERVER, ModelRequestDiagnostic(503))
+            }
+            override fun resume(sink: (ModelEvent) -> Unit) {
+                val index = currentRead.incrementAndGet()
+                check(index in entered.indices) { "unexpected resume" }
+                entered[index].countDown()
+                check(released[index].await(30, TimeUnit.SECONDS))
+                if (!succeed.get()) throw ModelRequestException(ModelFailure.NETWORK, transportInterrupted = true)
+                sink(ModelEvent.TextFinal("answer", "recovered"))
+            }
+            override fun disconnectTransport() { currentRead.get().takeIf { it in released.indices }?.let { released[it].countDown() } }
+            override fun cancel() { released.forEach { it.countDown() } }
+        }
+        val f = fresh { CatalogFixturePort { opens.incrementAndGet(); session } }
+        f.controller.reconnectSettings.save(ReconnectSettings(ReconnectDurationPreset.WINDOW_30S))
+        try {
+            assertTrue(send(f) is ChatController.TextSendResult.Accepted)
+            await(entered[0])
+            val owner = checkNotNull(f.controller.active)
+            fun line() = f.controller.timelineHistory(owner.conversationId)
+                .filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>().single()
+            val initial = line()
+            assertEquals("running", initial.status)
+            assertTrue(initial.reason.startsWith("SERVER · HTTP 503"))
+            repeat(2) { index ->
+                controlMain { assertTrue(f.controller.pause(owner)) }
+                val paused = line()
+                assertEquals("stopped", paused.status)
+                assertEquals(initial.id, paused.id); assertEquals(initial.reason, paused.reason)
+                assertEquals(initial.anchor, paused.anchor); assertEquals(initial.created, paused.created)
+                controlMain { assertTrue(f.controller.resume(owner)) }
+                await(entered[index + 1])
+                val resumed = line()
+                assertEquals("running", resumed.status)
+                assertEquals(initial.id, resumed.id); assertEquals(initial.reason, resumed.reason)
+                assertEquals(initial.anchor, resumed.anchor); assertEquals(initial.created, resumed.created)
+            }
+            succeed.set(true); released.last().countDown()
+            awaitControl("resumed run completed") { f.controller.active == null }
+            awaitControl("one successful timeline row is persisted") {
+                app.daiyu.android.timeline.ChatTimelineStore.read(f.db.readableDatabase, owner.conversationId.value)
+                    .filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
+                    .singleOrNull()?.status == "succeeded"
+            }
+            val live = line()
+            val saved = app.daiyu.android.timeline.ChatTimelineStore.read(f.db.readableDatabase, owner.conversationId.value)
+                .filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>().single()
+            assertEquals(live, saved)
+            assertEquals(initial.id, saved.id); assertEquals(initial.reason, saved.reason)
+            assertNull(f.controller.problem)
+            assertEquals(1, opens.get())
+        } finally { released.forEach { it.countDown() } }
+    }
+
     fun testQueuedDiagnosticRechecksEveryOriginalIdentityAndLifetimeGateOnHandler() {
         val held = FailingSession()
         val opens = AtomicInteger()

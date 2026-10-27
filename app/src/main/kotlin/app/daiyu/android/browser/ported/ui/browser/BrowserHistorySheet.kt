@@ -3,6 +3,8 @@
 // Local/private integration; see app/src/main/assets/licenses/openminis/NOTICE.md.
 package app.daiyu.android.browser.ported.ui.browser
 
+import app.daiyu.android.browser.BrowserSheetUiState
+
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
 
@@ -54,13 +56,14 @@ import app.daiyu.android.browser.ported.ui.components.MinisTextButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BrowserHistorySheet(
+internal fun BrowserHistorySheet(
     historyStore: BrowserHistoryStore,
     onNavigate: (String) -> Unit,
     onDismiss: () -> Unit,
+    uiState: BrowserSheetUiState = remember { BrowserSheetUiState() },
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by uiState::historyQuery
     var showClearConfirm by remember { mutableStateOf(false) }
 
     var historyRows by remember(historyStore) { mutableStateOf(historyStore.getEntries()) }

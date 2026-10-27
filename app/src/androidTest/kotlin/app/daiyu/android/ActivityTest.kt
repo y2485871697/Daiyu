@@ -214,10 +214,10 @@ class ActivityTest : WiredActivityTestCase() {
             val pause = MainActivity::class.java.getDeclaredMethod("onPause").apply { isAccessible = true }
             val resume = MainActivity::class.java.getDeclaredMethod("onResume").apply { isAccessible = true }
             pause.invoke(activity)
-            val attributes = activity.window.attributes; attributes.preferredRefreshRate = 13f; activity.window.attributes = attributes
-            val mode = attributes.preferredDisplayModeId
+            assertEquals(expected, activity.window.attributes.preferredRefreshRate, 0f)
+            val mode = activity.window.attributes.preferredDisplayModeId
             resume.invoke(activity); assertEquals(expected, activity.window.attributes.preferredRefreshRate, 0f)
-            pause.invoke(activity); assertEquals(13f, activity.window.attributes.preferredRefreshRate, 0f)
+            pause.invoke(activity); assertEquals(expected, activity.window.attributes.preferredRefreshRate, 0f)
             assertEquals(mode, activity.window.attributes.preferredDisplayModeId)
             resume.invoke(activity)
             val external = activity.window.attributes; external.preferredRefreshRate = 17f; activity.window.attributes = external

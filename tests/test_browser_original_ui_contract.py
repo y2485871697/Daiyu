@@ -55,7 +55,27 @@ TAB_CHIP_STABLE_PADDING = '.padding(start = 10.dp, end = 6.dp, top = 5.dp, botto
 TAB_CHIP_ORIGINAL_PADDING = '.padding(start = 10.dp, end = if (showClose) 6.dp else 10.dp, top = 5.dp, bottom = 5.dp)'
 
 
+def approved_browser_presentation_source(path, source):
+    if path not in ('ui/browser/BrowserSheet.kt', HISTORY_PATH):
+        return source
+    protected = []
+    def stash(match):
+        protected.append(match.group())
+        return f'__PRESENTATION_LITERAL_{len(protected) - 1}__'
+    source = TOKEN.sub(lambda match: stash(match) if match.lastgroup in ('string', 'comment') else match.group(), source)
+    source = source.replace('import app.daiyu.android.browser.BrowserSheetUiState\n', '', 1)
+    if path == 'ui/browser/BrowserSheet.kt':
+        source = source.replace('import androidx.compose.runtime.SideEffect\n', '', 1)
+        source = source.replace('val trimmed = urlInput.text.trim()', 'val trimmed = urlInput.trim()', 1)
+        source = source.replace('uiState.submittedAddress(normalized)', 'urlInput = normalized', 1)
+        source = source.replace(
+            'BrowserHistorySheet(\n            historyStore = BrowserHistoryStore.getInstance(context),\n            uiState = uiState,\n',
+            'BrowserHistorySheet(\n            historyStore = BrowserHistoryStore.getInstance(context),\n', 1)
+    return re.sub(r'__PRESENTATION_LITERAL_(\d+)__', lambda match: protected[int(match.group(1))], source)
+
+
 def approved_original_ui_source(path, source):
+    source = approved_browser_presentation_source(path, source)
     if path == 'ui/chat/StandardChatSheet.kt':
         return source.replace('        sheetGesturesEnabled = false,\n', '', 1)
     if path == 'ui/browser/BrowserSheet.kt':
@@ -275,6 +295,39 @@ class BrowserOriginalUiContractTest(unittest.TestCase):
                 contract = body_contract if expected['mode'] == 'body' else render_contract
                 self.assertEqual(expected['contract_sha256'], digest(contract(source)), 'original UI contract changed: ' + path)
                 self.assertEqual(expected['imports_sha256'], digest(imports_contract(source)), 'non-approved UI import: ' + path)
+
+    def test_presentation_retention_keeps_the_frozen_drawing_and_input_contract(self):
+        path = 'ui/browser/BrowserSheet.kt'
+        source = (PORT / path).read_text()
+        normalized = approved_original_ui_source(path, source)
+        self.assertEqual(self.baseline['files'][path]['contract_sha256'], digest(render_contract(normalized)))
+        for old, new in [('fontSize = 13.sp', 'fontSize = 14.sp'),
+                         ('singleLine = true', 'singleLine = false'),
+                         ('ImeAction.Go', 'ImeAction.Search'),
+                         ('uiState = uiState,', 'uiState = otherState,'),
+                         ('uiState.submittedAddress(normalized)', 'uiState.submittedAddress(currentURL)')]:
+            self.assertIn(old, source)
+            self.assertNotEqual(render_contract(normalized),
+                render_contract(approved_original_ui_source(path, source.replace(old, new, 1))))
+        changed = source.replace('import app.daiyu.android.browser.BrowserSheetUiState',
+                                 'import app.daiyu.android.browser.OtherState', 1)
+        self.assertNotEqual(imports_contract(normalized),
+                            imports_contract(approved_original_ui_source(path, changed)))
+
+    def test_presentation_adapter_protects_literals_comments_and_callback_contents(self):
+        path = 'ui/browser/BrowserSheet.kt'
+        source = (PORT / path).read_text()
+        for a, b in [('uiState.submittedAddress(normalized)', 'urlInput = normalized'),
+                     ('val trimmed = urlInput.text.trim()', 'val trimmed = urlInput.trim()'),
+                     ('uiState = uiState,', 'uiState = otherState,')]:
+            first = approved_original_ui_source(path, source + '\nText("' + a + '")')
+            second = approved_original_ui_source(path, source + '\nText("' + b + '")')
+            self.assertNotEqual(render_contract(first), render_contract(second))
+            comment = '\n// ' + a
+            self.assertTrue(approved_original_ui_source(path, source + comment).endswith(comment))
+        changed = source.replace('KeyboardActions(onGo = {', 'KeyboardActions(onGo = { Text("extra")', 1)
+        self.assertNotEqual(render_contract(approved_original_ui_source(path, source)),
+                            render_contract(approved_original_ui_source(path, changed)))
 
     def test_browser_gesture_adaptation_does_not_hide_drawing_changes(self):
         for path, old, new in [

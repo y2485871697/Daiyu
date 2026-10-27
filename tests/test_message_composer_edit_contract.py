@@ -89,7 +89,14 @@ class MessageComposerEditContract(unittest.TestCase):
         self.assertIn('message-edit-${UUID.randomUUID()}', host)
         self.assertIn('source.import(owner, uri, signal)', host)
         self.assertIn('source.store.clear(owner)', host)
-        self.assertIn('if (!editingPickerAway) invalidateMessageActionEditor()', main)
+        stop = main.split('override fun onStop()', 1)[1].split('override fun onDestroy()', 1)[0]
+        self.assertIn('suspendMessageActionEditor()', stop)
+        self.assertNotIn('invalidateMessageActionEditor()', stop)
+        suspend = main.split('private fun suspendMessageActionEditor()', 1)[1].split('private fun ', 1)[0]
+        self.assertIn('messageActionHost.invalidate()', suspend)
+        self.assertNotIn('clearInlineMessageEditor()', suspend)
+        self.assertNotIn('additions.close()', suspend)
+        self.assertIn('request.firstPickerHop = false; request.pickerAway = preserve', main)
         self.assertIn('request.visit === inlineMessageEditor?.visit', main)
         self.assertIn('request.editVisit === inlineMessageEditor?.visit', main)
         self.assertIn('editor.copy(text = next, selectionStart = next.length', main)

@@ -144,6 +144,7 @@ data class ComposerUi(
     /** Ready owned images only; never file/folder/path strings or video approval. Idle only. */
     val imageSendAvailable: Boolean = false,
     val editingMessageCanSubmit: Boolean = false,
+    val editingMessageBlocked: Boolean = false,
     /** A fenced/importing image draft must not silently fall through to text send. Editing is separate. */
     val imageSendBlocked: Boolean = false,
     val videoSendAvailable: Boolean = false,
@@ -161,7 +162,7 @@ data class ComposerUi(
     val gptSpeedSaving: Boolean = false,
 )
 
-internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
+internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
     ComposerPhase.IDLE -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable
     ComposerPhase.PAUSED, ComposerPhase.RUNNING -> text.isNotBlank() && supplementAvailable
 }

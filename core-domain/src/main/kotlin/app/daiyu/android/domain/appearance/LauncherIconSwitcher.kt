@@ -64,8 +64,9 @@ class LauncherIconSwitcher(
         }
         var changing: String? = target
         try {
-            // Even DEFAULT may be enabled; setting explicitly first avoids relying on defaults.
-            components.setState(target, IconComponentState.ENABLED)
+            // Keep DEFAULT normalization, but an already explicit selection needs no PM write.
+            if (before.getValue(target).state != IconComponentState.ENABLED)
+                components.setState(target, IconComponentState.ENABLED)
             check(components.snapshot(target).enabled) { "New launcher did not become enabled" }
             names.filter { it != target }.forEach { name ->
                 changing = name

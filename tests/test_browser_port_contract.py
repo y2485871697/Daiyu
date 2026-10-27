@@ -14,7 +14,8 @@ class BrowserPortContractTest(unittest.TestCase):
     def test_original_surfaces_use_real_visit_and_shared_original_sheet(self):
         ui = (APP / 'ui/screens/browser/BrowserVisualScreen.kt').read_text()
         self.assertIn('BrowserUiPool(context.applicationContext, visit)', ui)
-        self.assertIn('BrowserSheet(pool, onBack)', ui)
+        self.assertIn('BrowserSheet(pool, onBack, presentation)', ui)
+        self.assertIn('val presentation = uiState ?: remember { BrowserSheetUiState() }', ui)
         sheet = (PORT / 'ui/browser/BrowserSheet.kt').read_text()
         for name in ('StandardChatSheet(', 'BrowserSettingsSheet(', 'BrowserHistorySheet(', 'BrowserDownloadsSheet('):
             self.assertIn(name, sheet)

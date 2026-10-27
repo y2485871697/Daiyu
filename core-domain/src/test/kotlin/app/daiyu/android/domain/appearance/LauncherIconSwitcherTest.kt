@@ -28,6 +28,26 @@ class LauncherIconSwitcherTest {
         fun enabled() = states.keys.filter { snapshot(it).enabled }
     }
 
+    @Test fun repeatedForegroundSyncDoesNotRewriteAlreadySelectedAlias() {
+        val fake = Fake()
+        var notifications = 0
+        val sync = LauncherIconSwitcher(pkg, fake, IconNotificationPort { notifications++ }, {})
+        assertTrue(sync.apply(target).complete)
+        fake.calls.clear()
+        repeat(4) { assertTrue(sync.apply(target).complete) }
+        assertTrue(fake.calls.isEmpty())
+        assertEquals(5, notifications)
+    }
+
+    @Test fun enabledTargetStillConvergesOtherAliasesWithoutRewritingTarget() {
+        val fake = Fake()
+        fake.states[name(target)] = IconComponentState.ENABLED
+        val result = LauncherIconSwitcher(pkg, fake, IconNotificationPort {}, {}).apply(target)
+        assertTrue(result.complete)
+        assertEquals(listOf(name(target)), fake.enabled())
+        assertEquals(listOf(name(old) to IconComponentState.DISABLED), fake.calls)
+    }
+
     @Test fun enablesNewBeforeDisablingOldAndRecordsBeforeRefresh() {
         val fake = Fake()
         val effects = mutableListOf<String>()

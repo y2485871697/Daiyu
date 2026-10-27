@@ -3,6 +3,8 @@
 // Local/private integration; see app/src/main/assets/licenses/openminis/NOTICE.md.
 package app.daiyu.android.browser.ported.ui.browser
 
+import app.daiyu.android.browser.BrowserSheetUiState
+
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -57,6 +59,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -92,6 +95,7 @@ import kotlinx.coroutines.launch
 internal fun BrowserSheet(
     tabPool: BrowserUiPool,
     onDismiss: () -> Unit,
+    uiState: BrowserSheetUiState = remember { BrowserSheetUiState() },
 ) {
     val tabs by tabPool.tabs.collectAsState()
     val selectedTabId by tabPool.selectedTabId.collectAsState()
@@ -110,11 +114,11 @@ internal fun BrowserSheet(
     val isAgentBrowsing by tabPool.agentBrowsing.collectAsState()
     val userAgentProfile = tabPool.currentUserAgentProfile.collectAsState().value
 
-    var urlInput by remember(currentURL) { mutableStateOf(currentURL) }
-    var showHistory by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    // [T-android-browser-download-ux] Downloads panel + badge state.
-    var showDownloads by remember { mutableStateOf(false) }
+    val urlInput = uiState.displayedAddress(selectedTabId, currentURL)
+    SideEffect { uiState.synchronize(selectedTabId, currentURL) }
+    var showHistory by uiState::showHistory
+    var showSettings by uiState::showSettings
+    var showDownloads by uiState::showDownloads
     val downloadEntries by tabPool.downloads.collectAsState()
 
     LaunchedEffect(tabPool) {
@@ -242,7 +246,7 @@ internal fun BrowserSheet(
                     Box(modifier = Modifier.weight(1f)) {
                         androidx.compose.foundation.text.BasicTextField(
                             value = urlInput,
-                            onValueChange = { urlInput = it },
+                            onValueChange = uiState::editAddress,
                             singleLine = true,
                             enabled = !isAgentBusy,
                             textStyle = LocalTextStyle.current.copy(
@@ -253,17 +257,17 @@ internal fun BrowserSheet(
                             cursorBrush = imeCursorBrush(accent),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                             keyboardActions = KeyboardActions(onGo = {
-                                val trimmed = urlInput.trim()
+                                val trimmed = urlInput.text.trim()
                                 if (trimmed.isNotEmpty()) {
                                     val normalized = trimmed
                                     selectedTab?.manager?.loadURL(normalized)
-                                    urlInput = normalized
+                                    uiState.submittedAddress(normalized)
                                 }
                                 keyboardController?.hide()
                                 focusManager.clearFocus()
                             }),
                             modifier = Modifier.managedInput().fillMaxWidth().testTag("browser-visual-address"))
-                        if (urlInput.isEmpty()) {
+                        if (urlInput.text.isEmpty()) {
                             Text(
                                 stringResource(R.string.om_browser_search_placeholder),
                                 fontSize = 13.sp,
@@ -442,6 +446,7 @@ internal fun BrowserSheet(
     if (showHistory) {
         BrowserHistorySheet(
             historyStore = BrowserHistoryStore.getInstance(context),
+            uiState = uiState,
             // [T-android-browser-history-no-tab] C1: with no tabs open,
             // selectedTab is null and the old safe-call silently dropped the
             // navigation. Create a tab first (same path as the "+" button);

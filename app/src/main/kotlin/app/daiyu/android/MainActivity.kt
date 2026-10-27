@@ -1041,7 +1041,9 @@ class MainActivity : ComponentActivity() {
             putExtra(Intent.EXTRA_TITLE, request.suggestedName)
         }, request::result)
     }
-    private class BrowserResumeTarget(val conversationId: ConversationId?, val owner: WorkStepOwnerUi?)
+    private class BrowserResumeTarget(val conversationId: ConversationId?, val owner: WorkStepOwnerUi?) {
+        var presentation = app.daiyu.android.browser.BrowserSheetUiState()
+    }
     private var browserResumeTarget by mutableStateOf<BrowserResumeTarget?>(null)
     private var browserVisualEpoch by mutableStateOf(0L)
     private var browserVisualVisit by mutableStateOf<BrowserVisualVisit?>(null)
@@ -1075,6 +1077,7 @@ class MainActivity : ComponentActivity() {
         LocalBrowserVisual(applicationContext, selected?.id)
     }.let { human ->
         if (human.needsReplacement) {
+            browserResumeTarget?.presentation = app.daiyu.android.browser.BrowserSheetUiState()
             human.close()
             LocalBrowserVisual(applicationContext, selected?.id).also {
                 humanBrowsers[selected?.id] = it
@@ -1251,6 +1254,17 @@ class MainActivity : ComponentActivity() {
         if (editImagePick?.returned == true) editImagePick = null
         if (chatReferencePick?.editVisit != null) revokeChatReferencePick()
     }
+    private fun suspendMessageActionEditor() {
+        messageActionHost.invalidate()
+        messageActionVisit = Any()
+        messageActionSnapshot = null; messageActionKey = null
+        messageActionLoading = null; messageActionAttempted = null
+    }
+    private fun messageEditTargetCurrent(editor: InlineMessageEditor): Boolean =
+        messageActionSnapshot?.let { snapshot ->
+            snapshot.matchesRendered(shown.map { it.second }) &&
+                editor.target == (snapshot.renderedTargets[editor.key] ?: snapshot.targets[editor.key])
+        } == true
     private fun retainUncertainMessageEdit() {
         val editor = inlineMessageEditor ?: return
         inlineMessageEditor = editor.copy(uncertain = true)
@@ -1259,10 +1273,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun invalidateMessageActionEditor() {
         clearInlineMessageEditor()
-        messageActionHost.invalidate()
-        messageActionVisit = Any()
-        messageActionSnapshot = null; messageActionKey = null
-        messageActionLoading = null; messageActionAttempted = null
+        suspendMessageActionEditor()
     }
     private fun prepareMessageActionSnapshot() {
         val owner = selected?.id ?: run { invalidateMessageActionEditor(); return }
@@ -2541,6 +2552,7 @@ class MainActivity : ComponentActivity() {
                     if (original != null) key(original) {
                         app.daiyu.android.ui.screens.browser.BrowserVisualScreen(original,
                             ownerCurrent = { browserVisualPageCurrent(original) },
+                            uiState = browserResumeTarget?.presentation,
                             onBack = { if (activityUsable() && browserVisualVisit === original && retainedPage == "browser") returnToChat() })
                     } else {
                         val target = browserResumeTarget
@@ -2733,8 +2745,10 @@ class MainActivity : ComponentActivity() {
         val renderedContextEntryEpoch = contextManagementEntryEpoch
         val renderedDraftRevision = draftRevision
         val renderedInlineVisit = inlineMessageEditor?.visit
+        val renderedActionVisit = messageActionVisit
         val renderedSpeechOwner = speechHost.owner
-        fun editorMatches() = activityUsable() && selectionReady && pendingTextSend == null && controller.textSendState() == null &&
+        fun editorMatches() = activityUsable() && voiceForeground && messageActionVisit === renderedActionVisit &&
+            selectionReady && pendingTextSend == null && controller.textSendState() == null &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration &&
             inlineMessageEditor?.visit === renderedInlineVisit
         fun gestureOwner() = currentControlOwner()?.takeIf {
@@ -5178,7 +5192,7 @@ class MainActivity : ComponentActivity() {
         consumeOpenedAttachments()
     }
     override fun onResume() {
-        super.onResume(); voiceForeground = true; speechHost.setForeground(true)
+        super.onResume(); suspendMessageActionEditor(); voiceForeground = true; speechHost.setForeground(true)
         if (retainedPage == "session-gateway" && gatewayReloadPending) loadSessionGateway(restore = true)
         chatReferencePick?.pickerAway = false
         editImagePick?.pickerAway = false
@@ -5197,7 +5211,7 @@ class MainActivity : ComponentActivity() {
         controller.recoverVideos { if (activityUsable()) publishChat() }
         (application as ChatApplication).petSettingsNavigator = openPetSettings
         pets.refreshOverlayPermission()
-        refreshRateWindowResumed = true; refreshRateRequestRelinquished = false; applyPreferredRefreshRate()
+        refreshRateWindowResumed = true; applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
     }
     private fun applyPreferredRefreshRate() {
@@ -5215,6 +5229,13 @@ class MainActivity : ComponentActivity() {
         }
         if (previousPreferredRefreshRate == null) previousPreferredRefreshRate = attributes.preferredRefreshRate
         requestedPreferredRefreshRate = rate; attributes.preferredRefreshRate = rate; window.attributes = attributes
+    }
+    private fun releasePreferredRefreshRate() {
+        val previous = previousPreferredRefreshRate
+        if (previous != null && window.attributes.preferredRefreshRate == requestedPreferredRefreshRate) {
+            val attributes = window.attributes; attributes.preferredRefreshRate = previous; window.attributes = attributes
+        }
+        previousPreferredRefreshRate = null; requestedPreferredRefreshRate = null
     }
     override fun onPostResume() {
         super.onPostResume()
@@ -5235,6 +5256,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        suspendMessageActionEditor()
         revokeWorkspaceVisit()
         resetRootExitConfirmation()
         cancelPaneConversationSelection()
@@ -5313,11 +5335,6 @@ class MainActivity : ComponentActivity() {
             preserveMediaSelection = preserveMedia)
         speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
-        val previous = previousPreferredRefreshRate
-        if (previous != null && window.attributes.preferredRefreshRate == requestedPreferredRefreshRate) {
-            val attributes = window.attributes; attributes.preferredRefreshRate = previous; window.attributes = attributes
-        }
-        previousPreferredRefreshRate = null; requestedPreferredRefreshRate = null
         if (selectionReady) selections[selected?.id] = selectionStart to selectionEnd
         // A returned backup URI may show a one-shot confirmation. Unlike the external
         // DocumentsUI hop itself, that approval must not survive a background transition.
@@ -5344,14 +5361,7 @@ class MainActivity : ComponentActivity() {
         revokePlatformActionVisit()
         revokeContextManagementEntry(closeRoute = false)
         revokeTerminalJobsVisit()
-        val editingPickerAway = editImagePick?.let { it.live && it.pickerAway && it.visit === inlineMessageEditor?.visit } == true ||
-            chatReferencePick?.let { it.live && it.pickerAway && it.editVisit != null && it.editVisit === inlineMessageEditor?.visit } == true
-        if (!editingPickerAway) invalidateMessageActionEditor()
-        else {
-            messageActionHost.invalidate(); messageActionVisit = Any()
-            messageActionSnapshot = null; messageActionKey = null
-            messageActionLoading = null; messageActionAttempted = null
-        }
+        suspendMessageActionEditor()
         gatewayOwner?.revoke()
         controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
@@ -5426,7 +5436,7 @@ class MainActivity : ComponentActivity() {
         imageHost.close()
         speechHost.close()
         activityCallbacksAllowed = false; refreshRateWindowResumed = false
-        window.decorView.removeCallbacks(refreshRateRequest); dismissChatModels()
+        window.decorView.removeCallbacks(refreshRateRequest); releasePreferredRefreshRate(); dismissChatModels()
         cancelRestorePreview(); prompt = null
         controller.unobserve(listener); super.onDestroy()
     }
@@ -6158,8 +6168,11 @@ class MainActivity : ComponentActivity() {
                 imageHost.enter(selected?.id?.value)
                 val latest = selected?.id?.let { id -> controller.database.conversations().firstOrNull { it.id == id } }
                 if (selected != null && latest == null) { select(null); return@guard }
+                val retainedMessageEdit = inlineMessageEditor?.takeIf { it.target.conversationId == latest?.id }
+                if (retainedMessageEdit != null) inlineMessageEditor = null
                 editorGeneration++
                 selected = latest
+                inlineMessageEditor = retainedMessageEdit?.copy(visit = Any())
                 draft = latest?.draft ?: controller.database.draft()
                 if (initialSupplementRestore && restoredSupplementEditor?.let {
                         it.conversationId == selected?.id?.value && it.text == draft } == true)
@@ -6337,6 +6350,7 @@ class MainActivity : ComponentActivity() {
             controller.textSendState() == null && pendingTextSend == null && !imageHost.sending &&
             !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null
         val allowed = composerAvailable && !controller.dataBusy
+        val messageEditBlocked = inlineMessageEditor?.let { !messageEditTargetCurrent(it) } == true
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             scrollRequest = scrollRequest,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
@@ -6351,11 +6365,14 @@ class MainActivity : ComponentActivity() {
             }, toolReceipt = app.daiyu.android.ui.RetainedToolOutcomes.projectionReader(controller.database, shown.map { it.second }, controller::runState, controller::runStopping)),
                 controlOwner?.takeIf { state?.phase == ExecutionPhase.STREAMING }),
             statusText = controller.problem ?: when { controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
+                messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
+                    else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = inlineMessageEditor?.text ?: draft,
                 selectionStart = inlineMessageEditor?.selectionStart ?: selectionStart,
                 selectionEnd = inlineMessageEditor?.selectionEnd ?: selectionEnd,
                 editingMessageCanSubmit = inlineMessageEditor?.let { it.canSubmit && !editReferencePending(it) } == true,
+                editingMessageBlocked = messageEditBlocked,
                 editorGeneration = editorGeneration,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value,
                 imageSendAvailable = inlineMessageEditor == null && imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&

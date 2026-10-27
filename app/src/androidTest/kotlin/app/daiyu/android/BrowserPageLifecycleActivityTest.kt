@@ -58,6 +58,77 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testHumanBrowserRetainsAddressSelectionAndHistoryAcrossPauseAndHome() {
+        openHuman()
+        val address = "unfinished address, do not navigate"
+        val range = androidx.compose.ui.text.TextRange(2, 9)
+        node("browser-visual-address").performTextReplacement(address)
+        node("browser-visual-address").performTextInputSelection(range)
+        dismissIme()
+        fun presentation(): app.daiyu.android.browser.BrowserSheetUiState {
+            val target = checkNotNull(invokeHost(activity, "getBrowserResumeTarget"))
+            return target.javaClass.getDeclaredMethod("getPresentation").apply { isAccessible = true }
+                .invoke(target) as app.daiyu.android.browser.BrowserSheetUiState
+        }
+        lateinit var retained: app.daiyu.android.browser.BrowserSheetUiState
+        mainThread { retained = presentation() }
+        repeat(2) {
+            val previous = checkNotNull(visit())
+            realPauseResume(activity)
+            awaitUniqueTag("browser-visual-page")
+            node("browser-visual-address").assertTextContains(address)
+            node("browser-visual-address").assert(SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange, range))
+            mainThread {
+                assertSame(retained, presentation())
+                assertNotSame(previous, visit())
+                assertFalse(previous.snapshot().live)
+                assertEquals(address, retained.address.text)
+            }
+        }
+        node("browser-visual-history").performClick()
+        val query = "unsaved history search"
+        ui.onNode(hasSetTextAction() and hasText(activity.getString(R.string.om_browser_history_search)))
+            .performTextReplacement(query)
+        dismissIme()
+        realPauseResume(activity)
+        ui.onNode(hasSetTextAction() and hasText(query)).assertIsDisplayed()
+        val original = activity
+        val stopped = java.util.concurrent.CountDownLatch(1)
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
+        }
+        mainThread { original.lifecycle.addObserver(observer) }
+        try {
+            assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+            assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        } finally {
+            mainThread { original.lifecycle.removeObserver(observer) }
+            restoreOriginalHost(original)
+        }
+        awaitHostWindowFocus(original)
+        ui.onNode(hasSetTextAction() and hasText(query)).assertIsDisplayed()
+        mainThread {
+            assertSame(retained, presentation())
+            assertTrue(retained.showHistory)
+            assertEquals(query, retained.historyQuery)
+            assertEquals(address, retained.address.text)
+            assertEquals(range, retained.address.selection)
+        }
+        ui.onNodeWithText(activity.getString(R.string.om_browser_history_done)).performClick()
+        node("browser-visual-address").assertTextContains(address)
+        backToChat(activity)
+        openHuman()
+        mainThread {
+            assertNotSame(retained, presentation())
+            assertFalse(presentation().showHistory)
+            assertEquals("", presentation().historyQuery)
+            assertFalse(address == presentation().address.text)
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testTaskTargetDoesNotAutoReconnectOrFallBackToHuman() {
         val old = openHuman()
         val conversation = checkNotNull(old.conversationId)

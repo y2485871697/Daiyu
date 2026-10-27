@@ -133,6 +133,63 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
+    fun testPauseAndHomeKeepLivePageAndGraphicsFrameWithoutMountingAgain() {
+        var mounts = 0
+        var disposals = 0
+        var observedFrame: PageBackPreviewLayers.Frame? = null
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    PageBackGestureHost("retained-page", canNavigateBack = true,
+                        swipeDismissEnabled = true, predictiveBackEnabled = true,
+                        dispatchBack = {}, captureFromContent = true) {
+                        val frame = LocalPageBackPreviewFrame.current
+                        androidx.compose.runtime.SideEffect { observedFrame = frame }
+                        DisposableEffect(Unit) {
+                            mounts++
+                            onDispose { disposals++ }
+                        }
+                        Box(Modifier.fillMaxSize().background(Color.Blue).testTag("retained-foreground-page")) {
+                            Text("same live page")
+                        }
+                    }
+                }
+            }
+        }
+        dismissIme(); ui.waitForIdle()
+        val frame = checkNotNull(observedFrame)
+        val nodeId = node("retained-foreground-page").fetchSemanticsNode().id
+        repeat(2) {
+            realPauseResume(activity)
+            ui.waitForIdle()
+            mainThread { assertSame(frame, observedFrame) }
+            val original = activity
+            val stopped = java.util.concurrent.CountDownLatch(1)
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
+            }
+            mainThread { original.lifecycle.addObserver(observer) }
+            try {
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+                assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            } finally {
+                mainThread { original.lifecycle.removeObserver(observer) }
+                restoreOriginalHost(original)
+            }
+            awaitHostWindowFocus(original); ui.waitForIdle()
+            mainThread {
+                assertSame(frame, observedFrame)
+                assertEquals(1, mounts)
+                assertEquals(0, disposals)
+            }
+            assertEquals(nodeId, node("retained-foreground-page").fetchSemanticsNode().id)
+            node("page-back-departure").assertDoesNotExist()
+            node("page-enter-previous").assertDoesNotExist()
+            assertEquals(0, fixture.opens.get())
+        }
+    }
+
     fun testExplicitContentKeyKeepsLiveCompositionUntilContentActuallyChanges() {
         var mounts = 0
         var disposals = 0

@@ -56,6 +56,97 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testUnsubmittedMessageEditSurvivesRepeatedPauseAndHomeWithOldCallbacksRevoked() {
+        val (conversation, user) = seed()
+        mainThread { activity.select(conversation) }; readySnapshot()
+        mainThread {
+            retainedControls(activity).onTextChange("ordinary draft stays separate")
+            retainedControls(activity).onEditUser(user.id.value)
+        }
+        awaitControl("editing before background") { !fixture.controller.dataBusy && call("getInlineMessageEditor") != null }
+        mainThread {
+            retainedControls(activity).onTextChange("unsaved edited text")
+            retainedControls(activity).onSelectionChange(2, 7)
+        }
+        val before = fixture.database.exportBackup()
+        fun retainedEdit() {
+            val state = field("chatState") as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+            assertEquals("unsaved edited text", state.composer.text)
+            assertEquals(2, state.composer.selectionStart)
+            assertEquals(7, state.composer.selectionEnd)
+            assertEquals("ordinary draft stays separate", field("draft"))
+            assertNotNull(call("getInlineMessageEditor"))
+        }
+        repeat(2) {
+            lateinit var old: app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+            mainThread { old = retainedControls(activity) }
+            realPauseResume(activity, atPause = {
+                old.onTextChange("stale paused write"); old.onCancelMessageEdit(); old.onSend("unsaved edited text")
+                assertNotNull(call("getInlineMessageEditor"))
+            })
+            readySnapshot()
+            mainThread {
+                old.onTextChange("stale resumed write"); old.onCancelMessageEdit(); old.onSend("unsaved edited text")
+                retainedEdit()
+            }
+            val original = activity
+            val stopped = java.util.concurrent.CountDownLatch(1)
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
+            }
+            mainThread { old = retainedControls(activity); original.lifecycle.addObserver(observer) }
+            try {
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+                assertTrue(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            } finally {
+                mainThread { original.lifecycle.removeObserver(observer) }
+                restoreOriginalHost(original)
+            }
+            awaitHostWindowFocus(original); readySnapshot()
+            mainThread {
+                old.onTextChange("stale stopped write"); old.onCancelMessageEdit(); old.onSend("unsaved edited text")
+                retainedEdit()
+            }
+            assertSame(original, activity)
+            assertEquals(before, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
+        }
+        fixture.session("regenerated once", held = false)
+        mainThread { retainedControls(activity).onSend("unsaved edited text") }
+        awaitControl("explicit save after fresh snapshot") { !fixture.controller.dataBusy && call("getInlineMessageEditor") == null && fixture.opens.get() == 1 }
+        assertEquals("unsaved edited text", fixture.database.messages(conversation.id).first().second.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+        assertEquals("ordinary draft stays separate", fixture.database.conversations().single { it.id == conversation.id }.draft)
+    }
+
+    fun testSameConversationRevisionChangeKeepsUnsavedTextAndBlocksOldTarget() {
+        val (conversation, user) = seed()
+        mainThread { activity.select(conversation) }; readySnapshot()
+        mainThread { retainedControls(activity).onEditUser(user.id.value) }
+        awaitControl("edit opened") { !fixture.controller.dataBusy && call("getInlineMessageEditor") != null }
+        mainThread {
+            retainedControls(activity).onTextChange("keep this unsaved text")
+            retainedControls(activity).onSelectionChange(1, 6)
+            fixture.controller.dataTask(importing = false, work = {
+                fixture.database.save(user.copy(blocks = listOf(MessageBlock.Text("body", "external revision"))))
+                "updated fixture"
+            })
+        }
+        readySnapshot()
+        mainThread {
+            val state = field("chatState") as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+            assertEquals("keep this unsaved text", state.composer.text)
+            assertEquals(1, state.composer.selectionStart)
+            assertEquals(6, state.composer.selectionEnd)
+            assertTrue(state.composer.editingMessageBlocked)
+            retainedControls(activity).onSend("keep this unsaved text")
+        }
+        assertEquals("external revision", fixture.database.messages(conversation.id).first().second.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+        assertEquals(0, fixture.opens.get())
+        mainThread { retainedControls(activity).onCancelMessageEdit() }
+        assertNull(call("getInlineMessageEditor"))
+    }
+
     fun testOldInlineEditorCallbacksCannotOverwriteOrCancelANewVisit() {
         val (conversation, user) = seed()
         mainThread { activity.select(conversation) }; readySnapshot()

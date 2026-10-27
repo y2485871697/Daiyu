@@ -33,6 +33,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     private val frames = LinkedHashMap<Any, Frame>()
     private var pending: Departure? = null
     private var closed = false
+    private var previewEpoch = 0L
     var currentKey: Any? = null
         private set
 
@@ -68,16 +69,17 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     private fun freeze(frame: Frame) {
-        if (frame.image != null || frame.size == IntSize.Zero || frame.capture?.isActive == true) return
+        if (frame.image != null || frame.size == IntSize.Zero || frame.capture?.isCompleted == false) return
+        val epoch = previewEpoch
         frame.capture = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 // API28+ completes here; API26 submits its hardware Surface before suspending.
                 val image = frame.layer.toImageBitmap()
-                if (!closed && frames[frame.key] === frame) frame.image = image
+                if (!closed && previewEpoch == epoch && frames[frame.key] === frame) frame.image = image
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                if (!closed && frames[frame.key] === frame) frame.image = null
+                if (!closed && previewEpoch == epoch && frames[frame.key] === frame) frame.image = null
                 android.util.Log.w("DaiyuBackPreview", "freeze failed type=${failure.javaClass.simpleName}")
             }
         }
@@ -117,6 +119,17 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             iterator.remove()
             frame.image = null
             release(frame)
+        }
+    }
+
+    fun clearPreviews() {
+        previewEpoch++
+        pending = null
+        frames.values.forEach {
+            it.capture?.cancel()
+            it.image = null
+            it.holdingForChild = false
+            it.childChangeCaptured = null
         }
     }
 

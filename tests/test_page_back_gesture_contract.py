@@ -237,7 +237,7 @@ class PageBackGestureContractTest(unittest.TestCase):
                        '"generation-settings" -> "settings"',
                        '"legacy-library" -> "backup"'):
             self.assertIn(wiring, target)
-        self.assertIn('themeKey, configuration, insetsKey, density, layoutDirection, resumed, previewScopeKey', self.host)
+        self.assertIn('themeKey, configuration, insetsKey, density, layoutDirection, previewScopeKey', self.host)
         self.assertIn('exit.animateTo(1f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f))', self.host)
         self.assertIn('if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)', self.host)
 

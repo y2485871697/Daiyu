@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import app.daiyu.android.BrowserVisualVisit
+import app.daiyu.android.browser.BrowserSheetUiState
 import app.daiyu.android.browser.ported.ui.browser.BrowserSheet
 import app.daiyu.android.browser.ported.ui.theme.OpenMinisBrowserTheme
 import app.daiyu.android.browser.ui.BrowserUiPool
@@ -16,6 +17,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun BrowserVisualScreen(
     visit: BrowserVisualVisit?, ownerCurrent: () -> Boolean,
     onBack: () -> Unit, modifier: Modifier = Modifier,
+    uiState: BrowserSheetUiState? = null,
 ) {
     val context = LocalContext.current
     val pool = remember(visit) { BrowserUiPool(context.applicationContext, visit) }
@@ -34,6 +36,7 @@ internal fun BrowserVisualScreen(
         }
     }
     OpenMinisBrowserTheme(darkTheme = MiuixTheme.colorScheme.surface.luminance() < 0.5f) {
-        WithoutPressRipple { BrowserSheet(pool, onBack) }
+        val presentation = uiState ?: remember { BrowserSheetUiState() }
+        WithoutPressRipple { BrowserSheet(pool, onBack, presentation) }
     }
 }

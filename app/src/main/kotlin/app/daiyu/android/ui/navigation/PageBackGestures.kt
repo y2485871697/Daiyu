@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.abs
 import kotlinx.coroutines.launch
@@ -144,7 +145,7 @@ private class PageBackCallbackSession {
     }
 }
 
-private val LocalPageBackPreviewFrame = staticCompositionLocalOf<PageBackPreviewLayers.Frame?> { null }
+internal val LocalPageBackPreviewFrame = staticCompositionLocalOf<PageBackPreviewLayers.Frame?> { null }
 
 /** Records only the page body when a surrounding overlay is not part of its back target. */
 @Composable
@@ -263,7 +264,8 @@ internal fun PageBackGestureHost(
     animateBackEnabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
     val resumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
     val background = MiuixTheme.colorScheme.background
     val density = LocalDensity.current
@@ -283,10 +285,17 @@ internal fun PageBackGestureHost(
     val bars = WindowInsets.systemBars
     val insetsKey = IntSize(bars.getTop(density), bars.getBottom(density))
     val scope = rememberCoroutineScope()
-    val layers = remember(graphics, themeKey, configuration, insetsKey, density, layoutDirection, resumed, previewScopeKey) {
+    val layers = remember(graphics, themeKey, configuration, insetsKey, density, layoutDirection, previewScopeKey) {
         PageBackPreviewLayers(graphics, scope)
     }
     DisposableEffect(layers) { onDispose { layers.close() } }
+    DisposableEffect(layers, lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) layers.clearPreviews()
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     val stack = remember(routeKey) { PageBackStackRegistry() }
     val stackPath = remember(stack) { PageBackStackPath(stack) }
     stack.freezeCurrent = { layers.freezeCurrent() }

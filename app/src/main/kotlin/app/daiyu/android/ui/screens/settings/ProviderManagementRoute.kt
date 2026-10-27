@@ -20,7 +20,6 @@ import app.daiyu.android.model.catalog.CatalogLocalEditResult
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.model.catalog.SavedModelCatalogPersistence
 import app.daiyu.android.storage.*
-import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -106,7 +105,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var query by remember { mutableStateOf("") }
     val directoryListState = rememberLazyListState()
     var authentication by remember { mutableStateOf(false) }
-    var managing by remember { mutableStateOf<RegisteredProvider?>(null) }
+    var selectedSlots by remember { mutableStateOf<Set<String>?>(null) }
     var detail by remember { mutableStateOf<ProviderDetail?>(null) }
     var openingSlot by remember { mutableStateOf<String?>(null) }
     var pausedDraft by remember { mutableStateOf<PausedProviderDraft?>(null) }
@@ -136,7 +135,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     }
     fun current(p: ProviderPagePermit) = visit.get() && p.live.get() && permit === p && resumed &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()
-    fun clearTransientPrompts() { confirmation = null; managing = null }
+    fun clearTransientPrompts() { confirmation = null; selectedSlots = null }
     fun clearPrompts() { creating?.revoke(); creating = null; clearTransientPrompts() }
     fun closeDetail() { serial++; loading = false; openingSlot = null; detail?.revoke(); detail = null; clearPrompts() }
     fun refresh() {
@@ -170,6 +169,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             if (!current(p) || serial != request) return@launch
             checkingRegistry = false
             result.fold(onSuccess = { (value, detailCurrent, cards) ->
+                if (registry?.revision != value.revision) selectedSlots = null
                 registry = value
                 summaries = cards
                 if (!detailCurrent && detail === previousDetail) {
@@ -232,7 +232,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         action: (ProviderRepository, Long, () -> Unit) -> ProviderRegistrySnapshot,
     ) {
         if (!current(p) || registry !== expected || detail != null || loading || busy != null) return
-        confirmation = null; managing = null
+        confirmation = null
         val navigation = serial
         val ticket = Any(); busy = ticket
         try {
@@ -303,6 +303,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         }
     }
     fun back() {
+        if (selectedSlots != null) { clearTransientPrompts(); return }
         oauthAttempt = null; oauthRegistryRevision = null; oauthReturned = false
         discardOAuth(oauthResult); oauthResult = null
         if (creating != null) { serial++; clearPrompts(); refresh(); return }
@@ -330,7 +331,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         authentication -> "provider-authentication"
         else -> null
     }, if (creating != null && authentication) "provider-authentication" else null) {
-        BackHandler(previewEnabled = !loading || initialSlot == ProviderRegistry.PRIMARY) { back() }
+        BackHandler(previewEnabled = selectedSlots == null && (!loading || initialSlot == ProviderRegistry.PRIMARY)) { back() }
         val p = permit
         val enabled = version.let { current(p) && controller.ready && controller.active == null &&
             !controller.dataBusy && !controller.hasLiveChildTasks() && busy == null && !loading && !checkingRegistry &&
@@ -594,14 +595,29 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }
             })
         } else {
+            val displayedRegistry = registry
+            val selection = selectedSlots
             ProviderDirectoryPage(registry, summaries, query, { query = it }, enabled && registry != null,
                 notice, onBack = { back() },
                 onAddOpenAi = { if (current(p) && enabled) authentication = true },
                 onAddAnthropic = { if (current(p) && enabled) creating = NewProviderDraft(ProviderProtocol.MESSAGES) },
                 onAddSpeech = { if (current(p) && enabled) creating = NewProviderDraft(ProviderProtocol.CHAT_COMPLETIONS, speechOnly = true) },
                 onOpen = { if (current(p) && enabled) open(it.slotId) },
-                onManage = { if (current(p) && enabled) managing = it }, modifier = Modifier.testTag("provider-management"),
-                listState = directoryListState)
+                onSelect = { if (current(p) && enabled && registry === displayedRegistry && selectedSlots == null) selectedSlots = setOf(it.slotId) },
+                selectedSlots = selectedSlots,
+                onSelectionChange = { if (current(p) && enabled && selection != null && selectedSlots === selection) selectedSlots = it },
+                onCancelSelection = { if (current(p) && enabled && selectedSlots === selection) clearTransientPrompts() },
+                onDeleteSelected = {
+                    val expected = displayedRegistry
+                    val selected = selection
+                    if (current(p) && enabled && registry === expected && selectedSlots === selected && expected != null && !selected.isNullOrEmpty()) {
+                        confirmation = ProviderConfirm("删除提供商", "确定删除选中的 ${selected.size} 个提供商？若包含当前提供商，将清空当前选择，不会自动切换。", true) {
+                            if (selectedSlots === selected) mutate(expected, p, completed = {
+                                selectedSlots = null; refresh()
+                            }) { repo, revision, admit -> repo.deleteSelected(revision, selected, admit) }
+                        }
+                    }
+                }, modifier = Modifier.testTag("provider-management"), listState = directoryListState)
         }
         if (d != null && !d.live.get()) d.error?.let { message ->
             val dismissError: () -> Unit = {
@@ -610,33 +626,6 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             DaiyuConfirmDialog("提供商设置", message, "知道了", false,
                 onConfirm = dismissError, onDismiss = dismissError)
         }
-        val managed = managing
-        val managedRegistry = registry
-        val managedSpeech = managed?.let { summaries[it.slotId]?.endpoint }?.let {
-            app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(it)
-        } == true
-        if (managed != null && managedRegistry != null) DaiyuChoiceSheet(managed.name,
-            listOf("配置与模型", if (managed.enabled) "禁用" else "启用") +
-                (if (managedSpeech) emptyList() else listOf("设为当前提供商")) + "删除提供商",
-            onSelect = { index ->
-                if (current(p) && enabled && managing === managed) {
-                    managing = null
-                    when (if (managedSpeech && index == 2) 3 else index) {
-                        0 -> open(managed.slotId)
-                        1 -> mutate(managedRegistry, p) { repo, revision, admit ->
-                            repo.setEnabled(revision, managed.slotId, !managed.enabled, admit)
-                        }
-                        2 -> if (managed.enabled && managedRegistry.activeSlotId != managed.slotId) {
-                            confirmation = ProviderConfirm("切换提供商", "后续新运行将使用此提供商的已保存配置。", false) {
-                                mutate(managedRegistry, p) { repo, revision, admit -> repo.activate(revision, managed.slotId, admit) }
-                            }
-                        }
-                        3 -> confirmation = ProviderConfirm("删除提供商", "将移除注册并撤销旧编辑入口；若为当前提供商则清空选择，不自动切换。不会安全擦除原加密配置。", true) {
-                            mutate(managedRegistry, p) { repo, revision, admit -> repo.delete(revision, managed.slotId, admit) }
-                        }
-                    }
-                }
-            }, onDismiss = { managing = null })
         val confirm = confirmation
         if (confirm != null) DaiyuConfirmDialog(confirm.title, confirm.message, "确认", confirm.destructive,
             onConfirm = { if (confirmation === confirm && current(p) && enabled) { confirmation = null; confirm.action() } },

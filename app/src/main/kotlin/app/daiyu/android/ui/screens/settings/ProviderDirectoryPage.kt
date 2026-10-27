@@ -2,7 +2,27 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import app.daiyu.android.ui.haptics.combinedClickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
+import app.daiyu.android.ui.haptics.miuix.TextButton
+import app.daiyu.android.ui.layout.WidePageContent
+import app.daiyu.android.ui.layout.horizontalCutoutPadding
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
@@ -37,51 +57,101 @@ internal fun ProviderDirectoryPage(
     registry: ProviderRegistrySnapshot?, summaries: Map<String, ProviderCardSummary>,
     query: String, onQuery: (String) -> Unit, enabled: Boolean, notice: String?,
     onBack: () -> Unit, onAddOpenAi: () -> Unit, onAddAnthropic: () -> Unit,
-    onOpen: (RegisteredProvider) -> Unit, onManage: (RegisteredProvider) -> Unit,
+    onOpen: (RegisteredProvider) -> Unit, onSelect: (RegisteredProvider) -> Unit,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     onAddSpeech: () -> Unit = {},
+    selectedSlots: Set<String>? = null,
+    onSelectionChange: (Set<String>) -> Unit = {},
+    onDeleteSelected: () -> Unit = {},
+    onCancelSelection: () -> Unit = {},
 ) {
-    SettingsScaffoldPage("模型提供商", onBack, modifier, listState = listState) {
-        item("provider-search") {
-            SettingsSearch(query, onQuery, "搜索提供商", "provider-search")
+    val rows = registry?.providers.orEmpty().filter { registration ->
+        query.isBlank() || registration.name.contains(query.trim(), ignoreCase = true) ||
+            summaries[registration.slotId]?.endpoint?.contains(query.trim(), ignoreCase = true) == true
+    }
+    Column(modifier.fillMaxSize().background(settingsPageBackground())) {
+        SettingsScaffoldPage("模型提供商", onBack, Modifier.weight(1f), listState = listState) {
+            item("provider-search") {
+                SettingsSearch(query, onQuery, "搜索提供商", "provider-search")
+            }
+            notice?.let { item("provider-notice") { SettingsNote(it, error = true) } }
+            item("provider-create") {
+                SettingsSectionTitle("新增提供商")
+                SettingsCard {
+                    SettingsRow("新增 OpenAI-compatible", summary = "支持 ChatGPT、DeepSeek、Kimi、GLM、Qwen 等",
+                        tag = "provider-add", leading = { DaiyuIcon(DaiyuIcons.Model, null, Modifier.testTag("provider-add-icon")) },
+                        showChevron = true, onClick = if (enabled && selectedSlots == null) onAddOpenAi else null)
+                    SettingsRow("新增 Anthropic", summary = "支持 Anthropic Claude 官方或兼容 API",
+                        tag = "provider-add-anthropic", leading = {
+                            Box(Modifier.size(24.dp).testTag("provider-add-anthropic-icon"), contentAlignment = Alignment.Center) {
+                                Text("AI")
+                            }
+                        },
+                        showChevron = true, onClick = if (enabled && selectedSlots == null) onAddAnthropic else null)
+                    SettingsRow("新增豆包语音", summary = "仅用于朗读，填写语音控制台 API Key，不是方舟聊天 Key。",
+                        tag = "provider-add-speech", leading = { DaiyuIcon(DaiyuIcons.Voice, null, Modifier.testTag("provider-add-speech-icon")) },
+                        showChevron = true, onClick = if (enabled && selectedSlots == null) onAddSpeech else null)
+                }
+            }
+            item("provider-count") {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        SettingsSectionTitle("已配置提供商（共 ${registry?.providers?.size ?: 0} 个）")
+                    }
+                    if (selectedSlots != null) {
+                        val visibleIds = rows.map { it.slotId }.toSet()
+                        val allSelected = visibleIds.isNotEmpty() && selectedSlots.containsAll(visibleIds)
+                        TextButton(text = if (allSelected) "取消全选" else "全选",
+                            enabled = enabled && visibleIds.isNotEmpty(),
+                            onClick = { onSelectionChange(if (allSelected) selectedSlots - visibleIds else selectedSlots + visibleIds) },
+                            modifier = Modifier.padding(end = 16.dp).testTag("provider-select-all"))
+                    }
+                }
+            }
+            rows.forEach { registration -> item(registration.slotId) {
+                SettingsCard(Modifier.padding(bottom = 8.dp)) {
+                    SettingsRow(registration.name, tag = "provider-open-${registration.slotId}",
+                        textModifier = Modifier.modelNameOpticalAlignment(),
+                        summary = summaries[registration.slotId]?.description(registration.enabled),
+                        leading = { DaiyuIcon(DaiyuIcons.Provider, null) },
+                        trailing = {
+                            if (selectedSlots != null) {
+                                val checked = registration.slotId in selectedSlots
+                                val colors = MiuixTheme.colorScheme
+                                Box(Modifier.size(24.dp).clip(CircleShape)
+                                    .background(if (checked) colors.primary else colors.surfaceVariant)
+                                    .testTag("provider-selection-${registration.slotId}"), contentAlignment = Alignment.Center) {
+                                    if (checked) DaiyuIcon(DaiyuIcons.Check, null, tint = colors.onPrimary, size = 18.dp)
+                                }
+                            } else if (registry?.activeSlotId == registration.slotId) DaiyuIcon(DaiyuIcons.Check, "当前提供商")
+                        },
+                        modifier = Modifier.semantics {
+                            if (selectedSlots != null) {
+                                role = Role.Checkbox
+                                toggleableState = if (registration.slotId in selectedSlots) ToggleableState.On else ToggleableState.Off
+                            }
+                        }.combinedClickable(enabled = enabled,
+                            onClick = {
+                                if (selectedSlots == null) onOpen(registration)
+                                else onSelectionChange(if (registration.slotId in selectedSlots) selectedSlots - registration.slotId
+                                    else selectedSlots + registration.slotId)
+                            }, onLongClickLabel = "选择提供商",
+                            onLongClick = { if (selectedSlots == null) onSelect(registration) }))
+                }
+            } }
         }
-        notice?.let { item("provider-notice") { SettingsNote(it, error = true) } }
-        item("provider-create") {
-            SettingsSectionTitle("新增提供商")
-            SettingsCard {
-                SettingsRow("新增 OpenAI-compatible", summary = "支持 ChatGPT、DeepSeek、Kimi、GLM、Qwen 等",
-                    tag = "provider-add", leading = { DaiyuIcon(DaiyuIcons.Model, null, Modifier.testTag("provider-add-icon")) },
-                    showChevron = true, onClick = if (enabled) onAddOpenAi else null)
-                SettingsRow("新增 Anthropic", summary = "支持 Anthropic Claude 官方或兼容 API",
-                    tag = "provider-add-anthropic", leading = {
-                        Box(Modifier.size(24.dp).testTag("provider-add-anthropic-icon"), contentAlignment = Alignment.Center) {
-                            Text("AI")
-                        }
-                    },
-                    showChevron = true, onClick = if (enabled) onAddAnthropic else null)
-                SettingsRow("新增豆包语音", summary = "仅用于朗读，填写语音控制台 API Key，不是方舟聊天 Key。",
-                    tag = "provider-add-speech", leading = { DaiyuIcon(DaiyuIcons.Voice, null, Modifier.testTag("provider-add-speech-icon")) },
-                    showChevron = true, onClick = if (enabled) onAddSpeech else null)
+        if (selectedSlots != null) WidePageContent(fillHeight = false) { sidePadding ->
+            Row(Modifier.fillMaxWidth().horizontalCutoutPadding().padding(horizontal = sidePadding)
+                .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)
+                .testTag("provider-selection-actions"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(text = "删除", enabled = enabled && selectedSlots.isNotEmpty(), onClick = onDeleteSelected,
+                    colors = ButtonDefaults.textButtonColorsPrimary(color = MiuixTheme.colorScheme.error, textColor = MiuixTheme.colorScheme.onError),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-delete-selected"))
+                TextButton(text = "取消", enabled = enabled, onClick = onCancelSelection,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-cancel-selection"))
             }
         }
-        item("provider-count") { SettingsSectionTitle("已配置提供商（共 ${registry?.providers?.size ?: 0} 个）") }
-        val rows = registry?.providers.orEmpty().filter { registration ->
-            query.isBlank() || registration.name.contains(query.trim(), ignoreCase = true) ||
-                summaries[registration.slotId]?.endpoint?.contains(query.trim(), ignoreCase = true) == true
-        }
-        rows.forEach { registration -> item(registration.slotId) {
-            SettingsCard(Modifier.padding(bottom = 8.dp)) {
-                SettingsRow(registration.name, tag = "provider-open-${registration.slotId}",
-                    textModifier = Modifier.modelNameOpticalAlignment(),
-                    summary = summaries[registration.slotId]?.description(registration.enabled),
-                    leading = { DaiyuIcon(DaiyuIcons.Provider, null) },
-                    trailing = { if (registry?.activeSlotId == registration.slotId) DaiyuIcon(DaiyuIcons.Check, "当前提供商") },
-                    modifier = Modifier.combinedClickable(enabled = enabled,
-                        onClick = { onOpen(registration) }, onLongClickLabel = "管理提供商",
-                        onLongClick = { onManage(registration) }))
-            }
-        } }
     }
 }
 

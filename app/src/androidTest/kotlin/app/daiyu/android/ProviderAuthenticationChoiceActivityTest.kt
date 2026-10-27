@@ -197,9 +197,12 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         node("provider-open-primary").assertDoesNotExist()
         node("provider-search").performTextReplacement("")
         reveal("provider-open-primary", "模型提供商").performTouchInput { longClick() }
-        ui.onNodeWithText("配置与模型").assertExists()
+        node("provider-open-primary").assertIsOn()
+        node("provider-selection-actions").assertIsDisplayed()
+        node("provider-delete-selected").assertIsEnabled()
+        ui.onNodeWithText("配置与模型").assertDoesNotExist()
         ui.onNodeWithText("重命名").assertDoesNotExist()
-        ui.onNodeWithText("删除提供商").assertExists()
+        ui.onNodeWithText("删除提供商").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
     fun testDoubaoAddRegistersPresetsWithoutChangingChatOrOpeningModel() {

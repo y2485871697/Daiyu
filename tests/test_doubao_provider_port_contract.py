@@ -14,7 +14,7 @@ class DoubaoProviderPortContractTest(unittest.TestCase):
     def test_speech_entry_has_gated_callback_not_a_placeholder(self):
         ui = source('ui/screens/settings/ProviderDirectoryPage.kt')
         row = ui.split('SettingsRow("新增豆包语音"', 1)[1].split('item("provider-count")', 1)[0]
-        self.assertIn('onClick = if (enabled) onAddSpeech else null', row)
+        self.assertIn('onClick = if (enabled && selectedSlots == null) onAddSpeech else null', row)
         host = source('ui/screens/settings/ProviderManagementRoute.kt')
         self.assertIn('onAddSpeech = { if (current(p) && enabled) creating = NewProviderDraft(ProviderProtocol.CHAT_COMPLETIONS, speechOnly = true) }', host)
         self.assertIn('providerName = "豆包语音"', host)

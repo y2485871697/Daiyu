@@ -45,10 +45,17 @@ internal class ProviderRepository(
             activeSlotId = old.activeSlotId.takeUnless { !enabled && it == slotId })
     }
     /** Logical deletion, not secure erasure. Removed slot IDs cannot be registered again. */
-    fun delete(expectedRevision: Long, slotId: String, admit: () -> Unit = {}) = registry.change(expectedRevision) { old ->
-        admit(); requireProvider(old, slotId)
-        old.copy(providers = old.providers.filterNot { it.slotId == slotId },
-            activeSlotId = old.activeSlotId.takeUnless { it == slotId })
+    fun delete(expectedRevision: Long, slotId: String, admit: () -> Unit = {}) =
+        deleteSelected(expectedRevision, setOf(slotId), admit)
+
+    fun deleteSelected(expectedRevision: Long, slotIds: Set<String>, admit: () -> Unit = {}): ProviderRegistrySnapshot {
+        val selected = slotIds.toSet()
+        require(selected.isNotEmpty())
+        return registry.change(expectedRevision) { old ->
+            admit(); selected.forEach { requireProvider(old, it) }
+            old.copy(providers = old.providers.filterNot { it.slotId in selected },
+                activeSlotId = old.activeSlotId.takeUnless { it in selected })
+        }
     }
     fun activate(expectedRevision: Long, slotId: String, admit: () -> Unit = {}) = registry.change(expectedRevision) { old ->
         admit(); check(requireProvider(old, slotId).enabled) { "提供商未启用" }

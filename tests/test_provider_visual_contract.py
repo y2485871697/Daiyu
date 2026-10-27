@@ -121,7 +121,7 @@ class ProviderVisualContractTest(unittest.TestCase):
         anthropic = source.split('SettingsRow("新增 Anthropic"', 1)[1].split('SettingsRow("新增豆包语音"', 1)[0]
         self.assertIn('Box(Modifier.size(24.dp).testTag("provider-add-anthropic-icon"), contentAlignment = Alignment.Center)', anthropic)
         self.assertIn('Text("AI")', anthropic)
-        self.assertIn('onClick = if (enabled) onAddAnthropic else null', anthropic)
+        self.assertIn('onClick = if (enabled && selectedSlots == null) onAddAnthropic else null', anthropic)
         for tag in ('provider-add-icon', 'provider-add-speech-icon'):
             self.assertIn(f'Modifier.testTag("{tag}")', source)
 

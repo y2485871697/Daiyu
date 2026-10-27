@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
@@ -44,10 +45,11 @@ internal fun isWideScreen(containerWidthPx: Int, density: androidx.compose.ui.un
 @Composable
 fun WidePageContent(
     modifier: Modifier = Modifier,
+    fillHeight: Boolean = true,
     content: @Composable (sidePadding: Dp) -> Unit,
 ) {
     val isWideScreen = rememberIsWideScreen()
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = modifier.then(if (fillHeight) Modifier.fillMaxSize() else Modifier.fillMaxWidth())) {
         val sidePadding = if (isWideScreen) {
             ((maxWidth - MaxPageContentWidth) / 2).coerceAtLeast(0.dp)
         } else {

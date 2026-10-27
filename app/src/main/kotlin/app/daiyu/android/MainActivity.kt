@@ -2642,6 +2642,7 @@ class MainActivity : ComponentActivity() {
         refresh()
         // Recreating an Activity never replays an external VIEW/import confirmation.
         if (state == null) offerOpenedBackup(intent)
+        consumeOpenedAttachments()
     }
 
     @Suppress("DEPRECATION")
@@ -5089,6 +5090,7 @@ class MainActivity : ComponentActivity() {
         if (intent.action == ChatApplication.OPEN_PET_SETTINGS) {
             dismissSidebar(); retainedPage = "pet-settings"
         } else offerOpenedBackup(intent)
+        consumeOpenedAttachments()
     }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
@@ -5141,6 +5143,7 @@ class MainActivity : ComponentActivity() {
             if (generationResumed() && generationInputsDelegate.isInitialized()) generationInputs.resume()
             presentBackupImportResult()
             settleChatReference()
+            consumeOpenedAttachments()
         }
     }
     override fun onPause() {
@@ -6111,7 +6114,42 @@ class MainActivity : ComponentActivity() {
             if (sidebarVisible || retainedPage == "manage" || paneSnapshotRevision != currentPaneRevision())
                 requestPaneRefresh(invalidate = false)
         }
+        consumeOpenedAttachments()
     }
+    private fun consumeOpenedAttachments() {
+        if (!app.daiyu.android.attachments.OpenedAttachmentInbox.hasPending() || !generationResumed()) return
+        if ((!controller.ready || !selectionReady) && controller.problem?.startsWith("会话恢复失败") != true) return
+        val batch = app.daiyu.android.attachments.OpenedAttachmentInbox.take() ?: return
+        val store = app.daiyu.android.attachments.OpenedFileStore(applicationContext)
+        var accepted = false
+        try {
+            if (!controller.ready || !selectionReady || batch.conversation != selected?.id?.value ||
+                controller.dataBusy || controller.active != null || pendingTextSend != null ||
+                controller.textSendState() != null || imageHost.busy || imageHost.hasAttachments ||
+                videoHost.state.items.isNotEmpty() || videoSending || shizukuWritesBlocked ||
+                controller.problem?.startsWith("会话恢复失败") == true) {
+                toast("当前会话已变化或正在运行；未添加附件，请稍后重新打开")
+                return
+            }
+            val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+            val original = draft
+            returnToChat(); dismissSidebar()
+            if (ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) != owner || draft != original ||
+                controller.dataBusy || pendingTextSend != null || controller.textSendState() != null) {
+                toast("当前会话已变化；未添加附件，请重新打开")
+                return
+            }
+            val references = batch.documents.joinToString("\n") { it.reference() }
+            val next = if (draft.isEmpty()) references else "$draft\n$references"
+            updateDraft(next)
+            accepted = draft == next
+            if (accepted) { selectionStart = next.length; selectionEnd = next.length; publishChat(rowsChanged = false) }
+            else toast("附件未加入；原草稿保留，请重新打开")
+        } finally {
+            if (!accepted) lifecycleScope.launch(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { batch.documents.forEach(store::remove) }
+        }
+    }
+
     private fun currentAssistantLabel(): String = try {
         val binding=selected?.id?.let(controller.database::assistantId) ?: if(selected==null) assistantStore.selectedId.value else null
         if(binding==null) "未绑定助手" else assistantStore.read(binding)?.name ?: "助手已删除，请重新绑定"

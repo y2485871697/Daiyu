@@ -82,15 +82,29 @@
             android:exported="true" android:excludeFromRecents="true"
             android:allowTaskReparenting="false" android:taskAffinity="app.daiyu.android.vd.anchor"
             android:launchMode="standard" android:theme="@style/Theme.Daiyu.Anchor" />
-        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
-            android:enableOnBackInvokedCallback="true" android:windowSoftInputMode="adjustResize">
-            <!-- Only JSON/ZIP documents with content grants; no file/http or wildcard MIME capture. -->
+        <provider android:name=".attachments.OpenedFileProvider"
+            android:authorities="${applicationId}.opened.attachments" android:exported="false" />
+        <activity android:name=".attachments.OpenAttachmentActivity" android:exported="true"
+            android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="content" android:mimeType="application/json" />
-                <data android:scheme="content" android:mimeType="application/zip" />
+                <data android:scheme="content" android:mimeType="*/*" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
+            android:enableOnBackInvokedCallback="true" android:windowSoftInputMode="adjustResize">
         </activity>
         <!-- Task17IconManifest.fragment("app.daiyu.android"): 8 x 8 original cat icons.
              Keep MainActivity enabled as the target; only aliases own launcher filters. -->

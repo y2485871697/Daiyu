@@ -470,14 +470,14 @@ class BackupActivityTest:ComposeActivityTestCase() {
         instrumentation.waitForIdleSync()
     }
     private fun implicitOpened(uri:Uri=textUri)=opened(uri).setComponent(null).setPackage(instrumentation.targetContext.packageName)
-    fun testImplicitViewDuringRecoveryDefersOneUriThenRequiresConfirmation() {
+    fun testExplicitBackupViewDuringRecoveryStillRequiresConfirmation() {
         val implicit=implicitOpened()
         assertNull(implicit.component)
         val resolved=instrumentation.targetContext.packageManager.resolveActivity(implicit,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
-        assertEquals(MainActivity::class.java.name,resolved?.activityInfo?.name)
+        assertEquals(app.daiyu.android.attachments.OpenAttachmentActivity::class.java.name,resolved?.activityInfo?.name)
         val before=controller.database.exportBackup()
         main {gate("not-ready")}
-        start(implicit)
+        start(opened())
         main {assertNotNull(deferred());assertNotNull(dialog())}
         node("dialog-confirm").assertTextEquals("取消打开")
         assertEquals(0,provider.opens.get());unchanged(before)
@@ -710,11 +710,12 @@ class BackupActivityTest:ComposeActivityTestCase() {
         main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
         assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get())
     }
-    fun testManifestOnlyResolvesContentJsonOrZipView() {
+    fun testManifestResolvesContentDocumentsToAttachmentReceiver() {
         val pm=instrumentation.targetContext.packageManager
-        val component=android.content.ComponentName(instrumentation.targetContext,MainActivity::class.java)
-        assertEquals(android.content.pm.ActivityInfo.LAUNCH_SINGLE_TOP,pm.getActivityInfo(component,0).launchMode)
-        fun resolves(uri:String,mime:String):Boolean {
+        val component=android.content.ComponentName(instrumentation.targetContext,app.daiyu.android.attachments.OpenAttachmentActivity::class.java)
+        assertEquals(android.content.pm.ActivityInfo.LAUNCH_SINGLE_TOP,pm.getActivityInfo(
+            android.content.ComponentName(instrumentation.targetContext,MainActivity::class.java),0).launchMode)
+        fun resolves(uri:String,mime:String?):Boolean {
             val intent=Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri),mime)
             assertNull(intent.component);assertNull(intent.`package`)
             return pm.queryIntentActivities(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY).any {
@@ -723,12 +724,13 @@ class BackupActivityTest:ComposeActivityTestCase() {
         }
         assertTrue(resolves("content://activity-backup/text.json","application/json"))
         assertTrue(resolves("content://activity-backup/full.zip","application/zip"))
+        assertTrue(resolves("content://activity-backup/unknown",null))
         assertFalse(resolves("file:///full.zip","application/zip"))
         assertFalse(resolves("https://example.invalid/full.zip","application/zip"))
         assertFalse(resolves("file:///text.json","application/json"))
         assertFalse(resolves("https://example.invalid/text.json","application/json"))
-        assertFalse(resolves("content://activity-backup/text.json","text/plain"))
-        assertFalse(resolves("content://activity-backup/text.json","application/octet-stream"))
+        assertTrue(resolves("content://activity-backup/text.json","text/plain"))
+        assertTrue(resolves("content://activity-backup/text.json","application/octet-stream"))
     }
 
     fun testExportResultAfterLeavingBackupDoesNotOpenTarget() {

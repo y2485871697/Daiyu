@@ -1,5 +1,6 @@
 package app.daiyu.android.platform
 
+import app.daiyu.android.attachments.OpenedFileStore
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -155,7 +156,8 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
         val uri = Uri.parse(arguments.text("uri"))
         if (uri.scheme != "content" || uri.authority.isNullOrBlank() || uri.userInfo != null || uri.fragment != null)
             throw Rejected("invalid_uri")
-        if (app.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED)
+        if (!OpenedFileStore(app).owns(uri) &&
+            app.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED)
             throw Rejected("uri_read_grant_required")
         return uri
     }

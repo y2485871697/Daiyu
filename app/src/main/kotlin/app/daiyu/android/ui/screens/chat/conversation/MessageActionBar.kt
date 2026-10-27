@@ -2,7 +2,6 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -78,7 +77,7 @@ internal fun MessageActionBar(
         }
         TooltipBox(text = "删除", enabled = messageActionsEnabled) {
             ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = messageActionsEnabled) {
-                Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = MiuixTheme.colorScheme.error)
+                Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = colors.muted)
             }
         }
         if (timestamp.isNotBlank()) {

@@ -106,10 +106,16 @@ class AppearanceRolesContractTest(unittest.TestCase):
         self.assertIn('containerColor = MiuixTheme.colorScheme.errorContainer', inline)
         self.assertIn('contentColor = MiuixTheme.colorScheme.onErrorContainer', inline)
         self.assertIn('tint = LocalContentColor.current', inline)
-        self.assertIn('tint = MiuixTheme.colorScheme.error)', source('ui/screens/chat/conversation/MessageActionBar.kt'))
         for path in ('ui/screens/settings/LocalCatalogModelsScreen.kt', 'ui/screens/settings/McpSettingsScreen.kt',
                      'ui/screens/settings/PrivateWorkspacePanel.kt', 'ui/screens/chat/ManageChatsScreen.kt'):
             self.assertIn('deletionAppearance = true', source(path))
+
+    def test_message_delete_keeps_original_neutral_toolbar_color(self):
+        bar = source('ui/screens/chat/conversation/MessageActionBar.kt')
+        delete = bar.split('TooltipBox(text = "删除", enabled = messageActionsEnabled)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
+        self.assertIn('ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = messageActionsEnabled)', delete)
+        self.assertIn('Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = colors.muted)', delete)
+        self.assertNotIn('colorScheme.error', delete)
 
     def test_explicit_theme_mode_and_tertiary_are_bridged_without_recoloring_browser(self):
         for path in ('ui/components/ConversationPanePreview.kt', 'ui/components/UsagePresentation.kt',

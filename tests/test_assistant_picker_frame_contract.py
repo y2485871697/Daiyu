@@ -27,10 +27,10 @@ class AssistantPickerFrameContractTest(unittest.TestCase):
         self.assertIn('private data class TypeFrame(', text)
         self.assertIn('private data class PickerFrame(', text)
 
-    def test_meta_labels_share_a_baseline_and_symmetric_vertical_insets(self):
+    def test_meta_labels_share_a_baseline_and_symmetric_insets(self):
         picker = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/assistants/AssistantPickerDialogs.kt').read_text()
         meta = picker.split('testTag("assistant-list-meta")', 1)[1].split('LazyColumn(', 1)[0]
-        self.assertIn('.padding(horizontal = 2.dp * s, vertical = 8.dp * s)', meta)
+        self.assertIn('.padding(horizontal = 6.dp * s, vertical = 8.dp * s)', meta)
         self.assertIn('verticalAlignment = Alignment.CenterVertically', meta)
         self.assertIn('horizontalArrangement = Arrangement.SpaceBetween', meta)
         self.assertEqual(2, meta.count('Modifier.alignByBaseline()'))
@@ -39,6 +39,8 @@ class AssistantPickerFrameContractTest(unittest.TestCase):
         for oracle in ('val meta = frame.bounds[8]', 'text(R.string.assistant_list_hint)',
                        'assertEquals(search.bottom, meta.top, .51f)',
                        'assertEquals(meta.bottom, list.top, .51f)',
+                       'assertEquals(6f, dp(count.bounds.left - meta.left), .6f)',
+                       'assertEquals(6f, dp(meta.right - hint.bounds.right), .6f)',
                        'minOf(count.bounds.top, hint.bounds.top) - meta.top',
                        'meta.bottom - maxOf(count.bounds.bottom, hint.bounds.bottom)',
                        'count.bounds.top + count.firstBaseline, hint.bounds.top + hint.firstBaseline'):

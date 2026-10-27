@@ -96,7 +96,7 @@ fun AssistantPickerDialog(
             modifier = Modifier.testTag("assistant-search"),
             fieldModifier = Modifier.testTag("assistant-search-input"))
         Row(Modifier.fillMaxWidth().testTag("assistant-list-meta")
-            .padding(horizontal = 2.dp * s, vertical = 8.dp * s),
+            .padding(horizontal = 6.dp * s, vertical = 8.dp * s),
             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.assistant_count, filtered.size), color = colors.muted,
                 modifier = Modifier.alignByBaseline(), fontSize = (11f * s).sp, lineHeight = (16f * s).sp)

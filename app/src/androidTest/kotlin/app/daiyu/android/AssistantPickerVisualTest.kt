@@ -160,6 +160,8 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertEquals(44f, dp(search.height), dp(1f) + .01f)
             assertEquals(search.bottom, meta.top, .51f)
             assertEquals(meta.bottom, list.top, .51f)
+            assertEquals(6f, dp(count.bounds.left - meta.left), .6f)
+            assertEquals(6f, dp(meta.right - hint.bounds.right), .6f)
             assertEquals(8f, dp(minOf(count.bounds.top, hint.bounds.top) - meta.top), .6f)
             assertEquals(8f, dp(meta.bottom - maxOf(count.bounds.bottom, hint.bounds.bottom)), .6f)
             assertEquals(count.bounds.top + count.firstBaseline, hint.bounds.top + hint.firstBaseline, .51f)

@@ -137,10 +137,10 @@ private fun SettingsHomeRows(entries: List<SettingsEntry>, diagnosticsUi: Settin
             entry.id == "relay" -> {
                 SettingsRow(entry.title, summary = entry.summary, leading = { SettingsIcon(entry.icon) }, onClick = { open(entry) },
                     trailing = {
-                        DaiyuIcon(if (relayExpanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
-                            if (relayExpanded) "收起" else "展开", size = 20.dp)
+                        DaiyuIcon(DaiyuIcons.ChevronRight,
+                            if (relayExpanded) "收起" else "展开", modifier = Modifier.settingsDisclosureRotation(relayExpanded), size = 20.dp)
                     })
-                if (relayExpanded) Column(Modifier.padding(start = 66.dp)) {
+                SettingsExpandableContent(relayExpanded, Modifier.padding(start = 66.dp)) {
                     entries.filter { it.id in setOf("relay_st", "relay_moyu") }.forEach { child ->
                         SettingsRow(child.title, onClick = { open(child) })
                     }

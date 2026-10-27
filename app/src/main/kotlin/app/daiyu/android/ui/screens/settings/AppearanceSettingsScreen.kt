@@ -27,7 +27,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -153,7 +152,7 @@ internal fun AppearanceSettingsScreen(
                 SettingsRow("图标", onClick = { iconExpanded = !iconExpanded },
                     modifier = Modifier.semantics { stateDescription = if (iconExpanded) "已展开" else "已收起" },
                     trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null,
-                        modifier = Modifier.rotate(if (iconExpanded) 180f else 0f),
+                        modifier = Modifier.settingsDisclosureRotation(iconExpanded, expandedDegrees = 180f),
                         tint = colors.onSurfaceVariantSummary, size = 20.dp) })
                 iconContent(iconExpanded)
             }
@@ -215,7 +214,7 @@ internal fun AppearanceSettingsScreen(
                                 checkedBorderColor = DaiyuPalette.switchTrack),
                             onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) })
                     })
-                if (state.morphLoadingIndicator && loadingExpanded) {
+                SettingsExpandableContent(state.morphLoadingIndicator && loadingExpanded) {
                     SettingsSwitchRow("仅消息生成前", state.morphLoadingBeforeResponseOnly) {
                         onChange(state.copy(morphLoadingBeforeResponseOnly = it))
                     }

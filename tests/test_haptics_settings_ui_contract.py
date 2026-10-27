@@ -55,7 +55,8 @@ class HapticsSettingsUiContractTest(unittest.TestCase):
         self.assertIn('private fun HapticsSwitchSlot(', self.source)
         slot = self.source.split('private fun HapticsSwitchSlot(', 1)[1]
         self.assertIn('if (expanded != null)', slot)
-        self.assertIn('if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight', slot)
+        self.assertIn('DaiyuIcons.ChevronRight', slot)
+        self.assertIn('Modifier.settingsDisclosureRotation(expanded)', slot)
         self.assertIn('contentDescription = if (expanded) "收起$title" else "展开$title"', slot)
         self.assertIn('size = 16.dp', slot)
         self.assertIn('Row(Modifier.size(width = 72.dp, height = 48.dp)', slot)

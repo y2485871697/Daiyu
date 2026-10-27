@@ -21,7 +21,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -82,13 +81,14 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     var expanded by rememberSaveable(headers, draft.protocol) { mutableStateOf(false) }
     val latestDraft by rememberUpdatedState(draft)
     val latestEnabled by rememberUpdatedState(enabled)
+    val latestExpanded by rememberUpdatedState(expanded)
     val latestChange by rememberUpdatedState(onDraftChange)
     DisposableEffect(lifecycle, visit) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) { expanded = false; epoch++ } }
         lifecycle.addObserver(observer)
         onDispose { visit.set(false); lifecycle.removeObserver(observer) }
     }
-    fun current() = visit.get() && epoch == callbackEpoch && latestEnabled && latestDraft === draft && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    fun current() = visit.get() && epoch == callbackEpoch && latestEnabled && latestExpanded && latestDraft === draft && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun update(value: List<ProviderFieldRow>) {
         if (!current()) return
         val problem = value.mapIndexedNotNull { index, row -> when {
@@ -119,8 +119,8 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
         summary = if (headers) "可覆盖 User-Agent；认证与传输请求头由系统管理。" else "值使用 JSON 格式，字符串请加双引号；不是请求头。",
         tag = if (headers) "model-custom-headers" else "model-body-fields",
         onClick = if (enabled) ({ expanded = !expanded }) else null,
-        trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.rotate(if (expanded) 180f else 0f)) })
-    if (expanded) {
+        trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.settingsDisclosureRotation(expanded, expandedDegrees = 180f)) })
+    SettingsExpandableContent(expanded) {
         rows.forEachIndexed { index, row -> key(row.id) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 12.dp)
                 .testTag("$prefix-row:$index"), verticalAlignment = Alignment.CenterVertically) {
@@ -170,8 +170,11 @@ internal fun ProviderGatewayEditor(draft: SessionGatewayRule, enabled: Boolean,
     SettingsRow("网关", summary = "${draft.modelPattern} · ${draft.keyField}", tag = "provider-session-gateway",
         onClick = if (enabled) ({ expanded = !expanded }) else null,
         modifier = Modifier.semantics { this[RetainedProviderGatewayChange] = draft to onDraftChange },
-        trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.rotate(if (expanded) 180f else 0f)) })
-    if (expanded) SessionGatewayFields(draft, enabled, onDraftChange)
+        trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.settingsDisclosureRotation(expanded, expandedDegrees = 180f)) })
+    val latestExpanded by rememberUpdatedState(expanded)
+    SettingsExpandableContent(expanded) {
+        SessionGatewayFields(draft, enabled && expanded) { if (latestExpanded) onDraftChange(it) }
+    }
 }
 
 @Composable

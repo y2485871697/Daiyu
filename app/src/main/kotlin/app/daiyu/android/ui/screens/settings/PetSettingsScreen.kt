@@ -52,9 +52,9 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                 SettingsRow("鲸鱼女仆", tag = "pet-options-toggle",
                     modifier = Modifier.semantics { stateDescription = if (expanded) "已展开" else "已收起" },
                     onClick = { expanded = !expanded }, trailing = {
-                        DaiyuIcon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
+                        DaiyuIcon(DaiyuIcons.ChevronRight,
                             contentDescription = if (expanded) "收起桌宠选项" else "展开桌宠选项",
-                            modifier = Modifier.padding(end = 12.dp).size(20.dp).testTag("pet-options-chevron"))
+                            modifier = Modifier.padding(end = 12.dp).size(20.dp).settingsDisclosureRotation(expanded).testTag("pet-options-chevron"))
                         SettingsSwitch(checked = settings.enabled, enabled = enabled,
                             modifier = Modifier.testTag("pet-enabled").semantics { contentDescription = "鲸鱼女仆开关" },
                             onCheckedChange = { host.setEnabled(it) },
@@ -67,7 +67,7 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
                                 uncheckedBorderColor = colors.onSurfaceVariantSummary,
                             ))
                     })
-                if (expanded) {
+                SettingsExpandableContent(expanded) {
                     SettingsSwitchRow("任务结束后说话", settings.workReactions, enabled,
                         tag = "pet-work-reactions") {
                         host.updateSettings(host.snapshot().pet.state.settings.copy(workReactions = it))

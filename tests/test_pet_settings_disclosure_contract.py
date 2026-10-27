@@ -15,24 +15,24 @@ class PetSettingsDisclosureContractTest(unittest.TestCase):
             self.assertNotIn(obsolete, self.screen)
         self.assertIn('tag = "pet-options-toggle"', self.screen)
         self.assertIn('onClick = { expanded = !expanded }', self.screen)
-        self.assertIn('if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight', self.screen)
+        self.assertIn('DaiyuIcons.ChevronRight', self.screen)
         self.assertIn('stateDescription = if (expanded) "已展开" else "已收起"', self.screen)
 
     def test_disclosure_is_initially_collapsed_and_saveable_per_host(self):
         self.assertIn('var expanded by rememberSaveable(host) { mutableStateOf(false) }', self.screen)
-        body = self.screen.split('if (expanded) {', 1)[1]
+        body = self.screen.split('SettingsExpandableContent(expanded) {', 1)[1]
         for tag in ('pet-work-reactions', 'pet-global-visible', 'pet-custom-model', 'pet-model-configure'):
             self.assertIn('tag = "' + tag + '"', body)
         self.assertNotIn('if (settings.enabled', self.screen)
 
     def test_power_switch_is_independent_of_disclosure(self):
-        header = self.screen.split('SettingsRow("鲸鱼女仆"', 1)[1].split('if (expanded) {', 1)[0]
+        header = self.screen.split('SettingsRow("鲸鱼女仆"', 1)[1].split('SettingsExpandableContent(expanded) {', 1)[0]
         self.assertIn('SettingsSwitch(checked = settings.enabled', header)
         self.assertIn('onCheckedChange = { host.setEnabled(it) }', header)
         self.assertIn('Modifier.testTag("pet-enabled")', header)
         self.assertNotIn('SettingsSwitchRow("鲸鱼女仆"', self.screen)
         self.assertIn('contentDescription = "鲸鱼女仆开关"', header)
-        self.assertLess(header.index('DaiyuIcons.ChevronDown'), header.index('SettingsSwitch('))
+        self.assertLess(header.index('DaiyuIcons.ChevronRight'), header.index('SettingsSwitch('))
         self.assertEqual(1, header.count('expanded = !expanded'))
 
     def test_model_choice_and_save_guards_remain_real(self):

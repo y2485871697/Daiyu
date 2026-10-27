@@ -75,28 +75,28 @@ internal fun IconAppearanceEditor(
             if (failure == null) confirmed = draft
         }
     }
-    if (!expanded) return
-
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp)
-        .testTag("icon-appearance-editor"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
-            IconPreview("浅色图标预览", "icon-preview:light", draft.iconLightColor, draft.iconCatColor)
-            IconPreview("暗色图标预览", "icon-preview:dark", draft.iconDarkColor, draft.iconCatColor)
+    SettingsExpandableContent(expanded) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp)
+            .testTag("icon-appearance-editor"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
+                IconPreview("浅色图标预览", "icon-preview:light", draft.iconLightColor, draft.iconCatColor)
+                IconPreview("暗色图标预览", "icon-preview:dark", draft.iconDarkColor, draft.iconCatColor)
+            }
+            IconSwatches("浅色", "light", draft.iconLightColor) { if (current()) draft = draft.copy(iconLightColor = it) }
+            IconSwatches("暗色", "dark", draft.iconDarkColor) { if (current()) draft = draft.copy(iconDarkColor = it) }
+            IconSwatches("猫咪颜色", "cat", draft.iconCatColor) { if (current()) draft = draft.copy(iconCatColor = it) }
+            AssistantPreviewButton("确定", onClick = { confirm() },
+                modifier = Modifier.fillMaxWidth().testTag("icon-appearance-confirm").semantics {
+                    onClick {
+                        if ((draft != confirmed || error != null) && current()) {
+                            TouchHaptics.action(feedbackView) { confirm() }; true
+                        } else false
+                    }
+                },
+                primary = true, enabled = draft != confirmed || error != null)
+            error?.let { Text(it, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2,
+                modifier = Modifier.testTag("icon-appearance-error")) }
         }
-        IconSwatches("浅色", "light", draft.iconLightColor) { if (current()) draft = draft.copy(iconLightColor = it) }
-        IconSwatches("暗色", "dark", draft.iconDarkColor) { if (current()) draft = draft.copy(iconDarkColor = it) }
-        IconSwatches("猫咪颜色", "cat", draft.iconCatColor) { if (current()) draft = draft.copy(iconCatColor = it) }
-        AssistantPreviewButton("确定", onClick = { confirm() },
-            modifier = Modifier.fillMaxWidth().testTag("icon-appearance-confirm").semantics {
-                onClick {
-                    if ((draft != confirmed || error != null) && current()) {
-                        TouchHaptics.action(feedbackView) { confirm() }; true
-                    } else false
-                }
-            },
-            primary = true, enabled = draft != confirmed || error != null)
-        error?.let { Text(it, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2,
-            modifier = Modifier.testTag("icon-appearance-error")) }
     }
 }
 

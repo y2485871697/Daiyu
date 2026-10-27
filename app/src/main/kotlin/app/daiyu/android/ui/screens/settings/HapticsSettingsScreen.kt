@@ -137,9 +137,11 @@ internal fun HapticsSettingsScreen(
                                 onCheckedChange = { if (save { copy(background = it) }) expanded = it })
                         }
                     })
-                if (expanded && settings.backgroundOn) HapticsSwitchRow(
-                    "后台推理过程震动", settings.backgroundReasoning, true,
-                ) { save { copy(backgroundReasoning = it) } }
+                SettingsExpandableContent(expanded && settings.backgroundOn) {
+                    HapticsSwitchRow("后台推理过程震动", settings.backgroundReasoning, true) {
+                        save { copy(backgroundReasoning = it) }
+                    }
+                }
             }
         }
         error?.let { message -> item(key = "haptics_error") { SettingsNote(message, error = true) } }
@@ -195,7 +197,7 @@ private fun HapticsSwitchSlot(title: String, expanded: Boolean? = null, content:
     Row(Modifier.size(width = 72.dp, height = 48.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween) {
         if (expanded != null) DaiyuIcon(
-            if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
+            DaiyuIcons.ChevronRight, modifier = Modifier.settingsDisclosureRotation(expanded),
             contentDescription = if (expanded) "收起$title" else "展开$title",
             size = 16.dp, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         ) else Box(Modifier.size(16.dp))

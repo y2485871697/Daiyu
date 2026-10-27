@@ -4,6 +4,7 @@ import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.colorContentColor
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.readableAccent
+import app.daiyu.android.ui.app.resolvedPrimaryAccent
 import app.daiyu.android.ui.app.styleColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -15,9 +16,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun LinuxSettingsTheme(content: @Composable () -> Unit) {
     val dark = MiuixTheme.colorScheme.background.luminance() < .5f
-    val primary = DaiyuPalette.switchTrack
-    val onPrimary = colorContentColor(primary)
     val appearance = LocalAppearanceSettings.current
+    val primary = DaiyuPalette.switchTrack
+    val onPrimary = appearance.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White
     val container = appearance.secondaryAccentColor?.let { Color(it).copy(alpha = .14f) }
         ?: appearance.styleColor(Color(if (dark) 0xff302a36 else 0xffeee9f1))
     val onContainer = appearance.secondaryAccentColor?.let { readableAccent(Color(it), dark) }

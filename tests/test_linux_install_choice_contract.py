@@ -72,7 +72,7 @@ class LinuxInstallChoiceContract(unittest.TestCase):
         self.assertIn('.background(if (checked) DaiyuPalette.switchTrack else Color(0x28b4aabb))', actual_switch)
         self.assertIn('.border(1.dp, if (checked) DaiyuPalette.switchTrack else colors.line, shape)', actual_switch)
         self.assertIn('val primary = DaiyuPalette.switchTrack', theme)
-        for token in ['val onPrimary = colorContentColor(primary)', 'MiuixTheme(colors = MiuixTheme.colorScheme.copy(',
+        for token in ['val onPrimary = appearance.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White', 'MiuixTheme(colors = MiuixTheme.colorScheme.copy(',
                       'MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(',
                       'primaryVariant = primary', 'disabledPrimaryButton = container',
                       'primaryContainer = container, onPrimaryContainer = onContainer']:
@@ -82,6 +82,19 @@ class LinuxInstallChoiceContract(unittest.TestCase):
         self.assertIn('ButtonDefaults.buttonColorsPrimary()', screen)
         self.assertIn('MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton', screen)
         self.assertIn('import app.daiyu.android.ui.app.DaiyuPalette', theme)
+
+    def test_default_primary_restores_white_foreground_without_disabling_custom_contrast(self):
+        theme = (SETTINGS / 'LinuxSettingsTheme.kt').read_text()
+        self.assertIn('import app.daiyu.android.ui.app.resolvedPrimaryAccent', theme)
+        self.assertIn('val onPrimary = appearance.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White', theme)
+        self.assertNotIn('val onPrimary = colorContentColor(primary)', theme)
+        nav = (ANDROID / 'LinuxSettingsNavigationTest.kt').read_text()
+        self.assertIn('assertEquals(Color.White, colors.onPrimary)', nav)
+        self.assertNotIn('assertEquals(Color.Black, colors.onPrimary)', nav)
+        self.assertIn('testCustomPrimaryStillUsesReadableForegroundInBothThemes', nav)
+        self.assertIn('0xff000000.toInt() to Color.White', nav)
+        self.assertIn('0xffffffff.toInt() to Color.Black', nav)
+        self.assertIn('assertEquals(colors.onPrimary, materialColors.onPrimary)', nav)
 
     def test_upload_is_upward_existing_vector_but_remains_real_import(self):
         panel = (SETTINGS / 'PrivateWorkspacePanel.kt').read_text()

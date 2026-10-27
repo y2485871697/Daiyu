@@ -3,6 +3,8 @@ package app.daiyu.android.ui.screens.settings
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,18 +25,22 @@ import kotlin.math.abs
 
 class LinuxSettingsNavigationTest : WiredActivityTestCase() {
     private lateinit var colors: Colors
+    private lateinit var materialColors: ColorScheme
 
-    private fun show(dark: Boolean = false, fontScale: Float = 1f, locationsEnabled: Boolean = true) {
+    private fun show(dark: Boolean = false, fontScale: Float = 1f, locationsEnabled: Boolean = true,
+        primaryAccentColor: Int? = null) {
         val showKey = Any()
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                        primaryAccentColor = primaryAccentColor),
                         applyInterfaceScale = false) {
                         LinuxSettingsTheme {
                         val themeColors = MiuixTheme.colorScheme
-                        SideEffect { colors = themeColors }
+                        val materialThemeColors = MaterialTheme.colorScheme
+                        SideEffect { colors = themeColors; materialColors = materialThemeColors }
                         var tab by remember(showKey) { mutableStateOf(LinuxSettingsTab.BASIC) }
                         var location by remember(showKey) { mutableStateOf(LinuxFileLocation.WORKSPACE) }
                         Column(Modifier.width(320.dp)) {
@@ -84,7 +90,8 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
             show(dark = dark)
             ui.waitForIdle()
             assertEquals(Color(0xff82728f), colors.primary)
-            assertEquals(Color.Black, colors.onPrimary)
+            assertEquals(Color.White, colors.onPrimary)
+            assertPrimaryThemePairsMatch()
             assertColorPair(ui.onNodeWithTag("linux-tab-indicator:basic", useUnmergedTree = true),
                 colors.primary, colors.onPrimary)
             assertColorPair(node("linux-tab:files"), colors.primaryContainer, colors.onPrimaryContainer)
@@ -99,6 +106,37 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
             assertColorPair(node("linux-files:rootfs"), colors.primary, colors.onPrimary)
             assertColorPair(node("linux-files:workspace"), colors.primaryContainer, colors.onPrimaryContainer)
         }
+    }
+
+    fun testCustomPrimaryStillUsesReadableForegroundInBothThemes() {
+        for (dark in listOf(false, true)) {
+            for ((accent, foreground) in listOf(
+                0xff000000.toInt() to Color.White, 0xffffffff.toInt() to Color.Black,
+            )) {
+                show(dark = dark, primaryAccentColor = accent)
+                ui.waitForIdle()
+                assertEquals(Color(accent), colors.primary)
+                assertEquals(foreground, colors.onPrimary)
+                assertPrimaryThemePairsMatch()
+                assertColorPair(ui.onNodeWithTag("linux-tab-indicator:basic", useUnmergedTree = true),
+                    colors.primary, foreground)
+                assertColorPair(node("linux-files:workspace"), colors.primary, foreground)
+                node("linux-tab:files").performClick().assertIsSelected()
+                node("linux-files:rootfs").performClick().assertIsSelected()
+                assertColorPair(ui.onNodeWithTag("linux-tab-indicator:files", useUnmergedTree = true),
+                    colors.primary, foreground)
+                assertColorPair(node("linux-files:rootfs"), colors.primary, foreground)
+            }
+        }
+    }
+
+    private fun assertPrimaryThemePairsMatch() {
+        assertEquals(colors.primary, colors.primaryVariant)
+        assertEquals(colors.onPrimary, colors.onPrimaryVariant)
+        assertEquals(colors.primary, materialColors.primary)
+        assertEquals(colors.onPrimary, materialColors.onPrimary)
+        assertEquals(colors.primaryContainer, materialColors.primaryContainer)
+        assertEquals(colors.onPrimaryContainer, materialColors.onPrimaryContainer)
     }
 
     private fun assertColorPair(target: SemanticsNodeInteraction, background: Color, foreground: Color) {

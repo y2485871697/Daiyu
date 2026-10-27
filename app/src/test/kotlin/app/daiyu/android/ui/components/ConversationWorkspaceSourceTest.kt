@@ -14,11 +14,14 @@ class ConversationWorkspaceSourceTest {
         assertTrue(source.contains("if (!choosing)"))
         assertTrue(source.contains("workspace-path-card"))
         assertTrue(source.contains("LazyColumn"))
+        assertTrue(source.contains("resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)"))
+        assertTrue(source.contains("if (!choosing) ConversationAgentIconButton(onClick = onDismiss,"))
+        assertFalse(source.contains("MiuixTheme.colorScheme"))
         assertTrue(source.contains("onClick = onSave"))
         assertTrue(source.contains("onClick = onCancel"))
         assertTrue(source.contains("onSourceChange(source.id)"))
-        assertTrue(source.contains("primaryColor = theme.secondary, onPrimaryColor = theme.onSecondary"))
-        assertTrue(source.contains("primaryColor = theme.primary, onPrimaryColor = theme.onPrimary"))
+        assertTrue(source.contains("primaryColor = actions.secondaryContainer, onPrimaryColor = actions.onSecondary"))
+        assertTrue(source.contains("primaryColor = actions.primary, onPrimaryColor = actions.onPrimary"))
         for (forbidden in listOf("java.io", "java.nio", "LocalContext", "filesDir", "SharedPreferences",
             "ChatController", "rememberSaveable", "LaunchedEffect", "mutableStateOf", "BasicTextField", "bodySmall", "Color(0x")) {
             assertFalse("UI must not own filesystem, persistence or screenshot colors: $forbidden", source.contains(forbidden))

@@ -35,10 +35,17 @@ class WorkspacePickerContract(unittest.TestCase):
         self.assertIn('useDefaultHeight = choosing', sheet)
         self.assertIn('LazyColumn', sheet)
         self.assertLess(sheet.index('LazyColumn'), sheet.index('ConversationAgentButton("取消"'))
-        self.assertIn('primaryColor = theme.secondary, onPrimaryColor = theme.onSecondary', sheet)
-        self.assertIn('primaryColor = theme.primary, onPrimaryColor = theme.onPrimary', sheet)
+        self.assertIn('primaryColor = actions.secondaryContainer, onPrimaryColor = actions.onSecondary', sheet)
+        self.assertIn('primaryColor = actions.primary, onPrimaryColor = actions.onPrimary', sheet)
         self.assertNotIn('Color(0x', sheet)
         self.assertIn('directory?.selectable == true', sheet)
+
+    def test_picker_resolves_saved_accents_and_hides_only_its_close_button(self):
+        sheet = self.text('ui/components/ConversationWorkspaceSheet.kt')
+        self.assertIn('resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)', sheet)
+        self.assertNotIn('MiuixTheme.colorScheme', sheet)
+        self.assertIn('if (!choosing) ConversationAgentIconButton(onClick = onDismiss,', sheet)
+        self.assertEqual(sheet.count('testTag("workspace-close")'), 1)
 
     def test_only_use_saves_cancel_discards_draft(self):
         main = self.text('MainActivity.kt')

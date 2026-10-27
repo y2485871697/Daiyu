@@ -1742,6 +1742,7 @@ class MainActivity : ComponentActivity() {
     private var automaticCompression by mutableStateOf<Boolean?>(null)
     private var automaticCompressionPending by mutableStateOf(false)
     private var confirmedModelLabel by mutableStateOf("模型")
+    private var confirmedReasoningModel by mutableStateOf("")
     private var confirmedGptSpeed: ChatGptSpeedSelection? = null
     private var gptSpeedSaveOwner: ModelSettingsSaveOwner? = null
     private var contextModelRevision by mutableStateOf(0L)
@@ -2607,11 +2608,11 @@ class MainActivity : ComponentActivity() {
                 // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
                 val thinkingSpeed = confirmedGptSpeed
-                SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = reasoningPreference.get(thinkingOwner),
+                SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = ReasoningEffort.textPreference(reasoningPreference.get(thinkingOwner), model = confirmedReasoningModel),
                     mainChat = true, speedMode = chatState.composer.gptSpeedMode,
                     speedEnabled = chatState.composer.gptSpeedEnabled,
                     onCycleSpeed = { cycleChatGptSpeed(thinkingSpeed, thinkingOwner) },
-                    options = ReasoningEffort.entries.filter { it != ReasoningEffort.DEFAULT },
+                    options = ReasoningEffort.textChoices(confirmedReasoningModel),
                     onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
                         if (activityUsable() && selected?.id?.value == thinkingOwner) {
                             try { reasoningPreference.set(thinkingOwner, effort); publishChat() }
@@ -6243,7 +6244,7 @@ class MainActivity : ComponentActivity() {
                 imageSendBlocked = inlineMessageEditor == null && (imageHost.busy || imageHost.hasAttachments &&
                     (!imageHost.session.attachments.state.value.canSubmit || state != null)),
                 modelLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
-                reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
+                reasoningLabel = try { ReasoningEffort.textPreference(reasoningPreference.snapshot(selected?.id?.value), model = confirmedReasoningModel).displayName } catch (_: Exception) { "配置无效，需重存" },
                 gptSpeedMode = confirmedGptSpeed?.mode,
                 gptSpeedSaving = composerAvailable && gptSpeedSaveOwner != null,
                 gptSpeedEnabled = allowed && controller.active == null && !controller.hasLiveChildTasks() &&
@@ -6336,6 +6337,9 @@ class MainActivity : ComponentActivity() {
             }.getOrNull() }
             if (activityUsable() && modelLabelRead === request) {
                 confirmedModelLabel = saved?.second?.settings?.model?.ifBlank { "模型" } ?: "模型"
+                confirmedReasoningModel = saved?.second?.settings?.let {
+                    runCatching { app.daiyu.android.model.ReasoningRequestPolicy.requestModel(it.model, it.requestOptions) }.getOrNull()
+                }.orEmpty()
                 confirmedGptSpeed = saved?.let { ChatGptSpeedSelection(it.first, it.second) }
                 publishChat(rowsChanged = false)
                 contextModelRevision++
@@ -6420,6 +6424,9 @@ class MainActivity : ComponentActivity() {
             val saved = active?.settings
             chatModelSettings = saved
             confirmedModelLabel = saved?.model?.ifBlank { "模型" } ?: "模型"
+            confirmedReasoningModel = saved?.let {
+                runCatching { app.daiyu.android.model.ReasoningRequestPolicy.requestModel(it.model, it.requestOptions) }.getOrNull()
+            }.orEmpty()
             contextModelRevision++
             val session = result?.let {
                 LocalCatalogChatModelPickerSession(active?.catalog, saved?.model.orEmpty(),

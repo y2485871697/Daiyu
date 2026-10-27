@@ -9,8 +9,8 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
     def test_display_and_child_freeze_share_concrete_text_resolution(self):
         ui = (SRC / 'ui/components/subagent/SubAgentThinkingPreference.kt').read_text()
         runtime = (SRC / 'delegation/SavedSubAgentRuntimeBindings.kt').read_text()
-        self.assertIn('ReasoningEffort.textPreference(profile.reasoning, config.effectiveReasoningEffort)', ui)
-        self.assertIn('ReasoningEffort.textPreference(profile.reasoning, model.defaultReasoning)', runtime)
+        self.assertIn('ReasoningEffort.textPreference(profile.reasoning, config.effectiveReasoningEffort, config.model)', ui)
+        self.assertIn('ReasoningEffort.textPreference(profile.reasoning, model.defaultReasoning, model.modelId)', runtime)
         self.assertNotIn('profile.reasoning ?: ReasoningEffort.DEFAULT', ui + runtime)
 
     def test_new_chat_inherits_before_replacing_the_editor(self):
@@ -54,6 +54,20 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
         self.assertIn('require(!hasReasoning(body))', policy)
         options = (SRC / 'model/ProviderRequestOptions.kt').read_text()
         self.assertIn('if (config.has("thinkingConfig")) ReasoningRequestPolicy.validate(body, protocol)', options)
+
+    def test_mandatory_model_efforts_are_shared_by_main_display_picker_and_freeze(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        controller = (SRC / 'ChatController.kt').read_text()
+        policy = (SRC / 'model/ReasoningRequestPolicy.kt').read_text()
+        self.assertIn('ReasoningEffort.textChoices(confirmedReasoningModel)', main)
+        self.assertIn('model = confirmedReasoningModel).displayName', main)
+        self.assertIn('ReasoningRequestPolicy.freeze(provider, reasoningIntent)', controller)
+        self.assertEqual(2, main.count('ReasoningRequestPolicy.requestModel(it.model, it.requestOptions)'))
+        self.assertIn('reasoningPreference.retainAccepted(conversationId.value, reasoningIntent)', controller)
+        self.assertIn('ReasoningEffort.textPreference(requested, model = model)', policy)
+        self.assertIn('ReasoningEffort.textChoices(config.model)', (SRC / 'ui/components/subagent/SubAgentThinkingPreference.kt').read_text())
+        for name in ('ResponsesModel.kt', 'NativeCompletionModel.kt'):
+            self.assertIn('settings.reasoningOverride, request.opt("model") as? String)', (SRC / 'model' / name).read_text())
 
 if __name__ == '__main__':
     unittest.main()

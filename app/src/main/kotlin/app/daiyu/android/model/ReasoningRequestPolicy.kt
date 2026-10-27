@@ -10,12 +10,22 @@ internal object ReasoningRequestPolicy {
     fun hasReasoning(body: JSONObject): Boolean = keys.any(body::has) ||
         body.optJSONObject("generationConfig")?.has("thinkingConfig") == true
 
-    fun freeze(provider: ProviderSnapshot, effort: ReasoningEffort): ProviderSnapshot {
+    fun requestModel(model: String, options: ProviderRequestOptions): String =
+        if (options.customBody.isEmpty()) model else requestModel(model, MessagesRequest.jsonObject(options.customBody))
+
+    private fun requestModel(model: String, body: JSONObject): String = if (!body.has("model")) model else
+        (body.opt("model") as? String)?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("model 必须为非空字符串")
+
+    fun freeze(provider: ProviderSnapshot, requested: ReasoningEffort): ProviderSnapshot {
+        val options = provider.requestOptions
+        val body = if (options.customBody.isEmpty()) JSONObject() else MessagesRequest.jsonObject(options.customBody)
+        val model = requestModel(provider.model, body)
+        val effort = if (requested == ReasoningEffort.DEFAULT) requested
+            else ReasoningEffort.textPreference(requested, model = model)
         require(provider.reasoningOverride != false || effort == ReasoningEffort.DEFAULT || effort == ReasoningEffort.OFF) {
             "当前模型已声明不支持思考；请选择关闭"
         }
-        val options = provider.requestOptions
-        val body = if (options.customBody.isEmpty()) JSONObject() else MessagesRequest.jsonObject(options.customBody)
         if (effort != ReasoningEffort.DEFAULT) {
             require(!hasReasoning(body)) { "思考偏好与自定义推理参数冲突；请移除自定义推理参数后重试" }
             when (provider.protocol) {
@@ -36,19 +46,25 @@ internal object ReasoningRequestPolicy {
                         }
                     }
                 }
-                ProviderProtocol.CHAT_COMPLETIONS -> RikkaHubReasoning.chat(body, provider.asModelSettings().endpoint, provider.asModelSettings().model, effort)
-                ProviderProtocol.GEMINI -> RikkaHubReasoning.gemini(body, provider.asModelSettings().model, effort)
+                ProviderProtocol.CHAT_COMPLETIONS -> RikkaHubReasoning.chat(body, provider.asModelSettings().endpoint, model, effort)
+                ProviderProtocol.GEMINI -> RikkaHubReasoning.gemini(body, model, effort)
                 else -> throw IllegalArgumentException("当前协议尚未接通思考偏好")
             }
         }
-        validate(body, provider.protocol, provider.reasoningOverride)
+        validate(body, provider.protocol, provider.reasoningOverride, model)
         if (body.toString() == "{}" && options.customBody.isEmpty()) return provider
         return ProviderSnapshot.capture(provider.asModelSettings().copy(requestOptions = options.copy(customBody = body.toString())), provider.protocol, provider.imageInputSupported)
     }
 
-    fun validate(body: JSONObject, protocol: ProviderProtocol, reasoningOverride: Boolean? = null) {
+    fun validate(body: JSONObject, protocol: ProviderProtocol, reasoningOverride: Boolean? = null, model: String? = null) {
         if (!hasReasoning(body)) return
         fun string(value: JSONObject, key: String): String = value.opt(key) as? String ?: throw IllegalArgumentException("推理参数 $key 必须为字符串")
+        fun effort(value: JSONObject, key: String): String = string(value, key).also {
+            require(it in efforts) { "推理参数 $key 不支持此值" }
+            require(ReasoningEffort.fromWireValue(it) in ReasoningEffort.textChoices(model.orEmpty())) {
+                "当前模型不支持此思考档位，请选择低或更高档位"
+            }
+        }
         fun boolean(value: JSONObject, key: String) { if (value.has(key)) require(value.opt(key) is Boolean) { "推理参数 $key 必须为布尔值" } }
         fun objectValue(value: JSONObject, key: String): JSONObject = value.opt(key) as? JSONObject ?: throw IllegalArgumentException("推理参数 $key 必须为对象")
         fun noOtherKeys(allowed: Set<String>) { require((keys - allowed).none(body::has) && body.optJSONObject("generationConfig")?.has("thinkingConfig") != true) { "思考参数与当前协议不匹配" } }
@@ -57,7 +73,7 @@ internal object ReasoningRequestPolicy {
                 noOtherKeys(setOf("reasoning"))
                 val value = objectValue(body, "reasoning")
                 require(value.keys().asSequence().all { it in setOf("effort", "summary") })
-                if (value.has("effort")) require(string(value, "effort") in efforts) { "Responses reasoning.effort 不支持此值" }
+                if (value.has("effort")) effort(value, "effort")
                 if (value.has("summary")) require(string(value, "summary") in setOf("auto", "concise", "detailed"))
             }
             ProviderProtocol.MESSAGES -> {
@@ -89,7 +105,7 @@ internal object ReasoningRequestPolicy {
             }
             ProviderProtocol.CHAT_COMPLETIONS -> {
                 noOtherKeys(keys - setOf("output_config"))
-                if (body.has("reasoning_effort")) require(string(body, "reasoning_effort") in efforts)
+                if (body.has("reasoning_effort")) effort(body, "reasoning_effort")
                 for (key in listOf("enable_thinking", "thinking_mode")) boolean(body, key)
                 if (body.has("thinking_budget")) require(body.opt("thinking_budget") is Int && body.getInt("thinking_budget") >= 0)
                 if (body.has("thinking")) {
@@ -99,7 +115,7 @@ internal object ReasoningRequestPolicy {
                 }
                 if (body.has("reasoning")) {
                     val value = objectValue(body, "reasoning")
-                    if (value.has("effort")) require(string(value, "effort") in efforts)
+                    if (value.has("effort")) effort(value, "effort")
                     boolean(value, "enabled"); boolean(value, "exclude")
                     if (value.has("max_tokens")) require(value.opt("max_tokens") is Int && value.getInt("max_tokens") >= 0)
                 }

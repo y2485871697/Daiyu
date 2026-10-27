@@ -3466,14 +3466,16 @@ class ChatController internal constructor(private val application:Application,
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
         // One immutable request policy, read once before context/model preparation. Changing
         // the UI/store during streaming, pause/continue or tool rounds affects only the next run.
-        val frozenReasoning = try { reasoningPreference.snapshot(conversation?.id?.value) }
+        val reasoningIntent = try { reasoningPreference.snapshot(conversation?.id?.value) }
         catch (_: Exception) { problem="思考偏好无效或读取失败；请重新保存，草稿保留";notifyChanged();return null }
-        val requestProvider = try { app.daiyu.android.model.ReasoningRequestPolicy.freeze(provider, frozenReasoning) }
+        val requestProvider = try { app.daiyu.android.model.ReasoningRequestPolicy.freeze(provider, reasoningIntent) }
         catch (failure: Exception) {
             problem=if (failure is IllegalArgumentException) failure.message ?: "当前模型协议不支持此思考配置；草稿保留"
                 else "推理参数格式无效；Responses 使用 reasoning 对象，Messages 仅支持 enabled/disabled thinking；草稿保留"
             notifyChanged();return null
         }
+        val frozenReasoning = ReasoningEffort.textPreference(reasoningIntent,
+            model = app.daiyu.android.model.ReasoningRequestPolicy.requestModel(provider.model, provider.requestOptions))
         val requestConfig = requestProvider.asModelSettings()
         // sendPrepared runs on the preparation worker. Freeze once, AFTER the exact provider;
         // no settings IO on pause/continue/tool rounds, and no fallback on a corrupt/fenced store.
@@ -3484,7 +3486,7 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged(); return null
         }
         val run=platformAction?.runId ?: mcpPreparation?.scope?.runId ?: gui?.runId ?: terminalJobPreparation?.identity?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
-        if (conversation == null) try { reasoningPreference.retainAccepted(conversationId.value, frozenReasoning) }
+        if (conversation == null) try { reasoningPreference.retainAccepted(conversationId.value, reasoningIntent) }
         catch (_: Exception) { problem="会话思考偏好保存未确认；草稿保留，未发起请求";notifyChanged();return null }
         // One acceptance candidate, including its media reconstruction and all run owners.
         // This value must not change during preflight, streaming, or receipt reconciliation.

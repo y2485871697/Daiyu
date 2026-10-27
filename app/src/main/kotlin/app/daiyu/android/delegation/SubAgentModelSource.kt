@@ -57,11 +57,22 @@ internal enum class ReasoningEffort(val wireValue: String, val displayName: Stri
     XHIGH("xhigh", "超高", 6), MAX("max", "极高", 7);
     val enablesReasoning: Boolean get() = this != OFF
     companion object {
-        /** Text controls have seven concrete choices; legacy DEFAULT inherits a concrete fallback. */
-        fun textPreference(requested: ReasoningEffort?, modelDefault: ReasoningEffort = OFF): ReasoningEffort = when (requested) {
-            null -> modelDefault.takeUnless { it == DEFAULT } ?: OFF
-            DEFAULT -> OFF
-            else -> requested
+        /** Text controls resolve legacy DEFAULT to a concrete model-valid choice. */
+        fun textPreference(requested: ReasoningEffort?, modelDefault: ReasoningEffort = OFF,
+            model: String = ""): ReasoningEffort {
+            val preference = when (requested) {
+                null -> modelDefault.takeUnless { it == DEFAULT } ?: OFF
+                DEFAULT -> OFF
+                else -> requested
+            }
+            val choices = textChoices(model)
+            return preference.takeIf { it in choices } ?: choices.first()
+        }
+
+        // These documented models require reasoning and accept low through max, not none/minimal.
+        fun textChoices(model: String = ""): List<ReasoningEffort> {
+            val required = model.trim().substringAfterLast('/').lowercase() in setOf("gpt-6-astra", "gpt-6.1-sol")
+            return entries.filter { it != DEFAULT && (!required || it.rank >= LOW.rank) }
         }
 
         fun fromWireValue(value: String?): ReasoningEffort? {
@@ -130,7 +141,7 @@ internal object SubAgentPreferences {
     const val PROFILES_KEY = "agent_child_profiles_v1"
     fun applyReasoning(profile: SubAgentProfile, config: SubAgentModelConfig): SubAgentModelConfig {
         if (profile.isMedia) return config.copy(effectiveReasoningEffort = profile.reasoning ?: config.effectiveReasoningEffort)
-        return config.copy(effectiveReasoningEffort = ReasoningEffort.textPreference(profile.reasoning, config.effectiveReasoningEffort))
+        return config.copy(effectiveReasoningEffort = ReasoningEffort.textPreference(profile.reasoning, config.effectiveReasoningEffort, config.model))
     }
 }
 internal object MediaReasoningSettings {

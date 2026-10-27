@@ -354,4 +354,48 @@ class ProviderRequestWireTest {
         assertEquals("fast", gpt.body().getString("service_tier"))
     }
 
+
+    @Test fun mandatoryReasoningUsesTheSameLowPolicyInTheInitialPostAndToolContinuation() {
+        val call = JSONObject().put("type", "function_call").put("id", "fc-a")
+            .put("call_id", "a").put("name", "fixture").put("arguments", "{}")
+        val first = Connection(response(call))
+        val second = Connection(response())
+        val config = settings.copy(model = "gpt-6.1-sol")
+        val frozen = ReasoningRequestPolicy.freeze(config.requestSnapshot(), app.daiyu.android.delegation.ReasoningEffort.OFF)
+        val tool = ToolDefinition("fixture", "fixture tool", """{"type":"object","properties":{},"required":[],"additionalProperties":false}""")
+        var calls = 0
+        val session = ResponsesModel(frozen.asModelSettings()) { if (calls++ == 0) first else second }
+            .open(emptyList(), listOf(tool))
+        session.next(emptyList()) {}
+        session.next(listOf(ToolOutput(ToolCallId("a"), "result"))) {}
+        assertEquals(2, calls)
+        for (connection in listOf(first, second)) {
+            assertEquals("gpt-6.1-sol", connection.body().getString("model"))
+            assertEquals("low", connection.body().getJSONObject("reasoning").getString("effort"))
+        }
+        assertEquals("", config.requestOptions.customBody)
+    }
+
+    @Test fun customModelOverrideCannotSendAnUnsupportedEffortBeforeConnecting() {
+        var calls = 0
+        val custom = """{"model":"gpt-6.1-sol","reasoning":{"effort":"none"}}"""
+        expectRejected {
+            ResponsesModel(settings.copy(requestOptions = ProviderRequestOptions(custom))) {
+                calls++; Connection(response())
+            }.open(emptyList()).next(emptyList()) {}
+        }
+        assertEquals(0, calls)
+    }
+
+
+    @Test fun finalOldModelPreservesOffEvenWhenTheSelectedNameIsMandatory() {
+        val selected = settings.copy(model = "gpt-6.1-sol", requestOptions = ProviderRequestOptions("""{"model":"gpt-5"}"""))
+        val frozen = ReasoningRequestPolicy.freeze(selected.requestSnapshot(), app.daiyu.android.delegation.ReasoningEffort.OFF)
+        val conn = Connection(response())
+        ResponsesModel(frozen.asModelSettings()) { conn }.open(emptyList()).next(emptyList()) {}
+        assertEquals("gpt-5", conn.body().getString("model"))
+        assertEquals("none", conn.body().getJSONObject("reasoning").getString("effort"))
+        assertEquals("gpt-6.1-sol", selected.model)
+    }
+
 }

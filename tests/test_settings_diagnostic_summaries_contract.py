@@ -27,9 +27,19 @@ class SettingsDiagnosticSummariesContractTest(unittest.TestCase):
         self.assertIn("summary = status ?: ", logging)
         self.assertIn('summary = status ?: "记录状态与故障"', logging)
         self.assertIn("else -> ui.notice", self.row)
-        for status in ("正在处理诊断日志…", "正在读取诊断日志…", "诊断日志不可用；可清除后重新记录"):
+        for status in ("正在读取诊断日志…", "诊断日志不可用；可清除后重新记录"):
             self.assertIn(status, self.row)
         self.assertIn('mutate(if (enabled) "已开启诊断记录" else "已关闭诊断记录")', self.source)
+
+    def test_processing_hint_is_absent_without_removing_the_busy_guards(self):
+        status = self.row.split("val status = when {", 1)[1].split("when (entry.id)", 1)[0]
+        self.assertNotIn("正在处理诊断日志", self.source)
+        self.assertNotIn("ui.busy", status)
+        self.assertIn('summary = status ?: "记录状态与故障"', self.row)
+        self.assertIn("enabled = available", self.row)
+        self.assertIn("if (!admitted() || busy || pickerPending || store == null) return", self.source)
+        self.assertIn("busy = true; notice = null", self.source)
+        self.assertIn("finally { busy = false }", self.source)
 
     def test_operation_availability_keeps_busy_and_corruption_guards_not_recording_enabled(self):
         self.assertIn("val available = ui.state.loaded && !ui.state.unavailable && !ui.busy", self.row)

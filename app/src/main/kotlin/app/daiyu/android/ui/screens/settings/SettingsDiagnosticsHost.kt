@@ -117,7 +117,6 @@ internal fun rememberSettingsDiagnostics(store: DiagnosticLogStore?, isCurrent: 
 internal fun SettingsDiagnosticRow(entry: SettingsEntry, ui: SettingsDiagnosticsUi) {
     val available = ui.state.loaded && !ui.state.unavailable && !ui.busy
     val status = when {
-        ui.busy -> "正在处理诊断日志…"
         !ui.state.loaded -> "正在读取诊断日志…"
         ui.state.unavailable -> "诊断日志不可用；可清除后重新记录"
         else -> ui.notice

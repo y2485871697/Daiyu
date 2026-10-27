@@ -25,6 +25,8 @@ import app.daiyu.android.voice.providers.DoubaoPersonalVoice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
@@ -70,7 +72,7 @@ internal class AccountLeafPreviewGuard(port: VoiceAccountPreviewPort) {
 /**
  * Independently mounted leaf. frozenConfiguration MUST be a saved runtime snapshot (not a draft).
  * Selection is only a callback; the parent decides whether/how to save a new configuration.
- * No network on render/load/select/picker return. Control-plane queries and training require confirmation;
+ * No network on render/load/select/picker return. Project queries follow explicit taps; slot queries and training require confirmation;
  * demo playback only follows an explicit preview action.
  */
 @Composable
@@ -121,7 +123,7 @@ internal fun VoiceAccountPanel(
     var projects by remember(frozenConfiguration.revision) { mutableStateOf(emptyList<VoiceProjectCatalog.Project>()) }
     fun current() = latestCurrent(frozenConfiguration) && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     val enabled = loaded && !busy && account != null && current() && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    fun execute(block: suspend () -> Unit) {
+    fun execute(failureNotice: String? = null, block: suspend () -> Unit) {
         if (!current() || busy) return
         confirmation = null; notice = ""; busy = true
         operation = scope.launch {
@@ -132,7 +134,7 @@ internal fun VoiceAccountPanel(
             catch (_: Exception) {
                 if (current()) notice = if (previewGuard.stopUnconfirmed)
                     "试听停止未确认，已拒绝本次操作。请退出账户页面并核对语音输出状态。"
-                else "操作未确认。请核对账户、槽位和权限；若已提交训练，只查询原音色，不要重复训练。"
+                else failureNotice ?: "操作未确认。请核对账户、槽位和权限；若已提交训练，只查询原音色，不要重复训练。"
             } finally { busy = false }
         }
     }
@@ -157,7 +159,7 @@ internal fun VoiceAccountPanel(
             val credentials = account?.let { withContext(Dispatchers.IO) { resources.preferences.load(it.fingerprint) } }
             if (credentials != null) { ak = credentials.keyId; sk = credentials.secret; project = credentials.project }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { notice = "本机账户资料或控制面凭据不可读；不会静默覆盖，凭据可明确重新保存或清除。" }
+        catch (_: Exception) { notice = "本机账户资料或控制面凭据不可读；请重新填写 AK 和 SK 后保存。" }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         samplePicker.deliver(uri); pickerResult++
@@ -186,7 +188,6 @@ internal fun VoiceAccountPanel(
     var menu by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
     var manualId by remember { mutableStateOf(false) }
-    var projectManual by remember { mutableStateOf(false) }
     var advancedCreation by remember { mutableStateOf(false) }
     var agreed by remember { mutableStateOf(false) }
     var projectPicker by remember { mutableStateOf(false) }
@@ -198,6 +199,15 @@ internal fun VoiceAccountPanel(
         confirmation = null; preview.stop(); menu = false; addMenu = false
         if (target == "SYNC" || target == "ACCOUNT") parentPage = page
         page = target
+    }
+    suspend fun refreshProjects(a: String, s: String, preferred: String): String {
+        projects = emptyList(); projectPicker = false
+        val fetched = resources.projects.list(a, s)
+        currentCoroutineContext().ensureActive()
+        check(current() && page == "SYNC" && ak == a && sk == s)
+        val selected = VoiceProjectCatalog.selectProject(fetched, preferred)
+        projects = fetched; project = selected.name
+        return selected.name
     }
     fun beginFlow(target: String) {
         if (!current() || busy) return
@@ -276,19 +286,20 @@ internal fun VoiceAccountPanel(
             }
             if (page == "SYNC") {
                 item { SettingsCard(Modifier.testTag("voice-sync-credentials-card")) {
-                    SettingsTextField("AK", ak, { ak = it; sk = ""; projects = emptyList(); confirmation = null },
+                    SettingsTextField("AK", ak, { if (!busy && current()) { ak = it; sk = ""; project = "default"; projects = emptyList(); projectPicker = false; confirmation = null } },
                         password = true, enabled = !busy, compact = true)
-                    SettingsTextField("SK", sk, { sk = it; projects = emptyList(); confirmation = null },
+                    SettingsTextField("SK", sk, { if (!busy && current()) { sk = it; project = "default"; projects = emptyList(); projectPicker = false; confirmation = null } },
                         password = true, enabled = !busy, compact = true)
                 } }
                 item { SettingsCard(Modifier.testTag("voice-sync-project-card")) {
-                    SettingsRow("当前项目", summary = project, showChevron = true, onClick = if (busy || projects.isEmpty()) null else ({ projectPicker = true }))
-                    SettingsRow(if (projects.isEmpty()) "获取项目列表" else "刷新项目列表", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
-                        val a = ak; val s = sk
-                        ask("向火山 IAM 发送 AK 签名请求，仅查询项目，不发送语音 Key") { projects = resources.projects.list(a, s); projectPicker = projects.isNotEmpty(); notice = if (projects.isEmpty()) "没有可选项目，可手动填写项目名称。" else "请选择与语音 API Key 相同的项目。" }
+                    SettingsRow("当前项目", summary = project, showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
+                        val a = ak; val s = sk; val p = project
+                        execute("项目获取失败或没有可访问的项目，请核对 AK／SK 与项目权限后重试。") {
+                            refreshProjects(a, s, p)
+                            projectPicker = true
+                            notice = "请选择与语音 API Key 相同的项目。"
+                        }
                     }))
-                    SettingsRow("手动填写项目（备用）", showChevron = true, onClick = if (busy) null else ({ projectManual = !projectManual }))
-                    if (projectManual) AccountField("项目名称", project, busy) { project = it; confirmation = null }
                 } }
                 item { SettingsCard(Modifier.testTag("voice-sync-read-card")) {
                     SettingsRow("读取我的名额", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
@@ -300,14 +311,15 @@ internal fun VoiceAccountPanel(
                     }))
                 } }
                 item { SettingsCard(Modifier.testTag("voice-sync-storage-card")) {
-                    SettingsRow("保存账户信息", showChevron = true, onClick = if (account == null || busy || !current() || ak.isBlank() || sk.isBlank() || project.isBlank()) null else ({
-                        val a = ak; val s = sk; val p = project
-                        execute { withContext(Dispatchers.IO) { resources.preferences.save(account!!.fingerprint, a, s, p) }; notice = "账户信息已加密保存在本机" }
-                    }))
-                    SettingsRow("清除已记住的信息", showChevron = true, onClick = if (account == null || busy || !current()) null else ({
-                        ask("清除本机保存的 AK / SK 与项目，不改动云端账户") {
-                            withContext(Dispatchers.IO) { resources.preferences.clear(account!!.fingerprint) }
-                            ak = ""; sk = ""; project = "default"; projects = emptyList(); notice = "已清除本机账户信息"
+                    SettingsRow("保存账户信息", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
+                        val a = ak; val s = sk; val preferred = project
+                        execute("账户保存未确认，请核对 AK／SK、项目访问权限及本机存储后重试。") {
+                            val p = refreshProjects(a, s, preferred)
+                            withContext(Dispatchers.IO) {
+                                currentCoroutineContext().ensureActive()
+                                resources.preferences.save(account!!.fingerprint, a, s, p)
+                            }
+                            notice = "账户信息已加密保存在本机"
                         }
                     }))
                 } }
@@ -432,7 +444,9 @@ internal fun VoiceAccountPanel(
                         item.name.takeIf { it != item.displayName },
                         "无此项目访问权限".takeIf { !item.allowed },
                     ).joinToString(" · ").ifBlank { null }) {
-                    if (current()) { project = item.name; projectPicker = false; confirmation = null; notice = "" }
+                    if (current() && !busy && page == "SYNC" && projects.any { it.name == item.name && it.allowed }) {
+                        project = item.name; projectPicker = false; confirmation = null; notice = ""
+                    }
                 } }
             }
         }
@@ -459,7 +473,7 @@ internal fun VoiceAccountPanel(
         }
         confirmation?.let { pending ->
             DaiyuConfirmDialog("确认本次操作", pending.first, "确认", false,
-                onConfirm = { if (confirmation === pending && enabled) execute(pending.second) }, onDismiss = { confirmation = null })
+                onConfirm = { if (confirmation === pending && enabled) execute(block = pending.second) }, onDismiss = { confirmation = null })
         }
     }
 }

@@ -502,12 +502,14 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             assertEquals(cardBounds.right, bounds.right, 1f)
         }
         for ((title, tag) in listOf(
-            "当前项目" to "project", "获取项目列表" to "project", "手动填写项目（备用）" to "project",
-            "读取我的名额" to "read", "保存账户信息" to "storage", "清除已记住的信息" to "storage",
+            "当前项目" to "project", "读取我的名额" to "read", "保存账户信息" to "storage",
             "打开火山访问密钥管理" to "console",
         )) {
             reveal("settings-row:$title", "同步音色名额")
                 .assert(hasAnyAncestor(hasTestTag("voice-sync-$tag-card")))
+        }
+        for (removed in listOf("获取项目列表", "刷新项目列表", "手动填写项目（备用）", "清除已记住的信息")) {
+            node("settings-row:$removed").assertDoesNotExist()
         }
         ui.onAllNodesWithText("AK / SK 与语音 API Key 不同。", substring = true).assertCountEquals(0)
         ui.onAllNodesWithText("修改后请点击保存账户信息", substring = true).assertCountEquals(0)

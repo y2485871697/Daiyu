@@ -18,6 +18,12 @@ internal class VoiceProjectCatalog(private val transport: AccountHttpTransport) 
         }
     }
     companion object {
+        internal fun selectProject(projects: List<Project>, preferred: String): Project =
+            projects.firstOrNull { it.allowed && it.name == preferred }
+                ?: projects.firstOrNull { it.allowed && it.name == "default" }
+                ?: projects.firstOrNull { it.allowed }
+                ?: error("没有可访问的项目，请核对 AK／SK 与项目权限后重试")
+
         private const val HOST = "iam.volcengineapi.com"
         private const val LIMIT = 100
         internal fun signedRequest(ak: String, sk: String, offset: Int, now: Instant): Request {
@@ -46,9 +52,9 @@ internal class VoiceProjectCatalog(private val transport: AccountHttpTransport) 
                 val offset = page * LIMIT; val data = fetch(offset)
                 data.projects.forEach { result[it.name] = it }
                 if (offset + data.count >= data.total) return result.values.toList()
-                check(data.count == LIMIT) { "项目列表未完整返回，请重试或手动填写项目名称" }
+                check(data.count == LIMIT) { "项目列表未完整返回，请重试" }
             }
-            error("项目超过 2000 个，请手动填写项目名称")
+            error("项目超过 2000 个，请缩小账户可访问范围后重试")
         }
     }
 }

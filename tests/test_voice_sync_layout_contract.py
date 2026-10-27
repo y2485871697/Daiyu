@@ -40,36 +40,58 @@ class VoiceSyncLayoutContractTest(unittest.TestCase):
         for key in ('AK', 'SK'):
             self.assertIn(f'SettingsTextField("{key}",', credentials)
         self.assertEqual(2, credentials.count('password = true, enabled = !busy, compact = true'))
-        self.assertIn('ak = it; sk = ""; projects = emptyList(); confirmation = null', credentials)
-        self.assertIn('sk = it; projects = emptyList(); confirmation = null', credentials)
+        self.assertIn('ak = it; sk = ""; project = "default"; projects = emptyList(); projectPicker = false; confirmation = null', credentials)
+        self.assertIn('sk = it; project = "default"; projects = emptyList(); projectPicker = false; confirmation = null', credentials)
         self.assertNotIn('resources.', credentials)
         self.assertNotIn('execute', credentials)
 
-    def test_project_selection_refresh_and_manual_fallback_keep_their_guards(self):
+    def test_current_project_fetches_before_opening_without_cached_list_gate(self):
         project = body(self.sync, 'SettingsCard(Modifier.testTag("voice-sync-project-card"))')
+        self.assertEqual(1, project.count('SettingsRow('))
         self.assertIn('SettingsRow("当前项目", summary = project', project)
-        self.assertIn('if (busy || projects.isEmpty()) null', project)
-        self.assertIn('projectPicker = true', project)
         self.assertIn('if (!enabled || ak.isBlank() || sk.isBlank()) null', project)
-        self.assertIn('projects = resources.projects.list(a, s)', project)
-        self.assertIn('ask("向火山 IAM 发送 AK 签名请求', project)
-        self.assertIn('SettingsRow("手动填写项目（备用）"', project)
-        self.assertIn('if (projectManual) AccountField("项目名称", project, busy)', project)
-        self.assertIn('project = it; confirmation = null', project)
+        self.assertNotIn('projects.isEmpty()', project)
+        self.assertNotIn('ask(', project)
+        self.assertLess(project.index('refreshProjects(a, s, p)'), project.index('projectPicker = true'))
+        for removed in ('获取项目列表', '刷新项目列表', '手动填写项目（备用）', '清除已记住的信息', 'projectManual'):
+            self.assertNotIn(removed, self.panel)
 
-    def test_query_save_clear_and_console_keep_existing_functionality(self):
+    def test_shared_refresh_rechecks_owner_and_resolves_only_fetched_projects(self):
+        refresh = body(self.panel, 'suspend fun refreshProjects(')
+        self.assertIn('projects = emptyList(); projectPicker = false', refresh)
+        markers = ['resources.projects.list(a, s)', 'currentCoroutineContext().ensureActive()',
+                   'check(current() && page == "SYNC" && ak == a && sk == s)',
+                   'VoiceProjectCatalog.selectProject(fetched, preferred)',
+                   'projects = fetched; project = selected.name', 'return selected.name']
+        self.assertEqual(sorted(refresh.index(marker) for marker in markers),
+                         [refresh.index(marker) for marker in markers])
+        self.assertNotIn('catch', refresh)
+        self.assertEqual(1, self.panel.count('resources.projects.list('))
+
+    def test_save_fetches_every_time_before_encrypted_write_and_success(self):
+        storage = body(self.sync, 'SettingsCard(Modifier.testTag("voice-sync-storage-card"))')
+        self.assertEqual(1, storage.count('SettingsRow('))
+        self.assertIn('SettingsRow("保存账户信息"', storage)
+        self.assertIn('if (!enabled || ak.isBlank() || sk.isBlank()) null', storage)
+        self.assertNotIn('project.isBlank()', storage)
+        self.assertNotIn('projects.isEmpty()', storage)
+        markers = ['val p = refreshProjects(a, s, preferred)', 'withContext(Dispatchers.IO)',
+                   'currentCoroutineContext().ensureActive()',
+                   'resources.preferences.save(account!!.fingerprint, a, s, p)',
+                   'notice = "账户信息已加密保存在本机"']
+        self.assertEqual(sorted(storage.index(marker) for marker in markers),
+                         [storage.index(marker) for marker in markers])
+        self.assertNotIn('resources.preferences.clear(', self.panel)
+        self.assertIn('账户保存未确认', storage)
+        self.assertIn('catch (cancelled: CancellationException) { throw cancelled }', self.panel)
+        self.assertIn('else failureNotice ?:', self.panel)
+        self.assertIn('execute(block = pending.second)', self.panel)
+
+    def test_query_and_console_keep_existing_functionality(self):
         read = body(self.sync, 'SettingsCard(Modifier.testTag("voice-sync-read-card"))')
         self.assertIn('if (!enabled || ak.isBlank() || sk.isBlank() || project.isBlank()) null', read)
         self.assertIn('ask("查询项目 $p 的槽位', read)
         self.assertIn('resources.voices.importPurchased(speech!!, a, s, p)', read)
-        storage = body(self.sync, 'SettingsCard(Modifier.testTag("voice-sync-storage-card"))')
-        self.assertIn('SettingsRow("保存账户信息"', storage)
-        self.assertIn('if (account == null || busy || !current() || ak.isBlank() || sk.isBlank() || project.isBlank()) null', storage)
-        self.assertIn('execute { withContext(Dispatchers.IO) { resources.preferences.save(account!!.fingerprint, a, s, p) }', storage)
-        self.assertIn('SettingsRow("清除已记住的信息"', storage)
-        self.assertIn('ask("清除本机保存的 AK / SK 与项目，不改动云端账户")', storage)
-        self.assertIn('resources.preferences.clear(account!!.fingerprint)', storage)
-        self.assertIn('ak = ""; sk = ""; project = "default"; projects = emptyList()', storage)
         console = body(self.sync, 'SettingsCard(Modifier.testTag("voice-sync-console-card"))')
         self.assertIn('SettingsRow("打开火山访问密钥管理"', console)
         self.assertIn('if (current()) uriHandler.openUri("https://console.volcengine.com/iam/keymanage/")', console)

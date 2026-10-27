@@ -20,7 +20,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +32,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
@@ -44,14 +46,11 @@ import app.daiyu.android.data.model.AppearanceAccentColor
 import app.daiyu.android.data.model.AppearancePaletteStyle
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.UserBubbleMode
-import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.app.resolveUserBubbleColors
 import app.daiyu.android.ui.app.colorContentColor
-import app.daiyu.android.ui.app.DaiyuPalette
-import app.daiyu.android.ui.app.colorHsv
 import app.daiyu.android.ui.app.resolvedPrimaryAccent
 import app.daiyu.android.ui.haptics.material.Slider
 import app.daiyu.android.ui.haptics.selectable
@@ -81,79 +80,77 @@ internal fun AppearanceColorSheet(
     var draft by remember(editor) { mutableStateOf(state) }
     var saveFailed by remember(editor) { mutableStateOf(false) }
     val preview = editor.merge(state, draft)
-    CompositionLocalProvider(LocalAppearanceSettings provides preview) {
-        val accents = editor == AppearanceColorEditor.ACCENTS
-        val buttons = assistantPreviewPalette()
-        val defaults = AssistantPreviewPalette(buttons.dark)
-        AssistantPreviewDialog(show = true, title = when (editor) { AppearanceColorEditor.STYLE -> "色彩风格"; AppearanceColorEditor.ACCENTS -> "强调色"; AppearanceColorEditor.BUBBLES -> "聊天气泡" },
-            onDismiss = onDismiss, showCloseButton = false,
-            footer = {
-                AssistantPreviewButton("默认", {
-                    draft = editor.merge(draft, AppearanceSettings())
-                }, Modifier.weight(1f).testTag("appearance-color-default"), secondary = true)
-                AssistantPreviewButton("确定", {
-                    val saved = onChange(editor.merge(state, draft))
-                    saveFailed = !saved
-                    if (saved) onDismiss()
-                }, Modifier.weight(1f).testTag("appearance-color-confirm"), primary = true)
-            },
-        ) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
-                .testTag("appearance-color-content"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                if (saveFailed) Text("保存失败，草稿已保留，请重试。", color = MiuixTheme.colorScheme.error,
-                    modifier = Modifier.testTag("appearance-color-save-error"))
-                AppearanceDraftPreview(preview)
-                if (editor == AppearanceColorEditor.BUBBLES) {
-                    UserBubbleMode.entries.forEach { mode ->
-                        SettingsRadioRow(when (mode) {
-                            UserBubbleMode.OFF -> "无气泡"
-                            UserBubbleMode.THEME -> "跟随主题"
-                            UserBubbleMode.CUSTOM -> "自定义颜色"
-                        }, selected = draft.userBubbleMode == mode) {
-                            draft = draft.copy(userBubbleMode = mode)
-                        }
+    val accents = editor == AppearanceColorEditor.ACCENTS
+    val buttons = assistantPreviewPalette()
+    val defaults = AssistantPreviewPalette(buttons.dark)
+    AssistantPreviewDialog(show = true, title = when (editor) { AppearanceColorEditor.STYLE -> "色彩风格"; AppearanceColorEditor.ACCENTS -> "强调色"; AppearanceColorEditor.BUBBLES -> "聊天气泡" },
+        onDismiss = onDismiss, showCloseButton = false,
+        footer = {
+            AssistantPreviewButton("默认", {
+                draft = editor.merge(draft, AppearanceSettings())
+            }, Modifier.weight(1f).testTag("appearance-color-default"), secondary = true)
+            AssistantPreviewButton("确定", {
+                val saved = onChange(editor.merge(state, draft))
+                saveFailed = !saved
+                if (saved) onDismiss()
+            }, Modifier.weight(1f).testTag("appearance-color-confirm"), primary = true)
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            .testTag("appearance-color-content"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            if (saveFailed) Text("保存失败，草稿已保留，请重试。", color = MiuixTheme.colorScheme.error,
+                modifier = Modifier.testTag("appearance-color-save-error"))
+            AppearanceDraftPreview(preview)
+            if (editor == AppearanceColorEditor.BUBBLES) {
+                UserBubbleMode.entries.forEach { mode ->
+                    SettingsRadioRow(when (mode) {
+                        UserBubbleMode.OFF -> "无气泡"
+                        UserBubbleMode.THEME -> "跟随主题"
+                        UserBubbleMode.CUSTOM -> "自定义颜色"
+                    }, selected = draft.userBubbleMode == mode) {
+                        draft = draft.copy(userBubbleMode = mode)
                     }
-                    if (draft.userBubbleMode == UserBubbleMode.CUSTOM) {
-                        AppearanceColorPicker("用户气泡", draft.userBubbleColor?.let(::Color)
-                            ?: resolveUserBubbleColors(draft, buttons.dark).container) {
-                            draft = draft.copy(userBubbleColor = it.toArgb())
-                        }
+                }
+                if (draft.userBubbleMode == UserBubbleMode.CUSTOM) {
+                    AppearanceColorPicker("用户气泡", draft.userBubbleColor?.let(::Color)
+                        ?: resolveUserBubbleColors(draft, buttons.dark).container) {
+                        draft = draft.copy(userBubbleColor = it.toArgb())
                     }
-                } else if (accents) {
-                    AppearanceColorPicker("主强调色", draft.resolvedPrimaryAccent ?: defaults.primary) {
-                        draft = draft.copy(accentColor = AppearanceAccentColor.SYSTEM, primaryAccentColor = it.toArgb())
-                    }
-                    AppearanceColorPicker("次强调色", draft.secondaryAccentColor?.let(::Color) ?: defaults.secondary) {
-                        draft = draft.copy(secondaryAccentColor = it.toArgb())
-                    }
-                } else {
-                    AppearanceColorPicker("界面色彩", Color(draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())) {
-                        draft = draft.copy(paletteSeedColor = it.toArgb())
-                    }
-                    AppearancePaletteStyle.entries.chunked(3).forEach { row ->
-                        Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { style ->
-                                val selected = draft.paletteStyle == style
-                                val label = when (style) {
-                                    AppearancePaletteStyle.TONAL_SPOT -> "柔和"
-                                    AppearancePaletteStyle.NEUTRAL -> "中性"
-                                    AppearancePaletteStyle.VIBRANT -> "鲜艳"
-                                    AppearancePaletteStyle.EXPRESSIVE -> "灵动"
-                                    AppearancePaletteStyle.RAINBOW -> "彩虹"
-                                    AppearancePaletteStyle.FRUIT_SALAD -> "缤纷"
-                                    AppearancePaletteStyle.MONOCHROME -> "灰阶"
-                                    AppearancePaletteStyle.FIDELITY -> "原色"
-                                    AppearancePaletteStyle.CONTENT -> "自然"
-                                }
-                                Box(Modifier.weight(1f).height(44.dp)
-                                    .background(if (selected) buttons.soft else Color.Transparent, CircleShape)
-                                    .border(1.dp, if (selected) buttons.primary else buttons.line, CircleShape)
-                                    .testTag("appearance-style:${style.persistedValue}")
-                                    .selectable(selected, role = Role.RadioButton, onClick = {
-                                        draft = draft.copy(paletteStyle = style,
-                                            paletteSeedColor = draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())
-                                    }), contentAlignment = Alignment.Center) { Text(label, color = buttons.text) }
+                }
+            } else if (accents) {
+                AppearanceColorPicker("主强调色", draft.resolvedPrimaryAccent ?: defaults.primary) {
+                    draft = draft.copy(accentColor = AppearanceAccentColor.SYSTEM, primaryAccentColor = it.toArgb())
+                }
+                AppearanceColorPicker("次强调色", draft.secondaryAccentColor?.let(::Color) ?: defaults.secondary) {
+                    draft = draft.copy(secondaryAccentColor = it.toArgb())
+                }
+            } else {
+                AppearanceColorPicker("界面色彩", Color(draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())) {
+                    draft = draft.copy(paletteSeedColor = it.toArgb())
+                }
+                AppearancePaletteStyle.entries.chunked(3).forEach { row ->
+                    Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { style ->
+                            val selected = draft.paletteStyle == style
+                            val label = when (style) {
+                                AppearancePaletteStyle.TONAL_SPOT -> "柔和"
+                                AppearancePaletteStyle.NEUTRAL -> "中性"
+                                AppearancePaletteStyle.VIBRANT -> "鲜艳"
+                                AppearancePaletteStyle.EXPRESSIVE -> "灵动"
+                                AppearancePaletteStyle.RAINBOW -> "彩虹"
+                                AppearancePaletteStyle.FRUIT_SALAD -> "缤纷"
+                                AppearancePaletteStyle.MONOCHROME -> "灰阶"
+                                AppearancePaletteStyle.FIDELITY -> "原色"
+                                AppearancePaletteStyle.CONTENT -> "自然"
                             }
+                            Box(Modifier.weight(1f).height(44.dp)
+                                .background(if (selected) buttons.soft else Color.Transparent, CircleShape)
+                                .border(1.dp, if (selected) buttons.primary else buttons.line, CircleShape)
+                                .testTag("appearance-style:${style.persistedValue}")
+                                .selectable(selected, role = Role.RadioButton, onClick = {
+                                    draft = draft.copy(paletteStyle = style,
+                                        paletteSeedColor = draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())
+                                }), contentAlignment = Alignment.Center) { Text(label, color = buttons.text) }
                         }
                     }
                 }
@@ -195,16 +192,19 @@ private fun AppearanceDraftPreview(draft: AppearanceSettings) {
 @Composable
 private fun AppearanceColorPicker(label: String, color: Color, onChange: (Color) -> Unit) {
     val colors = MiuixTheme.colorScheme
-    val hsv = colorHsv(color)
+    var selection by remember(label) { mutableStateOf(AppearanceColorSelection.fromColor(color)) }
+    val synced = selection.synchronize(color)
+    if (synced != selection) selection = synced
     val changeColor by rememberUpdatedState(onChange)
-    var grayHue by remember { mutableStateOf(hsv[0]) }
-    val hue = if (hsv[1] > .001f) hsv[0] else grayHue
+    fun update(next: AppearanceColorSelection) {
+        selection = next
+        changeColor(next.color)
+    }
+    fun select(saturation: Float, value: Float) {
+        update(selection.selectSaturationValue(saturation, value))
+    }
     val swatches = listOf(0xFF8E7C9E, 0xFF407FCE, 0xFFBA668F, 0xFFBD5964,
         0xFFC68046, 0xFFC1A340, 0xFF56896C, 0xFF448D91)
-    val currentHue by rememberUpdatedState(hue)
-    fun select(saturation: Float, value: Float) {
-        changeColor(Color.hsv(currentHue, saturation.coerceIn(0f, 1f), value.coerceIn(0f, 1f)))
-    }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
@@ -218,7 +218,7 @@ private fun AppearanceColorPicker(label: String, color: Color, onChange: (Color)
                     .testTag("appearance-swatch:$label:$value")
                     .semantics { contentDescription = "$label #${value.toString(16).takeLast(6)}" }
                     .selectable(color.toArgb() == swatch.toArgb(), role = Role.RadioButton,
-                        onClick = { grayHue = colorHsv(swatch)[0]; onChange(swatch) }),
+                        onClick = { update(AppearanceColorSelection.fromColor(swatch)) }),
                     contentAlignment = Alignment.Center) {
                     Box(Modifier.size(26.dp).background(swatch, CircleShape)
                         .border(if (color.toArgb() == swatch.toArgb()) 3.dp else 1.dp,
@@ -230,36 +230,40 @@ private fun AppearanceColorPicker(label: String, color: Color, onChange: (Color)
             .semantics {
                 contentDescription = "$label 饱和度与明度"
                 customActions = listOf(
-                    CustomAccessibilityAction("增加饱和度") { select(hsv[1] + .05f, hsv[2]); true },
-                    CustomAccessibilityAction("减少饱和度") { select(hsv[1] - .05f, hsv[2]); true },
-                    CustomAccessibilityAction("增加明度") { select(hsv[1], hsv[2] + .05f); true },
-                    CustomAccessibilityAction("减少明度") { select(hsv[1], hsv[2] - .05f); true },
+                    CustomAccessibilityAction("增加饱和度") { select(selection.saturation + .05f, selection.value); true },
+                    CustomAccessibilityAction("减少饱和度") { select(selection.saturation - .05f, selection.value); true },
+                    CustomAccessibilityAction("增加明度") { select(selection.saturation, selection.value + .05f); true },
+                    CustomAccessibilityAction("减少明度") { select(selection.saturation, selection.value - .05f); true },
                 )
             }
-            .pointerInput(Unit) {
+            .pointerInput(label) {
                 detectTapGestures { point -> select(point.x / size.width, 1f - point.y / size.height) }
             }
-            .pointerInput(Unit) {
+            .pointerInput(label) {
                 detectDragGestures(onDragStart = { point -> select(point.x / size.width, 1f - point.y / size.height) }) { change, _ ->
                     change.consume()
                     select(change.position.x / size.width, 1f - change.position.y / size.height)
                 }
             }) {
-            drawRect(Brush.horizontalGradient(listOf(Color.White, Color.hsv(hue, 1f, 1f))))
+            drawRect(Brush.horizontalGradient(listOf(Color.White, Color.hsv(selection.hue, 1f, 1f))))
             drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
-            val cursor = Offset(hsv[1] * size.width, (1f - hsv[2]) * size.height)
+            val cursor = Offset(selection.saturation * size.width, (1f - selection.value) * size.height)
             drawCircle(Color.Black, 7.dp.toPx(), cursor, style = Stroke(3.dp.toPx()))
             drawCircle(Color.White, 7.dp.toPx(), cursor, style = Stroke(1.5.dp.toPx()))
         }
-        Slider(value = hue, onValueChange = {
-            grayHue = it
-            onChange(Color.hsv(it, hsv[1], hsv[2]))
-        },
-            valueRange = 0f..359.99f,
-            colors = SliderDefaults.colors(thumbColor = DaiyuPalette.switchTrack,
-                activeTrackColor = DaiyuPalette.switchTrack,
-                inactiveTrackColor = DaiyuPalette.switchTrack.copy(alpha = .15f)),
-            modifier = Modifier.fillMaxWidth().testTag("appearance-color-hue:$label")
-                .semantics { contentDescription = "$label 色相" })
+        val rainbow = listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)
+        val trackColors = if (LocalLayoutDirection.current == LayoutDirection.Rtl) rainbow.reversed() else rainbow
+        Box(Modifier.fillMaxWidth().height(48.dp)) {
+            Canvas(Modifier.fillMaxWidth().padding(horizontal = 10.dp).height(12.dp)
+                .align(Alignment.Center).clip(CircleShape).testTag("appearance-color-hue-track:$label")) {
+                drawRect(Brush.horizontalGradient(trackColors))
+            }
+            Slider(value = selection.hue, onValueChange = { update(selection.selectHue(it)) },
+                valueRange = 0f..360f,
+                colors = SliderDefaults.colors(thumbColor = colors.onSurface,
+                    activeTrackColor = Color.Transparent, inactiveTrackColor = Color.Transparent),
+                modifier = Modifier.fillMaxWidth().align(Alignment.Center).testTag("appearance-color-hue:$label")
+                    .semantics { contentDescription = "$label 色相" })
+        }
     }
 }

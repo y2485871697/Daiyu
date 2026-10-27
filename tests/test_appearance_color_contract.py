@@ -71,12 +71,13 @@ class AppearanceColorContractTest(unittest.TestCase):
             self.assertIn(f'AppearancePaletteStyle.{style} ->', sheet)
             self.assertIn(f'AppearancePaletteStyle.{style} ->', resolver)
 
-    def test_palette_pointer_drag_reads_current_hue_not_initial_closure(self):
+    def test_palette_pointer_drag_preserves_hsv_without_rekeying_on_color(self):
         sheet = source('ui/screens/settings/AppearanceColorSheet.kt')
-        self.assertIn('val currentHue by rememberUpdatedState(hue)', sheet)
-        self.assertIn('changeColor(Color.hsv(currentHue,', sheet)
-        self.assertIn('onChange(Color.hsv(it, hsv[1], hsv[2]))', sheet)
-        self.assertEqual(2, sheet.count('.pointerInput(Unit)'))
+        self.assertIn('selection.selectSaturationValue(saturation, value)', sheet)
+        self.assertIn('selection.selectHue(it)', sheet)
+        self.assertIn('val changeColor by rememberUpdatedState(onChange)', sheet)
+        self.assertEqual(2, sheet.count('.pointerInput(label)'))
+        self.assertNotIn('.pointerInput(color)', sheet)
         for label in ('增加饱和度', '减少饱和度', '增加明度', '减少明度'):
             self.assertIn(f'CustomAccessibilityAction("{label}")', sheet)
         self.assertIn('Box(Modifier.weight(1f).height(44.dp)', sheet)

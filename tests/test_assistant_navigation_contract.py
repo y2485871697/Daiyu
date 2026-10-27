@@ -18,7 +18,9 @@ class AssistantNavigationContractTest(unittest.TestCase):
 
     def test_editor_overlays_original_content_inside_page_back_host(self):
         self.assertIn('routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,', self.main)
-        self.assertIn('contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,', self.main)
+        self.assertIn('contentKey = when (retainedPage) {', self.main)
+        self.assertIn('"assistant-edit" -> assistantEditReturnPage', self.main)
+        self.assertIn('"context-management" -> "chat"', self.main)
         route = self.main.index('when (if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage)')
         overlay = self.main.index('if (retainedPage == "assistant-edit") assistantEditingId?.let')
         terminal = self.main.index('                TerminalTasksSurface()', route)

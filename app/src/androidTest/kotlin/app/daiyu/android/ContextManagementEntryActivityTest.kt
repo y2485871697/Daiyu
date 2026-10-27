@@ -150,6 +150,63 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         }
         return result
     }
+    fun testCompressionSheetNeverSlidesOrRemountsChatOnRepeatedOpenAndClose() {
+        val drawingWasEnabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
+        if (!drawingWasEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+        try {
+            seedAndSelect()
+            awaitLocalReaders()
+            dismissIme()
+            ui.waitForIdle()
+            captureScreenNode(ui.onNodeWithTag("page-back-host"))
+            val initial = node("page-back-surface").fetchSemanticsNode().boundsInRoot
+            val originalDraftId = node("chat-draft").fetchSemanticsNode().id
+            val before = fixture.database.exportBackup()
+            fun assertStationaryFrames() {
+                repeat(40) {
+                    ui.mainClock.advanceTimeByFrame()
+                    node("page-enter-previous").assertDoesNotExist()
+                    node("page-enter-scrim").assertDoesNotExist()
+                    node("page-enter-blocker").assertDoesNotExist()
+                    node("page-back-departure").assertDoesNotExist()
+                    node("page-back-target").assertDoesNotExist()
+                    assertEquals(initial, node("page-back-surface").fetchSemanticsNode().boundsInRoot)
+                    assertEquals(originalDraftId, node("chat-draft").fetchSemanticsNode().id)
+                }
+            }
+            repeat(2) { attempt ->
+                ui.onNodeWithContentDescription("更多").performTouchInput { click() }
+                awaitUniqueTag("chat-overflow-menu")
+                node("chat-menu:COMPRESS_CONTEXT").scrollToVisible().assertIsDisplayed()
+                ui.waitForIdle()
+                ui.mainClock.autoAdvance = false
+                try {
+                    node("chat-menu:COMPRESS_CONTEXT").performTouchInput { click() }
+                    assertStationaryFrames()
+                    node("context-management").assertExists()
+                } finally { ui.mainClock.autoAdvance = true }
+                lateinit var openedAdapter: ContextManagementControllerAdapter
+                mainThread { openedAdapter = adapter() }
+                awaitControl("compression snapshot ready before dismissal") {
+                    openedAdapter.state.value.operation == null && openedAdapter.state.value.snapshot != null
+                }
+                ui.waitForIdle()
+                ui.mainClock.autoAdvance = false
+                try {
+                    if (attempt == 0) node("context-close").performTouchInput { click() }
+                    else mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+                    assertStationaryFrames()
+                } finally { ui.mainClock.autoAdvance = true }
+                assertChatRoute()
+                assertDraft("retained unsent draft")
+            }
+            assertEquals(before, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = true
+            if (!drawingWasEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+        }
+    }
     fun testRealClickReadsOriginalConversationWithoutSendingOrChangingDraftAndBackFencesOldClick() {
         val conversation = seedAndSelect()
         val before = fixture.database.exportBackup()

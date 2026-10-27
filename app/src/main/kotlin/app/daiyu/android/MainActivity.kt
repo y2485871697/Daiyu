@@ -1855,9 +1855,14 @@ class MainActivity : ComponentActivity() {
                 }
                 app.daiyu.android.ui.navigation.PageBackGestureHost(
                     routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,
-                    contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,
+                    contentKey = when (retainedPage) {
+                        "assistant-edit" -> assistantEditReturnPage
+                        "context-management" -> "chat"
+                        else -> retainedPage
+                    },
                     captureFromContent = retainedPage == "chat" && !sidebarVisible,
-                    animateBackEnabled = retainedPage != "assistant-edit" && retainedPage != "history-search",
+                    animateBackEnabled = retainedPage != "assistant-edit" && retainedPage != "history-search" &&
+                        retainedPage != "context-management",
                     canNavigateBack = retainedPage != "chat",
                     swipeDismissEnabled = appearance.swipeDismissEnabled,
                     predictiveBackEnabled = appearance.predictiveBackEnabled,

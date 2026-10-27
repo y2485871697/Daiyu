@@ -12,6 +12,28 @@ class ContextRouteLifecycleContractTest(unittest.TestCase):
         cls.main = (SRC / 'MainActivity.kt').read_text()
         cls.activity_tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ContextManagementEntryActivityTest.kt').read_text()
 
+    def test_compression_sheet_keeps_chat_composition_and_skips_page_motion(self):
+        host = self.main.split('app.daiyu.android.ui.navigation.PageBackGestureHost(', 1)[1].split('previewScopeKey = selected?.id,', 1)[0]
+        self.assertIn('"context-management" -> "chat"', host)
+        self.assertIn('"assistant-edit" -> assistantEditReturnPage', host)
+        animation = host.split('animateBackEnabled = ', 1)[1].split('canNavigateBack =', 1)[0]
+        for route in ('assistant-edit', 'history-search', 'context-management'):
+            self.assertIn('retainedPage != "' + route + '"', animation)
+        self.assertIn('routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage', host)
+        self.assertIn('canNavigateBack = retainedPage != "chat"', host)
+
+    def test_real_menu_regression_samples_open_and_close_before_navigation_can_settle(self):
+        body = self.activity_tests.split('fun testCompressionSheetNeverSlidesOrRemountsChatOnRepeatedOpenAndClose()', 1)[1].split('\n    fun ', 1)[0]
+        for token in ('repeat(2)', 'ui.mainClock.autoAdvance = false',
+                      'node("chat-menu:COMPRESS_CONTEXT").performTouchInput { click() }',
+                      'repeat(40)', '"page-enter-previous"', '"page-enter-scrim"',
+                      '"page-enter-blocker"', '"page-back-departure"',
+                      'boundsInRoot', 'originalDraftId', '"context-close"',
+                      'activity.onBackPressedDispatcher.onBackPressed()',
+                      'assertEquals(before, fixture.database.exportBackup())',
+                      'assertEquals(0, fixture.opens.get())'):
+            self.assertIn(token, body)
+
     def test_revocation_clears_owner_before_callbacks_and_closes_only_its_route(self):
         body = self.main.split('private fun revokeContextManagementEntry(', 1)[1].split('private var legacyPage', 1)[0]
         self.assertIn('closeRoute: Boolean = true', body)

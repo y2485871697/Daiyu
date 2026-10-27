@@ -171,7 +171,9 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('layers.frame(visualRouteKey, sourceKey = if (visualRouteKey == routeKey) contentKey else visualRouteKey)', self.host)
         self.assertIn('remember(visualRouteKey, swipeDismissEnabled, predictiveBackEnabled, resumed, layers, visualBackTargetKey)', self.host)
         self.assertIn('routeKey = if (retainedPage == "chat" && sidebarVisible) "chat-sidebar" else retainedPage,', self.main)
-        self.assertIn('contentKey = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage,', self.main)
+        self.assertIn('contentKey = when (retainedPage) {', self.main)
+        self.assertIn('"assistant-edit" -> assistantEditReturnPage', self.main)
+        self.assertIn('"context-management" -> "chat"', self.main)
         regressions = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackGesturesActivityTest.kt').read_text()
         for method in ('testExplicitContentKeyKeepsLiveCompositionUntilContentActuallyChanges',
                        'testDefaultContentKeyStillFollowsRouteKey'):

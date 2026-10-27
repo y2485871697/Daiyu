@@ -67,6 +67,51 @@ class MessageActionBarLayoutTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testUserTurnHidesItsTimeAndKeepsActionsWhileAssistantTimeRemains() {
+        val userTime = "2026-10-27 12:34"
+        val clicked = mutableListOf<String>()
+        var density = 1f
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(appearance, applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
+                    androidx.compose.foundation.layout.Column(Modifier.width(width)) {
+                        Box(Modifier.testTag("user-time-turn")) {
+                            UserTurn(ChatTurnUi.User("question", "用户正文", timestamp = userTime),
+                                ChatScreenActions(
+                                    onCopy = { clicked += "copy:$it" },
+                                    onEditUser = { clicked += "edit:$it" },
+                                    onBranch = { clicked += "branch:$it" },
+                                    onDeleteTurn = { clicked += "delete:$it" },
+                                ))
+                        }
+                        AssistantTurn(ChatTurnUi.Assistant("reply", timestamp = timestamp), ChatScreenActions())
+                    }
+                }
+            }
+        }
+        fun userAction(description: String) = ui.onNode(hasContentDescription(description) and
+            hasAnyAncestor(hasTestTag("user-time-turn")))
+        for (theme in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
+            mainThread { appearance = appearance.copy(themeMode = theme) }
+            for (size in listOf(240.dp, 320.dp)) {
+                mainThread { width = size }
+                ui.onNodeWithText(userTime).assertDoesNotExist()
+                ui.onNodeWithText(timestamp).assertIsDisplayed()
+                val host = ui.onNodeWithTag("user-time-turn").fetchSemanticsNode().boundsInRoot
+                val delete = userAction("删除").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                assertTrue("User actions must remain at the trailing edge", host.right - delete.right in 0f..(13f * density))
+                for (label in listOf("复制回答", "编辑", "分支")) userAction(label).assertIsDisplayed()
+            }
+        }
+        userAction("复制回答").performClick()
+        userAction("编辑").performClick()
+        userAction("分支").performClick()
+        userAction("删除").performClick()
+        assertEquals(listOf("copy:question", "edit:question", "branch:question", "delete:question"), clicked)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testGrowingWidthMovesOnlyAssistantTimeAndKeepsUserActionsEndAligned() {
         mount()
         mainThread { width = 240.dp }

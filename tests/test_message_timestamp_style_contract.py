@@ -34,6 +34,17 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
         self.assertIn('if (turn.status != RunStatus.RUNNING && !initialBodyPending)', assistant)
         self.assertIn('allowSpeech = hasTextActions, showCopyAction = hasTextActions', turns)
 
+    def test_production_user_hides_timestamp_without_changing_actions_or_assistant(self):
+        turns = (CHAT / 'ChatMessageList.kt').read_text(encoding='utf-8')
+        user = turns.split('internal fun UserTurn(', 1)[1].split('internal fun AssistantTurn(', 1)[0]
+        assistant = turns.split('internal fun AssistantTurn(', 1)[1]
+        self.assertNotIn('timestamp =', user)
+        for setting in ('showEditAction = true', 'allowSpeech = false',
+                        'showRegenerateAction = false', 'endAligned = true'):
+            self.assertIn(setting, user)
+        self.assertIn('if (actions.editingMessageKey != turn.listKey) MessageActionBar(', user)
+        self.assertIn('MessageActionBar(turn.listKey, actions, timestamp = turn.timestamp,', assistant)
+
     def test_time_precision_and_format_are_not_changed_by_visual_fix(self):
         formatter = (CHAT / 'MessageTimestampFormatter.kt').read_text(encoding='utf-8')
         self.assertIn('yyyy-MM-dd HH:mm', formatter)

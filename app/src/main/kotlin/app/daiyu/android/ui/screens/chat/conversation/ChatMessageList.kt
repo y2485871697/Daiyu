@@ -338,7 +338,6 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
         if (actions.editingMessageKey != turn.listKey) MessageActionBar(
             id = turn.listKey,
             actions = actions,
-            timestamp = turn.timestamp,
             showEditAction = true,
             allowSpeech = false,
             showRegenerateAction = false,

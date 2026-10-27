@@ -92,13 +92,16 @@ class ControllerVideoPostApprovalTest {
         val dialogs = mutableListOf<Pair<ControllerVideoPostPrompt, (Boolean) -> Unit>>()
         val cancellations = AtomicInteger()
         var reads = 0
+        var useDefaultPermission = false
         var snapshot: () -> ControllerVideoPostAuthority? = { current }
         override fun postToMain(action: () -> Unit) { queue.put(action) }
         override fun snapshotOnMain(): ControllerVideoPostAuthority? {
             assertSame(main, Thread.currentThread()); reads++; return snapshot()
         }
         override fun showOnMain(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit) {
-            assertSame(main, Thread.currentThread()); dialogs += prompt to decision
+            assertSame(main, Thread.currentThread())
+            if (useDefaultPermission) super.showOnMain(prompt, decision)
+            else dialogs += prompt to decision
         }
         override fun cancelRun() { cancellations.incrementAndGet() }
         fun pump() { assertSame(main, Thread.currentThread()); checkNotNull(queue.poll(3, TimeUnit.SECONDS))() }
@@ -124,6 +127,48 @@ class ControllerVideoPostApprovalTest {
     private fun approve(request: VideoPostRequest): VideoPostApproval {
         val waiting = ask(request); host.pump(); host.dialogs.last().second(true)
         return checkNotNull(waiting.join())
+    }
+
+    @Test fun trustedDefaultIssuesFreshExactOneShotPermitForEachRequestedPostWithoutDialog() {
+        host.useDefaultPermission = true
+        val identity = Any()
+        val first = request(identity = identity)
+        val waiting = ask(first); host.pump()
+        val firstPermit = checkNotNull(waiting.join())
+        assertTrue(host.dialogs.isEmpty())
+        assertEquals(2, host.reads) // Default approval still re-reads authoritative state.
+        first.consume(firstPermit)
+        rejected { first.consume(firstPermit) }
+        val second = request(2, identity, payload = byteArrayOf(8, 9))
+        val next = ask(second); host.pump()
+        val secondPermit = checkNotNull(next.join())
+        assertNotSame(firstPermit, secondPermit)
+        rejected { request(2, identity).consume(secondPermit) }
+        second.consume(secondPermit)
+        assertTrue(host.dialogs.isEmpty())
+        assertEquals(4, host.reads)
+    }
+
+    @Test fun trustedDefaultCannotApproveAStoppedOrChangedRequestEvenWhenValuesAreRestored() {
+        host.useDefaultPermission = true
+        host.snapshot = { if (host.reads == 1) authority() else authority(configEpoch = 10) }
+        val waiting = ask(request()); host.pump()
+        assertNull(waiting.join())
+        assertTrue(host.dialogs.isEmpty())
+        assertEquals(1, host.cancellations.get())
+        host.snapshot = { authority() }
+        assertNull(ask(request()).join()) // Restoration never revives the revoked adapter.
+
+        val stoppedHost = Host(authority()).also { it.useDefaultPermission = true }
+        val stopped = ControllerVideoPostApproval(stoppedHost, authority())
+        stopped.registerFrozenPlan(actual)
+        val pending = Waiter { runBlocking { stopped.approve(request()) } }.also(workers::add)
+        val queued = checkNotNull(stoppedHost.queue.poll(3, TimeUnit.SECONDS))
+        stopped.revoke()
+        queued()
+        assertNull(pending.join())
+        assertTrue(stoppedHost.dialogs.isEmpty())
+        assertEquals(0, stoppedHost.reads)
     }
 
     @Test fun explicitMainPromptBindsExactPayloadCompleteOrderedRefsAndConsumesOnce() {
@@ -302,6 +347,7 @@ class ControllerVideoPostApprovalTest {
     }
 
     @Test fun realTransportCannotConnectIfRevokedBetweenPositiveActionAndConsumption() {
+        host.useDefaultPermission = true
         val connections = AtomicInteger()
         val approved = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -315,7 +361,8 @@ class ControllerVideoPostApprovalTest {
         }).open(rows, emptyList(), checkNotNull(actual.videos))
         val worker = Waiter { target.next(emptyList()) {}; null }.also(workers::add)
         try {
-            host.pump(); host.dialogs.single().second(true)
+            host.pump()
+            assertTrue(host.dialogs.isEmpty())
             assertTrue(approved.await(3, TimeUnit.SECONDS))
             adapter.revoke()
         } finally { release.countDown() }

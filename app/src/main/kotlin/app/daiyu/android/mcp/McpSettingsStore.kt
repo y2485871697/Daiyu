@@ -17,10 +17,14 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** Deliberately not a data class: neither URL nor credentials may appear in logs/toString. */
 internal class McpServer(val id: String, val label: String, val endpoint: String, val bearer: String,
-    val enabled: Boolean = false, catalog: List<McpRemoteTool> = emptyList(), allowedTools: Set<String> = emptySet()) {
+    val enabled: Boolean = true, catalog: List<McpRemoteTool> = emptyList(),
+    allowedTools: Set<String> = catalog.map { it.name }.toSet()) {
     val catalog: List<McpRemoteTool> = java.util.Collections.unmodifiableList(catalog.toList())
+    // Legacy envelope fields are retained for backwards-compatible storage only. The user's
+    // exact task submission grants in-app capability, including for previously disabled entries.
+    // A known catalog entry is still required: absent server/tool configuration is not permission.
     val allowedTools: Set<String> = java.util.Collections.unmodifiableSet(allowedTools.toSet())
-    fun eligible(tool: String): Boolean = enabled && tool in allowedTools && catalog.any { it.name == tool }
+    fun eligible(tool: String): Boolean = catalog.any { it.name == tool }
     fun withPolicy(enabled: Boolean = this.enabled, allowedTools: Set<String> = this.allowedTools,
         catalog: List<McpRemoteTool> = this.catalog) = McpServer(id, label, endpoint, bearer, enabled, catalog, allowedTools)
 
@@ -57,7 +61,8 @@ internal class McpSettingsOwner {
 }
 
 /** Entire envelope encrypted, authenticated to this purpose, atomic and excluded from Android backup.
- * A settings revision is NOT approval. Saving, restoring history, or listing never enables a tool.
+ * A settings revision is NOT a task token. Saving, restoring history or listing never executes
+ * a tool; the original exact task submission still supplies the single-use scope.
  */
 internal class McpSettingsStore(context: Context, private val testKey: (() -> SecretKey)? = null) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "mcp-private-v1.bin"))
@@ -163,7 +168,7 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
                 McpServer(McpJson.text(item, "id"), McpJson.text(item, "label"), McpJson.text(item, "endpoint"), McpJson.text(item, "bearer"),
                     hasPolicy && item.getBoolean("enabled"), tools, allowed)
             })
-        } catch (_: Exception) { throw IllegalStateException("MCP 私有配置不可读；未启用服务器，请明确修复") }
+        } catch (_: Exception) { throw IllegalStateException("MCP 私有配置不可读；未执行，请修复服务器配置") }
     }
     private fun key(): SecretKey {
         testKey?.let { return it() }

@@ -95,24 +95,31 @@ internal object RunBrowserTools {
                     checkAccess(session, command.action)
                     val effect = if (write) effect(session, command) else null
                     // The dispatcher also checks this against the same task before reserving.
-                    require(effect == null || effect in authorization.allowedWrites) { "task_write_not_authorized" }
-                    return PreparedTool.contextual(effect, admit = { context ->
+                    val defaultWrite = effect != null && confirmation?.token?.hasDefaultWrite(effect) == true
+                    require(effect == null || effect in authorization.allowedWrites || defaultWrite) { "task_write_not_authorized" }
+                    val admit: (ToolExecutionContext) -> ExecutionReceipt.NotExecuted? = { context ->
                         // Pure checks must also guard CONFIRMED replay, not only browser execution.
                         when {
                             context.owner !== owner -> ExecutionReceipt.NotExecuted("tool_run_owner_mismatch")
                             context.authorization !== authorization -> ExecutionReceipt.NotExecuted("tool_run_authorization_mismatch")
                             context.invocation.name != definition.name -> ExecutionReceipt.NotExecuted("tool_invocation_mismatch")
                             !matches(context.invocation.arguments, write, command) -> ExecutionReceipt.NotExecuted("tool_invocation_mismatch")
-                            effect != null && effect !in context.authorization.allowedWrites ->
+                            effect != null && effect !in context.authorization.allowedWrites && !defaultWrite ->
                                 ExecutionReceipt.NotExecuted("task_write_not_authorized")
                             command.action == "screenshot" && screenshotStore == null ->
                                 ExecutionReceipt.NotExecuted("browser_screenshot_store_unavailable")
                             else -> confirmedAdmission(confirmation, context, session)
                         }
-                    }) { context ->
+                    }
+                    val executePlan: (ToolExecutionContext) -> ExecutionReceipt = { context ->
                         if (context.cancelled()) ExecutionReceipt.NotExecuted("cancelled_before_execution")
                         else confirmedAdmission(confirmation, context, session) ?: execute(session, command, context, screenshotStore)
                     }
+                    return if (defaultWrite) PreparedTool.approvedWrite(checkNotNull(effect), approve = { context ->
+                        if (context.cancelled()) null else checkNotNull(confirmation).token.defaultWriteAuthorization(
+                            context.owner, confirmation.assistantId, session, context.authorization, context.invocation.arguments)
+                    }, admit = admit, execute = executePlan)
+                    else PreparedTool.contextual(effect, admit = admit, execute = executePlan)
                 }
             }
         }

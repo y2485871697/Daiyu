@@ -67,8 +67,11 @@ internal class GenerationPreparationPreview internal constructor(
 internal class ControllerGenerationPreparation private constructor(val preview: GenerationPreparationPreview) {
     private var consumed = false
 
-    /** Only the explicit paid confirmation button may call this; toggles/preferences cannot. */
-    @Synchronized fun confirm(
+    /** The original paid-task submit also grants the exact in-app capability. No separate
+     * capability confirmation is required. Cost/budget consent remains the parent's submit gate;
+     * toggles, composition and configuration edits must never call this method.
+     */
+    @Synchronized fun authorizeForSubmission(
         displayed: GenerationPreparationPreview,
         currentEditor: GenerationEditorSnapshot,
         currentIdentity: GenerationPreparationIdentity,
@@ -82,6 +85,13 @@ internal class ControllerGenerationPreparation private constructor(val preview: 
         require(preview.blockers.isEmpty()) { "generation_unsupported_parameters" }
         return ConfirmedGenerationPreparation(preview)
     }
+
+    /** Compatibility for the original paid-submit handoff, not a second capability gate. */
+    fun confirm(
+        displayed: GenerationPreparationPreview,
+        currentEditor: GenerationEditorSnapshot,
+        currentIdentity: GenerationPreparationIdentity,
+    ): ConfirmedGenerationPreparation = authorizeForSubmission(displayed, currentEditor, currentIdentity)
 
     @Synchronized fun cancel() { consumed = true }
 
@@ -105,8 +115,23 @@ internal class ControllerGenerationPreparation private constructor(val preview: 
             val config = GenerationRunConfig(batches, maxPolls)
             // Preserve all raw values. The current client rejects ALL optional parameters, even
             // size. Show a blocked preview rather than silently dropping one or billing a fallback.
-            val blockers = batches.flatMap { batch -> batch.items.filter { it.parameters.isNotEmpty() }
-                .map { "${batch.id}/${it.id}: 当前生成客户端不支持附加参数（含 size、duration、quality、seed、n）；请明确移除后重新预览。" } }
+            val blockers = batches.flatMap { batch -> batch.items.flatMap { item ->
+                buildList {
+                    val prefix = "${batch.id}/${item.id}: "
+                    if (item.prompt.isBlank() || item.prompt.length > 100_000)
+                        add(prefix + "缺少有效原始 prompt；请填写，不会猜测或使用聊天草稿替代。")
+                    if (item.parameters.isNotEmpty())
+                        add(prefix + "当前生成客户端不支持附加参数（含 size、duration、quality、seed、n）；请明确移除后重新预览。")
+                    when (batch.protocol) {
+                        GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART -> if (item.references.size != 1)
+                            add(prefix + "图片编辑需要一张明确选择的原图；不会猜测或补选。")
+                        GenerationProtocol.OPENAI_IMAGES_JSON -> if (item.references.isNotEmpty() || item.mask != null)
+                            add(prefix + "此生成协议不支持原图或 mask；不会静默丢弃。")
+                        GenerationProtocol.OPENAI_VIDEO_MULTIPART -> if (item.references.size > 1 || item.mask != null)
+                            add(prefix + "此视频协议只支持至多一张参考图且不支持 mask；不会静默丢弃。")
+                    }
+                }
+            } }
             return ControllerGenerationPreparation(GenerationPreparationPreview(identity, editor, config,
                 labels, downloads, blockers))
         }
@@ -332,7 +357,7 @@ internal class GenerationConfirmationHandoff(
     ): Boolean {
         val confirmed = synchronized(this) {
             check(retained == null) { "generation_handoff_already_used" }
-            preparation.confirm(preparation.preview, currentEditor, currentIdentity).also { retained = it }
+            preparation.authorizeForSubmission(preparation.preview, currentEditor, currentIdentity).also { retained = it }
         }
         val accepted = runCatching { onConfirmed(confirmed) }.getOrDefault(false)
         if (!accepted) {

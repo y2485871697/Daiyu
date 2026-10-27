@@ -11,9 +11,10 @@ import app.daiyu.android.integration.tools.*
 import java.util.UUID
 import java.util.concurrent.Semaphore
 
-/** Independently approved child, not permission for run_child_models or arbitrary descendants.
+/** Run-owned child, not permission for run_child_models or arbitrary descendants.
  * The REAL IDs, original captured scope and its browser session are retained before any IO.
- * Parent and child approvals are distinct; the parent dispatcher reuses parentAuthorization.
+ * Product defaults inherit only the parent's browser action/capability intersection;
+ * exact legacy approvals remain separate. The parent dispatcher reuses parentAuthorization.
  */
 internal class ControllerChildBrowserPlan private constructor(
     val parent: ControllerBrowserPreparation,
@@ -118,10 +119,14 @@ internal class ControllerChildBrowserPlan private constructor(
             val authorization = TaskAuthorization(capabilities.sessionId, identity.runId.value,
                 parent.preview.writes.map { it.effect }.toSet() + childEffects)
             val scope = ChildRunScope.capture(owner, capabilities, authorization, capabilities.enabled, childEffects)
+            val defaultPermission = parent.preview.defaultPermission?.let { BrowserDefaultPermission.child(grant, scope, it) }
             val session = CatalogChildBrowserSession.prepare(scope, parent.assistant, parent.settings, grant,
                 allowedActions.toSet(), writes.toList(),
-                downloads?.recorder(identity.conversationId.value, grant.owner) ?: {})
-            return ControllerChildBrowserPlan(parent, prompt, scope, authorization, session)
+                downloads?.recorder(identity.conversationId.value, grant.owner) ?: {}, defaultPermission)
+            return ControllerChildBrowserPlan(parent, prompt, scope, authorization, session).also { plan ->
+                // Trusted product permission is inherited locally; never simulate a UI approval.
+                if (defaultPermission != null) check(plan.confirm(plan.preview)) { "child_default_permission_failed" }
+            }
         }
     }
 }

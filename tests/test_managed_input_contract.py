@@ -12,12 +12,20 @@ class ManagedInputContractTest(unittest.TestCase):
     def test_all_censused_ordinary_fields_are_registered_and_cursor_aware(self):
         inventory = json.loads((ROOT / 'tests/fixtures/managed_input_fields.json').read_text())
         self.assertGreater(len(inventory), 25)
-        self.assertEqual(56, sum(row['calls'] for row in inventory))
+        self.assertEqual(52, sum(row['calls'] for row in inventory))
         for row in inventory:
             text = (ROOT / row['path']).read_text()
             with self.subTest(path=row['path']):
                 self.assertGreaterEqual(text.count('.managedInput()'), row['calls'])
                 self.assertGreaterEqual(text.count('imeCursorBrush(') + text.count('materialImeCursorColor('), row['calls'])
+
+    def test_browser_default_permission_removes_only_permission_editor_fields(self):
+        parent = (MAIN / 'ui/BrowserApprovalHost.kt').read_text()
+        self.assertNotIn('OutlinedTextField(', parent)
+        child = (MAIN / 'ui/ChildBrowserApprovalHost.kt').read_text()
+        self.assertEqual(1, child.count('OutlinedTextField('))
+        self.assertIn('Modifier.managedInput().testTag("child-browser-prompt")', child)
+        self.assertIn('materialImeCursorColor(MaterialTheme.colorScheme.primary)', child)
 
     def test_window_resolution_prefers_dialog_and_rejects_foreign_tokens(self):
         text = SOURCE.read_text().split('private fun View.inputWindow()', 1)[1].split('private fun View.visibleInputBounds()', 1)[0]

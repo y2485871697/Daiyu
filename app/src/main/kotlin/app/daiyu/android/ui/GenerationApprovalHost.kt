@@ -76,7 +76,8 @@ internal fun GenerationApprovalHost(
     var preparedProfiles by remember(identity) { mutableStateOf<List<GenerationModelProfile>>(emptyList()) }
     var preparedDownloads by remember(identity) { mutableStateOf<GenerationDownloadHosts?>(null) }
     val sourceCurrent = preparedForm == form && preparedProfiles == profiles && preparedDownloads === downloads
-    // No hidden enable toggle and no default profile. Every POST requires a separate button.
+    // No capability toggle or default profile. The paid submit below also grants the exact
+    // capability; this preview does not add a separate in-app permission question.
     val frozen = preparation
     DisposableEffect(frozen) { onDispose { frozen?.cancel() } }
     LaunchedEffect(identity, editor.revision, editor.text, editor.attachmentIds, form, profiles, downloads) {
@@ -93,11 +94,11 @@ internal fun GenerationApprovalHost(
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(when (mediaKind) {
-            GenerationKind.IMAGE -> "本次图片生成（独立付费授权）"
-            GenerationKind.VIDEO -> "本次视频生成（独立付费授权）"
-            null -> "本次图片 / 视频生成（独立付费授权）"
+            GenerationKind.IMAGE -> "本次图片生成（可能产生费用）"
+            GenerationKind.VIDEO -> "本次视频生成（可能产生费用）"
+            null -> "本次图片 / 视频生成（可能产生费用）"
         })
-        Text("不使用聊天模型。选择生成专用配置只是在填写表单，并不授权请求。")
+        Text("不使用聊天模型；请填写独立生成配置。应用内能力默认可用，提交时只确认本次生成的费用与精确参数。")
         if (profiles.isEmpty()) Text("未配置独立生成模型；不会回退到聊天模型。")
         profiles.forEach { profile ->
             OutlinedButton(onClick = { edit(form.copy(profileId = profile.id)) }) {
@@ -170,7 +171,7 @@ internal fun GenerationApprovalHost(
                         preparation = null
                         if (accepted == null) error = "草稿或运行槽已失效，请重新预览。"
                         else if (!accepted) error = "父级未接纳本次运行；授权已撤销，等待清理。"
-                    }) { Text("明确同意本次付费生成") }
+                    }) { Text("提交生成（可能产生费用）") }
             },
             dismissButton = { TextButton(onClick = { frozen.cancel(); preparation = null; onCancelled() }) { Text("取消，不发送") } },
         )

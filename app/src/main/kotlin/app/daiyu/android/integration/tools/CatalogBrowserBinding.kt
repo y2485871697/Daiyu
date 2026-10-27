@@ -6,6 +6,7 @@ import app.daiyu.android.browser.openminis.AndroidOpenMinisBrowserHost
 import android.content.Context
 import app.daiyu.android.assistants.AssistantProfile
 import app.daiyu.android.browser.BrowserRunAuthorization
+import app.daiyu.android.browser.BrowserRunHostDefaults
 import app.daiyu.android.browser.host.BrowserToolSession
 import app.daiyu.android.browser.network.BrowserCloseResult
 import app.daiyu.android.browser.openminis.AndroidBrowserRunHost
@@ -190,8 +191,8 @@ internal class CatalogBrowserBinding private constructor(
         ): CatalogBrowserBinding = CatalogBrowserBinding(AndroidHost(host), assistant, confirmed)
 
         /** Android-main-Looper operation AFTER trusted confirmation, never during preview.
-         * MAIN/CHILD/fetch capability comes only from the explicitly confirmed token.
-         * No history, cookie-name authorization or offload capability is inferred.
+         * MAIN/CHILD capability comes only from the run-owned token. Product-default tokens
+         * bind history/name permission and private offloads explicitly; legacy tokens stay denied.
          * The actual constructor's BrowserRunConstructionException is deliberately rethrown
          * unchanged: its closeWithResult() owns partial cleanup and must remain with the parent.
          */
@@ -202,10 +203,12 @@ internal class CatalogBrowserBinding private constructor(
             confirmed: BrowserRunAuthorization,
             onDownloadCompleted: (app.daiyu.android.browser.download.BrowserCompletedDownload) -> Unit = {},
         ): CatalogBrowserBinding = create(assistant, confirmed) {
-            AndroidHost(AndroidBrowserRunHost(context, confirmed.preview.grant, privateRoot,
-                cookieEnvPath = { _, _ -> error("browser_cookie_offload_disabled") },
-                cookieAuthorizeName = { _, _, _ -> false },
-                historyApproval = OpenMinisHistoryApproval.DENY,
+            val defaults = if (confirmed.preview.defaultPermission != null)
+                BrowserRunHostDefaults.prepare(confirmed, privateRoot) else null
+            AndroidHost(AndroidBrowserRunHost(context, confirmed.preview.grant, defaults?.root ?: privateRoot,
+                cookieEnvPath = { lease, file -> checkNotNull(defaults) { "browser_cookie_offload_disabled" }.cookieEnvPath(lease, file) },
+                cookieAuthorizeName = { lease, url, name -> defaults?.authorizeCookieName(lease, url, name) == true },
+                historyApproval = OpenMinisHistoryApproval { lease, url, _ -> defaults?.allowHistory(lease, url) == true },
                 onDownloadCompleted = onDownloadCompleted),
                 app.daiyu.android.media.BrowserScreenshotStore(context.filesDir, context.cacheDir))
         }

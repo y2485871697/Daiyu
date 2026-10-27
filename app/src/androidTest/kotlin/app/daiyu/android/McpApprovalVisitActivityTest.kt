@@ -21,6 +21,8 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
     private lateinit var root: File
     private val transports = AtomicInteger()
+    private val entered = java.util.concurrent.CountDownLatch(1)
+    private val release = java.util.concurrent.CountDownLatch(1)
     private val text = "  MCP visit draft remains exact  "
     private val raw = """{"server":"server","tool":"erase","arguments":{"target":"one"}}"""
 
@@ -33,6 +35,9 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
         }
         return RunControlFixture(isolated, mcpTransport = {
             transports.incrementAndGet(); error("MCP visit test must never open a transport")
+        }, beforeModel = {
+            entered.countDown()
+            check(release.await(10, TimeUnit.SECONDS))
         })
     }
 
@@ -44,6 +49,7 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
     }
 
     override fun tearDown() {
+        release.countDown()
         try { super.tearDown() } finally { if (::root.isInitialized) root.deleteRecursively() }
     }
 
@@ -94,19 +100,6 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
         assertUnsent()
     }
 
-    private fun preview(): Pair<ControllerMcpPreparation, Any> {
-        val action = openInput()
-        mainThread { host(activity, "setPrompt", null); action(raw) }
-        ui.waitUntil(timeoutMillis = 5_000) {
-            var ready = false
-            instrumentation.runOnMainSync { ready = approval() != null }
-            ready
-        }
-        awaitTag("mcp-approve")
-        lateinit var result: Pair<ControllerMcpPreparation, Any>
-        mainThread { result = checkNotNull(approval()) to checkNotNull(visit()) }
-        return result
-    }
     private fun assertUnsent() {
         assertDraft(text)
         assertEquals(text, fixture.database.draft())
@@ -145,30 +138,23 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testPreviewApproveUsesOriginalVisitAndForegroundNotTheCurrentVisit() {
-        for (transition in listOf<() -> Unit>(::routeRoundTrip, ::sidebarRoundTrip)) {
-            val (old, oldVisit) = preview()
-            mainThread { transition() }
-            assertFalse(old.scope.isCurrent())
-            val (fresh, freshVisit) = preview()
-            mainThread {
-                // The same production host method is captured by McpApprovalHost's approve callback.
-                host(activity, "approveMcp", old, oldVisit)
-                assertSame(fresh, approval()); assertSame(freshVisit, visit())
-                host(activity, "cancelMcpEditor")
-            }
-            assertUnsent()
-        }
-        val (fresh, freshVisit) = preview()
-        realPauseResume(activity) {
-            host(activity, "approveMcp", fresh, freshVisit)
-            host(activity, "openMcpApproval")
-            assertNull(approval()); assertNull(visit()); assertNull(host(activity, "getPrompt"))
-        }
+    fun testOriginalInputSubmitAutomaticallyGrantsExactCapabilityAndIsSingleUse() {
+        val action = openInput()
+        mainThread { host(activity, "setPrompt", null); action(raw) }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        lateinit var pending: ControllerMcpPreparation
         mainThread {
-            host(activity, "approveMcp", fresh, freshVisit)
-            assertNull(approval()); assertFalse(fresh.scope.isCurrent())
+            pending = checkNotNull(preparation())
+            assertTrue(pending.confirmed)
+            assertEquals(1, pending.scope.authorization.allowedWrites.size)
+            // Retaining the original input cannot enqueue a second run or reissue a token.
+            action(raw)
+            assertSame(pending, preparation())
         }
+        ui.onNodeWithTag("mcp-approve").assertDoesNotExist()
+        mainThread { fixture.controller.rejectMcp(pending); assertFalse(pending.scope.isCurrent()) }
+        release.countDown()
+        awaitControl("original MCP preparation drained") { preparation() == null }
         assertUnsent()
     }
 
@@ -198,23 +184,16 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
         mainThread { assertNull(approval()); assertNull(visit()); action(raw); assertNull(approval()) }
         assertUnsent()
         // The old continuation also released Controller preparation, without creating a new run.
-        val (next, _) = preview()
-        mainThread { host(activity, "cancelMcpEditor") }
-        assertFalse(next.scope.isCurrent()); assertUnsent()
+        val next = openInput()
+        mainThread { host(activity, "cancelMcpEditor"); next(raw) }
+        assertUnsent()
     }
 
-    fun testDestroyedActivityCannotReuseOriginalInputOrPreviewCallback() {
+    fun testDestroyedActivityCannotReuseOriginalSubmitCallback() {
         val oldActivity = activity
         val input = openInput()
         activity = recreateActivity(activity)
         mainThread { input(raw); assertNull(visit()); assertNull(approval()); assertNull(visit(oldActivity)) }
-        val (pending, token) = preview()
-        val previewActivity = activity
-        activity = recreateActivity(activity)
-        mainThread {
-            host(previewActivity, "approveMcp", pending, token)
-            assertNull(approval()); assertNull(visit()); assertFalse(pending.scope.isCurrent())
-        }
         assertUnsent()
     }
 }

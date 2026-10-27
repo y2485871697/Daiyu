@@ -139,7 +139,8 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         assertSame(pending, controller.browserPreparation())
         assertEquals(ControllerBrowserPreparation.State.PREVIEW, pending.state)
         assertEquals(draft, pending.draft)
-        assertEquals(BrowserAccess.READ_ONLY, pending.settings.access)
+        assertEquals(BrowserAccess.FULL, pending.settings.access)
+        assertTrue(pending.settings.productPolicy)
         assertTrue(pending.preview.writes.isEmpty())
         assertTrue("list_tabs" in pending.preview.allowedActions)
         assertNull(controller.textSendState())
@@ -147,16 +148,18 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         controlMain { controller.rejectBrowser(pending) }
     }
 
-    fun testDisabledBrowserRejectsKeepsDraftAndReleasesReservation() {
+    fun testLegacyDisabledSettingUsesProductDefaultsWithoutOpeningOrSending() {
         val draft = draft()
         browserSettings.save(BrowserSettings(BrowserAccess.DISABLED))
-        assertNull(controller.prepareBrowserSend(null, draft, emptyList()))
-        assertEquals("BROWSER_DISABLED", controller.problem)
-        assertNull(controller.browserPreparation())
+        val pending = prepare(draft)
+        assertEquals(BrowserAccess.FULL, pending.settings.access)
+        assertTrue(pending.settings.productPolicy)
+        assertNotNull(pending.preview.defaultPermission)
+        assertSame(pending, controller.browserPreparation())
         assertNull(controller.textSendState())
         assertUncommitted(draft)
-        browserSettings.save(BrowserSettings(BrowserAccess.READ_ONLY))
-        val replacement = prepare(draft) // Admission, not just a null accessor, proves slot release.
+        controlMain { controller.rejectBrowser(pending) }
+        val replacement = prepare(draft)
         controlMain { controller.rejectBrowser(replacement) }
         assertUncommitted(draft)
     }
@@ -234,10 +237,10 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         val pending = prepare(draft)
         val callbacks = AtomicInteger()
         controlMain {
-            assertFalse("preview alone is not confirmation",
+            controller.rejectBrowser(pending)
+            assertFalse("cancelled preparation cannot regain default permission",
                 controller.sendBrowser(pending, draft, ChatController.TextSendTicket()) { callbacks.incrementAndGet() })
             assertNull(controller.textSendState())
-            controller.rejectBrowser(pending)
             assertNull(controller.browserPreparation())
         }
         assertEquals(ControllerBrowserPreparation.State.DRAINED, pending.state)
@@ -265,7 +268,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         awaitControl("ordinary text run completed") { controller.active == null }
     }
 
-    fun testConfirmedBrowserSendPassesItsPersistentReceiptConversationToSessionFactory() {
+    fun testDefaultBrowserSendPassesItsPersistentReceiptConversationToSessionFactory() {
         val draft = draft()
         val pending = prepare(draft)
         val session = fixture.session(held = false)
@@ -273,7 +276,6 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         val done = CountDownLatch(1)
         val result = AtomicReference<ChatController.TextSendResult>()
         controlMain {
-            assertTrue(pending.confirm(pending.preview, draft))
             assertTrue(controller.sendBrowser(pending, draft, ticket) { result.set(it); done.countDown() })
         }
         await(done); await(session.entered)
@@ -415,8 +417,11 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
                 assertEquals(pending.identity.assistantMessageId,
                     rows.single { it.role == app.daiyu.android.domain.Message.ASSISTANT_ROLE }.id)
                 assertTrue(history.isNotEmpty())
-                assertTrue(File(root, "browser-runs/downloads").isDirectory)
-                assertTrue(File(root, "browser-runs/cookie-offloads").isDirectory)
+                val nativeRoots = checkNotNull(File(root, "browser-runs").listFiles())
+                    .filter { it.isDirectory && it.name.startsWith("run-") }
+                assertEquals(1, nativeRoots.size)
+                assertTrue(File(nativeRoots.single(), "downloads").isDirectory)
+                assertTrue(File(nativeRoots.single(), "cookie-offloads").isDirectory)
             } catch (failure: Throwable) { openFailure.set(failure) }
             finally { checked.countDown() }
         }
@@ -460,8 +465,8 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         val done = CountDownLatch(1)
         val result = AtomicReference<ChatController.TextSendResult>()
         controlMain {
-            assertTrue(plan.confirm(plan.preview))
-            assertTrue(pending.confirm(pending.preview, draft))
+            assertTrue(plan.confirmed)
+            assertTrue(pending.confirmDefault(draft))
             assertTrue(controller.sendBrowser(pending, draft, ticket) { result.set(it); done.countDown() })
         }
         await(done); await(first.entered); await(second.entered)
@@ -501,7 +506,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         } finally { reopened.close() }
     }
 
-    fun testIndependentChildApprovalIsRequiredAndQueuedCancellationIsZeroIO() {
+    fun testChildDefaultPermissionKeepsIdentityAndQueuedCancellationIsZeroIO() {
         val draft = draft()
         val pending = prepare(draft)
         val plan = checkNotNull(controller.prepareBrowserChild(pending, "independent child prompt",
@@ -514,10 +519,10 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         assertEquals(pending.identity.runId.value, plan.scope.owner.parentRunId)
         assertEquals(plan.scope.owner, plan.preview.childOwner)
         controlMain {
-            assertFalse("parent click is not child consent", pending.confirm(pending.preview, draft))
-            assertTrue(plan.confirm(plan.preview))
+            assertTrue("trusted child default is independent of UI clicks", plan.confirmed)
             assertFalse(plan.confirm(plan.preview))
-            assertTrue(pending.confirm(pending.preview, draft))
+            assertTrue(pending.confirmDefault(draft))
+            assertFalse(pending.confirmDefault(draft))
         }
         assertUncommitted(draft)
         val gate = holdWorker()

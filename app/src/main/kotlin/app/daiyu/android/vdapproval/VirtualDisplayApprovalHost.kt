@@ -8,9 +8,9 @@ import app.daiyu.android.integration.tools.*
 import app.daiyu.android.vd.AndroidVirtualDisplayOwnerHost
 import java.util.Collections
 
-/** Pure view model for a NEW approval UI. Construct/show is not permission or execution.
- * UI must render EVERY row's operation/effective parameters, including start vs initialize.
- * No Activity/settings/controller hookup is installed by this artifact. */
+/** Host request for one NEW immutable plan. Construction is not permission or execution.
+ * Product policy may grant directly; optional explicit review renders every effective parameter.
+ * Neither path grants Root, initializes a display, or changes the parent's real run identity. */
 internal class VirtualDisplayApprovalRequest(val plan: R08VirtualDisplayPlan) {
     data class Row(val stepId: String, val operation: String, val effectiveParameters: String, val exactEffect: WriteEffect)
     val rows: List<Row> = Collections.unmodifiableList(plan.writes.map {
@@ -19,6 +19,15 @@ internal class VirtualDisplayApprovalRequest(val plan: R08VirtualDisplayPlan) {
     val warning = "Root owner start, display initialization, and every GUI write are separate grants. " +
         "Reads never initialize. Closing revokes access but does not release, hand off, or kill the owner."
     private var answered = false
+
+    /** Trusted product policy entry: one-shot grant for this request's ORIGINAL immutable plan.
+     * This is app-internal permission only: it never starts an owner, fakes Root availability,
+     * initializes a display, or replaces the run's real lease/authorization. */
+    fun authorizeWithProductDefaults(): VirtualDisplayApproval = synchronized(this) {
+        check(!answered) { "virtual_display_approval_already_answered" }
+        answered = true
+        VirtualDisplayApproval.issue(plan)
+    }
 
     /** Call ONLY from the explicit approval UI action, never on open/show/dismiss/default chat.
      * The callback joins this approval into the parent's single combined TaskAuthorization;
@@ -33,7 +42,7 @@ internal class VirtualDisplayApprovalRequest(val plan: R08VirtualDisplayPlan) {
     }
 }
 
-/** Capability acquired only by the explicit UI action, for one immutable run plan and one binding. */
+/** Host-issued capability for one immutable run plan and one binding, never a system grant. */
 internal class VirtualDisplayApproval private constructor(internal val plan: R08VirtualDisplayPlan) {
     @Volatile private var revoked = false
     private var boundAuthorization: TaskAuthorization? = null

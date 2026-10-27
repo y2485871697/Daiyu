@@ -125,7 +125,7 @@ class ControllerVirtualDisplaySessionTest {
         }
         override fun shutdownOnce(generation: String, binding: OwnerRunBinding) { shutdowns++ }
     }
-    private class Parent : ControllerVirtualDisplaySession.Parent {
+    private class Parent(override val requiresExplicitApproval: Boolean = true) : ControllerVirtualDisplaySession.Parent {
         val lease = Lease()
         val shown = LinkedBlockingQueue<VirtualDisplayApprovalRequest>()
         val stops = AtomicInteger()
@@ -159,12 +159,12 @@ class ControllerVirtualDisplaySessionTest {
         }
     }
     private class Fixture(includeRelease: Boolean = false, includeHandoff: Boolean = false,
-                          includeLaunch: Boolean = false) : AutoCloseable {
+                          includeLaunch: Boolean = false, explicitApproval: Boolean = true) : AutoCloseable {
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
         val owner = runnerOwner(message)
         val capabilities = SessionCapabilities("session", setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY))
-        val parent = Parent()
+        val parent = Parent(explicitApproval)
         val endpoint = Endpoint()
         val shutdown = Shutdown()
         val constructions = AtomicInteger()
@@ -255,6 +255,65 @@ class ControllerVirtualDisplaySessionTest {
             .put("receipt", JSONObject().put("state", "SUCCEEDED"))
         assertTrue(f.session.answerCleanupFromUi(request, true))
         return request
+    }
+
+    @Test fun productDefaultsGrantFrozenPlanWithoutPublishingOrStartingOwner() = Fixture(explicitApproval = false).use { f ->
+        val original = f.mutableWrites.toList()
+        f.mutableWrites.clear()
+        val auth = f.begin().get(5, TimeUnit.SECONDS)
+        assertSame(f.parent.auth, auth)
+        assertTrue(f.parent.shown.isEmpty()); assertNull(f.session.pendingApproval())
+        val prepared = R08VirtualDisplayPlan.prepare(f.owner, f.capabilities, f.parent.lease.generation,
+            original, listOf(R08VirtualDisplayRead("status")))
+        assertEquals(prepared.effects, auth.allowedWrites)
+        assertEquals(1, f.parent.reserves.get()); assertEquals(1, f.constructions.get())
+        assertEquals(0, f.endpoint.starts); assertEquals(0, f.endpoint.initializations); assertEquals(0, f.endpoint.writes)
+        assertTrue(f.dispatch(auth).second.single().outcome is DispatchOutcome.Confirmed)
+        assertEquals(1, f.endpoint.starts)
+        f.session.close()
+        assertThrows(IllegalStateException::class.java) { f.session.registeredTools(f.owner, f.capabilities, auth) }
+        assertEquals(0, f.parent.lease.releases.get()) // revocation != physical exit
+    }
+
+    @Test fun productDefaultCancellationDuringRealReservationNeverIssuesOrRevivesGrant() = Fixture(explicitApproval = false).use { f ->
+        f.parent.reserveEntered = CountDownLatch(1); f.parent.reserveContinue = CountDownLatch(1)
+        val pending = f.begin()
+        assertTrue(f.parent.reserveEntered!!.await(5, TimeUnit.SECONDS))
+        f.session.close()
+        f.parent.reserveContinue!!.countDown()
+        assertStopped(pending)
+        assertNull(f.parent.auth); assertTrue(f.parent.shown.isEmpty())
+        assertEquals(0, f.constructions.get()); assertEquals(0, f.endpoint.starts)
+        assertThrows(ExecutionException::class.java) { f.begin().get(5, TimeUnit.SECONDS) }
+        assertEquals(1, f.parent.reserves.get())
+    }
+
+    @Test fun defaultAppPermissionDoesNotFakeRootStartAndUnknownDoesNotRetry() = Fixture(explicitApproval = false).use { f ->
+        f.endpoint.failStart = true
+        val auth = f.begin().get(5, TimeUnit.SECONDS)
+        assertEquals(0, f.endpoint.starts)
+        val result = f.dispatch(auth).second.single()
+        assertFalse(result.outcome is DispatchOutcome.Confirmed)
+        assertEquals(1, f.endpoint.starts)
+        assertEquals(0, f.endpoint.initializations)
+        f.session.close()
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.work { f.session.observeCloseOnWorker(true) })
+        assertEquals(0, f.parent.lease.releases.get())
+        assertEquals(1, f.endpoint.starts)
+    }
+
+    @Test fun defaultCleanupGrantsOnlyFreshSelectedPlanAndStillRequiresDrainAndLiveAdmission() = Fixture().use { f ->
+        val tasks = retainedTasks(f)
+        val request = checkNotNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, emptyList(), true) })
+        assertFalse(f.session.authorizeCleanupWithProductDefaults(request, parentDrained = false))
+        assertFalse(f.session.authorizeCleanupWithProductDefaults(request, true) { false })
+        assertTrue(f.session.authorizeCleanupWithProductDefaults(request, true))
+        assertFalse(f.session.authorizeCleanupWithProductDefaults(request, true))
+        assertFalse(f.session.answerCleanupFromUi(request, true))
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) { false } })
+        assertEquals(listOf("status"), f.endpoint.executed.map { it.second })
+        assertEquals(0, f.parent.lease.releases.get())
     }
 
     @Test fun explicitEmptyHandoffCleansWithoutClaimingTaskDelivery() = Fixture().use { f ->

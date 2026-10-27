@@ -10,7 +10,7 @@ import org.junit.Test
 import java.io.File
 
 class RunCommandToolsTest {
-    private class Fixture {
+    private class Fixture(private val automaticConsent: Boolean = false) {
         val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val task = TaskAuthorization("s", "r")
@@ -27,10 +27,19 @@ class RunCommandToolsTest {
         var cancelled = false
         var onOpen: () -> Unit = {}
         var execution = "executed"
+        var ownerCurrent = true
+        var duringConsent: () -> Unit = {}
+        val effects = mutableListOf<WriteEffect>()
+        val executedCommands = mutableListOf<String>()
+        private val gate = CommandApprovalGate({ fail("automatic consent must not post UI") }, { ownerCurrent && it === owner })
         val leaf = RunCommandTools(TerminalConfiguration(workingDirectory = File("/fixed")), owner, task, null,
-            approve = { context, _, disclosure ->
-                assertSame(task, context.authorization); assertTrue(disclosure.endsWith("echo exact"))
-                prompts++; approved
+            approve = { context, effect, disclosure ->
+                assertSame(task, context.authorization)
+                effects.add(effect)
+                duringConsent()
+                if (automaticConsent) gate.await(CommandApprovalRequest(owner, context.invocation.id.value,
+                    effect, disclosure), context.cancelled)
+                else { prompts++; approved }
             }, create = { _, _ ->
                 created++; onCreate()
                 object : CommandTransport {
@@ -41,7 +50,7 @@ class RunCommandToolsTest {
                         }
                         executions++
                         if (failExecute) throw java.io.IOException("sent but receipt lost")
-                        assertEquals("echo exact", arguments.getString("command"))
+                        executedCommands.add(arguments.getString("command"))
                         return JSONObject().put("ok", true).put("execution", execution)
                             .put("job_id", "00000000-0000-0000-0000-000000000001").put("stdout", "exact\n")
                     }
@@ -53,9 +62,52 @@ class RunCommandToolsTest {
         private val registry = ToolRegistry().also { registry -> leaf.tools().forEach { registry.register(it) } }
         private val dispatcher = ToolDispatcher(registry.snapshot(), SessionCapabilities("s", setOf(RunCommandTools.CAPABILITY)),
             ToolLedger(InMemoryToolLedgerStore()))
-        fun dispatch(id: String = "call", environment: String = "android", timeout: Long = 30000) = dispatcher.dispatchOwned(task,
-            listOf(ToolInvocation(ToolCallId(id), "terminal_exec", JSONObject().put("command", "echo exact")
-                .put("environment", environment).put("timeout_ms", timeout).toString())), owner) { cancelled }.single().outcome
+        fun dispatch(id: String = "call", environment: String = "android", timeout: Long = 30000,
+            command: String = "echo exact", dispatchOwner: RunExecutionOwner = owner) = dispatcher.dispatchOwned(task,
+            listOf(ToolInvocation(ToolCallId(id), "terminal_exec", JSONObject().put("command", command)
+                .put("environment", environment).put("timeout_ms", timeout).toString())), dispatchOwner) { cancelled }.single().outcome
+    }
+    @Test fun automaticDefaultExecutesDifferentCommandsAndTimeoutsWithSeparateExactGrants() {
+        val fixture = Fixture(automaticConsent = true)
+        val commands = listOf("echo first", "echo second", "echo second ")
+        commands.forEachIndexed { index, command ->
+            assertTrue(fixture.dispatch("call-$index", command = command) is DispatchOutcome.Confirmed)
+        }
+        assertTrue(fixture.dispatch("timeout", timeout = 60000, command = commands.last()) is DispatchOutcome.Confirmed)
+        assertEquals(commands + commands.last(), fixture.executedCommands)
+        assertEquals(4, fixture.effects.toSet().size)
+        assertEquals(0, fixture.prompts)
+        assertTrue(fixture.task.allowedWrites.isEmpty())
+        assertTrue((fixture.dispatch("replay", command = commands.first()) as DispatchOutcome.Confirmed).replayed)
+        assertEquals(4, fixture.executions)
+        fixture.leaf.close()
+    }
+    @Test fun automaticDefaultStillRejectsStopExpiredOwnerAndForeignOwner() {
+        val stopped = Fixture(automaticConsent = true)
+        stopped.duringConsent = { stopped.cancelled = true }
+        assertTrue(stopped.dispatch() is DispatchOutcome.NotExecuted)
+        assertEquals(0, stopped.created)
+        val expired = Fixture(automaticConsent = true)
+        expired.ownerCurrent = false
+        assertTrue(expired.dispatch() is DispatchOutcome.NotExecuted)
+        assertEquals(0, expired.created)
+        val foreign = Fixture(automaticConsent = true)
+        val other = runnerOwner(Message(MessageId("other"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        assertTrue(foreign.dispatch(dispatchOwner = other) is DispatchOutcome.NotExecuted)
+        assertTrue(foreign.effects.isEmpty())
+        assertEquals(0, foreign.created)
+    }
+    @Test fun automaticUnknownNeverReplaysOrPermitsADifferentCommand() {
+        val fixture = Fixture(automaticConsent = true)
+        fixture.execution = "unknown"
+        assertTrue(fixture.dispatch() is DispatchOutcome.Unknown)
+        assertTrue(fixture.dispatch("new-id") is DispatchOutcome.Unknown)
+        assertTrue(fixture.dispatch("different", command = "echo other") is DispatchOutcome.NotExecuted)
+        assertEquals(1, fixture.executions)
+        assertEquals(1, fixture.effects.size)
+        assertEquals(0, fixture.prompts)
+        fixture.leaf.close()
     }
     @Test fun consentExecutesExactBytesOnceAndConfirmedReplayDoesNotPrompt() {
         val fixture = Fixture()

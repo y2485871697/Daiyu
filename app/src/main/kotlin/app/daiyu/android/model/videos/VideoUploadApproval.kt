@@ -148,7 +148,7 @@ internal class VideoUploadApprovalController {
         return gate.offer(request)
     }
 
-    /** Invoke only from the positive action of the displayed exact prompt, not restored state. */
+    /** Confirm only this fresh offer after current-run checks, including trusted default permission. */
     fun confirm(prompt: VideoApprovalGate.Prompt, current: FrozenVideoApprovalRequest): VideoApprovalGate.Ticket {
         checkThread()
         check(evidence?.matches(current.provider, current.configurationRevision) == true)

@@ -125,7 +125,7 @@ class TouchHapticsContractTest(unittest.TestCase):
         self.assertIn('TextButton(text = "取消", onClick = onDismiss', text)
 
     def test_custom_semantics_links_and_slider_accessibility_are_covered(self):
-        for file in ("ui/screens/settings/SettingsUiComponents.kt", "ui/screens/settings/WorkspaceSettingsScreen.kt", "ui/screens/settings/IconAppearanceEditor.kt", "ui/PlatformActionApprovalHost.kt", "ui/screens/chat/conversation/MessageMarkdown.kt"):
+        for file in ("ui/screens/settings/SettingsUiComponents.kt", "ui/screens/settings/WorkspaceSettingsScreen.kt", "ui/screens/settings/IconAppearanceEditor.kt", "ui/screens/chat/conversation/MessageMarkdown.kt"):
             text = (SRC / file).read_text()
             self.assertIn("TouchHaptics.action(feedbackView)", text, file)
             self.assertIn("val feedbackView = LocalView.current", text, file)
@@ -135,6 +135,14 @@ class TouchHapticsContractTest(unittest.TestCase):
         self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description, speedMode, onCycleSpeed, speedEnabled)", text)
         self.assertNotIn("WindowDialog", text)
         self.assertNotIn("SliderDefaults", text)
+
+    def test_platform_actions_use_material_haptics_without_a_permission_toggle(self):
+        text = (SRC / "ui/PlatformActionApprovalHost.kt").read_text()
+        for component in ("Button", "TextButton", "Switch"):
+            self.assertIn(f"import app.daiyu.android.ui.haptics.material.{component}", text)
+        self.assertIn('Switch(checked = wifi, onCheckedChange = { wifi = it }', text)
+        self.assertNotIn('platform-action-enable', text)
+        self.assertNotIn('TouchHaptics.action(feedbackView)', text)
 
     def test_programmatic_native_check_restore_has_no_haptic_observer(self):
         for file, group in (("question/QuestionHost.kt", "group"), ("question/QuestionCardView.kt", "options")):

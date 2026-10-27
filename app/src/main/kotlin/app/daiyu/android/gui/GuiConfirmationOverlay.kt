@@ -24,6 +24,7 @@ internal class GuiConfirmationOverlay(
     private val onNotExecuted: (String) -> Unit,
     private val onRevoked: () -> Unit,
     private val deliver: (GuiConfirmedDelivery) -> Boolean,
+    private val productDefaults: Boolean = false,
 ) {
     private val windows = service.getSystemService(WindowManager::class.java)
     private val ticket = GuiConfirmationTicket()
@@ -50,7 +51,8 @@ internal class GuiConfirmationOverlay(
     fun show() {
         require((operation == GuiOperation.INPUT) == (input != null))
         require(input == null || input.length <= 4096)
-        renderPicker("请先切到要操作的外部应用，再点读取。此浮层不抢焦点；不授予系统权限、不执行动作。")
+        renderPicker(if (productDefaults) "请选择唯一真实目标。应用内许可默认开启；此处只澄清目标，不授予系统权限。"
+            else "请先切到要操作的外部应用，再点读取。此浮层不抢焦点；不授予系统权限、不执行动作。")
         windows.addView(panel, WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -59,6 +61,7 @@ internal class GuiConfirmationOverlay(
             PixelFormat.TRANSLUCENT).apply { gravity = Gravity.BOTTOM; title = "Daiyu 精确动作确认" })
         attached = true
         GuiRuntime.main.post(watchdog)
+        if (productDefaults) GuiRuntime.main.postDelayed({ if (active()) readChoices() }, 350)
     }
     private fun label(parent: LinearLayout, value: String) {
         parent.addView(TextView(service).apply { text = value; setTextColor(Color.WHITE); textSize = 14f })
@@ -87,20 +90,28 @@ internal class GuiConfirmationOverlay(
         val epoch = ticket.next()
         panel.removeAllViews()
         label(body(), "$message\n动作：$operation\n完整输入：${input ?: "（无）"}\n" +
-            "继续将读取整个有界 UI 树，而非仅所选节点；确认后整个有界观察和完整输入将发送给当前模型，可能进入任务或会话记录。请先移开敏感内容。")
-        button(panel, "读取当前外部目标并选择") { if (ticket.current(epoch) && active()) readChoices() }
+            if (productDefaults) "将读取有界 UI 树用于本次任务；多个候选目标时必须选择，不会猜测或沿用旧授权。"
+            else "继续将读取整个有界 UI 树，而非仅所选节点；确认后整个有界观察和完整输入将发送给当前模型，可能进入任务或会话记录。请先移开敏感内容。")
+        button(panel, if (productDefaults) "已切到目标应用，重新识别目标" else "读取当前外部目标并选择") {
+            if (ticket.current(epoch) && active()) readChoices()
+        }
         cancelButton(epoch)
     }
     private fun readChoices() {
-        session.approveReadsFromUser(GuiReadApproval(1, 0))
-        when (val result = session.previewFromUser()) {
+        if (!productDefaults) session.approveReadsFromUser(GuiReadApproval(1, 0))
+        when (val result = if (productDefaults) session.previewWithProductDefaults() else session.previewFromUser()) {
             is GuiResult.Value -> {
                 val observation = result.value
                 if (observation.truncated) { renderPicker("未执行：目标树超过安全边界，不能精确确认。"); return }
+                if (productDefaults) {
+                    val resolved = GuiExactTarget.resolve(observation, operation, input)
+                    if (resolved is GuiResult.Value) { stage(observation, resolved.value.nodeId); return }
+                }
                 val epoch = ticket.next()
                 panel.removeAllViews()
                 val content = body()
-                label(content, "实际应用：${observation.packageName} / window=${observation.windowId}\n选择真实目标；这不是最终授权。")
+                label(content, "实际应用：${observation.packageName} / window=${observation.windowId}\n" +
+                    if (productDefaults) "请选择要执行本次动作的唯一目标。" else "选择真实目标；这不是最终授权。")
                 val global = operation in setOf(GuiOperation.BACK, GuiOperation.HOME, GuiOperation.RECENTS, GuiOperation.NOTIFICATIONS)
                 if (global) button(content, "选择全局动作 $operation") {
                     if (ticket.current(epoch) && active()) stage(observation, null)
@@ -124,6 +135,7 @@ internal class GuiConfirmationOverlay(
         }
     }
     private fun stage(reference: GuiObservation, nodeId: Int?) {
+        if (productDefaults) { stageWithProductDefaults(reference, nodeId); return }
         val epoch = ticket.next()
         val node = nodeId?.let { id -> reference.nodes.single { it.id == id } }
         panel.removeAllViews()
@@ -174,6 +186,39 @@ internal class GuiConfirmationOverlay(
                         session.approveReadsFromUser(GuiReadApproval(0, 0))
                     }
                     else -> renderPicker("未执行：展示目标与最终真实目标不唯一匹配，请重新确认。")
+                }
+            } catch (_: Exception) { revoke("FINAL_OBSERVATION_UNAVAILABLE_NOT_EXECUTED") }
+        }, 350)
+        GuiRuntime.main.postDelayed({
+            if (ticket.current(epoch) && !delivered && !disposed) revoke("CONFIRMATION_EXPIRED_NOT_EXECUTED")
+        }, 10_350)
+    }
+    /** Selection is clarification, not a generic permission prompt. Render before recapturing;
+     * queued window/content events remain freshness signals, exactly as in explicit review. */
+    private fun stageWithProductDefaults(reference: GuiObservation, nodeId: Int?) {
+        val epoch = ticket.next()
+        panel.removeAllViews()
+        label(body(), "正在核实本次目标：${reference.packageName} / window=${reference.windowId} / node=${nodeId ?: "global"}\n动作：$operation")
+        cancelButton(epoch)
+        GuiRuntime.main.postDelayed({
+            if (!ticket.current(epoch) || !active()) return@postDelayed
+            try {
+                val current = session.previewWithProductDefaults()
+                if (current !is GuiResult.Value) { revoke("FINAL_OBSERVATION_UNAVAILABLE_NOT_EXECUTED"); return@postDelayed }
+                val matched = GuiExactTarget.unique(reference, nodeId, current.value)
+                if (matched !is GuiResult.Value) { renderPicker("目标变化或不唯一，请重新选择。"); return@postDelayed }
+                val action = GuiAction(current.value.observationId, operation, matched.value?.id, input)
+                val granted = session.grantExactActionWithProductDefaults(current.value, action)
+                if (granted !is GuiResult.Value) { revoke("TARGET_CHANGED_NOT_EXECUTED"); return@postDelayed }
+                // No simulated button press, dismissal, rendering or read after this final capture.
+                delivered = true
+                GuiRuntime.main.removeCallbacks(watchdog)
+                val accepted = try { deliver(granted.value) } catch (_: Exception) {
+                    revoke("CONFIRMATION_TRANSFER_UNCONFIRMED"); return@postDelayed
+                }
+                if (!accepted) {
+                    delivered = false
+                    revoke("CONFIRMATION_TRANSFER_REJECTED_NOT_EXECUTED")
                 }
             } catch (_: Exception) { revoke("FINAL_OBSERVATION_UNAVAILABLE_NOT_EXECUTED") }
         }, 350)

@@ -34,6 +34,7 @@ internal object ControllerVirtualDisplayRuntime {
      * No reserve callback: this adapter, not an in-memory parent substitute, owns that operation.
      */
     interface Parent {
+        val requiresExplicitApproval: Boolean get() = false
         fun showApproval(request: VirtualDisplayApprovalRequest)
         fun combinedAuthorization(owner: RunExecutionOwner, capabilities: SessionCapabilities,
                                   approvedEffects: Set<WriteEffect>): TaskAuthorization
@@ -71,6 +72,7 @@ internal object ControllerVirtualDisplayRuntime {
         var reserved: DurableLease? = null
         var reserveAttempted = false
         val bridge = object : ControllerVirtualDisplaySession.Parent {
+            override val requiresExplicitApproval get() = parent.requiresExplicitApproval
             @Synchronized override fun reserve(actual: RunExecutionOwner, caps: SessionCapabilities):
                 ControllerVirtualDisplaySession.Lease {
                 check(actual === owner && caps === capabilities && !reserveAttempted) { FAILURE }

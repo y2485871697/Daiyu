@@ -34,10 +34,9 @@ class ControllerTerminalJobSendTest : InstrumentationTestCase() {
         controlMain { controller.rejectTerminalJob(p) }
         awaitControl("job preview drained") { controller.terminalJobPreparation() == null }
     }
-    fun testConfirmedDaemonSendUsesSameDurableTextReceiptAndRetainedOriginalSessionWithoutStarting() {
+    fun testDefaultAuthorizedDaemonSendUsesSameDurableTextReceiptAndRetainedOriginalSessionWithoutStarting() {
         val draft = draft()
         val p = checkNotNull(controller.prepareTerminalJobSend(null, draft, "printf daemon", "daemon", null))
-        controlMain { assertTrue(controller.confirmTerminalJob(p, draft)) }
         val session = fixture.session(holdSeconds = 120)
         val done = CountDownLatch(1)
         val result = AtomicReference<ChatController.TextSendResult>()

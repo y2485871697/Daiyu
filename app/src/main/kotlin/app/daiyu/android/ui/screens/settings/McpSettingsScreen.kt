@@ -58,7 +58,7 @@ import kotlinx.coroutines.withContext
         val result = withContext(Dispatchers.IO) { runCatching { store.snapshot() } }
         if (current()) {
             snapshot = result.getOrNull(); busy = false
-            status = if (snapshot == null) "配置读取失败，请重新打开设置。" else "保存只配置服务器，不授予工具权限。"
+            status = if (snapshot == null) "配置读取失败，请重新打开设置。" else "能力默认可用；保存只更新服务器配置，不会执行工具。"
         }
     }
     DisposableEffect(owner) { onDispose { owner.revoke() } }
@@ -108,25 +108,8 @@ import kotlinx.coroutines.withContext
                 val result = withContext(Dispatchers.IO) { runCatching { managementFactory(store).refresh(before, server.id, owner) } }
                 if (current()) {
                     busy = false
-                    if (result.isSuccess) { snapshot = result.getOrThrow(); status = "工具目录已刷新；未授予任何工具权限。" }
-                    else status = "目录刷新失败或已过期；保留上次目录，未授予权限。"
-                }
-            }
-        }
-        fun policy(server: McpServer, enabled: Boolean = server.enabled,
-            allowed: Set<String> = server.allowedTools) {
-            val before = snapshot ?: return
-            if (busy || !current() || before.servers.none { it === server }) return
-            val next = before.servers.map { if (it === server) server.withPolicy(enabled, allowed) else it }
-            busy = true
-            scope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { store.save(next, owner, before) } }
-                if (current()) {
-                    busy = false
-                    if (result.isSuccess) {
-                        snapshot = result.getOrThrow()
-                        status = "策略已保存；每次调用仍需精确参数批准，旧批准已失效。"
-                    } else status = "策略保存失败或已过期；保持原配置。"
+                    if (result.isSuccess) { snapshot = result.getOrThrow(); status = "工具目录已刷新；可提交精确任务，尚未调用工具。" }
+                    else status = "目录刷新失败或已过期；保留上次目录，未调用工具。"
                 }
             }
         }
@@ -152,7 +135,7 @@ import kotlinx.coroutines.withContext
                         onClick = { snapshot?.let { refresh(it, selected) } })
                 }
             }) {
-            if (busy || status != "保存只配置服务器，不授予工具权限。") item(key = "status") {
+            if (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。") item(key = "status") {
                 top.yukonga.miuix.kmp.basic.Text(status,
                     modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp).testTag("mcp-settings-status"),
                     style = MiuixTheme.textStyles.body2)
@@ -190,10 +173,7 @@ import kotlinx.coroutines.withContext
                 item(key = "server-settings") {
                     SettingsSectionTitle("服务器设置")
                     SettingsCard {
-                        SettingsSwitchRow("启用服务器工具", selected.enabled, enabled = !busy,
-                            tag = "mcp-enable:${selected.id}", summary = "仅开放允许列表；不替代本轮调用批准") {
-                            policy(selected, enabled = it)
-                        }
+                        SettingsNote("应用内能力默认可用；填写服务器、工具与完整参数并提交即可执行原任务，无需另行许可。")
                         SettingsRow("连接设置", summary = selected.endpoint,
                             showChevron = true, onClick = if (busy) null else ({ edit(selected) }), tag = "mcp-settings-edit")
                     }
@@ -203,10 +183,8 @@ import kotlinx.coroutines.withContext
                 selected.catalog.forEach { tool ->
                     item(key = "tool:${tool.name}") {
                         SettingsCard {
-                            SettingsSwitchRow(tool.name, tool.name in selected.allowedTools, enabled = !busy,
-                                tag = "mcp-allow:${selected.id}:${tool.name}", summary = tool.description) { allow ->
-                                policy(selected, allowed = if (allow) selected.allowedTools + tool.name else selected.allowedTools - tool.name)
-                            }
+                            SettingsRow(tool.name, summary = tool.description,
+                                tag = "mcp-tool:${selected.id}:${tool.name}", showChevron = false)
                         }
                     }
                 }

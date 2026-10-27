@@ -12,7 +12,7 @@ class McpSettingsActivityTest : WiredActivityTestCase() {
         node("settings-search").assertDoesNotExist()
         reveal("settings-row:MCP 服务器", "设置").performClick()
         node("mcp-settings").assertExists()
-        ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "保存只配置服务器，不授予工具权限。")).fetchSemanticsNodes().isNotEmpty() }
+        ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "能力默认可用；保存只更新服务器配置，不会执行工具。")).fetchSemanticsNodes().isNotEmpty() }
     }
     private fun currentOwner(): McpSettingsOwner {
         lateinit var owner: McpSettingsOwner

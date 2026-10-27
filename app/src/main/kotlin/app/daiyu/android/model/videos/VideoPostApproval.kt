@@ -65,7 +65,7 @@ class VideoPostRequest internal constructor(
      */
     fun matchesConfiguration(settings: ModelSettings): Boolean = configuration == settings
 
-    /** Call only after explicit approval and with the real run-permit consumption operation.
+    /** Call only after current-run authorization (including trusted default permission), with the real consumption operation.
      * That operation MUST atomically validate the current run/config/history/ordered refs and
      * consume the host's one-shot permit, throwing on invalidation/reuse. It runs immediately
      * before connection creation, NOT when the dialog first returns. An empty closure is not

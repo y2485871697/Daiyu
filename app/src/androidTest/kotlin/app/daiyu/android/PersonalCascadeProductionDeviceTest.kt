@@ -99,11 +99,84 @@ class PersonalCascadeProductionDeviceTest : InstrumentationTestCase() {
             try { host.arm(); fail("ordinary permission cannot authorize personal uploads") }
             catch (_: IllegalArgumentException) { }
             val offer = checkNotNull(host.preparePersonalConsent())
-            host.armPersonal(ExplicitPersonalCascadePermission.acceptDisplayedLimits(offer))
+            assertTrue(armRequestedPersonalCascade(host, offer) { true })
             val ticket = Any()
             host.reserve(ticket); host.rejected(ticket); host.accepted(ticket, answer())
             assertEquals(0, created)
             assertFalse(host.consentCurrent(offer))
+        } finally { host.close() }
+    }
+
+    fun testRequestedDefaultUsesFreshFiniteOfferAndNeverCreatesOutputBeforeManualSend() = runBlocking {
+        val runtime = ControllerVoiceRuntime(context) { record(it) }
+        val cfg = config()
+        runtime.save(cfg, VoicePlaybackProfile.CONVERSATION)
+        var selected: FrozenVoiceSpeech? = null
+        val host = ActivityCascadeVoiceHost(context, runtime, AudioOwnerGate(),
+            outputFactory = { _, value -> selected = value; silentOutput() }, admission = { true })
+        try {
+            val offer = checkNotNull(host.preparePersonalConsent())
+            assertEquals(8, offer.limits.maxSentences)
+            assertEquals(1600, offer.limits.maxCharacters)
+            assertEquals(120_000L, offer.limits.maxAudioDurationMs)
+            assertEquals(300_000L, offer.limits.validForMs)
+            assertEquals(15_000L, offer.perRequestAudioMs)
+            assertTrue(armRequestedPersonalCascade(host, offer) { true })
+            assertNull(selected) // Default permission does not enable output or send a message.
+            assertFalse(host.consentCurrent(offer)) // This exact offer is already spent.
+            val ticket = Any(); host.reserve(ticket)
+            host.accepted(Any(), answer()); assertNull(selected)
+            host.accepted(ticket, answer())
+            val frozen = checkNotNull(selected)
+            assertEquals(runtime.snapshot(VoicePlaybackProfile.CONVERSATION), frozen.configuration) // No substitute voice/model/account.
+            assertEquals(15_000L, frozen.playbackLimitMs)
+            val upload = checkNotNull(frozen.upload)
+            repeat(8) { assertEquals(15_000L, upload.consume("request-$it", "x")) }
+            try { upload.consume("request-9", "x"); fail("finite upload/audio budget must remain enforced") }
+            catch (_: IllegalStateException) { }
+        } finally { host.close() }
+    }
+
+    fun testDefaultPermissionDoesNotReuseOldOfferAndStopInvalidatesBoundUpload() = runBlocking {
+        val runtime = ControllerVoiceRuntime(context) { record(it) }
+        runtime.save(config(), VoicePlaybackProfile.CONVERSATION)
+        var selected: FrozenVoiceSpeech? = null
+        val host = ActivityCascadeVoiceHost(context, runtime, AudioOwnerGate(),
+            outputFactory = { _, value -> selected = value; silentOutput() }, admission = { true })
+        try {
+            val stopped = checkNotNull(host.preparePersonalConsent())
+            host.close()
+            assertFalse(armRequestedPersonalCascade(host, stopped) { true })
+            val abandoned = checkNotNull(host.preparePersonalConsent())
+            assertFalse(armRequestedPersonalCascade(host, abandoned) { false }) // Original editor/lifecycle retired.
+            val latest = checkNotNull(host.preparePersonalConsent())
+            assertFalse(armRequestedPersonalCascade(host, abandoned) { true })
+            assertTrue(host.consentCurrent(latest)) // A late old callback cannot revoke the new offer.
+            assertTrue(armRequestedPersonalCascade(host, latest) { true })
+            val ticket = Any(); host.reserve(ticket); host.accepted(ticket, answer())
+            val upload = checkNotNull(checkNotNull(selected).upload)
+            host.close()
+            try { upload.consume("after-stop", "x"); fail("stop must revoke even default permission") }
+            catch (_: IllegalStateException) { }
+            assertFalse(armRequestedPersonalCascade(host, latest) { true })
+        } finally { host.close() }
+    }
+
+    fun testDefaultPermissionStillRejectsOversizedCharactersBeforeUpload() = runBlocking {
+        val runtime = ControllerVoiceRuntime(context) { record(it) }
+        runtime.save(config(), VoicePlaybackProfile.CONVERSATION)
+        var selected: FrozenVoiceSpeech? = null
+        val host = ActivityCascadeVoiceHost(context, runtime, AudioOwnerGate(),
+            outputFactory = { _, value -> selected = value; silentOutput() }, admission = { true })
+        try {
+            val offer = checkNotNull(host.preparePersonalConsent())
+            assertTrue(armRequestedPersonalCascade(host, offer) { true })
+            val ticket = Any(); host.reserve(ticket); host.accepted(ticket, answer())
+            val upload = checkNotNull(checkNotNull(selected).upload)
+            try { upload.consume("oversized", "x".repeat(1601)); fail("character limit must remain enforced") }
+            catch (_: IllegalStateException) { }
+            try { upload.consume("next", "x"); fail("denied budget must not revive") }
+            catch (_: IllegalStateException) { }
         } finally { host.close() }
     }
 
@@ -118,7 +191,7 @@ class PersonalCascadeProductionDeviceTest : InstrumentationTestCase() {
         var player: RemoteVoiceHostPlayer? = null
         try {
             val offer = checkNotNull(host.preparePersonalConsent())
-            host.armPersonal(ExplicitPersonalCascadePermission.acceptDisplayedLimits(offer))
+            assertTrue(armRequestedPersonalCascade(host, offer) { true })
             val ticket = Any(); host.reserve(ticket)
             host.accepted(Any(), answer()); assertNull(frozen)
             host.accepted(ticket, answer())

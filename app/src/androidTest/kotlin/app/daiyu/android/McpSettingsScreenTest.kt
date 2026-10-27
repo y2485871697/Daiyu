@@ -34,7 +34,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
                     McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {})
                 } } }
                 ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and
-                    SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "保存只配置服务器，不授予工具权限。")).fetchSemanticsNodes().isNotEmpty() }
+                    SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "能力默认可用；保存只更新服务器配置，不会执行工具。")).fetchSemanticsNodes().isNotEmpty() }
                 node("mcp-settings-count").assertTextEquals("服务器 · 0")
                 node("mcp-settings-status").assertDoesNotExist()
                 node("mcp-settings-empty").assertIsDisplayed()
@@ -115,17 +115,18 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {}, managementFactory = { management })
             } } }
-            awaitStatus("保存只配置服务器，不授予工具权限。")
+            awaitStatus("能力默认可用；保存只更新服务器配置，不会执行工具。")
             assertTrue(methods.isEmpty())
             node("mcp-server-enabled:server").assertDoesNotExist()
             node("mcp-tool-enabled:server:erase").assertDoesNotExist()
             click("mcp-server:server")
             click("mcp-refresh:server")
-            awaitStatus("工具目录已刷新；未授予任何工具权限。")
+            awaitStatus("工具目录已刷新；可提交精确任务，尚未调用工具。")
             assertEquals(listOf("initialize", "notifications/initialized", "tools/list"), methods.toList())
             val saved = store.snapshot().servers.single()
-            assertFalse(saved.enabled)
-            assertTrue(saved.allowedTools.isEmpty())
+            assertTrue(saved.enabled)
+            assertTrue(saved.eligible("erase"))
+            assertEquals(setOf("erase"), saved.allowedTools)
             assertEquals(listOf("erase"), saved.catalog.map { it.name })
             ui.onAllNodesWithText("synthetic-token", substring = true).assertCountEquals(0)
             assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
@@ -144,7 +145,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {})
             } } }
-            ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "保存只配置服务器，不授予工具权限。")).fetchSemanticsNodes().isNotEmpty() }
+            ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "能力默认可用；保存只更新服务器配置，不会执行工具。")).fetchSemanticsNodes().isNotEmpty() }
             node("mcp-server-label").assertDoesNotExist()
             node("mcp-server-id").assertDoesNotExist()
             node("mcp-settings-clear").assertDoesNotExist()

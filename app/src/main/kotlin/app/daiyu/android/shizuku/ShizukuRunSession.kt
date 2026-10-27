@@ -2,6 +2,7 @@ package app.daiyu.android.shizuku
 
 import app.daiyu.android.domain.tools.ExecutionReceipt
 import app.daiyu.android.domain.tools.WriteEffect
+import app.daiyu.android.integration.tools.CommandPermissionDefaults
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,7 +63,7 @@ internal class ShizukuRunSession(val sessionId: String, val runId: String) : Aut
             status = ShizukuApprovalStatus.DRAFT)
     }
 
-    /** Call only for an explicit user confirmation of all fields in state, including this run ID. */
+    /** Freeze the exact current fields/run ID for submission; also supports explicit test consent. */
     fun approve(displayed: ShizukuRunState) = synchronized(lock) {
         check(!started && !closing) { "shizuku_approval_consumed" }
         check(value == displayed) { "shizuku_approval_changed" }
@@ -82,6 +83,10 @@ internal class ShizukuRunSession(val sessionId: String, val runId: String) : Aut
     /** Transport seam for deterministic tests; production uses only ShizukuAuthorization above. */
     internal fun open(connect: (uid: Int, scope: String) -> ShizukuBackend): RunShizukuCommands {
         val selection = synchronized(lock) {
+            // Called by the host's explicit submit/open operation, never by composition or refresh.
+            // The same validator and one-use ticket remain authoritative; no OS permission is made up.
+            if (!CommandPermissionDefaults.REQUIRE_INTERACTIVE_APPROVAL && !closing && !started && approvedEffect == null)
+                approve(value)
             check(!closing && !started && approvedEffect != null) { "shizuku_command_not_approved" }
             val id = checkNotNull(ticket)
             started = true

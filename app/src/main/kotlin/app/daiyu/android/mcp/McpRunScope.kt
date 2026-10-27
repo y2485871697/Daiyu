@@ -49,7 +49,7 @@ internal class McpRunScope(
     init {
         require(choices.size in 1..8 && choices.map { it.serverId to it.tool }.distinct().size == choices.size)
         choices.forEachIndexed { index, choice ->
-            require(servers[index].eligible(choice.tool)) { "mcp_tool_disabled" }
+            require(servers[index].eligible(choice.tool)) { "mcp_selected_tool_unavailable" }
             val secret = servers[index].bearer
             require(secret.isEmpty() || (McpJson.canonical(McpJson.redact(McpJson.objectValue(choice.arguments), secret)) == choice.arguments &&
                 !choice.tool.contains(secret))) { "mcp_secret_in_intent" }

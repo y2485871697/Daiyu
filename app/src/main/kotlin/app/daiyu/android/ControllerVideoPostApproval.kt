@@ -36,13 +36,14 @@ internal class ControllerVideoPostAuthority(
 /** Implement using the parent's existing main dispatcher, state/DB authority and cancellation.
  * snapshotOnMain may do DB work, but is NEVER called with the adapter gate held. Return null if
  * the run controller no longer authorizes this run. Do not call that controller from a worker.
- * showOnMain must show a new prompt each time; only its explicit positive action passes true.
+ * showOnMain defaults to trusted permission for this freshly offered, already-requested POST.
+ * It must never reuse an old decision; authority is re-read before issuing each exact permit.
  * cancelRun must be thread safe and signal the existing run/session, not wait for worker drainage.
  */
 internal interface ControllerVideoPostApprovalHost {
     fun postToMain(action: () -> Unit)
     fun snapshotOnMain(): ControllerVideoPostAuthority?
-    fun showOnMain(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit)
+    fun showOnMain(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit) = decision(true)
     fun cancelRun()
 }
 
@@ -60,14 +61,14 @@ internal class ControllerVideoPostPrompt internal constructor(
     val totalVideoBytes = references.fold(0L) { total, ref -> Math.addExact(total, ref.bytes) }
     val disclosure: String get() = "本次 POST #$postNumber 将向 $endpoint（$model）上传 " +
         "${references.size} 个原视频，共 $totalVideoBytes 字节。" +
-        "本次请求为 $requestByteCount 字节；本次确认仅许可这一个 POST，工具续轮必须再次确认。"
+        "本次请求为 $requestByteCount 字节；默认许可仅签发此 POST 的一次性令牌，工具续轮重新核验并签发。"
     override fun toString() = "ControllerVideoPostPrompt(<one private POST>)"
 }
 
 /** One instance per already-authorized parent run; construct on the Android main thread.
  *
  * Workers register the ACTUAL plan produced by wrap and suspend in approve. Main obtains fresh
- * authority before displaying and again on the exact dialog's positive callback. A private,
+ * authority before offering and again on that exact offer's decision (default or custom). A private,
  * one-shot permit is consumed on the worker immediately before ResponsesModel connects.
  *
  * The short shared gate contains only in-memory identity/epoch/state operations. No dispatcher,

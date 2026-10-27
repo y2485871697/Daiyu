@@ -490,16 +490,10 @@ class MainActivity : ComponentActivity() {
             it.id == config.voice && it.providerId == config.referenceOwner()
         }
         if (config.engine != "MIMO" || reference == null) { toast("参考录音已删除或账户已更换，请重新选择"); return }
-        voiceConsent = android.app.AlertDialog.Builder(this)
-            .setTitle("本次发送参考录音？")
-            .setMessage("将向 ${config.provider}（${config.endpoint}）发送参考录音「${reference.name}」及本条回答文本用于合成，可能收费。仅授权本次请求，不长期授权。")
-            .setHapticNegativeButton("取消", null)
-            .setHapticPositiveButton("确认本次发送") { _, _ ->
-                if (current()) lifecycleScope.launch {
-                    try { play(voiceRuntime.authorizeReference(frozen)) }
-                    catch (_: Exception) { if (current()) toast("参考录音或配置已失效；未发送") }
-                }
-            }.create().also { it.show() }
+        if (current()) lifecycleScope.launch {
+            try { play(voiceRuntime.authorizeReference(frozen)) }
+            catch (_: Exception) { if (current()) toast("参考录音或配置已失效；未发送") }
+        }
     }
     private var voiceForeground = false
     private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -588,19 +582,7 @@ class MainActivity : ComponentActivity() {
     private val videoUi = object : ControllerVideoUi {
         override fun editor() = ControllerVideoEditor(selected?.id?.value, editorGeneration, draftRevision,
             draft, activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible)
-        override fun showRun(prompt: app.daiyu.android.model.videos.VideoApprovalGate.Prompt,
-            text: String, decision: (Boolean) -> Unit) {
-            showVideoPermission("批准本次原视频运行", prompt.disclosure +
-                "\n模型：${prompt.request.provider.model}\n端点：${prompt.request.provider.asModelSettings().requestEndpoint()}" +
-                "\n\n原文：\n" + text +
-                "\n\n" + prompt.inventory.joinToString("\n") { "${it.mime} · ${it.bytes} 字节 · SHA-256 ${it.sha256}" }, decision)
-        }
-        override fun showPost(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit) {
-            showVideoPermission("许可本次 POST #${prompt.postNumber}", prompt.disclosure +
-                "\n正文 SHA-256：${prompt.requestSha256}\n\n" + prompt.references.joinToString("\n") {
-                    "${it.mime} · ${it.bytes} 字节 · SHA-256 ${it.sha256}"
-                }, decision)
-        }
+
     }
     private var commandDialog: android.app.AlertDialog? = null
     private var commandRequest: app.daiyu.android.integration.tools.CommandApprovalRequest? = null
@@ -637,18 +619,6 @@ class MainActivity : ComponentActivity() {
         commandDialog?.dismiss(); commandDialog = null; commandRequest = null
     }
 
-    private fun showVideoPermission(title: String, message: String, decision: (Boolean) -> Unit) {
-        videoDialog?.dismiss()
-        val decided = AtomicBoolean(false)
-        fun answer(value: Boolean) { if (decided.compareAndSet(false, true)) decision(value) }
-        videoDialog = android.app.AlertDialog.Builder(this).setTitle(title).setMessage(message)
-            .setHapticPositiveButton("明确允许") { _, _ -> answer(true) }
-            .setHapticNegativeButton("拒绝") { _, _ -> answer(false) }
-            .setOnCancelListener { answer(false) }.create().also { dialog ->
-                dialog.setOnDismissListener { answer(false); if (videoDialog === dialog) videoDialog = null }
-                dialog.show()
-            }
-    }
     private fun fenceVideoRoute(detachHost: Boolean = true) {
         videoPickEntry = null
         controller.invalidateVideo(videoUi) // Gate and real session first; dismiss is not revocation.
@@ -3139,7 +3109,7 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
             if (engineeringUi) Row(Modifier.fillMaxWidth()) {
                 app.daiyu.android.ui.haptics.miuix.TextButton(
-                    text = if (hasImages) "Shizuku 仅限无附件文本" else "Shizuku 文本审批",
+                    text = if (hasImages) "Shizuku 仅限无附件文本" else "Shizuku 文本",
                     enabled = available && shizukuEditor == null,
                     modifier = Modifier.weight(1f).testTag("shizuku-text-entry").heightIn(min = 48.dp),
                     onClick = {
@@ -3153,23 +3123,22 @@ class MainActivity : ComponentActivity() {
                     onClick = { if (activityUsable()) retainedPage = "shizuku-settings" })
             }
             if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(
-                text = if (mcpPreparing) "正在冻结 MCP 本轮范围" else "MCP 本轮精确调用审批",
+                text = if (mcpPreparing) "正在冻结 MCP 本轮范围" else "MCP 调用",
                 enabled = available && !mcpPreparing && mcpApproval == null && pendingTextSend == null,
                 modifier = Modifier.testTag("mcp-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openMcpApproval)
             mcpApproval?.let { pending ->
                 val visit = mcpVisit
                 app.daiyu.android.ui.McpApprovalHost(pending,
-                    onCancel = { if (mcpVisit === visit && mcpApproval === pending) cancelMcpEditor() },
-                    onApprove = { approveMcp(pending, visit) })
+                    onCancel = { if (mcpVisit === visit && mcpApproval === pending) cancelMcpEditor() })
             }
             if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(
-                text = if (browserPreparing) "正在准备浏览器审批" else "浏览器操作审批",
+                text = if (browserPreparing) "正在准备浏览器" else "浏览器操作",
                 enabled = available && !browserPreparing && browserApproval == null && pendingTextSend == null,
                 modifier = Modifier.testTag("browser-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openBrowserApproval)
             if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(
-                text = "图片 / 视频生成审批",
+                text = "图片 / 视频生成",
                 enabled = available && pendingTextSend == null && generationApproval == null &&
                     !controller.generationSubmissionPending(),
                 modifier = Modifier.testTag("generation-approval-entry").heightIn(min = 48.dp),
@@ -3273,8 +3242,9 @@ class MainActivity : ComponentActivity() {
             if (editor != null && !hasImages) key(editor) {
                 Column(Modifier.testTag("shizuku-text-panel")) {
                     ShizukuApprovalHost(controller, editor.conversation, editor.text,
+                        isCurrent = { shizukuEditorCurrent(editor) },
                         onAccepted = { preview, saved -> acceptShizuku(editor, preview, saved) })
-                    app.daiyu.android.ui.haptics.miuix.TextButton(text = "取消文本审批",
+                    app.daiyu.android.ui.haptics.miuix.TextButton(text = "取消 Shizuku 命令",
                         modifier = Modifier.testTag("shizuku-text-cancel"), onClick = ::cancelShizukuEditor)
                 }
             }
@@ -3345,7 +3315,7 @@ class MainActivity : ComponentActivity() {
             !shizukuWritesBlocked && pendingTextSend == null && controller.textSendState() == null && draft.isNotBlank() && terminalEditor == null &&
             shizukuEditor == null && browserApproval == null && !browserPreparing && generationApproval == null
         val renderedDraft = terminalDraft()
-        if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "终端精确命令审批",
+        if (engineeringUi) app.daiyu.android.ui.haptics.miuix.TextButton(text = "终端命令",
             enabled = canEnter, modifier = Modifier.testTag("terminal-chat-entry"), onClick = {
                 if (canEnter && activityUsable() && retainedPage == "chat" && !sidebarVisible &&
                     renderedDraft == terminalDraft() && terminalEditor == null && !imageHost.hasAttachments &&
@@ -3358,7 +3328,7 @@ class MainActivity : ComponentActivity() {
         key(editor) {
             Column(Modifier.fillMaxWidth().testTag("terminal-chat-editor")) {
                 androidx.compose.material3.Text(if (editor.jobMode == null)
-                    "聊天草稿不是 shell。PTY仅发送下面独立输入区的 UTF-8 字节；不补回车。需要执行时请在输入中明确换行。准备和确认都不发送、不启动。"
+                    "聊天草稿不是 shell。PTY仅发送下面独立输入区的 UTF-8 字节；不补回车。需要执行时请在输入中明确换行。点击运行后准备并提交任务。"
                     else "固定命令 job：独立 shell 使用私有 stdin 脚本（末尾补换行），不保留跨命令变量或 cwd；聊天草稿不是命令。async 随 run 关闭请求停止；daemon 仅 Android 应用身份通过 setsid，在同 app 进程内独立于 run，不承诺跨重启、后代退出或长期存活。")
                 Row {
                     listOf(null to "PTY", "async" to "async job", "daemon" to "daemon job").forEach { (mode, label) ->
@@ -3409,64 +3379,20 @@ class MainActivity : ComponentActivity() {
                 }
                 val pending = editor.preparation
                 val jobPending = editor.jobPreparation
-                if (jobPending != null) {
-                    TerminalJobApproval(editor, jobPending)
-                } else if (pending == null) {
+                if (pending == null && jobPending == null) {
                     app.daiyu.android.ui.haptics.material.Button(enabled = terminalInputEditable(editor) && editor.command.isNotEmpty(),
                         modifier = Modifier.testTag("terminal-prepare"), onClick = { prepareTerminal(editor) }) {
-                        androidx.compose.material3.Text(if (editor.preparing) "准备中（不启动）" else "准备终端审批（不启动）")
+                        androidx.compose.material3.Text(if (editor.preparing) "准备中" else "运行终端任务")
                     }
                 } else {
-                    val state = if (editor.confirmed) ControllerTerminalPreparation.State.CONFIRMED else pending.state
-                    app.daiyu.android.ui.TerminalApprovalHost(
-                        draft = terminalDraft(), assistant = pending.assistant, provider = pending.provider,
-                        preparation = pending, state = state, onPrepare = { false },
-                        onConfirm = { preparation, displayed, current ->
-                            if (!terminalEditorCurrent(editor) || editor.preparation !== preparation) false
-                            else {
-                                val configuration = runCatching { controller.terminalConfiguration(editor.conversation) }.getOrNull()
-                                val confirmed = configuration != null && controller.confirmTerminal(preparation, displayed,
-                                    current, configuration.first, configuration.second)
-                                if (confirmed) { editor.confirmed = true; publishChat() } else cancelTerminalEditor()
-                                confirmed
-                            }
-                        }, onCancel = { if (terminalEditor === editor && editor.preparation === it) cancelTerminalEditor() }, problem = controller.problem)
-                    if (state == ControllerTerminalPreparation.State.CONFIRMED) {
-                        androidx.compose.material3.Text("已确认；尚未发送或执行。仅授权 2 个步骤及 2 个有界读页。")
-                        app.daiyu.android.ui.haptics.material.Button(modifier = Modifier.testTag("terminal-send-approved"),
-                            onClick = { sendTerminal(editor, pending) }) {
-                            androidx.compose.material3.Text("发送已批准任务")
-                        }
-                    }
+                    androidx.compose.material3.Text("正在提交终端任务")
                 }
                 app.daiyu.android.ui.haptics.material.TextButton(onClick = { if (terminalEditor === editor) cancelTerminalEditor() },
-                    modifier = Modifier.testTag("terminal-chat-cancel")) { androidx.compose.material3.Text("取消终端审批") }
+                    modifier = Modifier.testTag("terminal-chat-cancel")) { androidx.compose.material3.Text("取消终端任务") }
             }
         }
     }
 
-    @Composable private fun TerminalJobApproval(editor: TerminalEditor, pending: ControllerTerminalJobPreparation) {
-        val plan = pending.plan
-        val config = plan.configuration
-        val linux = config.linux
-        androidx.compose.material3.Text("冻结固定命令：${plan.mode}；${if (linux?.rootScope != null) "启动时由受管 helper 核验 Root 身份" else "启动时通过同一后端执行 id -u 身份探针，不自动提权"}。\nconversation=${plan.conversationId.value}\nrun=${plan.runId.value}\n" +
-            "backend=${config.backend} · Android host UID=${android.os.Process.myUid()} · host root=${linux?.rootScope != null}\n" +
-            "guest UID=${linux?.expectedUid ?: "不适用"} · environment=${linux?.environmentId ?: "android-app"}\n" +
-            "host cwd=${config.workingDirectory}\nguest cwd=${linux?.guestWorkingDirectory ?: "不适用"}\n" +
-            "argv=${org.json.JSONArray(linux?.shellArgv ?: listOf("/system/bin/sh"))}\n" +
-            "env=${org.json.JSONObject(linux?.environment.orEmpty() + config.environment)}\n" +
-            "shared=${org.json.JSONObject(linux?.sharedMounts.orEmpty())}\n" +
-            "身份：${if (linux?.rootScope != null) "chroot / Host Root（独立进程域）" else "Android 应用 UID（非 Host Root）"}\n精确命令：\n${plan.command}")
-        if (!editor.confirmed) app.daiyu.android.ui.haptics.material.Button(modifier = Modifier.testTag("terminal-job-confirm"), onClick = {
-            if (terminalEditorCurrent(editor) && editor.jobPreparation === pending) {
-                if (controller.confirmTerminalJob(pending, terminalDraft())) editor.confirmed = true
-                else cancelTerminalEditor()
-            }
-        }) { androidx.compose.material3.Text("仅批准此固定命令，不启动") }
-        else app.daiyu.android.ui.haptics.material.Button(modifier = Modifier.testTag("terminal-job-send"), onClick = {
-            if (terminalEditorCurrent(editor) && editor.jobPreparation === pending) sendTerminalJob(editor, pending)
-        }) { androidx.compose.material3.Text("发送已批准 job") }
-    }
     private fun prepareTerminalJob(editor: TerminalEditor) {
         val mode = editor.jobMode ?: return
         val command = editor.command
@@ -3483,6 +3409,7 @@ class MainActivity : ComponentActivity() {
                     editor.jobPreparation = prepared
                     retained = prepared != null
                     if (!retained) toast(controller.problem ?: "job 准备未受理；未启动")
+                    else sendTerminalJob(editor, checkNotNull(prepared))
                 }
             } finally {
                 if (!retained) prepared?.let(controller::rejectTerminalJob)
@@ -3664,6 +3591,7 @@ class MainActivity : ComponentActivity() {
                     editor.preparation = prepared
                     retained = prepared != null
                     if (!retained) toast(controller.problem ?: "终端准备未受理；草稿保留")
+                    else sendTerminal(editor, checkNotNull(prepared))
                 }
             } finally {
                 if (!retained) prepared?.let(controller::rejectTerminal)
@@ -4192,7 +4120,7 @@ class MainActivity : ComponentActivity() {
             cancelGuiEditor(entry); toast("GUI 未执行：服务不可用或位置已撤销；草稿保留")
             return
         }
-        val result = try { checkNotNull(entry.session).prepareExactActionFromUser(entry.operation, entry.input,
+        val result = try { checkNotNull(entry.session).prepareExactActionWithProductDefaults(entry.operation, entry.input,
                     ownerCurrent = { guiOwnerCurrent(entry) },
                     onNotExecuted = { code ->
                         if (guiEditor === entry) { cancelGuiEditor(entry); toast("GUI 未执行：$code"); publishChat() }
@@ -4216,7 +4144,9 @@ class MainActivity : ComponentActivity() {
                         }
                     }) } catch (_: Exception) { app.daiyu.android.gui.GuiResult.Rejected("GUI_OVERLAY_UNAVAILABLE") }
         if (result !is app.daiyu.android.gui.GuiResult.Value) {
-            cancelGuiEditor(entry); toast("GUI 确认浮层不可用；未执行，草稿保留")
+            cancelGuiEditor(entry)
+            toast(if (result is app.daiyu.android.gui.GuiResult.Unknown)
+                "GUI 结果未确认；保留原记录，不自动重试" else "GUI 未执行：当前目标不可用；草稿保留")
         }
         publishChat()
     }
@@ -4308,7 +4238,7 @@ class MainActivity : ComponentActivity() {
                 visit.busy = false
                 if (request != null && visit.adapter.canPublish(request)) {
                     visit.request = request
-                    visit.status = "请核对原 owner 的独立 Release；本次不交付任务。"
+                    answerVirtualDisplayCleanup(visit, request, true)
                 } else visit.status = "暂不可释放：排空未完成、仍持有任务或请求已处理。未发送，不自动重试。"
             } else closeVirtualDisplayCleanup(visit)
         }
@@ -4355,7 +4285,7 @@ class MainActivity : ComponentActivity() {
                 visit.busy = false
                 if (request != null && visit.adapter.canPublish(request)) {
                     visit.request = request
-                    visit.status = "选择已冻结；请核对完整 Handoff → 条件 Release 参数和授权。"
+                    answerVirtualDisplayCleanup(visit, request, true)
                 } else visit.status = "交付审批未冻结；原状态已改变或选择不可用，不自动重试。"
             } else closeVirtualDisplayCleanup(visit)
         }
@@ -4381,11 +4311,12 @@ class MainActivity : ComponentActivity() {
     private fun answerVirtualDisplayCleanup(visit: VirtualDisplayCleanupVisit,
         request: R08CleanupApprovalRequest, accepted: Boolean): Boolean {
         if (!cleanupVisitCurrent(visit) || visit.request !== request || visit.decided) return false
-        val answered = visit.adapter.answerFromUi(request, accepted)
+        val answered = if (accepted) visit.adapter.authorizeWithProductDefaults(request)
+            else visit.adapter.answerFromUi(request, false)
         if (!accepted) { closeVirtualDisplayCleanup(visit); return answered }
         if (!answered) return false
         visit.decided = true
-        visit.status = "已显式批准；排队 worker 将再次检查原父记录、本地 drain 和 UI admission。"
+        visit.status = "请求已受理；排队 worker 将再次检查原父记录、本地 drain 和当前访问。"
         lifecycleScope.launch {
             val result = try {
                 withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { visit.adapter.releaseOnWorker(request) }
@@ -4554,7 +4485,7 @@ class MainActivity : ComponentActivity() {
         if (!mcpVisitCurrent(visit) || mcpApproval !== pending) return
         val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
         if (!imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending && pendingTextSend == null &&
-            pending.confirm(pending, owner, draft)) {
+            owner == pending.editor && draft == pending.text && pending.scope.isCurrent()) {
             val submitted = PendingTextSend(owner, draft)
             pendingTextSend = submitted
             if (!controller.sendMcp(pending, owner, draft, submitted.ticket) { result ->
@@ -4577,8 +4508,8 @@ class MainActivity : ComponentActivity() {
         val original = draft
         val conversation = selected
         val input = InputPrompt("本轮 MCP 服务器、工具与完整参数", "{\"server\":\"my_server\",\"tool\":\"tool_name\",\"arguments\":{}}",
-            "先在 MCP 设置保存服务器。填写一个完整 JSON 对象；每轮只批准这个服务器/工具/参数，未知工具默认有副作用。此步骤不连接服务器。",
-            "冻结并审阅", { raw ->
+            "先在 MCP 设置保存服务器。填写一个完整 JSON 对象；本次只使用这个服务器/工具/参数，未知工具默认有副作用。提交后按默认许可运行。",
+            "运行 MCP 调用", { raw ->
                 if (!mcpVisitCurrent(visit) || mcpInput == null ||
                     owner != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) ||
                     draft != original || imageHost.hasAttachments || videoHost.state.items.isNotEmpty() || videoSending || pendingTextSend != null) return@InputPrompt
@@ -4602,6 +4533,7 @@ class MainActivity : ComponentActivity() {
                         if (mcpVisitCurrent(visit) && mcpRequest === request &&
                             owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) && draft == original) {
                             mcpApproval = prepared; retained = prepared != null
+                            prepared?.let { approveMcp(it, visit) }
                             if (prepared == null) toast(controller.problem ?: "MCP 准备失败；草稿保留")
                         }
                     } finally {
@@ -4631,44 +4563,54 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openBrowserApproval() {
-        if (videoHost.state.items.isNotEmpty() || videoSending) return
-        if (!activityUsable() || pendingTextSend != null || imageHost.hasAttachments || draft.isBlank()) return
+        if (videoHost.state.items.isNotEmpty() || videoSending || !activityUsable() ||
+            retainedPage != "chat" || sidebarVisible || pendingTextSend != null ||
+            imageHost.hasAttachments || draft.isBlank()) return
         val snapshot = BrowserDraftSnapshot(BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
         val conversation = selected
-        prompt = InputPrompt("本次浏览器写操作", "",
-            "每行一个完整 JSON 操作；仅批准这些精确参数。留空只开放读取，不自动建标签、跳转或下载。",
-            "预览审批", { raw ->
-                val current = BrowserDraftSnapshot(BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
-                if (current != snapshot || !activityUsable() || imageHost.hasAttachments || pendingTextSend != null) return@InputPrompt
-                val writes = raw.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-                if (snapshot.owner.conversationId == null) controller.database.draft(snapshot.text)
-                else controller.database.draft(checkNotNull(snapshot.owner.conversationId), snapshot.text)
-                cancelShizukuEditor()
-                cancelBrowserEditor()
-                val request = Any()
-                browserRequest = request
-                browserPreparing = true
-                lifecycleScope.launch {
-                    var prepared: ControllerBrowserPreparation? = null
-                    var retained = false
-                    try {
-                        withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
-                            prepared = controller.prepareBrowserSend(conversation, snapshot, writes)
+        if (snapshot.owner.conversationId == null) controller.database.draft(snapshot.text)
+        else controller.database.draft(checkNotNull(snapshot.owner.conversationId), snapshot.text)
+        cancelShizukuEditor()
+        cancelBrowserEditor()
+        val request = Any()
+        browserRequest = request
+        browserPreparing = true
+        lifecycleScope.launch {
+            var prepared: ControllerBrowserPreparation? = null
+            var retained = false
+            try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    prepared = controller.prepareBrowserSend(conversation, snapshot, emptyList())
+                }
+                val matches = activityUsable() && browserRequest === request && retainedPage == "chat" &&
+                    !sidebarVisible && !imageHost.hasAttachments && videoHost.state.items.isEmpty() &&
+                    !videoSending && pendingTextSend == null && snapshot == BrowserDraftSnapshot(
+                        BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
+                if (matches) {
+                    val pending = prepared
+                    if (pending == null) toast(controller.problem ?: "浏览器准备未受理；草稿保留")
+                    else {
+                        browserApproval = pending
+                        val owner = ChatController.TextSendOwner(snapshot.owner.conversationId,
+                            snapshot.owner.editorGeneration, snapshot.owner.draftRevision)
+                        val submitted = PendingTextSend(owner, snapshot.text)
+                        pendingTextSend = submitted
+                        retained = controller.sendBrowser(pending, snapshot, submitted.ticket) { result ->
+                            if (browserApproval === pending) browserApproval = null
+                            completeTextSend(submitted, result)
                         }
-                        val matches = activityUsable() && browserRequest === request && retainedPage == "chat" &&
-                            !sidebarVisible && snapshot == BrowserDraftSnapshot(
-                                BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
-                        if (matches) {
-                            browserApproval = prepared
-                            retained = prepared != null
-                            if (prepared == null) toast(controller.problem ?: "浏览器准备未受理；草稿保留")
+                        if (!retained) {
+                            pendingTextSend = null
+                            if (browserApproval === pending) browserApproval = null
+                            toast("浏览器任务未受理；草稿保留，不自动重试")
                         }
-                    } finally {
-                        if (!retained) prepared?.let(controller::rejectBrowser)
-                        if (browserRequest === request) { browserPreparing = false; browserRequest = null }
                     }
                 }
-            })
+            } finally {
+                if (!retained) prepared?.let(controller::rejectBrowser)
+                if (browserRequest === request) { browserPreparing = false; browserRequest = null }
+            }
+        }
     }
 
     private fun trackShizukuPreparation() {
@@ -4714,11 +4656,15 @@ class MainActivity : ComponentActivity() {
         }?.let(controller::rejectShizuku) // Includes submitted prepare/connect; never stops another run.
     }
 
+    private fun shizukuEditorCurrent(editor: ShizukuEditor): Boolean =
+        activityUsable() && retainedPage == "chat" && !sidebarVisible && shizukuEditor === editor &&
+            editorGeneration == editor.generation && draftRevision == editor.revision && draft == editor.text &&
+            selected?.id == editor.conversation?.id && !imageHost.hasAttachments && videoHost.state.items.isEmpty()
+
     private fun acceptShizuku(editor: ShizukuEditor, preview: ControllerShizukuPreparation, saved: Conversation) {
-        if (!activityUsable() || retainedPage != "chat" || sidebarVisible || shizukuEditor !== editor ||
-            editor.preview !== preview || !preview.isSubmitted() || editorGeneration != editor.generation || draftRevision != editor.revision || draft != editor.text ||
-            selected?.id != editor.conversation?.id || preview.conversation?.id != editor.conversation?.id ||
-            preview.text != editor.text || saved.id != preview.conversationId || imageHost.hasAttachments) return
+        if (!shizukuEditorCurrent(editor) || editor.preview !== preview || !preview.isSubmitted() ||
+            preview.conversation?.id != editor.conversation?.id || preview.text != editor.text ||
+            saved.id != preview.conversationId) return
         shizukuEditor = null
         selected = saved; editorGeneration++; draftRevision++
         draft = ""; selectionStart = 0; selectionEnd = 0

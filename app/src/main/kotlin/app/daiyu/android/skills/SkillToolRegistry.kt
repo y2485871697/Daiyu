@@ -20,8 +20,26 @@ class SkillToolRegistry(
     private val userStore by lazy { user ?: SkillStore(File(context.filesDir, "runtime-skills-v1"), this.builtin.installedNamesForRun() + builtinCatalog.names) }
     private val preferences = context.getSharedPreferences("runtime-skills-v1-settings", Context.MODE_PRIVATE)
     var enabled: Boolean
-        get() = preferences.getBoolean("enabled", true)
-        set(value) { check(preferences.edit().putBoolean("enabled", value).commit()) { "storage_unavailable" } }
+        get() = synchronized(capabilityPolicyLock) {
+            // One authorized migration of the obsolete global ceiling only. Never touch the
+            // per-skill enabled metadata or an assistant's selected IDs. Keep this lazy so invalid
+            // tool JSON is still rejected before settings/store I/O.
+            if (!preferences.getBoolean(CAPABILITY_POLICY, false)) {
+                check(preferences.edit().putBoolean("enabled", true)
+                    .putBoolean(CAPABILITY_POLICY, true).commit()) { "storage_unavailable" }
+            }
+            preferences.getBoolean("enabled", true)
+        }
+        set(value) { synchronized(capabilityPolicyLock) {
+            // A new explicit choice is already on the new policy and must survive every reopen.
+            check(preferences.edit().putBoolean("enabled", value)
+                .putBoolean(CAPABILITY_POLICY, true).commit()) { "storage_unavailable" }
+        } }
+
+    private companion object {
+        const val CAPABILITY_POLICY = "product-capability-default-v1"
+        val capabilityPolicyLock = Any()
+    }
     val schemas: JSONArray get() {
         val out = JSONArray()
         fun add(name: String, description: String, properties: JSONObject, required: List<String> = emptyList(), sideEffect: Boolean = false) {

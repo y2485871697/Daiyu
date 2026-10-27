@@ -159,6 +159,44 @@ class ShizukuRunSessionTest {
         override fun close() = session.close()
     }
 
+    @Test fun defaultOpenFreezesCurrentExactGrantWithoutSeparateApprovalClick() {
+        for (script in listOf("printf exact", "printf different")) {
+            val session = ShizukuRunSession("session", "run").apply { edit(2000, script, 1234) }
+            val backend = Backend()
+            assertTrue(session.allowedWrites.isEmpty()) // Editing/mounting never issues authority.
+            DispatchFixture(session, backend).use { f ->
+                assertEquals(setOf(RunShizukuCommands.writeEffect(2000, script, 1234)), session.allowedWrites)
+                assertEquals(0, backend.executions.get()) // Open alone does not execute a command.
+                assertTrue(f.dispatch("changed", script + " ") is DispatchOutcome.NotExecuted)
+                assertTrue(f.dispatch("timeout", script, 1235) is DispatchOutcome.NotExecuted)
+                f.dispatch(script = script)
+                assertEquals(1, backend.executions.get())
+                f.dispatch("new-call", script)
+                assertEquals(1, backend.executions.get())
+                rejected { session.open { _, _ -> fail("one-use connection"); Backend() } }
+            }
+        }
+    }
+
+    @Test fun defaultOpenCannotResurrectRevocationOrUnknownOrChooseAnotherIdentity() {
+        val revoked = ShizukuRunSession("session", "run").apply { edit(2000, "printf exact", 1234); revoke() }
+        rejected { revoked.open { _, _ -> fail("revoked must not connect"); Backend() } }
+        assertTrue(revoked.allowedWrites.isEmpty())
+        val mismatch = ShizukuRunSession("session", "run").apply { edit(0, "printf exact", 1234) }
+        val wrongBackend = Backend(2000)
+        rejected { mismatch.open { uid, _ -> assertEquals(0, uid); wrongBackend } }
+        assertEquals(1, wrongBackend.closes.get())
+        assertTrue(mismatch.allowedWrites.isEmpty())
+        val session = ShizukuRunSession("session", "run").apply { edit(2000, "printf exact", 1234) }
+        DispatchFixture(session, Backend().apply { unknown = true }).use { f ->
+            assertTrue(f.dispatch() is DispatchOutcome.Unknown)
+            f.dispatch("new-call")
+            assertEquals(1, f.backend.executions.get())
+            assertTrue(session.allowedWrites.isEmpty())
+            rejected { session.open { _, _ -> fail("unknown must not reconnect"); Backend() } }
+        }
+    }
+
     @Test fun exactApprovedCommandExecutesButDifferentScriptOrTimeoutDoesNot() {
         DispatchFixture(approved(), Backend()).use { f ->
             assertTrue(f.dispatch("different", "printf exact ") is DispatchOutcome.NotExecuted)

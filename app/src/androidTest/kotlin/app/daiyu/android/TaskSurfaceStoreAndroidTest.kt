@@ -21,7 +21,7 @@ class TaskSurfaceStoreAndroidTest : InstrumentationTestCase() {
 
     fun testAtomicRoundTripFreshInstancesAndBackupRecovery() {
         val file = File(root, "preference")
-        assertEquals(TaskSurfaceSettings.Available(TaskSurfacePreference.ASK), store(file).load())
+        assertEquals(TaskSurfaceSettings.Available(TaskSurfacePreference.FOREGROUND), store(file).load())
         TaskSurfacePreference.entries.forEach { value ->
             assertTrue(store(file).save(value))
             assertEquals(TaskSurfaceSettings.Available(value), store(file).load())

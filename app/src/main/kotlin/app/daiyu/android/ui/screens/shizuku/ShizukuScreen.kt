@@ -14,6 +14,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.R
 import app.daiyu.android.domain.tools.ExecutionReceipt
+import app.daiyu.android.integration.tools.CommandPermissionDefaults
 import app.daiyu.android.shizuku.*
 import app.daiyu.android.ui.components.EtaFormTextField
 import app.daiyu.android.ui.components.MiuixScaffoldPage
@@ -159,7 +160,8 @@ internal fun ShizukuApprovalContent(
     onEdit: (Int?, String, Long) -> Unit,
     onApprove: () -> Unit,
     onOpen: () -> Unit,
-    onRevoke: () -> Unit
+    onRevoke: () -> Unit,
+    requireInteractiveApproval: Boolean = CommandPermissionDefaults.REQUIRE_INTERACTIVE_APPROVAL
 ) {
     val editable = !busy && state.status in setOf(ShizukuApprovalStatus.DRAFT, ShizukuApprovalStatus.APPROVED)
     var timeout by remember(state.sessionId, state.runId) { mutableStateOf(state.timeoutMillis.toString()) }
@@ -197,12 +199,13 @@ internal fun ShizukuApprovalContent(
                 ShizukuApprovalStatus.REVOKED -> R.string.shizuku_revoked
                 ShizukuApprovalStatus.CLOSED -> R.string.shizuku_run_closed
             }), Modifier.padding(top = 12.dp).testTag("shizuku-approval-status"))
-            if (editable) TextButton(stringResource(R.string.shizuku_approve), onClick = onApprove,
-                enabled = state.selectedUid != null && state.script.isNotBlank() && state.timeoutMillis in 1..120_000 &&
-                    timeout.toLongOrNull() == state.timeoutMillis,
-                modifier = Modifier.testTag("shizuku-approve"))
-            if (state.status == ShizukuApprovalStatus.APPROVED) {
-                TextButton(stringResource(R.string.shizuku_open), onClick = onOpen, enabled = !busy && canOpen,
+            val valid = state.selectedUid != null && state.script.isNotBlank() && state.timeoutMillis in 1..120_000 &&
+                timeout.toLongOrNull() == state.timeoutMillis
+            if (requireInteractiveApproval && editable) TextButton(stringResource(R.string.shizuku_approve), onClick = onApprove,
+                enabled = valid, modifier = Modifier.testTag("shizuku-approve"))
+            if (state.status == ShizukuApprovalStatus.APPROVED ||
+                (!requireInteractiveApproval && state.status == ShizukuApprovalStatus.DRAFT)) {
+                TextButton(stringResource(R.string.shizuku_open), onClick = onOpen, enabled = !busy && canOpen && valid,
                     modifier = Modifier.testTag("shizuku-open"))
             }
             if (state.status !in setOf(ShizukuApprovalStatus.REVOKED, ShizukuApprovalStatus.CLOSED)) {

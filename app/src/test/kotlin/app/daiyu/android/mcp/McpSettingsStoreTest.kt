@@ -74,7 +74,8 @@ class McpSettingsStoreTest {
         store.observeInvalidated(first) { invalidations++ }
         val second = reopened.save(listOf(restored.withPolicy(enabled = false)), owner, reopened.snapshot())
         assertEquals(1, invalidations); assertFalse(store.isCurrent(first))
-        assertFalse(second.servers.single().eligible("erase"))
+        // Old policy bits may round-trip but no longer impose a second app capability gate.
+        assertTrue(second.servers.single().eligible("erase"))
         store.observeInvalidated(first) { invalidations++ }
         assertEquals(2, invalidations)
         val unsubscribe = reopened.observeInvalidated(second) { invalidations++ }

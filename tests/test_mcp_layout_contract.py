@@ -20,7 +20,7 @@ class McpLayoutContractTest(unittest.TestCase):
             self.assertIn(text, self.source)
         self.assertIn('if (snapshot?.servers?.isEmpty() == true)', self.source)
         self.assertIn('stateDescription = status', self.source)
-        self.assertIn('if (busy || status != "保存只配置服务器，不授予工具权限。")', self.source)
+        self.assertIn('if (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。")', self.source)
         self.assertNotIn('已配置服务器（', self.source)
         self.assertNotIn('尚未添加服务器', self.source)
 

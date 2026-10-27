@@ -49,6 +49,15 @@ class R08PlanEditorHostTest {
         assertEquals(false, plan.reads.last().parameters().getBoolean("include"))
         assertEquals(1024, plan.reads.last().parameters().getInt("maxBytes"))
         assertTrue(review.rows.all { it.exactEffect.target == "${plan.bindingKey}/durable_generation" })
+        val defaultGrant = review.authorizeWithProductDefaults()
+        assertSame(plan, defaultGrant.plan)
+        assertEquals(plan.effects, defaultGrant.requiredEffects)
+        assertTrue(defaultGrant.isActive)
+        assertThrows(IllegalStateException::class.java) { review.authorizeWithProductDefaults() }
+        assertThrows(IllegalStateException::class.java) { review.answerFromUi(true) { fail("default already consumed") } }
+        defaultGrant.revoke()
+        assertFalse(defaultGrant.isActive)
+        assertThrows(IllegalStateException::class.java) { review.authorizeWithProductDefaults() }
         assertThrows(IllegalStateException::class.java) { host.freeze(prefix()) }
         assertFalse(host.cancel())
         assertThrows(UnsupportedOperationException::class.java) {

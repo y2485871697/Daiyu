@@ -3,13 +3,8 @@ package app.daiyu.android.ui
 import app.daiyu.android.ui.components.materialImeCursorColor
 import app.daiyu.android.ui.components.managedInput
 
-import androidx.compose.ui.platform.LocalView
-import app.daiyu.android.ui.haptics.TouchHaptics
 import android.os.Build
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.*
 import app.daiyu.android.ui.haptics.material.Button
 import app.daiyu.android.ui.haptics.material.TextButton
@@ -17,8 +12,6 @@ import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
 import app.daiyu.android.ControllerPlatformActionPreparation
@@ -28,7 +21,7 @@ import app.daiyu.android.tasksurface.*
 import app.daiyu.android.ui.screens.settings.TaskSurfaceLocationDialog
 import org.json.JSONObject
 
-/** Dedicated, opt-in composer adjunct. Settings/capability switches never issue a WRITE grant. */
+/** Original exact-task form. Submission grants the capability; no second app permission dialog. */
 @Composable internal fun PlatformActionApprovalHost(
     controller: ChatController,
     conversation: Conversation?, text: String, owner: ChatController.TextSendOwner, visit: Any,
@@ -37,7 +30,6 @@ import org.json.JSONObject
     onAccepted: (ControllerPlatformActionPreparation, Conversation) -> Unit,
     showEntry: Boolean = true,
 ) {
-    val feedbackView = LocalView.current
     var open by remember(owner, visit) { mutableStateOf(false) }
     var kind by remember(owner, visit) { mutableStateOf<PlatformActionKind?>(null) }
     var first by remember(owner, visit) { mutableStateOf("") }
@@ -55,13 +47,38 @@ import org.json.JSONObject
     val currentState by rememberUpdatedState(isCurrent)
     fun current(expected: ChatController.TextSendOwner, value: String) = active.get() && currentState(expected, value)
     val accepted by rememberUpdatedState(onAccepted)
+    fun submit(frozen: ControllerPlatformActionPreparation) {
+        if (preview !== frozen || sending || frozen.submitted) return
+        if (!current(owner, text)) {
+            controller.rejectPlatformAction(frozen); preview = null
+            error = "草稿或页面已变化，未发送"
+            return
+        }
+        sending = true
+        val queued = runCatching {
+            controller.confirmPlatformAction(frozen) { saved ->
+                if (saved != null && current(owner, text) && saved.id == frozen.conversationId) {
+                    preview = null // RunResources now owns the original scope and its drain.
+                    sending = false; open = false
+                    accepted(frozen, saved)
+                } else {
+                    controller.rejectPlatformAction(frozen); preview = null; sending = false
+                    error = "未受理或原编辑器已变化；未清除新草稿，未自动重发"
+                }
+            }
+        }.getOrDefault(false)
+        if (!queued) {
+            controller.rejectPlatformAction(frozen); preview = null; sending = false
+            error = "原提交已失效或系统能力不可用；未重复发送"
+        }
+    }
     DisposableEffect(controller, owner, visit) {
         onDispose { active.set(false); preview?.let(controller::rejectPlatformAction) }
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (showEntry) TextButton(enabled = enabled && preview == null, onClick = { open = !open },
             modifier = Modifier.testTag("platform-action-entry")) {
-            Text("专用系统操作：闹钟 / 计时器 / 音量 / 媒体 / 联网（单次批准）")
+            Text("系统操作：闹钟 / 计时器 / 音量 / 媒体 / 联网")
         }
         if (open) {
             Text("仅本次精确动作，普通应用身份；无自动接管、Root、Shizuku 或 GUI 回退。停止不会撤销已提交效果。闹钟/计时器仅应用前台可见时提交，系统时钟可能显示界面，不自动返回或暗切主屏。")
@@ -141,19 +158,20 @@ import org.json.JSONObject
                     preview = arguments?.let { controller.preparePlatformAction(conversation, text, checkNotNull(selected), it) }
                     error = if (preview == null) "参数、系统能力或运行状态不允许；未执行。请检查精确值。" else null
                     locationState = null; locationQuestion = null
-                    preview?.takeIf { it.requiresLocation }?.let { frozen ->
-                        if (!controller.preparePlatformActionLocation(frozen) { route ->
+                    preview?.let { frozen ->
+                        if (!frozen.requiresLocation) submit(frozen)
+                        else if (!controller.preparePlatformActionLocation(frozen) { route ->
                             if (preview !== frozen || !current(owner, text)) controller.rejectPlatformAction(frozen)
                             else {
                                 locationState = route
                                 if (route === TaskSurfaceDecision.AskRequired) {
                                     val location = frozen.location
                                     locationQuestion = location?.let { it.adapter?.askFromUser(it.request) }
-                                }
+                                } else if (route is TaskSurfaceDecision.Ready) submit(frozen)
                             }
                         }) locationState = TaskSurfaceDecision.NotExecuted("CLOCK_LOCATION_UNAVAILABLE", "位置准备不可用；未执行")
                     }
-                }) { Text("预览本次精确动作") }
+                }) { Text("执行本次精确动作") }
         }
     }
     preview?.let { frozen ->
@@ -164,47 +182,19 @@ import org.json.JSONObject
             TaskSurfaceLocationDialog(adapter, location.request, question, onResolved = {
                 locationQuestion = null
                 locationState = location.decision()
+                if (locationState is TaskSurfaceDecision.Ready) submit(frozen)
             })
-        } else AlertDialog(onDismissRequest = { controller.rejectPlatformAction(frozen); preview = null },
-            title = { Text("确认单次系统操作") },
-            text = { Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
-                Text("会话 ${frozen.conversationId.value}\n运行 ${frozen.runId.value}\n${frozen.action.preview}")
-                Text("以下为完整发送内容。仅此动作可获写授权；更换参数会被拒绝。Intent/媒体键不能验证效果，UNKNOWN 将保留原运行且禁止自动重试。")
-                Text(frozen.messageText)
-                if (frozen.requiresLocation) {
-                    val state = locationState
-                    if (state == null) Text("正在冻结原运行的执行位置；尚未批准动作。")
-                    else if (state is TaskSurfaceDecision.NotExecuted) Text("${state.code}：${state.message}")
-                    else if (state is TaskSurfaceDecision.Ready) Text("本次位置：前台。位置选择不授予动作权限；仍须下方单次批准。")
-                }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            } },
-            confirmButton = {
-                val confirmEnabled = !sending && !frozen.submitted &&
-                    (!frozen.requiresLocation || (locationState is TaskSurfaceDecision.Ready &&
-                        location?.ready(TaskSurface.FOREGROUND) != null))
-                val approve: () -> Unit = {
-                    sending = true
-                    if (!current(owner, text)) {
-                        controller.rejectPlatformAction(frozen); preview = null; error = "草稿或页面已变化，未发送"
-                    } else if (!controller.confirmPlatformAction(frozen) { saved ->
-                        if (saved != null && current(owner, text) && saved.id == frozen.conversationId) {
-                            preview = null // Ownership transfers to RunResources; disposal must not stop acceptance.
-                            accepted(frozen, saved)
-                        } else {
-                            controller.rejectPlatformAction(frozen); preview = null
-                            error = "未受理或原编辑器已变化；未清除新草稿，未自动重发"
-                        }
-                    }) error = "批准已失效；未重复发送"
-                }
-                Button(enabled = confirmEnabled,
-                    modifier = Modifier.testTag("platform-action-confirm").semantics {
-                        // Keep the UI callback independent of ClickableNode attachment.
-                        onClick {
-                            if (confirmEnabled) { TouchHaptics.action(feedbackView) { approve() }; true } else false
-                        }
-                    }, onClick = approve) { Text("批准精确动作并发送") }
-            },
-            dismissButton = { TextButton(onClick = { controller.rejectPlatformAction(frozen); preview = null }) { Text("拒绝 / 停止原准备") } })
+        } else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(frozen.action.preview)
+            if (sending) Text("正在提交原系统操作；不会自动重试。")
+            else if (frozen.requiresLocation) {
+                val state = locationState
+                if (state == null) Text("正在准备执行位置；位置就绪后执行原提交，无需再次许可。")
+                else if (state is TaskSurfaceDecision.NotExecuted) Text("${state.code}：${state.message}")
+            }
+            TextButton(onClick = {
+                controller.rejectPlatformAction(frozen); preview = null; sending = false
+            }, modifier = Modifier.testTag("platform-action-cancel")) { Text("取消 / 停止原提交") }
+        }
     }
 }

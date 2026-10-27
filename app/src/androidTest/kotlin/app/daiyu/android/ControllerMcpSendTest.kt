@@ -76,10 +76,11 @@ class ControllerMcpSendTest : InstrumentationTestCase() {
         assertEquals(text, fixture.database.draft()); assertTrue(fixture.database.conversations().isEmpty())
         assertEquals(0, connections.get()); assertEquals(0, requests.get()); assertEquals(0, fixture.opens.get())
     }
-    fun testSettingsAndPreviewNeverConnectAndMissingApprovalStaleDraftAndStaleConfigurationAreRejected() {
+    fun testPreparationNeverConnectsAndStaleOwnerDraftAndConfigurationAreRejected() {
         val pending = prepare(); assertUncommitted()
         controlMain {
-            assertFalse(controller.sendMcp(pending, owner, text, ChatController.TextSendTicket()) { fail("unapproved callback") })
+            assertFalse(controller.sendMcp(pending, owner.copy(draftRevision = 12), text, ChatController.TextSendTicket()) { fail("stale owner callback") })
+            assertFalse(controller.sendMcp(pending, owner, "different draft", ChatController.TextSendTicket()) { fail("stale draft callback") })
             assertFalse(pending.confirm(pending, owner.copy(draftRevision = 12), text))
         }
         store.save(store.snapshot().servers, McpSettingsOwner(), store.snapshot())
@@ -120,7 +121,6 @@ class ControllerMcpSendTest : InstrumentationTestCase() {
         val ticket = ChatController.TextSendTicket()
         val done = CountDownLatch(1); val receipt = AtomicReference<ChatController.TextSendResult>()
         controlMain {
-            assertTrue(pending.confirm(pending, owner, text))
             assertTrue(controller.sendMcp(pending, owner, text, ticket) { receipt.set(it); done.countDown() })
         }
         assertTrue(done.await(10, TimeUnit.SECONDS)); assertTrue(receipt.get() is ChatController.TextSendResult.Accepted)
@@ -149,7 +149,6 @@ class ControllerMcpSendTest : InstrumentationTestCase() {
     }
     fun testPersistedDraftCasFailureAndRecoveryNeverCreateAReplacementMcpOwnerOrReopenTransport() {
         val pending = prepare()
-        controlMain { assertTrue(pending.confirm(pending, owner, text)) }
         fixture.database.draft("edited after preview")
         val done = CountDownLatch(1); val receipt = AtomicReference<ChatController.TextSendResult>()
         controlMain { assertTrue(controller.sendMcp(pending, owner, text, ChatController.TextSendTicket()) { receipt.set(it); done.countDown() }) }

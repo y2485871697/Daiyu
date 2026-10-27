@@ -22,7 +22,7 @@ class ShizukuApprovalScreenTest : WiredActivityTestCase() {
                 val state = session.states.collectAsState().value
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                        ShizukuApprovalContent(state, busy = false, canOpen = true,
+                        ShizukuApprovalContent(state, busy = false, canOpen = true, requireInteractiveApproval = true,
                             onEdit = session::edit, onApprove = { session.approve(state) },
                             onOpen = { opens.incrementAndGet() }, onRevoke = session::revoke)
                     }

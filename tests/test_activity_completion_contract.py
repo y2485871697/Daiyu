@@ -19,16 +19,19 @@ class ActivityCompletionContract(unittest.TestCase):
         for oracle in ('assertNull(restoreDialog())', 'assertEquals(0,modelCalls.get())', 'assertEquals(0,provider.opens.get())', 'assertEquals(0L,controller.dataRevision)'):
             self.assertIn(oracle, case)
 
-    def test_shizuku_preview_click_follows_final_scroll_and_native_ime_frame(self):
+    def test_shizuku_direct_send_click_follows_final_scroll_and_native_ime_frame(self):
         source = (TESTS / 'ShizukuMainActivityTest.kt').read_text()
-        case = source.split('private fun preview(', 1)[1].split('fun testIndependentEntry', 1)[0]
-        parts = ('openEditor(seedDraft)', 'awaitNodeWindowFocus(panel)', 'dismissIme()',
-                 'val previewButton = panelNode(', 'awaitImeFrame(previewButton, visible = false)',
-                 'previewButton.performClick()', 'ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() != null }')
+        case = source.split('private fun clickSend()', 1)[1].split('private fun submitWhileWorkerBlocked()', 1)[0]
+        parts = ('awaitNodeWindowFocus(node("shizuku-text-panel"))', 'dismissIme()',
+                 'val send = panelNode(hasTestTag("shizuku-text-send"))',
+                 'awaitImeFrame(send, visible = false)', 'send.performClick()')
         positions = [case.index(part) for part in parts]
         self.assertEqual(sorted(positions), positions)
-        self.assertEqual(1, case.count('previewButton.performClick()'))
-        self.assertIn('get(current) === preparation', case)
+        self.assertEqual(1, case.count('send.performClick()'))
+        submit = source.split('private fun submitWhileWorkerBlocked()', 1)[1].split('private fun reserveReceiptFixture(', 1)[0]
+        self.assertLess(submit.index('clickSend()'), submit.index('checkNotNull(fixture.controller.shizukuPreparation())'))
+        self.assertIn('assertTrue(it.isSubmitted())', submit)
+        self.assertNotIn('private fun preview(', source)
         self.assertNotIn('awaitDialogEnter', case)
 
 

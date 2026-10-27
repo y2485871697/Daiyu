@@ -38,7 +38,7 @@ internal class ControllerShizukuPreparation internal constructor(
     @Synchronized internal fun isSubmitted(): Boolean = submitted
     @Synchronized internal fun isCancelled(): Boolean = cancelled
 
-    /** Only invoked by the controller's explicit confirmation entry point. No I/O here. */
+    /** Controller submission freezes the original exact one-use grant; no extra app prompt or I/O. */
     @Synchronized internal fun approve(): TaskAuthorization {
         check(!submitted && !cancelled) { "shizuku_approval_consumed" }
         session.approve(session.state)

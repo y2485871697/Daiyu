@@ -54,13 +54,20 @@ internal class ControllerPlatformActionPreparation(
         }
     }
     val messageText: String get() = "$text\n\n本次只批准以下精确系统操作（普通应用身份，不得修改或自动重试）：\n${action.preview}\n必须调用 ${action.kind.toolName}，参数为 ${action.json}。Intent/媒体键仅提交不能证明效果；UNKNOWN 必须停止。"
-    @Synchronized fun approve(): PlatformActionScope {
+    /** Issue the original exact token at task submission, without a second capability question.
+     * Location and real Android support are execution prerequisites, not app permission toggles.
+     * No backend execution happens here; the original dispatcher/ledger still admits the write.
+     */
+    @Synchronized fun authorizeForSubmission(): PlatformActionScope {
         check(!submitted && !cancelled) { "platform_approval_consumed" }
+        check(backend.unavailable(action.kind) == null) { "platform_capability_unavailable" }
         check(!requiresLocation || location?.ready(TaskSurface.FOREGROUND) != null) { "clock_location_not_approved" }
         submitted = true
         return PlatformActionScope(conversationId, runId, action,
             TaskAuthorization(runId.value, runId.value, setOf(action.effect)), routedBackend, onDrained = { location?.end() }).also { scope = it }
     }
+    /** Source compatibility; submitting the task already grants this exact action. */
+    fun approve(): PlatformActionScope = authorizeForSubmission()
     @Synchronized fun cancel() {
         cancelled = true
         val approved = scope

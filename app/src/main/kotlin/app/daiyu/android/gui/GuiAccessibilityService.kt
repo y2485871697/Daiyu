@@ -25,6 +25,12 @@ import app.daiyu.android.tasksurface.TaskSurfaceSelfTarget
 /** System-bound only. Keepalive runs separately in system_server; it grants no GUI task access. */
 class GuiAccessibilityService : AccessibilityService() {
     private var watchingPermission = false
+    private var watchingScreen = false
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) GuiRuntime.screenOff(this@GuiAccessibilityService)
+        }
+    }
     private val permissionObserver = object : android.database.ContentObserver(GuiRuntime.main) {
         override fun onChange(selfChange: Boolean) {
             val enabled = try { GuiSystemSettings.enabledBySystem(this@GuiAccessibilityService) } catch (_: Exception) { false }
@@ -46,6 +52,16 @@ class GuiAccessibilityService : AccessibilityService() {
                 return // unable to watch revocation: never advertise a connected host
             }
         }
+        if (!watchingScreen) {
+            try {
+                androidx.core.content.ContextCompat.registerReceiver(this, screenReceiver,
+                    android.content.IntentFilter(Intent.ACTION_SCREEN_OFF), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+                watchingScreen = true
+            } catch (_: Exception) {
+                GuiRuntime.disconnected(this)
+                return // unable to observe lock/off revocation: never advertise a usable host
+            }
+        }
         serviceInfo = serviceInfo.apply {
             eventTypes = eventTypes or AccessibilityEvent.TYPE_VIEW_CLICKED or AccessibilityEvent.TYPE_VIEW_LONG_CLICKED or
                 AccessibilityEvent.TYPE_VIEW_FOCUSED or AccessibilityEvent.TYPE_VIEW_SELECTED
@@ -64,6 +80,7 @@ class GuiAccessibilityService : AccessibilityService() {
     override fun onInterrupt() { GuiRuntime.disconnected(this) }
     override fun onUnbind(intent: Intent?): Boolean { GuiRuntime.disconnected(this); return super.onUnbind(intent) }
     override fun onDestroy() {
+        if (watchingScreen) { unregisterReceiver(screenReceiver); watchingScreen = false }
         if (watchingPermission) { contentResolver.unregisterContentObserver(permissionObserver); watchingPermission = false }
         GuiRuntime.disconnected(this); super.onDestroy()
     }
@@ -179,11 +196,11 @@ internal object GuiRuntime {
     }
     internal fun showConfirmation(session: GuiRunSession, operation: GuiOperation, text: String?,
         ownerCurrent: () -> Boolean, onNotExecuted: (String) -> Unit, onRevoked: () -> Unit,
-        deliver: (GuiConfirmedDelivery) -> Boolean): GuiResult<Unit> {
+        deliver: (GuiConfirmedDelivery) -> Boolean, productDefaults: Boolean = false): GuiResult<Unit> {
         onMain(); operationRejection(session.lease, operation)?.let { return it }; screenRejection()?.let { return it }
         selfRootRejection(session.lease)?.let { return it }
         if (confirmation != null) return GuiResult.Rejected("CONFIRMATION_ALREADY_OPEN")
-        val host = GuiConfirmationOverlay(service!!, session, operation, text, ownerCurrent, onNotExecuted, onRevoked, deliver)
+        val host = GuiConfirmationOverlay(service!!, session, operation, text, ownerCurrent, onNotExecuted, onRevoked, deliver, productDefaults)
         confirmation = host
         return try { host.show(); GuiResult.Value(Unit) } catch (_: Exception) {
             session.close(); GuiResult.Rejected("OVERLAY_UNAVAILABLE_NOT_EXECUTED")
@@ -220,6 +237,13 @@ internal object GuiRuntime {
             targetBinding = null; clearNodes(); service = null; generation++; gate.disconnect()
         }
     }
+    fun screenOff(value: GuiAccessibilityService) {
+        onMain()
+        if (service !== value) return
+        targetBinding?.lease?.valid = false
+        generation++; clearNodes()
+        confirmation?.revoke("SCREEN_LOCKED_NOT_EXECUTED")
+    }
     fun changed(value: GuiAccessibilityService) { onMain(); if (service === value) { generation++; clearNodes() } }
     private data class NodeContext(val packageName: String, val windowId: Int, val children: Int, val visible: Boolean)
     private data class TreeSample(val packageName: String, val windowId: Int, val nodes: List<GuiNode>,
@@ -239,8 +263,12 @@ internal object GuiRuntime {
             disconnected(current)
             return GuiResult.Rejected("SERVICE_PERMISSION_REVOKED_NOT_EXECUTED")
         }
-        if (!(try { access.unlocked(current) } catch (_: Exception) { false }))
+        if (!(try { access.unlocked(current) } catch (_: Exception) { false })) {
+            // Unlocking later must not revive this run's snapshot or its exact grants.
+            targetBinding?.lease?.let { it.valid = false }
+            clearNodes()
             return GuiResult.Rejected("SCREEN_LOCKED_NOT_EXECUTED")
+        }
         return null
     }
     /** Main-thread, trusted user callback only. Null target means external-only, not inferred self.

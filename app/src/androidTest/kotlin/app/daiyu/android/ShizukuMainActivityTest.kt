@@ -26,30 +26,51 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         return ui.onNode(target).scrollToVisible().assertIsDisplayed().assertIsEnabled()
     }
 
-    private fun enableTextApproval() {
-        panelNode(hasTestTag("shizuku-text-enable")).assertIsOff().performClick()
-        ui.onNodeWithTag("shizuku-text-enable").assertIsOn()
+    private fun withBlockedShizukuWorker(block: (() -> Unit) -> Unit) {
+        val executor = app.daiyu.android.ChatController::class.java.getDeclaredField("executor")
+            .apply { isAccessible = true }.get(fixture.controller) as java.util.concurrent.ExecutorService
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val blocker = executor.submit { entered.countDown(); release.await() }
+        try {
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            block { release.countDown() }
+        } finally {
+            release.countDown()
+            blocker.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            executor.submit { }.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
     }
 
-    private fun openEditor(seedDraft: Boolean = true) {
+    private fun openEditor(seedDraft: Boolean = true, uid: String? = "2000") {
         if (seedDraft) setDraft(text) else assertDraft(text)
         node("shizuku-text-entry").performClick()
-        enableTextApproval()
-        panelNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）")).performTextReplacement("2000")
+        if (uid != null) panelNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）"))
+            .performTextReplacement(uid)
         panelNode(hasSetTextAction() and hasText("本次精确 shell 命令")).performTextReplacement(command)
         panelNode(hasSetTextAction() and hasText("超时毫秒（1–120000）")).performTextReplacement("1234")
     }
 
-    private fun preview(seedDraft: Boolean = true): ControllerShizukuPreparation {
-        openEditor(seedDraft)
-        val panel = node("shizuku-text-panel")
-        awaitNodeWindowFocus(panel)
+    private fun clickSend() {
+        awaitNodeWindowFocus(node("shizuku-text-panel"))
         dismissIme()
-        val previewButton = panelNode(hasText("预览命令及本次运行") and hasClickAction())
-        awaitImeFrame(previewButton, visible = false)
-        previewButton.performClick()
-        ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() != null }
-        val preparation = checkNotNull(fixture.controller.shizukuPreparation())
+        val send = panelNode(hasTestTag("shizuku-text-send"))
+        awaitImeFrame(send, visible = false)
+        send.performClick()
+    }
+
+    private fun submitWhileWorkerBlocked(): ControllerShizukuPreparation {
+        clickSend()
+        return checkNotNull(fixture.controller.shizukuPreparation()).also { assertTrue(it.isSubmitted()) }
+    }
+
+    // Explicit unsubmitted receipt/cancellation fixture; not a product preview or UI submission.
+    private fun reserveReceiptFixture(seedDraft: Boolean = true, conversation: Conversation? = null): ControllerShizukuPreparation {
+        openEditor(seedDraft)
+        lateinit var preparation: ControllerShizukuPreparation
+        mainThread {
+            preparation = checkNotNull(fixture.controller.prepareShizukuSend(conversation, text, command, "2000", "1234"))
+        }
         ui.waitUntil(5_000) {
             var published = false
             instrumentation.runOnMainSync {
@@ -62,92 +83,71 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         return preparation
     }
 
-    fun testIndependentEntryDefaultsOffAndUidHasNoFallback() {
-        setDraft(text)
-        node("shizuku-text-entry").assertIsEnabled().performClick()
-        assertNull(fixture.controller.shizukuPreparation())
-        ui.onNodeWithText("本次精确 shell 命令").assertDoesNotExist()
-        enableTextApproval()
-        panelNode(hasSetTextAction() and hasText("本次精确 shell 命令")).performTextReplacement(command)
-        // Even with valid text/command/timeout, no UID was selected.
-        panelNode(hasText("预览命令及本次运行") and hasClickAction()).performClick()
+    fun testIndependentEntryIsAvailableButUidHasNoFallback() {
+        openEditor(uid = null)
+        ui.onNodeWithTag("shizuku-text-enable").assertDoesNotExist()
         assertNull(fixture.controller.shizukuPreparation())
         assertEquals(0, fixture.opens.get())
+        clickSend()
+        assertNull(fixture.controller.shizukuPreparation())
+        assertEquals(0, fixture.opens.get())
+        assertDraft(text)
         assertEquals(text, fixture.database.draft())
+        assertTrue(fixture.database.conversations().isEmpty())
     }
 
-    fun testFullPreviewRefusalAndExplicitPanelCancelDoNotSend() {
-        val p = preview()
+    fun testExplicitPanelCancelDoesNotSend() {
+        val p = reserveReceiptFixture()
         assertEquals(text, p.text); assertEquals(command, p.command)
         assertEquals(2000, p.uid); assertEquals(1234L, p.timeoutMillis)
-        val inPreview = hasAnyAncestor(isDialog())
-        ui.onNode(hasText("会话：${p.conversationId.value}\n运行：${p.runId.value}") and inPreview).assertExists()
-        ui.onNode(hasText(command) and inPreview).assertExists()
-        ui.onNode(hasText(p.messageText) and inPreview).assertExists()
-        ui.onNode(hasText("拒绝 / 取消") and inPreview).performClick()
+        panelNode(hasTestTag("shizuku-text-cancel")).performClick()
         ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() == null }
         assertTrue(p.isCancelled())
-        panelNode(hasTestTag("shizuku-text-cancel")).performClick()
         node("shizuku-text-panel").assertDoesNotExist()
         assertDraft(text)
         assertTrue(fixture.database.conversations().isEmpty())
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testApproveReachesRealControllerAndFailureReceiptPreservesDraftWithoutPermissionIO() {
-        val p = preview()
-        ui.onNodeWithText("同意本次写操作并发送").performClick()
-        // RunControlFixture intentionally is not a ChatApplication: preparation fails closed at
-        // shizuku_application_host_required before any SDK connection. This is not a fake success.
-        ui.waitUntil(5_000) { p.isSubmitted() && fixture.controller.shizukuPreparation() == null }
-        assertTrue(fixture.controller.problem != null)
+    fun testDirectSendFailurePreservesDraftWithoutPermissionIO() {
+        openEditor()
+        withBlockedShizukuWorker { release ->
+            val p = submitWhileWorkerBlocked()
+            assertEquals(text, p.text); assertEquals(command, p.command)
+            assertEquals(2000, p.uid); assertEquals(1234L, p.timeoutMillis)
+            release()
+            // Fixture is not ChatApplication: refusal occurs before SDK connection.
+            ui.waitUntil(5_000) { p.isSubmitted() && fixture.controller.shizukuPreparation() == null }
+        }
+        assertNotNull(fixture.controller.problem)
         assertDraft(text)
         assertEquals(text, fixture.database.draft())
         assertEquals(0, fixture.opens.get())
         assertTrue(fixture.database.conversations().isEmpty())
     }
 
-    fun testRecreationCancelsAlreadyApprovedQueuedPreparationWithoutSending() {
+    fun testRecreationCancelsSubmittedQueuedPreparationWithoutSending() {
         verifyRecreationCancelsQueuedPreparation()
     }
 
     private fun verifyRecreationCancelsQueuedPreparation() {
-        val p = preview()
-        dismissIme()
-        val executor = ChatController::class.java.getDeclaredField("executor")
-            .apply { isAccessible = true }.get(fixture.controller) as java.util.concurrent.ExecutorService
-        val entered = java.util.concurrent.CountDownLatch(1)
-        val release = java.util.concurrent.CountDownLatch(1)
-        val blocker = executor.submit {
-            entered.countDown()
-            release.await()
-        }
-        try {
-            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
-            ui.onNodeWithText("同意本次写操作并发送").performClick()
-            assertTrue(p.isSubmitted())
+        openEditor()
+        withBlockedShizukuWorker { release ->
+            val p = submitWhileWorkerBlocked()
             var cancelledBeforeRelease = false
-            activity = recreateActivity(activity) {
-                cancelledBeforeRelease = p.isCancelled()
-                release.countDown()
-            }
+            activity = recreateActivity(activity) { cancelledBeforeRelease = p.isCancelled(); release() }
             assertTrue(cancelledBeforeRelease)
-            blocker.get(5, java.util.concurrent.TimeUnit.SECONDS)
-            executor.submit { }.get(5, java.util.concurrent.TimeUnit.SECONDS)
             ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() == null }
             assertDraft(text)
             assertEquals(0, fixture.opens.get())
             assertTrue(fixture.database.conversations().isEmpty())
-        } finally {
-            release.countDown()
-            blocker.get(5, java.util.concurrent.TimeUnit.SECONDS)
         }
     }
 
     fun testEditorAbaAndOtherConversationRejectOldAcceptedCallbacks() {
         val conversation = fixture.database.create()
         mainThread { activity.select(conversation) }
-        val p = preview()
+        val p = reserveReceiptFixture(conversation = conversation)
         val oldEditor = checkNotNull(editor())
         mainThread {
             val actions = retainedControls(activity)
@@ -171,7 +171,7 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
     fun testAcceptedDbFixtureClearsOnlyMatchingEditorAndLoadsThatConversation() {
         val conversation = fixture.database.create("default")
         mainThread { activity.select(conversation) }
-        val p = preview()
+        val p = reserveReceiptFixture(conversation = conversation)
         val owner = checkNotNull(editor())
         val user = Message(MessageId("approved-user"), conversation.id, p.runId, Message.USER_ROLE,
             listOf(MessageBlock.Text("body", p.messageText)), RunStatus.COMPLETED)
@@ -197,7 +197,7 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
     }
 
     fun testNavigationAndRecreationCancelPreviewAndCannotReplayOldReceipt() {
-        val p = preview()
+        val p = reserveReceiptFixture()
         val oldActivity = activity
         val oldEditor = checkNotNull(editor())
         activity = recreateActivity(activity)
@@ -207,9 +207,9 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         assertDraft(text)
         mainThread { invokeOn(oldActivity, "acceptShizuku", oldEditor, p, fixture.database.create()) }
         assertDraft(text)
-        val next = preview(seedDraft = false)
-        // Invoke the real host route while the modal preview covers the chat toolbar.
-        ui.onNode(hasText(command) and hasAnyAncestor(isDialog())).assertExists()
+        val next = reserveReceiptFixture(seedDraft = false)
+        ui.onNode(hasSetTextAction() and hasText(command) and
+            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).assertExists()
         mainThread {
             assertSame(next, fixture.controller.shizukuPreparation())
             assertFalse(next.isCancelled())

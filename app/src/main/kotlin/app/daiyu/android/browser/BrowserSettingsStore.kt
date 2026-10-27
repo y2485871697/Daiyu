@@ -18,10 +18,18 @@ internal class BrowserSettingsSaveOwner {
 }
 
 /** A preference is only a capability ceiling. It never contains a task WRITE approval. */
-data class BrowserSettings(val access: BrowserAccess = BrowserAccess.DISABLED) {
-    // These policies deliberately cannot be enabled by this preference or by FULL.
-    val historyConsent: String get() = "DENY"
+data class BrowserSettings(
+    val access: BrowserAccess = BrowserAccess.DISABLED,
+    val productPolicy: Boolean = false,
+) {
+    // Product policy is separate from FULL: strict fixtures/editors cannot infer outbound consent.
+    val historyConsent: String get() = if (productPolicy) "ALLOW" else "DENY"
     val allowedCookieNames: Set<String> get() = emptySet()
+    // A finite name set cannot represent the product ceiling. The cookie backend must still
+    // offload privately and withhold values from model/history receipts; this is not disclosure.
+    val allCookieNamesAllowed: Boolean get() = productPolicy
+    fun allowsCookieName(name: String): Boolean = name.isNotEmpty() &&
+        (allCookieNamesAllowed || name in allowedCookieNames)
 }
 
 /**
@@ -35,7 +43,7 @@ class BrowserSettingsStore private constructor(private val preferences: SharedPr
         "browser-settings", Context.MODE_PRIVATE), true)
 
     fun snapshot(): BrowserSettings = synchronized(lock) {
-        if (productDefaults) return@synchronized BrowserSettings(BrowserAccess.FULL)
+        if (productDefaults) return@synchronized BrowserSettings(BrowserAccess.FULL, productPolicy = true)
         check(fenced[preferences] != true) { "浏览器设置写入结果未确认，请重新保存" }
         val raw = try { preferences.getString(KEY, null) } catch (_: ClassCastException) { null }
         BrowserSettings(when (raw) {

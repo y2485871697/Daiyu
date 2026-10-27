@@ -32,7 +32,7 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
     private val settings = BrowserSettings(BrowserAccess.FULL)
     private val provider = ProviderSnapshot.capture(ModelSettings("https://example.invalid", "fixture-model", "synthetic-key", false))
 
-    fun testFullPreferenceDoesNotEnableOrConfirmAnythingOnMount() {
+    fun testDefaultPermissionNeedsNoEnableSwitchAndMountDoesNotSend() {
         val calls = AtomicInteger()
         mainThread {
             activity.setContent {
@@ -44,7 +44,8 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
-        ui.onNodeWithTag("browser-enable").assertIsOff()
+        ui.onNodeWithTag("browser-enable").assertDoesNotExist()
+        ui.onNodeWithTag("browser-prepare").assertIsEnabled()
         ui.onNodeWithTag("browser-confirm").assertDoesNotExist()
         assertEquals(0, calls.get())
     }
@@ -81,13 +82,15 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
         ui.onNodeWithTag("browser-confirm").assertIsNotEnabled()
     }
 
-    fun testIndependentChildExactFetchApprovalDoesNotFollowParentClickOrFullPreference() {
+    fun testProductionChildDefaultNeedsNoSecondApprovalAndCancellationClosesIt() {
         val p = ControllerBrowserPreparation.prepare(conversation, originalDraft, assistant, provider, settings,
             BrowserGrant(BrowserOwner("ui-child-parent", BrowserOwnerKind.MAIN), BrowserAccess.FULL), setOf("list_tabs"))
         val raw = """ {"action":"fetch","tab_id":0,"url":"https://fixture.invalid/child-file"} """
         val child = ControllerChildBrowserPlan.prepare(p, "independent child prompt", setOf("fetch"), listOf(raw))
         assertTrue(p.attachChild(child))
-        assertFalse(p.confirm(p.preview, originalDraft))
+        assertTrue(child.confirmed)
+        assertNotNull(child.preview.defaultPermission)
+        assertTrue("navigate" in child.preview.allowedActions)
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -96,15 +99,28 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
-        assertFalse(child.confirmed)
-        ui.onNodeWithTag("child-browser-review").performClick()
-        ui.waitForIdle()
-        ui.onNodeWithTag("child-browser-write-1", useUnmergedTree = true).scrollToVisible().assertTextEquals(raw)
-        ui.onNodeWithTag("child-browser-confirm").performClick()
-        ui.waitForIdle()
+        ui.onNodeWithTag("child-browser-enable").assertDoesNotExist()
+        ui.onNodeWithTag("child-browser-confirm").assertDoesNotExist()
         assertTrue(child.confirmed)
-        assertTrue(p.confirm(p.preview, originalDraft))
+        assertTrue(p.confirmDefault(originalDraft))
         p.cancel()
+        assertFalse(child.confirmed)
+        assertTrue(child.drained)
+    }
+
+    fun testProductionPreparationDefaultsAreRunOwnedAndRejectStaleDraftWithoutUi() {
+        val p = ControllerBrowserPreparation.prepare(conversation, originalDraft, assistant, provider, settings,
+            BrowserGrant(BrowserOwner("production-default", BrowserOwnerKind.MAIN), BrowserAccess.FULL), setOf("list_tabs"))
+        assertNotNull(p.preview.defaultPermission)
+        assertTrue(p.preview.writes.isEmpty())
+        assertTrue(setOf("new_tab", "navigate", "click", "type", "fetch", "get_cookies", "set_cookies").all { it in p.preview.allowedActions })
+        assertFalse(p.confirmDefault(originalDraft.copy(owner = originalDraft.owner.copy(draftRevision = 3))))
+        assertFalse(p.confirmDefault(originalDraft.copy(owner = originalDraft.owner.copy(editorGeneration = 2))))
+        assertEquals(ControllerBrowserPreparation.State.PREVIEW, p.state)
+        assertTrue(p.confirmDefault(originalDraft))
+        p.cancel()
+        assertFalse(p.confirmDefault(originalDraft))
+        assertEquals(ControllerBrowserPreparation.State.DRAINED, p.state)
     }
 
     fun testSameTextWithNewRevisionInvalidatesPreviewWithoutConfirmation() {

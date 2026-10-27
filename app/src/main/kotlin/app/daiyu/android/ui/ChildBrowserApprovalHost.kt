@@ -1,107 +1,61 @@
 package app.daiyu.android.ui
 
-import app.daiyu.android.ui.components.materialImeCursorColor
-import app.daiyu.android.ui.components.managedInput
-
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
-import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.*
-import app.daiyu.android.ui.haptics.material.Button
-import app.daiyu.android.ui.haptics.material.TextButton
-import app.daiyu.android.ui.haptics.material.Switch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ControllerBrowserPreparation
 import app.daiyu.android.ControllerChildBrowserPlan
-import org.json.JSONObject
+import app.daiyu.android.browser.BrowserDefaultPermission
+import app.daiyu.android.ui.components.materialImeCursorColor
+import app.daiyu.android.ui.components.managedInput
+import app.daiyu.android.ui.haptics.material.TextButton
 
-/** Separate human approval, never inferred from the parent text, ask_user or saved FULL.
- * Preparing a plan freezes real child IDs/lineage and exact effects, but opens nothing.
+/** An optional child task is not auto-created. Its prompt/identity are explicit, while ordinary
+ * browser permission is inherited by production policy, not by a second approval switch.
  */
 @Composable
 internal fun ChildBrowserApprovalHost(
     parent: ControllerBrowserPreparation,
     prepare: (ControllerBrowserPreparation, String, Set<String>, List<String>) -> ControllerChildBrowserPlan?,
 ) {
-    var enabled by remember(parent) { mutableStateOf(false) }
     var prompt by remember(parent) { mutableStateOf("") }
-    var reads by remember(parent) { mutableStateOf("") }
-    var writes by remember(parent) { mutableStateOf("") }
     var plan by remember(parent) { mutableStateOf(parent.childPlan) }
-    var showing by remember(parent) { mutableStateOf(false) }
-    var confirmed by remember(parent) { mutableStateOf(parent.childPlan?.confirmed == true) }
     var error by remember(parent) { mutableStateOf<String?>(null) }
     val editable = parent.state == ControllerBrowserPreparation.State.PREVIEW && plan == null
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row {
-            Switch(enabled = editable, checked = enabled, modifier = Modifier.testTag("child-browser-enable"),
-                onCheckedChange = { enabled = it })
-            Text("另行批准一个工具型子任务（默认关闭）")
-        }
-        Text("普通 run_child_models 仍是 text-only。本入口仅批准以下一个预冻结子任务；标签隔离不等于 WebView 全局 cookie／账户隔离。cookie 和 history 始终拒绝。")
-        if (enabled && plan == null) {
+        Text("可选工具型子任务：默认继承本次父运行浏览器权限交集，无需另行批准。普通 run_child_models 仍是 text-only。")
+        Text("标签和授权按 child 隔离；不承诺 WebView 全局 cookie／账户隔离，不向模型返回 cookie。")
+        if (plan == null) {
             OutlinedTextField(prompt, { prompt = it }, enabled = editable,
-                label = { Text("独立子任务完整提示词") }, modifier = Modifier.managedInput().testTag("child-browser-prompt"),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-            )
-            OutlinedTextField(reads, { reads = it }, enabled = editable,
-                label = { Text("明确选择子读取动作（如 list_tabs；英文逗号分隔）") },
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                modifier = Modifier.managedInput(),
-            )
-            OutlinedTextField(writes, { writes = it }, enabled = editable,
-                label = { Text("子写操作完整 JSON（每行一个；无默认写授权）") },
-                supportingText = { Text("fetch 必须给完整 URL 和 tab_id；不允许 headers／cookie／destination。") },
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.primary), errorCursorColor = materialImeCursorColor(androidx.compose.material3.MaterialTheme.colorScheme.error)),
-                modifier = Modifier.managedInput(),
-            )
+                label = { Text("子任务完整提示词") }, modifier = Modifier.managedInput().testTag("child-browser-prompt"),
+                colors = OutlinedTextFieldDefaults.colors(cursorColor = materialImeCursorColor(MaterialTheme.colorScheme.primary),
+                    errorCursorColor = materialImeCursorColor(MaterialTheme.colorScheme.error)))
             TextButton(enabled = editable && prompt.isNotBlank(), modifier = Modifier.testTag("child-browser-preview"), onClick = {
                 try {
-                    val raw = writes.lineSequence().filter { it.isNotBlank() }.toList()
-                    val actions = reads.split(',').map { it.trim() }.filter { it.isNotBlank() }.toSet() +
-                        raw.map { JSONObject(it).getString("action") }
-                    plan = prepare(parent, prompt, actions, raw)
-                    showing = plan != null
-                    error = if (plan == null) "子任务预览被拒绝；未打开 host 或模型。" else null
-                } catch (_: Exception) { error = "子操作必须是完整精确 JSON；未自动修复或授权。" }
-            }) { Text("冻结独立子任务并审阅（尚未批准）") }
+                    val actions = parent.preview.defaultPermission?.actions
+                        ?: BrowserDefaultPermission.availableActions(parent.preview.grant.access)
+                    plan = prepare(parent, prompt, actions, emptyList())
+                    error = if (plan == null) "子任务准备被拒绝；未打开 host 或模型。" else null
+                } catch (_: Exception) { error = "子任务准备失效；未自动创建目标或发送。" }
+            }) { Text("添加子任务") }
         }
-        plan?.let {
-            Text(if (confirmed) "子任务已独立批准；仅在父消息持久接受后构造。" else "子任务尚未批准，父发送被阻止。")
-            TextButton(onClick = { showing = true }, modifier = Modifier.testTag("child-browser-review")) { Text("查看子任务完整批准页") }
+        plan?.let { selected ->
+            Text(if (selected.confirmed) "子任务已就绪；仅在父消息持久接受后构造。" else "子任务需要受限策略审阅。")
+            val owner = selected.scope.owner
+            SelectionContainer { Text("parent run: ${owner.parentRunId}\nchild run: ${owner.childRunId}" +
+                "\ngroup: ${owner.taskGroupId}\ngeneration: ${owner.generation}" +
+                "\nowner: CHILD / ${selected.preview.grant.owner.sessionId}\n${selected.prompt}") }
+            if (!selected.confirmed && parent.preview.defaultPermission == null) {
+                TextButton(modifier = Modifier.testTag("child-browser-confirm"), onClick = {
+                    if (!selected.confirm(selected.preview)) error = "子任务准备已失效。"
+                }) { Text("批准受限子任务") }
+            }
+            Text("实际动作仍严格校验参数和精确效果。删除、付款、发布须保留业务确认。UNKNOWN 不自动重试。")
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-    val selected = plan
-    if (showing && selected != null) AlertDialog(
-        onDismissRequest = { showing = false },
-        title = { Text("独立批准工具型 child 的精确浏览器效果") },
-        text = { Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-            val owner = selected.scope.owner
-            SelectionContainer { Text("conversation: ${owner.conversationId}\nparent run: ${owner.parentRunId}" +
-                "\ngroup: ${owner.taskGroupId}\ngeneration: ${owner.generation}\nchild run: ${owner.childRunId}" +
-                "\nassistant message: ${owner.assistantMessageId}\nprofile: ${parent.assistant.id}" +
-                "\nmodel: ${parent.provider.model}\nowner: CHILD / ${selected.preview.grant.owner.sessionId}" +
-                "\naccess ceiling: ${parent.settings.access}\n动作: ${selected.preview.allowedActions.sorted().joinToString(", ")}") }
-            Text("完整子提示词及冻结的助手指令：")
-            SelectionContainer { Text(selected.prompt + "\n\n" + parent.assistant.prompt) }
-            selected.preview.writes.forEachIndexed { index, write ->
-                Text("完整原始 JSON：")
-                SelectionContainer { Text(write.arguments, Modifier.testTag("child-browser-write-${index + 1}")) }
-                SelectionContainer { Text("namespace: ${write.effect.namespace}\noperation: ${write.effect.operation}" +
-                    "\ntarget: ${write.effect.target}\nchange: ${write.effect.change}") }
-            }
-            Text("仅批准上述 child 的精确效果（包括列出的 exact fetch），不批准父／sibling／其他代次。Stop 不撤销已发生的效果；执行 UNKNOWN 由原 ledger 保护、不重 GET；清理 UNKNOWN 保留容量，不重开 host。")
-        } },
-        confirmButton = { Button(enabled = !confirmed, modifier = Modifier.testTag("child-browser-confirm"), onClick = {
-            confirmed = selected.confirm(selected.preview)
-            if (confirmed) showing = false else error = "子任务预览失效；未授权。"
-        }) { Text(if (confirmed) "此子任务已独立批准" else "明确批准此 child 的精确访问") } },
-        dismissButton = { TextButton(onClick = { showing = false }) { Text("返回（不增加批准）") } },
-    )
 }

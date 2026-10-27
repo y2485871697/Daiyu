@@ -51,6 +51,26 @@ class ControllerTerminalPreparationTest {
     }
 
 
+    @Test fun defaultConsentKeepsEachFrozenPtyInputIsolatedAndCancellationCannotTransfer() {
+        val first = Fixture(plan(bytes = "echo first\n".toByteArray()))
+        val second = Fixture(plan(bytes = "echo second\n".toByteArray()))
+        assertFalse(app.daiyu.android.integration.tools.CommandPermissionDefaults.REQUIRE_INTERACTIVE_APPROVAL)
+        for (f in listOf(first, second)) {
+            val p = f.preparation
+            assertTrue(p.confirm(p.preview, draft, p.assistant, p.provider))
+            assertEquals(f.plan.effects.values.toSet(), f.tokens.single().allowedWrites)
+            assertEquals(0, f.opens.get())
+        }
+        assertNotEquals(first.tokens.single().allowedWrites, second.tokens.single().allowedWrites)
+        val pending = first.preparation
+        pending.cancel()
+        assertNull(pending.takeConfirmed(pending.preview, draft, pending.assistant, pending.provider))
+        assertFalse(pending.confirm(pending.preview, draft, pending.assistant, pending.provider))
+        assertTrue(pending.awaitCleanup(1))
+        second.preparation.cancel()
+        assertTrue(second.preparation.awaitCleanup(1))
+    }
+
     @Test fun providerAndProfileAreCheckedAtAuthorizationAndTransfer() {
         val f = Fixture(plan())
         val p = f.preparation

@@ -31,7 +31,6 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
     val allowed by rememberUpdatedState(enabled)
     var prepared by remember { mutableStateOf<FrozenVoiceSpeech?>(null) }
     var initialize by remember { mutableStateOf(false) }
-    var consent by remember { mutableStateOf<FrozenVoiceSpeech?>(null) }
     var error by remember { mutableStateOf("") }
     var preparing by remember { mutableStateOf(false) }
     var request by remember { mutableLongStateOf(0L) }
@@ -46,7 +45,7 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
     }
     val state by host.state.collectAsState()
     fun stop(): Boolean {
-        request++; preparation?.cancel(); preparation = null; preparing = false; consent = null; initialize = false
+        request++; preparation?.cancel(); preparation = null; preparing = false; initialize = false
         val stopped = stopVoicePreview(host, ActivityVoiceAudio.gate)
         prepared = null
         if (!stopped) error = "音频停止未确认，请退出本页检查语音输出。"
@@ -98,7 +97,7 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
                     error = ""
                     try {
                         val frozen = personalPreview ?: runtime.prepareSpeech(profile)
-                        if (frozen.configuration.engine == "SYSTEM") play(frozen) else consent = frozen
+                        play(frozen)
                     } catch (_: Exception) { error = "请先选择模型和音色。" }
                 }
             }))
@@ -107,10 +106,4 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
     if (initialize) DaiyuConfirmDialog("启用系统语音", "将为此分组保存系统语音设置。保存后可点击试听，不会迁移其他分组的配置。",
         "启用", false, onConfirm = { initialize = false; if (current()) onInitialize?.invoke() },
         onDismiss = { initialize = false })
-    consent?.let { frozen ->
-        DaiyuConfirmDialog("试听", if (frozen.configuration.voice.startsWith("mimo-local-"))
-            "本次将向所选 MiMo 服务发送参考录音与试听文字，可能产生费用。仅授权本次试听。"
-        else "本次将向所选语音服务发送试听文字，可能产生费用。仅授权本次试听。",
-            "试听", false, onConfirm = { consent = null; play(frozen) }, onDismiss = { consent = null })
-    }
 }

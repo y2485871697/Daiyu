@@ -2072,7 +2072,7 @@ class ChatController internal constructor(private val application:Application,
         // A submitted worker, possibly in connect(), retains ownership until its own cleanup.
         if(draft) finishShizukuPreparation(preview,installed=false)
     }
-    /** Call only from an explicit confirmation of the immutable preview. Queues one attempt;
+    /** The original explicit command submission authorizes the immutable plan and queues one attempt;
      * acceptance is the database receipt in complete, NOT a guarantee of command completion.
      * No Shizuku permission prompt, probe, new call ID or automatic retry occurs here.
      */
@@ -2172,7 +2172,7 @@ class ChatController internal constructor(private val application:Application,
             if (closed || pendingPlatformAction !== preview || preview.submitted || preview.cancelled ||
                 pendingPlatformToken?.revoked != false ||
                 (preview.requiresLocation && preview.location?.ready(app.daiyu.android.tasksurface.TaskSurface.FOREGROUND) == null)) return false
-            preview.approve() // User confirmation only, no Android calls.
+            if (runCatching { preview.authorizeForSubmission() }.isFailure) return false
             checkNotNull(pendingPlatformToken)
         }
         try { executor.execute {
@@ -2821,6 +2821,8 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             val candidate = preparation ?: return false
             if (candidate.terminalJob !== pending || candidate.revoked || candidate.submitted || closed || pendingTextState != null) return false
+            if (!CommandPermissionDefaults.REQUIRE_INTERACTIVE_APPROVAL && !pending.isConfirmed &&
+                !pending.confirm(current, pending.assistant, pending.provider)) return false
             val transferred = pending.transfer(current, pending.assistant, pending.provider) ?: return false
             retainedTerminalJobs.add(transferred)
             candidate.terminalJobRun = transferred
@@ -2937,6 +2939,8 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             val candidate = preparation ?: return false
             if (candidate.terminal !== pending || candidate.revoked || candidate.submitted || closed || pendingTextState != null) return false
+            if (!CommandPermissionDefaults.REQUIRE_INTERACTIVE_APPROVAL && pending.state == ControllerTerminalPreparation.State.PREVIEW &&
+                !pending.confirm(displayed, current, assistant, provider)) return false
             val transferred = pending.takeConfirmed(displayed, current, assistant, provider) ?: return false
             candidate.terminalRun = transferred
             candidate.submitted = true
@@ -3016,7 +3020,8 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             val candidate = preparation ?: return false
             if (candidate.mcp !== pending || candidate.submitted || candidate.revoked || closed ||
-                !pending.confirmed || owner != pending.editor || text != pending.text || pendingTextState != null) return false
+                owner != pending.editor || text != pending.text || pendingTextState != null) return false
+            if (!pending.authorizeForSubmission(owner, text)) return false
             candidate.submitted = true; candidate.textTicket = ticket
             pendingTextState = TextSendState(ticket, owner, text)
             candidate
@@ -3121,8 +3126,9 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             val candidate = preparation ?: return false
             if (candidate.browser !== pending || candidate.submitted || candidate.revoked || closed ||
-                current != pending.draft || pending.state != ControllerBrowserPreparation.State.CONFIRMED ||
-                pendingTextState != null) return false
+                current != pending.draft || pendingTextState != null) return false
+            if (pending.state == ControllerBrowserPreparation.State.PREVIEW && !pending.confirmDefault(current)) return false
+            if (pending.state != ControllerBrowserPreparation.State.CONFIRMED) return false
             candidate.submitted = true
             candidate.textTicket = ticket
             pendingTextState = TextSendState(ticket, owner, current.text)

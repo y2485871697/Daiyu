@@ -34,6 +34,59 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         editable()
         return GuiRuntime.showConfirmation(this, operation, text, ownerCurrent, onNotExecuted, onRevoked, onConfirmed)
     }
+    /** Trusted product entry, not a tool or a simulated UI click. It authorizes only this live
+     * lease's exact requested action. Ambiguous/missing targets still need clarification. */
+    fun prepareExactActionWithProductDefaults(operation: GuiOperation, text: String? = null,
+        ownerCurrent: () -> Boolean,
+        onNotExecuted: (String) -> Unit = {},
+        onRevoked: () -> Unit = {},
+        onConfirmed: (GuiConfirmedDelivery) -> Boolean): GuiResult<Unit> {
+        editable()
+        if (!ownerCurrent()) return GuiResult.Rejected("GUI_RUN_OWNER_MISMATCH")
+        if ((operation == GuiOperation.INPUT) != (text != null) || (text?.length ?: 0) > 4096)
+            return GuiResult.Rejected("GUI_ACTION_PARAMETERS_REQUIRED")
+        val read = previewWithProductDefaults()
+        if (read is GuiResult.Value) {
+            val resolved = GuiExactTarget.resolve(read.value, operation, text)
+            if (resolved is GuiResult.Value) {
+                if (!ownerCurrent()) return GuiResult.Rejected("GUI_RUN_OWNER_MISMATCH")
+                val grant = grantExactActionWithProductDefaults(read.value, resolved.value)
+                if (grant !is GuiResult.Value) return grant as GuiResult.Rejected
+                // No view changes, additional observations or new run/plan between capture and handoff.
+                return try {
+                    if (ownerCurrent() && onConfirmed(grant.value)) GuiResult.Value(Unit)
+                    else { close(); GuiResult.Rejected("CONFIRMATION_TRANSFER_REJECTED_NOT_EXECUTED") }
+                } catch (_: Exception) {
+                    close(); GuiResult.Unknown("CONFIRMATION_TRANSFER_UNCONFIRMED")
+                }
+            }
+            if (resolved is GuiResult.Rejected && resolved.code != "GUI_TARGET_CLARIFICATION_REQUIRED")
+                return resolved
+        } else when (read) {
+            is GuiResult.Unknown -> return read
+            is GuiResult.Rejected -> if (read.code !in setOf("NO_ACTIVE_EXTERNAL_WINDOW",
+                "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")) return read
+            else -> error("unreachable")
+        }
+        return GuiRuntime.showConfirmation(this, operation, text, ownerCurrent, onNotExecuted, onRevoked,
+            onConfirmed, productDefaults = true)
+    }
+    internal fun previewWithProductDefaults(): GuiResult<GuiObservation> {
+        editable()
+        val granted = GuiRuntime.approveReads(lease, GuiReadApproval(1, 0))
+        if (granted !is GuiResult.Value) return granted as GuiResult.Rejected
+        return GuiRuntime.observe(lease)
+    }
+    internal fun grantExactActionWithProductDefaults(observation: GuiObservation, action: GuiAction): GuiResult<GuiConfirmedDelivery> {
+        editable()
+        if (action.observationId != observation.observationId) return GuiResult.Rejected("OBSERVATION_ID_MISMATCH")
+        val checked = GuiRuntime.validateExactTarget(lease, action)
+        if (checked !is GuiResult.Value) return checked as GuiResult.Rejected
+        val approved = GuiRuntime.approveAction(lease, action)
+        if (approved !is GuiResult.Value) return approved as GuiResult.Rejected
+        GuiRuntime.approveReads(lease, GuiReadApproval(0, 0))
+        return GuiResult.Value(GuiConfirmedDelivery(this, observation, action, freezeAuthorization()))
+    }
     fun validateExactActionFromUser(action: GuiAction): GuiResult<Unit> {
         editable(); return GuiRuntime.validateExactTarget(lease, action)
     }
@@ -55,7 +108,8 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         editable(); return GuiRuntime.approveAction(lease, action)
     }
     /** Main-thread freeze after confirmation, before building the parent's one TaskAuthorization. */
-    fun freezeAuthorizationFromUser(): Set<WriteEffect> {
+    fun freezeAuthorizationFromUser(): Set<WriteEffect> = freezeAuthorization()
+    private fun freezeAuthorization(): Set<WriteEffect> {
         onMain(); check(!closed.get() && ioFence.rejection() == null) { "gui_session_closed" }
         return frozenWrites ?: Collections.unmodifiableSet(GuiRuntime.approvedActions(lease)
             .map { it.effect(identity) }.toSet()).also { frozenWrites = it }

@@ -89,6 +89,8 @@ class GuiRuntimeScreenshotTest {
         var active = true
         var windowType = AccessibilityWindowInfo.TYPE_APPLICATION
         var nodeActions = 0
+        var rootClickable = true
+        var actionAccepted = true
         var label = "before"
         var missing = false
         var throwOnSubmit = false
@@ -115,9 +117,9 @@ class GuiRuntimeScreenshotTest {
                 ReflectionHelpers.setField(this, "mWindowId", this@Platform.windowId)
                 shadowOf(this).setAccessibilityWindowInfo(window)
                 shadowOf(this).setRefreshReturnValue(true)
-                shadowOf(this).setOnPerformActionListener { _, _ -> nodeActions++; true }
+                shadowOf(this).setOnPerformActionListener { _, _ -> nodeActions++; actionAccepted }
             }
-            val root = node("root")
+            val root = node("root").apply { isClickable = rootClickable }
             shadowOf(root).addChild(node(label))
             return root
         }
@@ -173,6 +175,87 @@ class GuiRuntimeScreenshotTest {
     private fun assertNoActions() {
         assertEquals(0, platform.nodeActions)
         assertTrue(shadowOf(service).globalActionsPerformed.isEmpty())
+    }
+
+    private fun defaultDelivery(current: () -> Boolean = { true }): GuiConfirmedDelivery {
+        platform.rootClickable = false
+        // No user read/action approval. The trusted product entry must supply its own exact grant.
+        GuiRuntime.approveReads(session.lease, GuiReadApproval(0, 0))
+        var delivered: GuiConfirmedDelivery? = null
+        val result = session.prepareExactActionWithProductDefaults(GuiOperation.TAP,
+            ownerCurrent = current, onConfirmed = { delivered = it; true })
+        assertTrue(result.toString(), result is GuiResult.Value)
+        return checkNotNull(delivered)
+    }
+
+    @Test fun productDefaultsIssueExactOriginalLeaseGrantWithoutUiOrExecutingActions() {
+        val delivery = defaultDelivery()
+        assertSame(session, delivery.session)
+        assertEquals(setOf(delivery.action.effect(session.identity)), delivery.writes)
+        assertEquals(setOf(delivery.action), GuiRuntime.approvedActions(session.lease))
+        assertEquals(0, session.lease.reads); assertEquals(0, session.lease.screenshots)
+        assertNoActions()
+        assertTrue(GuiRuntime.action(session.lease, delivery.action) is GuiResult.Value)
+        assertEquals(1, platform.nodeActions)
+        assertTrue(GuiRuntime.action(session.lease, delivery.action) is GuiResult.Rejected)
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun defaultGrantExpiresAndCannotBeUsedAfterStopDisconnectOrOwnerLoss() {
+        val expired = defaultDelivery()
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11))
+        rejected(GuiRuntime.action(session.lease, expired.action), "OBSERVATION_EXPIRED")
+        assertNoActions()
+        session.close()
+        assertTrue(session.releaseConfirmed)
+        rejected(GuiRuntime.action(session.lease, expired.action), "GUI_AUTHORIZATION_REVOKED")
+        session = (GuiRuntime.openForUser(GuiOwner("next", "next")) as GuiResult.Value).value
+        var handedOff = false
+        rejected(session.prepareExactActionWithProductDefaults(GuiOperation.TAP,
+            ownerCurrent = { false }, onConfirmed = { handedOff = true; true }), "GUI_RUN_OWNER_MISMATCH")
+        assertFalse(handedOff)
+        val next = defaultDelivery()
+        GuiRuntime.disconnected(service)
+        rejected(GuiRuntime.action(session.lease, next.action), "SERVICE_DISCONNECTED_NOT_EXECUTED")
+        GuiRuntime.connected(service)
+        rejected(GuiRuntime.action(session.lease, next.action), "GUI_AUTHORIZATION_REVOKED")
+        assertNoActions()
+    }
+
+    @Test fun defaultPermissionDoesNotInventSystemPermissionAndAndroidRejectionConsumesAction() {
+        platform.permissionEnabled = false
+        var handedOff = false
+        val denied = session.prepareExactActionWithProductDefaults(GuiOperation.TAP,
+            ownerCurrent = { true }, onConfirmed = { handedOff = true; true })
+        assertTrue(denied is GuiResult.Rejected)
+        assertFalse(handedOff); assertNoActions()
+        platform.permissionEnabled = true
+        GuiRuntime.connected(service)
+        session = (GuiRuntime.openForUser(GuiOwner("fresh", "fresh")) as GuiResult.Value).value
+        val delivery = defaultDelivery()
+        platform.actionAccepted = false
+        assertEquals(GuiResult.Value("PLATFORM_ACTION_REJECTED"), GuiRuntime.action(session.lease, delivery.action))
+        assertEquals(1, platform.nodeActions)
+        assertTrue(GuiRuntime.action(session.lease, delivery.action) is GuiResult.Rejected)
+        assertEquals(1, platform.nodeActions)
+    }
+
+    @Test fun screenOffRevokesDefaultGrantEvenIfNoToolRunsWhileLocked() {
+        val delivery = defaultDelivery()
+        GuiRuntime.screenOff(service)
+        // Model resumes only after unlock: the old grant must already be dead.
+        assertTrue(platform.screenUnlocked)
+        rejected(GuiRuntime.action(session.lease, delivery.action), "GUI_AUTHORIZATION_REVOKED")
+        assertNoActions()
+    }
+
+    @Test fun defaultGrantIsRevokedByLockAndUnlockCannotResurrectIt() {
+        val delivery = defaultDelivery()
+        platform.screenUnlocked = false
+        rejected(GuiRuntime.action(session.lease, delivery.action), "SCREEN_LOCKED_NOT_EXECUTED")
+        platform.screenUnlocked = true
+        rejected(GuiRuntime.action(session.lease, delivery.action), "GUI_AUTHORIZATION_REVOKED")
+        assertNoActions()
     }
 
     @Test fun recyclingReturnedWindowDoesNotInvalidateFixtureNodeWindowIds() {
@@ -331,11 +414,15 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val action = approve(observation)
         platform.screenUnlocked = false
         rejected(GuiRuntime.action(session.lease, action), "SCREEN_LOCKED_NOT_EXECUTED")
-        rejected(screenshot(observation).completed(), "SCREEN_LOCKED_NOT_EXECUTED")
-        platform.screenUnlocked = true; platform.permissionEnabled = false
-        rejected(GuiRuntime.action(session.lease, action), "SERVICE_PERMISSION_REVOKED_NOT_EXECUTED")
+        rejected(screenshot(observation).completed(), "GUI_AUTHORIZATION_REVOKED")
+        platform.screenUnlocked = true
+        rejected(GuiRuntime.action(session.lease, action), "GUI_AUTHORIZATION_REVOKED")
+        openSelf()
+        val fresh = observe(); val freshAction = approve(fresh)
+        platform.permissionEnabled = false
+        rejected(GuiRuntime.action(session.lease, freshAction), "SERVICE_PERMISSION_REVOKED_NOT_EXECUTED")
         assertFalse(session.lease.valid)
-        rejected(screenshot(observation).completed(), "SERVICE_DISCONNECTED_NOT_EXECUTED")
+        rejected(screenshot(fresh).completed(), "SERVICE_DISCONNECTED_NOT_EXECUTED")
         assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 

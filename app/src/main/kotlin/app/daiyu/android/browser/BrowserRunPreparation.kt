@@ -30,7 +30,7 @@ internal data class BrowserRunIdentity(
 
 internal data class BrowserConfirmedWrite internal constructor(val arguments: String, val effect: WriteEffect)
 
-/** Not a bearer grant: this immutable snapshot is what trusted UI must display and confirm. */
+/** Not a bearer grant: immutable run identity, action ceiling and optional exact effects. */
 internal class BrowserRunPreview internal constructor(
     val identity: BrowserRunIdentity,
     val settings: BrowserSettings,
@@ -39,6 +39,7 @@ internal class BrowserRunPreview internal constructor(
     writes: List<BrowserConfirmedWrite>,
     /** Complete child lineage is visible to trusted approval UI, never a model bearer token. */
     val childOwner: ChildRunOwner? = null,
+    val defaultPermission: BrowserDefaultPermission? = null,
 ) {
     val allowedActions: Set<String> = Collections.unmodifiableSet(actions.toSet())
     val writes: List<BrowserConfirmedWrite> = Collections.unmodifiableList(writes.toList())
@@ -49,9 +50,10 @@ internal class BrowserRunPreview internal constructor(
  * The host supplies a frozen grant. Even the first WRITE preview uses only that grant and
  * the production effect algorithm; never manufacture a temporary session for approval.
  *
- * Cookies remain unavailable. Fetch is an exact WRITE, including URL and explicit tab id.
- * MAIN and CHILD have separate trusted preparation entries; FULL never implies approval.
- * Tab creation/closure still counts as WRITE and needs exact confirmation, as in the catalog.
+ * Fetch and cookie offloads are exact WRITEs, including explicit tab id. Cookie values remain private.
+ * MAIN and CHILD have separate trusted preparation entries. Product default permission must
+ * be supplied by the trusted host; legacy/exact callers remain strict. Even default writes
+ * obtain their exact effect at invocation time, never a broad TaskAuthorization.
  */
 internal class BrowserRunPreparation private constructor(
     val preview: BrowserRunPreview,
@@ -60,7 +62,7 @@ internal class BrowserRunPreparation private constructor(
 ) {
     private var consumed = false
 
-    /** Call only from explicit trusted confirmation, never from settings save or model content. */
+    /** Trusted admission only: explicit exact consent or a run-owned product default, never model content. */
     @Synchronized fun confirm(displayed: BrowserRunPreview): BrowserRunAuthorization {
         check(!consumed) { "browser_preparation_consumed" }
         require(displayed === preview) { "browser_preview_changed" }
@@ -84,10 +86,11 @@ internal class BrowserRunPreparation private constructor(
             allowedActions: Set<String>,
             writeArguments: List<String> = emptyList(),
             existingSession: BrowserToolSession? = null,
+            defaultPermission: BrowserDefaultPermission? = null,
         ): BrowserRunPreparation {
             // Do not remove this check: MAIN entry must never silently acquire child authority.
             require(grant.owner.kind == BrowserOwnerKind.MAIN) { "browser_child_requires_scope" }
-            return prepareValidated(identity, settings, grant, allowedActions, writeArguments, existingSession, null)
+            return prepareValidated(identity, settings, grant, allowedActions, writeArguments, existingSession, null, defaultPermission)
         }
 
         /** Trusted child host only, after ChildRunScope.capture has intersected parent permissions.
@@ -104,6 +107,7 @@ internal class BrowserRunPreparation private constructor(
             allowedActions: Set<String>,
             writeArguments: List<String> = emptyList(),
             existingSession: BrowserToolSession? = null,
+            defaultPermission: BrowserDefaultPermission? = null,
         ): BrowserRunPreparation {
             val child = scope.owner
             require(grant.owner.kind == BrowserOwnerKind.CHILD && grant.owner.sessionId == child.childRunId) {
@@ -113,7 +117,7 @@ internal class BrowserRunPreparation private constructor(
                 scope.authorization.sessionId == scope.session.sessionId) { "browser_child_scope_mismatch" }
             val identity = BrowserRunIdentity(ConversationId(child.conversationId), RunId(child.childRunId),
                 assistantId, MessageId(child.assistantMessageId))
-            val result = prepareValidated(identity, settings, grant, allowedActions, writeArguments, existingSession, scope)
+            val result = prepareValidated(identity, settings, grant, allowedActions, writeArguments, existingSession, scope, defaultPermission)
             require(result.preview.writes.all { it.effect in scope.authorization.allowedWrites }) {
                 "browser_child_write_not_inherited"
             }
@@ -132,6 +136,7 @@ internal class BrowserRunPreparation private constructor(
             writeArguments: List<String>,
             existingSession: BrowserToolSession?,
             childScope: ChildRunScope?,
+            defaultPermission: BrowserDefaultPermission?,
         ): BrowserRunPreparation {
             require(settings.access != BrowserAccess.DISABLED && grant.access != BrowserAccess.DISABLED) {
                 "BROWSER_DISABLED"
@@ -141,9 +146,14 @@ internal class BrowserRunPreparation private constructor(
             }
             require(grant.owner.sessionId == identity.runId.value) { "browser_run_owner_mismatch" }
             require(existingSession == null || existingSession.grant == grant) { "browser_grant_mismatch" }
-            val permitted = reads + tabWrites + if (grant.access == BrowserAccess.FULL) fullWrites else emptySet()
-            val actions = allowedActions.toSet()
+            val permitted = reads + tabWrites + (if (grant.access == BrowserAccess.FULL) fullWrites else emptySet()) +
+                defaultPermission?.actions.orEmpty()
+            require(defaultPermission == null || defaultPermission.grant == grant) { "browser_default_owner_mismatch" }
+            val actions = allowedActions.toSet() + defaultPermission?.actions.orEmpty()
             require(actions.isNotEmpty() && actions.all { it in permitted }) { "browser_action_not_available" }
+            require(childScope == null || defaultPermission == null || actions.all { action ->
+                (if (action in reads) RunBrowserTools.READ_CAPABILITY else RunBrowserTools.WRITE_CAPABILITY) in childScope.session.enabled
+            }) { "browser_child_capability_not_inherited" }
             val arguments = writeArguments.toList()
             // Reuse the exact production schema, access checks and canonical effect; no second encoder.
             val writes = arguments.map { raw ->
@@ -151,9 +161,11 @@ internal class BrowserRunPreparation private constructor(
                 require(effect.operation in actions && effect.operation !in reads) { "browser_write_not_selected" }
                 BrowserConfirmedWrite(raw, effect)
             }
-            require(writes.map { it.effect.operation }.toSet() == actions - reads) { "browser_exact_write_required" }
+            require((actions - reads - defaultPermission?.actions.orEmpty()).all { action ->
+                writes.any { it.effect.operation == action }
+            }) { "browser_exact_write_required" }
             require(writes.map { it.effect }.distinct().size == writes.size) { "browser_duplicate_effect" }
-            return BrowserRunPreparation(BrowserRunPreview(identity, settings, grant, actions, writes, childScope?.owner),
+            return BrowserRunPreparation(BrowserRunPreview(identity, settings, grant, actions, writes, childScope?.owner, defaultPermission),
                 existingSession, childScope)
         }
     }
@@ -217,9 +229,29 @@ internal class BrowserRunAuthorization internal constructor(
             // Full read schema validation remains the production catalog's responsibility.
         } else {
             require(toolName == RunBrowserTools.WRITE_TOOL_NAME) { "browser_tool_mismatch" }
-            require(RunBrowserTools.writeEffect(session, arguments) in effects) { "browser_effect_not_confirmed" }
+            val effect = RunBrowserTools.writeEffect(session, arguments)
+            require(effect in effects || action in preview.defaultPermission?.actions.orEmpty()) { "browser_effect_not_confirmed" }
         }
     }
+
+    /** Single-effect approval, invoked only by the dispatcher after a fresh ledger reservation.
+     * The original task remains immutable; child tasks retain capture's intersected task object.
+     */
+    @Synchronized fun defaultWriteAuthorization(owner: RunExecutionOwner, assistantId: String,
+        session: BrowserToolSession, authorization: TaskAuthorization, arguments: String): TaskAuthorization? {
+        checkInvocation(owner, assistantId, session, RunBrowserTools.WRITE_TOOL_NAME, arguments)
+        require(authorization === boundAuthorization) { "browser_task_authorization_mismatch" }
+        val effect = RunBrowserTools.writeEffect(session, arguments)
+        if (effect.operation !in preview.defaultPermission?.actions.orEmpty()) return null
+        return TaskAuthorization(taskSessionId, preview.identity.runId.value, setOf(effect))
+    }
+
+    fun hasDefaultWrite(effect: WriteEffect): Boolean = effect.operation in preview.defaultPermission?.actions.orEmpty()
+
+    /** Native callbacks use the same revocable owner, not saved settings or model-supplied IDs. */
+    @Synchronized fun allowsHostDefault(lease: app.daiyu.android.browser.session.BrowserTabLease,
+        action: String? = null): Boolean = !revoked && preview.defaultPermission != null &&
+        lease.owner == preview.grant.owner && (action == null || action in preview.defaultPermission?.actions.orEmpty())
 
     @Synchronized private fun checkBinding(owner: RunExecutionOwner, assistantId: String, session: BrowserToolSession) {
         require(!revoked) { "browser_authorization_revoked" }

@@ -157,6 +157,39 @@ class ControllerGenerationPreparationTest {
         rejects { ok.confirm(ok.preview, editor, identity) }
     }
 
+    @Test fun originalPaidSubmitAutomaticallyIssuesExactCapabilityWithoutAnotherPermission() {
+        val preparation = prepare()
+        val slot = GenerationConfirmationHandoff { error("accepted task must not request cleanup") }
+        var received: ConfirmedGenerationPreparation? = null
+        assertTrue(slot.confirm(preparation, editor, identity) { received = it; true })
+        val token = checkNotNull(received)
+        assertSame(token, slot.token)
+        assertSame(preparation.preview, token.preview)
+        val realOwner = owner()
+        val writes = token.paidWrites(realOwner, editor, identity)
+        assertEquals(1, writes.size)
+        rejects { slot.confirm(preparation, editor, identity) { true } }
+        rejects { preparation.authorizeForSubmission(preparation.preview, editor, identity) }
+        token.revokeAdmission()
+        rejects { token.paidWrites(realOwner, editor, identity) }
+    }
+
+    @Test fun missingPromptAndOriginalImageAreConfigurationBlockersNotPermissionQuestions() {
+        fun incomplete(protocol: GenerationProtocol, item: GenerationRunConfig.Item) =
+            ControllerGenerationPreparation.prepare(identity, editor, listOf(profile(protocol)), listOf(
+                GenerationBatchSelection("batch", "generation-only", listOf(item))), 0, hosts)
+        val missingPrompt = incomplete(GenerationProtocol.OPENAI_IMAGES_JSON, GenerationRunConfig.Item("item", "  "))
+        assertTrue(missingPrompt.preview.blockers.any { it.contains("prompt") })
+        rejects { missingPrompt.authorizeForSubmission(missingPrompt.preview, editor, identity) }
+        val missingImage = incomplete(GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART, GenerationRunConfig.Item("item", "edit"))
+        assertTrue(missingImage.preview.blockers.any { it.contains("原图") })
+        rejects { missingImage.authorizeForSubmission(missingImage.preview, editor, identity) }
+        val unsupportedMask = incomplete(GenerationProtocol.OPENAI_VIDEO_MULTIPART,
+            GenerationRunConfig.Item("item", "video", mask = GenerationInput(byteArrayOf(1), "image/png")))
+        assertTrue(unsupportedMask.preview.blockers.any { it.contains("mask") })
+        rejects { unsupportedMask.authorizeForSubmission(unsupportedMask.preview, editor, identity) }
+    }
+
     @Test fun exactPaidWritesUseOnlyRealRunnerOwnerAndCannotRebindReplacementTask() {
         val token = confirmed()
         val realOwner = owner()

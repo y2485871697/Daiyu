@@ -35,9 +35,12 @@ class ControllerVideoSessionTest : InstrumentationTestCase() {
         var editor = ControllerVideoEditor(null, 3, 4, "  unchanged original  ", true)
         val decisions = mutableListOf<(Boolean) -> Unit>()
         val prompts = mutableListOf<VideoApprovalGate.Prompt>()
+        var useDefaultPermission = false
         override fun editor() = editor
         override fun showRun(prompt: VideoApprovalGate.Prompt, text: String, decision: (Boolean) -> Unit) {
-            check(text == editor.text); prompts += prompt; decisions += decision
+            check(text == editor.text)
+            if (useDefaultPermission) super.showRun(prompt, text, decision)
+            else { prompts += prompt; decisions += decision }
         }
         override fun showPost(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit) = error("no model open in this test")
     }
@@ -108,6 +111,35 @@ class ControllerVideoSessionTest : InstrumentationTestCase() {
         while (main { ui.decisions.size } < count && System.nanoTime() < until) Thread.sleep(10)
         assertEquals(count, main { ui.decisions.size })
     }
+    fun testTrustedDefaultRunPermissionNeedsNoDialogAndStopStillRetiresIt() {
+        seed(1)
+        main { ui.useDefaultPermission = true }
+        val session = newSession()
+        val waiting = authorize(session)
+        assertTrue(waiting.done.await(5, TimeUnit.SECONDS))
+        assertTrue(waiting.result.get() is OpenRouterVideoCapability)
+        assertTrue(main { ui.decisions.isEmpty() && ui.prompts.isEmpty() })
+        assertFalse(session.isRevoked())
+        main { session.revoke() }
+        assertTrue(session.isRevoked())
+        val replay = authorize(session)
+        assertTrue(replay.done.await(5, TimeUnit.SECONDS))
+        assertTrue(replay.result.get() is Throwable)
+        assertTrue(main { ui.decisions.isEmpty() })
+    }
+
+    fun testTrustedDefaultCannotAdmitAnEditorThatStoppedBeforeRunAuthorization() {
+        seed(1)
+        main { ui.useDefaultPermission = true }
+        val session = newSession()
+        main { ui.editor = ui.editor.copy(visible = false) }
+        val waiting = authorize(session)
+        assertTrue(waiting.done.await(5, TimeUnit.SECONDS))
+        assertTrue(waiting.result.get() is Throwable)
+        assertTrue(session.isRevoked())
+        assertTrue(main { ui.decisions.isEmpty() })
+    }
+
     fun testFullHistoryNotTheLatestSqlitePageIsBoundAtRunConfirmation() {
         seed(104) // 208 physical rows, beyond the ordinary UI's 200-row page.
         val session = newSession()

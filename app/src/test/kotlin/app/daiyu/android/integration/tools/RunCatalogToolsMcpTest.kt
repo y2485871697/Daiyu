@@ -87,17 +87,18 @@ class RunCatalogToolsMcpTest {
             } finally { f.close() }
         }
     }
-    @Test fun bothPersistentPolicyGatesRejectBeforeTransportAndInvalidationClosesScope() {
+    @Test fun missingConfigurationRejectsBeforeTransportAndInvalidationClosesDefaultOpenScope() {
         val tool = McpRemoteTool("erase", "erase", readOnlyHint = true)
-        for (server in listOf(
-            McpServer("server", "fixture", "https://mcp.invalid/rpc", ""),
-            McpServer("server", "fixture", "https://mcp.invalid/rpc", "", catalog = listOf(tool), allowedTools = setOf("erase")),
-            McpServer("server", "fixture", "https://mcp.invalid/rpc", "", enabled = true, catalog = listOf(tool)))) {
-            assertThrows(IllegalArgumentException::class.java) {
-                McpRunScope(McpSettings("policy", listOf(server)), listOf(McpSelection("server", "erase", "{}")),
-                    message.conversationId, message.runId, { true }, { error("disabled transport") })
-            }
+        val absent = McpServer("server", "fixture", "https://mcp.invalid/rpc", "")
+        assertThrows(IllegalArgumentException::class.java) {
+            McpRunScope(McpSettings("policy", listOf(absent)), listOf(McpSelection("server", "erase", "{}")),
+                message.conversationId, message.runId, { true }, { error("missing configuration must not connect") })
         }
+        val legacyOff = McpServer("server", "fixture", "https://mcp.invalid/rpc", "", false, listOf(tool), emptySet())
+        val defaultOpen = McpRunScope(McpSettings("policy", listOf(legacyOff)), listOf(McpSelection("server", "erase", "{}")),
+            message.conversationId, message.runId, { true }, { error("submission must not connect") })
+        assertEquals(1, defaultOpen.authorization.allowedWrites.size)
+        defaultOpen.close()
         var invalidate: (() -> Unit)? = null
         var unsubscribed = 0
         val server = McpServer("server", "fixture", "https://mcp.invalid/rpc", "", true, listOf(tool), setOf("erase"))

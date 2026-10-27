@@ -12,7 +12,7 @@ internal class TaskSurfaceStore(private val persistence: TaskSurfacePersistence)
     private var writeUnconfirmed = false
     @Synchronized fun load(): TaskSurfaceSettings = if (writeUnconfirmed) TaskSurfaceSettings.Unavailable else try {
         val raw = persistence.read()
-        if (raw == null) TaskSurfaceSettings.Available(TaskSurfacePreference.ASK)
+        if (raw == null) TaskSurfaceSettings.Available(TaskSurfacePreference.FOREGROUND)
         else parse(raw)?.let { TaskSurfaceSettings.Available(it) } ?: TaskSurfaceSettings.Unavailable
     } catch (_: Exception) { TaskSurfaceSettings.Unavailable }
 

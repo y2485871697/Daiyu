@@ -86,7 +86,7 @@ class ControllerVirtualDisplayRuntimeTest {
                 AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED, true, 0, 99, true)
         }
     }
-    private class Parent : ControllerVirtualDisplayRuntime.Parent {
+    private class Parent(override val requiresExplicitApproval: Boolean = true) : ControllerVirtualDisplayRuntime.Parent {
         val shown = LinkedBlockingQueue<VirtualDisplayApprovalRequest>()
         var stops = 0
         var auth: TaskAuthorization? = null
@@ -287,6 +287,29 @@ class ControllerVirtualDisplayRuntimeTest {
         assertTrue(f.fs.isSymbolicLink(f.root))
         assertEquals(originalMode, f.fs.permissions(victim))
         assertEquals(0L, Files.list(victim).use { it.count() })
+    }
+
+    @Test fun productionDefaultsDoNotPublishUiOrClaimRootAndReleaseLeaseOnlyAfterDrain() = Fixture().use { f ->
+        val parent = Parent(requiresExplicitApproval = false)
+        val host = Host(normalWire())
+        val retained = mutableListOf<ControllerVirtualDisplaySession>()
+        val session = ControllerVirtualDisplayRuntime.assemble(f.owner, f.capabilities, f.writes,
+            emptyList(), parent, { retained += it }, f.store()) { host }
+        assertSame(session, retained.single())
+        assertFalse(Files.exists(f.root))
+        val auth = f.executor.submit<TaskAuthorization> { session.authorizationFactory(f.owner) }.get(10, TimeUnit.SECONDS)
+        assertSame(parent.auth, auth)
+        assertTrue(parent.shown.isEmpty()); assertNull(session.pendingApproval())
+        assertEquals(0, host.starts); assertTrue(host.wire.sent.isEmpty())
+        assertTrue(files(f.root).keys.any { it.endsWith("claim.event") })
+        assertEquals(0, f.gate.availablePermits())
+        session.close()
+        assertEquals(0, f.gate.availablePermits()) // admission closure is not a physical release receipt
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained,
+            f.work { session.observeCloseOnWorker(true) })
+        assertEquals(1, f.gate.availablePermits())
+        assertEquals(0, host.starts); assertTrue(host.wire.sent.isEmpty())
+        assertEquals(0, parent.stops)
     }
 
     @Test fun acceptedParentRetainsFirstAndOnlyExecutedLeafStartsTheRealAdapter() = Fixture().use { f ->

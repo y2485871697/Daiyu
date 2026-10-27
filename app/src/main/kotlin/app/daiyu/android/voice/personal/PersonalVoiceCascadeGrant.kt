@@ -60,9 +60,9 @@ data class PersonalVoiceCascadeUse(
 }
 
 /**
- * In-memory, single-original-send capability. Only a separate explicit finite-cascade confirmation
- * may call authorize(). Selecting a voice, loading a profile, or a one-shot reference consent may
- * not call it. No serialization, reference lookup, HTTP, audio gate, or provider protocol here.
+ * In-memory, single-original-send capability. A user-requested cascade may authorize its exact
+ * finite offer using trusted default permission. Selecting a voice, loading a profile, or one-shot
+ * reference consent must not arm a cascade. No serialization, reference lookup, HTTP or audio gate here.
  *
  * Parent contract:
  * - reserve against the ORIGINAL ticket by reference identity; bind only its admitted assistant;
@@ -165,7 +165,7 @@ class PersonalVoiceCascadeGrant private constructor(
     override fun toString(): String = "PersonalVoiceCascadeGrant(redacted)"
 
     companion object {
-        /** No consent defaults. The parent supplies limits from the explicit confirmation UI. */
+        /** The parent supplies the requested offer's finite limits, never an unlimited permission. */
         fun authorize(
             binding: PersonalVoiceCascadeBinding,
             limits: PersonalVoiceCascadeLimits,

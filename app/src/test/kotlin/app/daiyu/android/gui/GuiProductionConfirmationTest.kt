@@ -12,6 +12,25 @@ class GuiProductionConfirmationTest {
         GuiObservation(id, pkg, window, 5, 100, nodes, truncated)
     private fun code(result: GuiResult<*>) = (result as GuiResult.Rejected).code
 
+    @Test fun productDefaultResolverRequiresUniqueSafeTargetAndExactRequiredParameters() {
+        val observed = observation("default")
+        assertEquals(GuiResult.Value(GuiAction("default", GuiOperation.TAP, node.id)),
+            GuiExactTarget.resolve(observed, GuiOperation.TAP, null))
+        assertEquals(GuiResult.Value(GuiAction("default", GuiOperation.HOME)),
+            GuiExactTarget.resolve(observed, GuiOperation.HOME, null))
+        listOf(emptyList(), listOf(node, node.copy(id = 9)), listOf(node.copy(password = true)),
+            listOf(node.copy(enabled = false))).forEach { candidates ->
+            assertEquals("GUI_TARGET_CLARIFICATION_REQUIRED",
+                code(GuiExactTarget.resolve(observation("default", nodes = candidates), GuiOperation.TAP, null)))
+        }
+        assertEquals("GUI_ACTION_PARAMETERS_REQUIRED", code(GuiExactTarget.resolve(observed, GuiOperation.INPUT, null)))
+        assertEquals("GUI_ACTION_PARAMETERS_REQUIRED", code(GuiExactTarget.resolve(observed, GuiOperation.TAP, "unexpected")))
+        assertEquals("TARGET_TREE_TRUNCATED_RECONFIRM_NOT_EXECUTED",
+            code(GuiExactTarget.resolve(observation("cut", truncated = true), GuiOperation.HOME, null)))
+        val password = observation("password", nodes = listOf(node.copy(editable = true, password = true)))
+        assertEquals("GUI_TARGET_CLARIFICATION_REQUIRED", code(GuiExactTarget.resolve(password, GuiOperation.INPUT, "secret")))
+    }
+
     @Test fun oldCallbacksAreInertAfterRenderAndAfterCancel() {
         val ticket = GuiConfirmationTicket()
         val old = ticket.next()

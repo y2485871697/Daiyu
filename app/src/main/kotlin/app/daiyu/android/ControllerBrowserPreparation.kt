@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.assistants.AssistantProfile
+import app.daiyu.android.browser.BrowserDefaultPermission
 import app.daiyu.android.browser.BrowserPrivateRoot
 import app.daiyu.android.browser.BrowserRunAuthorization
 import app.daiyu.android.browser.BrowserRunIdentity
@@ -104,7 +105,15 @@ internal class ControllerBrowserPreparation private constructor(
     val isCancelled: Boolean get() = synchronized(lock) { cancelled }
     val isSubmitted: Boolean get() = state != State.PREVIEW
 
-    /** This is the ONLY token-producing entry. A settings save/ask_user cannot call it implicitly. */
+    /** Trusted send admission for the run-owned product default; no generic second approval.
+     * Shared SEND may call this directly, retaining the exact draft/owner and DB admission gate.
+     */
+    fun confirmDefault(current: BrowserDraftSnapshot): Boolean {
+        if (preview.defaultPermission == null) return false
+        return confirm(preview, current)
+    }
+
+    /** Freezes admission, not a business confirmation for delete/payment/publication. */
     fun confirm(displayed: BrowserRunPreview, current: BrowserDraftSnapshot): Boolean = synchronized(lock) {
         if (phase != State.PREVIEW || displayed !== preview || current != draft || cancelled ||
             childPlan?.confirmed == false) return false
@@ -321,6 +330,7 @@ internal class ControllerBrowserPreparation private constructor(
             runId: RunId = RunId(grant.owner.sessionId),
             assistantMessageId: MessageId = MessageId(UUID.randomUUID().toString()),
             conversationId: ConversationId = conversation?.id ?: ConversationId(UUID.randomUUID().toString()),
+            useDefaultPermission: Boolean = true,
         ): ControllerBrowserPreparation {
             require(draft.text.isNotBlank()) { "browser_empty_text" }
             require(draft.owner.conversationId == conversation?.id) { "browser_draft_owner_changed" }
@@ -331,7 +341,8 @@ internal class ControllerBrowserPreparation private constructor(
             val frozen = assistant.copy(enabledSkillIds = Collections.unmodifiableList(assistant.enabledSkillIds.toList()))
             val identity = BrowserRunIdentity(conversationId, runId, frozen.id, assistantMessageId)
             return ControllerBrowserPreparation(conversation?.copy(), draft.copy(), frozen, provider,
-                BrowserRunPreparation.prepare(identity, settings.copy(), grant.copy(), allowedActions, writeArguments))
+                BrowserRunPreparation.prepare(identity, settings.copy(), grant.copy(), allowedActions, writeArguments,
+                    defaultPermission = if (useDefaultPermission) BrowserDefaultPermission.main(grant) else null))
         }
     }
 }

@@ -26,7 +26,7 @@ internal class CrossAppNotifications(
         generation++
         listener = source
         if (!granted()) revoke()
-        else store.prune(clock())
+        else store.resumeAfterSystemGrant(clock())
     }
     fun disconnected(source: NotificationSnapshotSource) = synchronized(gate) {
         if (listener === source) {
@@ -39,7 +39,7 @@ internal class CrossAppNotifications(
     }
     private fun revoke() {
         listener = null; generation++
-        store.setEnabled(false, clock())
+        store.clearForSystemRevocation()
     }
     fun status(): String = synchronized(gate) {
         if (!granted()) { revoke(); "未获系统通知读取授权；记录已停止并清除" }
@@ -47,7 +47,7 @@ internal class CrossAppNotifications(
         else "系统已授权且服务已连接；仍需run工具选择与模型/历史双同意"
     }
     fun recording(): Boolean = synchronized(gate) {
-        if (!granted()) { revoke(); false } else store.enabled()
+        if (!granted()) { revoke(); false } else listener != null && store.enabled()
     }
     fun record(enabled: Boolean) = synchronized(gate) {
         if (enabled) check(granted() && listener != null) { "notification_access_unavailable" }

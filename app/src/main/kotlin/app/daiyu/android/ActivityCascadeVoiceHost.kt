@@ -59,7 +59,7 @@ internal class ActivityCascadeVoiceHost(
         armed = frozen
         mutable.value = "级联已授权下一条回答：点击听写、检查草稿后手动发送；不会自动发送。回答按完整句子朗读，云端可能按句收费。"
     }
-    /** Preparation reads local references only. Caller MUST show the complete disclosure before armPersonal. */
+    /** Preparation reads local references only. A requested cascade may use trusted finite default permission. */
     suspend fun preparePersonalConsent(): PersonalCascadeOffer? {
         check(!disposed) { "cascade_host_disposed" }
         close()

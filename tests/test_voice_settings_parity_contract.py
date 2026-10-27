@@ -11,6 +11,21 @@ def source(name):
 
 
 class VoiceSettingsParityContractTest(unittest.TestCase):
+    def test_preview_click_uses_default_permission_and_retains_frozen_reference_guards(self):
+        text = source('VoiceSettingsPreview.kt')
+        for old in ('var consent by remember', 'else consent = frozen', 'consent?.let', '仅授权本次试听'):
+            self.assertNotIn(old, text)
+        self.assertIn('val frozen = personalPreview ?: runtime.prepareSpeech(profile)\n                        play(frozen)', text)
+        self.assertIn('if (initialize) DaiyuConfirmDialog("启用系统语音"', text)
+        play = text.split('fun play(frozen: FrozenVoiceSpeech)', 1)[1].split('DisposableEffect(host, lifecycle)', 1)[0]
+        for guard in ('!current() || !allowed', '!runtime.current(frozen)', 'val token = ++request',
+                      'request == token && current() && allowed && runtime.current(ready)',
+                      'lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)',
+                      'host.speak(host.owner, "settings-preview", sampleText)'):
+            self.assertIn(guard, play)
+        self.assertLess(play.index('runtime.authorizeReference(frozen)'), play.index('runtime.current(ready)'))
+        self.assertLess(play.index('runtime.current(ready)'), play.index('host.speak('))
+
     def test_five_original_groups_and_embedded_offline_page(self):
         text = source('VoiceSettingsPanel.kt')
         for key, title in [('RECOGNITION', '语音识别'), ('READ_ALOUD', '朗读'),

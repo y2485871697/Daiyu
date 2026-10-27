@@ -7,17 +7,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class McpPolicyTest {
-    @Test fun defaultDisabledAndBothPolicyGatesRejectBeforeCreatingAnyTransport() {
+    @Test fun exactTaskCapabilityDefaultsOpenIncludingLegacyOffButMissingCatalogStillBlocks() {
         val tool = McpRemoteTool("erase", "erase")
         for (server in listOf(
-            McpServer("server", "fixture", "https://mcp.invalid/rpc", ""),
-            McpServer("server", "fixture", "https://mcp.invalid/rpc", "", catalog = listOf(tool), allowedTools = setOf("erase")),
-            McpServer("server", "fixture", "https://mcp.invalid/rpc", "", enabled = true, catalog = listOf(tool)))) {
-            assertFalse(server.eligible("erase"))
-            assertThrows(IllegalArgumentException::class.java) {
-                McpRunScope(McpSettings("policy", listOf(server)), listOf(McpSelection("server", "erase", "{}")),
-                    ConversationId("conversation"), RunId("run"), { true }, { error("disabled transport") })
-            }
+            McpServer("server", "fixture", "https://mcp.invalid/rpc", "", catalog = listOf(tool)),
+            McpServer("server", "fixture", "https://mcp.invalid/rpc", "", enabled = false, catalog = listOf(tool), allowedTools = emptySet()))) {
+            assertTrue(server.eligible("erase"))
+            assertFalse(server.eligible("not_configured"))
+            val scope = McpRunScope(McpSettings("policy", listOf(server)), listOf(McpSelection("server", "erase", "{}")),
+                ConversationId("conversation"), RunId("run"), { true }, { error("submission must not connect") })
+            assertEquals(1, scope.authorization.allowedWrites.size)
+            scope.close()
+        }
+        val absent = McpServer("server", "fixture", "https://mcp.invalid/rpc", "")
+        assertFalse(absent.eligible("erase"))
+        assertThrows(IllegalArgumentException::class.java) {
+            McpRunScope(McpSettings("policy", listOf(absent)), listOf(McpSelection("server", "erase", "{}")),
+                ConversationId("conversation"), RunId("run"), { true }, { error("missing configuration must not connect") })
         }
         assertThrows(IllegalArgumentException::class.java) {
             McpServer("server", "fixture", "https://mcp.invalid/rpc", "", true, emptyList(), setOf("erase"))

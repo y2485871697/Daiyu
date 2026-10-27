@@ -70,6 +70,35 @@ class ControllerTerminalSendTest : InstrumentationTestCase() {
         awaitControl("preview drained") { controller.terminalPreparation() == null }
     }
 
+    fun testDefaultAuthorizedSendNeedsNoConfirmationAndKeepsOriginalPlan() {
+        val draft = draft()
+        val p = prepare(draft)
+        assertEquals(ControllerTerminalPreparation.State.PREVIEW, p.state)
+        assertNull(field(p, "token"))
+        val session = fixture.session(holdSeconds = 120)
+        val done = CountDownLatch(1)
+        val result = AtomicReference<ChatController.TextSendResult>()
+        val ticket = ChatController.TextSendTicket()
+        controlMain {
+            assertTrue(controller.sendTerminal(p, p.preview, draft, p.assistant, p.provider, ticket) {
+                result.set(it); done.countDown()
+            })
+            assertEquals(ControllerTerminalPreparation.State.TRANSFERRED, p.state)
+        }
+        waitFor(done); waitFor(session.entered)
+        assertTrue(result.get() is ChatController.TextSendResult.Accepted)
+        val catalog = checkNotNull(field(controller, "runTools"))
+        val authorization = checkNotNull(field(p, "token"))
+        assertSame(authorization, field(catalog, "initialAuthorization"))
+        val leaf = checkNotNull(field(catalog, "terminalLeaf"))
+        val binding = field(checkNotNull(field(leaf, "tools")), "binding") as CatalogTerminalBinding
+        assertSame(p.preview.plan, binding.plan)
+        assertSame(authorization, binding.authorization)
+        controlMain { controller.acknowledgeTextSend(ticket) }
+        session.release.countDown()
+        awaitControl("default authorized run drained") { controller.active == null }
+    }
+
     fun testExplicitSendUsesOriginalAuthorizationAndBindingAndPersistentReceiptIdentity() {
         val draft = draft()
         val p = prepare(draft)

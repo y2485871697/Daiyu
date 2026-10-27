@@ -5,9 +5,15 @@ import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.storage.ConversationDatabase
 import org.json.JSONObject
 
-/** Private capture store on the application's existing helper, never a Catalog/model data source. */
+/**
+ * Private capture store, never a Catalog/model data source. Capture defaults on and legacy off migrates once;
+ * later explicit choices, the original epoch and existing records are preserved. Android listener authorization remains
+ * checked by CrossAppNotifications before recording or reading any content.
+ */
 internal class NotificationHistoryStore(private val database: ConversationDatabase) {
     private val db get() = database.writableDatabase
+
+    init { migrateProductDefaults(db) }
     fun enabled(): Boolean = db.rawQuery("SELECT enabled FROM notification_capture WHERE id=1", null).use {
         it.moveToFirst() && it.getInt(0) == 1
     }
@@ -21,6 +27,23 @@ internal class NotificationHistoryStore(private val database: ConversationDataba
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
+    /** System revocation erases content but is not an explicit user preference change. */
+    fun clearForSystemRevocation() {
+        val db = db
+        db.beginTransaction()
+        try {
+            db.delete("notification_records", null, null)
+            db.execSQL("UPDATE notification_capture SET since_ms=0 WHERE id=1")
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    /** Reconnection starts a new future-event epoch, never backfills pre-grant notifications. */
+    fun resumeAfterSystemGrant(now: Long) {
+        db.execSQL("UPDATE notification_capture SET since_ms=? WHERE id=1 AND enabled=1 AND since_ms=0", arrayOf(now))
+        prune(now)
+    }
+
     fun prune(now: Long) {
         val db = db
         db.delete("notification_records", "captured_ms<? OR captured_ms>?", arrayOf((now - RETENTION_MS).toString(), now.toString()))
@@ -56,9 +79,24 @@ internal class NotificationHistoryStore(private val database: ConversationDataba
         const val MAX_BYTES = 512 * 1024
         const val MAX_ROW_BYTES = 4096
         fun installSchema(db: SQLiteDatabase) {
-            db.execSQL("CREATE TABLE IF NOT EXISTS notification_capture(id INTEGER PRIMARY KEY CHECK(id=1),enabled INTEGER NOT NULL DEFAULT 0,since_ms INTEGER NOT NULL DEFAULT 0)")
-            db.execSQL("INSERT OR IGNORE INTO notification_capture(id,enabled,since_ms) VALUES(1,0,0)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS notification_capture(id INTEGER PRIMARY KEY CHECK(id=1),enabled INTEGER NOT NULL DEFAULT 1,since_ms INTEGER NOT NULL DEFAULT 0)")
+            migrateProductDefaults(db)
             db.execSQL("CREATE TABLE IF NOT EXISTS notification_records(seq INTEGER PRIMARY KEY AUTOINCREMENT,captured_ms INTEGER NOT NULL,payload TEXT NOT NULL,bytes INTEGER NOT NULL)")
+        }
+        private fun migrateProductDefaults(db: SQLiteDatabase) {
+            db.beginTransaction()
+            try {
+                db.execSQL("CREATE TABLE IF NOT EXISTS notification_capture_policy(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL)")
+                db.execSQL("INSERT OR IGNORE INTO notification_capture(id,enabled,since_ms) VALUES(1,1,0)")
+                val migrated = db.rawQuery("SELECT version FROM notification_capture_policy WHERE id=1", null).use {
+                    it.moveToFirst() && it.getInt(0) >= 1
+                }
+                if (!migrated) {
+                    db.execSQL("UPDATE notification_capture SET since_ms=CASE WHEN enabled=0 THEN 0 ELSE since_ms END,enabled=1 WHERE id=1")
+                    db.execSQL("INSERT OR REPLACE INTO notification_capture_policy(id,version) VALUES(1,1)")
+                }
+                db.setTransactionSuccessful()
+            } finally { db.endTransaction() }
         }
     }
 }

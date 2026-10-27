@@ -14,8 +14,9 @@ internal interface CommandTransport : AutoCloseable {
     fun awaitTermination(timeoutMillis: Long): Boolean
 }
 
-/** Ordinary chat commands use the same central ledger as every other tool. Each command needs
- * host consent for its frozen bytes and backend; neither a capability nor model JSON grants it. */
+/** Ordinary chat commands use the same central ledger as every other tool. Each command gets
+ * one exact host grant for its frozen bytes/backend under the app consent policy, not OS authority.
+ * Neither a capability nor model JSON is itself a write grant. */
 internal class RunCommandTools(
     private val android: TerminalConfiguration,
     private val owner: RunExecutionOwner,
@@ -84,7 +85,7 @@ internal class RunCommandTools(
     }
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = app.daiyu.android.domain.tools.ToolDefinition("terminal_exec", 1,
-            "在 Android 应用身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；Linux 工作目录：${linuxConfiguration?.linux?.guestWorkingDirectory ?: "未配置"}。两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。每次先显示完整命令和环境，用户明确批准才启动；不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
+            "在 Android 应用身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；Linux 工作目录：${linuxConfiguration?.linux?.guestWorkingDirectory ?: "未配置"}。两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("command", ArgumentType.Text(maxLength = 32768, minimumLength = 1)),
                 ArgumentField("environment", ArgumentType.Text(choices = setOf("android", "linux"))),
@@ -105,7 +106,8 @@ internal class RunCommandTools(
             return PreparedTool.approvedWrite(effect,
                 approve = { call ->
                     val available = synchronized(lock) { !closed && !unknown } && config != null
-                    if (available && !call.cancelled() && approve(call, effect, disclosure))
+                    if (available && denied(call) == null && !call.cancelled() && approve(call, effect, disclosure) &&
+                        !call.cancelled() && denied(call) == null)
                         TaskAuthorization(authorization.sessionId, authorization.taskId, setOf(effect)) else null
                 },
                 admit = { call -> denied(call) ?: when {

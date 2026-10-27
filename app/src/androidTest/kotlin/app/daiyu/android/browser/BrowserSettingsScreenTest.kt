@@ -35,8 +35,34 @@ class BrowserSettingsScreenTest : WiredActivityTestCase() {
         }
         ui.waitUntil(5_000) {
             ui.onAllNodesWithTag("browser-save").fetchSemanticsNodes().singleOrNull()
-                ?.config?.getOrNull(SemanticsActions.OnClick) != null
+                ?.config?.getOrNull(SemanticsActions.OnClick) != null ||
+                ui.onAllNodesWithTag("browser-default-permissions").fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    fun testProductDefaultsShowAllowedPolicyWithoutAnExtraSaveOrPermissionChoice() {
+        val isolated = app.daiyu.android.testContext(instrumentation.targetContext,
+            "browser-product-screen-${java.util.UUID.randomUUID()}-")
+        val context = object : android.content.ContextWrapper(isolated) {
+            override fun getApplicationContext(): Context = this
+        }
+        val preferences = context.getSharedPreferences("browser-settings", Context.MODE_PRIVATE)
+        preferences.edit().putString(BrowserSettingsStore.KEY, "v1:DISABLED").commit()
+        try {
+            val store = BrowserSettingsStore(context)
+            show(store)
+            reveal("browser-default-permissions", "浏览器").assertExists()
+            ui.onNodeWithTag("browser-save").assertDoesNotExist()
+            ui.onNodeWithTag("browser-access:DISABLED").assertDoesNotExist()
+            reveal("settings-row:任务历史记录：ALLOW", "浏览器").assertExists()
+            reveal("settings-row:Cookie 名称：默认允许", "浏览器").assertExists()
+            assertEquals(BrowserAccess.FULL, store.snapshot().access)
+            assertEquals("ALLOW", store.snapshot().historyConsent)
+            assertTrue(store.snapshot().allCookieNamesAllowed)
+            assertEquals("v1:DISABLED", preferences.getString(BrowserSettingsStore.KEY, null))
+            assertEquals(0, fixture.opens.get())
+            assertTrue(fixture.database.conversations().isEmpty())
+        } finally { preferences.edit().clear().commit() }
     }
 
     fun testDefaultSaveAndReadbackAcrossNewStoreAndComposition() {

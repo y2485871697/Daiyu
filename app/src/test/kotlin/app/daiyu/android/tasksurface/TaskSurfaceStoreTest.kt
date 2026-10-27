@@ -4,13 +4,44 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TaskSurfaceStoreTest {
-    @Test fun missingRecordIsAskAndAllThreeValuesSurviveFreshStoreInstances() {
+    @Test fun missingRecordIsForegroundAndAllThreeExplicitValuesSurviveFreshStoreInstances() {
         val persistence = MemoryPersistence()
-        assertEquals(TaskSurfaceSettings.Available(TaskSurfacePreference.ASK), TaskSurfaceStore(persistence).load())
+        assertEquals(TaskSurfaceSettings.Available(TaskSurfacePreference.FOREGROUND), TaskSurfaceStore(persistence).load())
         TaskSurfacePreference.entries.forEach { value ->
             assertTrue(TaskSurfaceStore(persistence).save(value))
             assertEquals(TaskSurfaceSettings.Available(value), TaskSurfaceStore(persistence).load())
         }
+    }
+
+    @Test fun absentDefaultDoesNotWritePreferenceAndFrozenRunDoesNotFollowLaterSettings() {
+        val persistence = MemoryPersistence()
+        val store = TaskSurfaceStore(persistence)
+        val original = store.freeze(Any(), "app.daiyu.android")
+        assertNull(persistence.record)
+        assertEquals(TaskSurface.FOREGROUND,
+            (original.decision("example.target", false) as TaskSurfaceDecision.Ready).surface)
+        assertTrue(store.save(TaskSurfacePreference.BACKGROUND))
+        assertEquals(TaskSurface.FOREGROUND,
+            (original.decision("example.target", false) as TaskSurfaceDecision.Ready).surface)
+        val next = store.freeze(Any(), "app.daiyu.android")
+        assertEquals("TASK_SURFACE_BACKGROUND_UNSUPPORTED",
+            (next.decision("example.target", false) as TaskSurfaceDecision.NotExecuted).code)
+        assertEquals(TaskSurfaceSettings.Available(TaskSurfacePreference.BACKGROUND), store.load())
+        val self = next.decision("app.daiyu.android", false) as TaskSurfaceDecision.Ready
+        assertEquals(TaskSurface.FOREGROUND, self.surface)
+        assertTrue(self.selfTarget!!.isCurrent(next.owner, "app.daiyu.android"))
+        next.end()
+        assertFalse(self.selfTarget!!.isCurrent(next.owner, "app.daiyu.android"))
+        assertEquals(TaskSurfaceSettings.Available(TaskSurfacePreference.BACKGROUND), store.load())
+    }
+
+    @Test fun failedFirstWriteDoesNotFallBackToTheAbsentForegroundDefault() {
+        val persistence = MemoryPersistence().apply { ignoreWrite = true }
+        val store = TaskSurfaceStore(persistence)
+        assertFalse(store.save(TaskSurfacePreference.ASK))
+        assertNull(persistence.record)
+        assertSame(TaskSurfaceSettings.Unavailable, store.load())
+        assertTrue(store.freeze(Any(), "app.daiyu.android").decision("example.target", false) is TaskSurfaceDecision.NotExecuted)
     }
 
     @Test fun corruptVersionTruncatedUnknownAndReadFailureNeverDefaultToForeground() {

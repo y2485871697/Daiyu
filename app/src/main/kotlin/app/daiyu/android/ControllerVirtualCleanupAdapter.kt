@@ -94,6 +94,16 @@ internal class ControllerVirtualCleanupAdapter(
         }
     }
 
+    /** Call from the host's original cleanup/selection event, never by auto-clicking a dialog.
+     * Authorization alone performs no release and cannot revive the stopped run's grant. */
+    fun authorizeWithProductDefaults(original: R08CleanupApprovalRequest): Boolean {
+        if (!eligible()) return false
+        return synchronized(lock) {
+            visitActive() && prepared === original && session.authorizeCleanupWithProductDefaults(
+                original, parentDrained = true, admissionStillValid = ::visitActive)
+        }
+    }
+
     fun releaseOnWorker(original: R08CleanupApprovalRequest): ControllerVirtualDisplaySession.CleanupResult {
         worker()
         if (!eligible() || !synchronized(lock) { visitActive() && prepared === original })

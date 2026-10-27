@@ -31,6 +31,8 @@ internal class ControllerVirtualDisplaySession internal constructor(
      * receipt throws; the parent retains this session for reconciliation, never reserves again.
      */
     interface Parent {
+        /** Compatibility/review hosts may opt in; production uses trusted default app permission. */
+        val requiresExplicitApproval: Boolean get() = false
         fun reserve(owner: RunExecutionOwner, capabilities: SessionCapabilities): Lease
         /** Publish on the parent's UI lane. Do not wait for that lane; no root start here. */
         fun showApproval(request: VirtualDisplayApprovalRequest)
@@ -150,13 +152,23 @@ internal class ControllerVirtualDisplaySession internal constructor(
             val prepared = R08VirtualDisplayPlan.prepare(actualOwner, capabilities, reserved.generation,
                 frozenWrites, frozenReads)
             val review = VirtualDisplayApprovalRequest(prepared)
+            val explicitReview = parent.requiresExplicitApproval
             val publish = synchronized(lock) {
                 plan = prepared
-                if (closed) false else { request = review; true }
+                if (closed) false else {
+                    if (explicitReview) request = review else {
+                        // The policy consumes this fresh request only; never reuse a revoked grant.
+                        approval = review.authorizeWithProductDefaults()
+                        decision = true
+                    }
+                    true
+                }
             }
             if (!publish) throw AcceptedRunStopped()
-            parent.showApproval(review)
-            answered.await()
+            if (explicitReview) {
+                parent.showApproval(review)
+                answered.await()
+            }
             val grant = synchronized(lock) {
                 if (closed || decision != true) null else approval
             } ?: throw AcceptedRunStopped()
@@ -473,6 +485,19 @@ internal class ControllerVirtualDisplaySession internal constructor(
                     listOf(R08VirtualDisplayWrite("host_cleanup_release", R08VirtualDisplayAction.Release)))
                 R08CleanupApprovalRequest(releasePlan).also { cleanupRequest = it }
             }
+        }
+    }
+
+    /** Trusted default app permission for a NEW, explicitly requested cleanup plan. The original
+     * run grant stays revoked; parent drain, selected tasks and one-attempt release stay mandatory. */
+    fun authorizeCleanupWithProductDefaults(original: R08CleanupApprovalRequest,
+        parentDrained: Boolean, admissionStillValid: () -> Boolean = { true }): Boolean = synchronized(lock) {
+        if (cleanupRequest !== original || cleanupDecision != null || cleanupAttempted || released ||
+            !(if (original.hasHandoff) taskHandoffAvailable(parentDrained) else cleanupAvailable(parentDrained)) ||
+            !admissionStillValid()) false else {
+            cleanupApproval = original.review.authorizeWithProductDefaults()
+            cleanupDecision = true
+            true
         }
     }
 

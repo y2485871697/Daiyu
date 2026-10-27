@@ -21,10 +21,23 @@ internal class ControllerMcpPreparation internal constructor(
     @Volatile private var cancelled = false
     @Volatile private var approved = false
     val confirmed: Boolean get() = approved && !cancelled && scope.isCurrent()
-    fun confirm(displayed: ControllerMcpPreparation, owner: ChatController.TextSendOwner, draft: String): Boolean = synchronized(this) {
-        if (displayed !== this || owner != editor || draft != text || cancelled || approved || !scope.isCurrent()) false
+
+    /** The original task submission is the capability grant. Call at the controller's send gate,
+     * not from composition or a second permission dialog. The already frozen scope retains its
+     * ONE exact authorization; this does not open a connection or approve another tool/argument.
+     */
+    fun authorizeForSubmission(owner: ChatController.TextSendOwner, draft: String): Boolean = synchronized(this) {
+        if (owner != editor || draft != text || cancelled || approved || !scope.isCurrent()) false
         else { approved = true; true }
     }
-    fun cancel() { cancelled = true; scope.close() }
+
+    /** Compatibility for callers holding an immutable preview; not an additional permission. */
+    fun confirm(displayed: ControllerMcpPreparation, owner: ChatController.TextSendOwner, draft: String): Boolean =
+        displayed === this && authorizeForSubmission(owner, draft)
+
+    fun cancel() {
+        synchronized(this) { cancelled = true }
+        scope.close()
+    }
     override fun toString() = "ControllerMcpPreparation(redacted)"
 }

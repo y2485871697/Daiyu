@@ -57,19 +57,21 @@ class McpManagementTest {
         fun assertDrained() { sessions.forEach { var done = false; it.observeDrained { done = true }; assertTrue(done) } }
         override fun close() { owner.revoke(); worker.shutdownNow(); store.clear(McpSettingsOwner()) }
     }
-    @Test fun explicitDiscoveryOnlyRedactsMetadataKeepsDefaultOffAndDoesNotCreateExecution() {
+    @Test fun explicitDiscoveryOnlyRedactsMetadataDefaultsCapabilityOpenAndDoesNotCreateExecution() {
         Fixture().use { f ->
             val before = f.seed()
             f.listing = """{"tools":[{"name":"echo-synthetic-token","description":"synthetic-token","inputSchema":{"type":"object","properties":{"synthetic-token":{"default":"synthetic-token"}}}}]}"""
             val result = f.offMain { f.management.refresh(before, "server", f.owner) }
             assertEquals(listOf("initialize", "notifications/initialized", "tools/list"), f.methods)
             val server = result.servers.single()
-            assertFalse(server.enabled); assertTrue(server.allowedTools.isEmpty())
+            assertTrue(server.enabled)
+            assertTrue(server.eligible(server.catalog.single().name))
+            assertEquals(server.catalog.map { it.name }.toSet(), server.allowedTools)
             assertFalse(McpJson.canonical(server.catalog.single().json()).contains("synthetic-token"))
             assertFalse(f.store.isCurrent(before)); f.assertDrained()
         }
     }
-    @Test fun onlyUnchangedMetadataKeepsAllowlistAndRefreshFailurePreservesLastDirectory() {
+    @Test fun metadataRefreshKeepsCapabilityOpenInvalidatesOldConfigAndFailurePreservesLastDirectory() {
         Fixture().use { f ->
             val original = f.seed(McpServer("server", "fixture", "https://fixture.invalid/mcp", "", true,
                 listOf(McpRemoteTool("erase", "erase")), setOf("erase")))
@@ -77,7 +79,10 @@ class McpManagementTest {
             assertEquals(setOf("erase"), same.servers.single().allowedTools)
             f.listing = """{"tools":[{"name":"erase","description":"changed","inputSchema":{"type":"object"}},{"name":"new","inputSchema":{"type":"object"}}]}"""
             val changed = f.offMain { f.management.refresh(same, "server", f.owner) }
-            assertTrue(changed.servers.single().enabled); assertTrue(changed.servers.single().allowedTools.isEmpty())
+            assertTrue(changed.servers.single().enabled)
+            assertEquals(setOf("erase", "new"), changed.servers.single().allowedTools)
+            assertTrue(changed.servers.single().eligible("new"))
+            assertFalse(f.store.isCurrent(same))
             assertEquals(2, changed.servers.single().catalog.size)
             f.listing = """{"tools":[{"name":"invalid","inputSchema":{"type":"array"}}]}"""
             f.offMain { assertThrows(IllegalStateException::class.java) { f.management.refresh(changed, "server", f.owner) } }

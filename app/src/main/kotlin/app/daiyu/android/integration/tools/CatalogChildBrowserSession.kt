@@ -140,10 +140,12 @@ internal class CatalogChildBrowserSession private constructor(
         fun prepare(scope: ChildRunScope, assistant: AssistantProfile, settings: BrowserSettings,
                     grant: BrowserGrant, allowedActions: Set<String>,
                     writeArguments: List<String> = emptyList(),
-                    onDownloadCompleted: (app.daiyu.android.browser.download.BrowserCompletedDownload) -> Unit = {}): CatalogChildBrowserSession {
+                    onDownloadCompleted: (app.daiyu.android.browser.download.BrowserCompletedDownload) -> Unit = {},
+                    defaultPermission: BrowserDefaultPermission? = null): CatalogChildBrowserSession {
             val frozen = assistant.copy(enabledSkillIds = java.util.Collections.unmodifiableList(assistant.enabledSkillIds.toList()))
             return CatalogChildBrowserSession(scope, frozen, BrowserRunPreparation.prepareChild(
-                scope, frozen.id, settings, grant, allowedActions, writeArguments), onDownloadCompleted)
+                scope, frozen.id, settings, grant, allowedActions, writeArguments,
+                defaultPermission = defaultPermission), onDownloadCompleted)
         }
     }
 }

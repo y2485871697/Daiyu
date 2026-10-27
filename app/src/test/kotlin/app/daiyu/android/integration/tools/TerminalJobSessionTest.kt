@@ -102,6 +102,21 @@ class TerminalJobSessionTest {
             return result.get()
         }
     }
+    @Test fun defaultConsentDoesNotBroadenFrozenJobCommandOrModeGrant() {
+        assertFalse(CommandPermissionDefaults.REQUIRE_INTERACTIVE_APPROVAL)
+        val original = plan("async")
+        val grant = TaskAuthorization(original.sessionId, original.runId.value, setOf(original.effect))
+        val changed = TerminalJobPlan(original.conversationId, original.runId, original.launch,
+            original.command + " ", "async")
+        for (other in listOf(changed, plan("daemon"))) {
+            assertNotEquals(original.effect, other.effect)
+            try {
+                TerminalJobSession.approved(other, grant) { fail("wrong grant must never create transport"); Backend() }
+                fail("frozen job grant leaked")
+            } catch (_: IllegalArgumentException) {}
+        }
+    }
+
     @Test fun definitionsAndConfirmationDoNotCreateBackendAndOnlyEmptyArgumentsAreExposed() {
         val f = Fixture()
         assertEquals(0, f.creates.get())

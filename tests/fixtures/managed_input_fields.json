@@ -8,16 +8,12 @@
     "calls": 3
   },
   {
-    "path": "app/src/main/kotlin/app/daiyu/android/ui/BrowserApprovalHost.kt",
-    "calls": 2
-  },
-  {
     "path": "app/src/main/kotlin/app/daiyu/android/ui/GenerationApprovalHost.kt",
     "calls": 4
   },
   {
     "path": "app/src/main/kotlin/app/daiyu/android/ui/ChildBrowserApprovalHost.kt",
-    "calls": 3
+    "calls": 1
   },
   {
     "path": "app/src/main/kotlin/app/daiyu/android/ui/PlatformActionApprovalHost.kt",

@@ -15,6 +15,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 /** Mount ownership only: real controller reservation, no privileged transport or model request. */
 class ShizukuApprovalHostTest : WiredActivityTestCase() {
     private val mounted = mutableStateOf(true)
+    private val currentVisit = mutableStateOf(true)
     private val text = "mount-owned draft"
 
     private fun show() {
@@ -23,6 +24,7 @@ class ShizukuApprovalHostTest : WiredActivityTestCase() {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         if (mounted.value) ShizukuApprovalHost(fixture.controller, null, text,
+                            isCurrent = { currentVisit.value },
                             onAccepted = { _, _ -> error("must not submit") })
                     }
                 }
@@ -31,15 +33,64 @@ class ShizukuApprovalHostTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
-    private fun ownPreview(): ControllerShizukuPreparation {
-        ui.onNodeWithTag("shizuku-text-enable").scrollToVisible().performClick()
+    private fun withBlockedShizukuWorker(block: (() -> Unit) -> Unit) {
+        val executor = app.daiyu.android.ChatController::class.java.getDeclaredField("executor")
+            .apply { isAccessible = true }.get(fixture.controller) as java.util.concurrent.ExecutorService
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val blocker = executor.submit { entered.countDown(); release.await() }
+        try {
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            block { release.countDown() }
+        } finally {
+            release.countDown()
+            blocker.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            executor.submit { }.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
+    }
+
+    private fun ownSubmission(): ControllerShizukuPreparation {
         ui.onNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）"))
             .scrollToVisible().performTextReplacement("2000")
         ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
             .scrollToVisible().performTextReplacement("printf own")
-        ui.onNodeWithText("预览命令及本次运行").scrollToVisible().performClick()
-        ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() != null }
-        return checkNotNull(fixture.controller.shizukuPreparation())
+        ui.onNodeWithTag("shizuku-text-send").scrollToVisible().performClick()
+        return checkNotNull(fixture.controller.shizukuPreparation()).also { assertTrue(it.isSubmitted()) }
+    }
+
+    private fun ownCancelledSubmission(): ControllerShizukuPreparation {
+        lateinit var original: ControllerShizukuPreparation
+        withBlockedShizukuWorker {
+            original = ownSubmission()
+            mainThread { fixture.controller.rejectShizuku(original) }
+        }
+        ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() == null }
+        assertTrue(original.isCancelled())
+        return original
+    }
+
+    fun testDisposedSendCallbackCannotCreateANewPreparation() {
+        verifyRetainedSendRejected(dispose = true)
+    }
+
+    fun testRevokedParentVisitRejectsRetainedSendWithoutDisposal() {
+        verifyRetainedSendRejected(dispose = false)
+    }
+
+    private fun verifyRetainedSendRejected(dispose: Boolean) {
+        show()
+        ui.onNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）"))
+            .scrollToVisible().performTextReplacement("2000")
+        ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
+            .scrollToVisible().performTextReplacement("printf stale")
+        val oldSend = checkNotNull(ui.onNodeWithTag("shizuku-text-send").scrollToVisible()
+            .fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action)
+        mainThread { if (dispose) mounted.value = false else currentVisit.value = false }
+        ui.waitForIdle()
+        mainThread { oldSend() }
+        assertNull(fixture.controller.shizukuPreparation())
+        assertEquals(0, fixture.opens.get())
+        assertTrue(fixture.database.conversations().isEmpty())
     }
 
     fun testOldMountDisposalDoesNotRejectReplacementPreparation() {
@@ -52,7 +103,7 @@ class ShizukuApprovalHostTest : WiredActivityTestCase() {
 
     private fun verifyReplacementAfterDisposal(createOwned: Boolean) {
         show()
-        val original = if (createOwned) ownPreview() else null
+        val original = if (createOwned) ownCancelledSubmission() else null
         var replacement: ControllerShizukuPreparation? = null
         try {
             mainThread {
@@ -77,16 +128,37 @@ class ShizukuApprovalHostTest : WiredActivityTestCase() {
         }
     }
 
-    fun testDisposalRejectsOwnUnsubmittedPreparation() {
-        verifyOwnDisposal()
+    fun testDisposalDoesNotRejectOwnSubmittedPreparation() {
+        show()
+        withBlockedShizukuWorker {
+            val original = ownSubmission()
+            mainThread { mounted.value = false }
+            ui.waitForIdle()
+            assertSame(original, fixture.controller.shizukuPreparation())
+            assertTrue(original.isSubmitted())
+            assertFalse(original.isCancelled())
+            assertEquals(0, fixture.opens.get())
+            assertTrue(fixture.database.conversations().isEmpty())
+        }
+        ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() == null }
+        assertEquals(0, fixture.opens.get())
+        assertTrue(fixture.database.conversations().isEmpty())
     }
 
-    private fun verifyOwnDisposal() {
+    fun testUidRequiredAndMountEditingDoNotSubmit() {
         show()
-        val original = ownPreview()
+        ui.onNodeWithTag("shizuku-text-enable").assertDoesNotExist()
+        ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
+            .scrollToVisible().performTextReplacement("printf own")
+        ui.onNodeWithTag("shizuku-text-send").scrollToVisible().performClick()
+        assertNull(fixture.controller.shizukuPreparation())
+        assertEquals(0, fixture.opens.get())
+        ui.onNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）"))
+            .scrollToVisible().performTextReplacement("2000")
+        ui.waitForIdle()
+        assertNull(fixture.controller.shizukuPreparation())
         mainThread { mounted.value = false }
         ui.waitForIdle()
-        assertTrue(original.isCancelled())
         assertNull(fixture.controller.shizukuPreparation())
         assertEquals(0, fixture.opens.get())
         assertTrue(fixture.database.conversations().isEmpty())

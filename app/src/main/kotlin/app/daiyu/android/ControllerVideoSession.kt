@@ -18,8 +18,10 @@ internal data class ControllerVideoEditor(val conversation: String?, val generat
 
 internal interface ControllerVideoUi {
     fun editor(): ControllerVideoEditor
-    fun showRun(prompt: VideoApprovalGate.Prompt, text: String, decision: (Boolean) -> Unit)
-    fun showPost(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit)
+    // The user's send already expresses upload intent. Defaults decide THIS fresh offer only;
+    // session authority, preflight, exact token consumption and synchronous revocation still apply.
+    fun showRun(prompt: VideoApprovalGate.Prompt, text: String, decision: (Boolean) -> Unit) = decision(true)
+    fun showPost(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit) = decision(true)
 }
 
 /** One parent run. No transport, executor, journal writer or database is created here.

@@ -16,7 +16,7 @@
     <string name="shizuku_identity_required">必须明确选择身份，不会自动切换 root、shell 或 Linux。</string>
     <string name="shizuku_script">精确命令（按原文批准）</string>
     <string name="shizuku_timeout">超时（毫秒，1–120000）</string>
-    <string name="shizuku_scope_warning">批准只绑定以上命令、超时、身份与当前运行。修改任何一项后必须重新批准。命令可能改变设备，停止不等于撤销副作用。</string>
+    <string name="shizuku_scope_warning">应用内许可默认放行；提交时仅绑定当前精确命令、超时、身份与运行，无需另行确认。仍须真实系统授权。命令可能改变设备，停止不等于撤销副作用。</string>
     <string name="shizuku_approve">批准以上命令，仅限本次运行</string>
     <string name="shizuku_open">连接所选身份并交给本次运行</string>
     <string name="shizuku_revoke">撤销本次批准并停止</string>

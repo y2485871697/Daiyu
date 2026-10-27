@@ -534,7 +534,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         node("settings-field:声音名称").performTextReplacement("local draft")
         // Complete the pending show before reveal hides it and navigates to another editor page.
         awaitImeFrame(node("settings-field:声音名称"), visible = true)
-        reveal("settings-row:查找我的音色名额", "制作声音").performClick()
+        reveal("settings-row:选择音色名额", "制作声音").performClick()
         awaitNodeWindowFocus(node("settings-field:AK").assertIsDisplayed())
         dismissIme()
         awaitImeFrame(node("settings-field:AK"), visible = false)
@@ -563,7 +563,7 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         ui.onNodeWithTag("voice-personal-action:CREATE").performClick()
         awaitUniqueTag("page:制作声音")
         for ((tag, title) in listOf(
-            "name" to null, "advanced" to "高级：新建后付费音色", "sync" to "查找我的音色名额",
+            "name" to null, "advanced" to "高级：新建后付费音色", "sync" to "选择音色名额",
             "manual" to "备用方式：从控制台复制 ID", "next-sample" to "下一步：选择录音",
         )) {
             val card = reveal("voice-create-$tag-card", "制作声音").fetchSemanticsNode().boundsInRoot

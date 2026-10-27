@@ -6,6 +6,8 @@ import android.os.Looper
 import android.provider.OpenableColumns
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
+import app.daiyu.android.ui.components.OptionSelectionSheet
+import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.screens.settings.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -130,6 +132,7 @@ internal fun VoiceAccountPanel(
     val samplePicker = remember(resources) { AccountSamplePicker<Uri>() }
     var pickerPending by remember { mutableStateOf(false) }
     var pickerResult by remember { mutableIntStateOf(0) }
+    var slotPicker by remember(frozenConfiguration.revision) { mutableStateOf(false) }
     var projects by remember(frozenConfiguration.revision) { mutableStateOf(emptyList<VoiceProjectCatalog.Project>()) }
     fun current() = latestCurrent(frozenConfiguration) && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     val enabled = loaded && !busy && account != null && current() && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
@@ -160,7 +163,7 @@ internal fun VoiceAccountPanel(
     DisposableEffect(lifecycle, frozenConfiguration.revision, preview) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                confirmation = null; operation?.cancel(); preview.stop()
+                slotPicker = false; confirmation = null; operation?.cancel(); preview.stop()
             }
         }
         lifecycle.addObserver(observer)
@@ -213,10 +216,12 @@ internal fun VoiceAccountPanel(
     var detail by remember { mutableStateOf<String?>(null) }
     var voiceMenu by remember { mutableStateOf<PersonalVoices.Voice?>(null) }
     var accountKey by remember(frozenConfiguration.revision) { mutableStateOf(frozenConfiguration.key) }
+    val creationSlots = personalVoiceSlots(voices, creating = true, postpaid = false)
+        .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }
     fun navigate(target: String) {
         if (!current() || busy) return
         clearPageFeedback()
-        confirmation = null; menu = false; addMenu = false
+        slotPicker = false; confirmation = null; menu = false; addMenu = false
         if (target == "SYNC" || target == "ACCOUNT") parentPage = page
         page = target
     }
@@ -241,7 +246,7 @@ internal fun VoiceAccountPanel(
         if (busy) { operation?.cancel(); feedback = feedback.report(feedback.visit, "正在停止等待，请稍候。"); return }
         clearPageFeedback()
         samplePicker.invalidate()
-        confirmation = null; menu = false; addMenu = false; voiceMenu = null
+        slotPicker = false; confirmation = null; menu = false; addMenu = false; voiceMenu = null
         when {
             page == "SYNC" || page == "ACCOUNT" -> {
                 page = parentPage
@@ -396,17 +401,17 @@ internal fun VoiceAccountPanel(
                     SettingsRow(if (advancedCreation) "收起高级设置" else "高级：新建后付费音色", onClick = { advancedCreation = !advancedCreation })
                     if (advancedCreation) SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) { postpaid = it; confirmation = null }
                 } }
-                val slots = personalVoiceSlots(voices, creating = true, postpaid = postpaid)
-                if (slots.isNotEmpty()) item { SettingsCard(Modifier.testTag("voice-create-slots-card")) {
-                    slots.forEachIndexed { index, voice ->
-                        SettingsRadioRow(personalVoiceSlotTitle(voice, index), slotId == voice.id,
-                            enabled = enabled && voice.canTrain, summary = voiceSlotSummary(voice)) {
-                            if (current()) { slotId = voice.id; postpaid = false; confirmation = null }
-                        }
-                    }
-                } }
                 item { SettingsCard(Modifier.testTag("voice-create-sync-card")) {
-                    SettingsRow("查找我的音色名额", showChevron = true, onClick = if (!enabled) null else ({ navigate("SYNC") }))
+                    SettingsRow("选择音色名额", summary = if (postpaid) null else creationSlots
+                        .withIndex().firstOrNull { it.value.id == slotId }
+                        ?.let { personalVoiceSlotTitle(it.value, it.index) + " · " + it.value.id } ?: slotId.takeIf { it.isNotBlank() },
+                        showChevron = true, onClick = if (!enabled) null else ({
+                            if (current() && !busy) {
+                                if (resources.voices.state.value.any { it.account == account?.fingerprint &&
+                                    it.id.matches(Regex("S_[A-Za-z0-9_-]+")) && it.canTrain }) slotPicker = true
+                                else navigate("SYNC")
+                            }
+                        }))
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-manual-card")) {
                     SettingsRow("备用方式：从控制台复制 ID", showChevron = true, onClick = if (busy) null else ({ manualId = !manualId }))
@@ -476,6 +481,20 @@ internal fun VoiceAccountPanel(
             onSelect = { navigate(it) }, onDismiss = { menu = false }, isEnabled = { !busy && current() })
         if (addMenu) VoiceAddSheet(
             onSelect = { beginFlow(it) }, onDismiss = { addMenu = false }, isEnabled = { !busy && current() })
+        if (slotPicker && page == "CREATE" && step == 0) OptionSelectionSheet(
+            "选择音色名额", onDismiss = { slotPicker = false }, modifier = Modifier.testTag("voice-create-slot-picker")) {
+            creationSlots.forEachIndexed { index, voice ->
+                OptionSelectionItem(personalVoiceSlotTitle(voice, index) + "\n" + voice.id + " · " + voiceSlotSummary(voice),
+                    selected = !postpaid && slotId == voice.id,
+                    enabled = enabled && voice.canTrain,
+                    modifier = Modifier.testTag("voice-create-slot:${voice.id}")) {
+                    if (enabled && !busy && current() && page == "CREATE" && step == 0 &&
+                        resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }) {
+                        slotId = voice.id; postpaid = false; confirmation = null; slotPicker = false
+                    }
+                }
+            }
+        }
         if (projectPicker) ChatSelectionSheet("选择项目", onDismiss = { projectPicker = false },
             showCloseButton = false, titleFontSize = 20.sp) {
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {

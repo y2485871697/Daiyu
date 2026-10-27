@@ -36,7 +36,7 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
 
     def test_each_step_uses_independent_shared_cards_without_custom_paint(self):
         cards = [
-            ['name', 'advanced', 'slots', 'sync', 'manual', 'next-sample'],
+            ['name', 'advanced', 'sync', 'manual', 'next-sample'],
             ['sample', 'next-confirm'],
             ['summary', 'consent', 'submit'],
         ]
@@ -53,17 +53,17 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
         for required in (
             'name = it.take(80); confirmation = null',
             'if (advancedCreation) SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled)',
-            'personalVoiceSlots(voices, creating = true, postpaid = postpaid)',
-            'enabled = enabled && voice.canTrain',
-            'slotId = voice.id; postpaid = false; confirmation = null',
-            'if (!enabled) null else ({ navigate("SYNC") })',
+            'SettingsRow("选择音色名额"',
+            'if (resources.voices.state.value.any { it.account == account?.fingerprint &&',
+            'else navigate("SYNC")',
             'if (busy) null else ({ manualId = !manualId })',
             'AccountField("名额 ID", slotId, busy)',
             'if (!enabled || name.isBlank() || (!postpaid && (!slotId.matches(Regex("S_[A-Za-z0-9_-]+")) || voices.firstOrNull { it.id == slotId }?.canTrain == false))) null',
             'step = 1; agreed = false',
         ):
             self.assertIn(required, first)
-        self.assertIn('if (slots.isNotEmpty()) item', first)
+        self.assertNotIn('voice-create-slots-card', first)
+        self.assertNotIn('SettingsRadioRow(', first)
         self.assertNotIn('resources.voices.create(', first)
 
     def test_sample_selection_does_not_read_or_upload_audio(self):
@@ -97,7 +97,8 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
     def test_all_creation_steps_omit_static_small_descriptions_but_keep_actual_values(self):
         for step in self.steps:
             self.assertNotIn('SettingsNote(', step)
-        self.assertIn('summary = voiceSlotSummary(voice)', self.steps[0])
+        self.assertIn('voiceSlotSummary(voice)', self.panel)
+        self.assertIn('personalVoiceSlotTitle(it.value, it.index)', self.steps[0])
         self.assertIn('summary = if (sampleUri == null) null else sampleName', self.steps[1])
         self.assertNotIn('选择文件不会上传', self.steps[1])
         self.assertIn('SettingsRow("名称", summary = name)', self.steps[2])

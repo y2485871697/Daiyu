@@ -62,6 +62,15 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('entry.messages <= 0 && entry.failure == null) return', divider)
         self.assertIn('indication = null', divider)
 
+    def test_timeline_lines_use_readable_theme_foreground_at_the_existing_half_dp_height(self):
+        divider = source('ui/screens/chat/conversation/ChatTimelineDivider.kt')
+        self.assertIn('val line = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .5f)', divider)
+        self.assertNotIn('val line = MiuixTheme.colorScheme.outline', divider)
+        self.assertEqual(2, divider.count('Modifier.weight(1f).height(.5.dp).background(line)'))
+        self.assertIn('val color = MiuixTheme.colorScheme.onSurfaceVariantSummary', divider)
+        self.assertIn('.padding(horizontal = 20.dp, vertical = 10.dp)', divider)
+        self.assertIn('style = MiuixTheme.textStyles.footnote2, color = color', divider)
+
     def test_backup_v7_validates_display_payload_and_authoritative_anchor(self):
         backup = source('backup/NeutralBackupService.kt')
         self.assertIn('columnsFor(8)', backup)

@@ -1,17 +1,76 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.timeline.*
 import app.daiyu.android.ui.app.AgentAppTheme
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.abs
 
 class ChatTimelineDividerTest : WiredActivityTestCase() {
     private val anchor = TimelineAnchor("conversation", "run", "message", 0)
+    fun testBothTimelineLinesUseReadableThemeColorWithoutChangingTheirGeometry() {
+        val entry = ChatTimelineEntry.Compression("contrast", anchor, 1L, "summary", null, 49, null, null)
+        for (dark in listOf(false, true)) for (custom in listOf(false, true)) {
+            var background = Color.Unspecified
+            var expected = Color.Unspecified
+            var previous = Color.Unspecified
+            lateinit var density: Density
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(
+                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                    paletteSeedColor = if (custom) 0xFF56896C.toInt() else null,
+                    pureBlackEnabled = dark && custom,
+                ), applyInterfaceScale = false) {
+                    density = LocalDensity.current
+                    val colors = MiuixTheme.colorScheme
+                    background = colors.background
+                    expected = colors.onSurfaceVariantSummary.copy(alpha = .5f).compositeOver(background)
+                    previous = colors.outline.copy(alpha = .55f).compositeOver(background)
+                    Box(Modifier.requiredWidth(360.dp).background(background)) { ChatTimelineDivider(entry) }
+                }
+            } }
+            awaitUniqueTag("timeline:contrast")
+            awaitVisualIdle()
+            val timeline = ui.onNodeWithTag("timeline:contrast").assertIsDisplayed()
+            ui.onNodeWithText("主代理 · 已压缩 49 条消息").assertIsDisplayed()
+            val pixels = captureScreenNode(timeline).toPixelMap()
+            val inset = with(density) { 24.dp.roundToPx() }
+            fun distance(a: Color, b: Color): Float = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
+            val center = pixels.height / 2
+            for (x in listOf(inset, pixels.width - 1 - inset)) {
+                val stripe = (center - 3..center + 3).filter { it in 0 until pixels.height }
+                    .map { pixels[x, it] }.filter { distance(it, background) > .02f }
+                assertEquals(with(density) { .5.dp.roundToPx() }.coerceAtLeast(1), stripe.size)
+                assertTrue("line color follows theme; dark=$dark custom=$custom",
+                    stripe.any { distance(it, expected) < .035f })
+                assertTrue("line must be clearer than the old outline; dark=$dark custom=$custom",
+                    stripe.maxOf { distance(it, background) } > distance(previous, background) + .04f)
+            }
+            ui.onNodeWithText("主代理 · 已压缩 49 条消息").performClick()
+            ui.onNodeWithText("压缩摘要").assertIsDisplayed()
+            ui.onNodeWithTag("timeline-close").performClick()
+            ui.onNodeWithTag("timeline-details").assertDoesNotExist()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testContextLimitDividerIsNonInteractiveAndNeverOpensDetails() {
         val entry = ChatTimelineEntry.ContextLimit("context-limit:one", anchor, 1L, 280_000L, 272_000L, 270_000L)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {

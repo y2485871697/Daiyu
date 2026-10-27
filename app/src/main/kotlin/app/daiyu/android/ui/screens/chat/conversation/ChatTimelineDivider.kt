@@ -84,7 +84,7 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
         is ChatTimelineEntry.ContextLimit -> "上下文超限"
     }
     val title = if (entry is ChatTimelineEntry.Compression && entry.failure == null) "压缩摘要" else "错误详情"
-    val line = MiuixTheme.colorScheme.outline.copy(alpha = .55f)
+    val line = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .5f)
     val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
     Row(Modifier.fillMaxWidth().alpha(alpha).testTag("timeline:${entry.id}").padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {

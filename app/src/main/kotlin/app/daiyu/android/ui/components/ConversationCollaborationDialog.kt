@@ -112,6 +112,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     val panelState = panelEditor?.observe()
     val panelConfig = (panelState as? SubAgentEditorState.Loaded)?.config
     val panelEnabled = canChange && panelEditor?.enabled == true && panelConfig != null
+    var addedDraft by remember(panelEditor) { mutableStateOf<SubAgentProfileDraftSession?>(null) }
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
         WithoutPressRipple {
             ConversationAgentTypography {
@@ -164,7 +165,6 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                 applicationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                             } else if (current != null && editor != null && panelEditor != null) {
                                 key(panelEditor) {
-                                    var addedDraft by remember(panelEditor) { mutableStateOf<SubAgentProfileDraftSession?>(null) }
                                     CompositionLocalProvider(LocalConversationSubAgentEditor provides panelEditor) {
                                         when (panelState) {
                                             is SubAgentEditorState.Error -> {
@@ -195,23 +195,25 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                                 Spacer(Modifier.height(8.dp))
                                             }
                                         }
-                                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("subagent-collaboration-add-row"),
-                                            verticalAlignment = Alignment.CenterVertically) {
-                                            Text("点按模型切换 · 长按调整思考", style = MaterialTheme.typography.labelSmall.copy(
-                                                platformStyle = PlatformTextStyle(includeFontPadding = false),
-                                                lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)),
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.weight(1f).testTag("subagent-collaboration-hint"))
-                                            ConversationAgentIconButton(modifier = Modifier.size(48.dp).testTag("subagent-collaboration-add"), enabled = panelEnabled, onClick = {
-                                                if (panelEnabled && panelEditor.enabled) SubAgentProfileDraftSession.open(panelEditor)?.let { addedDraft = it }
-                                            }) { Icon(Icons.Rounded.Add, "添加子代理", Modifier.size(22.dp)) }
-                                        }
                                         addedDraft?.let { session ->
                                             SubAgentProfileConfigDialog(session, panelEditor, providers, enabled = latestOwnerMatches() && !latestTaskRunning && !latestChoosing,
                                                 onDismiss = { session.dismiss(); if (addedDraft === session) addedDraft = null }, onRetry = { editor.retry(); panelEditor.retry() })
                                         }
                                     }
                                 }
+                            }
+                        }
+                        if (current != null && editor != null && panelEditor != null) {
+                            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("subagent-collaboration-add-row"),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text("点按模型切换 · 长按调整思考", style = MaterialTheme.typography.labelSmall.copy(
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                                    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f).testTag("subagent-collaboration-hint"))
+                                ConversationAgentIconButton(modifier = Modifier.size(48.dp).testTag("subagent-collaboration-add"), enabled = panelEnabled, onClick = {
+                                    if (panelEnabled && panelEditor.enabled) SubAgentProfileDraftSession.open(panelEditor)?.let { addedDraft = it }
+                                }) { Icon(Icons.Rounded.Add, "添加子代理", Modifier.size(22.dp)) }
                             }
                         }
                         HorizontalDivider(Modifier.padding(top = if (panelEditor != null) 8.dp else 10.dp).testTag("subagent-collaboration-footer-divider"), color = conversationAgentColors().line)

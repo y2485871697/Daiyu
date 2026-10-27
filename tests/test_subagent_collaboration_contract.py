@@ -33,7 +33,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
 
     def test_chat_hint_and_add_share_a_compact_centered_row_without_stacked_padding(self):
         dialog = (UI / 'ConversationCollaborationDialog.kt').read_text()
-        row = dialog.split('Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("subagent-collaboration-add-row")', 1)[1].split('addedDraft?.let', 1)[0]
+        row = dialog.split('Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("subagent-collaboration-add-row")', 1)[1].split('HorizontalDivider(Modifier.padding(top = if (panelEditor != null)', 1)[0]
         self.assertIn('verticalAlignment = Alignment.CenterVertically', row)
         self.assertIn('PlatformTextStyle(includeFontPadding = false)', row)
         self.assertIn('LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)', row)
@@ -54,6 +54,51 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
         self.assertIn('.verticalScroll(', body)
         self.assertIn('testTag("subagent-collaboration-footer")', footer)
         self.assertNotIn('verticalScroll(', footer)
+
+    def test_hint_and_add_are_siblings_of_the_scroll_body_before_footer_divider(self):
+        dialog = (UI / 'ConversationCollaborationDialog.kt').read_text()
+        start = dialog.index('Column(Modifier.fillMaxWidth().weight(1f).testTag("subagent-collaboration-body")')
+        opening = dialog.index(' {', dialog.index('.padding(bottom = if (panelEditor != null)', start)) + 1
+        depth = 1
+        cursor = opening + 1
+        while depth:
+            if dialog[cursor] == '{':
+                depth += 1
+            elif dialog[cursor] == '}':
+                depth -= 1
+            cursor += 1
+        body = dialog[start:cursor]
+        fixed = dialog[cursor:dialog.index('testTag("subagent-collaboration-footer-divider")', cursor)]
+        self.assertIn('.verticalScroll(', body)
+        self.assertNotIn('subagent-collaboration-add-row', body)
+        self.assertIn('SubAgentProfileRow(profile, providers, enabled = panelEnabled', body)
+        self.assertIn('addedDraft?.let { session ->', body)
+        self.assertIn('if (current != null && editor != null && panelEditor != null)', fixed)
+        self.assertIn('subagent-collaboration-add-row', fixed)
+        self.assertIn('subagent-collaboration-hint', fixed)
+        self.assertIn('subagent-collaboration-add', fixed)
+        self.assertNotIn('verticalScroll(', fixed)
+        self.assertEqual(1, dialog.count('var addedDraft by remember(panelEditor)'))
+        self.assertLess(dialog.index('var addedDraft by remember(panelEditor)'), start)
+
+    def test_android_fixed_add_row_regression_covers_empty_short_long_and_scroll(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/CollaborationEmptyStateTest.kt').read_text()
+        test = test.split('fun testCurrentPanelHintAndAddStayAboveFooterForEmptyShortAndLongProfiles()', 1)[1]
+        test = test.split('fun testEmptyPresetDirectory', 1)[0]
+        for required in ('listOf(false, true)', 'listOf(1f, 1.3f)', 'listOf(0, 1, 8)',
+                         'Add row starts below the scroll body', 'body.bottom, rowBounds.top',
+                         '8f * density, divider.top - rowBounds.bottom',
+                         'Last profile is reachable above the fixed add row',
+                         'Scrolling never moves the add row', 'Scrolling never moves the add button',
+                         'Scrolling never moves the divider', 'Scrolling never moves the footer',
+                         'Hint and add centers', 'Text line box centers',
+                         'assertEquals(before, prefs.all)', 'assertEquals(0, fixture.opens.get())',
+                         'node("subagent-config-window").assertDoesNotExist()', 'awaitNodeWindowFocus(done)'):
+            self.assertIn(required, test)
+        self.assertNotIn('node("subagent-collaboration-add-row").scrollToVisible()', test)
+        for obsolete in ('Add row remains inside the scroll body', 'Last card gap stays 8dp',
+                         'Short content leaves space inside the body, not below the footer'):
+            self.assertNotIn(obsolete, test)
 
     def test_android_height_and_footer_regression_covers_short_and_long_content(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/BottomSheetEdgeActivityTest.kt').read_text()

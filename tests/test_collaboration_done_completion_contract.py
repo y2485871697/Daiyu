@@ -7,7 +7,7 @@ SOURCE = Path(__file__).resolve().parents[1] / 'app/src/androidTest/kotlin/app/d
 
 class CollaborationDoneCompletionContractTest(unittest.TestCase):
     def body(self):
-        return SOURCE.read_text(encoding='utf-8').split('fun testCurrentPanelHintAndAddCenterInCompactRowForEmptyAndThreeProfiles()', 1)[1].split('fun testEmptyPresetDirectoryKeepsCurrentConfigurationEntryAndDoesNotApplyAnything()', 1)[0]
+        return SOURCE.read_text(encoding='utf-8').split('fun testCurrentPanelHintAndAddStayAboveFooterForEmptyShortAndLongProfiles()', 1)[1].split('fun testEmptyPresetDirectoryKeepsCurrentConfigurationEntryAndDoesNotApplyAnything()', 1)[0]
 
     def test_parent_focus_and_single_real_click_precede_bounded_dismissal(self):
         body = self.body()
@@ -23,9 +23,9 @@ class CollaborationDoneCompletionContractTest(unittest.TestCase):
 
     def test_original_geometry_preferences_and_zero_io_oracles_remain(self):
         body = self.body()
-        self.assertIn('for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (count in listOf(0, 3))', body)
+        self.assertIn('for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (count in listOf(0, 1, 8))', body)
         self.assertEqual(2, body.count('assertEquals(before, prefs.all)'))
-        for oracle in ['Hint and add centers:', 'Add glyph centers:', 'No extra top inset:', 'No extra bottom inset:', 'Hint does not overflow:', 'Text line box centers:', 'Last card gap stays 8dp:', 'Add row remains inside the scroll body:', 'Long content scrolls to the body bottom:', 'Short content leaves space inside the body, not below the footer:', 'Footer gap stays 8dp:', 'assertEquals(0, fixture.opens.get())', 'add.performTouchInput { click(']:
+        for oracle in ['Hint and add centers:', 'Add glyph centers:', 'No extra top inset:', 'No extra bottom inset:', 'Hint does not overflow:', 'Text line box centers:', 'Add row starts below the scroll body:', 'Add row stays 8dp above the footer divider:', 'Short content leaves whitespace above the fixed add row:', 'Profile scroll actually advances:', 'Profiles scroll back toward the start:', 'Scrolling never moves the add row:', 'Scrolling never moves the footer:', 'assertEquals(0, fixture.opens.get())', 'add.performTouchInput { click(']:
             self.assertIn(oracle, body)
 
 

@@ -169,13 +169,13 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         }
     }
 
-    fun testCurrentPanelHintAndAddCenterInCompactRowForEmptyAndThreeProfiles() {
+    fun testCurrentPanelHintAndAddStayAboveFooterForEmptyShortAndLongProfiles() {
         val provider = SubAgentProvider("provider", "Provider", listOf(
             SubAgentModel("model", "gpt-6.1-sol", supportsGptSpeed = true)))
         val source = object : SubAgentModelSource {
             override val providers = MutableStateFlow(listOf(provider))
         }
-        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (count in listOf(0, 3)) {
+        for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (count in listOf(0, 1, 8)) {
             val prefs = instrumentation.targetContext.getSharedPreferences("collaboration-add-row-${UUID.randomUUID()}", 0)
             try {
                 val repository = ConversationSubAgentPreferences(prefs)
@@ -188,7 +188,8 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 assertTrue(repository.applyPreset(owner, preset.id) is ConversationSubAgentPreferences.WriteResult.Saved)
                 val before = prefs.all.toMap()
                 show(owner.value, repository, dark, fontScale, source)
-                val row = node("subagent-collaboration-add-row").scrollToVisible().assertIsDisplayed().assertHeightIsEqualTo(48.dp)
+                awaitDialogEnter(node("subagent-collaboration-card"))
+                val row = node("subagent-collaboration-add-row").assertIsDisplayed().assertHeightIsEqualTo(48.dp)
                 val add = node("subagent-collaboration-add").assertIsEnabled().assertHasClickAction()
                     .assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
                 awaitNodeWindowFocus(add)
@@ -209,17 +210,41 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 assertFalse("Hint does not overflow: $geometry", text.hasVisualOverflow)
                 assertEquals("Text line box centers: $geometry", addBounds.center.y,
                     hintBounds.top + (text.getLineTop(0) + text.getLineBottom(text.lineCount - 1)) / 2f, 1f)
-                if (count == 3) {
-                    val lastCard = node("subagent-card-worker-2").fetchSemanticsNode()
-                    val lastCardBottom = lastCard.positionInRoot.y + lastCard.size.height
-                    assertEquals("Last card gap stays 8dp: $geometry", 8f * density, rowBounds.top - lastCardBottom, 1.5f)
-                }
                 val divider = node("subagent-collaboration-footer-divider").fetchSemanticsNode().boundsInRoot
                 val body = node("subagent-collaboration-body").fetchSemanticsNode().boundsInRoot
-                assertTrue("Add row remains inside the scroll body: $geometry", rowBounds.bottom <= body.bottom + 1.5f)
-                if (count == 3) assertEquals("Long content scrolls to the body bottom: $geometry", body.bottom, rowBounds.bottom, 1.5f)
-                else assertTrue("Short content leaves space inside the body, not below the footer: $geometry", (body.bottom - rowBounds.bottom) / density > 60f)
-                assertEquals("Footer gap stays 8dp: $geometry", 8f * density, divider.top - body.bottom, 1.5f)
+                val footer = node("subagent-collaboration-footer").fetchSemanticsNode().boundsInRoot
+                assertEquals("Add row starts below the scroll body: $geometry", body.bottom, rowBounds.top, 1.5f)
+                assertEquals("Add row stays 8dp above the footer divider: $geometry", 8f * density, divider.top - rowBounds.bottom, 1.5f)
+                assertTrue("Add row remains above the buttons: $geometry", rowBounds.bottom <= footer.top)
+                if (count <= 1) {
+                    val contentBottom = if (count == 0) ui.onNodeWithText("自动委派").fetchSemanticsNode().boundsInRoot.bottom
+                        else node("subagent-card-worker-0").fetchSemanticsNode().boundsInRoot.bottom
+                    assertTrue("Short content leaves whitespace above the fixed add row: $geometry", rowBounds.top > contentBottom)
+                } else {
+                    val scrollRange = node("subagent-collaboration-body").fetchSemanticsNode()
+                        .config[androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange]
+                    assertTrue("Long profiles require scrolling: $geometry", scrollRange.maxValue() > 0f)
+                    val initialScroll = scrollRange.value()
+                    node("subagent-card-worker-${count - 1}").scrollToVisible().assertIsDisplayed()
+                    val bottomScroll = scrollRange.value()
+                    assertTrue("Profile scroll actually advances: $geometry", bottomScroll > initialScroll)
+                    val lastCard = node("subagent-card-worker-${count - 1}").fetchSemanticsNode()
+                    val lastCardBottom = lastCard.positionInRoot.y + lastCard.size.height
+                    assertTrue("Last profile is reachable above the fixed add row: $geometry", lastCardBottom <= rowBounds.top + 1.5f)
+                    val scrolledRow = row.fetchSemanticsNode().boundsInRoot
+                    val scrolledAdd = add.fetchSemanticsNode().boundsInRoot
+                    val scrolledDivider = node("subagent-collaboration-footer-divider").fetchSemanticsNode().boundsInRoot
+                    val scrolledFooter = node("subagent-collaboration-footer").fetchSemanticsNode().boundsInRoot
+                    assertEquals("Scrolling never moves the add row: $geometry", rowBounds, scrolledRow)
+                    assertEquals("Scrolling never moves the add button: $geometry", addBounds, scrolledAdd)
+                    assertEquals("Scrolling never moves the divider: $geometry", divider, scrolledDivider)
+                    assertEquals("Scrolling never moves the footer: $geometry", footer, scrolledFooter)
+                    node("subagent-card-worker-0").scrollToVisible().assertIsDisplayed()
+                    assertTrue("Profiles scroll back toward the start: $geometry", scrollRange.value() < bottomScroll)
+                    assertEquals("Return scrolling never moves the add row: $geometry", rowBounds, row.fetchSemanticsNode().boundsInRoot)
+                    assertEquals("Return scrolling never moves the footer: $geometry", footer,
+                        node("subagent-collaboration-footer").fetchSemanticsNode().boundsInRoot)
+                }
                 assertEquals(before, prefs.all)
                 add.performTouchInput { click(androidx.compose.ui.geometry.Offset(2f * density, height / 2f)) }
                 node("subagent-config-window").assertIsDisplayed()

@@ -48,21 +48,37 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPopupReferenceGeometryRetainsSliderAndReopeningDoesNotWriteSpeed() {
+    fun testPopupLargerIconAndValueRetainSliderAndReopeningDoesNotWriteSpeed() {
         node("chat-reasoning").performClick()
-        node("chat-thinking-speed").assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(36.dp)
+        node("chat-thinking-speed").assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
+        ui.onNodeWithTag("chat-thinking-speed-icon", useUnmergedTree = true)
+            .assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(36.dp)
         node("thinking-depth-slider").assertHeightIsEqualTo(28.dp)
         awaitDialogEnter(node("chat-thinking-title"))
         val title = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
         node("chat-thinking-title").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) {
             assertTrue(it(title))
         }
-        assertEquals(14f, title.single().layoutInput.style.fontSize.value, .001f)
-        assertEquals(22f, title.single().layoutInput.style.lineHeight.value, .001f)
+        assertEquals(20f, title.single().layoutInput.style.fontSize.value, .001f)
+        assertEquals(28f, title.single().layoutInput.style.lineHeight.value, .001f)
         val layout = title.single()
         assertFalse("title size=${layout.size} constraints=${layout.layoutInput.constraints} " +
             "lines=${layout.lineCount} widthOverflow=${layout.didOverflowWidth} heightOverflow=${layout.didOverflowHeight} " +
             "bounds=${node("chat-thinking-title").fetchSemanticsNode().boundsInRoot}", layout.hasVisualOverflow)
+        val values = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        node("chat-thinking-value").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) {
+            assertTrue(it(values))
+        }
+        val value = values.single()
+        assertEquals(22f, value.layoutInput.style.fontSize.value, .001f)
+        assertEquals(30f, value.layoutInput.style.lineHeight.value, .001f)
+        assertFalse(value.hasVisualOverflow)
+        val iconBounds = ui.onNodeWithTag("chat-thinking-speed-icon", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val textSize = value.layoutInput.style.fontSize.value * value.layoutInput.density.fontScale * value.layoutInput.density.density
+        assertTrue("Thinking icon must be larger than the selected value text", iconBounds.height > textSize)
+        val sliderBounds = node("thinking-depth-slider").fetchSemanticsNode().boundsInRoot
+        val titleBounds = node("chat-thinking-title").fetchSemanticsNode().boundsInRoot
+        assertEquals("Slider keeps the existing content width", titleBounds.width, sliderBounds.width, 1f)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         node("chat-reasoning").performClick()
         assertNull(fixture.settings.load().requestOptions.speedMode)

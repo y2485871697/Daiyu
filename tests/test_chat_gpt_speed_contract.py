@@ -77,12 +77,19 @@ class ChatGptSpeedContractTest(unittest.TestCase):
         picker = source('ui/components/subagent/ConversationThinkingPicker.kt')
         subagent, main = picker.split('ConversationAgentTypography {', 1)
         self.assertIn('ConversationThinkingMark(Modifier.size(34.dp))', subagent)
-        for token in ('fontSize = 14.sp, lineHeight = 22.sp', 'Modifier.size(36.dp)',
-                      'modifier = Modifier.size(24.dp)', 'fontSize = 18.sp', 'lineHeight = 28.sp', 'bottom = 13.dp',
+        for token in ('fontSize = 20.sp, lineHeight = 28.sp', 'Modifier.size(48.dp)',
+                      'modifier = Modifier.size(36.dp).testTag("chat-thinking-speed-icon")',
+                      'fontSize = 22.sp', 'lineHeight = 30.sp', 'bottom = 13.dp',
                       'height(28.dp)', '11.dp.toPx()'):
             self.assertIn(token, main)
         self.assertIn('val speedClick = onCycleSpeed?.takeIf { speedMode != null }', main)
         self.assertNotIn('Toast', main)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatGptSpeedActivityTest.kt').read_text()
+        self.assertIn('testPopupLargerIconAndValueRetainSliderAndReopeningDoesNotWriteSpeed', regression)
+        for token in ('assertWidthIsEqualTo(48.dp)', 'assertWidthIsEqualTo(36.dp)',
+                      'assertHeightIsEqualTo(28.dp)', '22f, value.layoutInput.style.fontSize.value',
+                      '30f, value.layoutInput.style.lineHeight.value'):
+            self.assertIn(token, regression)
 
 if __name__ == '__main__':
     unittest.main()

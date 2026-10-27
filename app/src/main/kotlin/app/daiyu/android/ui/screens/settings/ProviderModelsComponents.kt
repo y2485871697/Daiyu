@@ -37,10 +37,10 @@ internal fun ProviderEmptyModelsPage(title: String, onBack: () -> Unit,
     SettingsScaffoldPage(title, onBack, listState = listState) {
         tabs()
         item("model-management") { ProviderModelManagementCard("") }
-        item("model-search") { SettingsSearch(query, { query = it }, "搜索模型", "local-model-search") }
-        item("model-empty") {
+        item("model-search") {
             SettingsSectionTitle("模型列表（共 0 个）")
-            SettingsNote(notice)
+            SettingsSearch(query, { query = it }, "搜索模型", "local-model-search")
         }
+        item("model-empty") { SettingsNote(notice) }
     }
 }

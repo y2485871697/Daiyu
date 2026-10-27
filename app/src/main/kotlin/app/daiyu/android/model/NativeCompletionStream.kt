@@ -64,7 +64,7 @@ internal object NativeCompletionStream {
             if (data == "[DONE]") { protocol(reason != null); done = true; return@frame false }
             if (data.trim() == "null") return@frame true
             val chunk = MessagesRequest.jsonObject(data)
-            if (chunk.has("error")) throw ModelRequestException(ModelFailure.REQUEST)
+            if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"))
             if (chunk.has("id") && !chunk.isNull("id")) {
                 val next = chunk.string("id")
                 if (next.isNotBlank()) { protocol(sourceId == null || sourceId == next); sourceId = next }
@@ -196,7 +196,7 @@ internal object NativeCompletionStream {
             if (cancelled()) throw InterruptedException()
             if (data == "[DONE]") { protocol(reason != null); return@frame false }
             val chunk = MessagesRequest.jsonObject(data)
-            if (chunk.has("error")) throw ModelRequestException(ModelFailure.REQUEST)
+            if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"))
             chunk.optJSONObject("promptFeedback")?.let { if (it.has("blockReason")) throw ModelRequestException(ModelFailure.INCOMPLETE) }
             chunk.optJSONObject("usageMetadata")?.let { value ->
                 val input = ProviderUsage.count(value, "promptTokenCount")

@@ -224,7 +224,8 @@ internal object ResponsesStream {
                     usage?.let(sink)
                     if (prefix != null) sink(ModelEvent.ProtocolOutput(prefix + checkNotNull(output)))
                 }
-                "response.failed","error" -> throw ModelRequestException(ModelFailure.REQUEST)
+                "response.failed","error" -> throw ProviderHttpFailure.event(
+                    event.optJSONObject("response")?.optJSONObject("error") ?: event.optJSONObject("error") ?: event)
                 "response.incomplete" -> throw ModelRequestException(ModelFailure.INCOMPLETE)
             }
             if (acknowledgedSink != null) {

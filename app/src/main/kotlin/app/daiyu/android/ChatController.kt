@@ -4578,7 +4578,7 @@ class ChatController internal constructor(private val application:Application,
             }
             if (active) switchChatReasoningModel(editor.slotId, providers.catalogSnapshot(editor).models.singleOrNull { it.id == expected.model }?.settings?.localIdentity,
                 editor.slotId, ticket.record.settings.localIdentity, change) else change()
-            "模型已切换"
+            null
         })
     }
     internal fun selectActiveProviderCatalogModel(expectedActive: ProviderEditorSlot?, expectedSettings: ModelSettings?,
@@ -4595,7 +4595,7 @@ class ChatController internal constructor(private val application:Application,
                 target.slotId, ticket.record.settings.localIdentity) {
                 providers.selectActiveCatalogModel(expectedActive, expectedSettings, target, targetSettings, ticket, cancelled)
             }
-            "模型已切换"
+            null
         })
     }
     internal fun renameProviderCatalogModel(editor: ProviderEditorSlot,
@@ -4673,7 +4673,7 @@ class ChatController internal constructor(private val application:Application,
         invalidateVideoConfiguration()
         dataTask(failureNotice="模型切换未保存",completed=completed,work={
             settings.selectModel(expected,model)
-            "模型已切换"
+            null
         })
     }
     internal fun selectConfiguredCatalogModel(
@@ -4685,7 +4685,7 @@ class ChatController internal constructor(private val application:Application,
         invalidateVideoConfiguration()
         dataTask(failureNotice = "模型切换未保存", completed = completed, work = {
             settings.selectCatalogModel(expected, ticket)
-            "模型已切换"
+            null
         })
     }
     internal fun renameConfiguredCatalogModel(

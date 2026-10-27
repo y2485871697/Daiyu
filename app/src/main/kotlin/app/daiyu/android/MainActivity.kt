@@ -2606,7 +2606,7 @@ class MainActivity : ComponentActivity() {
                     val dismiss = { if (chatModelOwner === owner) dismissChatModels() }
                     if (session == null) ChatModelPicker(picker, onSelect = {}, onDismiss = dismiss)
                     else LocalCatalogChatModelPicker(session, enabled = picker.enabled,
-                        loading = picker.loading, message = picker.message,
+                        loading = picker.loading, message = picker.message, switching = picker.switching,
                         onSelect = { selectChatModel(it, owner, session) },
                         onSelectOtherProvider = { providerId, ticket -> selectChatModel(ticket, owner, session, providerId) },
                         onDismiss = dismiss)
@@ -6126,7 +6126,7 @@ class MainActivity : ComponentActivity() {
         trackShizukuPreparation()
         backupBusy = controller.dataBusy
         backupStatus = controller.dataStatus
-        chatModelPicker = chatModelPicker?.let { picker -> picker.copy(enabled = !picker.loading &&
+        chatModelPicker = chatModelPicker?.let { picker -> picker.copy(enabled = !picker.loading && !picker.switching &&
             !chatModelSelectionFailed && (chatModelProviderEditor == null || chatModelSettings != null) &&
             chatModelProviderChoices.isNotEmpty() && chatModelSession != null && controller.active == null &&
             !controller.dataBusy && controller.ready) }
@@ -6574,6 +6574,7 @@ class MainActivity : ComponentActivity() {
     ) {
         if (owner == null || chatModelOwner !== owner || chatModelSession !== session) return
         val picker = chatModelPicker ?: return
+        if (picker.switching) return
         val saved = chatModelSettings
         val target = chatModelProviderChoices[providerId] ?: return
         val cancelled = chatModelCancelled
@@ -6581,6 +6582,7 @@ class MainActivity : ComponentActivity() {
             requireActivityUsable()
             check(!chatModelSelectionFailed && picker.enabled && !picker.loading && retainedPage == "chat" && controller.ready &&
                 controller.active == null && !controller.dataBusy)
+            chatModelPicker = picker.copy(switching = true)
             controller.selectActiveProviderCatalogModel(chatModelProviderEditor, saved, target.editor, target.settings, ticket,
                 cancelled = { cancelled.get() }) { success ->
                 if (activityUsable()) {
@@ -6592,7 +6594,7 @@ class MainActivity : ComponentActivity() {
                         if (success) { dismissChatModels(); refresh() }
                         else {
                             chatModelSelectionFailed = true
-                            chatModelPicker = chatModelPicker?.copy(enabled = false,
+                            chatModelPicker = chatModelPicker?.copy(enabled = false, switching = false,
                                 message = "切换未保存，请关闭后重新打开选择模型")
                         }
                     }
@@ -6601,7 +6603,7 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             if (chatModelOwner === owner && chatModelSession === session) {
                 chatModelSelectionFailed = true
-                chatModelPicker = picker.copy(enabled = false, message = "切换未保存，请关闭后重新打开选择模型")
+                chatModelPicker = picker.copy(enabled = false, switching = false, message = "切换未保存，请关闭后重新打开选择模型")
             }
         }
     }

@@ -101,6 +101,49 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
         ui.onNodeWithText(failure).assertIsDisplayed()
     }
 
+    fun testModelSwitchKeepsPixelsAndSuppressesTaskHintWithoutAcceptingMoreSelections() {
+        for (dark in listOf(false, true)) {
+            val updates = mutableStateOf(state)
+            show(updates = updates, dark = dark)
+            awaitVisualIdle()
+            val tags = listOf("chat-model-option:same", "chat-model-option:next")
+            val before = tags.associateWith { captureScreenNode(node(it)).toPixelMap() }
+            val callbacksBefore = selected.size
+            for (enabled in listOf(true, false)) {
+                mainThread { updates.value = state.copy(enabled = enabled, switching = true) }
+                awaitVisualIdle()
+                ui.onNodeWithText("当前任务结束后可切换模型").assertDoesNotExist()
+                for (tag in tags) {
+                    node(tag).assertIsNotEnabled().performTouchInput { click(center) }
+                    val expected = before.getValue(tag)
+                    val actual = captureScreenNode(node(tag)).toPixelMap()
+                    assertEquals(expected.width, actual.width)
+                    assertEquals(expected.height, actual.height)
+                    var changed = 0
+                    for (y in 0 until expected.height) for (x in 0 until expected.width) {
+                        if (expected[x, y] != actual[x, y]) changed++
+                    }
+                    assertEquals("switching must not dim $tag (dark=$dark, enabled=$enabled)", 0, changed)
+                }
+                assertEquals(callbacksBefore, selected.size)
+                node("chat-model-provider:b").performClick()
+                node("chat-model-option:b:same").assertIsNotEnabled().performTouchInput { click(center) }
+                assertEquals(callbacksBefore, selected.size)
+                node("chat-model-provider:a").performClick()
+            }
+            val failure = "切换未保存，请关闭后重新打开选择模型"
+            mainThread { updates.value = state.copy(enabled = false, message = failure) }
+            ui.onNodeWithText(failure).assertIsDisplayed()
+            node("chat-model-option:next").assertIsNotEnabled()
+            mainThread { updates.value = state.copy(enabled = false) }
+            ui.onNodeWithText("当前任务结束后可切换模型").assertIsDisplayed()
+            mainThread { updates.value = state }
+            node("chat-model-option:next").assertIsEnabled().performTouchInput { click(center) }
+            assertEquals(callbacksBefore + 1, selected.size)
+            assertEquals("a" to "next", selected.last())
+        }
+    }
+
     fun testHtmlStructureAndAccordionAcrossThemesAndScales() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(dark = dark, scale = scale)

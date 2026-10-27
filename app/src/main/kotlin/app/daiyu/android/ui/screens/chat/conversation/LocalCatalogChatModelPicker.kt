@@ -44,13 +44,14 @@ internal fun LocalCatalogChatModelPicker(
     onSelect: (CatalogModelSelection<CatalogModelParameters>) -> Unit,
     onSelectOtherProvider: (String, CatalogModelSelection<CatalogModelParameters>) -> Unit,
     onDismiss: () -> Unit,
+    switching: Boolean = false,
 ) {
     ChatModelPicker(
-        state = session.state.copy(enabled = enabled && !loading, loading = loading, message = message),
-        onSelect = { id -> if (enabled && !loading) session.selectionFor(id)?.let(onSelect) },
+        state = session.state.copy(enabled = enabled && !loading, loading = loading, message = message, switching = switching),
+        onSelect = { id -> if (enabled && !loading && !switching) session.selectionFor(id)?.let(onSelect) },
         onDismiss = onDismiss,
         onSelectOtherProvider = { providerId, id ->
-            if (enabled && !loading) session.selectionFor(providerId, id)?.let { onSelectOtherProvider(providerId, it) }
+            if (enabled && !loading && !switching) session.selectionFor(providerId, id)?.let { onSelectOtherProvider(providerId, it) }
         },
     )
 }

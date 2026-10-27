@@ -62,6 +62,7 @@ internal data class ChatModelPickerState(
     val enabled: Boolean = true,
     val providerId: String = "current",
     val providers: List<ChatModelProviderUi> = emptyList(),
+    val switching: Boolean = false,
 )
 
 @Composable
@@ -94,11 +95,12 @@ internal fun ChatModelPicker(
             if (models.isEmpty()) null else provider.copy(models = models)
         }
     }
-    val canSelect = state.enabled && !state.loading
+    val canSelect = state.enabled && !state.loading && !state.switching
+    val visuallyEnabled = (state.enabled || state.switching) && !state.loading
     val status = when {
         state.loading -> "正在读取模型目录…"
         state.message != null -> state.message
-        !state.enabled -> "当前任务结束后可切换模型"
+        !state.enabled && !state.switching -> "当前任务结束后可切换模型"
         else -> null
     }
     ChatSelectionSheet(height = 500.dp, title = title, showCloseButton = false, onDismiss = onDismiss) {
@@ -174,7 +176,7 @@ internal fun ChatModelPicker(
                             Box(Modifier.fillMaxWidth()
                                 .modelGroupSurface(top = false, bottom = index == provider.models.lastIndex, surface = surface, line = colors.line)
                                 .padding(start = 4.dp, end = 4.dp, bottom = if (index == provider.models.lastIndex) 4.dp else 2.dp)) {
-                                Row(Modifier.testTag(tag).fillMaxWidth().alpha(if (canSelect) 1f else .45f)
+                                Row(Modifier.testTag(tag).fillMaxWidth().alpha(if (visuallyEnabled) 1f else .45f)
                                     .clip(RoundedCornerShape(12.dp)).background(if (selected) selectedBackground else Color.Transparent)
                                     .selectable(selected = selected, enabled = canSelect, role = Role.RadioButton,
                                         interactionSource = remember { MutableInteractionSource() }, indication = null,

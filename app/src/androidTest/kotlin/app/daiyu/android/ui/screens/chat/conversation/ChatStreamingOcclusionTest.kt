@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
@@ -21,6 +22,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import top.yukonga.miuix.kmp.basic.Text
 
 class ChatStreamingOcclusionTest : WiredActivityTestCase() {
+    private var density = 1f
     private var height by mutableStateOf(600.dp)
     private var editorHeight by mutableStateOf(96.dp)
     private var viewportHeight by mutableStateOf(420.dp)
@@ -30,6 +32,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
                     BoxWithConstraints(Modifier.size(320.dp, viewportHeight)) {
                         ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { bottomInset ->
                             ChatMessageList(
@@ -49,17 +52,19 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
-        assertTailAboveComposer()
+        assertTailClearance()
     }
 
     private fun tailTop(): Float = ui.onNodeWithTag("chat-turn:tail")
         .fetchSemanticsNode().layoutInfo.coordinates.positionInRoot().y
 
-    private fun assertTailAboveComposer() {
+    private fun assertTailClearance() {
         val coordinates = ui.onNodeWithTag("occlusion-tail").fetchSemanticsNode().layoutInfo.coordinates
         val tailBottom = coordinates.positionInRoot().y + coordinates.size.height
         val composerTop = ui.onNodeWithTag("occlusion-composer").fetchSemanticsNode().boundsInRoot.top
-        assertTrue("Unclipped output tail $tailBottom must stay above composer $composerTop", tailBottom <= composerTop + 1f)
+        val gap = (composerTop - tailBottom) / density
+        assertTrue("Streaming tail must keep at least 16dp clear of composer: gap=${gap}dp",
+            gap >= 16f - 1f / density)
     }
 
     private fun frame() {
@@ -75,17 +80,17 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 ui.runOnUiThread { height += growth.dp }
                 // One frame measures new content; the next lets the follower consume that layout.
                 repeat(2) { frame() }
-                assertTailAboveComposer()
+                assertTailClearance()
             }
             repeat(8) {
                 frame()
-                assertTailAboveComposer()
+                assertTailClearance()
             }
         } finally {
             ui.mainClock.autoAdvance = true
         }
         ui.waitForIdle()
-        assertTailAboveComposer()
+        assertTailClearance()
         assertEquals(0, fixture.opens.get())
     }
 
@@ -96,13 +101,13 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             for ((editor, viewport) in listOf(160 to 420, 72 to 300, 120 to 380, 96 to 420)) {
                 ui.runOnUiThread { editorHeight = editor.dp; viewportHeight = viewport.dp }
                 repeat(2) { frame() }
-                assertTailAboveComposer()
+                assertTailClearance()
             }
         } finally {
             ui.mainClock.autoAdvance = true
         }
         ui.waitForIdle()
-        assertTailAboveComposer()
+        assertTailClearance()
         assertEquals(0, fixture.opens.get())
     }
 
@@ -112,7 +117,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         try {
             ui.runOnUiThread { height += 120.dp }
             repeat(2) { frame() }
-            assertTailAboveComposer()
+            assertTailClearance()
             ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
             val stopped = tailTop()
             ui.runOnUiThread { height += 300.dp }
@@ -125,7 +130,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         }
         mainThread { request = ChatScrollRequest(2) }
         ui.waitForIdle()
-        assertTailAboveComposer()
+        assertTailClearance()
         mainThread { request = ChatScrollRequest(serial = 3, messageId = "u1", followBottom = false) }
         ui.waitForIdle()
         ui.onNodeWithText("history 1").assertIsDisplayed()

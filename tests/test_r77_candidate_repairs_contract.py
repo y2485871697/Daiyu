@@ -47,10 +47,11 @@ class R77CandidateRepairsContract(unittest.TestCase):
     def test_spacing_keeps_original_wait_and_geometry_oracle_with_last_sample_diagnostics(self):
         source = (TEST / 'ui/screens/chat/conversation/ChatMessageSpacingTest.kt').read_text()
         self.assertIn('ui.waitUntil(5_000)', source)
-        self.assertIn('displayed && gap in 8f..28f', source)
+        self.assertIn('displayed && gap in 30f..40f', source)
         self.assertIn('tail.size.height > viewport.height', source)
         self.assertIn('Compact tail after composer growth: $lastGeometry', source)
-        self.assertNotIn('autoAdvance = false', source)
+        settled = source.split('private fun assertCompactTail(', 1)[1].split('fun testCompleted', 1)[0]
+        self.assertNotIn('autoAdvance = false', settled)
         production = (UI / 'ChatMessageList.kt').read_text()
         self.assertNotIn('LaunchedEffect(listState, occlusionPx)', production)
         show = source.split('private fun show(', 1)[1].split('private fun assertCompactTail(', 1)[0]

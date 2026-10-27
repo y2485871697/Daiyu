@@ -86,6 +86,48 @@ class CloudContextUsageStoreTest : InstrumentationTestCase() {
             assertNull(CloudContextUsageStore.read(db, conversation, model.copy(configuration = 2)).inputTokens)
         } finally { db.close(); SQLiteDatabase.deleteDatabase(file) }
     }
+    fun testMessagesMissingCreationPersistsAndRestoresNormalizedCloudInput() {
+        val body = listOf(
+            """{"type":"message_start","message":{"id":"fixture","role":"assistant","content":[],"usage":{"input_tokens":40000,"cache_read_input_tokens":200000,"output_tokens":1}}}""",
+            """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}""",
+            """{"type":"content_block_stop","index":0}""",
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":123}}""",
+            """{"type":"message_stop"}""",
+        ).joinToString("") { "data: $it\n\n" }
+        val events = mutableListOf<ModelEvent>()
+        app.daiyu.android.model.MessagesStream.read(body.reader().buffered(), { false }, events::add)
+        val usage = events.filterIsInstance<ModelEvent.Usage>().single()
+        assertEquals(240_000L, usage.inputTokens)
+        assertEquals(200_000L, usage.cachedTokens)
+        assertNull(usage.cacheCreationTokens)
+        val scoped = model.copy(windowTokens = 272_000, receiptIdentity = "c".repeat(64))
+        val saved = checkpoint().let { it.copy(usage = listOf(it.usage.single().copy(snapshot = usage))) }
+        val file = java.io.File(instrumentation.targetContext.cacheDir, "context-messages-${UUID.randomUUID()}.db")
+        var db = SQLiteDatabase.openOrCreateDatabase(file, null)
+        try {
+            db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY)")
+            db.execSQL("INSERT INTO conversations VALUES('context-conversation')")
+            CloudContextUsageStore.installSchema(db)
+            transaction(db) { CloudContextUsageStore.record(db, saved, scoped) }
+            db.close()
+            db = SQLiteDatabase.openOrCreateDatabase(file, null)
+            val reopened = scoped.copy(configuration = 2, registryRevision = 3)
+            val restored = CloudContextUsageStore.read(db, conversation, reopened)
+            assertEquals(240_000L, restored.inputTokens)
+            assertEquals(240_000f / 272_000f, restored.fraction!!, .00001f)
+            assertEquals("240k/272k", restored.tokensLabel(java.util.Locale.US))
+            val summary = RequestCheckpoint("summary", "summary-attempt", "owner", RequestOperation.NEXT)
+            transaction(db) {
+                CloudContextUsageStore.record(db, saved.copy(usage = saved.usage +
+                    RequestUsageCheckpoint(summary, ModelEvent.Usage(270_000, 500), UsageRequestSource.SUMMARY)), scoped)
+            }
+            assertEquals(240_000L, CloudContextUsageStore.read(db, conversation, reopened).inputTokens)
+            assertNull(CloudContextUsageStore.read(db, conversation, scoped.copy(provider = "other")).inputTokens)
+            transaction(db) { CloudContextUsageStore.invalidate(db, conversation) }
+            assertNull(CloudContextUsageStore.read(db, conversation, reopened).inputTokens)
+        } finally { db.close(); SQLiteDatabase.deleteDatabase(file) }
+    }
+
     fun testActualPersistsWhilePartialDecreasesAndModelChangesRemainScoped() = database().use { db ->
         transaction(db) { CloudContextUsageStore.record(db, checkpoint(), model) }
         assertEquals(40_000L, CloudContextUsageStore.read(db, conversation, model).inputTokens)

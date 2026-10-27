@@ -39,7 +39,9 @@ internal object ProviderUsage {
     }
 
     fun messages(input: Long?, output: Long?, cached: Long?, creation: Long?): ModelEvent.Usage? {
-        val total = if (input != null && cached != null && creation != null) input + cached + creation else null
+        // Anthropic reports disjoint input categories; preserve whichever categories it supplies.
+        val total = if (input == null && cached == null && creation == null) null
+            else (input ?: 0L) + (cached ?: 0L) + (creation ?: 0L)
         if (total != null && total > MAX_TOKENS) invalid()
         return if (total == null && output == null && cached == null && creation == null) null
             else ModelEvent.Usage(total, output, cached, creation)

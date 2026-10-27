@@ -79,7 +79,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         snapshot.first?.setPaused(snapshot.second, snapshot.third)
     }
     private fun retainsTransportOnPause(): Boolean =
-        session is CheckpointedResumableModelSession && options.reconnect.budgetFactory != null
+        (session is CheckpointedResumableModelSession || session is RequestRetryModelSession) && options.reconnect.budgetFactory != null
     @Volatile private var identity: Message? = null
     private class WaitingSlice(
         val offer: BarrierOffer,
@@ -183,11 +183,16 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             } else Triple(null, boundaryWaiter, null)
         }
         captured.second?.let { LockSupport.unpark(it) }
-        val resumable = captured.first as? CheckpointedResumableModelSession
-        if (resumable != null && options.reconnect.budgetFactory != null) {
+        val retained = captured.first
+        if (options.reconnect.budgetFactory != null &&
+            (retained is CheckpointedResumableModelSession || retained is RequestRetryModelSession)) {
             syncReconnectPause()
-            captured.third?.invoke() ?: resumable.disconnectTransport()
-        } else cancelSession(captured.first)
+            captured.third?.invoke() ?: when (retained) {
+                is CheckpointedResumableModelSession -> retained.disconnectTransport()
+                is RequestRetryModelSession -> retained.disconnectTransport()
+                else -> Unit
+            }
+        } else cancelSession(retained)
         options.contextRuntime?.cancel()
         compactingRuntime?.cancel()
         return true
@@ -749,7 +754,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     // no persistence or observer callback below runs while terminalLock is held.
                     synchronized(eventLock) {
                     if (!accepting || token != generation || terminal || terminalReserved || stopped.get()) return@synchronized
+                    if (retainsTransportOnPause() && (pauseRequested || attemptFence != pauseEpoch))
+                        throw ModelDeliveryRejectedException()
                     try {
+                    reconnectBudget?.check()
                     sinkFailure?.let { throw it }
                     repetitiveSurface?.let { throw RepetitiveOutputException(it) }
                     when (event) {
@@ -839,7 +847,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             }
                         }
                     }
-                    } catch (failure: Exception) { sinkFailure = failure; throw failure }
+                    } catch (failure: Exception) { if (failure !is TransportReconnectDeadlineException) sinkFailure = failure; throw failure }
                     }
                 }
                 val acknowledgedSink: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
@@ -911,10 +919,20 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         }
                     }
                 }
+                // A repost replaces only this model turn. Prior tool receipts/outputs stay intact.
+                val requestBaseCurrent = current
+                val requestBaseHistory = segmentHistory.fork()
+                val requestBaseContext = contextState
+                val requestBaseOverhead = contextInputOverhead
+                val requestBaseRecords = records.toMap()
+                val requestBaseCalls = calls.toMap()
+                val requestBaseFloor = textFloor
+                var replayRequest = false
                 var transportFailure: Exception? = null
                 try {
                     var attempt = 0
                     while (true) {
+                        var invoked = false
                         try {
                             // The admission check is deliberately after the uncertainty
                             // checkpoint: a stop during that write must not open the request.
@@ -925,10 +943,14 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 if (pauseRequested || attemptFence != pauseEpoch) throw ModelDeliveryRejectedException()
                             }
                             val delivery = ProviderEventDeliveryGate()
+                            val providerInFlight = AtomicBoolean(false)
                             val checkpointed = active as? CheckpointedResumableModelSession
                             val interrupt: () -> Unit = {
                                 delivery.expire()
-                                checkpointed?.disconnectTransport()
+                                when (val original = active) {
+                                    is CheckpointedResumableModelSession -> original.disconnectTransport()
+                                    is RequestRetryModelSession -> original.disconnectTransport()
+                                }
                             }
                             synchronized(terminalLock) {
                                 if (stopped.get() || terminalReserved || terminal || token != generation) throw InterruptedException()
@@ -940,13 +962,44 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             try {
                                 binding = reconnectBudget?.attach(interrupt)
                                 reconnectBudget?.check()
-                                val attemptSink: (ModelEvent) -> Unit = { event -> delivery.deliver { sink(event) } }
+                                val attemptSink: (ModelEvent) -> Unit = { event ->
+                                    val ack = delivery.deliverAcknowledged { sink(event); ModelDeliveryAck.ACCEPTED }
+                                    if (ack == ModelDeliveryAck.REJECTED && providerInFlight.get() &&
+                                        (active is RequestRetryModelSession || active is CheckpointedResumableModelSession))
+                                        throw ModelDeliveryRejectedException()
+                                }
                                 // attach/check may call outside code. Re-admit only while the
                                 // registered gate and the pre-checkpoint pause fence still match.
                                 synchronized(terminalLock) {
                                     if (stopped.get() || terminalReserved || terminal || token != generation) throw InterruptedException()
                                     if (pauseRequested || attemptFence != pauseEpoch || delivery.isClosed) throw ModelDeliveryRejectedException()
                                 }
+                                if (replayRequest) {
+                                    synchronized(eventLock) {
+                                        segmentHistory = requestBaseHistory.fork()
+                                        current = requestBaseCurrent
+                                        contextState = requestBaseContext
+                                        contextInputOverhead = requestBaseOverhead
+                                        transportCheckpoint = null
+                                        records.clear(); records.putAll(requestBaseRecords)
+                                        calls.clear(); calls.putAll(requestBaseCalls)
+                                        pending.clear()
+                                        responseText.clear(); reasoningText.clear()
+                                        reasoningBaseline = emptyMap()
+                                        repetitiveSurface = null
+                                        restoreGuards(0)
+                                        textFloor = requestBaseFloor
+                                        apply(current)
+                                    }
+                                    replayRequest = false
+                                }
+                                reconnectBudget?.check()
+                                synchronized(terminalLock) {
+                                    if (stopped.get() || terminalReserved || terminal || token != generation) throw InterruptedException()
+                                    if (pauseRequested || attemptFence != pauseEpoch || delivery.isClosed) throw ModelDeliveryRejectedException()
+                                }
+                                invoked = true
+                                providerInFlight.set(true)
                                 if (checkpointed != null) {
                                     check(options.runtimeStore is AtomicRuntimeStore && options.runtimeStore.durable) {
                                         "Background resume requires an atomic durable checkpoint store"
@@ -954,12 +1007,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     val batchSink: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
                                         delivery.deliverAcknowledged { acknowledgedSink(batch) }
                                     }
-                                    if (attempt == 0) checkpointed.nextAcknowledged(outputs, sink, batchSink)
+                                    if (attempt == 0) checkpointed.nextAcknowledged(outputs, attemptSink, batchSink)
                                     else checkpointed.resumeAcknowledged(batchSink)
                                 } else if (attempt == 0) active.next(outputs, attemptSink)
                                 else (active as ResumableModelSession).resume(attemptSink)
                                 reconnectBudget?.check()
                             } finally {
+                                providerInFlight.set(false)
                                 synchronized(terminalLock) {
                                     if (attemptDelivery === delivery) attemptDelivery = null
                                     if (transportInterruption === interrupt) transportInterruption = null
@@ -971,14 +1025,26 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             break
                         } catch (failure: Exception) {
                             if (stopped.get() || breakStream || sinkFailure != null) throw failure
+                            // No HTTP request has started: a control fence is not a network error.
+                            if (!invoked && failure is ModelDeliveryRejectedException && retainsTransportOnPause()) {
+                                awaitPause()
+                                synchronized(terminalLock) {
+                                    if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
+                                    attemptFence = pauseEpoch
+                                    setPhase(ExecutionPhase.STREAMING, attempt)
+                                }
+                                checkpoint()
+                                continue
+                            }
                             val resumable = active as? ResumableModelSession
                             val classified = (failure as? ModelRequestException)?.failure
-                                ?: if (failure is ModelDeliveryRejectedException && active is CheckpointedResumableModelSession)
+                                ?: if (failure is ModelDeliveryRejectedException && (active is CheckpointedResumableModelSession || active is RequestRetryModelSession))
                                     ModelFailure.NETWORK else null
-                            val factory = options.reconnect.budgetFactory.takeIf { active is CheckpointedResumableModelSession }
+                            val factory = options.reconnect.budgetFactory.takeIf { active is CheckpointedResumableModelSession || active is RequestRetryModelSession }
                             val canResume = try { resumable?.canResume == true } catch (_: Exception) { false }
                             if ((factory == null && attempt >= options.reconnect.maxAttempts) ||
                                 classified !in options.reconnect.failures || !canResume) throw failure
+                            replayRequest = (active as? RequestRetryModelSession)?.retriesCurrentRequest == true
                             segmentHistory.finishReasoning()
                             apply(current)
                             if (factory != null) {
@@ -1008,7 +1074,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                         if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
                                         boundaryWaiter = Thread.currentThread()
                                     }
-                                    LockSupport.parkNanos(remaining)
+                                    LockSupport.parkNanos(minOf(remaining, 100_000_000L))
                                     synchronized(terminalLock) {
                                         if (boundaryWaiter === Thread.currentThread()) boundaryWaiter = null
                                         if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
@@ -1023,8 +1089,11 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 setPhase(ExecutionPhase.STREAMING, attempt)
                                 attemptFence = pauseEpoch
                             }
-                            request = checkNotNull(request).copy(attemptId = UUID.randomUUID().toString(), operation = RequestOperation.RESUME)
-                            usageRequests = usageRequests.map { if (it.requestId == request?.requestId) checkNotNull(request) else it }
+                            request = if (replayRequest) RequestCheckpoint(UUID.randomUUID().toString(),
+                                UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
+                            else checkNotNull(request).copy(attemptId = UUID.randomUUID().toString(), operation = RequestOperation.RESUME)
+                            usageRequests = if (replayRequest) usageRequests + checkNotNull(request)
+                                else usageRequests.map { if (it.requestId == request?.requestId) checkNotNull(request) else it }
                             contextState = contextState?.let { state ->
                                 val resumed = checkNotNull(request)
                                 fun anchor(value: RequestInputCheckpoint?): RequestInputCheckpoint? = value?.let {

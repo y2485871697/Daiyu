@@ -133,12 +133,12 @@ fun interface TransportReconnectBudgetFactory {
     fun create(round: Int, reason: ModelFailure): TransportReconnectBudget
 }
 
-/** Zero retries is the compatible default. Only transport resume, never open/repost, is retried. */
+/** Zero retries is the default. Sessions explicitly opt into cursor resume or current-request replay. */
 data class ReconnectPolicy(
     val maxAttempts: Int = 0,
     val delayMillis: Long = 0,
     val failures: Set<ModelFailure> = setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT),
-    /** Only checkpointed transport sessions use this; no attempt-count cap substitutes for it. */
+    /** Retained-session total window; an attempt-count cap does not substitute for it. */
     val budgetFactory: TransportReconnectBudgetFactory? = null
 ) {
     init { require(maxAttempts in 0..20); require(delayMillis in 0..60_000) }

@@ -151,7 +151,7 @@ internal object NativeCompletionStream {
             true
         }
         if (cancelled()) throw InterruptedException()
-        if (!done) throw ModelRequestException(ModelFailure.INCOMPLETE)
+        if (!done) throw ModelRequestException(ModelFailure.INCOMPLETE, transportInterrupted = true)
         protocol(text.isNotEmpty() || reasoning.isNotEmpty() || details.isNotEmpty() || calls.isNotEmpty())
         val row = NativeCompletionRequest.textMessage(ProviderProtocol.CHAT_COMPLETIONS, "assistant", text.toString())
         if (reasoning.isNotEmpty()) row.put("reasoning_content", reasoning.toString())
@@ -260,7 +260,7 @@ internal object NativeCompletionStream {
             true
         }
         if (cancelled()) throw InterruptedException()
-        if (reason == null) throw ModelRequestException(ModelFailure.INCOMPLETE)
+        if (reason == null) throw ModelRequestException(ModelFailure.INCOMPLETE, transportInterrupted = true)
         protocol(parts.length() > 0)
         val row = JSONObject().put("role", "model").put("parts", parts)
         MessagesRequest.validateObject(row, MessagesRequest.MAX_MESSAGE_CONTAINER_DEPTH)

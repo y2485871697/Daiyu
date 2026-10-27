@@ -8,16 +8,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FrozenReconnectAdapterTest {
-    @Test fun defaultRunnerAndEveryCurrentProtocolRemainZeroAttemptsForAllGlobalDurations() {
+    @Test fun defaultRunnerHasNoRetriesAndGlobalDurationsEnableOnlyKnownProtocols() {
         assertEquals(0, ReconnectPolicy().maxAttempts)
         assertEquals(0, RunnerOptions().reconnect.maxAttempts)
         for (protocol in ProviderProtocol.entries) {
             for (duration in ReconnectDurationPreset.entries) {
                 val frozen = FrozenReconnectAdapter.freeze(ReconnectSettings(duration), protocol)
                 assertEquals(ReconnectSettings(duration), frozen.settings)
-                assertEquals(ReconnectPolicy(), frozen.runnerPolicy())
-                assertFalse(frozen.capability.supported)
-                if (duration != ReconnectDurationPreset.NONE) {
+                val known = protocol != ProviderProtocol.UNKNOWN
+                assertEquals(known, frozen.capability.supported)
+                assertEquals(known && duration != ReconnectDurationPreset.NONE, frozen.runnerPolicy().budgetFactory != null)
+                if (!known && duration != ReconnectDurationPreset.NONE) {
                     try { frozen.requireSupported(); fail("unsupported enabled setting accepted") }
                     catch (failure: ReconnectUnavailableException) { assertEquals(frozen.capability, failure.capability) }
                 } else frozen.requireSupported()
@@ -31,7 +32,7 @@ class FrozenReconnectAdapterTest {
             val disabled = FrozenReconnectAdapter.freeze(ReconnectSettings(ReconnectDurationPreset.NONE), protocol)
             for (failure in ModelFailure.entries) {
                 assertNull(disabled.unavailableMessage(failure))
-                if (failure in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)) {
+                if (protocol == ProviderProtocol.UNKNOWN && failure in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)) {
                     assertEquals(enabled.capability.userMessage, enabled.unavailableMessage(failure))
                 } else assertNull(enabled.unavailableMessage(failure))
             }
@@ -83,7 +84,7 @@ class FrozenReconnectAdapterTest {
         }
         assertEquals(listOf("history", "tools", "definitions", "images"), opened)
         assertEquals(4, nexts); assertEquals(4, cancellations)
-        assertEquals(List(4) { ReconnectCapability.MESSAGES_UNSUPPORTED.userMessage }, notices)
+        assertTrue(notices.isEmpty())
         assertEquals(300_000L, frozen.windowMillis)
     }
 

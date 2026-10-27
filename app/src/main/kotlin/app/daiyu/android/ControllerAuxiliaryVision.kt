@@ -24,8 +24,8 @@ import javax.net.ssl.HttpsURLConnection
  * checks all returned identities before the bridge may resolve bytes or contact a provider.
  *
  * Only request projections cross into [main]; nothing here saves or edits messages/assets.
- * No fallback, HTTP retry, or transport-resume capability is introduced. A failure seals this
- * instance; creating a fresh run is a separate explicit host decision, not recovery/retry.
+ * Auxiliary observations never retry or fall back. The main session retains its own retry or
+ * cursor capability; failures without that capability seal this parent-run instance.
  */
 internal class ControllerAuxiliaryVision private constructor(
     private val main: ModelPort,
@@ -87,7 +87,7 @@ internal class ControllerAuxiliaryVision private constructor(
                 checkUsable()
                 sessions.add(session)
             }
-            return GuardedSession(session)
+            return if (session is RequestRetryModelSession) RetryingSession(session) else GuardedSession(session)
         } catch (failure: Throwable) {
             opened?.let { runCatching { it.cancel() } }
             sealFailure()
@@ -97,20 +97,32 @@ internal class ControllerAuxiliaryVision private constructor(
         }
     }
 
-    private inner class GuardedSession(private val delegate: ModelSession) : ModelSession {
-        override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+    private open inner class GuardedSession(protected val delegate: ModelSession) : ModelSession {
+        protected fun operation(block: () -> Unit) {
             begin()
-            try {
-                delegate.next(outputs) { event -> checkUsable(); sink(event) }
-                checkUsable()
-            } catch (failure: Throwable) {
-                sealFailure()
+            try { block(); checkUsable() }
+            catch (failure: Throwable) {
+                val retry = delegate as? RequestRetryModelSession
+                val recoverable = retry?.canResume == true && (failure is ModelDeliveryRejectedException ||
+                    failure is ModelRequestException && failure.failure in setOf(ModelFailure.NETWORK,
+                        ModelFailure.TIMEOUT, ModelFailure.SERVER, ModelFailure.RATE_LIMIT, ModelFailure.AUTHENTICATION))
+                if (!recoverable) sealFailure()
                 throw cancellationOr(failure)
-            } finally {
-                synchronized(lifecycle) { inFlight = false }
-            }
+            } finally { synchronized(lifecycle) { inFlight = false } }
+        }
+        override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = operation {
+            delegate.next(outputs) { event -> checkUsable(); sink(event) }
         }
         override fun cancel() = this@ControllerAuxiliaryVision.cancel()
+    }
+    private inner class RetryingSession(private val retained: RequestRetryModelSession) :
+        GuardedSession(retained), RequestRetryModelSession {
+        override val canResume: Boolean get() = !isCancelled() && retained.canResume
+        override val retriesCurrentRequest: Boolean get() = retained.retriesCurrentRequest
+        override fun resume(sink: (ModelEvent) -> Unit) = operation {
+            retained.resume { event -> checkUsable(); sink(event) }
+        }
+        override fun disconnectTransport() = retained.disconnectTransport()
     }
 
     private fun begin() = synchronized(lifecycle) {

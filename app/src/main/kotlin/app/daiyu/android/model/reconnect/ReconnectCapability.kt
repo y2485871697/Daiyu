@@ -6,6 +6,7 @@ import app.daiyu.android.model.ProviderProtocol
 
 /** Capability is a transport contract, NOT a protocol name, reconnect preference, or SSE id. */
 enum class ReconnectCapability(val supported: Boolean, val userMessage: String) {
+    REQUEST_RETRY(true, "支持重试当前模型请求；已执行的本地工具不会再次运行"),
     TRANSPORT_RESUME(true, "原会话支持只读取尚未确认事件的恢复；不会重新提交请求或工具结果"),
     RESPONSES_UNSUPPORTED(false, "当前 Responses 接入不支持无重发恢复；未重新 POST 模型请求或工具结果"),
     MESSAGES_UNSUPPORTED(false, "当前 Messages 接入不支持无重发恢复；未重新 POST 模型请求或工具结果"),
@@ -20,14 +21,12 @@ class ReconnectUnavailableException(val capability: ReconnectCapability) :
     IllegalStateException(capability.userMessage)
 
 object ReconnectCapabilities {
-    /** Preflight for the production transports in this source tree. No open/network call.
-     * Ordinary ResponsesModel.Session and MessagesModel.Session only implement ModelSession.
-     * Neither previous_response_id nor a new POST can satisfy ResumableModelSession's contract. */
+    /** Production transports can replay the current request without re-executing local tools. */
     fun forProtocol(protocol: ProviderProtocol): ReconnectCapability = when (protocol) {
-        ProviderProtocol.RESPONSES -> ReconnectCapability.RESPONSES_UNSUPPORTED
-        ProviderProtocol.MESSAGES -> ReconnectCapability.MESSAGES_UNSUPPORTED
-        ProviderProtocol.CHAT_COMPLETIONS -> ReconnectCapability.CHAT_COMPLETIONS_UNSUPPORTED
-        ProviderProtocol.GEMINI -> ReconnectCapability.GEMINI_UNSUPPORTED
+        ProviderProtocol.RESPONSES -> ReconnectCapability.REQUEST_RETRY
+        ProviderProtocol.MESSAGES -> ReconnectCapability.REQUEST_RETRY
+        ProviderProtocol.CHAT_COMPLETIONS -> ReconnectCapability.REQUEST_RETRY
+        ProviderProtocol.GEMINI -> ReconnectCapability.REQUEST_RETRY
         ProviderProtocol.UNKNOWN -> ReconnectCapability.UNKNOWN_TRANSPORT
     }
 
@@ -36,8 +35,10 @@ object ReconnectCapabilities {
     fun forSession(session: ModelSession): ReconnectCapability {
         val resumable = session as? ResumableModelSession ?: return ReconnectCapability.NOT_RESUMABLE
         return try {
-            if (resumable.canResume) ReconnectCapability.TRANSPORT_RESUME
-            else ReconnectCapability.SESSION_UNAVAILABLE
+            if (!resumable.canResume) ReconnectCapability.SESSION_UNAVAILABLE
+            else if (session is app.daiyu.android.domain.RequestRetryModelSession && session.retriesCurrentRequest)
+                ReconnectCapability.REQUEST_RETRY
+            else ReconnectCapability.TRANSPORT_RESUME
         } catch (_: Exception) {
             // Never expose provider exception bodies/credentials as a capability diagnostic.
             ReconnectCapability.SESSION_UNAVAILABLE

@@ -39,6 +39,7 @@ internal class UsageRecordingModel(
         val owner = conversationId ?: if (inferConversation) history.lastOrNull()?.conversationId?.value else null
         return when (session) {
             is CheckpointedResumableModelSession -> Checkpointed(session, owner)
+            is RequestRetryModelSession -> Retrying(session, owner)
             is ResumableModelSession -> Resumable(session, owner)
             else -> Recording(session, owner)
         }
@@ -85,12 +86,19 @@ internal class UsageRecordingModel(
         Recording(transport, owner), ResumableModelSession {
         override val canResume get() = transport.canResume
         override fun resume(sink: (ModelEvent) -> Unit) {
-            val current = checkNotNull(request) { "尚无可恢复的用量请求" }
+            val current = if ((transport as? RequestRetryModelSession)?.retriesCurrentRequest == true) start()
+                else checkNotNull(request) { "尚无可恢复的用量请求" }
             try { transport.resume { current.deliver(it, sink) } } finally { current.persist() }
         }
     }
+    private inner class Retrying(private val transport: RequestRetryModelSession, owner: String?) :
+        Resumable(transport, owner), RequestRetryModelSession {
+        override val retriesCurrentRequest: Boolean get() = transport.retriesCurrentRequest
+        override fun disconnectTransport() = transport.disconnectTransport()
+    }
     private inner class Checkpointed(private val transport: CheckpointedResumableModelSession, owner: String?) :
-        Resumable(transport, owner), CheckpointedResumableModelSession {
+        Resumable(transport, owner), CheckpointedResumableModelSession, RequestRetryModelSession {
+        override val retriesCurrentRequest: Boolean get() = (transport as? RequestRetryModelSession)?.retriesCurrentRequest == true
         override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
             val current = start()
             try { transport.nextAcknowledged(outputs) { current.deliver(it, sink) } } finally { current.persist() }
@@ -102,7 +110,8 @@ internal class UsageRecordingModel(
             finally { current.persist() }
         }
         override fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck) {
-            val current = checkNotNull(request) { "尚无可恢复的用量请求" }
+            val current = if ((transport as? RequestRetryModelSession)?.retriesCurrentRequest == true) start()
+                else checkNotNull(request) { "尚无可恢复的用量请求" }
             try { transport.resumeAcknowledged { current.deliver(it, sink) } } finally { current.persist() }
         }
         override fun disconnectTransport() = transport.disconnectTransport()

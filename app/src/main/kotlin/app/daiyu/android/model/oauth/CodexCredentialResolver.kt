@@ -16,15 +16,19 @@ internal class CodexCredentialResolver(
     private val refreshAfter = ConcurrentHashMap<CodexAuth, Long>()
     private fun lock(auth: CodexAuth) = locks.computeIfAbsent(auth) { Any() }
     fun clear(auth: CodexAuth) = synchronized(lock(auth)) { remove(auth); pending.remove(auth); refreshAfter.remove(auth); Unit }
-    fun resolve(auth: CodexAuth): CodexTokens = synchronized(lock(auth)) {
+    fun resolve(auth: CodexAuth, rejectedAccess: String? = null): CodexTokens = synchronized(lock(auth)) {
         pending[auth]?.let { rotated -> write(auth, rotated); pending.remove(auth) }
         var tokens = checkNotNull(read(auth)) { "OAuth 登录已失效，请重新登录" }
         val now = clock()
-        if (tokens.expiresAt - now < 4 * 3600_000L && tokens.refresh.isNotBlank() && now >= (refreshAfter[auth] ?: 0L)) {
+        val forced = rejectedAccess != null && tokens.access == rejectedAccess
+        check(!forced || tokens.refresh.isNotBlank()) { "OAuth 登录已失效，请重新登录" }
+        if (tokens.refresh.isNotBlank() && (forced ||
+            (tokens.expiresAt - now < 4 * 3600_000L && now >= (refreshAfter[auth] ?: 0L)))) {
             val updated = try { CodexTokens.response(refresh(tokens.refresh), now, tokens) }
             catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
-            catch (_: Exception) {
-                check(now < tokens.expiresAt) { "OAuth 登录已过期，请重新登录" }
+            catch (failure: Exception) {
+                if (forced) throw failure
+                check(!forced && now < tokens.expiresAt) { "OAuth 登录已失效，请重新登录" }
                 null
             }
             refreshAfter[auth] = now + 60_000L

@@ -446,4 +446,35 @@ class ControllerAuxiliaryVisionTest {
     companion object {
         private const val COMPLETE = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"observation\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"visible evidence\"}]}]}}\n\n"
     }
+    @Test fun mainRequestRetryCapabilitySurvivesAuxiliaryProjection() {
+        var nexts = 0
+        var resumes = 0
+        var disconnected = 0
+        val retained = object : RequestRetryModelSession {
+            override val canResume = true
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                nexts++
+                sink(ModelEvent.TextDelta("m", "partial"))
+                throw ModelRequestException(ModelFailure.NETWORK)
+            }
+            override fun resume(sink: (ModelEvent) -> Unit) { resumes++; sink(ModelEvent.TextFinal("m", "fresh")) }
+            override fun disconnectTransport() { disconnected++ }
+            override fun cancel() {}
+        }
+        val host = host(main = ModelPort { retained })
+        try {
+            val wrapped = host.open(emptyList()) as RequestRetryModelSession
+            val events = mutableListOf<ModelEvent>()
+            assertTrue(rejected { wrapped.next(emptyList(), events::add) } is ModelRequestException)
+            assertTrue(wrapped.canResume)
+            assertTrue(wrapped.retriesCurrentRequest)
+            wrapped.disconnectTransport()
+            wrapped.resume(events::add)
+            assertEquals(1, nexts)
+            assertEquals(1, resumes)
+            assertEquals(1, disconnected)
+            assertEquals(2, events.size)
+        } finally { host.close() }
+    }
+
 }

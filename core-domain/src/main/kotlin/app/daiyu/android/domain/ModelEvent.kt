@@ -36,11 +36,18 @@ interface ModelSession {
     fun cancel()
 }
 /** Optional transport-only resume capability. Implementations must not repost a model request or
- * tool outputs, and must deliver only events not acknowledged by a successful sink return.
+ * tool outputs unless explicitly implementing RequestRetryModelSession. Cursor transports must
+ * deliver only events not acknowledged by a successful sink return.
  * If the server cannot resume with those guarantees, canResume must be false. */
 interface ResumableModelSession : ModelSession {
     val canResume: Boolean
     fun resume(sink: (ModelEvent) -> Unit)
+}
+/** Explicit current-request replay, distinct from cursor-only transport resume. Implementations
+ * retain the already-submitted tool outputs; replay never authorizes executing local tools. */
+interface RequestRetryModelSession : ResumableModelSession {
+    val retriesCurrentRequest: Boolean get() = true
+    fun disconnectTransport()
 }
 /** Explicit acknowledgement: a stale gate returning Unit is NOT an acknowledgement. */
 enum class ModelDeliveryAck { ACCEPTED, REJECTED }
@@ -108,7 +115,7 @@ enum class ModelFailure(val userMessage: String) {
     TLS("HTTPS 安全连接失败，请检查服务证书和网络"),
     NETWORK("网络连接失败，请检查服务地址和网络；未自动重试")
 }
-class ModelRequestException(val failure: ModelFailure) : RuntimeException("Model request failed")
+class ModelRequestException(val failure: ModelFailure, val transportInterrupted: Boolean = false) : RuntimeException("Model request failed")
 
 /** A local reconnect budget expiry, never a retryable provider/network failure. */
 open class TransportReconnectDeadlineException(lateSuccess: Boolean = false) : RuntimeException(

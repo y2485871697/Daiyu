@@ -252,7 +252,7 @@ internal object ResponsesStream {
             output==null
         }
         if(cancelled()) throw InterruptedException()
-        return output ?: throw ModelRequestException(if (acknowledgedSink != null) ModelFailure.NETWORK else ModelFailure.INCOMPLETE)
+        return output ?: throw ModelRequestException(if (acknowledgedSink != null) ModelFailure.NETWORK else ModelFailure.INCOMPLETE, transportInterrupted = true)
         }
     }
 }

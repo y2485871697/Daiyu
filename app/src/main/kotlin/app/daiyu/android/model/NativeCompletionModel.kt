@@ -9,7 +9,7 @@ import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.HttpsURLConnection
 
-/** Native Chat Completions and Gemini transports. ModelPort/Runner still own the run. No retry/resume. */
+/** Native Chat Completions and Gemini transports. ModelPort/Runner still own the run. Current-request retry is retained by the session. */
 class NativeCompletionModel internal constructor(
     private val settings: ModelSettings,
     private val connect: (URL) -> HttpsURLConnection,
@@ -34,12 +34,12 @@ class NativeCompletionModel internal constructor(
         history: List<Message>,
         private val tools: List<ToolDefinition>,
         images: ModelImagePlan?,
-    ) : ModelSession {
+    ) : RequestRetryModelSession {
         private val endpoint = settings.also { it.validate() }.requestEndpoint()
         private val historySnapshot = FrozenMessageImagePlan.snapshot(history)
         private val imagePlan = ImageRequestPreflight.history(
             settings, settings.protocol, imageInputSupported, historySnapshot, images)
-        private val rows = NativeCompletionRequest.history(settings.protocol, historySnapshot, images = imagePlan)
+        private var rows = NativeCompletionRequest.history(settings.protocol, historySnapshot, images = imagePlan)
         private val ownItems = mutableListOf<String>()
         private val cancelled = AtomicBoolean(false)
         @Volatile private var connection: HttpsURLConnection? = null
@@ -49,12 +49,27 @@ class NativeCompletionModel internal constructor(
         init { NativeCompletionRequest.body(settings, rows, tools, instructions) }
         private fun checkCancelled() { if (cancelled.get()) throw InterruptedException() }
 
+        private val retry = app.daiyu.android.model.reconnect.ModelRequestRetry()
+        override val canResume: Boolean get() = !cancelled.get() && retry.available
+        @Synchronized
+        override fun resume(sink: (ModelEvent) -> Unit) = retry.replay { next(it, sink) }
+        override fun disconnectTransport() { try { connection?.disconnect() } catch (_: Exception) {} }
+
         @Synchronized
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkCancelled()
             check(usable && (!started || pending.isNotEmpty())) { "Model session cannot be replayed" }
             require(outputs.size == pending.size && outputs.map { it.callId.value }.toSet() == pending.keys) {
                 "Tool outputs must match all pending tool calls exactly once"
+            }
+            val savedRows = rows.toString()
+            val savedItems = ownItems.toList()
+            val savedPending = pending
+            val savedStarted = started
+            retry.capture(outputs) {
+                rows = org.json.JSONArray(savedRows)
+                ownItems.clear(); ownItems.addAll(savedItems)
+                pending = savedPending; started = savedStarted; usable = true
             }
             started = true; usable = false
             val resultRows = outputs.map { output ->
@@ -110,7 +125,7 @@ class NativeCompletionModel internal constructor(
                 })
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
-                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResource { reader ->
+                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResponse { reader ->
                     val row = NativeCompletionStream.read(settings.protocol, reader, cancelled::get, deliver)
                     checkCancelled()
                     app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(row)
@@ -121,15 +136,20 @@ class NativeCompletionModel internal constructor(
                 }
                 checkCancelled()
             } catch (failure: Exception) {
-                if (failure === deliveryFailure) throw failure
+                if (failure === deliveryFailure) {
+                    if (failure is ModelDeliveryRejectedException) retry.failed(failure) else retry.completed()
+                    throw failure
+                }
                 checkCancelled()
-                throw providerTransportFailure(failure, configuringRequest)
+                val classified = providerTransportFailure(failure, configuringRequest)
+                retry.failed(classified)
+                throw classified
             } finally {
                 bytes.close()
                 try { owned?.errorStream?.close() } catch (_: Exception) {}
                 try { owned?.disconnect() } catch (_: Exception) {} finally { connection = null }
             }
-            checkCancelled(); usable = true
+            checkCancelled(); usable = true; retry.completed()
         }
         // Deliberately not synchronized: disconnect must interrupt a next() holding the session monitor.
         override fun cancel() {

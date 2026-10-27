@@ -33,12 +33,16 @@ internal object CodexOAuthRuntime {
         catch (_: Exception) { throw CodexOAuthFailure(CodexOAuthFailureReason.STORAGE, "storage") }
     }
     fun headers(auth: CodexAuth): Map<String, String> {
-        val tokens = resolver.resolve(auth)
-        return buildMap {
+        return headers(resolver.resolve(auth))
+    }
+    fun refreshHeaders(auth: CodexAuth, rejectedAuthorization: String): Map<String, String> {
+        require(rejectedAuthorization.startsWith("Bearer "))
+        return headers(resolver.resolve(auth, rejectedAuthorization.removePrefix("Bearer ")))
+    }
+    private fun headers(tokens: CodexTokens): Map<String, String> = buildMap {
             put("Authorization", "Bearer ${tokens.access}")
             put("User-Agent", "codex_cli_rs/${CodexOAuthProtocol.CLIENT_VERSION} (Android; arm64)")
             put("Originator", "codex_cli_rs"); put("Version", CodexOAuthProtocol.CLIENT_VERSION)
             tokens.account?.let { put("ChatGPT-Account-ID", it) }
         }
-    }
 }

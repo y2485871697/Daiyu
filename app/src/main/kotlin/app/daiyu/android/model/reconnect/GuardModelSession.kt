@@ -5,7 +5,8 @@ import app.daiyu.android.domain.*
 /** Preserve exact retained transport capability through media/runtime guards. This never opens
  * a model and never bypasses a POST approval. Checks run at admission AND event delivery. */
 fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSession {
-    if (session is CheckpointedResumableModelSession) return object : CheckpointedResumableModelSession {
+    if (session is CheckpointedResumableModelSession) return object : CheckpointedResumableModelSession, RequestRetryModelSession {
+        override val retriesCurrentRequest: Boolean get() = (session as? RequestRetryModelSession)?.retriesCurrentRequest == true
         override val canResume: Boolean get() = session.canResume
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkRuntime(); session.next(outputs) { checkRuntime(); sink(it) }
@@ -22,6 +23,18 @@ fun guardModelSession(session: ModelSession, checkRuntime: () -> Unit): ModelSes
         }
         override fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck) {
             checkRuntime(); session.resumeAcknowledged { checkRuntime(); sink(it) }
+        }
+        override fun disconnectTransport() = session.disconnectTransport()
+        override fun cancel() = session.cancel()
+    }
+    if (session is RequestRetryModelSession) return object : RequestRetryModelSession {
+        override val canResume: Boolean get() = session.canResume
+        override val retriesCurrentRequest: Boolean get() = session.retriesCurrentRequest
+        override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+            checkRuntime(); session.next(outputs) { checkRuntime(); sink(it) }
+        }
+        override fun resume(sink: (ModelEvent) -> Unit) {
+            checkRuntime(); session.resume { checkRuntime(); sink(it) }
         }
         override fun disconnectTransport() = session.disconnectTransport()
         override fun cancel() = session.cancel()

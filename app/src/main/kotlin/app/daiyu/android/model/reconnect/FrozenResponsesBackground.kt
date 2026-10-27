@@ -14,7 +14,7 @@ class FrozenResponsesBackground private constructor(private val frozen: ModelSet
     }
     companion object {
         fun freeze(settings: ReconnectSettings, provider: ProviderSnapshot): FrozenResponsesBackground? {
-            if (!settings.responsesBackgroundEnabled || provider.protocol != ProviderProtocol.RESPONSES) return null
+            if (!settings.enabled || !settings.responsesBackgroundEnabled || provider.protocol != ProviderProtocol.RESPONSES) return null
             val model = provider.asModelSettings()
             val uri = try { URI(model.requestEndpoint()) } catch (_: Exception) { return null }
             if (uri.scheme != "https" || uri.host != "api.openai.com" || uri.port != -1 ||

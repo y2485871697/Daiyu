@@ -90,11 +90,41 @@ class ResponsesBackgroundResumeTest {
     }
 
     @Test fun noHandleAndExpiredGetNeverFallbackToPost() {
-        for (scripts in listOf(listOf("" to 200), listOf(created() to 200, "" to 404), listOf(created() to 200, "" to 410))) {
+        for (scripts in listOf(listOf(created() to 200, "" to 404), listOf(created() to 200, "" to 405), listOf(created() to 200, "" to 410))) {
             val connections = mutableListOf<Connection>()
             assertEquals(RunStatus.FAILED, run(model(scripts, connections), Runtime()).status)
             assertEquals(1, connections.count { it.requestMethod == "POST" })
             assertEquals(scripts.size, connections.size)
+        }
+    }
+
+    @Test fun noCursorRetriesOnlyCurrentPostWithAcknowledgements() {
+        val connections = mutableListOf<Connection>()
+        val result = run(model(listOf("" to 200, (created() + completed(1)) to 200), connections), Runtime())
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(listOf("POST", "POST"), connections.map { it.requestMethod })
+        assertEquals(connections[0].url, connections[1].url)
+        assertEquals(connections[0].sent.toString("UTF-8"), connections[1].sent.toString("UTF-8"))
+    }
+
+    @Test fun unavailableCursorEndpointSealsSessionBeforeAnyThirdFactoryCall() {
+        for (status in listOf(404, 405, 410)) {
+            var factories = 0
+            val connections = mutableListOf<Connection>()
+            val session = ResponsesModel(settings) { url ->
+                factories++
+                Connection(url, if (factories == 1) created() else "", if (factories == 1) 200 else status)
+                    .also(connections::add)
+            }.withBackgroundResume(requireNotNull(frozen().responsesBackground)).open(emptyList()) as CheckpointedResumableModelSession
+            assertThrows(ModelRequestException::class.java) { session.nextAcknowledged(emptyList()) { ModelDeliveryAck.ACCEPTED } }
+            assertTrue(session.canResume)
+            assertEquals(ModelFailure.ENDPOINT, assertThrows(ModelRequestException::class.java) {
+                session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED }
+            }.failure)
+            assertFalse(session.canResume)
+            assertThrows(IllegalStateException::class.java) { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } }
+            assertEquals(2, factories)
+            assertEquals(listOf("POST", "GET"), connections.map { it.requestMethod })
         }
     }
 
@@ -166,9 +196,9 @@ class ResponsesBackgroundResumeTest {
         assertEquals(preference,ReconnectSettingsCodec.decode(ReconnectSettingsCodec.encode(preference)))
         assertFalse(ReconnectSettingsCodec.decode("v1:continuous").responsesBackgroundEnabled)
         for (protocol in listOf(ProviderProtocol.RESPONSES,ProviderProtocol.MESSAGES,ProviderProtocol.CHAT_COMPLETIONS,ProviderProtocol.GEMINI)) {
-            assertFalse(ReconnectCapabilities.forProtocol(protocol).supported)
+            assertEquals(ReconnectCapability.REQUEST_RETRY, ReconnectCapabilities.forProtocol(protocol))
             assertEquals(0,FrozenReconnectAdapter.freeze(preference,protocol).runnerPolicy().maxAttempts)
-            assertNull(FrozenReconnectAdapter.freeze(preference,protocol).runnerPolicy().budgetFactory)
+            assertNotNull(FrozenReconnectAdapter.freeze(preference,protocol).runnerPolicy().budgetFactory)
         }
     }
 }

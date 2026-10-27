@@ -9,7 +9,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ReconnectCapabilityTest {
-    @Test fun ordinaryProductionTransportsNeverAcquireResumeCapabilityAndProbeDoesNotPost() {
+    @Test fun productionTransportsAdvertiseRequestRetryWithoutPostingBeforeFailure() {
         var connections = 0
         for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)) {
             val settings = ModelSettings("https://example.invalid/v1", "fixture", "unused", false,
@@ -19,10 +19,10 @@ class ReconnectCapabilityTest {
                 ProviderProtocol.MESSAGES -> MessagesModel(settings) { connections++; error("must not connect") }
                 else -> error("fixture")
             }
-            assertFalse(ReconnectCapabilities.forProtocol(protocol).supported)
+            assertEquals(ReconnectCapability.REQUEST_RETRY, ReconnectCapabilities.forProtocol(protocol))
             val session = model.open(emptyList()) // Logical session only; it does not connect.
-            assertFalse(session is ResumableModelSession)
-            assertEquals(ReconnectCapability.NOT_RESUMABLE, ReconnectCapabilities.forSession(session))
+            assertTrue(session is RequestRetryModelSession)
+            assertEquals(ReconnectCapability.SESSION_UNAVAILABLE, ReconnectCapabilities.forSession(session))
             session.cancel()
         }
         assertEquals(0, connections)

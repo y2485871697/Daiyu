@@ -197,7 +197,7 @@ internal object MessagesStream {
                 true
             }
             if (cancelled()) throw InterruptedException()
-            if (!terminal) throw ModelRequestException(ModelFailure.INCOMPLETE)
+            if (!terminal) throw ModelRequestException(ModelFailure.INCOMPLETE, transportInterrupted = true)
             val content = JSONArray()
             blocks.values.forEach { content.put(it.wire) }
             // Validate the complete saved envelope (including unknown retained wire fields)

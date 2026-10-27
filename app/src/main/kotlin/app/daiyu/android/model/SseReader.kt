@@ -39,6 +39,6 @@ object SseReader {
             }
         }
         // An unterminated frame is not a confirmed event.
-        if(data.isNotEmpty()) throw ModelRequestException(ModelFailure.INCOMPLETE)
+        if(data.isNotEmpty()) throw ModelRequestException(ModelFailure.INCOMPLETE, transportInterrupted = true)
     }
 }

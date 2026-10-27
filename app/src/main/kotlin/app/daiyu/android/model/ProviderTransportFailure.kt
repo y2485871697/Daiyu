@@ -6,7 +6,7 @@ import java.io.Closeable
 
 /** Keep provider-owned exception chains out of transport results, not caller failures. */
 internal fun providerTransportFailure(failure: Exception, configuringRequest: Boolean): Exception = when {
-    failure is ModelRequestException -> ModelRequestException(failure.failure)
+    failure is ModelRequestException -> ModelRequestException(if (failure.transportInterrupted) ModelFailure.NETWORK else failure.failure)
     configuringRequest && (failure is IllegalArgumentException || failure is IllegalStateException || failure is SecurityException) ->
         ModelRequestException(ModelFailure.REQUEST)
     failure is SecurityException -> ModelRequestException(ModelFailure.PERMISSION)
@@ -30,4 +30,9 @@ internal inline fun <T : Closeable, R> T.useProviderResource(block: (T) -> R): R
             try { close() } catch (_: Exception) {}
         } else close()
     }
+}
+
+/** A fully decoded response is already confirmed; reader cleanup cannot reopen generation. */
+internal inline fun <T : Closeable, R> T.useProviderResponse(block: (T) -> R): R {
+    try { return block(this) } finally { try { close() } catch (_: Exception) {} }
 }

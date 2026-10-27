@@ -46,11 +46,11 @@ class MessagesModel internal constructor(
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
         private val sessionContext: SessionGatewayContext?,
-    ) : ModelSession {
+    ) : RequestRetryModelSession {
         private val endpoint = MessagesRequest.endpoint(settings)
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
         private val imagePlan = ImageRequestPreflight.history(settings, ProviderProtocol.MESSAGES, capability, historySnapshot, images)
-        private val messages = MessagesRequest.history(historySnapshot, imagePlan)
+        private var messages = MessagesRequest.history(historySnapshot, imagePlan)
         private val ownItems = mutableListOf<String>()
         private val cancelled = AtomicBoolean(false)
         @Volatile private var connection: HttpsURLConnection? = null
@@ -61,14 +61,30 @@ class MessagesModel internal constructor(
         init { MessagesRequest.body(settings.model, messages, tools, maxTokens) }
         private fun checkCancelled() { if (cancelled.get()) throw InterruptedException() }
 
+        private val retry = app.daiyu.android.model.reconnect.ModelRequestRetry()
+        override val canResume: Boolean get() = !cancelled.get() && retry.available
+        @Synchronized
+        override fun resume(sink: (ModelEvent) -> Unit) = retry.replay { next(it, sink) }
+        override fun disconnectTransport() { try { connection?.disconnect() } catch (_: Exception) {} }
+
+        @Synchronized
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkCancelled()
             check(usable && (!started || pending.isNotEmpty())) { "Messages session cannot be replayed" }
             require(outputs.map { it.callId.value }.toSet() == pending && outputs.size == pending.size) {
                 "Tool outputs must match all pending tool calls exactly once"
             }
+            val savedMessages = messages.toString()
+            val savedItems = ownItems.toList()
+            val savedPending = pending
+            val savedStarted = started
+            retry.capture(outputs) {
+                messages = JSONArray(savedMessages)
+                ownItems.clear(); ownItems.addAll(savedItems)
+                pending = savedPending; started = savedStarted; usable = true
+            }
             started = true
-            // After any failure, no repost of an unconfirmed request or tool output is allowed.
+            // Retain the exact request boundary; only an explicitly enabled Runner may replay it.
             usable = false
             if (outputs.isNotEmpty()) {
                 val content = JSONArray()
@@ -124,7 +140,7 @@ class MessagesModel internal constructor(
                 })
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
-                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResource { reader ->
+                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResponse { reader ->
                     val raw = MessagesStream.read(reader, cancelled::get, deliver)
                     checkCancelled()
                     val item = JSONObject(raw)
@@ -143,9 +159,14 @@ class MessagesModel internal constructor(
                 checkCancelled()
             } catch (failure: Exception) {
                 // Caller failures retain identity even when the sink also cancels the session.
-                if (failure === deliveryFailure) throw failure
+                if (failure === deliveryFailure) {
+                    if (failure is ModelDeliveryRejectedException) retry.failed(failure) else retry.completed()
+                    throw failure
+                }
                 checkCancelled()
-                throw providerTransportFailure(failure, configuringRequest)
+                val classified = providerTransportFailure(failure, configuringRequest)
+                retry.failed(classified)
+                throw classified
             } finally {
                 requestBytes.close()
                 // Do not read or expose provider error bodies. Close any already available error stream.
@@ -154,6 +175,7 @@ class MessagesModel internal constructor(
             }
             checkCancelled()
             usable = true
+            retry.completed()
         }
 
         override fun cancel() {

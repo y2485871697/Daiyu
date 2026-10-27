@@ -25,13 +25,12 @@ class FrozenReconnectAdapter private constructor(
      * It must NOT be assigned to ReconnectPolicy.delayMillis or converted into attempt counts. */
     val windowMillis: Long? = settings.duration.windowMillis
 
-    /** Ordinary protocols keep the zero-retry default. The explicit frozen background contract
-     * installs the retained total-window algorithm, not a fabricated fixed attempt count. */
+    /** All supported protocols share a retained total window, not a fixed attempt count. */
     fun runnerPolicy(): ReconnectPolicy = runnerPolicyWithDiagnostics {}
 
     internal fun runnerPolicyWithDiagnostics(emit: (ReconnectChanged) -> Unit): ReconnectPolicy {
-        if (!settings.enabled || responsesBackground == null) return ReconnectPolicy()
-        return ReconnectPolicy(delayMillis = 250, budgetFactory = app.daiyu.android.domain.runtime.TransportReconnectBudgetFactory { round, reason ->
+        if (!settings.enabled || !capability.supported) return ReconnectPolicy()
+        return ReconnectPolicy(delayMillis = 1_000, failures = setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT, ModelFailure.SERVER, ModelFailure.RATE_LIMIT, ModelFailure.AUTHENTICATION), budgetFactory = app.daiyu.android.domain.runtime.TransportReconnectBudgetFactory { round, reason ->
             val retained = ModelErrorReconnect(round, windowMillis, SystemReconnectTiming, emit, reason)
             retained.start()
             object : app.daiyu.android.domain.runtime.TransportReconnectBudget {
@@ -67,8 +66,9 @@ class FrozenReconnectAdapter private constructor(
         }
         fun session(open: () -> ModelSession): ModelSession {
             val retained = try { open() } catch (failure: ModelRequestException) { report(failure); throw failure }
-            if (responsesBackground != null && retained is app.daiyu.android.domain.CheckpointedResumableModelSession)
-                return retained // Preserve the exact original session and its acknowledgement API.
+            if (settings.enabled && (retained is app.daiyu.android.domain.RequestRetryModelSession ||
+                (responsesBackground != null && retained is app.daiyu.android.domain.CheckpointedResumableModelSession)))
+                return retained
             return object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     try { retained.next(outputs, sink) }

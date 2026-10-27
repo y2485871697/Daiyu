@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.readableAccent
@@ -20,7 +21,7 @@ internal data class ChatActionColors(
 internal fun chatActionColors(): ChatActionColors {
     val buttons = assistantPreviewPalette()
     val customPrimary = LocalAppearanceSettings.current.primaryAccentColor != null
-    val filled = LocalAppearanceDark.current || customPrimary
+    val filled = LocalAppearanceDark.current || customPrimary || LocalAppearanceSettings.current.paletteSeedColor != null
     return ChatActionColors(
         sendContainer = if (filled) buttons.primary else Color(0xFFE8E7EE),
         sendContent = if (filled) buttons.onPrimary else buttons.accent,
@@ -43,5 +44,11 @@ internal fun chatChromeColors(): ChatChromeColors {
     val base = if (dark) ChatChromeColors(Color(0xFFE0DCE8), Color(0xFF7A7786), Color(0xFFB2A9C7), Color(0xFFB4A3F7), Color(0xFF2B283A))
     else ChatChromeColors(Color(0xFF36333F), Color(0xFFA19AA9), Color(0xFF716A82), Color(0xFF7663BD), Color(0xFFECE7F5))
     val appearance = LocalAppearanceSettings.current
+    if (appearance.paletteSeedColor != null) {
+        val theme = resolveAppearanceColors(appearance, dark)
+        return base.copy(text = theme.onSurface, muted = readableAccent(theme.onSurfaceSecondary, dark, theme.surface),
+            toolbar = readableAccent(theme.onSurfaceSecondary, dark, theme.surface), line = theme.dividerLine,
+            accent = readableAccent(appearance.resolvedPrimaryAccent ?: base.accent, dark, theme.surface))
+    }
     return base.copy(accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: base.accent, line = appearance.styleColor(base.line))
 }

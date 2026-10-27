@@ -22,6 +22,24 @@ class AppearanceColorsTest {
             assertEquals(base.onSecondaryContainer, resolved.onSecondaryContainer)
             assertEquals(base.background, resolved.background)
             assertEquals(base.surface, resolved.surface)
+            assertEquals(base.onSurface, resolved.onSurface)
+            assertEquals(base.onSurfaceSecondary, resolved.onSurfaceSecondary)
+            assertEquals(base.onBackground, resolved.onBackground)
+            assertEquals(base.surfaceVariant, resolved.surfaceVariant)
+            assertEquals(base.surfaceContainer, resolved.surfaceContainer)
+            assertEquals(base.surfaceContainerHigh, resolved.surfaceContainerHigh)
+            assertEquals(base.surfaceContainerHighest, resolved.surfaceContainerHighest)
+            assertEquals(base.outline, resolved.outline)
+            assertEquals(base.dividerLine, resolved.dividerLine)
+        }
+    }
+
+    @Test fun customRgbIsOpaqueAndDoesNotTreatZeroAsMissing() {
+        for (dark in listOf(false, true)) for (input in listOf(0, 0x003377CC, 0x803377CC.toInt())) {
+            val appearance = AppearanceSettings(paletteSeedColor = input)
+            val expected = Color(input or 0xFF000000.toInt())
+            assertEquals(expected, resolveAppearanceColors(appearance, dark).surface)
+            assertEquals(expected, resolveAppearanceColors(appearance, dark).background)
         }
     }
 
@@ -99,15 +117,60 @@ class AppearanceColorsTest {
         (maxOf(foreground.luminance(), background.luminance()) + .05f) /
             (minOf(foreground.luminance(), background.luminance()) + .05f)
 
-    @Test fun seedBrightnessIsEffectiveWithoutCrossingThemeBoundaries() {
+    @Test fun customSurfaceUsesExactSelectedRgbAcrossThemesAndStyles() {
         for (dark in listOf(false, true)) for (style in AppearancePaletteStyle.entries) {
-            val bright = resolveAppearanceColors(AppearanceSettings(paletteStyle = style,
-                paletteSeedColor = Color.hsv(145f, .8f, 1f).toArgb()), dark)
-            val dim = resolveAppearanceColors(AppearanceSettings(paletteStyle = style,
-                paletteSeedColor = Color.hsv(145f, .8f, .15f).toArgb()), dark)
-            assertNotEquals("$dark $style", bright.surface, dim.surface)
-            assertEquals(dark, bright.surface.luminance() < .5f)
-            assertEquals(dark, dim.surface.luminance() < .5f)
+            for (fill in listOf(Color.Black, Color.White, Color.Red, Color.Blue, Color(0xFF407FCE))) {
+                val appearance = AppearanceSettings(paletteStyle = style, paletteSeedColor = fill.toArgb())
+                val resolved = resolveAppearanceColors(appearance, dark)
+                assertEquals("background dark=$dark style=$style", fill, resolved.background)
+                assertEquals("surface dark=$dark style=$style", fill, resolved.surface)
+                assertTrue(contrast(resolved.onBackground, resolved.background) >= 4.5f)
+                for ((background, foreground) in listOf(resolved.surface to resolved.onSurface,
+                    resolved.surfaceVariant to resolved.onSurfaceSecondary,
+                    resolved.surfaceContainer to resolved.onSurfaceContainer,
+                    resolved.surfaceContainerHigh to resolved.onSurfaceContainerHigh,
+                    resolved.surfaceContainerHighest to resolved.onSurfaceContainerHighest)) {
+                    assertTrue("dark=$dark style=$style fill=$fill", contrast(foreground, background) >= 4.5f)
+                }
+                assertNotEquals(resolved.surface, resolved.surfaceContainerHigh)
+            }
+        }
+    }
+
+    @Test fun fidelityDecorationRetainsSelectedRgbAndOriginalAlpha() {
+        for (fill in listOf(Color.Black, Color.White, Color.Red, Color(0xFF407FCE))) {
+            val appearance = AppearanceSettings(paletteStyle = AppearancePaletteStyle.FIDELITY,
+                paletteSeedColor = fill.toArgb())
+            val result = appearance.styleColor(Color.White.copy(alpha = .4f))
+            assertEquals(fill.toArgb(), result.copy(alpha = 1f).toArgb())
+            assertEquals(.4f, result.alpha, .001f)
+        }
+    }
+
+    @Test fun customSurfacePropagatesToLocalPalettesAndKeepsContentReadable() {
+        for (dark in listOf(false, true)) for (fill in listOf(Color.Black, Color.White, Color.Red, Color.Blue)) {
+            val appearance = AppearanceSettings(paletteSeedColor = fill.toArgb())
+            val side = app.daiyu.android.ui.components.ConversationPanePreviewPalette(dark, appearance)
+            val assistant = app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette(dark, appearance)
+            val agent = app.daiyu.android.ui.components.subagent.ConversationAgentColors(dark, appearance)
+            val usage = app.daiyu.android.ui.components.UsagePalette(dark, appearance)
+            assertEquals(fill, side.surface)
+            assertEquals(fill, side.fallbackSurface)
+            assertEquals(fill, assistant.background)
+            assertEquals(fill, usage.background)
+            for (gradient in listOf(side.gradient, assistant.gradient, agent.gradient, usage.sheet)) {
+                gradient.forEach { assertEquals(fill, it) }
+            }
+            for (text in listOf(side.text, side.muted, side.toolbar, side.accent,
+                assistant.text, assistant.muted, assistant.toolbar, assistant.accent,
+                agent.text, agent.muted, agent.accent, agent.taskMuted,
+                usage.text, usage.muted, usage.toolbar, usage.accent)) {
+                assertTrue("dark=$dark fill=$fill text=$text", contrast(text, fill) >= 4.5f)
+            }
+            val actions = resolveAppearanceActions(appearance, dark)
+            assertTrue(contrast(actions.onSecondary, actions.secondaryContainer) >= 4.5f)
+            val bubble = resolveUserBubbleColors(appearance, dark)
+            assertTrue(contrast(bubble.content, bubble.container) >= 4.5f)
         }
     }
 

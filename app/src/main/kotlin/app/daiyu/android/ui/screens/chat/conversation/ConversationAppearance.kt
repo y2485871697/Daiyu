@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import app.daiyu.android.ui.app.LocalAppearanceDark
+import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.app.resolveUserBubbleColors
 import app.daiyu.android.ui.app.LocalAppearanceSettings
@@ -52,6 +53,13 @@ internal fun conversationColors(): ConversationColors {
     val appearance = LocalAppearanceSettings.current
     val bubble = resolveUserBubbleColors(appearance, dark)
     val actions = resolveAppearanceActions(appearance, dark)
+    if (appearance.paletteSeedColor != null) {
+        val theme = resolveAppearanceColors(appearance, dark)
+        return base.copy(text = theme.onSurface, muted = readableAccent(theme.onSurfaceSecondary, dark, theme.surface),
+            accent = readableAccent(appearance.resolvedPrimaryAccent ?: base.accent, dark, theme.surface),
+            bubble = bubble.container, bubbleText = bubble.content, surface = theme.surfaceContainer,
+            line = theme.dividerLine, soft = actions.secondaryContainer)
+    }
     return base.copy(accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: base.accent,
         bubble = bubble.container, bubbleText = bubble.content, surface = appearance.styleColor(base.surface),
         line = appearance.styleColor(base.line),

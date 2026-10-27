@@ -60,8 +60,8 @@ internal fun AppearanceSettings.styleColor(original: Color): Color {
         AppearancePaletteStyle.EXPRESSIVE -> 1.1f
         AppearancePaletteStyle.RAINBOW -> .9f
         AppearancePaletteStyle.FRUIT_SALAD -> 1.2f
-        AppearancePaletteStyle.FIDELITY -> 1.25f
-        AppearancePaletteStyle.CONTENT -> 1f
+        AppearancePaletteStyle.FIDELITY -> 1f
+        AppearancePaletteStyle.CONTENT -> .9f
     }
     val hueOffset = when (paletteStyle) {
         AppearancePaletteStyle.EXPRESSIVE -> 60f
@@ -69,24 +69,43 @@ internal fun AppearanceSettings.styleColor(original: Color): Color {
         AppearancePaletteStyle.FRUIT_SALAD -> -50f
         else -> 0f
     }
-    val saturation = (max(base[1], .035f) * seed[1] * 2f * strength).coerceIn(0f, .42f)
-    // Seed brightness changes the environment without crossing theme boundaries.
-    val value = (base[2] * (.94f + .04f * seed[2]) + .02f * seed[2]).coerceIn(0f, 1f)
+    val saturation = (seed[1] * strength).coerceIn(0f, 1f)
+    val value = seed[2]
     return Color.hsv((seed[0] + hueOffset + 360f) % 360f, saturation, value, original.alpha)
 }
 
 internal fun resolveAppearanceColors(appearance: AppearanceSettings, dark: Boolean): Colors {
     val base = if (dark) DaiyuPalette.dark else DaiyuPalette.light
     var colors = base.copy(
-        background = if (dark && appearance.pureBlackEnabled) Color.Black else appearance.styleColor(base.background),
-        surface = if (dark && appearance.pureBlackEnabled) Color.Black else appearance.styleColor(base.surface),
-        surfaceVariant = appearance.styleColor(base.surfaceVariant),
-        surfaceContainer = appearance.styleColor(base.surfaceContainer),
-        surfaceContainerHigh = appearance.styleColor(base.surfaceContainerHigh),
-        surfaceContainerHighest = appearance.styleColor(base.surfaceContainerHighest),
-        outline = appearance.styleColor(base.outline),
-        dividerLine = appearance.styleColor(base.dividerLine),
+        background = if (dark && appearance.pureBlackEnabled) Color.Black else base.background,
+        surface = if (dark && appearance.pureBlackEnabled) Color.Black else base.surface,
     )
+    if (appearance.paletteSeedColor != null) {
+        val fill = Color(appearance.paletteSeedColor).copy(alpha = 1f)
+        val surface = if (dark && appearance.pureBlackEnabled) Color.Black else fill
+        val content = colorContentColor(surface)
+        val styled = appearance.styleColor(surface)
+        fun layer(amount: Float): Color = lerp(lerp(surface, styled, .20f), content, amount)
+        val variant = layer(.04f)
+        val container = layer(.06f)
+        val high = layer(.10f)
+        val highest = layer(.14f)
+        colors = colors.copy(
+            background = surface, onBackground = content,
+            onBackgroundVariant = readableAccent(base.onBackgroundVariant, dark, surface),
+            surface = surface, onSurface = content,
+            surfaceVariant = variant,
+            onSurfaceSecondary = readableAccent(base.onSurfaceSecondary, dark, variant),
+            onSurfaceVariantSummary = readableAccent(base.onSurfaceVariantSummary, dark, variant),
+            onSurfaceVariantActions = readableAccent(base.onSurfaceVariantActions, dark, variant),
+            disabledOnSurface = readableAccent(base.disabledOnSurface, dark, surface),
+            surfaceContainer = container, onSurfaceContainer = colorContentColor(container),
+            onSurfaceContainerVariant = readableAccent(base.onSurfaceContainerVariant, dark, container),
+            surfaceContainerHigh = high, onSurfaceContainerHigh = colorContentColor(high),
+            surfaceContainerHighest = highest, onSurfaceContainerHighest = colorContentColor(highest),
+            outline = layer(.24f), dividerLine = layer(.18f),
+        )
+    }
     val surface = colors.surface
     val primary = appearance.resolvedPrimaryAccent?.copy(alpha = 1f)
     val secondary = appearance.secondaryAccentColor?.let { Color(it).copy(alpha = 1f) }
@@ -141,17 +160,21 @@ internal fun resolveAppearanceActions(appearance: AppearanceSettings, dark: Bool
     val primary = appearance.resolvedPrimaryAccent ?: if (dark) Color(0xFFB6A4C7) else Color(0xFF8E7C9E)
     val secondary = appearance.secondaryAccentColor?.let(::Color)
         ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
-    val container = appearance.secondaryAccentColor?.let { lerp(surface, Color(it), .14f) }
+    val container = if (appearance.paletteSeedColor != null) lerp(surface, secondary, .14f)
+        else appearance.secondaryAccentColor?.let { lerp(surface, Color(it), .14f) }
         ?: appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9))
     return AppearanceActionColors(primary,
-        if (appearance.primaryAccentColor != null) colorContentColor(primary)
+        if (appearance.primaryAccentColor != null || appearance.paletteSeedColor != null) colorContentColor(primary)
             else if (dark) Color(0xFF261F30) else Color.White,
         secondary,
-        if (appearance.secondaryAccentColor != null) readableAccent(secondary, dark, container) else secondary,
+        if (appearance.secondaryAccentColor != null || appearance.paletteSeedColor != null)
+            readableAccent(secondary, dark, container) else secondary,
         container,
-        appearance.primaryAccentColor?.let { lerp(surface, Color(it), .12f) }
+        if (appearance.paletteSeedColor != null) lerp(surface, primary, .12f)
+            else appearance.primaryAccentColor?.let { lerp(surface, Color(it), .12f) }
             ?: appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9)),
-        appearance.primaryAccentColor?.let { readableAccent(Color(it), dark, lerp(surface, Color(it), .12f)) }
+        if (appearance.paletteSeedColor != null) readableAccent(primary, dark, lerp(surface, primary, .12f))
+            else appearance.primaryAccentColor?.let { readableAccent(Color(it), dark, lerp(surface, Color(it), .12f)) }
             ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F))
 }
 
@@ -165,14 +188,15 @@ internal fun destructiveColors(dark: Boolean): DestructiveColors {
 internal data class UserBubbleColors(val container: Color, val content: Color)
 
 internal fun resolveUserBubbleColors(appearance: AppearanceSettings, dark: Boolean): UserBubbleColors {
-    val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
+    val text = if (appearance.paletteSeedColor != null) resolveAppearanceColors(appearance, dark).onSurface
+        else if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
     val themed = appearance.styleColor(if (dark) Color(0xFF26233D) else Color(0xFFF0ECFC))
     return when (appearance.userBubbleMode) {
         UserBubbleMode.OFF -> UserBubbleColors(Color.Transparent, text)
-        UserBubbleMode.THEME -> UserBubbleColors(themed, text)
+        UserBubbleMode.THEME -> UserBubbleColors(themed, if (appearance.paletteSeedColor != null) colorContentColor(themed) else text)
         UserBubbleMode.CUSTOM -> appearance.userBubbleColor?.let {
             val fill = Color(it).copy(alpha = 1f)
             UserBubbleColors(fill, colorContentColor(fill))
-        } ?: UserBubbleColors(themed, text)
+        } ?: UserBubbleColors(themed, if (appearance.paletteSeedColor != null) colorContentColor(themed) else text)
     }
 }

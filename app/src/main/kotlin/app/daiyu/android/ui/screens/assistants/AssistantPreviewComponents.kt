@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.assistants
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.destructiveColors
 import app.daiyu.android.ui.app.resolveAppearanceActions
+import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
@@ -60,27 +61,29 @@ import top.yukonga.miuix.kmp.basic.Text
 
 /** Assistant surfaces share the app's device-tuned density and retain system font scaling. */
 internal data class AssistantPreviewPalette(val dark: Boolean, val appearance: AppearanceSettings = AppearanceSettings()) {
+    private val customSurface = appearance.paletteSeedColor != null
+    private val theme = resolveAppearanceColors(appearance, dark)
     private val actions = resolveAppearanceActions(appearance, dark)
     private val destructive = destructiveColors(dark)
     val dangerContainer = destructive.container
     val onDangerContainer = destructive.content
     val dangerBorder = destructive.border
-    val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
-    val toolbar = if (dark) Color(0xFFB2A9C7) else Color(0xFF716A82)
-    val muted = if (dark) Color(0xFF9C92A8) else Color(0xFF968B9F)
-    val accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
-    val line = appearance.styleColor(if (dark) Color(0x29C5B1DB) else Color(0x299B89AA))
-    val soft = appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9))
+    val text = if (customSurface) theme.onSurface else if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
+    val toolbar = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else if (dark) Color(0xFFB2A9C7) else Color(0xFF716A82)
+    val muted = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else if (dark) Color(0xFF9C92A8) else Color(0xFF968B9F)
+    val accent = if (customSurface) readableAccent(appearance.resolvedPrimaryAccent ?: (if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)), dark, theme.surface) else appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
+    val line = if (customSurface) theme.dividerLine else appearance.styleColor(if (dark) Color(0x29C5B1DB) else Color(0x299B89AA))
+    val soft = if (customSurface) theme.surfaceContainer else appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9))
     val secondary = appearance.secondaryAccentColor?.let(::Color) ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
     val secondaryContainer = actions.secondaryContainer
     val onSecondary = actions.onSecondary
-    val fieldBackground = appearance.styleColor(if (dark) Color(0x22C4ACD7) else Color(0x1FA18DB9))
+    val fieldBackground = if (customSurface) theme.surfaceContainer else appearance.styleColor(if (dark) Color(0x22C4ACD7) else Color(0x1FA18DB9))
     val primary = actions.primary
     val onPrimary = actions.onPrimary
     val danger = if (dark) Color(0xFFDF9CA9) else Color(0xFFAE687A)
-    val border = appearance.styleColor(if (dark) Color(0x26DCCDFF) else Color(0xEDFFFFFF))
-    val background = appearance.styleColor(if (dark) Color(0xFF101218) else Color.White)
-    val gradient = (if (dark) listOf(Color(0xF22E283B), Color(0xF21B1825))
+    val border = if (customSurface) theme.outline else appearance.styleColor(if (dark) Color(0x26DCCDFF) else Color(0xEDFFFFFF))
+    val background = if (customSurface) theme.surface else appearance.styleColor(if (dark) Color(0xFF101218) else Color.White)
+    val gradient = if (customSurface) listOf(theme.surface, theme.surface) else (if (dark) listOf(Color(0xF22E283B), Color(0xF21B1825))
         else listOf(Color(0xF0FFFFFF), Color(0xF0F8F4FF))).map(appearance::styleColor)
 }
 

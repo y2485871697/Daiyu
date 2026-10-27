@@ -33,6 +33,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import app.daiyu.android.ui.components.dialogEnterMotion
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -106,6 +107,8 @@ import androidx.compose.foundation.verticalScroll
 import app.daiyu.android.ui.SubAgentSettingsScreen
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.DaiyuPalette
+import app.daiyu.android.ui.app.resolveAppearanceColors
+import app.daiyu.android.ui.app.colorContentColor
 import app.daiyu.android.ui.components.*
 import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
 import app.daiyu.android.ui.screens.chat.conversation.ComposerReferences
@@ -2631,12 +2634,13 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION")
     private fun updateSystemBars(isDark: Boolean) {
-        val background = if (isDark) DaiyuPalette.dark.background else DaiyuPalette.light.background
+        val background = resolveAppearanceColors(appearance, isDark).background
+        val lightBars = colorContentColor(background) == Color.Black
         window.statusBarColor = background.toArgb()
         window.navigationBarColor = background.toArgb()
         val controller = WindowCompat.getInsetsController(window, window.decorView)
-        controller.isAppearanceLightStatusBars = !isDark
-        controller.isAppearanceLightNavigationBars = !isDark
+        controller.isAppearanceLightStatusBars = lightBars
+        controller.isAppearanceLightNavigationBars = lightBars
     }
 
     private fun chatActions(): ChatScreenActions {

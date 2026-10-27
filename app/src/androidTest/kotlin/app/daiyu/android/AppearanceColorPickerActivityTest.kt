@@ -1,5 +1,11 @@
 package app.daiyu.android
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,12 +41,40 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
             var visible by mutableStateOf(true)
             activity.setContent {
                 AgentAppTheme(state, true) {
-                    if (visible) AppearanceColorSheet(editor, state,
-                        onChange = { requests += it; state = it; true }, onDismiss = { visible = false })
+                    Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface)
+                        .testTag("exact-applied-surface")) {
+                        if (visible) AppearanceColorSheet(editor, state,
+                            onChange = { requests += it; state = it; true }, onDismiss = { visible = false })
+                    }
                 }
             }
         }
         awaitDialogEnter(node("assistant-sheet"))
+    }
+
+    fun testExactInterfaceDraftAndAppliedSurfaceInBothThemes() {
+        for (dark in listOf(false, true)) for (fill in listOf(Color.Black, Color.White, Color(0xFF407FCE))) {
+            val requests = mutableListOf<AppearanceSettings>()
+            show(AppearanceColorEditor.STYLE, dark, requests)
+            if (fill == Color(0xFF407FCE)) {
+                node("appearance-swatch:界面色彩:${0xFF407FCE}").scrollToVisible().performClick()
+            } else {
+                val pad = node("appearance-color-pad:界面色彩").scrollToVisible()
+                val labels = if (fill == Color.Black) listOf("减少明度") else listOf("减少饱和度", "增加明度")
+                for (label in labels) repeat(25) {
+                    val action = pad.fetchSemanticsNode().config[SemanticsActions.CustomActions].first { it.label == label }
+                    ui.runOnIdle { assertTrue(action.action()) }
+                }
+            }
+            val preview = node("appearance-draft-preview").scrollToVisible().captureToImage()
+            assertSameColor(fill, pixel(preview, .5f, .02f))
+            ui.runOnIdle { assertTrue(requests.isEmpty()) }
+            node("appearance-color-confirm").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            ui.runOnIdle { assertEquals(fill, Color(requests.single().paletteSeedColor!!)) }
+            assertSameColor(fill, pixel(node("exact-applied-surface").captureToImage(), .5f, .5f))
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testPlaneKeepsHueAcrossDraggingAndBlackInBothThemes() {

@@ -36,7 +36,7 @@ fun AgentAppTheme(
     }
     val themedColors = remember(appearance, isDark) { resolveAppearanceColors(appearance, isDark) }
 
-    LaunchedEffect(isDark) { onResolvedDarkModeChange(isDark) }
+    LaunchedEffect(isDark, appearance.paletteSeedColor, appearance.pureBlackEnabled) { onResolvedDarkModeChange(isDark) }
 
     MiuixTheme(colors = themedColors) {
         val platformDensity = LocalDensity.current

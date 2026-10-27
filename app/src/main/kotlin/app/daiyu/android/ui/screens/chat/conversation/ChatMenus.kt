@@ -161,13 +161,6 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
         MenuEntry("视频", DaiyuIcons.Video, ChatMenuAction.ATTACH_VIDEO),
         MenuEntry("文件引用", DaiyuIcons.File, ChatMenuAction.ATTACH_FILE),
         MenuEntry("目录引用", DaiyuIcons.Folder, ChatMenuAction.ATTACH_FOLDER),
-        MenuEntry("浏览器工具", DaiyuIcons.Browser, ChatMenuAction.BROWSER_TOOLS),
-        MenuEntry("屏幕操作", DaiyuIcons.Accessibility, ChatMenuAction.GUI_TOOLS),
-        MenuEntry("MCP 工具", DaiyuIcons.Gateway, ChatMenuAction.MCP_TOOLS),
-        MenuEntry("精确终端任务", DaiyuIcons.Terminal, ChatMenuAction.TERMINAL_TOOLS),
-        MenuEntry("生成图片", DaiyuIcons.Image, ChatMenuAction.GENERATE_IMAGE),
-        MenuEntry("生成视频", DaiyuIcons.Video, ChatMenuAction.GENERATE_VIDEO),
-        MenuEntry("生成模型配置", DaiyuIcons.Provider, ChatMenuAction.GENERATION_SETTINGS),
     )
     val colors = usagePalette()
     ChatSelectionSheet("附件", onDismiss, subtitle = "选择你要添加的内容", showCloseButton = false,

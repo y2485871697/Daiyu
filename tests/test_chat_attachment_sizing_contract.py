@@ -27,8 +27,13 @@ class ChatAttachmentSizingContract(unittest.TestCase):
                     self.assertNotRegex(call, r"\b(?:titleFontSize|subtitleFontSize)\s*=", str(file))
 
     def test_four_entries_keep_mapping_click_semantics_and_dismiss_order(self):
-        self.assertEqual(["IMAGE", "VIDEO", "FILE", "FOLDER"],
-                         re.findall(r"MenuEntry\([^\n]*ChatMenuAction.ATTACH_(\w+)\)", self.attachment))
+        self.assertEqual([
+            ("图片", "Image", "ATTACH_IMAGE"),
+            ("视频", "Video", "ATTACH_VIDEO"),
+            ("文件引用", "File", "ATTACH_FILE"),
+            ("目录引用", "Folder", "ATTACH_FOLDER"),
+        ], re.findall(r'MenuEntry\("([^"]+)",\s*DaiyuIcons\.(\w+),\s*ChatMenuAction\.(\w+)\)',
+                      self.attachment))
         self.assertIn("import app.daiyu.android.ui.haptics.clickable", self.menus)
         self.assertIn("indication = null", self.attachment)
         self.assertIn("role = Role.Button) { onDismiss(); onAction(entry.action) }", self.attachment)

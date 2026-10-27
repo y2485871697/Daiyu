@@ -159,7 +159,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         for (mixed in listOf(false, true)) {
             val fixture = source(mixed, "memory-$mixed")
             val message = fixture.copy(blocks = fixture.blocks.map { block ->
-                if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = "memory_get",
+                if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = "assistant_memory_read",
                     arguments = """{"id":"mem-02","command":"not a terminal command"}"""),
                     result = """{"ok":true,"text":"memory body","revision":"r7","stdout":"not terminal output"}""")
                 else block

@@ -45,14 +45,18 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
         TimelineAnchor.at(db.messages(owner).map { it.second }, 1), 10L, "running", 100L, "NETWORK", 0, "main-model")
 
     fun testContextLimitIsImmutableAndSurvivesReopenFullAndConversationBackup() {
-        val (context, db) = fresh(); val owner = seed(db)
-        val message = db.messages(owner).map { it.second }.last()
+        val (context, db) = fresh()
+        val owner = db.create("default").id
+        val run = RunId("context-limit-${owner.value}")
+        val user = Message(MessageId("limit-user-${owner.value}"), owner, run, Message.USER_ROLE,
+            listOf(MessageBlock.Text("question", "keep working")), RunStatus.COMPLETED)
+        val message = user.copy(id = MessageId("limit-answer-${owner.value}"),
+            role = Message.ASSISTANT_ROLE, blocks = emptyList(), status = RunStatus.RUNNING)
+        db.send(user, message)
         val block = MessageBlock.Text("answer", "completed tool boundary")
         val tail = MessageBlock.Text("after", "next completed boundary")
-        val stopped = message.copy(blocks = listOf(block, tail), historySegments = listOf(
+        val stopped = message.copy(status = RunStatus.COMPLETED, blocks = listOf(block, tail), historySegments = listOf(
             MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, listOf(block)),
-            MessageHistorySegment(MessageId("extra-${owner.value}"), Message.USER_ROLE,
-                listOf(MessageBlock.Text("extra", "keep working"))),
             MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, listOf(tail))))
         db.save(stopped)
         val capacity = app.daiyu.android.domain.runtime.ContextCapacityCheckpoint(

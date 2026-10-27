@@ -147,13 +147,14 @@ class ResponsesTest:InstrumentationTestCase() {
             429 to ModelFailure.RATE_LIMIT,500 to ModelFailure.SERVER,400 to ModelFailure.REQUEST)
         for((code,failure) in expected) {
             val result=run(listOf(Connection("synthetic-secret",code)))
-            assertEquals(RunStatus.FAILED,result.status);assertEquals(failure.userMessage,result.error)
+            assertEquals(RunStatus.FAILED,result.status)
+            assertEquals(ModelRequestException(failure, ModelRequestDiagnostic(code)).userMessage,result.error)
             assertFalse(result.error!!.contains("synthetic-secret"))
         }
         assertEquals(RunStatus.COMPLETED,run(listOf(Connection(frames(completed(message("answer"))),200,"Text/Event-Stream; charset=UTF-8"))).status)
         assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection("{}",200,"text/event-streamXYZ"))).error)
         assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection(frames(JSONObject().put("choices",JSONArray()))))).error)
-        assertEquals(ModelFailure.INCOMPLETE.userMessage,run(listOf(Connection("data: [DONE]\n\n"))).error)
+        assertEquals(ModelFailure.NETWORK.userMessage,run(listOf(Connection("data: [DONE]\n\n"))).error)
     }
     fun testTransportFailuresAreClassifiedWithoutRetriesOrLeaks() {
         for ((exception, expected) in listOf(
@@ -195,7 +196,7 @@ class ResponsesTest:InstrumentationTestCase() {
             event("response.completed","response" to JSONObject().put("status","completed")))) {
             assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection(frames(event)))).error)
         }
-        assertEquals(ModelFailure.INCOMPLETE.userMessage,run(listOf(Connection("data: ${completed()}"))).error)
+        assertEquals(ModelFailure.NETWORK.userMessage,run(listOf(Connection("data: ${completed()}"))).error)
     }
     fun testSinkIoFailuresKeepTheirIdentity() {
         for(exception in listOf(java.io.IOException("sink"),java.net.SocketTimeoutException("sink"),javax.net.ssl.SSLException("sink"))) {

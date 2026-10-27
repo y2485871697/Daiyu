@@ -208,8 +208,9 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         mainThread { invokeOn(oldActivity, "acceptShizuku", oldEditor, p, fixture.database.create()) }
         assertDraft(text)
         val next = reserveReceiptFixture(seedDraft = false)
-        ui.onNode(hasSetTextAction() and hasText(command) and
-            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).assertExists()
+        ui.onNode(hasText(command, substring = false) and
+            hasAnyAncestor(hasTestTag("shizuku-text-panel")))
+            .assertExists().assertIsNotEnabled().assertEditableText(command)
         mainThread {
             assertSame(next, fixture.controller.shizukuPreparation())
             assertFalse(next.isCancelled())

@@ -12,6 +12,14 @@ import app.daiyu.android.ui.app.AgentAppTheme
 
 class ChatTimelineDividerTest : WiredActivityTestCase() {
     private val anchor = TimelineAnchor("conversation", "run", "message", 0)
+    fun testContextLimitDividerIsNonInteractiveAndNeverOpensDetails() {
+        val entry = ChatTimelineEntry.ContextLimit("context-limit:one", anchor, 1L, 280_000L, 272_000L, 270_000L)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            ChatTimelineDivider(entry)
+        } } }
+        ui.onNodeWithText("上下文超限").assertIsDisplayed().assertIsNotEnabled()
+        ui.onNodeWithTag("timeline-details").assertDoesNotExist()
+    }
     fun testCompressionDetailShowsCompleteSummaryActualModelAndCopyCloseActions() {
         val summary = "完整摘要首行\n用户约束：未授权编译\n尚未完成：任务乙"
         val entry = ChatTimelineEntry.Compression("archive", anchor, 1L, summary,
@@ -19,10 +27,10 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             ChatTimelineDivider(entry)
         } } }
-        ui.onNodeWithText("已压缩 6 条消息").performClick()
+        ui.onNodeWithText("主代理 · 已压缩 6 条消息").performClick()
         ui.onNodeWithTag("timeline-details").assertIsDisplayed()
         ui.onNodeWithText(summary).assertIsDisplayed()
-        ui.onNodeWithText("summary-provider · actual-summary-model · RESPONSES").assertExists()
+        ui.onNodeWithText("summary-provider · actual-summary-model").assertExists()
         ui.onNodeWithTag("timeline-copy").performClick()
         ui.onNodeWithContentDescription("已复制").assertExists()
         ui.onNodeWithTag("timeline-close").performClick()

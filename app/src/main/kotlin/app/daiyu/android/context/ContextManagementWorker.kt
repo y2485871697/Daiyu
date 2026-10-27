@@ -72,6 +72,7 @@ internal interface ContextManagementBackend {
         expected: ContextManagementSnapshot): ContextCompressionReceipt
     fun runCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
         selection: ContextManagementSelection?, parent: Message,
+        windowTokens: Long, sendBudgetTokens: Long,
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): app.daiyu.android.domain.runtime.RunContextRuntime =
         throw UnsupportedOperationException("运行中压缩不可用")
 }
@@ -134,13 +135,16 @@ internal class ContextManagementWorker(
 
     override fun runCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
         selection: ContextManagementSelection?, parent: Message,
+        windowTokens: Long, sendBudgetTokens: Long,
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): app.daiyu.android.domain.runtime.RunContextRuntime {
         checkLease(lease)
         require(parent.conversationId == lease.owner.conversationId)
         val saved = requireNotNull(expected.savedConfiguration)
         require(settings() == saved) { "压缩设置已改变，请重新选择" }
         val target = if (selection == null) requireNotNull(expected.summaryTarget) else profiles.describeSelection(selection)
-        val policy = policies.resolve(saved.copy(automatic = true, summaryModel = target.binding))
+        require(sendBudgetTokens > 0 && sendBudgetTokens <= windowTokens)
+        val policy = policies.resolve(saved.copy(automatic = true, summaryModel = target.binding,
+            contextWindowTokens = windowTokens, reserveTokens = windowTokens - sendBudgetTokens))
         return ProductionRunContext(policy, parent, resolve = { usage ->
             checkLease(lease)
             require(settings() == saved) { "压缩设置已改变，请重新选择" }

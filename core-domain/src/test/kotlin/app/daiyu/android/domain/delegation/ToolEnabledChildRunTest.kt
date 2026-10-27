@@ -60,7 +60,8 @@ class ToolEnabledChildRunTest {
         }
     }
     private class Fixture(val assembly: Assembly = Assembly(), val transport: Transport = Transport(),
-        val capacity: Semaphore = Semaphore(1)) {
+        val capacity: Semaphore = Semaphore(1),
+        val contextRuntime: RunContextRuntime? = null, val runtimeStore: RuntimeStore? = null) {
         val parent = RunExecutionOwner.issue(Message(MessageId("parent-message"), ConversationId("conversation"), RunId("parent"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val scope = ChildRunScope.capture(ChildRunOwner("conversation", "parent", "group", 7, "child", "child-message"),
@@ -76,12 +77,46 @@ class ToolEnabledChildRunTest {
                     check(definitions.isNotEmpty()); return transport
                 }
             }
-        }, journal, capacity)
+        }, journal, capacity, runtimeStore = runtimeStore, contextRuntime = contextRuntime)
         fun waitDrained() {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
             while (!run.drained && System.nanoTime() < deadline) Thread.sleep(5)
             assertTrue(run.drained)
         }
+    }
+
+    @Test fun capacityPauseIsVisibleAndResumeCompressesTheSameChildWithoutRecreation() {
+        val paused = CountDownLatch(1)
+        val summaries = AtomicInteger()
+        val runtime = object : RunContextRuntime {
+            override val automatic = false
+            override val windowTokens = 1000L
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) =
+                if (summaries.get() == 0) 1100L else 100L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message> {
+                admit(); summaries.incrementAndGet(); return history
+            }
+        }
+        val f = Fixture(contextRuntime = runtime, runtimeStore = object : RuntimeStore {
+            override fun save(checkpoint: RunCheckpoint) {
+                if (checkpoint.context?.capacity != null) paused.countDown()
+            }
+        })
+        try {
+            assertTrue(f.run.start()); await(paused)
+            assertTrue(f.run.contextLimited)
+            assertTrue(f.run.snapshot.contextLimited)
+            assertEquals(ChildTaskPauseState.PAUSED, f.run.pauseState)
+            assertEquals(0, f.factories.get())
+            assertEquals(ChildTaskControlReceipt.PENDING, f.run.resume())
+            await(f.journal.finished); await(f.assembly.observed)
+            f.transport.returnCancel.countDown(); f.assembly.report(ChildToolDrain.Drained)
+            f.waitDrained()
+            assertEquals(1, summaries.get()); assertEquals(1, f.factories.get()); assertEquals(1, f.assembly.prepares.get())
+            assertFalse(f.run.contextLimited)
+        } finally { f.transport.returnCancel.countDown(); f.run.close() }
     }
 
     @Test fun pauseBeforeStartPreservesOriginalBrowserChildAndNeverConstructsUntilResume() {

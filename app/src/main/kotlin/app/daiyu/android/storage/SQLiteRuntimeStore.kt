@@ -155,6 +155,9 @@ internal class SQLiteRuntimeStore private constructor(
                 "message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?",
                 arrayOf(m.id.value, checkpoint.owner, prior.toString(), processOwner)) == 1)
             database.writeRuntimeMessage(db, m)
+            app.daiyu.android.timeline.ChatTimelineStore.contextLimit(checkpoint)?.let {
+                app.daiyu.android.timeline.ChatTimelineStore.write(db, it)
+            }
             val boundContext = contextUsageBinding?.takeIf { it.first.id == m.id && it.first.runId == m.runId &&
                 it.first.conversationId == m.conversationId }
             ConversationUsageStore.record(db, checkpoint, boundContext?.second?.windowTokens)

@@ -7,7 +7,7 @@ import app.daiyu.android.domain.delegation.ChildTaskStatus
 import app.daiyu.android.domain.delegation.RetainedChildTask
 
 internal data class SubAgentStatusRow(val owner: ChildRunOwner, val agent: String, val status: String,
-    val completed: Boolean = false, val model: String = "模型未记录")
+    val completed: Boolean = false, val model: String = "模型未记录", val contextLimited: Boolean = false)
 
 internal fun subAgentStatusItemKey(owner: ChildRunOwner): String = with(owner) {
     listOf(conversationId, parentRunId, taskGroupId, generation.toString(), childRunId, assistantMessageId)
@@ -26,6 +26,7 @@ internal fun subAgentStatusRows(records: List<ChildTaskRecord>, live: List<Retai
             record.status == ChildTaskStatus.NOT_EXECUTED -> "未执行"
             record.status == ChildTaskStatus.UNKNOWN -> "结果未知"
             task != null && !task.settled && task.stopRequested -> "停止中"
+            task != null && !task.settled && task.contextLimited -> "上下文超限"
             task != null && !task.settled && task.pauseState == ChildTaskPauseState.PAUSED -> "已暂停"
             task != null && !task.settled && task.pauseState == ChildTaskPauseState.PENDING -> "暂停中"
             task != null && !task.settled && task.queueState == app.daiyu.android.domain.delegation.ChildTaskQueueState.PENDING -> "排队中"
@@ -34,6 +35,6 @@ internal fun subAgentStatusRows(records: List<ChildTaskRecord>, live: List<Retai
         }
         SubAgentStatusRow(record.owner, record.display?.agentName ?: record.profileId, status,
             record.status == ChildTaskStatus.COMPLETED && task?.journalUnconfirmed != true,
-            record.display?.modelName ?: "模型未记录")
+            record.display?.modelName ?: "模型未记录", task?.contextLimited == true)
     }
 }

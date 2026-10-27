@@ -168,7 +168,8 @@ data class ExecutionState(
     val phase: ExecutionPhase = ExecutionPhase.IDLE,
     val pauseRequested: Boolean = false,
     val queuedSupplements: Int = 0,
-    val reconnectAttempt: Int = 0
+    val reconnectAttempt: Int = 0,
+    val contextLimited: Boolean = false
 )
 
 /** Process death is a terminal interruption, not authorization to retry an uncertain request/tool. */

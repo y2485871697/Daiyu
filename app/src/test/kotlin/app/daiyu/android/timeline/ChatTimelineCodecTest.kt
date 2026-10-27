@@ -55,6 +55,17 @@ class ChatTimelineCodecTest {
         row.getJSONObject("model").put("api_key", "secret")
         rejects { ChatTimelineStore.decode("archive", 0L, row) }
     }
+
+    @Test fun contextLimitKeepsExactStopPositionBudgetAndAgentLabel() {
+        val entry = ChatTimelineEntry.ContextLimit("context-limit:one", anchor.copy(segment = 2), 789L,
+            280_000L, 272_000L, 270_000L, "子代理 · review")
+        assertEquals("context_limit", ChatTimelineStore.kind(entry))
+        assertEquals(entry, ChatTimelineStore.decode(entry.id, entry.created, ChatTimelineStore.encode(entry)))
+        for ((key, value) in listOf("estimated" to 270_000L, "budget" to 0L, "window" to 260_000L,
+            "estimated" to "280000", "estimated" to 1.2)) {
+            rejects { ChatTimelineStore.decode(entry.id, entry.created, ChatTimelineStore.encode(entry).put(key, value)) }
+        }
+    }
     private fun rejects(block: () -> Unit) {
         try { block(); fail("invalid display evidence accepted") } catch (_: IllegalArgumentException) { }
     }

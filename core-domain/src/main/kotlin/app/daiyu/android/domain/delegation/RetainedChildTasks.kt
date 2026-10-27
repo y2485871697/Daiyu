@@ -30,7 +30,8 @@ data class RetainedChildTask(
     val settled: Boolean,
     val journalUnconfirmed: Boolean,
     val pauseState: ChildTaskPauseState = ChildTaskPauseState.ACTIVE,
-    val queueState: ChildTaskQueueState = ChildTaskQueueState.ACTIVE
+    val queueState: ChildTaskQueueState = ChildTaskQueueState.ACTIVE,
+    val contextLimited: Boolean = false,
 )
 
 internal class ChildTaskResources(

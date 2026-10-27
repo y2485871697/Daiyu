@@ -31,7 +31,7 @@ internal object RunCheckpointCodec {
                 put(item)
             } }
         }
-        val version = if (value.context != null) 9 else if (value.usage.any { it.snapshot.cacheCreationTokens != null }) 8 else if (value.transport == null) 6 else 7
+        val version = if (value.context?.capacity != null) 10 else if (value.context != null) 9 else if (value.usage.any { it.snapshot.cacheCreationTokens != null }) 8 else if (value.transport == null) 6 else 7
         return JSONObject().put("version", version).put("message", messages(listOf(value.message)))
             // Runtime context is a logical projection: several segments may share one physical message ID.
             .put("history", if (value.context != null) projectedHistory(value.history) else messages(value.history))
@@ -51,7 +51,11 @@ internal object RunCheckpointCodec {
                 .put("calibration", context.calibration?.let(::encodeInput) ?: JSONObject.NULL)
                 .put("pressure", context.pressure?.let(::encodeRequest) ?: JSONObject.NULL)
                 .put("summaries", JSONArray().apply { context.summaries.forEach { put(encodeRequest(it)) } })
-                .put("compactions", context.compactions)) } }
+                .put("compactions", context.compactions).apply { context.capacity?.let { capacity ->
+                    put("capacity", JSONObject().put("id", capacity.id).put("created", capacity.created)
+                        .put("estimated", capacity.estimatedTokens).put("window", capacity.windowTokens)
+                        .put("budget", capacity.budgetTokens).put("segment", capacity.segment))
+                } }) } }
             .apply { value.transport?.let { put("transport", JSONObject().put("response_id", it.responseId)
                 .put("sequence", it.sequence).put("decoder_state", it.decoderState)) } }
             .put("usage_requests", JSONArray().apply { value.usageRequests.forEach { put(encodeRequest(it)) } })
@@ -72,7 +76,7 @@ internal object RunCheckpointCodec {
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')
         val version = integer(value, "version")
-        require(version in 1L..9L)
+        require(version in 1L..10L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
         val recoveryOwner = if (value.has("recovery_source_owner")) string(value, "recovery_source_owner") else null
@@ -90,13 +94,20 @@ internal object RunCheckpointCodec {
             if (recoveryOwner == null) emptyArray() else arrayOf("recovery_source_owner")))
         val context = if (version < 9) null else {
             val row = value.getJSONObject("context")
-            fields(row, "input", "calibration", "pressure", "summaries", "compactions")
+            fields(row, *(arrayOf("input", "calibration", "pressure", "summaries", "compactions") +
+                if (version >= 10) arrayOf("capacity") else emptyArray()))
             val summaries = row.getJSONArray("summaries"); require(summaries.length() <= 100)
             RunContextCheckpoint(if (row.isNull("input")) null else decodeInput(row.getJSONObject("input")),
                 if (row.isNull("calibration")) null else decodeInput(row.getJSONObject("calibration")),
                 if (row.isNull("pressure")) null else decodeRequest(row.get("pressure")),
                 (0 until summaries.length()).map { decodeRequest(summaries.get(it)) },
-                integer(row, "compactions").also { require(it in 0..100) }.toInt())
+                integer(row, "compactions").also { require(it in 0..100) }.toInt(),
+                if (version < 10) null else row.getJSONObject("capacity").let { capacity ->
+                    fields(capacity, "id", "created", "estimated", "window", "budget", "segment")
+                    ContextCapacityCheckpoint(string(capacity, "id"), integer(capacity, "created"),
+                        integer(capacity, "estimated"), integer(capacity, "window"), integer(capacity, "budget"),
+                        integer(capacity, "segment").also { require(it in 0L..50000L) }.toInt())
+                })
         }
         val transport = if (version < 7L || !value.has("transport") || value.isNull("transport")) null else {
             val row = value.getJSONObject("transport")
@@ -183,6 +194,11 @@ internal object RunCheckpointCodec {
             require(value.phase == ExecutionPhase.TERMINAL || it.owner == value.owner)
         }
         value.context?.let { state ->
+            state.capacity?.let { capacity ->
+                require(capacity.segment < MessageHistory.expand(listOf(m)).count {
+                    it.conversationId == m.conversationId && it.runId == m.runId && it.id == m.id
+                })
+            }
             require(state.compactions in 0..state.summaries.size)
             val main = value.usageRequests.map { it.owner to it.requestId }.toSet()
             listOfNotNull(state.input, state.calibration).forEach { input ->

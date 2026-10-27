@@ -32,6 +32,15 @@ class SubAgentStatusRowsTest {
         assertEquals("状态未确认", subAgentStatusRows(listOf(task), listOf(live.copy(journalUnconfirmed = true))).single().status)
         assertEquals("停止中", subAgentStatusRows(listOf(task), listOf(live.copy(stopRequested = true))).single().status)
     }
+    @Test fun contextLimitIsDistinctFromOrdinaryPauseAndKeepsResumeActionIdentity() {
+        val task = task().copy(status = ChildTaskStatus.RUNNING)
+        val live = RetainedChildTask(task, false, false, false, ChildTaskPauseState.PAUSED, contextLimited = true)
+        val row = subAgentStatusRows(listOf(task), listOf(live)).single()
+        assertEquals("上下文超限", row.status)
+        assertTrue(row.contextLimited)
+        assertEquals(subAgentStatusItemKey(task.owner), subAgentStatusItemKey(row.owner))
+        assertFalse(subAgentStatusRows(listOf(task), listOf(live.copy(contextLimited = false))).single().contextLimited)
+    }
     @Test fun poolQueueIsVisibleWithoutReplacingTheUsersPauseState() {
         val task = task().copy(status = ChildTaskStatus.RUNNING)
         val live = RetainedChildTask(task, false, false, false, queueState = ChildTaskQueueState.PENDING)

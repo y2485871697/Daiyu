@@ -34,14 +34,14 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     @Volatile private var terminal = false
     @Volatile private var terminalReserved = false
     private var started = false
-    private class CompactRequest(val create: () -> RunContextRuntime, val completed: (Boolean, String?) -> Unit)
+    private class CompactRequest(val create: (RunContextRuntime) -> RunContextRuntime, val completed: (Boolean, String?) -> Unit)
     private var pendingCompact: CompactRequest? = null
     @Volatile private var compactingRuntime: RunContextRuntime? = null
 
     /** Maintenance only: never cancel the streaming response or an executing tool batch. */
-    fun requestCompaction(create: () -> RunContextRuntime, completed: (Boolean, String?) -> Unit = { _, _ -> }): Boolean {
+    fun requestCompaction(create: (RunContextRuntime) -> RunContextRuntime, completed: (Boolean, String?) -> Unit = { _, _ -> }): Boolean {
         val waiter = synchronized(terminalLock) {
-            if (options.contextRuntime == null || terminal || terminalReserved || stopped.get() || pendingCompact != null) return false
+            if (options.contextRuntime?.canCompact != true || terminal || terminalReserved || stopped.get() || pendingCompact != null) return false
             pendingCompact = CompactRequest(create, completed)
             boundaryWaiter
         }
@@ -49,7 +49,11 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         return true
     }
 
+    fun requestCompaction(completed: (Boolean, String?) -> Unit = { _, _ -> }): Boolean =
+        requestCompaction({ it }, completed)
+
     @Volatile private var pauseRequested = false
+    @Volatile private var contextLimited = false
     @Volatile private var reasoningInterruptedAtNanos: Long? = null
     @Volatile private var breakStream = false
     @Volatile private var generation = 0L
@@ -165,7 +169,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     /** Nonblocking control call. A tool already executing is allowed to finish its batch. */
     fun pause(): Boolean {
         val captured = synchronized(terminalLock) {
-            if (terminal || terminalReserved || stopped.get()) return false
+            if (terminal || terminalReserved || stopped.get() || contextLimited) return false
             pauseRequested = true
             if (reasoningInterruptedAtNanos == null) reasoningInterruptedAtNanos = System.nanoTime()
             pauseRevision++
@@ -191,7 +195,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     /** Releases the user pause without changing the running owner. */
     fun resume(): Boolean {
         val waiter = synchronized(terminalLock) {
-            if (terminal || terminalReserved || stopped.get() || !pauseRequested) return false
+            if (terminal || terminalReserved || stopped.get() || !pauseRequested || contextLimited) return false
             pauseRequested = false
             pauseRevision++
             execution = execution.copy(pauseRequested = false)
@@ -280,9 +284,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     }
     private fun setPhase(phase: ExecutionPhase, attempt: Int = 0) = synchronized(terminalLock) {
         val actual = if (phase == ExecutionPhase.BOUNDARY || phase == ExecutionPhase.PAUSED) {
-            if (pauseRequested) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY
+            if (pauseRequested || contextLimited) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY
         } else phase
-        execution = ExecutionState(actual, pauseRequested, supplements.size, attempt)
+        execution = ExecutionState(actual, pauseRequested || contextLimited, supplements.size, attempt, contextLimited)
     }
     fun run(initial: Message, history: List<Message>): Message =
         when (val slice = startInternal(initial, history, allowBarrier = false)) {
@@ -299,6 +303,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var contextState = contextRuntime?.let { RunContextCheckpoint() }
         var acceptedContextSegments = 0
         var reopenAfterCompaction = false
+        var contextInputOverhead = 0L
         fun effectiveHistory(message: Message = current): List<Message> = if (contextRuntime == null) modelHistory else modelHistory +
             MessageHistory.expand(listOf(segmentHistory.project(message).copy(status = RunStatus.COMPLETED, error = null)))
                 .drop(acceptedContextSegments)
@@ -456,6 +461,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         }
         fun compactAtBoundary(): Boolean {
             val base = contextRuntime ?: return false
+            if (!base.canCompact) return false
             val pressure = contextState?.pressure
             val selected = synchronized(terminalLock) {
                 if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) return false
@@ -476,13 +482,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 catch (failure: PersistenceException) { persistenceFailure = failure; throw failure }
             }
             try {
-                val selectedRuntime = manual?.create?.invoke() ?: base
+                val selectedRuntime = manual?.create?.invoke(base) ?: base
                 runtime = selectedRuntime
                 compactingRuntime = selectedRuntime
                 if (cancelled()) return false
                 val before = effectiveHistory()
                 val historyLocal = selectedRuntime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
-                val anchor = contextState?.calibration
+                val anchor = contextState?.calibration ?: contextState?.input
                 val local = anchor?.let { (it.localTokens + historyLocal - it.historyTokens).coerceAtLeast(0) } ?: historyLocal
                 val billed = anchor?.billedTokens?.let { (it + local - anchor.localTokens).coerceAtLeast(0) }
                 if (cancelled()) return false
@@ -544,6 +550,60 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
             }
         }
+        fun contextSize(): Long {
+            val runtime = contextRuntime ?: return 0
+            val local = runtime.localTokens(effectiveHistory(), (tool as? CatalogTool)?.definitions.orEmpty())
+            val anchor = contextState?.calibration ?: contextState?.input
+            return if (anchor != null) ((anchor.billedTokens ?: anchor.localTokens) + local - anchor.historyTokens).coerceAtLeast(0)
+                else (local + contextInputOverhead).coerceAtLeast(0)
+        }
+        fun awaitContextCapacity() {
+            val runtime = contextRuntime ?: return
+            while (true) {
+                if (stopped.get() || terminalReserved) throw InterruptedException()
+                val controls = synchronized(terminalLock) {
+                    pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()
+                }
+                if (controls && boundary()) reopenAfterCompaction = true
+                // A manual summary is maintenance on the same writer, not a new model/tool turn.
+                if (synchronized(terminalLock) { pendingCompact != null }) compactAtBoundary()
+                val estimate = contextSize()
+                if (estimate <= runtime.sendBudgetTokens) {
+                    if (contextLimited) {
+                        contextState = checkNotNull(contextState).copy(capacity = null)
+                        synchronized(terminalLock) { contextLimited = false; boundaryWaiter = null }
+                        setPhase(ExecutionPhase.BOUNDARY)
+                        checkpoint()
+                    }
+                    return
+                }
+                if (!contextLimited) {
+                    val claimed = synchronized(terminalLock) {
+                        if (stopped.get() || terminalReserved) throw InterruptedException()
+                        if (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) false
+                        else { contextLimited = true; setPhase(ExecutionPhase.PAUSED); true }
+                    }
+                    if (!claimed) continue
+                    // Freeze the stop position so resumed text starts below the divider.
+                    val sealed = segmentHistory.sealSession(current, emptyList())
+                    segmentHistory = RunnerHistorySegments(sealed) { reasoningInterruptedAtNanos ?: System.nanoTime() }
+                    current = sealed
+                    val segment = (MessageHistory.expand(listOf(sealed)).count {
+                        it.id == initial.id && it.runId == initial.runId
+                    } - 1).coerceAtLeast(0)
+                    contextState = checkNotNull(contextState).copy(capacity = ContextCapacityCheckpoint(
+                        UUID.randomUUID().toString(), System.currentTimeMillis(), estimate,
+                        runtime.windowTokens, runtime.sendBudgetTokens, segment))
+                    checkpoint()
+                }
+                val park = synchronized(terminalLock) {
+                    if (stopped.get() || terminalReserved || pauseRequested || breakStream || pendingCompact != null ||
+                        supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) false
+                    else { boundaryWaiter = Thread.currentThread(); true }
+                }
+                if (park) LockSupport.park()
+            }
+        }
         fun open(): ModelSession {
             while (true) {
                 boundary()
@@ -552,6 +612,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     ownerBound = true
                 }
                 compactAtBoundary()
+                awaitContextCapacity()
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
                     if (pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream) null
@@ -598,6 +659,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (round > 0 && compactAtBoundary()) {
                     cancelSession(active); active = open()
                 }
+                awaitContextCapacity()
+                if (reopenAfterCompaction) { cancelSession(active); active = open() }
                 if (stopped.get()) throw InterruptedException()
                 val pending = mutableListOf<ToolInvocation>()
                 var repetition = ReasoningRepetitionGuard()
@@ -694,6 +757,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             contextState = contextState?.copy(input = RequestInputCheckpoint(checkNotNull(request), event.tokens,
                                 historyTokens = checkNotNull(contextRuntime).localTokens(effectiveHistory(),
                                     (tool as? CatalogTool)?.definitions.orEmpty())))
+                            contextState?.input?.let { contextInputOverhead = it.localTokens - it.historyTokens }
                             checkpoint()
                         }
                         is ModelEvent.Usage -> {
@@ -710,6 +774,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 val plausible = billed != null && billed > 0 && billed <= window * 130 / 100 &&
                                     (event.cachedTokens == null || event.cachedTokens <= window)
                                 val state = checkNotNull(contextState)
+                                if (plausible && local != null && local.request == request)
+                                    contextInputOverhead = checkNotNull(billed) - local.historyTokens
                                 contextState = state.copy(
                                     calibration = if (plausible && local?.request == request) local?.copy(billedTokens = billed)
                                         else state.calibration?.takeUnless { it.request == request },

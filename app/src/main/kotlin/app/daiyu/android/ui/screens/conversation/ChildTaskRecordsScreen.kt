@@ -258,7 +258,7 @@ private fun TaskRecordCard(record: ChildTaskRecord, live: RetainedChildTask?, en
             Text(stringResource(status), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             when (live?.pauseState) {
                 ChildTaskPauseState.PENDING -> Text(stringResource(R.string.business_task_pause_pending))
-                ChildTaskPauseState.PAUSED -> Text(stringResource(R.string.business_task_paused))
+                ChildTaskPauseState.PAUSED -> Text(if (live.contextLimited) "上下文超限" else stringResource(R.string.business_task_paused))
                 else -> Unit
             }
             if (live?.queueState == app.daiyu.android.domain.delegation.ChildTaskQueueState.PENDING)
@@ -284,8 +284,9 @@ private fun TaskRecordCard(record: ChildTaskRecord, live: RetainedChildTask?, en
                 if (onPause != null) TextButton(stringResource(R.string.business_task_pause), onClick = onPause,
                     enabled = enabled && live.pauseState == ChildTaskPauseState.ACTIVE,
                     modifier = Modifier.testTag("child-task-pause:${record.owner.childRunId}"))
-                if (onResume != null) TextButton(stringResource(if (live.pauseState == ChildTaskPauseState.PENDING)
-                    R.string.business_task_retract_pause else R.string.business_task_resume), onClick = onResume,
+                if (onResume != null) TextButton(if (live.contextLimited) "压缩并继续" else
+                    stringResource(if (live.pauseState == ChildTaskPauseState.PENDING)
+                        R.string.business_task_retract_pause else R.string.business_task_resume), onClick = onResume,
                     enabled = enabled && live.pauseState != ChildTaskPauseState.ACTIVE,
                     modifier = Modifier.testTag("child-task-resume:${record.owner.childRunId}"))
             }

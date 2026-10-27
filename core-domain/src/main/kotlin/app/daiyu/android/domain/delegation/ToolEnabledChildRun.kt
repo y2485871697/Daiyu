@@ -56,15 +56,23 @@ class ToolEnabledChildRun(
         private set
     val snapshot: RetainedChildTask get() = synchronized(gate) {
         RetainedChildTask(observed, cancelled && observed.status != ChildTaskStatus.COMPLETED,
-            released, unknown, pauseControl.snapshot())
+            released, unknown, pauseState, contextLimited = contextLimited)
     }
     private val pauseControl = ChildTaskPauseControl(::changed)
-    val pauseState: ChildTaskPauseState get() = pauseControl.snapshot()
+    val contextLimited: Boolean get() = synchronized(gate) { runner?.state()?.contextLimited == true }
+    val pauseState: ChildTaskPauseState get() = if (contextLimited) ChildTaskPauseState.PAUSED else pauseControl.snapshot()
     fun pause(): ChildTaskControlReceipt = synchronized(gate) {
         if (cancelled || workerExited) ChildTaskControlReceipt.STALE else pauseControl.pause()
     }
     fun resume(): ChildTaskControlReceipt = synchronized(gate) {
-        if (cancelled || workerExited) ChildTaskControlReceipt.STALE else pauseControl.resume()
+        if (cancelled || workerExited) ChildTaskControlReceipt.STALE
+        else if (runner?.state()?.contextLimited == true) {
+            if (runner?.requestCompaction { _, _ -> changed() } == true) {
+                pauseControl.resume()
+                ChildTaskControlReceipt.PENDING
+            }
+            else ChildTaskControlReceipt.STALE
+        } else pauseControl.resume()
     }
     val drained: Boolean get() = synchronized(gate) { released }
     val cleanupUnknown: Boolean get() = synchronized(gate) { unknown }

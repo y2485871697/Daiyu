@@ -85,13 +85,13 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
                     }
                 }, controls = {
                     val actions = when (row.status) {
-                        "已暂停" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
+                        "已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
                         "执行中", "排队中" -> listOf(ToolCardAction.PAUSE_TASK, ToolCardAction.STOP_TASK)
                         "暂停中", "停止中" -> emptyList()
                         else -> if (records.any { it.owner == row.owner && it.text.isNotBlank() }) emptyList() else listOf(ToolCardAction.READ_TASK_RESULT)
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        actions.forEach { action -> ToolMiniAction(text = action.label,
+                        actions.forEach { action -> ToolMiniAction(text = if (row.contextLimited && action == ToolCardAction.RESUME_TASK) "压缩并继续" else action.label,
                             onClick = { onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner))) }) }
                     }
                 })

@@ -102,6 +102,17 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_preparations"))
     }
 
+    fun testLiveManualCompressionKeepsTheRunningWindowAndBudgetInsteadOfGlobalSettings() {
+        val worker = worker(Wire())
+        val snapshot = worker.snapshot(lease)
+        val parent = Message(MessageId("live"), lease.owner.conversationId, RunId("live-run"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        val runtime = worker.runCompression(lease, snapshot, null, parent, 272_000, 270_000) {}
+        assertEquals(272_000L, runtime.windowTokens)
+        assertEquals(270_000L, runtime.sendBudgetTokens)
+        assertFalse(runtime.automatic)
+    }
+
     fun testActualPostHasDurableOperationNoParentAndFinallyKeepsParserUsageWithoutCheckpoint() {
         val before = historyRows()
         val wire = Wire(beforePost = ::assertAdmission)

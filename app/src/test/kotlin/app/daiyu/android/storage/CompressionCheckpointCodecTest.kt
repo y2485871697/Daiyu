@@ -75,4 +75,46 @@ class CompressionCheckpointCodecTest {
         assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.encode(value.copy(context =
             value.context!!.copy(summaries = value.context!!.summaries + value.context!!.summaries))) }
     }
+    @Test fun v10CapacityStopSurvivesCodecAndProcessInterruptionWithoutResumeAdmission() {
+        val base = checkpoint()
+        val message = base.message.copy(blocks = listOf(MessageBlock.Text("text", "stopped here")))
+        val capacity = ContextCapacityCheckpoint("limit", 123L, 280_000L, 272_000L, 270_000L, 0)
+        val value = base.copy(message = message, phase = ExecutionPhase.PAUSED,
+            context = base.context!!.copy(capacity = capacity))
+        val json = RunCheckpointCodec.encode(value)
+        assertEquals(10, JSONObject(json).getInt("version"))
+        assertEquals(value, RunCheckpointCodec.decode(json))
+        assertEquals(capacity, ProcessRecovery.interrupt(RunCheckpointCodec.decode(json)).context!!.capacity)
+        val cleared = value.copy(context = value.context!!.copy(capacity = null))
+        assertEquals(9, JSONObject(RunCheckpointCodec.encode(cleared)).getInt("version"))
+        assertThrows(IllegalArgumentException::class.java) {
+            RunCheckpointCodec.encode(value.copy(context = value.context!!.copy(capacity = capacity.copy(segment = 2))))
+        }
+        val negativeSegment = JSONObject(json)
+        negativeSegment.getJSONObject("context").getJSONObject("capacity").put("segment", -4294967296L)
+        assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(negativeSegment.toString()) }
+        val invalid = JSONObject(json)
+        invalid.getJSONObject("context").getJSONObject("capacity").put("estimated", 270_000L)
+        assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(invalid.toString()) }
+    }
+
+    @Test fun capacityAnchorCountsOnlyItsAssistantSegmentsNotSupplementRows() {
+        val base = checkpoint()
+        val block = MessageBlock.Text("answer", "before supplement")
+        val message = base.message.copy(blocks = listOf(block), historySegments = listOf(
+            MessageHistorySegment(base.message.id, Message.ASSISTANT_ROLE, listOf(block)),
+            MessageHistorySegment(MessageId("supplement"), Message.USER_ROLE,
+                listOf(MessageBlock.Text("supplement", "extra instruction")))))
+        val capacity = ContextCapacityCheckpoint("limit", 123L, 280_000L, 272_000L, 270_000L, 0)
+        val value = base.copy(message = message, phase = ExecutionPhase.PAUSED,
+            context = base.context!!.copy(capacity = capacity))
+        assertEquals(value, RunCheckpointCodec.decode(RunCheckpointCodec.encode(value)))
+        assertThrows(IllegalArgumentException::class.java) {
+            RunCheckpointCodec.encode(value.copy(context = value.context!!.copy(capacity = capacity.copy(segment = 1))))
+        }
+        val invalid = JSONObject(RunCheckpointCodec.encode(value))
+        invalid.getJSONObject("context").getJSONObject("capacity").put("segment", 1)
+        assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(invalid.toString()) }
+    }
+
 }

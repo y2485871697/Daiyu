@@ -45,6 +45,9 @@ sealed interface ChatTimelineEntry {
         override val created: Long, val summary: String, val model: SummaryModelIdentity?,
         val messages: Int, val beforeTokens: Long?, val afterTokens: Long?,
         val agentLabel: String = "主代理", val failure: String? = null) : ChatTimelineEntry
+    data class ContextLimit(override val id: String, override val anchor: TimelineAnchor,
+        override val created: Long, val estimatedTokens: Long, val windowTokens: Long,
+        val budgetTokens: Long, val agentLabel: String = "主代理") : ChatTimelineEntry
     data class Reconnect(override val id: String, override val anchor: TimelineAnchor,
         override val created: Long, val status: String, val elapsedMs: Long, val reason: String,
         val round: Int, val model: String) : ChatTimelineEntry
@@ -53,14 +56,27 @@ sealed interface ChatTimelineEntry {
 /** Display evidence only. Never read by request admission, replay, or transport recovery. */
 internal object ChatTimelineStore {
     val revision = java.util.concurrent.atomic.AtomicLong()
+    fun kind(entry: ChatTimelineEntry): String = when (entry) {
+        is ChatTimelineEntry.Compression -> "compression"
+        is ChatTimelineEntry.Reconnect -> "reconnect"
+        is ChatTimelineEntry.ContextLimit -> "context_limit"
+    }
+    fun contextLimit(checkpoint: app.daiyu.android.domain.runtime.RunCheckpoint,
+        agentLabel: String = "主代理", anchor: TimelineAnchor? = null): ChatTimelineEntry.ContextLimit? =
+        checkpoint.context?.capacity?.let { capacity ->
+            val message = checkpoint.message
+            ChatTimelineEntry.ContextLimit("context-limit:${capacity.id}", anchor ?: TimelineAnchor(
+                message.conversationId.value, message.runId.value, message.id.value, capacity.segment),
+                capacity.created, capacity.estimatedTokens, capacity.windowTokens, capacity.budgetTokens, agentLabel)
+        }
     val columns = listOf("id", "conversation_id", "message_id", "kind", "payload", "created")
     fun install(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS chat_timeline_events(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,message_id TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,created INTEGER NOT NULL)")
         db.execSQL("CREATE INDEX IF NOT EXISTS chat_timeline_owner ON chat_timeline_events(conversation_id,created,id)")
     }
     fun write(db: SQLiteDatabase, entry: ChatTimelineEntry) {
-        val kind = if (entry is ChatTimelineEntry.Compression) "compression" else "reconnect"
-        if (entry is ChatTimelineEntry.Compression && db.rawQuery("SELECT 1 FROM chat_timeline_events WHERE id=?", arrayOf(entry.id)).use { it.moveToFirst() }) return
+        val kind = kind(entry)
+        if (entry !is ChatTimelineEntry.Reconnect && db.rawQuery("SELECT 1 FROM chat_timeline_events WHERE id=?", arrayOf(entry.id)).use { it.moveToFirst() }) return
         val values = ContentValues().apply {
             put("id", entry.id); put("conversation_id", entry.anchor.conversationId)
             put("message_id", entry.anchor.messageId); put("kind", kind)
@@ -89,6 +105,10 @@ internal object ChatTimelineStore {
                 put("before", entry.beforeTokens ?: JSONObject.NULL); put("after", entry.afterTokens ?: JSONObject.NULL)
                 put("model", entry.model?.let { JSONObject().put("provider", it.providerId).put("model", it.model).put("protocol", it.protocol).put("providerName", it.providerName ?: JSONObject.NULL) } ?: JSONObject.NULL)
             }
+            is ChatTimelineEntry.ContextLimit -> {
+                put("kind", "context_limit"); put("estimated", entry.estimatedTokens)
+                put("window", entry.windowTokens); put("budget", entry.budgetTokens); put("agentLabel", entry.agentLabel)
+            }
             is ChatTimelineEntry.Reconnect -> {
                 put("kind", "reconnect"); put("status", entry.status); put("elapsed", entry.elapsedMs)
                 put("reason", entry.reason); put("round", entry.round); put("model", entry.model)
@@ -103,6 +123,7 @@ internal object ChatTimelineStore {
         val detail = when (kind) {
             "compression" -> setOf("summary", "messages", "before", "after", "model")
             "reconnect" -> setOf("status", "elapsed", "reason", "round", "model")
+            "context_limit" -> setOf("estimated", "window", "budget", "agentLabel")
             else -> error("unknown_timeline_kind")
         }
         val keys = row.keys().asSequence().toSet()
@@ -122,6 +143,11 @@ internal object ChatTimelineStore {
                     if (row.isNull("before")) null else number("before"), if (row.isNull("after")) null else number("after"),
                     if (row.has("agentLabel")) text("agentLabel") else "主代理",
                     if (row.has("failure") && !row.isNull("failure")) text("failure") else null)
+            }
+            "context_limit" -> {
+                val estimated = number("estimated"); val window = number("window"); val budget = number("budget")
+                require(budget > 0 && window >= budget && estimated > budget)
+                ChatTimelineEntry.ContextLimit(id, anchor, created, estimated, window, budget, text("agentLabel"))
             }
             "reconnect" -> ChatTimelineEntry.Reconnect(id, anchor, created,
                 text("status").also { require(it in setOf("running", "succeeded", "failed", "stopped")) },

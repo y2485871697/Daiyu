@@ -81,6 +81,7 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
         is ChatTimelineEntry.Compression -> if (entry.failure != null) "${entry.agentLabel} · 压缩失败"
             else "${entry.agentLabel} · 已压缩 ${entry.messages} 条消息"
         is ChatTimelineEntry.Reconnect -> reconnectLabel(entry.status, elapsed)
+        is ChatTimelineEntry.ContextLimit -> "上下文超限"
     }
     val title = if (entry is ChatTimelineEntry.Compression && entry.failure == null) "压缩摘要" else "错误详情"
     val line = MiuixTheme.colorScheme.outline.copy(alpha = .55f)
@@ -89,8 +90,8 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f).height(.5.dp).background(line))
         Row(Modifier.clip(RoundedCornerShape(8.dp)).clickable(
-            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { showDetails = true })
-            .semantics { contentDescription = "$label. $title" }.padding(horizontal = 8.dp, vertical = 2.dp),
+            interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = entry !is ChatTimelineEntry.ContextLimit, onClick = { showDetails = true })
+            .semantics { contentDescription = if (entry is ChatTimelineEntry.ContextLimit) label else "$label. $title" }.padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (entry is ChatTimelineEntry.Compression) {
                 Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(12.dp), tint = color)
@@ -101,9 +102,10 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
         }
         Box(Modifier.weight(1f).height(.5.dp).background(line))
     }
-    if (showDetails) {
+    if (showDetails && entry !is ChatTimelineEntry.ContextLimit) {
         val summary = when (entry) {
             is ChatTimelineEntry.Compression -> entry.summary
+            is ChatTimelineEntry.ContextLimit -> ""
             is ChatTimelineEntry.Reconnect -> {
                 val reason = app.daiyu.android.domain.ModelFailure.entries.firstOrNull { it.name == entry.reason }?.userMessage
                 listOf(entry.reason, reason.orEmpty(), "状态：${reconnectLabel(entry.status, elapsed)}",

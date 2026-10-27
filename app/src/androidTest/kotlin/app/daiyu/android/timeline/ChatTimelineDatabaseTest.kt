@@ -44,6 +44,38 @@ class ChatTimelineDatabaseTest : InstrumentationTestCase() {
     private fun event(db: ConversationDatabase, owner: ConversationId) = ChatTimelineEntry.Reconnect("reconnect-${owner.value}",
         TimelineAnchor.at(db.messages(owner).map { it.second }, 1), 10L, "running", 100L, "NETWORK", 0, "main-model")
 
+    fun testContextLimitIsImmutableAndSurvivesReopenFullAndConversationBackup() {
+        val (context, db) = fresh(); val owner = seed(db)
+        val message = db.messages(owner).map { it.second }.last()
+        val block = MessageBlock.Text("answer", "completed tool boundary")
+        val tail = MessageBlock.Text("after", "next completed boundary")
+        val stopped = message.copy(blocks = listOf(block, tail), historySegments = listOf(
+            MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, listOf(block)),
+            MessageHistorySegment(MessageId("extra-${owner.value}"), Message.USER_ROLE,
+                listOf(MessageBlock.Text("extra", "keep working"))),
+            MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, listOf(tail))))
+        db.save(stopped)
+        val capacity = app.daiyu.android.domain.runtime.ContextCapacityCheckpoint(
+            "limit-${owner.value}", 100L, 280_000L, 272_000L, 270_000L, 1)
+        val checkpoint = app.daiyu.android.domain.runtime.RunCheckpoint(stopped, emptyList(),
+            app.daiyu.android.domain.runtime.ExecutionPhase.PAUSED,
+            context = app.daiyu.android.domain.runtime.RunContextCheckpoint(capacity = capacity))
+        val entry = checkNotNull(ChatTimelineStore.contextLimit(checkpoint))
+        assertEquals(1, entry.anchor.segment)
+        ChatTimelineStore.write(db.writableDatabase, entry)
+        ChatTimelineStore.write(db.writableDatabase, entry.copy(estimatedTokens = 290_000))
+        db.close()
+        assertEquals(listOf(entry), ChatTimelineStore.read(db.readableDatabase, owner.value))
+        val source = NeutralBackupService(context, db)
+        for (text in listOf(source.exportPackage(), source.exportConversation(owner))) {
+            val (destination, target) = fresh()
+            val importer = NeutralBackupService(destination, target)
+            assertFalse(importer.importPackage(text).alreadyImported)
+            assertEquals(listOf(entry), ChatTimelineStore.read(target.readableDatabase, owner.value))
+            assertTrue(importer.importPackage(text).alreadyImported)
+        }
+    }
+
     fun testReconnectTerminalCannotBeOverwrittenAndDeleteCascades() {
         val (_, db) = fresh(); val owner = seed(db)
         val running = event(db, owner); val terminal = running.copy(status = "succeeded", elapsedMs = 4500L)

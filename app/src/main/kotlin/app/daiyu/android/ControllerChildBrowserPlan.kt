@@ -33,6 +33,7 @@ internal class ControllerChildBrowserPlan private constructor(
     private var controlEpoch = 0L
     val snapshot: RetainedChildTask? get() = synchronized(gate) { child?.snapshot }
     val progress: String get() = synchronized(gate) { child?.progress.orEmpty() }
+    val contextLimited: Boolean get() = synchronized(gate) { child?.contextLimited == true }
     val pauseState: ChildTaskPauseState get() = synchronized(gate) {
         child?.pauseState ?: if (pauseRequested) ChildTaskPauseState.PENDING else ChildTaskPauseState.ACTIVE
     }

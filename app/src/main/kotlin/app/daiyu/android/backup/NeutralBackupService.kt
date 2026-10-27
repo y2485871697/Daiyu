@@ -546,7 +546,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 val entry = app.daiyu.android.timeline.ChatTimelineStore.decode(string(row, "id"), integer(row, "created"), JSONObject(string(row, "payload")))
                 require(entry.anchor.conversationId in conversationIds && entry.anchor.conversationId == string(row, "conversation_id") &&
                     entry.anchor.messageId == string(row, "message_id"))
-                require(string(row, "kind") == if (entry is app.daiyu.android.timeline.ChatTimelineEntry.Compression) "compression" else "reconnect")
+                require(string(row, "kind") == app.daiyu.android.timeline.ChatTimelineStore.kind(entry))
                 require(entry.anchor.listKey in anchors) { "提示位置不属于备份历史" }
             }
         }

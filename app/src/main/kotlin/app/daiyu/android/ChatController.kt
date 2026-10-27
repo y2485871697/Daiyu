@@ -507,9 +507,9 @@ class ChatController internal constructor(private val application:Application,
                 }
                 override fun finish() = Unit
             }
-            val accepted = running.requestCompaction(create = {
+            val accepted = running.requestCompaction(create = { capacity ->
                 postCompressionActivity(waiting.copy(running = false))
-                contextManagementFactory(application, contextService).runCompression(lease, expected, selection, original) { activity ->
+                contextManagementFactory(application, contextService).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens) { activity ->
                     if (activity.running) runtimeStore?.bindCompressionModel(original, activity.model)
                     postCompressionActivity(activity)
                 }
@@ -3781,6 +3781,9 @@ class ChatController internal constructor(private val application:Application,
                         onChanged = ::browserChildrenChanged,
                         childUsage = checkNotNull(runtimeStore).childUsage, contextRuntime = childContext,
                         onCheckpoint = { checkpoint ->
+                            app.daiyu.android.timeline.ChatTimelineStore.contextLimit(checkpoint, childLabel, parentAnchor)?.let { entry ->
+                                synchronized(this) { if (!closed) persistReconnect(entry) }
+                            }
                             val summary = checkpoint.history.firstOrNull()
                             val wrapped = (summary?.blocks?.singleOrNull() as? MessageBlock.Text)?.text
                             if ((checkpoint.context?.compactions ?: 0) > 0 && summary?.id?.value?.startsWith("summary-") == true &&
@@ -3899,9 +3902,11 @@ class ChatController internal constructor(private val application:Application,
                     postReconnectNotice(notice?.let { "$it · 第${event.round + 1}轮 · ${event.elapsedMs / 1000}秒" })
                 },
                     runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
-                    contextRuntime = if (video == null && auxiliaryFrozen == null &&
-                        preparedContext.frozen.policy.contextTokens != null)
-                        app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) { activity ->
+                    contextRuntime = if (preparedContext.frozen.policy.contextTokens == null) null
+                        else if (video != null || auxiliaryFrozen != null)
+                            app.daiyu.android.context.ProductionRunContext(preparedContext.frozen.policy, assistant,
+                                null, automatic = false, canCompact = false)
+                        else app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) { activity ->
                             synchronized(this) {
                                 val original = reconnectResources
                                 if (!activity.running || (original != null && resources === original && !original.fenced))
@@ -3910,7 +3915,7 @@ class ChatController internal constructor(private val application:Application,
                                         postCompressionActivity(activity)
                                     }
                             }
-                        } else null,
+                        },
                     onUsage = { synchronized(this) {
                         if (!closed && active?.id == assistant.id && active?.runId == run &&
                             active?.conversationId == conversationId) notifyChanged()
@@ -5081,6 +5086,10 @@ class ChatController internal constructor(private val application:Application,
             current to current.childPauseEpoch
         }
         // Reconnect diagnostics acquire our monitor from the budget callback.
+        if (lifetime.runner.state().contextLimited) {
+            synchronized(this) { problem = "上下文超限，请先压缩后继续"; notifyChanged() }
+            return false
+        }
         val accepted = lifetime.runner.resume()
         if (accepted) synchronized(this) {
             if (resources === lifetime && ownedRunner(owner) === lifetime.runner) {

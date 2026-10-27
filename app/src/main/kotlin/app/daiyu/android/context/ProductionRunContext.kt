@@ -14,6 +14,7 @@ internal class ProductionRunContext(
     override val automatic: Boolean,
     private val agentLabel: String = "主代理",
     private val taskId: String? = null,
+    override val canCompact: Boolean = true,
     private val progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {},
 ) : RunContextRuntime {
     constructor(frozen: FrozenContextPreparation, parent: Message,
@@ -21,6 +22,7 @@ internal class ProductionRunContext(
         this(frozen.policy, parent, frozen.runtimeModel, frozen.policy.enabled && frozen.runtimeModel != null,
             progress = progress)
     override val windowTokens = checkNotNull(policy.contextTokens)
+    override val sendBudgetTokens = checkNotNull(policy.sendBudgetTokens)
     @Volatile private var cancellation: ContextPreparationCancellation? = null
     @Volatile private var lastActivity: app.daiyu.android.timeline.CompressionActivity? = null
     override fun cancel() { cancellation?.cancel() }
@@ -80,7 +82,8 @@ internal class ProductionRunContext(
                 listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n$text\n[摘要结束]")), RunStatus.COMPLETED)
             val result = listOf(summary) + logical.drop(cut)
             require(this.localTokens(result, emptyList()) < this.localTokens(history, emptyList())) { "压缩未缩小；保留原文" }
-            require(policy.fitsSendBudget(this.localTokens(result, emptyList()))) { "压缩后仍超出发送预算" }
+            val requestOverhead = (billedTokens ?: localTokens) - this.localTokens(history, emptyList())
+            require(policy.fitsSendBudget((this.localTokens(result, emptyList()) + requestOverhead).coerceAtLeast(0L))) { "压缩后仍超出发送预算" }
             return result
         } finally { this.cancellation = null }
     }

@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.deletionButtonColors
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -116,7 +117,7 @@ internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boole
                     Column {
                         SettingsRow(field.name, summary = field.type.label, tag = "model-body-field:$index",
                             onClick = { if (current(active)) { selection = field; notice = null } })
-                        TextButton(text = "删除字段", modifier = Modifier.testTag("model-body-field-delete:$index"),
+                        TextButton(text = "删除字段", colors = deletionButtonColors(), modifier = Modifier.testTag("model-body-field-delete:$index"),
                             enabled = enabled, onClick = {
                                 if (current(active)) {
                                     val result = runCatching { RequestBodyFields.remove(active.draft.customBody, field.name, active.draft.protocol) }

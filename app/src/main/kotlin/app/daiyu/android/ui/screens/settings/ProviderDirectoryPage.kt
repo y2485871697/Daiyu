@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.deletionButtonColors
 import androidx.compose.foundation.ExperimentalFoundationApi
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.background
@@ -21,7 +22,6 @@ import androidx.compose.ui.state.ToggleableState
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import app.daiyu.android.ui.layout.WidePageContent
 import app.daiyu.android.ui.layout.horizontalCutoutPadding
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -146,7 +146,7 @@ internal fun ProviderDirectoryPage(
                 .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)
                 .testTag("provider-selection-actions"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(text = "删除", enabled = enabled && selectedSlots.isNotEmpty(), onClick = onDeleteSelected,
-                    colors = ButtonDefaults.textButtonColorsPrimary(color = MiuixTheme.colorScheme.error, textColor = MiuixTheme.colorScheme.onError),
+                    colors = deletionButtonColors(),
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-delete-selected"))
                 TextButton(text = "取消", enabled = enabled, onClick = onCancelSelection,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-cancel-selection"))

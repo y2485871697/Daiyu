@@ -1,15 +1,15 @@
 package app.daiyu.android.ui.screens.assistants
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Icon
@@ -29,11 +29,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
@@ -239,7 +237,7 @@ internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantA
     AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_delete_title),
         onDismiss = onDismiss, onBack = onDismiss, onOutsideDismiss = onOutsideDismiss, footer = {
             AssistantPreviewButton(stringResource(R.string.action_cancel), onDismiss, Modifier.weight(1f))
-            AssistantPreviewButton(stringResource(R.string.action_delete), onConfirm, Modifier.weight(1f), danger = true, enabled = canDelete)
+            AssistantPreviewButton(stringResource(R.string.action_delete), onConfirm, Modifier.weight(1f), danger = true, deletionAppearance = true, enabled = canDelete)
         }) {
         AssistantDialogIdentity(profile, assets)
         Text(stringResource(R.string.assistant_delete_body, profile.name), color = assistantPreviewPalette().text,

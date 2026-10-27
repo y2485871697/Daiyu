@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -17,12 +20,11 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -41,6 +43,13 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceAccentColor
 import app.daiyu.android.data.model.AppearancePaletteStyle
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.UserBubbleMode
+import app.daiyu.android.ui.app.LocalAppearanceSettings
+import app.daiyu.android.ui.app.LocalAppearanceDark
+import app.daiyu.android.ui.app.resolveAppearanceColors
+import app.daiyu.android.ui.app.resolveAppearanceActions
+import app.daiyu.android.ui.app.resolveUserBubbleColors
+import app.daiyu.android.ui.app.colorContentColor
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.colorHsv
 import app.daiyu.android.ui.app.resolvedPrimaryAccent
@@ -53,73 +62,133 @@ import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-internal enum class AppearanceColorEditor { STYLE, ACCENTS }
+internal enum class AppearanceColorEditor {
+    STYLE, ACCENTS, BUBBLES;
+    fun merge(current: AppearanceSettings, source: AppearanceSettings): AppearanceSettings = when (this) {
+        STYLE -> current.withColorStyle(source)
+        ACCENTS -> current.withAccentColors(source)
+        BUBBLES -> current.withUserBubbleColors(source)
+    }
+}
 
 @Composable
 internal fun AppearanceColorSheet(
     editor: AppearanceColorEditor,
     state: AppearanceSettings,
-    onChange: (AppearanceSettings) -> Unit,
+    onChange: (AppearanceSettings) -> Boolean,
     onDismiss: () -> Unit,
 ) {
-    var draft by remember { mutableStateOf(state) }
-    val accents = editor == AppearanceColorEditor.ACCENTS
-    val buttons = assistantPreviewPalette()
-    val defaults = AssistantPreviewPalette(buttons.dark)
-    AssistantPreviewDialog(show = true, title = if (accents) "强调色" else "色彩风格",
-        onDismiss = onDismiss, showCloseButton = false,
-        footer = {
-            AssistantPreviewButton("默认", {
-                draft = if (accents) draft.withAccentColors(AppearanceSettings())
-                    else draft.withColorStyle(AppearanceSettings())
-            }, Modifier.weight(1f).testTag("appearance-color-default"), secondary = true)
-            AssistantPreviewButton("确定", {
-                onChange(if (accents) state.withAccentColors(draft) else state.withColorStyle(draft))
-                onDismiss()
-            }, Modifier.weight(1f).testTag("appearance-color-confirm"), primary = true)
-        },
-    ) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
-            .testTag("appearance-color-content"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            if (accents) {
-                AppearanceColorPicker("强调色", draft.resolvedPrimaryAccent ?: defaults.primary) {
-                    draft = draft.copy(accentColor = AppearanceAccentColor.SYSTEM, primaryAccentColor = it.toArgb())
-                }
-                AppearanceColorPicker("次强调色", draft.secondaryAccentColor?.let(::Color) ?: defaults.secondary) {
-                    draft = draft.copy(secondaryAccentColor = it.toArgb())
-                }
-            } else {
-                AppearanceColorPicker("界面色彩", Color(draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())) {
-                    draft = draft.copy(paletteSeedColor = it.toArgb())
-                }
-                AppearancePaletteStyle.entries.chunked(3).forEach { row ->
-                    Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { style ->
-                            val selected = draft.paletteStyle == style
-                            val label = when (style) {
-                                AppearancePaletteStyle.TONAL_SPOT -> "柔和"
-                                AppearancePaletteStyle.NEUTRAL -> "中性"
-                                AppearancePaletteStyle.VIBRANT -> "鲜艳"
-                                AppearancePaletteStyle.EXPRESSIVE -> "灵动"
-                                AppearancePaletteStyle.RAINBOW -> "彩虹"
-                                AppearancePaletteStyle.FRUIT_SALAD -> "缤纷"
-                                AppearancePaletteStyle.MONOCHROME -> "灰阶"
-                                AppearancePaletteStyle.FIDELITY -> "原色"
-                                AppearancePaletteStyle.CONTENT -> "自然"
+    var draft by remember(editor) { mutableStateOf(state) }
+    var saveFailed by remember(editor) { mutableStateOf(false) }
+    val preview = editor.merge(state, draft)
+    CompositionLocalProvider(LocalAppearanceSettings provides preview) {
+        val accents = editor == AppearanceColorEditor.ACCENTS
+        val buttons = assistantPreviewPalette()
+        val defaults = AssistantPreviewPalette(buttons.dark)
+        AssistantPreviewDialog(show = true, title = when (editor) { AppearanceColorEditor.STYLE -> "色彩风格"; AppearanceColorEditor.ACCENTS -> "强调色"; AppearanceColorEditor.BUBBLES -> "聊天气泡" },
+            onDismiss = onDismiss, showCloseButton = false,
+            footer = {
+                AssistantPreviewButton("默认", {
+                    draft = editor.merge(draft, AppearanceSettings())
+                }, Modifier.weight(1f).testTag("appearance-color-default"), secondary = true)
+                AssistantPreviewButton("确定", {
+                    val saved = onChange(editor.merge(state, draft))
+                    saveFailed = !saved
+                    if (saved) onDismiss()
+                }, Modifier.weight(1f).testTag("appearance-color-confirm"), primary = true)
+            },
+        ) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .testTag("appearance-color-content"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                if (saveFailed) Text("保存失败，草稿已保留，请重试。", color = MiuixTheme.colorScheme.error,
+                    modifier = Modifier.testTag("appearance-color-save-error"))
+                AppearanceDraftPreview(preview)
+                if (editor == AppearanceColorEditor.BUBBLES) {
+                    UserBubbleMode.entries.forEach { mode ->
+                        SettingsRadioRow(when (mode) {
+                            UserBubbleMode.OFF -> "无气泡"
+                            UserBubbleMode.THEME -> "跟随主题"
+                            UserBubbleMode.CUSTOM -> "自定义颜色"
+                        }, selected = draft.userBubbleMode == mode) {
+                            draft = draft.copy(userBubbleMode = mode)
+                        }
+                    }
+                    if (draft.userBubbleMode == UserBubbleMode.CUSTOM) {
+                        AppearanceColorPicker("用户气泡", draft.userBubbleColor?.let(::Color)
+                            ?: resolveUserBubbleColors(draft, buttons.dark).container) {
+                            draft = draft.copy(userBubbleColor = it.toArgb())
+                        }
+                    }
+                } else if (accents) {
+                    AppearanceColorPicker("主强调色", draft.resolvedPrimaryAccent ?: defaults.primary) {
+                        draft = draft.copy(accentColor = AppearanceAccentColor.SYSTEM, primaryAccentColor = it.toArgb())
+                    }
+                    AppearanceColorPicker("次强调色", draft.secondaryAccentColor?.let(::Color) ?: defaults.secondary) {
+                        draft = draft.copy(secondaryAccentColor = it.toArgb())
+                    }
+                } else {
+                    AppearanceColorPicker("界面色彩", Color(draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())) {
+                        draft = draft.copy(paletteSeedColor = it.toArgb())
+                    }
+                    AppearancePaletteStyle.entries.chunked(3).forEach { row ->
+                        Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { style ->
+                                val selected = draft.paletteStyle == style
+                                val label = when (style) {
+                                    AppearancePaletteStyle.TONAL_SPOT -> "柔和"
+                                    AppearancePaletteStyle.NEUTRAL -> "中性"
+                                    AppearancePaletteStyle.VIBRANT -> "鲜艳"
+                                    AppearancePaletteStyle.EXPRESSIVE -> "灵动"
+                                    AppearancePaletteStyle.RAINBOW -> "彩虹"
+                                    AppearancePaletteStyle.FRUIT_SALAD -> "缤纷"
+                                    AppearancePaletteStyle.MONOCHROME -> "灰阶"
+                                    AppearancePaletteStyle.FIDELITY -> "原色"
+                                    AppearancePaletteStyle.CONTENT -> "自然"
+                                }
+                                Box(Modifier.weight(1f).height(44.dp)
+                                    .background(if (selected) buttons.soft else Color.Transparent, CircleShape)
+                                    .border(1.dp, if (selected) buttons.primary else buttons.line, CircleShape)
+                                    .testTag("appearance-style:${style.persistedValue}")
+                                    .selectable(selected, role = Role.RadioButton, onClick = {
+                                        draft = draft.copy(paletteStyle = style,
+                                            paletteSeedColor = draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())
+                                    }), contentAlignment = Alignment.Center) { Text(label, color = buttons.text) }
                             }
-                            Box(Modifier.weight(1f).height(44.dp)
-                                .background(if (selected) buttons.soft else Color.Transparent, CircleShape)
-                                .border(1.dp, if (selected) buttons.primary else buttons.line, CircleShape)
-                                .testTag("appearance-style:${style.persistedValue}")
-                                .selectable(selected, role = Role.RadioButton, onClick = {
-                                    draft = draft.copy(paletteStyle = style,
-                                        paletteSeedColor = draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())
-                                }), contentAlignment = Alignment.Center) { Text(label, color = buttons.text) }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AppearanceDraftPreview(draft: AppearanceSettings) {
+    val dark = LocalAppearanceDark.current
+    val colors = resolveAppearanceColors(draft, dark)
+    val actions = resolveAppearanceActions(draft, dark)
+    val bubble = resolveUserBubbleColors(draft, dark)
+    val selection = app.daiyu.android.ui.components.ConversationPanePreviewPalette(dark, draft)
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+    Column(Modifier.fillMaxWidth().background(colors.surface, shape)
+        .border(1.dp, colors.outline, shape).padding(12.dp).testTag("appearance-draft-preview"),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("预览", color = colors.onSurface)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("选中项目", Modifier.weight(1f).background(selection.selectionContainer, shape).padding(10.dp),
+                color = selection.selectionContent)
+            Text("普通容器", Modifier.weight(1f).background(colors.surfaceContainer, shape).padding(10.dp),
+                color = colors.onSurface)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("主操作", Modifier.background(actions.primary, CircleShape).padding(10.dp), color = actions.onPrimary)
+            Text("次操作", Modifier.background(actions.secondaryContainer, CircleShape).padding(10.dp), color = actions.onSecondary)
+            val track = draft.resolvedPrimaryAccent ?: Color(0xFF82728F)
+            Box(Modifier.size(38.dp, 24.dp).background(track, CircleShape).padding(3.dp), contentAlignment = Alignment.CenterEnd) {
+                Box(Modifier.size(18.dp).background(draft.resolvedPrimaryAccent?.let(::colorContentColor) ?: Color.White, CircleShape))
+            }
+        }
+        Text("我的消息", Modifier.align(Alignment.End).background(bubble.container, shape).padding(10.dp), color = bubble.content)
     }
 }
 

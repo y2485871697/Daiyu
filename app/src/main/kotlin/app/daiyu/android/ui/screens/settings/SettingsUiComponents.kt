@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.app.DaiyuPalette
 
 import app.daiyu.android.ui.components.etaInputContainerColor
@@ -35,10 +37,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -50,7 +50,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick as semanticsClick
@@ -168,7 +167,8 @@ internal fun SettingsRadioRow(title: String, selected: Boolean, enabled: Boolean
         SettingsRow(title = title, summary = summary, trailing = {
             if (selected) {
                 DaiyuIcon(DaiyuIcons.Check, contentDescription = "已选择",
-                    tint = MiuixTheme.colorScheme.primary, size = 24.dp)
+                    tint = app.daiyu.android.ui.app.readableAccent(MiuixTheme.colorScheme.primary,
+                        app.daiyu.android.ui.app.LocalAppearanceDark.current, MiuixTheme.colorScheme.surface), size = 24.dp)
             }
         })
     }

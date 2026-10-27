@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
@@ -51,12 +53,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,7 +66,6 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawWithCache
@@ -388,7 +387,7 @@ private fun ConversationPanePanel(
             .graphicsLayer { clip = true; shape = drawerShape }
             .then(if (backdrop != null) Modifier.textureBlur(backdrop = backdrop, shape = drawerShape,
                 blurRadius = 28f * scale, colors = BlurColors(blendColors = emptyList(), saturation = 1.3f))
-                else Modifier.background(if (colors.dark) Color(0xFF24202F) else Color(0xFFF8F4FC)))
+                else Modifier.background(colors.fallbackSurface))
             .drawWithCache {
                 // CSS linear-gradient(145deg), including its explicit 62% stop.
                 val length = size.width * .573576f + size.height * .819152f
@@ -904,12 +903,12 @@ private fun ConversationTextRow(
                 .clip(RoundedCornerShape(DrawerMetrics.RowCornerRadius))
                 .background(
                     if (selected) {
-                        conversationPanePreviewPalette().bubble
+                        conversationPanePreviewPalette().selectionContainer
                     } else {
                         Color.Transparent
                     },
                 )
-                .border(1.dp, if (selected) conversationPanePreviewPalette().line else Color.Transparent,
+                .border(1.dp, if (selected) conversationPanePreviewPalette().selectionBorder else Color.Transparent,
                     RoundedCornerShape(DrawerMetrics.RowCornerRadius))
                 .testTag("drawer-conversation:${conversation.id}")
                 .semantics {
@@ -945,7 +944,7 @@ private fun ConversationTextRow(
             }
             Text(
                 text = conversation.title.ifBlank { conversation.preview },
-                color = conversationPanePreviewPalette().text,
+                color = if (selected) conversationPanePreviewPalette().selectionContent else conversationPanePreviewPalette().text,
                 fontSize = (14f * conversationPanePreviewScale()).sp,
                 lineHeight = (20f * conversationPanePreviewScale()).sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
@@ -1204,7 +1203,7 @@ private fun DrawerCircleButton(
             .size(size)
             .testTag(tag)
             .clip(CircleShape)
-            .background(conversationPanePreviewPalette().bubble)
+            .background(conversationPanePreviewPalette().utilityContainer)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

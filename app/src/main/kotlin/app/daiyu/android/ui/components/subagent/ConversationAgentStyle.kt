@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components.subagent
 
+import app.daiyu.android.ui.app.resolveAppearanceActions
+import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.colorContentColor
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.LocalAppearanceSettings
@@ -37,8 +39,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -49,19 +49,21 @@ import androidx.compose.ui.unit.sp
 internal val LocalConversationAgentStyle = staticCompositionLocalOf { false }
 
 internal data class ConversationAgentColors(val dark: Boolean, val appearance: AppearanceSettings = AppearanceSettings()) {
+    private val actions = resolveAppearanceActions(appearance, dark)
     val text = Color(if (dark) 0xffe0dce8 else 0xff36333f)
     val muted = Color(if (dark) 0xff9d92aa else 0xff938a9b)
     val accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: Color(if (dark) 0xffc6b7d5 else 0xff756980)
     val strong = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: Color(if (dark) 0xffb4a3f7 else 0xff7663bd)
-    val line = Color(if (dark) 0x28c3b0d9 else 0x2681738e)
+    val line = appearance.styleColor(Color(if (dark) 0x28c3b0d9 else 0x2681738e))
     val field = Color(if (dark) 0x06ffffff else 0x60ffffff)
-    val soft = appearance.secondaryAccentColor?.let { Color(it).copy(alpha = .14f) } ?: Color(if (dark) 0x14c0acd7 else 0x1281738e)
+    val soft = if (appearance.secondaryAccentColor != null) actions.secondaryContainer else appearance.styleColor(Color(if (dark) 0x14c0acd7 else 0x1281738e))
+    val onSoft = readableAccent(actions.secondary, dark, soft)
     val taskLine = appearance.styleColor(Color(if (dark) 0xff2b283a else 0xffece7f5))
     val taskMuted = Color(if (dark) 0xff7a7786 else 0xffa19aa9)
     val gradient = (if (dark) listOf(Color(0xf22e283b), Color(0xf21b1825)) else listOf(Color(0xf0ffffff), Color(0xf0f8f4ff))).map(appearance::styleColor)
-    val edge = Color(if (dark) 0x26dccdff else 0xedffffff)
+    val edge = appearance.styleColor(Color(if (dark) 0x26dccdff else 0xedffffff))
 }
-@Composable internal fun conversationAgentColors() = ConversationAgentColors(MaterialTheme.colorScheme.background.luminance() < .5f, LocalAppearanceSettings.current)
+@Composable internal fun conversationAgentColors() = ConversationAgentColors(LocalAppearanceDark.current, LocalAppearanceSettings.current)
 
 /** Floating glass sheet with rounded corners. */
 @Composable
@@ -103,7 +105,7 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
             .background(if (checked) DaiyuPalette.switchTrack else Color(0x28b4aabb))
             .border(1.dp, if (checked) DaiyuPalette.switchTrack else colors.line, shape),
             contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart) {
-            Box(Modifier.padding(horizontal = 2.dp).size(16.dp).background(if (checked) Color.White else Color(0xffa69baa), CircleShape))
+            Box(Modifier.padding(horizontal = 2.dp).size(16.dp).background(if (checked) DaiyuPalette.switchThumb else Color(0xffa69baa), CircleShape))
         }
     }
 }
@@ -120,7 +122,7 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
             cornerRadius = ButtonDefaults.CornerRadius)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 14.sp, lineHeight = 20.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = if (primary) onPrimaryColor else colors.accent)
+        Text(text, fontSize = 14.sp, lineHeight = 20.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = if (primary) onPrimaryColor else colors.onSoft)
     }
 }
 

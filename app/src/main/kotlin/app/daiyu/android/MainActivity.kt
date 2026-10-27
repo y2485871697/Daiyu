@@ -2297,6 +2297,7 @@ class MainActivity : ComponentActivity() {
                     "appearance" -> AppearanceSettingsScreen(
                         state = appearance,
                         onChange = { saveAppearance(it) },
+                        onColorChange = { saveAppearance(it) },
                         onBack = { retainedPage = "settings" },
                         iconContent = { expanded ->
                             IconAppearanceEditor(iconCoordinator, expanded,
@@ -6913,10 +6914,15 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun loadAppearance(): AppearanceSettings = appearanceStore.load()
-    private fun saveAppearance(value: AppearanceSettings) { guard {
-        appearance = appearanceStore.save(value)
-        publishChat()
-    } }
+    private fun saveAppearance(value: AppearanceSettings): Boolean {
+        var saved = false
+        guard {
+            appearance = appearanceStore.save(value)
+            publishChat()
+            saved = true
+        }
+        return saved
+    }
 
 }
 

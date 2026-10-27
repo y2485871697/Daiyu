@@ -19,7 +19,7 @@ class AssistantSwitchGeometryContractTest(unittest.TestCase):
         self.assertIn('.size(16.dp * s).testTag("assistant-preview-switch-thumb")', self.switch)
         self.assertNotIn('.offset(', self.switch)
         self.assertEqual(2, self.switch.count('.size(36.dp * s, 22.dp * s)'))
-        self.assertIn('Color.White else colors.muted', self.switch)
+        self.assertIn('DaiyuPalette.switchThumb else colors.muted', self.switch)
 
     def test_pixel_rounding_keeps_a_one_pixel_tolerance_across_density_and_scale(self):
         def pixels(dp, density):

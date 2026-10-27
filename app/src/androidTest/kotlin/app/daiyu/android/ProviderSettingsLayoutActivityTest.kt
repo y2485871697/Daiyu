@@ -128,8 +128,8 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                         ProviderSettingsTheme {
                             primary = MiuixTheme.colorScheme.primary
                             onPrimary = MiuixTheme.colorScheme.onPrimary
-                            deleteFill = MiuixTheme.colorScheme.surfaceVariant
-                            deleteText = assistantPreviewPalette().danger
+                            deleteFill = MiuixTheme.colorScheme.errorContainer
+                            deleteText = MiuixTheme.colorScheme.onErrorContainer
                             key(dark, fontScale) {
                                 Box(Modifier.fillMaxSize().systemBarsPadding()) {
                                     Column(Modifier.width(250.dp).background(Color.Magenta).testTag("provider-action-host")) {

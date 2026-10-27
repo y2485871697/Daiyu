@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -50,6 +51,8 @@ fun AgentAppTheme(
             }
         }
         val miuixColors = MiuixTheme.colorScheme
+        val tertiaryAccent = appearance.secondaryAccentColor?.let(::Color) ?: appearance.resolvedPrimaryAccent
+        val materialDefaults = if (isDark) darkColorScheme() else lightColorScheme()
         val materialColors = if (isDark) {
             darkColorScheme(
                 primary = miuixColors.primary,
@@ -60,6 +63,10 @@ fun AgentAppTheme(
                 onSecondary = miuixColors.onSecondary,
                 secondaryContainer = miuixColors.secondaryContainer,
                 onSecondaryContainer = miuixColors.onSecondaryContainer,
+                tertiary = tertiaryAccent ?: materialDefaults.tertiary,
+                onTertiary = tertiaryAccent?.let(::colorContentColor) ?: materialDefaults.onTertiary,
+                tertiaryContainer = if (tertiaryAccent != null) miuixColors.tertiaryContainer else materialDefaults.tertiaryContainer,
+                onTertiaryContainer = if (tertiaryAccent != null) miuixColors.onTertiaryContainer else materialDefaults.onTertiaryContainer,
                 background = miuixColors.background,
                 onBackground = miuixColors.onBackground,
                 surface = miuixColors.surface,
@@ -89,6 +96,10 @@ fun AgentAppTheme(
                 onSecondary = miuixColors.onSecondary,
                 secondaryContainer = miuixColors.secondaryContainer,
                 onSecondaryContainer = miuixColors.onSecondaryContainer,
+                tertiary = tertiaryAccent ?: materialDefaults.tertiary,
+                onTertiary = tertiaryAccent?.let(::colorContentColor) ?: materialDefaults.onTertiary,
+                tertiaryContainer = if (tertiaryAccent != null) miuixColors.tertiaryContainer else materialDefaults.tertiaryContainer,
+                onTertiaryContainer = if (tertiaryAccent != null) miuixColors.onTertiaryContainer else materialDefaults.onTertiaryContainer,
                 background = miuixColors.background,
                 onBackground = miuixColors.onBackground,
                 surface = miuixColors.surface,
@@ -112,6 +123,7 @@ fun AgentAppTheme(
 
         CompositionLocalProvider(
             LocalAppearanceSettings provides appearance,
+            LocalAppearanceDark provides isDark,
             LocalBlurEnabled provides appearance.blurEnabled,
             LocalTopBarBlurStyle provides appearance.topBarBlurStyle,
             LocalPlatformDensity provides platformDensity,

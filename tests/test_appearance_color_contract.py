@@ -36,11 +36,12 @@ class AppearanceColorContractTest(unittest.TestCase):
     def test_defaults_edit_draft_and_only_confirm_saves_the_owned_group(self):
         sheet = source('ui/screens/settings/AppearanceColorSheet.kt')
         reset = sheet.split('AssistantPreviewButton("默认"', 1)[1].split('AssistantPreviewButton("确定"', 1)[0]
-        self.assertIn('draft.withAccentColors(AppearanceSettings())', reset)
-        self.assertIn('draft.withColorStyle(AppearanceSettings())', reset)
+        self.assertIn('editor.merge(draft, AppearanceSettings())', reset)
+        self.assertIn('STYLE -> current.withColorStyle(source)', sheet)
         self.assertNotIn('onChange(', reset)
-        self.assertEqual(1, sheet.count('onChange(if (accents)'))
-        self.assertIn('state.withAccentColors(draft) else state.withColorStyle(draft)', sheet)
+        self.assertEqual(1, sheet.count('onChange(editor.merge(state, draft))'))
+        self.assertIn('ACCENTS -> current.withAccentColors(source)', sheet)
+        self.assertIn('BUBBLES -> current.withUserBubbleColors(source)', sheet)
         self.assertIn('onDismiss = onDismiss, showCloseButton = false', sheet)
 
     def test_default_color_previews_do_not_read_applied_overrides(self):
@@ -53,7 +54,7 @@ class AppearanceColorContractTest(unittest.TestCase):
     def test_both_editors_share_assistant_sheet_and_separate_palettes(self):
         sheet = source('ui/screens/settings/AppearanceColorSheet.kt')
         self.assertIn('AssistantPreviewDialog(show = true', sheet)
-        for label in ('强调色', '次强调色', '界面色彩'):
+        for label in ('主强调色', '次强调色', '界面色彩', '用户气泡'):
             self.assertIn(f'AppearanceColorPicker("{label}"', sheet)
         self.assertIn('.verticalScroll(rememberScrollState())', sheet)
         self.assertIn('footer = {', sheet)
@@ -91,7 +92,8 @@ class AppearanceColorContractTest(unittest.TestCase):
 
     def test_theme_keeps_default_primary_container_foreground_and_black_mode(self):
         resolver = source('ui/app/AppearanceColors.kt')
-        self.assertIn('onPrimaryContainer = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: base.onPrimaryContainer', resolver)
+        self.assertIn('onPrimaryContainer = readableAccent(primary, dark, container)', resolver)
+        self.assertIn('if (primary != null)', resolver)
         self.assertEqual(2, resolver.count('if (dark && appearance.pureBlackEnabled) Color.Black'))
         theme = source('ui/app/AgentAppTheme.kt')
         self.assertIn('remember(appearance, isDark) { resolveAppearanceColors(appearance, isDark) }', theme)
@@ -103,7 +105,7 @@ class AppearanceColorContractTest(unittest.TestCase):
                      'ui/screens/chat/conversation/ChatAppearance.kt',
                      'ui/screens/chat/conversation/ConversationAppearance.kt'):
             self.assertIn('appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) }', source(path), path)
-        self.assertIn('val primary = appearance.resolvedPrimaryAccent ?: base.primary', source('ui/app/AppearanceColors.kt'))
+        self.assertIn('val primary = appearance.resolvedPrimaryAccent?.copy(alpha = 1f)', source('ui/app/AppearanceColors.kt'))
         self.assertIn('color = colors.onPrimaryContainer, modifier = Modifier.testTag("appearance-scale-value")',
                       source('ui/screens/settings/AppearanceSettingsScreen.kt'))
 

@@ -207,7 +207,7 @@ internal fun <T> LocalCatalogModelsScreen(
             }, onDismiss = { if (editing === selection) editing = null })
     }
     deleting?.let { selection ->
-        DaiyuConfirmDialog("删除本地模型", "删除 ${selection.record.displayName} 的本地记录，不影响远端模型或其他配置。", "删除", true,
+        DaiyuConfirmDialog("删除本地模型", "删除 ${selection.record.displayName} 的本地记录，不影响远端模型或其他配置。", "删除", true, deletionAppearance = true,
             onConfirm = { if (deleting === selection && current() && matches(selection)) submit(selection, null) },
             onDismiss = { if (deleting === selection) deleting = null })
     }

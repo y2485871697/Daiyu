@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.material3.SwitchDefaults
 
 import androidx.compose.foundation.background
@@ -22,10 +24,8 @@ import androidx.compose.foundation.selection.selectableGroup
 import app.daiyu.android.ui.haptics.material.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.stateDescription
@@ -90,6 +90,7 @@ private fun ThemeChoice(mode: AppearanceThemeMode, selected: Boolean, onClick: (
 internal fun AppearanceSettingsScreen(
     state: AppearanceSettings,
     onChange: (AppearanceSettings) -> Unit,
+    onColorChange: (AppearanceSettings) -> Boolean,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     iconContent: @Composable (expanded: Boolean) -> Unit = {},
@@ -123,7 +124,7 @@ internal fun AppearanceSettingsScreen(
         }
     }
     colorEditor?.let { editor ->
-        AppearanceColorSheet(editor, state, onChange, onDismiss = { colorEditor = null })
+        AppearanceColorSheet(editor, state, onColorChange, onDismiss = { colorEditor = null })
     }
     SettingsScaffoldPage(title = "外观与主题", onBack = onBack, modifier = modifier) {
         item(key = "appearance_theme") {
@@ -142,6 +143,7 @@ internal fun AppearanceSettingsScreen(
             SettingsCard {
                 SettingsRow("色彩风格", onClick = { colorEditor = AppearanceColorEditor.STYLE })
                 SettingsRow("强调色", onClick = { colorEditor = AppearanceColorEditor.ACCENTS })
+                SettingsRow("聊天气泡", onClick = { colorEditor = AppearanceColorEditor.BUBBLES })
                 SettingsSwitchRow("纯黑背景", state.pureBlackEnabled) { onChange(state.copy(pureBlackEnabled = it)) }
             }
         }

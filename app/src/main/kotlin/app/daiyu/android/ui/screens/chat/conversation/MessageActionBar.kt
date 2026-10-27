@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,10 +12,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CallSplit
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -77,7 +78,7 @@ internal fun MessageActionBar(
         }
         TooltipBox(text = "删除", enabled = messageActionsEnabled) {
             ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = messageActionsEnabled) {
-                Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = colors.muted)
+                Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = MiuixTheme.colorScheme.error)
             }
         }
         if (timestamp.isNotBlank()) {

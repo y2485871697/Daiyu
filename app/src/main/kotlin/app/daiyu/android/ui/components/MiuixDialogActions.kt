@@ -43,6 +43,7 @@ fun MiuixDialogActions(
     cancelEnabled: Boolean = true,
     confirmEnabled: Boolean = true,
     destructive: Boolean = false,
+    deletionAppearance: Boolean = false,
 ) {
     val view = LocalView.current
     val cancelClick = {
@@ -78,7 +79,9 @@ fun MiuixDialogActions(
             modifier = Modifier.testTag("dialog-confirm").weight(1f).fillMaxHeight().semantics {
                 semanticsClick { confirmClick() }
             },
-            colors = if (destructive) {
+            colors = if (deletionAppearance) {
+                deletionButtonColors()
+            } else if (destructive) {
                 ButtonDefaults.textButtonColorsPrimary(
                     color = MiuixTheme.colorScheme.error,
                     textColor = MiuixTheme.colorScheme.onError,
@@ -89,3 +92,9 @@ fun MiuixDialogActions(
         )
     }
 }
+
+@Composable
+internal fun deletionButtonColors() = ButtonDefaults.textButtonColorsPrimary(
+    color = MiuixTheme.colorScheme.errorContainer,
+    textColor = MiuixTheme.colorScheme.onErrorContainer,
+)

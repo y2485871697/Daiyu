@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -8,11 +10,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.platform.testTag
@@ -23,7 +23,6 @@ import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.icons.ModelBrandIcon
-import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -290,8 +289,8 @@ internal fun ModelSettingsScreen(
                     connection.cancel(); balance.cancel(); onDelete()
                 }
             }, colors = ButtonDefaults.textButtonColorsPrimary(
-                color = MiuixTheme.colorScheme.surfaceVariant,
-                textColor = assistantPreviewPalette().danger),
+                color = MiuixTheme.colorScheme.errorContainer,
+                textColor = MiuixTheme.colorScheme.onErrorContainer),
                 modifier = Modifier.testTag("provider-delete").padding(horizontal = 20.dp, vertical = 4.dp))
         }
     }

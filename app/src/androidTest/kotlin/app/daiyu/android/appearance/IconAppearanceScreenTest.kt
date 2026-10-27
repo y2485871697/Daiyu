@@ -89,7 +89,7 @@ class IconAppearanceScreenTest : ComposeActivityTestCase() {
                     CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                         key(coordinator) {
                             Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("icon-test-host")) {
-                                AppearanceSettingsScreen(AppearanceSettings(), onChange = {}, onBack = {},
+                                AppearanceSettingsScreen(AppearanceSettings(), onChange = {}, onColorChange = { true }, onBack = {},
                                     iconContent = { expanded -> IconAppearanceEditor(coordinator, expanded) })
                             }
                         }

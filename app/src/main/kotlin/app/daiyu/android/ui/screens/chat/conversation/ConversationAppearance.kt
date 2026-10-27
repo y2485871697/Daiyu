@@ -5,6 +5,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import app.daiyu.android.ui.app.LocalAppearanceDark
+import app.daiyu.android.ui.app.resolveAppearanceActions
+import app.daiyu.android.ui.app.resolveUserBubbleColors
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.readableAccent
 import app.daiyu.android.ui.app.resolvedPrimaryAccent
@@ -14,7 +17,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -35,11 +37,12 @@ internal data class ConversationColors(
     val success: Color,
     val error: Color,
     val warning: Color,
+    val bubbleText: Color = text,
 )
 
 @Composable
 internal fun conversationColors(): ConversationColors {
-    val dark = MiuixTheme.colorScheme.surfaceVariant.luminance() < 0.5f
+    val dark = LocalAppearanceDark.current
     val base = if (dark) ConversationColors(true, Color(0xFFE0DCE8), Color(0xFF8F879B),
         Color(0xFFBBAACB), Color(0xFF26233D), Color(0x85282331), Color(0x24C2ADDB),
         Color(0x13BEA8D7), Color(0xFF9AB3A4), Color(0xFFD896A1), Color(0xFFC3AF8A))
@@ -47,10 +50,12 @@ internal fun conversationColors(): ConversationColors {
         Color(0xFF756980), Color(0xFFF0ECFC), Color(0x8CFAF8FC), Color(0x2692819F),
         Color(0x108A779A), Color(0xFF6B8574), Color(0xFFAD626E), Color(0xFFA48D65))
     val appearance = LocalAppearanceSettings.current
+    val bubble = resolveUserBubbleColors(appearance, dark)
+    val actions = resolveAppearanceActions(appearance, dark)
     return base.copy(accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: base.accent,
-        bubble = appearance.styleColor(base.bubble), surface = appearance.styleColor(base.surface),
+        bubble = bubble.container, bubbleText = bubble.content, surface = appearance.styleColor(base.surface),
         line = appearance.styleColor(base.line),
-        soft = appearance.secondaryAccentColor?.let { Color(it).copy(alpha = .14f) } ?: base.soft)
+        soft = if (appearance.secondaryAccentColor != null) actions.secondaryContainer else appearance.styleColor(base.soft))
 }
 
 /** Keep native click semantics and interaction tracking, without a ripple indication. */

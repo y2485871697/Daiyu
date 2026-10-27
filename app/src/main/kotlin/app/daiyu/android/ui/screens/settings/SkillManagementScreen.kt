@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.app.DaiyuPalette
 
 import app.daiyu.android.ui.components.materialImeCursorColor
@@ -41,10 +43,8 @@ import app.daiyu.android.ui.screens.settings.SettingsSwitch as Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -295,6 +295,7 @@ internal fun SkillManagementScreen(
     controller.removal?.let { removal ->
         val cancel: () -> Unit = { if (controller.removal === removal) controller.cancelRemoval() }
         SkillConfirmationSheet("删除技能", cancel, "删除", "skills-confirm-remove",
+            deletionAppearance = true,
             confirmEnabled = !controller.busy, cancelEnabled = !controller.busy,
             onConfirm = { controller.remove(removal) },
             cancelModifier = Modifier.semantics { this[RetainedSkillRemovalCancel] = cancel }) {
@@ -480,7 +481,7 @@ private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Uni
         }
         if (entry.builtin && engineeringUi) SkillActionButton("重装内置技能", onReinstall,
             enabled = canReinstall, modifier = Modifier.fillMaxWidth().testTag("skill-reinstall:${entry.id}"))
-        if (!entry.builtin && engineeringUi) SkillActionButton("删除技能", onRemove,
+        if (!entry.builtin && engineeringUi) SkillActionButton("删除技能", onRemove, deletionAppearance = true,
             enabled = canRemove, modifier = Modifier.fillMaxWidth().testTag("skill-remove:${entry.id}"))
         SkillActionButton("关闭", onDismiss, primary = true,
             modifier = Modifier.fillMaxWidth().testTag("skills-details-close"))
@@ -490,7 +491,7 @@ private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Uni
 @Composable
 private fun SkillConfirmationSheet(title: String, onDismiss: () -> Unit, confirmText: String,
     confirmTag: String, confirmEnabled: Boolean, cancelEnabled: Boolean, onConfirm: () -> Unit,
-    cancelModifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    cancelModifier: Modifier = Modifier, deletionAppearance: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     SkillSheet(title, onDismiss) {
         Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -502,7 +503,7 @@ private fun SkillConfirmationSheet(title: String, onDismiss: () -> Unit, confirm
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SkillActionButton("取消", onDismiss, enabled = cancelEnabled,
                 modifier = Modifier.weight(1f).fillMaxHeight().then(cancelModifier))
-            SkillActionButton(confirmText, onConfirm, enabled = confirmEnabled, primary = true,
+            SkillActionButton(confirmText, onConfirm, enabled = confirmEnabled, primary = true, deletionAppearance = deletionAppearance,
                 modifier = Modifier.weight(1f).fillMaxHeight().testTag(confirmTag))
         }
     }
@@ -521,8 +522,11 @@ private fun SkillSheet(title: String, onDismiss: () -> Unit, content: @Composabl
 
 @Composable
 private fun SkillActionButton(text: String, onClick: () -> Unit, enabled: Boolean = true,
-    primary: Boolean = false, modifier: Modifier = Modifier) {
-    ConversationAgentButton(text, enabled = enabled, primary = primary, onClick = onClick,
+    primary: Boolean = false, modifier: Modifier = Modifier, deletionAppearance: Boolean = false) {
+    if (deletionAppearance) ConversationAgentButton(text, enabled = enabled, primary = true, onClick = onClick,
+        primaryColor = MiuixTheme.colorScheme.errorContainer, onPrimaryColor = MiuixTheme.colorScheme.onErrorContainer,
+        modifier = modifier.heightIn(min = 48.dp))
+    else ConversationAgentButton(text, enabled = enabled, primary = primary, onClick = onClick,
         modifier = modifier.heightIn(min = 48.dp))
 }
 

@@ -193,7 +193,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         awaitDialogEnter(node("assistant-sheet"))
         node("appearance-color-default").assertIsDisplayed()
         node("appearance-color-confirm").assertIsDisplayed()
-        node("appearance-color-pad:${if (title == "强调色") "强调色" else "界面色彩"}").assertExists()
+        node("appearance-color-pad:${if (title == "强调色") "主强调色" else "界面色彩"}").assertExists()
         if (title == "强调色") node("appearance-color-pad:次强调色").assertExists()
         androidx.test.espresso.Espresso.pressBack()
         ui.waitUntil(5_000) {
@@ -206,7 +206,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(state, false) {
-                    AppearanceSettingsScreen(state, onChange = { state = it }, onBack = {})
+                    AppearanceSettingsScreen(state, onChange = { state = it }, onColorChange = { state = it ; true }, onBack = {})
                 }
             }
         }
@@ -252,7 +252,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                     val density = LocalDensity.current
                     CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
                         AgentAppTheme(state, true) {
-                            AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it }, onBack = {})
+                            AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it }, onColorChange = { requests.add(it); state = it ; true }, onBack = {})
                         }
                     }
                 }
@@ -299,7 +299,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(state, false) {
-                    AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it }, onBack = {})
+                    AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it }, onColorChange = { requests.add(it); state = it ; true }, onBack = {})
                 }
             }
         }
@@ -331,7 +331,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                         key(dark, scale) {
                             AgentAppTheme(state, true) {
                                 Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("appearance-host")) {
-                                    AppearanceSettingsScreen(state, onChange = { state = it }, onBack = {})
+                                    AppearanceSettingsScreen(state, onChange = { state = it }, onColorChange = { state = it ; true }, onBack = {})
                                 }
                             }
                         }
@@ -370,7 +370,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(state, true) {
-                    AppearanceSettingsScreen(state, onChange = { saves += it; state = it }, onBack = {})
+                    AppearanceSettingsScreen(state, onChange = { saves += it; state = it }, onColorChange = { saves += it; state = it ; true }, onBack = {})
                 }
             }
         }
@@ -411,13 +411,61 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testUserBubbleDraftKeepsFailedSaveAndOnlyCommitsItsOwnGroup() {
+        val original = AppearanceSettings(primaryAccentColor = 0xFF448866.toInt(), secondaryAccentColor = 0xFF884466.toInt(),
+            paletteSeedColor = 0xFF446688.toInt())
+        var state by mutableStateOf(original)
+        var accept = false
+        val requests = mutableListOf<AppearanceSettings>()
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(state, true) {
+                    AppearanceSettingsScreen(state, onChange = { state = it }, onColorChange = {
+                        requests += it
+                        if (accept) { state = it; true } else false
+                    }, onBack = {})
+                }
+            }
+        }
+        fun open() {
+            reveal("settings-row:聊天气泡", "外观与主题").performTouchInput { click() }
+            awaitDialogEnter(node("assistant-sheet"))
+        }
+        fun closed() {
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+        }
+        open()
+        node("settings-radio:自定义颜色").scrollToVisible().performClick()
+        node("appearance-swatch:用户气泡:${0xFF407FCE}").scrollToVisible().performClick()
+        ui.runOnIdle { assertEquals(original, state); assertTrue(requests.isEmpty()) }
+        node("appearance-color-confirm").performClick()
+        node("appearance-color-save-error").assertExists()
+        ui.runOnIdle { assertEquals(original, state); accept = true }
+        node("appearance-color-confirm").performClick()
+        closed()
+        val expected = original.copy(userBubbleMode = app.daiyu.android.data.model.UserBubbleMode.CUSTOM,
+            userBubbleColor = 0xFF407FCE.toInt())
+        ui.runOnIdle { assertEquals(expected, state); assertEquals(listOf(expected, expected), requests) }
+        open()
+        node("appearance-color-default").performClick()
+        androidx.test.espresso.Espresso.pressBack()
+        closed()
+        ui.runOnIdle { assertEquals(expected, state); assertEquals(2, requests.size) }
+        open()
+        node("appearance-color-default").performClick()
+        node("appearance-color-confirm").performClick()
+        closed()
+        ui.runOnIdle { assertEquals(original, state) }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testScaleGestureCommitsOnceAndRejectedSaveRestoresConfirmedValue() {
         val state = AppearanceSettings(interfaceScale = 1f)
         val requests = mutableListOf<AppearanceSettings>()
         mainThread {
             activity.setContent {
                 AgentAppTheme(state, false) {
-                    AppearanceSettingsScreen(state, onChange = { requests.add(it) }, onBack = {})
+                    AppearanceSettingsScreen(state, onChange = { requests.add(it) }, onColorChange = { requests.add(it) ; true }, onBack = {})
                 }
             }
         }

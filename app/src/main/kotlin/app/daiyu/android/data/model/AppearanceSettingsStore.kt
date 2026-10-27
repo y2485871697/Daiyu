@@ -2,12 +2,17 @@ package app.daiyu.android.data.model
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.util.WeakHashMap
 
 /** The retained appearance preference file; does not read or migrate another app's data. */
 internal class AppearanceSettingsStore(private val preferences: SharedPreferences) {
     constructor(context: Context) : this(context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE))
 
-    fun load(): AppearanceSettings = AppearanceSettings(
+    fun load(): AppearanceSettings = synchronized(lock) {
+        fenced[preferences] ?: read()
+    }
+
+    private fun read(): AppearanceSettings = AppearanceSettings(
         themeMode = AppearanceThemeMode.fromPersistedValue(preferences.getString("theme", null)),
         interfaceScale = preferences.getFloat("scale", DEFAULT_INTERFACE_SCALE),
         messageTimestampsEnabled = preferences.getBoolean("timestamps", false),
@@ -18,6 +23,8 @@ internal class AppearanceSettingsStore(private val preferences: SharedPreference
         paletteSeedColor = preferences.optionalColor("palette_seed"),
         primaryAccentColor = preferences.optionalColor("primary_accent"),
         secondaryAccentColor = preferences.optionalColor("secondary_accent"),
+        userBubbleMode = UserBubbleMode.fromPersistedValue(preferences.getString("user_bubble_mode", null)),
+        userBubbleColor = preferences.optionalColor("user_bubble_color"),
         blurEnabled = preferences.getBoolean("blur", true),
         topBarBlurStyle = AppearanceTopBarBlurStyle.fromPersistedValue(preferences.getString("blur_style", null)),
         morphLoadingIndicator = preferences.getBoolean("morph_loading", true),
@@ -30,8 +37,10 @@ internal class AppearanceSettingsStore(private val preferences: SharedPreference
     ).normalized()
 
     /** Caller only publishes the returned state after the complete synchronous commit succeeds. */
-    fun save(value: AppearanceSettings): AppearanceSettings {
+    fun save(value: AppearanceSettings): AppearanceSettings = synchronized(lock) {
         val normalized = value.normalized()
+        // A failed synchronous commit may already have changed the process preference map.
+        fenced.getOrPut(preferences) { read() }
         check(preferences.edit()
             .putString("theme", normalized.themeMode.persistedValue)
             .putFloat("scale", normalized.interfaceScale)
@@ -43,6 +52,8 @@ internal class AppearanceSettingsStore(private val preferences: SharedPreference
             .putOptionalColor("palette_seed", normalized.paletteSeedColor)
             .putOptionalColor("primary_accent", normalized.primaryAccentColor)
             .putOptionalColor("secondary_accent", normalized.secondaryAccentColor)
+            .putString("user_bubble_mode", normalized.userBubbleMode.persistedValue)
+            .putOptionalColor("user_bubble_color", normalized.userBubbleColor)
             .putBoolean("blur", normalized.blurEnabled)
             .putString("blur_style", normalized.topBarBlurStyle.persistedValue)
             .putBoolean("morph_loading", normalized.morphLoadingIndicator)
@@ -53,7 +64,9 @@ internal class AppearanceSettingsStore(private val preferences: SharedPreference
             .putInt("icon_dark", normalized.iconDarkColor)
             .putInt("icon_cat", normalized.iconCatColor)
             .commit()) { "外观设置保存失败" }
-        return normalized
+        check(read() == normalized) { "外观设置回读不一致，请重新保存" }
+        fenced.remove(preferences)
+        normalized
     }
 
     private fun SharedPreferences.optionalColor(key: String): Int? =
@@ -62,5 +75,9 @@ internal class AppearanceSettingsStore(private val preferences: SharedPreference
     private fun SharedPreferences.Editor.putOptionalColor(key: String, color: Int?): SharedPreferences.Editor =
         if (color == null) remove(key) else putInt(key, color)
 
-    companion object { const val FILE_NAME = "appearance-settings" }
+    companion object {
+        const val FILE_NAME = "appearance-settings"
+        private val lock = Any()
+        private val fenced = WeakHashMap<SharedPreferences, AppearanceSettings>()
+    }
 }

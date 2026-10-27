@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import app.daiyu.android.ui.haptics.material.TextButton
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -23,7 +24,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import app.daiyu.android.ui.haptics.miuix.TextButton as MiuixTextButton
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 /** One opening owns one editor, application, expected profile and parallel-pool snapshot. */
 internal class SubAgentProfileDraftSession private constructor(
@@ -189,7 +189,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                         else TextButton(enabled = !session.submitting, onClick = onRetry) { Text("重试恢复配置（保留草稿）") }
                     }
                 }
-                SubAgentDraftDialogActions(ready, secondaryEnabled, if (editing) "删除" else "取消", onSecondary = {
+                SubAgentDraftDialogActions(ready, secondaryEnabled, if (editing) "删除" else "取消", deletion = editing, onSecondary = {
                     val expected = session.expectedProfile
                     if (expected == null) userDismiss()
                     else if (!session.submitting && session.canDelete(latestEditor, latestEnabled)) {
@@ -263,18 +263,21 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     }
 }
 @Composable
-private fun SubAgentDraftDialogActions(confirmEnabled: Boolean, secondaryEnabled: Boolean, secondaryLabel: String,
+private fun SubAgentDraftDialogActions(confirmEnabled: Boolean, secondaryEnabled: Boolean, secondaryLabel: String, deletion: Boolean,
     onSecondary: () -> Unit, onConfirm: () -> Unit) {
     if (LocalConversationAgentStyle.current) {
         HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(top = 10.dp).testTag("subagent-config-actions"), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ConversationAgentButton(secondaryLabel, secondaryEnabled, modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onSecondary)
+            if (deletion) ConversationAgentButton(secondaryLabel, secondaryEnabled, primary = true,
+                primaryColor = MiuixTheme.colorScheme.errorContainer, onPrimaryColor = MiuixTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onSecondary)
+            else ConversationAgentButton(secondaryLabel, secondaryEnabled, modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onSecondary)
             ConversationAgentButton("确认", confirmEnabled, primary = true, modifier = Modifier.weight(1f).fillMaxHeight(), onClick = onConfirm)
         }
         return
     }
     Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MiuixTextButton(text = secondaryLabel, modifier = Modifier.weight(1f), enabled = secondaryEnabled, onClick = onSecondary)
+        MiuixTextButton(text = secondaryLabel, modifier = Modifier.weight(1f), enabled = secondaryEnabled, colors = if (deletion) deletionButtonColors() else MiuixButtonDefaults.textButtonColors(), onClick = onSecondary)
         MiuixTextButton(text = "确认", modifier = Modifier.weight(1f), enabled = confirmEnabled, colors = MiuixButtonDefaults.textButtonColorsPrimary(), onClick = onConfirm)
     }
 }

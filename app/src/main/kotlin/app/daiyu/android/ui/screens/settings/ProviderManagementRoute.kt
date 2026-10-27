@@ -25,7 +25,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
-import app.daiyu.android.ui.haptics.miuix.TextButton
 
 internal val RetainedProviderConnectionTest =
     SemanticsPropertyKey<Pair<ModelSettingsDraftUi, ModelConnectionTester>>("RetainedProviderConnectionTest")
@@ -71,7 +70,7 @@ private class NewProviderDraft(protocol: ProviderProtocol, val speechOnly: Boole
     val registration = ProviderRegistrationOwnership { oauth?.let(app.daiyu.android.model.oauth.CodexOAuthRuntime::discard) }
     fun revoke() { balanceTestJob?.cancel(); balanceTestJob = null; registration.revoke() }
 }
-private class ProviderConfirm(val title: String, val message: String, val destructive: Boolean, val action: () -> Unit)
+private class ProviderConfirm(val title: String, val message: String, val destructive: Boolean, val deletionAppearance: Boolean = false, val action: () -> Unit)
 private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(oauth = oauth, protocol = protocol, endpoint = endpoint,
     responsesPath = responsesPath, apiKey = apiKey, model = model, batteryEnabled = batteryEnabled,
     deviceStatusEnabled = deviceStatusEnabled, customBody = requestOptions.customBody,
@@ -530,7 +529,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 })
             val delete: () -> Unit = {
                 if (live() && enabled && registry === d.registry) {
-                    confirmation = ProviderConfirm("删除提供商", "确定删除“${d.name}”？若为当前提供商，将清空当前选择，不会自动切换。", true) {
+                    confirmation = ProviderConfirm("删除提供商", "确定删除“${d.name}”？若为当前提供商，将清空当前选择，不会自动切换。", true, deletionAppearance = true) {
                         if (live() && enabled && registry === d.registry) {
                             closeDetail()
                             mutate(d.registry, p, completed = {
@@ -611,7 +610,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     val expected = displayedRegistry
                     val selected = selection
                     if (current(p) && enabled && registry === expected && selectedSlots === selected && expected != null && !selected.isNullOrEmpty()) {
-                        confirmation = ProviderConfirm("删除提供商", "确定删除选中的 ${selected.size} 个提供商？若包含当前提供商，将清空当前选择，不会自动切换。", true) {
+                        confirmation = ProviderConfirm("删除提供商", "确定删除选中的 ${selected.size} 个提供商？若包含当前提供商，将清空当前选择，不会自动切换。", true, deletionAppearance = true) {
                             if (selectedSlots === selected) mutate(expected, p, completed = {
                                 selectedSlots = null; refresh()
                             }) { repo, revision, admit -> repo.deleteSelected(revision, selected, admit) }
@@ -627,7 +626,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 onConfirm = dismissError, onDismiss = dismissError)
         }
         val confirm = confirmation
-        if (confirm != null) DaiyuConfirmDialog(confirm.title, confirm.message, "确认", confirm.destructive,
+        if (confirm != null) DaiyuConfirmDialog(confirm.title, confirm.message, "确认", confirm.destructive, deletionAppearance = confirm.deletionAppearance,
             onConfirm = { if (confirmation === confirm && current(p) && enabled) { confirmation = null; confirm.action() } },
             onDismiss = { if (confirmation === confirm) confirmation = null })
     }

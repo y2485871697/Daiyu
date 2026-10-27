@@ -243,7 +243,7 @@ import kotlinx.coroutines.withContext
             }
         }
         if (deleting && selected != null) DaiyuConfirmDialog(title = "删除服务器", confirmText = "删除",
-            message = "删除 ${selected.label} 及其凭据？", destructive = true,
+            message = "删除 ${selected.label} 及其凭据？", destructive = true, deletionAppearance = true,
             onDismiss = { deleting = false }, onConfirm = {
                 id = selected.id
                 save(true)

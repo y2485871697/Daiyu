@@ -18,7 +18,7 @@ class SettingsSwitchAccentContractTest(unittest.TestCase):
         style = (SRC / 'ui/components/subagent/ConversationAgentStyle.kt').read_text()
         switch = style.split('internal fun ConversationAgentSwitch(', 1)[1].split('internal fun ConversationAgentButton(', 1)[0]
         self.assertEqual(2, switch.count(f'if (checked) {TOKEN}'))
-        for retained in ('Color(0x28b4aabb)', 'else colors.line', 'Color.White', 'Color(0xffa69baa)',
+        for retained in ('Color(0x28b4aabb)', 'else colors.line', 'DaiyuPalette.switchThumb', 'Color(0xffa69baa)',
                          '.size(36.dp, 22.dp)', '.alpha(if (enabled) 1f else .4f)'):
             self.assertIn(retained, switch)
 

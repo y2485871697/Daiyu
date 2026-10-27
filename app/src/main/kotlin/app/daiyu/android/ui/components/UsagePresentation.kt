@@ -1,5 +1,9 @@
 package app.daiyu.android.ui.components
 
+import app.daiyu.android.ui.app.colorContentColor
+import app.daiyu.android.ui.app.resolveAppearanceActions
+import app.daiyu.android.ui.app.resolveAppearanceColors
+import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.readableAccent
@@ -15,7 +19,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
@@ -24,20 +27,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Local usage/context presentation only. Never installs a theme above settings. */
 internal data class UsagePalette(val dark: Boolean, val appearance: AppearanceSettings = AppearanceSettings()) {
+    private val theme = resolveAppearanceColors(appearance, dark)
+    private val actions = resolveAppearanceActions(appearance, dark)
+    val primary = appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xffc6b6d5 else 0xff82718f)
+    val onPrimary = if (appearance.primaryAccentColor != null) colorContentColor(primary) else Color(if (dark) 0xff211735 else 0xffffffff)
+    val selectionContainer = if (appearance.primaryAccentColor != null) theme.primaryContainer else appearance.styleColor(Color(if (dark) 0xff28262f else 0xffefedfb))
+    val selectionContent = if (appearance.primaryAccentColor != null) theme.onPrimaryContainer else Color(if (dark) 0xffc6b6d5 else 0xff82718f)
+    val secondaryContainer get() = if (appearance.secondaryAccentColor != null) actions.secondaryContainer else bubble
+    val onSecondaryContainer get() = readableAccent(actions.secondary, dark, secondaryContainer)
     val text = Color(if (dark) 0xffe0dce8 else 0xff36333f)
     val muted = Color(if (dark) 0xff918997 else 0xff968b9f)
     val accent = appearance.resolvedPrimaryAccent?.let { readableAccent(it, dark) } ?: Color(if (dark) 0xffc6b6d5 else 0xff82718f)
@@ -46,11 +53,11 @@ internal data class UsagePalette(val dark: Boolean, val appearance: AppearanceSe
     val bubble = appearance.styleColor(Color(if (dark) 0xff28262f else 0xfff1eff3))
     val background = appearance.styleColor(Color(if (dark) 0xff101218 else 0xffffffff))
     val sheet = listOf(Color(if (dark) 0xf22e283b else 0xf0ffffff), Color(if (dark) 0xf21b1825 else 0xf0f8f4ff)).map(appearance::styleColor)
-    val edge = Color(if (dark) 0x26dccdff else 0xedffffff)
+    val edge = appearance.styleColor(Color(if (dark) 0x26dccdff else 0xedffffff))
 }
 
 @Composable
-internal fun usagePalette() = UsagePalette(MiuixTheme.colorScheme.surface.luminance() < 0.5f, LocalAppearanceSettings.current)
+internal fun usagePalette() = UsagePalette(LocalAppearanceDark.current, LocalAppearanceSettings.current)
 
 @Composable
 internal fun UsageGlassDialog(
@@ -123,14 +130,14 @@ internal fun UsageAction(
     val colors = usagePalette()
     val shape = RoundedCornerShape(11.dp)
     Box(modifier.alpha(if (enabled) 1f else .4f).clip(shape)
-        .background(if (plain) Color.Transparent else if (primary) colors.accent else colors.bubble)
-        .then(if (plain) Modifier else Modifier.border(1.dp, if (primary) colors.accent else colors.line, shape))
+        .background(if (plain) Color.Transparent else if (primary) colors.primary else colors.secondaryContainer)
+        .then(if (plain) Modifier else Modifier.border(1.dp, if (primary) colors.primary else colors.line, shape))
         .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() },
             indication = null, onClick = onClick)
         .heightIn(min = if (plain) 40.dp else 44.dp).padding(horizontal = if (plain) 0.dp else 10.dp, vertical = 8.dp),
         contentAlignment = if (plain) Alignment.CenterStart else Alignment.Center) {
         Text(text, fontSize = if (plain) 13.sp else 14.sp, lineHeight = 20.sp,
-            color = if (primary) Color(if (colors.dark) 0xff211735 else 0xffffffff) else if (plain) colors.muted else colors.accent)
+            color = if (plain) colors.muted else if (primary) colors.onPrimary else colors.onSecondaryContainer)
     }
 }
 

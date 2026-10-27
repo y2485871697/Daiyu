@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
@@ -19,24 +21,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.text.font.FontWeight
 import app.daiyu.android.ui.components.usagePalette
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -233,7 +228,7 @@ internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onActio
     ).filter { it.action in available }
     if (entries.isEmpty()) return
     val colors = usagePalette()
-    val selectionBackground = if (colors.dark) colors.bubble else Color(0xFFEFEDFB)
+    val selectionBackground = colors.selectionContainer
     ChatSelectionSheet("语音功能", onDismiss, subtitle = "选择要使用的语音功能", showCloseButton = false,
         titleFontSize = 20.sp, subtitleFontSize = 14.sp) {
         Column(Modifier.testTag("chat-voice-mode-menu").fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -249,10 +244,10 @@ internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onActio
                     horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(entry.icon, null, Modifier.size(24.dp), tint = colors.accent)
                     Text(entry.title, Modifier.weight(1f), fontSize = 16.sp, lineHeight = 24.sp,
-                        color = if (isSelected) colors.accent else colors.text)
-                    Box(Modifier.size(22.dp).background(if (isSelected) colors.accent else Color.Transparent, CircleShape),
+                        color = if (isSelected) colors.selectionContent else colors.text)
+                    Box(Modifier.size(22.dp).background(if (isSelected) colors.primary else Color.Transparent, CircleShape),
                         contentAlignment = Alignment.Center) {
-                        if (isSelected) Icon(DaiyuIcons.Check, null, Modifier.size(14.dp), tint = Color.White)
+                        if (isSelected) Icon(DaiyuIcons.Check, null, Modifier.size(14.dp), tint = colors.onPrimary)
                     }
                 }
             }

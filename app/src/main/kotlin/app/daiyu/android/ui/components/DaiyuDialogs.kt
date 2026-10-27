@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,10 +26,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
@@ -98,11 +98,12 @@ internal fun DaiyuConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     preview: Boolean = false,
+    deletionAppearance: Boolean = false,
 ) {
     if (preview) {
         ChatSelectionSheet(title, onDismiss, footer = {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("dialog-cancel"))
-            AssistantPreviewButton(confirmText, onConfirm, Modifier.weight(1f).testTag("dialog-confirm"), primary = !destructive, danger = destructive)
+            AssistantPreviewButton(confirmText, onConfirm, Modifier.weight(1f).testTag("dialog-confirm"), primary = !destructive, danger = destructive, deletionAppearance = deletionAppearance)
         }) { Text(message, fontSize = 12.sp, lineHeight = 19.2.sp, modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) }
         return
     }
@@ -110,6 +111,7 @@ internal fun DaiyuConfirmDialog(
         MiuixDialogActions(
             confirmText = confirmText,
             destructive = destructive,
+            deletionAppearance = deletionAppearance,
             onCancel = onDismiss,
             onConfirm = onConfirm,
         )

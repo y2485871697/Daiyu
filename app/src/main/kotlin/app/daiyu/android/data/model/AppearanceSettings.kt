@@ -26,12 +26,15 @@ data class AppearanceSettings(
     val paletteSeedColor: Int? = null,
     val primaryAccentColor: Int? = null,
     val secondaryAccentColor: Int? = null,
+    val userBubbleMode: UserBubbleMode = UserBubbleMode.THEME,
+    val userBubbleColor: Int? = null,
 ) {
     fun normalized(): AppearanceSettings = copy(
         interfaceScale = normalizeInterfaceScale(interfaceScale),
         paletteSeedColor = paletteSeedColor?.or(0xFF000000.toInt()),
         primaryAccentColor = primaryAccentColor?.or(0xFF000000.toInt()),
         secondaryAccentColor = secondaryAccentColor?.or(0xFF000000.toInt()),
+        userBubbleColor = userBubbleColor?.or(0xFF000000.toInt()),
         iconLightColor = iconLightColor or 0xFF000000.toInt(),
         iconDarkColor = iconDarkColor or 0xFF000000.toInt(),
         iconCatColor = iconCatColor or 0xFF000000.toInt(),
@@ -46,10 +49,23 @@ data class AppearanceSettings(
         secondaryAccentColor = source.secondaryAccentColor,
     )
 
+    fun withUserBubbleColors(source: AppearanceSettings) = copy(
+        userBubbleMode = source.userBubbleMode, userBubbleColor = source.userBubbleColor,
+    )
+
     companion object {
         const val DEFAULT_ICON_LIGHT = 0xFFFFFFFF.toInt()
         const val DEFAULT_ICON_DARK = 0xFF1C1C1E.toInt()
         const val DEFAULT_ICON_CAT = 0xFF2491FF.toInt()
+    }
+}
+
+enum class UserBubbleMode(val persistedValue: String) {
+    OFF("off"), THEME("theme"), CUSTOM("custom");
+
+    companion object {
+        fun fromPersistedValue(value: String?): UserBubbleMode =
+            entries.firstOrNull { it.persistedValue == value } ?: THEME
     }
 }
 

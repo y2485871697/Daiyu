@@ -27,7 +27,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -81,7 +80,7 @@ internal fun ChatModelPicker(
     var expanded by remember(state.providerId) { mutableStateOf<String?>(state.providerId) }
     var searchCollapsed by remember(query) { mutableStateOf(emptySet<String>()) }
     val colors = usagePalette()
-    val selectedBackground = if (colors.dark) colors.bubble else Color(0xFFEFEDFB)
+    val selectedBackground = colors.selectionContainer
     val search = query.trim()
     val listState = rememberLazyListState()
     LaunchedEffect(search) { listState.scrollToItem(0) }
@@ -187,7 +186,7 @@ internal fun ChatModelPicker(
                                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     ModelBrandIcon(model.apiModelId, Modifier.size(22.dp).testTag("chat-model-brand:${provider.id}:${model.id}"), displayName = model.displayName, tint = colors.accent)
                                     Column(Modifier.weight(1f).modelNameOpticalAlignment()) {
-                                        Text(model.displayName, color = if (selected) colors.accent else colors.text,
+                                        Text(model.displayName, color = if (selected) colors.selectionContent else colors.text,
                                             fontSize = 16.sp, lineHeight = 24.sp,
                                             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                                             maxLines = 2, overflow = TextOverflow.Ellipsis,

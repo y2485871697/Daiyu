@@ -175,7 +175,7 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
         })
     val deletion = deleting
     if (deletion != null) DaiyuConfirmDialog("删除私有文件", "将删除私有工作区中的 ${deletion.entry.relative}。仅支持文件或空目录，无法撤销；不会删除原导入来源。",
-        "删除", true, onConfirm = {
+        "删除", true, deletionAppearance = true, onConfirm = {
             if (current() && !busy && !sharedBusy() && pending == null && deleting === deletion && epoch.get() == deletion.epoch) {
                 deleting = null; busy = true; onOccupied(true); readCancellation?.set(true); request = null
                 val token = Any(); request = token

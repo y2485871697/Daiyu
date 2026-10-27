@@ -95,6 +95,8 @@ def candidate_workflow_inputs(workflow):
     smoke = smoke.replace(SMOKE_UWB_TRANSPORT, '')
     smoke = smoke.replace('timeout-minutes: 175', 'timeout-minutes: 160')
     smoke = smoke.replace('timeout-minutes: 185', 'timeout-minutes: 170')
+    smoke = smoke.replace('timeout-minutes: 205', 'timeout-minutes: 160')
+    smoke = smoke.replace('timeout-minutes: 215', 'timeout-minutes: 170')
     smoke = smoke.replace('          rm -f smoke/prelaunch-ready.txt\n', '')
     smoke = smoke.replace('test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh',
                           'bash scripts/smoke_boot.sh')

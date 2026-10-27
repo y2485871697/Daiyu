@@ -16,6 +16,10 @@ class ManagedInputContractTest(unittest.TestCase):
         for row in inventory:
             text = (ROOT / row['path']).read_text()
             with self.subTest(path=row['path']):
+                if row['path'].endswith('/assistants/AssistantPickerDialogs.kt'):
+                    self.assertRegex(text, r'\bAssistantSearchField\s*\(\s*searchQuery\s*,\s*\{\s*searchQuery\s*=\s*it\s*\}')
+                    text = (MAIN / 'ui/screens/assistants/AssistantSearchField.kt').read_text()
+                    self.assertRegex(text, r'\bBasicTextField\s*\(')
                 self.assertGreaterEqual(text.count('.managedInput()'), row['calls'])
                 self.assertGreaterEqual(text.count('imeCursorBrush(') + text.count('materialImeCursorColor('), row['calls'])
 

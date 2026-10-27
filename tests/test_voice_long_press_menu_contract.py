@@ -39,7 +39,8 @@ class VoiceLongPressMenuContractTest(unittest.TestCase):
     def test_menu_state_is_revoked_by_availability_disabled_or_editor_changes(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()
         self.assertIn('var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes)', composer)
-        self.assertIn('val voiceMenuEnabled = state.enabled && state.voiceModes.isNotEmpty()', composer)
+        self.assertIn('val toolbarEnabled = state.enabled && !editing', composer)
+        self.assertIn('val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()', composer)
         self.assertIn('ChatVoiceModeMenu(voiceModes && voiceMenuEnabled,', composer)
 
     def test_only_long_press_can_open_the_mode_picker(self):
@@ -63,8 +64,8 @@ class VoiceLongPressMenuContractTest(unittest.TestCase):
 
     def test_selection_stays_open_without_audio_and_uses_model_picker_background(self):
         sheet = voice_sheet()
-        self.assertIn('if (colors.dark) colors.bubble else Color(0xFFEFEDFB)', sheet)
-        self.assertIn('if (colors.dark) colors.bubble else Color(0xFFEFEDFB)', (CHAT / 'ChatModelPicker.kt').read_text())
+        self.assertIn('val selectionBackground = colors.selectionContainer', sheet)
+        self.assertIn('val selectedBackground = colors.selectionContainer', (CHAT / 'ChatModelPicker.kt').read_text())
         self.assertIn('.background(if (isSelected) selectionBackground else Color.Transparent)', sheet)
         self.assertIn('.semantics { this.selected = isSelected }', sheet)
         self.assertIn('role = Role.RadioButton) { onAction(entry.action) }', sheet)

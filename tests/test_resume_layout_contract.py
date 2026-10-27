@@ -21,7 +21,7 @@ class ResumeLayoutContractTest(unittest.TestCase):
             self.assertNotIn(workaround, row)
 
     def test_all_audited_temporary_actions_keep_their_existing_chevron_slot(self):
-        expected = {'ui/screens/settings/BackupScreen.kt': 2, 'ui/screens/settings/CompressionSettingsForm.kt': 1, 'ui/screens/settings/LinuxSettingsScreen.kt': 2, 'ui/screens/settings/PetSettingsScreen.kt': 1, 'ui/screens/settings/BrowserSettingsScreen.kt': 1, 'ui/screens/settings/IndependentModelScreen.kt': 1, 'ui/screens/settings/OfflineSpeechSettingsScreen.kt': 1, 'ui/screens/settings/ModelSettingsScreen.kt': 1, 'ui/screens/settings/GuiSettingsPanel.kt': 4, 'ui/screens/settings/McpSettingsScreen.kt': 2, 'ui/screens/settings/SettingsHomeScreen.kt': 1, 'ui/screens/settings/SettingsDiagnosticsHost.kt': 2, 'ui/screens/settings/RequestBodyFieldsEditor.kt': 1, 'ui/screens/settings/ProviderDirectoryPage.kt': 4, 'title/TitleModelSettingsPanel.kt': 1, 'VoiceAccountPanel.kt': 14, 'VoiceSettingsPanel.kt': 14, 'VoiceSettingsPreview.kt': 1}
+        expected = {'ui/screens/settings/BackupScreen.kt': 2, 'ui/screens/settings/CompressionSettingsForm.kt': 1, 'ui/screens/settings/LinuxSettingsScreen.kt': 2, 'ui/screens/settings/PetSettingsScreen.kt': 1, 'ui/screens/settings/BrowserSettingsScreen.kt': 1, 'ui/screens/settings/IndependentModelScreen.kt': 1, 'ui/screens/settings/OfflineSpeechSettingsScreen.kt': 1, 'ui/screens/settings/ModelSettingsScreen.kt': 1, 'ui/screens/settings/GuiSettingsPanel.kt': 4, 'ui/screens/settings/McpSettingsScreen.kt': 2, 'ui/screens/settings/SettingsHomeScreen.kt': 1, 'ui/screens/settings/SettingsDiagnosticsHost.kt': 2, 'ui/screens/settings/RequestBodyFieldsEditor.kt': 1, 'ui/screens/settings/ProviderDirectoryPage.kt': 4, 'title/TitleModelSettingsPanel.kt': 1, 'VoiceAccountPanel.kt': 13, 'VoiceSettingsPanel.kt': 14, 'VoiceSettingsPreview.kt': 1}
         for path, count in expected.items():
             with self.subTest(path=path):
                 text = (SRC / path).read_text()
@@ -44,8 +44,9 @@ class ResumeLayoutContractTest(unittest.TestCase):
         self.assertIn("resumed = false; permit.revoke()", route)
         self.assertIn("permit = ProviderPagePermit(); resumed = true", route)
         page = (SRC / "ui/screens/settings/ProviderDirectoryPage.kt").read_text()
-        for action in ("onAddOpenAi", "onAddAnthropic", "onAddSpeech", "onApiKey"):
-            self.assertIn(f"showChevron = true, onClick = if (enabled) {action} else null", page)
+        for action in ("onAddOpenAi", "onAddAnthropic", "onAddSpeech"):
+            self.assertIn(f"showChevron = true, onClick = if (enabled && selectedSlots == null) {action} else null", page)
+        self.assertIn("showChevron = true, onClick = if (enabled) onApiKey else null", page)
 
     def test_permanent_read_only_rows_do_not_gain_navigation_arrows(self):
         home = (SRC / "ui/screens/settings/SettingsHomeScreen.kt").read_text()

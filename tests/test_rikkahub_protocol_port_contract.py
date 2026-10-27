@@ -53,7 +53,7 @@ class RikkaHubProtocolPortContractTest(unittest.TestCase):
         for name in ('reasoning_content', 'reasoning_details', 'ReasoningDelta', 'ReasoningFinal', 'thoughtSignature'):
             self.assertIn(name, stream)
         self.assertNotIn('call.arguments.toString().ifEmpty', stream)
-        self.assertIn('if (!done) throw ModelRequestException(ModelFailure.INCOMPLETE)', stream)
+        self.assertIn('if (!done) throw ModelRequestException(ModelFailure.INCOMPLETE, transportInterrupted = true)', stream)
 
     def test_responses_confirm_tools_only_after_successful_terminal(self):
         stream = (S/'model/ResponsesStream.kt').read_text()

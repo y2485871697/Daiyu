@@ -53,7 +53,7 @@ class ModelNameAlignmentContract(unittest.TestCase):
         models = source('ui/screens/settings/ModelSettingsScreen.kt')
         self.assertIn('title = entry.displayName,\n                            textModifier = Modifier.modelNameOpticalAlignment()', models)
         providers = source('ui/screens/settings/ProviderDirectoryPage.kt')
-        self.assertIn('SettingsRow(registration.name, tag = "provider-open-${registration.slotId}",\n                    textModifier = Modifier.modelNameOpticalAlignment()', providers)
+        self.assertIn('SettingsRow(registration.name,tag="provider-open-${registration.slotId}",textModifier=Modifier.modelNameOpticalAlignment()', ''.join(providers.split()))
         self.assertEqual(1, providers.count('modelNameOpticalAlignment()'))
 
     def test_all_direct_brand_icon_presentations_use_shared_alignment(self):

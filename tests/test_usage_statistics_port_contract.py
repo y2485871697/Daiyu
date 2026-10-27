@@ -36,7 +36,7 @@ class UsageStatisticsPortContractTest(unittest.TestCase):
         fields=read('storage/UsageStatisticsStore.kt')
         for field in ('input','output','cached','creation'): self.assertIn('next.'+field+' ?: '+field,fields)
         self.assertIn('val current = start()',source)
-        self.assertIn('val current = checkNotNull(request)',source)
+        self.assertIn('val current = if ((transport as? RequestRetryModelSession)?.retriesCurrentRequest == true) start()\n                else checkNotNull(request) { "尚无可恢复的用量请求" }',source)
         self.assertIn('observe(event)\n            persist()\n            try { sink(event) } finally { persist() }',source)
         self.assertIn('batch.events.forEach(::observe)\n            persist()',source)
         self.assertIn('nextAcknowledged(outputs, { current.deliver(it, localSink) }',source)

@@ -95,9 +95,9 @@ class ImeFrameContractTest(unittest.TestCase):
 
     def test_voice_completes_show_hide_before_navigation_back(self):
         text = (TEST / 'VoiceSettingsStructureActivityTest.kt').read_text()
-        body = text.split('fun testDoubaoSubpagesDoNotStartNetworkAndBackPreservesWizard()', 1)[1]
+        body = text.split('fun testDoubaoSubpagesDoNotStartNetworkAndBackPreservesWizard()', 1)[1].split('\n    fun ', 1)[0]
         show = body.index('awaitImeFrame(node("settings-field:声音名称"), visible = true)')
-        navigate = body.index('reveal("settings-row:查找我的音色名额"')
+        navigate = body.index('reveal("settings-row:选择音色名额"')
         self.assertLess(show, navigate)
         self.assertEqual(5, body.count('awaitImeFrame(node("settings-field:AK"), visible = false)'))
         self.assertEqual(2, body.count('sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)'))

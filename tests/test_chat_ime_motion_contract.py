@@ -38,7 +38,7 @@ class ChatImeMotionContractTest(unittest.TestCase):
 
     def test_editing_motion_excludes_ime_and_preserves_composer_blank_region(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()
-        self.assertIn('Column(modifier.managedInput()', composer)
+        self.assertRegex(composer, r'Column\s*\(\s*modifier\b[^{}]*\.managedInput\s*\(\s*\)')
         self.assertIn('Column(Modifier.fillMaxWidth().animateContentSize(', composer)
         editor = composer.split('Column(Modifier.fillMaxWidth().animateContentSize(', 1)[1]
         self.assertLess(editor.index('ComposerReferenceChips('), editor.index('BasicTextField('))

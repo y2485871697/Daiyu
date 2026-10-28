@@ -216,7 +216,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
             store.select("other")
             // capture must reject a profile changed while its memory snapshot is being read.
             store.save(AssistantProfile("default","after","personality after",memoryEnabled=false,enabledSkillIds=listOf("after")))
-            main { assertFalse(f.controller.bindConversationAssistant(existing.id,"default","other")) }
+            main { assertTrue(f.controller.bindConversationAssistant(existing.id,"default","other")) }
             assertEquals("composer must survive until accepted",f.database.draft())
         } finally { release.countDown(); worker.join(10000) }
         assertFalse(worker.isAlive); failure.get()?.let { throw it }
@@ -224,14 +224,14 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         assertTrue(f.controller.problem!!.contains("助手配置或记忆读取失败"))
         assertEquals("composer must survive until accepted",f.database.draft())
         assertEquals(listOf(existing.id),f.database.conversations().map { it.id })
-        assertEquals("default",f.database.assistantId(existing.id))
+        assertEquals("other",f.database.assistantId(existing.id))
         assertTrue(f.database.messages(existing.id).isEmpty())
         assertEquals(0,factories.get()); assertEquals(0,opened.get())
         assertEquals(1,f.memory.reads.get())
         assertEquals("other",store.selectedId.value)
     }
 
-    fun testCompletedCaptureFreezesGlobalProfileAndMemoryAndBlocksBindingRepair() {
+    fun testCompletedCaptureFreezesGlobalProfileAndMemoryAndAllowsUnrelatedBindingRepair() {
         val entered=CountDownLatch(1); val release=CountDownLatch(1)
         val captured=AtomicReference<AssistantRunContext?>()
         val f=fresh(factory={ _, assistant ->
@@ -254,7 +254,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
             store.select("other")
             store.save(AssistantProfile("default","after","personality after",memoryEnabled=false,enabledSkillIds=listOf("after")))
             f.memory.load = { "memory after" }
-            main { assertFalse(f.controller.bindConversationAssistant(existing.id,"default","other")) }
+            main { assertTrue(f.controller.bindConversationAssistant(existing.id,"default","other")) }
             assertEquals("composer must survive until accepted",f.database.draft())
         } finally { release.countDown(); worker.join(10000) }
         assertFalse(worker.isAlive); failure.get()?.let { throw it }
@@ -271,7 +271,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         catch (_:AssistantMemoryUnavailable) {}
         assertEquals(1,f.memory.reads.get())
         assertEquals("other",store.selectedId.value)
-        assertEquals("default",f.database.assistantId(existing.id))
+        assertEquals("other",f.database.assistantId(existing.id))
         assertTrue(f.database.messages(existing.id).isEmpty())
         assertEquals(RunStatus.COMPLETED,f.database.messages(conversation.id).last().second.status)
         assertEquals("",f.database.draft())

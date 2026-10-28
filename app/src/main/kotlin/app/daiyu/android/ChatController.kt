@@ -363,7 +363,7 @@ class ChatController internal constructor(private val application:Application,
     private var closed=false
     // The existing preparation lane is retained until the worker (and device cleanup) exits.
     // Identity, not a Boolean reset, prevents an old completion from clearing a newer owner.
-    private class Preparation(val assistantId: String?, var textTicket: TextSendTicket? = null) {
+    private class Preparation(val assistantId: String?, val conversationOwner: ConversationId?, var textTicket: TextSendTicket? = null) {
         var providerConfiguration: ProviderRunConfiguration? = null
         var summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null
         var summaryTransferred = false
@@ -447,7 +447,7 @@ class ChatController internal constructor(private val application:Application,
                                 }
                             }
                         }
-                        val token = reservePreparation()
+                        val token = reservePreparation(visit.owner.conversationId)
                         visit.token = token
                         object : ContextManagementLease {
                             override val owner = visit.owner
@@ -541,7 +541,7 @@ class ChatController internal constructor(private val application:Application,
             return accepted
         }
         if (!idleAvailable() || hasLiveChildTasks(owner.conversationId)) return false
-        val token = reservePreparation()
+        val token = reservePreparation(owner.conversationId)
         var compressionStarted = false
         val lease = object : ContextManagementLease {
             override val owner = owner
@@ -622,8 +622,8 @@ class ChatController internal constructor(private val application:Application,
     }
     private val preparing: Boolean get() = preparation != null
     // Call only after the idle gate; selection is already initialized in memory.
-    private fun reservePreparation(textTicket: TextSendTicket? = null): Preparation =
-        Preparation(assistantStore.selectedId.value, textTicket).also {
+    private fun reservePreparation(conversation: ConversationId?, textTicket: TextSendTicket? = null): Preparation =
+        Preparation(assistantStore.selectedId.value, conversation, textTicket).also {
         check(preparation == null)
         it.videoRouteEpoch = videoRouteEpoch.get()
         preparation = it
@@ -645,17 +645,14 @@ class ChatController internal constructor(private val application:Application,
             synchronized(this) { virtualDisplayEntry?.submitted == false || guiEntry?.submitted == false })) finishPreparation(token)
     }
     internal fun bindConversationAssistant(owner: ConversationId, expected: String?, replacement: String): Boolean {
-        val token = synchronized(this) {
-            if(!idleAvailable() || hasLiveChildTasks(owner)) return false
-            reservePreparation()
-        }
+        val operation = synchronized(this) { reserveConversationConfiguration(owner) } ?: return false
         return try {
-            database.bindAssistant(owner, expected, replacement).also { changed ->
-                problem=if(changed) null else "会话或助手绑定已变化；请重新打开选择器"
-                notifyChanged()
-            }
-        } catch (_:Exception) {problem="助手绑定失败；原绑定和草稿保留";notifyChanged();false}
-        finally {finishPreparation(token)}
+            database.bindAssistant(owner, expected, replacement)
+        } catch (_: Exception) { false }
+        finally { synchronized(this) {
+            conversationConfigurations.release(operation)
+            if (closed) closeStorageWhenIdle() else notifyChanged()
+        } }
     }
     private val conversationWorkspaces by lazy {
         app.daiyu.android.workspace.ConversationWorkspaceAccess(application) {
@@ -687,7 +684,7 @@ class ChatController internal constructor(private val application:Application,
     ): Boolean {
         val token = synchronized(this) {
             if (!idleAvailable() || hasLiveChildTasks()) return false
-            reservePreparation()
+            reservePreparation(owner)
         }
         return try {
             val workspaces = change(app.daiyu.android.workspace.ConversationWorkspaceCodec.decodeWorkspaces(expected))
@@ -795,7 +792,7 @@ class ChatController internal constructor(private val application:Application,
             conversation?.id?.value != request.conversation) return false
         val token = synchronized(this) {
             if (!idleAvailable() || pendingVideoState != null) return false
-            reservePreparation().also {
+            reservePreparation(conversation?.id).also {
                 it.videoRequired = true; it.videoEditor = editor
                 pendingVideoState = VideoSendState(request, editor)
             }
@@ -887,7 +884,7 @@ class ChatController internal constructor(private val application:Application,
             if (!idleAvailable() ||
                 (conversation != null && conversation.id.value in generationConversationPublicationSeals) ||
                 editor.text.isBlank() || editor.attachmentIds.isNotEmpty()) return null
-            reservePreparation().also { generationPreparation = it }
+            reservePreparation(conversation?.id).also { generationPreparation = it }
         }
         return try {
             val snapshot = GenerationSettingsStore(application).loadSnapshot()
@@ -1613,11 +1610,14 @@ class ChatController internal constructor(private val application:Application,
     }
     private var resources:RunResources?=null
     // Tools can exist before database acceptance. An UNKNOWN close must pin those too.
-    private val unacceptedTools=mutableMapOf<RunCatalogTools,ControllerShizukuCleanup>()
-    private fun closeUnacceptedTools(tools:RunCatalogTools) {
+    private class UnacceptedToolCleanup(val source: ConversationId?, val conversation: ConversationId) {
+        val observation = ControllerShizukuCleanup()
+    }
+    private val unacceptedTools=mutableMapOf<RunCatalogTools,UnacceptedToolCleanup>()
+    private fun closeUnacceptedTools(tools:RunCatalogTools, source: ConversationId?, conversation: ConversationId) {
         val observation=synchronized(this) {
             if(unacceptedTools.containsKey(tools)) return
-            ControllerShizukuCleanup().also {unacceptedTools[tools]=it}
+            UnacceptedToolCleanup(source, conversation).also {unacceptedTools[tools]=it}.observation
         }
         tools.closeWithResult { result -> handler.post {synchronized(this) {
             observation.observe(result)
@@ -1887,7 +1887,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val token = synchronized(this) {
             if (!idleAvailable()) return ChildTaskCommandReceipt.Rejected("child_host_busy")
-            reservePreparation()
+            reservePreparation(ConversationId(command.source.owner.conversationId))
         }
         try {
             val conversation = ConversationId(command.source.owner.conversationId)
@@ -1951,7 +1951,7 @@ class ChatController internal constructor(private val application:Application,
         if(rejectSynchronousMainSend()) return null
         val token = synchronized(this) {
             if (!idleAvailable() || text.isBlank()) return null
-            reservePreparation()
+            reservePreparation(conversation.id)
         }
         return try {
             sendPrepared(token, conversation, text, withChildren=true)
@@ -1993,16 +1993,66 @@ class ChatController internal constructor(private val application:Application,
             CloudContextUsageStore.read(it, conversation, model)
         }
     }
-    private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && catalogDeletionReaders == 0 && active==null &&
+    private fun idleAvailable() = !closed && ready && !conversationConfigurations.occupied && !preparing && !dataBusy && catalogDeletionReaders == 0 && active==null &&
         resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && pendingPlatformAction==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     @Synchronized internal fun taskConfigurationBusy(): Boolean = preparing || active != null ||
         resources != null || generationEntry != null || virtualDisplayEntry != null || guiEntry != null ||
         generationReaders > 0 || pendingShizuku != null || pendingPlatformAction != null ||
-        unacceptedTools.isNotEmpty() || hasLiveChildTasks()
+        unacceptedTools.isNotEmpty() || hasLiveChildTasks() || conversationConfigurations.occupied
+
+    private val conversationConfigurations = ConversationConfigurationGate()
+    private fun configurationTaskOwners(): Set<String?> = buildSet {
+        preparation?.let { add(it.conversationOwner?.value) }
+        active?.let { add(it.conversationId.value) }
+        resources?.let { add(it.initial.conversationId.value) }
+        generationEntry?.let { add(it.conversation?.id?.value); add(it.identity.conversationId.value) }
+        guiEntry?.let { add(it.conversation?.id?.value); add(it.conversationId.value) }
+        virtualDisplayEntry?.let { add(it.conversation?.id?.value); add(it.conversationId.value) }
+        pendingShizuku?.let { add(it.conversation?.id?.value); add(it.conversationId.value) }
+        pendingPlatformAction?.let { add(it.conversation?.id?.value); add(it.conversationId.value) }
+        unacceptedTools.values.forEach { add(it.source?.value); add(it.conversation.value) }
+        backgroundRuns.values.forEach { tasks -> tasks.snapshots().filterNot { it.settled }.forEach {
+            add(it.record.owner.conversationId)
+        } }
+        browserChildren.filterNot { it.drained }.forEach { add(it.scope.owner.conversationId) }
+    }
+    @Synchronized internal fun taskConfigurationBusy(conversation: ConversationId?): Boolean =
+        closed || !ready || recoveryFailed || dataBusy || catalogDeletionReaders != 0 ||
+            problem?.startsWith("会话恢复失败") == true ||
+            conversationConfigurations.blocks(conversation?.value, configurationTaskOwners())
+
+    private fun reserveConversationConfiguration(conversation: ConversationId?): ConversationConfigurationGate.Operation? {
+        if (taskConfigurationBusy(conversation)) return null
+        return conversationConfigurations.reserve(conversation?.value, configurationTaskOwners())
+    }
+    private fun conversationConfigurationTask(conversation: ConversationId?, failureNotice: String,
+        completed: (Boolean) -> Unit, work: () -> Unit) {
+        val operation = synchronized(this) {
+            checkNotNull(reserveConversationConfiguration(conversation)) { "请先结束任务" }
+        }
+        try { executor.execute {
+            val success = try {
+                synchronized(this) { check(!closed && conversationConfigurations.current(operation)) }
+                work()
+                true
+            } catch (_: Exception) { false }
+            handler.post {
+                val publish = synchronized(this) {
+                    conversationConfigurations.release(operation)
+                    if (closed) { closeStorageWhenIdle(); false }
+                    else { if (!success) dataNotice = failureNotice; notifyChanged(); true }
+                }
+                if (publish) completed(success)
+            }
+        } } catch (failure: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { conversationConfigurations.release(operation); if (closed) closeStorageWhenIdle() }
+            throw failure
+        }
+    }
 
     @Synchronized internal fun setChatReasoning(owner: String?, effort: ReasoningEffort): Boolean {
-        if (!idleAvailable() || hasLiveChildTasks()) return false
+        if (taskConfigurationBusy(owner?.let(::ConversationId))) return false
         reasoningPreference.set(owner, effort)
         return true
     }
@@ -2231,7 +2281,7 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             if(isMainContextCompressing(conversation?.id) || !idleAvailable() || text.isBlank()) return null
             // Legacy synchronous API; UI hosts should use sendText instead.
-            reservePreparation()
+            reservePreparation(conversation?.id)
         }
         return try {sendPrepared(token,conversation,text)} finally {finishPreparation(token)}
     }
@@ -2254,7 +2304,7 @@ class ChatController internal constructor(private val application:Application,
         val owner = TextSendOwner(conversation?.id, editorGeneration, draftRevision)
         val token = synchronized(this) {
             if(isMainContextCompressing(conversation?.id) || pendingTextState != null || !idleAvailable() || text.isBlank() || editorGeneration < 0 || draftRevision < 0) return false
-            reservePreparation(ticket).also {
+            reservePreparation(conversation?.id, ticket).also {
                 pendingTextState = TextSendState(ticket, owner, text)
                 it.videoEditor = ControllerVideoEditor(conversation?.id?.value, editorGeneration, draftRevision, text, true)
             }
@@ -2305,7 +2355,7 @@ class ChatController internal constructor(private val application:Application,
         val timeout=ControllerShizukuPreparation.parseTimeout(timeoutInput) ?: return null
         val preview=runCatching {ControllerShizukuPreparation(conversation,text,uid,command,timeout)}.getOrNull()
             ?: return null
-        pendingShizukuToken=reservePreparation();pendingShizuku=preview;notifyChanged()
+        pendingShizukuToken=reservePreparation(conversation?.id);pendingShizuku=preview;notifyChanged()
         return preview
     }
     internal fun rejectShizuku(preview:ControllerShizukuPreparation) {
@@ -2383,7 +2433,7 @@ class ChatController internal constructor(private val application:Application,
                     android.content.Intent(action).resolveActivity(application.packageManager)?.packageName
                 })
         }.getOrNull() ?: return null
-        pendingPlatformToken = reservePreparation()
+        pendingPlatformToken = reservePreparation(conversation?.id)
         pendingPlatformAction = preview
         notifyChanged()
         return preview
@@ -2598,7 +2648,7 @@ class ChatController internal constructor(private val application:Application,
             synchronized(this) { !closed && guiEntry === entry && !entry.revoked }
         }
         guiEntry = entry
-        reservePreparation()
+        reservePreparation(conversation?.id)
         notifyChanged()
         return entry
     }
@@ -2706,7 +2756,7 @@ class ChatController internal constructor(private val application:Application,
                     targets.firstOrNull(), backgroundSupported = !containsSelf, unsupportedPlan = containsSelf) {
                     synchronized(this) { !closed && virtualDisplayEntry === entry && !entry.revoked }
                 }
-                virtualDisplayEntry = entry; reservePreparation(); notifyChanged()
+                virtualDisplayEntry = entry; reservePreparation(conversation?.id); notifyChanged()
             }
     }
 
@@ -3006,7 +3056,7 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             if (!idleAvailable() || pendingTextState != null || draft.text.isBlank() ||
                 draft.owner.conversationId != conversation?.id || retainedTerminalJobs.size >= 64) return null
-            reservePreparation()
+            reservePreparation(conversation?.id)
         }
         try {
             require(mode in setOf("async", "daemon"))
@@ -3113,7 +3163,7 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             if (!idleAvailable() || pendingTextState != null || draft.text.isBlank() ||
                 draft.owner.conversationId != conversation?.id) return null
-            reservePreparation()
+            reservePreparation(conversation?.id)
         }
         var launch: TerminalPtyLaunch? = null
         var pending: ControllerTerminalPreparation? = null
@@ -3225,7 +3275,7 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             if (!idleAvailable() || text.isBlank() || editor.conversationId != conversation?.id ||
                 editor.editorGeneration < 0 || editor.draftRevision < 0) return null
-            reservePreparation()
+            reservePreparation(conversation?.id)
         }
         var pending: ControllerMcpPreparation? = null
         try {
@@ -3304,7 +3354,7 @@ class ChatController internal constructor(private val application:Application,
         check(Looper.myLooper() != Looper.getMainLooper()) { "browser_prepare_requires_worker" }
         val token = synchronized(this) {
             if (!idleAvailable() || draft.text.isBlank() || draft.owner.conversationId != conversation?.id) return null
-            reservePreparation()
+            reservePreparation(conversation?.id)
         }
         try {
             val id = if (conversation == null) token.assistantId else database.assistantId(conversation.id)
@@ -3433,7 +3483,7 @@ class ChatController internal constructor(private val application:Application,
         val (token, handle)=synchronized(this) {
             if(!idleAvailable() || draftRevision<0 || snapshot.none {it is ImageSendPart.Image} ||
                 conversation!=null && conversation.id.value!=owner.conversationId) return null
-            val token=reservePreparation().also { it.providerConfiguration = configuration }
+            val token=reservePreparation(conversation?.id).also { it.providerConfiguration = configuration }
             val handle=ImageSendHandle(owner,draftRevision) { token.cancellation.cancel() }
             pendingImage=handle
             token to handle
@@ -4093,7 +4143,7 @@ class ChatController internal constructor(private val application:Application,
             owned to tools
         } catch (_: Exception) {
             auxiliaryPort?.close()
-            if(preparingTools!=null) closeUnacceptedTools(preparingTools)
+            if(preparingTools!=null) closeUnacceptedTools(preparingTools, conversation?.id, conversationId)
             else {
                 preparingDevices?.close()
                 preparingChildren?.close()
@@ -4103,7 +4153,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val (owned, tools) = prepared
         if (childPreparation != null && !runCatching { childPreparation.isCurrent() }.getOrDefault(false)) {
-            auxiliaryPort?.close(); closeUnacceptedTools(tools)
+            auxiliaryPort?.close(); closeUnacceptedTools(tools, conversation?.id, conversationId)
             problem="子代理配置或提供商已变化；草稿保留，请重新发送";notifyChanged();return null
         }
         if (!runCatching {
@@ -4111,19 +4161,19 @@ class ChatController internal constructor(private val application:Application,
             binding != null && binding.providerSlotId == frozenProvider.editor.slotId &&
                 binding.localModelIdentity == frozenProvider.localModelIdentity && providers.isCurrentConversation(binding, frozenProvider)
         }.getOrDefault(false)) {
-            auxiliaryPort?.close(); closeUnacceptedTools(tools)
+            auxiliaryPort?.close(); closeUnacceptedTools(tools, conversation?.id, conversationId)
             problem="提供商选择或配置已变化；草稿保留，请重新发送";notifyChanged();return null
         }
         // Only the in-memory admission gate is under the controller monitor. In particular,
         // beginCommit must never encompass SQLite or provider/model I/O.
         if (terminalPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
             (terminalPreparation.assistant to terminalPreparation.provider)) {
-            closeUnacceptedTools(tools)
+            closeUnacceptedTools(tools, conversation?.id, conversationId)
             return null
         }
         if (terminalJobPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
             (terminalJobPreparation.assistant to terminalJobPreparation.provider)) {
-            closeUnacceptedTools(tools)
+            closeUnacceptedTools(tools, conversation?.id, conversationId)
             return null
         }
         val mayCommit=synchronized(this) {
@@ -4132,7 +4182,7 @@ class ChatController internal constructor(private val application:Application,
                 mcpPreparation?.confirmed==false || browserPreparation?.isCancelled==true || (imageAttempt!=null && !imageAttempt.beginCommit())) false
             else { token.committing=true; true }
         }
-        if (!mayCommit) { auxiliaryPort?.close(); closeUnacceptedTools(tools); return null }
+        if (!mayCommit) { auxiliaryPort?.close(); closeUnacceptedTools(tools, conversation?.id, conversationId); return null }
         var databaseSendEntered=false
         val saved=try {
             checkNotNull(token.summaryPreparation).seal()
@@ -4195,7 +4245,7 @@ class ChatController internal constructor(private val application:Application,
             }
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
             auxiliaryPort?.close()
-            closeUnacceptedTools(tools)
+            closeUnacceptedTools(tools, conversation?.id, conversationId)
             problem=if(!token.persistenceUnconfirmed) "会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求"
                 else "发送保存结果未确认；保留原文和附件，不自动重发"
             notifyChanged();return null
@@ -4258,7 +4308,7 @@ class ChatController internal constructor(private val application:Application,
             pendingTitle.getAndSet(null)?.let(titleCoordinator::revoke)
             // close won AFTER acceptance: receipt still wins, but no provider request is opened.
             auxiliaryPort?.close()
-            closeUnacceptedTools(tools)
+            closeUnacceptedTools(tools, conversation?.id, conversationId)
             try {database.save(assistant.copy(status=RunStatus.INTERRUPTED))} catch (_:Exception) { }
         }
         return saved
@@ -4467,7 +4517,7 @@ class ChatController internal constructor(private val application:Application,
         browserChildren.removeAll { it.drained }
         if (browserChildren.isNotEmpty()) return // Child workers/UNKNOWN still own the DB and ledger.
         pruneBackgroundRuns()
-        if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || guiEntry!=null || generationReaders!=0 ||
+        if(conversationConfigurations.occupied || resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || guiEntry!=null || generationReaders!=0 ||
             catalogDeletionReaders!=0 || unacceptedTools.isNotEmpty() || messageActionReaders!=0 || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || timelineWriters!=0 || contextManagementReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
@@ -4576,7 +4626,7 @@ class ChatController internal constructor(private val application:Application,
                             if (action == MessageAction.SAVE_EDIT) editImages else emptyList())
                         val owner = database.conversations().single { it.id == target.conversationId }
                         val text = revision.user.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
-                        val token = synchronized(this) { if (closed) null else reservePreparation() }
+                        val token = synchronized(this) { if (closed) null else reservePreparation(owner.id) }
                         var saved: Conversation? = null
                         val outcome = if (token == null) RegenerationSendOutcome.NOT_SENT else try {
                             saved = try { sendPrepared(token, owner, text, actionRevision = revision) }
@@ -4764,11 +4814,10 @@ class ChatController internal constructor(private val application:Application,
         conversation: ConversationId? = preferences.getString("selected", null)?.let(::ConversationId),
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        synchronized(this) { check(idleAvailable() && !hasLiveChildTasks()) { "请先结束任务" } }
+        check(!taskConfigurationBusy(conversation)) { "请先结束任务" }
         val expectedBinding = database.modelBinding(conversation)
         check(expectedActive == null || expectedBinding?.providerSlotId == expectedActive.slotId) { "会话模型已变化，请重新打开选择器" }
-        invalidateVideoConfiguration()
-        dataTask(failureNotice = "会话模型切换未保存；请重新打开目录核对", completed = completed, work = {
+        conversationConfigurationTask(conversation, failureNotice = "会话模型切换未保存；请重新打开目录核对", completed = completed, work = {
             check(database.modelBinding(conversation) == expectedBinding) { "会话模型已变化" }
             if (expectedBinding != null && expectedSettings != null) check(conversationModelEditing(conversation).second.settings == expectedSettings) { "模型配置已变化" }
             switchChatReasoningModel(expectedBinding?.providerSlotId, expectedBinding?.localModelIdentity,
@@ -4777,7 +4826,6 @@ class ChatController internal constructor(private val application:Application,
                     check(database.bindModel(conversation, expectedBinding, binding)) { "会话模型已变化" }
                 }
             }
-            null
         })
     }
 

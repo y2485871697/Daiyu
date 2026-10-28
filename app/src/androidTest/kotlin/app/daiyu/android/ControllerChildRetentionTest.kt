@@ -240,6 +240,64 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         assertEquals(ChildTaskStatus.COMPLETED, f.controller.childTasks(f.conversation.id).single().status)
     }
 
+    fun testChildAndPhysicalCleanupOnlyProtectTheirOwnConversationConfiguration() {
+        val f = fresh(holdChildCleanup = true)
+        val viewing = f.database.create("default")
+        f.controller.assistantStore.save(app.daiyu.android.assistants.AssistantProfile("other", "Other", ""))
+        send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "parent ended") { f.controller.active == null }
+        val originalModel = f.database.modelBinding(f.conversation.id)
+        val registry = f.controller.providers.snapshot()
+        val globalSettings = f.settings.load()
+        fun verify() {
+            val effort = if (f.controller.reasoningPreference.snapshot(viewing.id.value) == ReasoningEffort.HIGH) ReasoningEffort.LOW else ReasoningEffort.HIGH
+            val cancels = f.childCancels.get()
+            main {
+                assertTrue(f.controller.taskConfigurationBusy(f.conversation.id))
+                assertFalse(f.controller.taskConfigurationBusy(viewing.id))
+                assertFalse(f.controller.bindConversationAssistant(f.conversation.id, "default", "other"))
+                assertFalse(f.controller.setChatReasoning(f.conversation.id.value, ReasoningEffort.MAX))
+                val expected = f.database.assistantId(viewing.id)
+                val replacement = if (expected == "default") "other" else "default"
+                assertTrue(f.controller.bindConversationAssistant(viewing.id, expected, replacement))
+                assertEquals(replacement, f.database.assistantId(viewing.id))
+                assertFalse(f.controller.dataBusy)
+            }
+            val (editor, editing) = f.controller.conversationModelEditing(viewing.id)
+            val global = f.controller.providers.withEditor(editor) { it.load() }
+            val ticket = checkNotNull(f.controller.providers.catalogSnapshot(editor).selectionFor("child-api"))
+            val done = CountDownLatch(1); val saved = AtomicReference<Boolean>()
+            main { f.controller.selectActiveProviderCatalogModel(editor, editing.settings, editor, global, ticket,
+                cancelled = { false }, completed = { saved.set(it); done.countDown() }, conversation = viewing.id) }
+            assertTrue("B model selection must finish before A child cleanup", done.await(5, TimeUnit.SECONDS))
+            assertEquals(true, saved.get())
+            assertEquals(ConversationModelBinding(editor.slotId, ticket.record.settings.localIdentity), f.database.modelBinding(viewing.id))
+            main {
+                assertTrue(f.controller.setChatReasoning(viewing.id.value, effort))
+                assertEquals(effort, f.controller.reasoningPreference.snapshot(viewing.id.value))
+                val (current, currentSettings) = f.controller.conversationModelEditing(f.conversation.id)
+                try {
+                    f.controller.selectActiveProviderCatalogModel(current, currentSettings.settings, editor, global, ticket,
+                        cancelled = { false }, completed = { fail("busy A model queued") }, conversation = f.conversation.id)
+                    fail("busy A model accepted")
+                } catch (failure: IllegalStateException) { assertEquals("请先结束任务", failure.message) }
+            }
+            assertEquals(originalModel, f.database.modelBinding(f.conversation.id))
+            assertEquals(registry, f.controller.providers.snapshot())
+            assertEquals(globalSettings, f.settings.load())
+            assertEquals("default", f.controller.assistantStore.selectedId.value)
+            assertEquals(cancels, f.childCancels.get())
+            assertTrue(f.controller.hasLiveChildTasks(f.conversation.id))
+            assertFalse(f.controller.dataBusy)
+        }
+        verify()
+        finishChildWithCleanupBlocked(f)
+        verify()
+        f.childCleanupRelease.countDown()
+        awaitChange(f, "physical cleanup drained") { !f.controller.hasLiveChildTasks(f.conversation.id) }
+        main { assertFalse(f.controller.taskConfigurationBusy(f.conversation.id)) }
+    }
+
     fun testControllerAppendUsesNewOwnerAndWaitsForOriginalWorkerAndCleanup() {
         val f = fresh(holdChildCleanup = true)
         send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))

@@ -31,7 +31,7 @@ class ModelSwitchFeedbackContractTest(unittest.TestCase):
         self.assertIn("if (picker.switching) return", method)
         pending = method.index("chatModelPicker = picker.copy(switching = true)")
         self.assertLess(pending, method.index("controller.selectActiveProviderCatalogModel("))
-        self.assertIn("controller.active == null && !controller.dataBusy", method)
+        self.assertIn("!controller.taskConfigurationBusy(conversation) && !controller.dataBusy", method)
         self.assertIn("chatModelOwner === owner && chatModelSession === session", method)
         self.assertIn("if (success) { dismissChatModels(); refresh() }", method)
 
@@ -57,9 +57,13 @@ class ModelSwitchFeedbackContractTest(unittest.TestCase):
         self.assertNotIn('"模型已切换"', text)
         for name in ("selectProviderCatalogModel", "selectActiveProviderCatalogModel", "selectConfiguredModel", "selectConfiguredCatalogModel"):
             method = text.split("internal fun " + name + "(", 1)[1].split("\n    internal fun ", 1)[0]
-            self.assertIn("dataTask(failureNotice", method)
+            if name == "selectActiveProviderCatalogModel":
+                self.assertIn("conversationConfigurationTask(conversation, failureNotice", method)
+                self.assertNotIn("dataTask(", method)
+            else:
+                self.assertIn("dataTask(failureNotice", method)
+                self.assertRegex(method, r"\n            null\n        \}\)")
             self.assertRegex(method, r"completed\s*=\s*completed")
-            self.assertRegex(method, r"\n            null\n        \}\)")
         self.assertIn('check(idleAvailable() && !hasLiveChildTasks())', text)
         self.assertIn("dataBusy=true;notifyChanged()", text)
         self.assertIn("try { completed(success) }", text)

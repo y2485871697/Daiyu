@@ -21,24 +21,27 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
     def test_model_rejection_precedes_switching_and_all_controller_side_effects(self):
         text = (SRC / 'MainActivity.kt').read_text()
         method = text.split('private fun selectChatModel(', 1)[1].split('private fun gatewayCurrent', 1)[0]
-        self.assertLess(method.index('if (!allowTaskConfigurationChange()) return'), method.index('picker.copy(switching = true)'))
-        self.assertLess(method.index('if (!allowTaskConfigurationChange()) return'), method.index('try {'))
+        self.assertLess(method.index('if (!allowTaskConfigurationChange(conversation)) return'), method.index('picker.copy(switching = true)'))
+        self.assertLess(method.index('if (!allowTaskConfigurationChange(conversation)) return'), method.index('try {'))
         refresh = text.split('private fun refresh()', 1)[1].split('controlOwner = controller.active', 1)[0]
         self.assertNotIn('controller.active == null', refresh)
         load = text.split('chatModelPicker = (session?.state', 1)[1].split('private fun selectChatModel(', 1)[0]
         self.assertNotIn('controller.active == null', load)
         controller = (SRC / 'ChatController.kt').read_text().split('internal fun selectActiveProviderCatalogModel', 1)[1].split('internal fun renameProviderCatalogModel', 1)[0]
-        self.assertLess(controller.index('check(idleAvailable() && !hasLiveChildTasks())'), controller.index('invalidateVideoConfiguration()'))
+        self.assertLess(controller.index('check(!taskConfigurationBusy(conversation))'), controller.index('conversationConfigurationTask(conversation,'))
+        pure = controller.split('internal fun saveConversationGptSpeed', 1)[0]
+        self.assertNotIn('invalidateVideoConfiguration()', pure)
+        self.assertNotIn('dataTask(', pure)
         self.assertIn('{ "请先结束任务" }', controller)
 
-    def test_reasoning_is_saved_only_under_controller_idle_gate(self):
+    def test_reasoning_is_saved_only_under_its_conversation_gate(self):
         text = (SRC / 'MainActivity.kt').read_text()
         body = text.split('onEffortChange = { effort ->', 1)[1].split('controller.observe(listener)', 1)[0]
-        self.assertIn('allowTaskConfigurationChange()', body)
+        self.assertIn('allowTaskConfigurationChange(thinkingOwner?.let(::ConversationId))', body)
         self.assertIn('controller.setChatReasoning(thinkingOwner, effort)', body)
         self.assertNotIn('reasoningPreference.set(', body)
         controller = (SRC / 'ChatController.kt').read_text().split('@Synchronized internal fun setChatReasoning', 1)[1].split('@Synchronized internal fun deleteAssistant', 1)[0]
-        self.assertLess(controller.index('if (!idleAvailable() || hasLiveChildTasks()) return false'), controller.index('reasoningPreference.set'))
+        self.assertLess(controller.index('if (taskConfigurationBusy(owner?.let(::ConversationId))) return false'), controller.index('reasoningPreference.set'))
         picker = (SRC / 'ui/components/subagent/ConversationThinkingPicker.kt').read_text().split('    ConversationAgentTypography {', 1)[1].split('/** .depth-slider', 1)[0]
         self.assertIn('ConversationDepthSlider(selected,', picker)
         self.assertNotIn('selected = index', picker)
@@ -46,13 +49,15 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
 
     def test_assistant_rejection_keeps_picker_and_management_state(self):
         text = (SRC / 'ui/screens/assistants/AssistantPickerDialogs.kt').read_text()
-        self.assertIn('if (canInteract()) { onSelect(profile.id); onDismiss() }', text)
+        self.assertIn('if (canSelect()) { onSelect(profile.id); onDismiss() }', text)
+        self.assertIn('canSelect = canSelect', text)
         self.assertIn('if (canInteract()) actionProfileId = profile.id', text)
         self.assertIn('if (canInteract()) { deleteProfile = null; onDelete(profile.id) }', text)
         self.assertIn('if (canInteract()) onEdit(profile.id)', text)
         self.assertIn('canInteract = canInteract', text)
         host = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('canInteract = { assistantOwnerMatches(owner) && allowTaskConfigurationChange() }', host)
+        self.assertIn('canSelect = { assistantOwnerMatches(owner) && allowAssistantSelection(owner) }', host)
         self.assertIn('controller.deleteAssistant(id)', host)
         self.assertIn('if (sidebarVisible) selectCurrentConversationAssistant(id, renderedAssistantConversation, renderedAssistantGeneration)', host)
         gate = host.split('private fun allowTaskConfigurationChange()', 1)[1].split('private var assistantPicker', 1)[0]
@@ -67,6 +72,31 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         self.assertLess(store.index("m.status='RUNNING'"), store.index('db.delete("assistants"'))
         self.assertIn('throw AssistantInUseException()', store)
         self.assertIn('if (failure is AssistantInUseException) "请先结束任务"', (SRC / 'ChatController.kt').read_text())
+
+    def test_scoped_gate_collects_real_retained_owners_and_freezes_every_preparation(self):
+        text = (SRC / 'ChatController.kt').read_text()
+        owners = text.split('private fun configurationTaskOwners()', 1)[1].split('@Synchronized internal fun taskConfigurationBusy(conversation:', 1)[0]
+        for required in ('it.conversationOwner?.value', 'it.initial.conversationId.value', 'it.identity.conversationId.value',
+                         'it.source?.value', 'it.conversation.value', 'filterNot { it.settled }',
+                         'browserChildren.filterNot { it.drained }'):
+            self.assertIn(required, owners)
+        self.assertNotIn('reservePreparation()', text)
+        self.assertIn('reservePreparation(conversation?.id, ticket)', text)
+        self.assertIn('reservePreparation(owner.id)', text)
+        self.assertIn('UnacceptedToolCleanup(source, conversation)', text)
+
+    def test_conversation_binding_operation_does_not_replace_running_resources_or_diagnostics(self):
+        text = (SRC / 'ChatController.kt').read_text()
+        operation = text.split('private fun conversationConfigurationTask(', 1)[1].split('@Synchronized internal fun setChatReasoning', 1)[0]
+        for forbidden in ('dataBusy=true', 'dataBusy = true', 'problem=', 'problem =', 'invalidateVideoConfiguration(', 'reservePreparation('):
+            self.assertNotIn(forbidden, operation)
+        self.assertIn('conversationConfigurations.current(operation)', operation)
+        self.assertIn('conversationConfigurations.release(operation)', operation)
+        assistant = text.split('internal fun bindConversationAssistant(', 1)[1].split('private val conversationWorkspaces', 1)[0]
+        self.assertNotIn('problem=', assistant)
+        self.assertNotIn('reservePreparation(', assistant)
+        self.assertIn('database.bindAssistant(owner, expected, replacement)', assistant)
+        self.assertIn('if(conversationConfigurations.occupied || resources!=null', text)
 
     def test_actual_sql_query_distinguishes_running_other_conversation_from_idle_binding(self):
         source = (SRC / 'assistants/SqliteAssistantStore.kt').read_text()

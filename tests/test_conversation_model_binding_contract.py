@@ -60,7 +60,7 @@ class ConversationModelBindingContractTest(unittest.TestCase):
     def test_assistant_selection_and_new_creation_follow_the_current_conversation(self):
         host = text("MainActivity.kt")
         helper = host.split("private fun selectCurrentConversationAssistant",1)[1].split("private fun assistantOwnerMatches",1)[0]
-        self.assertIn("if (!allowTaskConfigurationChange()) return", helper)
+        self.assertIn("if (!allowTaskConfigurationChange(conversation)) return", helper)
         self.assertIn("controller.bindConversationAssistant(current.id, expected, id)", helper)
         self.assertIn("selected = current.copy(assistantId = id)", helper)
         create = host.split("internal fun createNewConversation()",1)[1].split("internal fun select(",1)[0]

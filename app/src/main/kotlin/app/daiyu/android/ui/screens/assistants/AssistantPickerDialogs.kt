@@ -65,6 +65,7 @@ fun AssistantPickerDialog(
     editing: Boolean = false,
     onOutsideDismiss: () -> Unit = onDismiss,
     canInteract: () -> Boolean = { true },
+    canSelect: () -> Boolean = canInteract,
 ) {
     var searchFocused by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -109,7 +110,7 @@ fun AssistantPickerDialog(
             verticalArrangement = Arrangement.spacedBy(5.dp * s)) {
             items(filtered, key = { it.id }) { profile ->
                 AssistantProfileCard(profile, profile.id == selectedId,
-                    onClick = { if (canInteract()) { onSelect(profile.id); onDismiss() } },
+                    onClick = { if (canSelect()) { onSelect(profile.id); onDismiss() } },
                     onLongClick = { if (canInteract()) actionProfileId = profile.id }, assets = assets,
                     modifier = Modifier.testTag("assistant-item-${profile.id}"))
             }
@@ -149,6 +150,7 @@ fun AssistantPickerDialog(
     editing: Boolean = false,
     onOutsideDismiss: () -> Unit = onDismiss,
     canInteract: () -> Boolean = { true },
+    canSelect: () -> Boolean = canInteract,
     onDelete: ((String) -> Unit)? = null,
 ) {
     val profiles by store.assistants.collectAsState()
@@ -180,7 +182,7 @@ fun AssistantPickerDialog(
                 assets.deleteMemory(id)
                 assets.deleteAvatar(avatar)
             }
-        }, assets = assets, editing = editing, onOutsideDismiss = onOutsideDismiss, canInteract = canInteract)
+        }, assets = assets, editing = editing, onOutsideDismiss = onOutsideDismiss, canInteract = canInteract, canSelect = canSelect)
 }
 
 @OptIn(ExperimentalFoundationApi::class)

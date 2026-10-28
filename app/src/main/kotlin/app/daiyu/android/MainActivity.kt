@@ -1716,6 +1716,14 @@ class MainActivity : ComponentActivity() {
         toast("请先结束任务")
         return false
     }
+    private fun allowTaskConfigurationChange(conversation: ConversationId?): Boolean {
+        if (!controller.taskConfigurationBusy(conversation)) return true
+        toast("请先结束任务")
+        return false
+    }
+    private fun allowAssistantSelection(owner: AssistantSelectionOwner): Boolean =
+        if (owner.global) allowTaskConfigurationChange(null)
+        else allowTaskConfigurationChange(ConversationId(checkNotNull(owner.conversationId)))
     private var assistantPicker by mutableStateOf(false)
     private var assistantSelectionOwner by mutableStateOf<AssistantSelectionOwner?>(null)
     private fun openAssistantPicker(global: Boolean = false) {
@@ -1729,7 +1737,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun selectCurrentConversationAssistant(id: String, conversation: ConversationId?, generation: Long) {
         if (!activityUsable() || selected?.id != conversation || editorGeneration != generation) return
-        if (!allowTaskConfigurationChange()) return
+        if (!allowTaskConfigurationChange(conversation)) return
         val current = selected
         if (current == null) assistantStore.select(id)
         else {
@@ -2761,13 +2769,14 @@ class MainActivity : ComponentActivity() {
                         editing = retainedPage == "assistant-edit",
                         canMutate = { assistantOwnerMatches(owner) && !controller.dataBusy },
                         canInteract = { assistantOwnerMatches(owner) && allowTaskConfigurationChange() },
+                        canSelect = { assistantOwnerMatches(owner) && allowAssistantSelection(owner) },
                         onDelete = { id -> guard {
                             if (!assistantOwnerMatches(owner) || !allowTaskConfigurationChange()) return@guard
                             controller.deleteAssistant(id)
                         } },
                         onSelect = { id -> guard {
                             check(assistantOwnerMatches(owner)) { "选择器所属页面已变化；未改变绑定" }
-                            if (!allowTaskConfigurationChange()) return@guard
+                            if (!allowAssistantSelection(owner)) return@guard
                             if(owner.global) assistantStore.select(id)
                             else {
                                 val conversationId=ConversationId(checkNotNull(owner.conversationId))
@@ -2858,7 +2867,7 @@ class MainActivity : ComponentActivity() {
                     options = ReasoningEffort.textChoices(confirmedReasoningModel),
                     onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
                         if (activityUsable() && selected?.id?.value == thinkingOwner) {
-                            if (allowTaskConfigurationChange()) try {
+                            if (allowTaskConfigurationChange(thinkingOwner?.let(::ConversationId))) try {
                                 if (controller.setChatReasoning(thinkingOwner, effort)) publishChat()
                                 else toast("请先结束任务")
                             } catch (_: Exception) { toast("思考偏好保存未确认；请重新保存") }
@@ -6837,7 +6846,8 @@ class MainActivity : ComponentActivity() {
         if (owner == null || chatModelOwner !== owner || chatModelSession !== session) return
         val picker = chatModelPicker ?: return
         if (picker.switching) return
-        if (!allowTaskConfigurationChange()) return
+        val conversation = selected?.id
+        if (!allowTaskConfigurationChange(conversation)) return
         val saved = chatModelSettings
         val target = chatModelProviderChoices[providerId] ?: return
         val cancelled = chatModelCancelled
@@ -6845,10 +6855,10 @@ class MainActivity : ComponentActivity() {
         try {
             requireActivityUsable()
             check(!chatModelSelectionFailed && picker.enabled && !picker.loading && retainedPage == "chat" && controller.ready &&
-                controller.active == null && !controller.dataBusy)
+                !controller.taskConfigurationBusy(conversation) && !controller.dataBusy)
             chatModelPicker = picker.copy(switching = true)
             controller.selectActiveProviderCatalogModel(chatModelProviderEditor, saved, target.editor, target.settings, ticket,
-                cancelled = { cancelled.get() || !lease.isActive }, conversation = selected?.id, completed = { success ->
+                cancelled = { cancelled.get() || !lease.isActive }, conversation = conversation, completed = { success ->
                 if (activityUsable()) {
                     if (success) {
                         controller.revokeImageProvider()

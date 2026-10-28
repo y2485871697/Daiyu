@@ -99,7 +99,11 @@ class AppearanceColorContractTest(unittest.TestCase):
         self.assertIn('if (primary != null)', resolver)
         self.assertIn('if (dark && appearance.pureBlackEnabled) Color.Black', resolver)
         self.assertIn('val fill = Color(appearance.paletteSeedColor).copy(alpha = 1f)', resolver)
-        self.assertIn('background = surface, onBackground = content', resolver)
+        self.assertIn('background = surface,', resolver)
+        surfaces = resolver.split('if (appearance.paletteSeedColor != null) {', 1)[1].split('val surface = colors.surface', 1)[0]
+        self.assertNotIn('onBackground =', surfaces)
+        self.assertNotIn('onSurface =', surfaces)
+        self.assertNotIn('onSurfaceSecondary =', surfaces)
         theme = source('ui/app/AgentAppTheme.kt')
         self.assertIn('remember(appearance, isDark) { resolveAppearanceColors(appearance, isDark) }', theme)
         self.assertIn('LocalAppearanceSettings provides appearance', theme)

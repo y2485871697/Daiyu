@@ -2,7 +2,6 @@ package app.daiyu.android.ui.screens.settings
 
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.DaiyuPalette
-import app.daiyu.android.ui.app.readableAccent
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.resolvedPrimaryAccent
 import app.daiyu.android.ui.app.styleColor
@@ -21,9 +20,7 @@ internal fun LinuxSettingsTheme(content: @Composable () -> Unit) {
     val resolved = app.daiyu.android.ui.app.resolveAppearanceColors(appearance, dark)
     val container = if (appearance.primaryAccentColor != null || appearance.paletteSeedColor != null) resolved.primaryContainer
         else appearance.styleColor(Color(if (dark) 0xff302a36 else 0xffeee9f1))
-    val onContainer = appearance.resolvedPrimaryAccent
-        ?: if (appearance.paletteSeedColor != null) readableAccent(primary, dark, container)
-        else Color(if (dark) 0xffc6b7d5 else 0xff756980)
+    val onContainer = appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xffc6b7d5 else 0xff756980)
     MiuixTheme(colors = MiuixTheme.colorScheme.copy(primary = primary, onPrimary = onPrimary,
         primaryVariant = primary, onPrimaryVariant = onPrimary,
         disabledPrimary = container, disabledOnPrimary = onContainer,

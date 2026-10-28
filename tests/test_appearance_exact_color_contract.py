@@ -4,14 +4,14 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 class ExactAppearanceColorContractTest(unittest.TestCase):
-    def test_custom_palettes_use_opaque_resolved_surface_and_matching_text(self):
+    def test_custom_palettes_use_opaque_resolved_surface_without_replacing_text(self):
         for path in ('ui/components/ConversationPanePreview.kt', 'ui/components/UsagePresentation.kt',
                      'ui/components/subagent/ConversationAgentStyle.kt', 'ui/screens/assistants/AssistantPreviewComponents.kt'):
             text = (SRC / path).read_text()
             self.assertIn('resolveAppearanceColors(appearance, dark)', text)
             self.assertIn('if (customSurface) listOf(theme.surface', text)
-            self.assertIn('if (customSurface) theme.onSurface', text)
-            self.assertIn('dark, theme.surface)', text)
+            self.assertNotIn('if (customSurface) theme.onSurface', text)
+            self.assertNotIn('readableAccent(theme.onSurfaceSecondary', text)
     def test_system_bars_refresh_when_custom_rgb_changes(self):
         theme = (SRC / 'ui/app/AgentAppTheme.kt').read_text()
         host = (SRC / 'MainActivity.kt').read_text()

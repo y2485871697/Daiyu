@@ -111,21 +111,15 @@ class AppearanceColorsTest {
         (maxOf(foreground.luminance(), background.luminance()) + .05f) /
             (minOf(foreground.luminance(), background.luminance()) + .05f)
 
-    @Test fun customSurfaceUsesExactSelectedRgbAcrossThemesAndStyles() {
+    @Test fun customSurfaceUsesExactSelectedRgbAndKeepsThemeForegroundsAcrossThemesAndStyles() {
         for (dark in listOf(false, true)) for (style in AppearancePaletteStyle.entries) {
             for (fill in listOf(Color.Black, Color.White, Color.Red, Color.Blue, Color(0xFF407FCE))) {
                 val appearance = AppearanceSettings(paletteStyle = style, paletteSeedColor = fill.toArgb())
                 val resolved = resolveAppearanceColors(appearance, dark)
                 assertEquals("background dark=$dark style=$style", fill, resolved.background)
                 assertEquals("surface dark=$dark style=$style", fill, resolved.surface)
-                assertTrue(contrast(resolved.onBackground, resolved.background) >= 4.5f)
-                for ((background, foreground) in listOf(resolved.surface to resolved.onSurface,
-                    resolved.surfaceVariant to resolved.onSurfaceSecondary,
-                    resolved.surfaceContainer to resolved.onSurfaceContainer,
-                    resolved.surfaceContainerHigh to resolved.onSurfaceContainerHigh,
-                    resolved.surfaceContainerHighest to resolved.onSurfaceContainerHighest)) {
-                    assertTrue("dark=$dark style=$style fill=$fill", contrast(foreground, background) >= 4.5f)
-                }
+                val baseline = resolveAppearanceColors(appearance.copy(paletteSeedColor = null), dark)
+                assertEquals("dark=$dark style=$style fill=$fill", foregrounds(baseline), foregrounds(resolved))
                 assertNotEquals(resolved.surface, resolved.surfaceContainerHigh)
             }
         }
@@ -141,9 +135,15 @@ class AppearanceColorsTest {
         }
     }
 
-    @Test fun customSurfacePropagatesToLocalPalettesAndKeepsContentReadable() {
-        for (dark in listOf(false, true)) for (fill in listOf(Color.Black, Color.White, Color.Red, Color.Blue)) {
-            val appearance = AppearanceSettings(paletteSeedColor = fill.toArgb())
+    @Test fun customSurfacePropagatesWithoutChangingAnyLocalForegroundRole() {
+        val accents = listOf(null to null, Color.Yellow.toArgb() to null,
+            null to Color.Cyan.toArgb(), Color.Black.toArgb() to Color.White.toArgb())
+        for (dark in listOf(false, true)) for (style in AppearancePaletteStyle.entries)
+            for (fill in listOf(Color.Black, Color.White, Color.Red, Color.Blue, Color(0xFF407FCE)))
+                for ((primary, secondary) in accents) {
+            val appearance = AppearanceSettings(paletteStyle = style, paletteSeedColor = fill.toArgb(),
+                primaryAccentColor = primary, secondaryAccentColor = secondary)
+            val baseline = appearance.copy(paletteSeedColor = null)
             val side = app.daiyu.android.ui.components.ConversationPanePreviewPalette(dark, appearance)
             val assistant = app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette(dark, appearance)
             val agent = app.daiyu.android.ui.components.subagent.ConversationAgentColors(dark, appearance)
@@ -155,18 +155,40 @@ class AppearanceColorsTest {
             for (gradient in listOf(side.gradient, assistant.gradient, agent.gradient, usage.sheet)) {
                 gradient.forEach { assertEquals(fill, it) }
             }
-            for (text in listOf(side.text, side.muted, side.toolbar, side.accent,
-                assistant.text, assistant.muted, assistant.toolbar, assistant.accent,
-                agent.text, agent.muted, agent.accent, agent.taskMuted,
-                usage.text, usage.muted, usage.toolbar, usage.accent)) {
-                assertTrue("dark=$dark fill=$fill text=$text", contrast(text, fill) >= 4.5f)
+            fun localForegrounds(settings: AppearanceSettings): List<Color> {
+                val pane = app.daiyu.android.ui.components.ConversationPanePreviewPalette(dark, settings)
+                val assistantColors = app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette(dark, settings)
+                val agentColors = app.daiyu.android.ui.components.subagent.ConversationAgentColors(dark, settings)
+                val usageColors = app.daiyu.android.ui.components.UsagePalette(dark, settings)
+                return listOf(pane.text, pane.muted, pane.toolbar, pane.accent, pane.selectionContent, pane.folderText,
+                    assistantColors.text, assistantColors.muted, assistantColors.toolbar, assistantColors.accent,
+                    assistantColors.onPrimary, assistantColors.onSecondary,
+                    agentColors.text, agentColors.muted, agentColors.accent, agentColors.strong,
+                    agentColors.taskMuted, agentColors.onSoft,
+                    usageColors.text, usageColors.muted, usageColors.toolbar, usageColors.accent,
+                    usageColors.selectionContent, usageColors.onSecondaryContainer)
             }
+            val label = "dark=$dark style=$style fill=$fill primary=$primary secondary=$secondary"
+            assertEquals(label, foregrounds(resolveAppearanceColors(baseline, dark)),
+                foregrounds(resolveAppearanceColors(appearance, dark)))
+            assertEquals(label, localForegrounds(baseline), localForegrounds(appearance))
+            val originalActions = resolveAppearanceActions(baseline, dark)
             val actions = resolveAppearanceActions(appearance, dark)
-            assertTrue(contrast(actions.onSecondary, actions.secondaryContainer) >= 4.5f)
-            val bubble = resolveUserBubbleColors(appearance, dark)
-            assertTrue(contrast(bubble.content, bubble.container) >= 4.5f)
+            assertEquals(label, listOf(originalActions.onPrimary, originalActions.onSecondary, originalActions.onPrimaryContainer),
+                listOf(actions.onPrimary, actions.onSecondary, actions.onPrimaryContainer))
+            assertEquals(label, resolveUserBubbleColors(baseline, dark).content, resolveUserBubbleColors(appearance, dark).content)
         }
     }
+
+    private fun foregrounds(colors: top.yukonga.miuix.kmp.theme.Colors): List<Color> = listOf(
+        colors.onBackground, colors.onBackgroundVariant, colors.onSurface, colors.onSurfaceSecondary,
+        colors.onSurfaceVariantSummary, colors.onSurfaceVariantActions, colors.disabledOnSurface,
+        colors.onSurfaceContainer, colors.onSurfaceContainerVariant, colors.onSurfaceContainerHigh,
+        colors.onSurfaceContainerHighest, colors.onPrimary, colors.onPrimaryContainer, colors.onPrimaryVariant,
+        colors.disabledOnPrimary, colors.disabledOnPrimaryButton, colors.onSecondary, colors.onSecondaryVariant,
+        colors.onSecondaryContainer, colors.onSecondaryContainerVariant, colors.onTertiaryContainer,
+        colors.onError, colors.onErrorContainer,
+    )
 
     @Test fun customActionRolesKeepSelectedAccentsAndOriginalFilledForeground() {
         for (dark in listOf(false, true)) for (accent in listOf(Color.Black, Color.White, Color.Yellow, Color(0xFF767676))) {
@@ -190,7 +212,7 @@ class AppearanceColorsTest {
             val initial = AppearanceSettings(paletteSeedColor = 0xFF439965.toInt(), primaryAccentColor = 0xFF556699.toInt(),
                 secondaryAccentColor = 0xFF886644.toInt())
             val themed = resolveUserBubbleColors(initial, dark)
-            assertTrue(contrast(themed.content, themed.container) >= 4.5f)
+            assertEquals(resolveUserBubbleColors(initial.copy(paletteSeedColor = null), dark).content, themed.content)
             val off = resolveUserBubbleColors(initial.copy(userBubbleMode = UserBubbleMode.OFF), dark)
             assertEquals(Color.Transparent, off.container)
             assertEquals(themed.content, off.content)

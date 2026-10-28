@@ -25,6 +25,24 @@ class ColorPickerStabilityContractTest(unittest.TestCase):
         self.assertIn('if (saved) onDismiss()', editor)
         self.assertEqual(1, editor.count('onChange(editor.merge(state, draft))'))
 
+    def test_empty_style_seed_uses_actual_preview_surface_not_a_hidden_purple_default(self):
+        editor = self.sheet().split('internal fun AppearanceColorSheet(', 1)[1].split('private fun AppearanceDraftPreview', 1)[0]
+        self.assertIn('val styleColor = draft.paletteSeedColor?.let(::Color)', editor)
+        self.assertIn('?: resolveAppearanceColors(draft, buttons.dark).surface', editor)
+        self.assertIn('AppearanceColorPicker("界面色彩", styleColor)', editor)
+        self.assertIn('paletteSeedColor = draft.paletteSeedColor ?: styleColor.toArgb()', editor)
+        self.assertNotIn('draft.paletteSeedColor ?: 0xFF8E7C9E', editor)
+
+    def test_instrumented_cases_cover_same_point_reset_and_fixed_text(self):
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/AppearanceColorPickerActivityTest.kt').read_text()
+        for case in ('testDefaultMarkerAndRepeatedPositionMatchThePreview',
+                     'testStyleChoiceAndDefaultKeepTheDisplayedSurface',
+                     'testStylePreviewTextKeepsItsOriginalThemeColors',
+                     'testSurfaceChangesKeepChatAndLinuxForegroundRoles'):
+            self.assertIn(case, test)
+        self.assertIn('assertSameColor(sampled, selected)', test)
+        self.assertIn('assertSameColor(selected, repeated)', test)
+
     def test_hue_track_is_fixed_full_spectrum_not_a_theme_fill(self):
         picker = self.sheet().split('private fun AppearanceColorPicker(', 1)[1]
         self.assertIn('listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)', picker)

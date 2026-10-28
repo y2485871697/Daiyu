@@ -83,26 +83,20 @@ internal fun resolveAppearanceColors(appearance: AppearanceSettings, dark: Boole
     if (appearance.paletteSeedColor != null) {
         val fill = Color(appearance.paletteSeedColor).copy(alpha = 1f)
         val surface = if (dark && appearance.pureBlackEnabled) Color.Black else fill
-        val content = colorContentColor(surface)
+        val layerTarget = colorContentColor(surface)
         val styled = appearance.styleColor(surface)
-        fun layer(amount: Float): Color = lerp(lerp(surface, styled, .20f), content, amount)
+        fun layer(amount: Float): Color = lerp(lerp(surface, styled, .20f), layerTarget, amount)
         val variant = layer(.04f)
         val container = layer(.06f)
         val high = layer(.10f)
         val highest = layer(.14f)
         colors = colors.copy(
-            background = surface, onBackground = content,
-            onBackgroundVariant = readableAccent(base.onBackgroundVariant, dark, surface),
-            surface = surface, onSurface = content,
+            background = surface,
+            surface = surface,
             surfaceVariant = variant,
-            onSurfaceSecondary = readableAccent(base.onSurfaceSecondary, dark, variant),
-            onSurfaceVariantSummary = readableAccent(base.onSurfaceVariantSummary, dark, variant),
-            onSurfaceVariantActions = readableAccent(base.onSurfaceVariantActions, dark, variant),
-            disabledOnSurface = readableAccent(base.disabledOnSurface, dark, surface),
-            surfaceContainer = container, onSurfaceContainer = colorContentColor(container),
-            onSurfaceContainerVariant = readableAccent(base.onSurfaceContainerVariant, dark, container),
-            surfaceContainerHigh = high, onSurfaceContainerHigh = colorContentColor(high),
-            surfaceContainerHighest = highest, onSurfaceContainerHighest = colorContentColor(highest),
+            surfaceContainer = container,
+            surfaceContainerHigh = high,
+            surfaceContainerHighest = highest,
             outline = layer(.24f), dividerLine = layer(.18f),
         )
     }
@@ -162,15 +156,12 @@ internal fun resolveAppearanceActions(appearance: AppearanceSettings, dark: Bool
     return AppearanceActionColors(primary,
         if (dark) Color(0xFF261F30) else Color.White,
         secondary,
-        appearance.secondaryAccentColor?.let(::Color)
-            ?: if (appearance.paletteSeedColor != null) readableAccent(secondary, dark, container) else secondary,
+        secondary,
         container,
         if (appearance.paletteSeedColor != null) lerp(surface, primary, .12f)
             else appearance.primaryAccentColor?.let { lerp(surface, Color(it), .12f) }
             ?: appearance.styleColor(if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9)),
-        appearance.resolvedPrimaryAccent
-            ?: if (appearance.paletteSeedColor != null) readableAccent(primary, dark, lerp(surface, primary, .12f))
-            else if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F))
+        appearance.resolvedPrimaryAccent ?: if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F))
 }
 
 internal data class DestructiveColors(val container: Color, val content: Color, val border: Color)
@@ -183,15 +174,14 @@ internal fun destructiveColors(): DestructiveColors {
 internal data class UserBubbleColors(val container: Color, val content: Color)
 
 internal fun resolveUserBubbleColors(appearance: AppearanceSettings, dark: Boolean): UserBubbleColors {
-    val text = if (appearance.paletteSeedColor != null) resolveAppearanceColors(appearance, dark).onSurface
-        else if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
+    val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
     val themed = appearance.styleColor(if (dark) Color(0xFF26233D) else Color(0xFFF0ECFC))
     return when (appearance.userBubbleMode) {
         UserBubbleMode.OFF -> UserBubbleColors(Color.Transparent, text)
-        UserBubbleMode.THEME -> UserBubbleColors(themed, if (appearance.paletteSeedColor != null) colorContentColor(themed) else text)
+        UserBubbleMode.THEME -> UserBubbleColors(themed, text)
         UserBubbleMode.CUSTOM -> appearance.userBubbleColor?.let {
             val fill = Color(it).copy(alpha = 1f)
             UserBubbleColors(fill, colorContentColor(fill))
-        } ?: UserBubbleColors(themed, if (appearance.paletteSeedColor != null) colorContentColor(themed) else text)
+        } ?: UserBubbleColors(themed, text)
     }
 }

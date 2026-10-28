@@ -15,11 +15,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
+import app.daiyu.android.data.model.AppearancePaletteStyle
+import app.daiyu.android.ui.app.colorHsv
+import app.daiyu.android.ui.app.resolveAppearanceColors
+import app.daiyu.android.ui.screens.chat.conversation.chatChromeColors
+import app.daiyu.android.ui.screens.chat.conversation.chatActionColors
+import app.daiyu.android.ui.screens.chat.conversation.conversationColors
+import app.daiyu.android.ui.screens.settings.LinuxSettingsTheme
 import app.daiyu.android.data.model.UserBubbleMode
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -64,6 +72,131 @@ class AppearanceColorPickerActivityTest : WiredActivityTestCase() {
             }
         }
         awaitDialogEnter(node("assistant-sheet"))
+    }
+
+    private fun previewTextColor(tag: String): Color {
+        var color = Color.Unspecified
+        node(tag).scrollToVisible().performSemanticsAction(SemanticsActions.GetTextLayoutResult) { get ->
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            assertTrue(get(layouts))
+            color = layouts.single().layoutInput.style.color
+        }
+        return color
+    }
+
+    fun testDefaultMarkerAndRepeatedPositionMatchThePreview() {
+        for (dark in listOf(false, true)) {
+            val requests = mutableListOf<AppearanceSettings>()
+            show(AppearanceColorEditor.STYLE, dark, requests)
+            val defaultSurface = resolveAppearanceColors(AppearanceSettings(), dark).surface
+            val chip = node("appearance-color-value:界面色彩")
+            assertSameColor(defaultSurface, pixel(capturePicker(chip.scrollToVisible()), .5f, .5f))
+            val hsv = colorHsv(defaultSurface)
+            val pad = node("appearance-color-pad:界面色彩")
+            repeat(2) {
+                pad.scrollToVisible().performTouchInput { click(Offset(width * hsv[1], height * (1f - hsv[2]))) }
+                assertSameColor(defaultSurface, pixel(capturePicker(node("appearance-draft-preview").scrollToVisible()), .5f, .02f))
+            }
+            val plane = capturePicker(pad.scrollToVisible())
+            val sampled = pixel(plane, .72f, .28f)
+            pad.performTouchInput { click(Offset(width * .72f, height * .28f)) }
+            val selected = pixel(capturePicker(chip.scrollToVisible()), .5f, .5f)
+            assertSameColor(sampled, selected)
+            pad.scrollToVisible().performTouchInput { click(Offset(width * .72f, height * .28f)) }
+            val repeated = pixel(capturePicker(chip.scrollToVisible()), .5f, .5f)
+            assertSameColor(selected, repeated)
+            assertSameColor(selected, pixel(capturePicker(node("appearance-draft-preview").scrollToVisible()), .5f, .02f))
+            ui.runOnIdle { assertTrue(requests.isEmpty()) }
+            node("appearance-color-confirm").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            ui.runOnIdle { assertSameColor(selected, Color(requests.single().paletteSeedColor!!)) }
+        }
+    }
+
+    fun testStyleChoiceAndDefaultKeepTheDisplayedSurface() {
+        for (dark in listOf(false, true)) {
+            val requests = mutableListOf<AppearanceSettings>()
+            show(AppearanceColorEditor.STYLE, dark, requests)
+            val initial = resolveAppearanceColors(AppearanceSettings(), dark).surface
+            node("appearance-style:${AppearancePaletteStyle.VIBRANT.persistedValue}").scrollToVisible().performClick()
+            assertSameColor(initial, pixel(capturePicker(node("appearance-color-value:界面色彩").scrollToVisible()), .5f, .5f))
+            assertSameColor(initial, pixel(capturePicker(node("appearance-draft-preview").scrollToVisible()), .5f, .02f))
+            node("appearance-color-confirm").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            ui.runOnIdle {
+                assertEquals(initial.toArgb(), requests.single().paletteSeedColor)
+                assertEquals(AppearancePaletteStyle.VIBRANT, requests.single().paletteStyle)
+            }
+            val resetRequests = mutableListOf<AppearanceSettings>()
+            show(AppearanceColorEditor.STYLE, dark, resetRequests)
+            val swatch = node("appearance-swatch:界面色彩:${0xFF407FCE}")
+            repeat(2) {
+                swatch.scrollToVisible().performClick()
+                assertSameColor(Color(0xFF407FCE), pixel(capturePicker(node("appearance-color-value:界面色彩").scrollToVisible()), .5f, .5f))
+            }
+            node("appearance-color-default").performClick()
+            assertSameColor(initial, pixel(capturePicker(node("appearance-color-value:界面色彩").scrollToVisible()), .5f, .5f))
+            assertSameColor(initial, pixel(capturePicker(node("appearance-draft-preview").scrollToVisible()), .5f, .02f))
+            ui.runOnIdle { assertTrue(resetRequests.isEmpty()) }
+            node("appearance-color-confirm").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            ui.runOnIdle { assertNull(resetRequests.single().paletteSeedColor) }
+        }
+    }
+
+    fun testStylePreviewTextKeepsItsOriginalThemeColors() {
+        val tags = listOf("appearance-preview-title", "appearance-preview-container", "appearance-preview-selection",
+            "appearance-preview-primary-action", "appearance-preview-secondary-action", "appearance-preview-bubble")
+        for (dark in listOf(false, true)) for (customAccents in listOf(false, true)) {
+            val requests = mutableListOf<AppearanceSettings>()
+            show(AppearanceColorEditor.STYLE, dark, requests, customAccents = customAccents)
+            val baseline = tags.map(::previewTextColor)
+            val pad = node("appearance-color-pad:界面色彩")
+            for ((x, y) in listOf(.03f to .04f, .8f to .98f, .72f to .28f)) {
+                pad.scrollToVisible().performTouchInput { click(Offset(width * x, height * y)) }
+                assertEquals("dark=$dark customAccents=$customAccents point=$x,$y", baseline, tags.map(::previewTextColor))
+            }
+            ui.runOnIdle { assertTrue(requests.isEmpty()) }
+            androidx.test.espresso.Espresso.pressBack()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+        }
+    }
+
+    fun testSurfaceChangesKeepChatAndLinuxForegroundRoles() {
+        for (dark in listOf(false, true)) for (customAccents in listOf(false, true)) {
+            var state by mutableStateOf(AppearanceSettings(
+                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                primaryAccentColor = if (customAccents) Color.Yellow.toArgb() else null,
+                secondaryAccentColor = if (customAccents) Color.Cyan.toArgb() else null))
+            var foregrounds = emptyList<Color>()
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(state, true) {
+                        val chrome = chatChromeColors()
+                        val conversation = conversationColors()
+                        val actions = chatActionColors()
+                        val material = androidx.compose.material3.MaterialTheme.colorScheme
+                        val outer = listOf(chrome.text, chrome.muted, chrome.toolbar, chrome.accent,
+                            conversation.text, conversation.muted, conversation.accent, conversation.bubbleText,
+                            actions.sendContent, actions.appendContent, material.onBackground, material.onSurface, material.onSurfaceVariant)
+                        LinuxSettingsTheme {
+                            val colors = MiuixTheme.colorScheme
+                            foregrounds = outer + listOf(colors.onPrimary, colors.onPrimaryContainer,
+                                colors.disabledOnPrimary, colors.disabledOnPrimaryButton)
+                            Box(Modifier.fillMaxSize().testTag("appearance-foreground-probe"))
+                        }
+                    }
+                }
+            }
+            ui.waitForIdle()
+            val baseline = ui.runOnIdle { foregrounds.toList() }
+            assertFalse(baseline.isEmpty())
+            for (seed in listOf(Color.Black, Color.White, Color.Red, Color.Blue)) {
+                ui.runOnIdle { state = state.copy(paletteSeedColor = seed.toArgb()) }
+                ui.waitForIdle()
+                ui.runOnIdle { assertEquals("dark=$dark seed=$seed customAccents=$customAccents", baseline, foregrounds) }
+            }
+        }
     }
 
     fun testPaleAccentKeepsPreviewButtonTextAndSwitchThumbInsteadOfBlack() {

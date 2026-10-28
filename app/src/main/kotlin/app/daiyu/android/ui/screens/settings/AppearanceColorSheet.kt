@@ -149,7 +149,9 @@ internal fun AppearanceColorSheet(
                     draft = draft.copy(secondaryAccentColor = it.toArgb())
                 }
             } else {
-                AppearanceColorPicker("界面色彩", Color(draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())) {
+                val styleColor = draft.paletteSeedColor?.let(::Color)
+                    ?: resolveAppearanceColors(draft, buttons.dark).surface
+                AppearanceColorPicker("界面色彩", styleColor) {
                     draft = draft.copy(paletteSeedColor = it.toArgb())
                 }
                 AppearancePaletteStyle.entries.chunked(3).forEach { row ->
@@ -173,7 +175,7 @@ internal fun AppearanceColorSheet(
                                 .testTag("appearance-style:${style.persistedValue}")
                                 .selectable(selected, role = Role.RadioButton, onClick = {
                                     draft = draft.copy(paletteStyle = style,
-                                        paletteSeedColor = draft.paletteSeedColor ?: 0xFF8E7C9E.toInt())
+                                        paletteSeedColor = draft.paletteSeedColor ?: styleColor.toArgb())
                                 }), contentAlignment = Alignment.Center) { Text(label, color = buttons.text) }
                         }
                     }
@@ -194,12 +196,12 @@ private fun AppearanceDraftPreview(draft: AppearanceSettings) {
     Column(Modifier.fillMaxWidth().background(colors.surface, shape)
         .border(1.dp, colors.outline, shape).padding(12.dp).testTag("appearance-draft-preview"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("预览", color = colors.onSurface)
+        Text("预览", Modifier.testTag("appearance-preview-title"), color = colors.onSurface)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("选中项目", Modifier.weight(1f).testTag("appearance-preview-selection")
                 .background(selection.selectionContainer, shape).padding(10.dp),
                 color = selection.selectionContent)
-            Text("普通容器", Modifier.weight(1f).background(colors.surfaceContainer, shape).padding(10.dp),
+            Text("普通容器", Modifier.weight(1f).testTag("appearance-preview-container").background(colors.surfaceContainer, shape).padding(10.dp),
                 color = colors.onSurface)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -210,7 +212,7 @@ private fun AppearanceDraftPreview(draft: AppearanceSettings) {
                 Box(Modifier.size(18.dp).testTag("appearance-preview-switch-thumb").background(DaiyuPalette.switchThumb, CircleShape))
             }
         }
-        Text("我的消息", Modifier.align(Alignment.End).background(bubble.container, shape).padding(10.dp), color = bubble.content)
+        Text("我的消息", Modifier.testTag("appearance-preview-bubble").align(Alignment.End).background(bubble.container, shape).padding(10.dp), color = bubble.content)
     }
 }
 
@@ -234,7 +236,7 @@ private fun AppearanceColorPicker(label: String, color: Color, onChange: (Color)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             Text(label, color = colors.onSurface)
-            Box(Modifier.size(26.dp).background(color, CircleShape).border(1.dp, colors.outline, CircleShape))
+            Box(Modifier.size(26.dp).testTag("appearance-color-value:$label").background(color, CircleShape).border(1.dp, colors.outline, CircleShape))
         }
         Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.SpaceBetween) {
             swatches.forEach { value ->

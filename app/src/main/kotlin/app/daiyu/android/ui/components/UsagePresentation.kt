@@ -44,14 +44,14 @@ internal data class UsagePalette(val dark: Boolean, val appearance: AppearanceSe
     val selectionContainer = if (appearance.primaryAccentColor != null) theme.primaryContainer
         else if (customSurface) theme.surfaceContainerHigh else appearance.styleColor(Color(if (dark) 0xff28262f else 0xffefedfb))
     val selectionContent = if (appearance.primaryAccentColor != null) theme.onPrimaryContainer
-        else if (customSurface) theme.onSurfaceContainerHigh else Color(if (dark) 0xffc6b6d5 else 0xff82718f)
+        else Color(if (dark) 0xffc6b6d5 else 0xff82718f)
     val secondaryContainer get() = if (appearance.secondaryAccentColor != null) actions.secondaryContainer else bubble
     val onSecondaryContainer get() = appearance.secondaryAccentColor?.let(::Color)
-        ?: readableAccent(actions.secondary, dark, secondaryContainer)
-    val text = if (customSurface) theme.onSurface else Color(if (dark) 0xffe0dce8 else 0xff36333f)
-    val muted = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else Color(if (dark) 0xff918997 else 0xff968b9f)
-    val accent = appearance.resolvedPrimaryAccent ?: if (customSurface) readableAccent(Color(if (dark) 0xffc6b6d5 else 0xff82718f), dark, theme.surface) else Color(if (dark) 0xffc6b6d5 else 0xff82718f)
-    val toolbar = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else Color(if (dark) 0xffb2a9c7 else 0xff716a82)
+        ?: readableAccent(actions.secondary, dark, Color(if (dark) 0xff28262f else 0xfff1eff3))
+    val text = Color(if (dark) 0xffe0dce8 else 0xff36333f)
+    val muted = Color(if (dark) 0xff918997 else 0xff968b9f)
+    val accent = appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xffc6b6d5 else 0xff82718f)
+    val toolbar = Color(if (dark) 0xffb2a9c7 else 0xff716a82)
     val line = if (customSurface) theme.dividerLine else appearance.styleColor(Color(if (dark) 0xff393540 else 0xffe6e1e8))
     val bubble = if (customSurface) theme.surfaceContainer else appearance.styleColor(Color(if (dark) 0xff28262f else 0xfff1eff3))
     val background = if (customSurface) theme.surface else appearance.styleColor(Color(if (dark) 0xff101218 else 0xffffffff))

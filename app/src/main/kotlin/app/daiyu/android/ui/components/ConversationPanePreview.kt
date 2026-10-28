@@ -3,7 +3,6 @@ package app.daiyu.android.ui.components
 import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.LocalAppearanceSettings
-import app.daiyu.android.ui.app.readableAccent
 import app.daiyu.android.ui.app.resolvedPrimaryAccent
 import app.daiyu.android.ui.app.styleColor
 import app.daiyu.android.data.model.AppearanceSettings
@@ -17,15 +16,15 @@ import androidx.compose.ui.graphics.Color
 internal data class ConversationPanePreviewPalette(val dark: Boolean, val appearance: AppearanceSettings = AppearanceSettings()) {
     private val customSurface = appearance.paletteSeedColor != null
     private val theme = resolveAppearanceColors(appearance, dark)
-    val text = if (customSurface) theme.onSurface else if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
-    val accent = appearance.resolvedPrimaryAccent ?: if (customSurface) readableAccent((if (dark) Color(0xFFC6B7D5) else Color(0xFF655A72)), dark, theme.surface) else if (dark) Color(0xFFC6B7D5) else Color(0xFF655A72)
-    val toolbar = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else if (dark) Color(0xFFC0B4CD) else Color(0xFF6F647C)
-    val muted = if (customSurface) readableAccent(theme.onSurfaceSecondary, dark, theme.surface) else if (dark) Color(0xFF9890A3) else Color(0xFF8C8394)
+    val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
+    val accent = appearance.resolvedPrimaryAccent ?: if (dark) Color(0xFFC6B7D5) else Color(0xFF655A72)
+    val toolbar = if (dark) Color(0xFFC0B4CD) else Color(0xFF6F647C)
+    val muted = if (dark) Color(0xFF9890A3) else Color(0xFF8C8394)
     val selectionContainer = if (appearance.primaryAccentColor != null) theme.primaryContainer
         else if (customSurface) theme.surfaceContainerHigh
         else appearance.styleColor(if (dark) Color(0x2AC0ACD7) else Color(0x2A81738E))
     val selectionContent = if (appearance.primaryAccentColor != null) theme.onPrimaryContainer
-        else if (customSurface) theme.onSurfaceContainerHigh else text
+        else text
     val selectionBorder = if (appearance.primaryAccentColor != null) theme.onPrimaryContainer.copy(alpha = .35f)
         else if (customSurface) theme.outline
         else appearance.styleColor(if (dark) Color(0x40C3B0D9) else Color(0x3881738E))

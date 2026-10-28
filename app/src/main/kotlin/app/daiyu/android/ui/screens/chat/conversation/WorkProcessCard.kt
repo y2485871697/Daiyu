@@ -48,7 +48,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
     val thinking = allowLiveTiming && work.segments.any { it.reasoning?.activeSinceNanos != null }
     val expanded = expandedOverride ?: thinking
@@ -104,12 +104,14 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
                         }
                         segment.reasoning?.let { reported ->
-                            key(ownerKey, "reasoning", reported.itemId) {
+                            key(ownerKey, "reasoning", reported.itemId, expanded) {
                                 reasoningState.SaveableStateProvider(reported.itemId) {
                                     ReasoningStepRow(ownerKey, reported,
                                         showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
                                             .any { it.steps.isNotEmpty() || it.reasoning != null },
-                                        allowLiveTiming = allowLiveTiming, generationComplete = generationComplete)
+                                        allowLiveTiming = allowLiveTiming, generationComplete = generationComplete,
+                                        revealResetEpoch = revealResetEpoch,
+                                        onVisibleAdvance = { if (expanded) onVisibleAdvance() })
                                 }
                             }
                         }

@@ -513,20 +513,22 @@ internal fun AssistantTurn(
             else turn.workProcess?.segments.orEmpty().any { it.reasoning != null }
         if (!integratedReasoning) ReportedReasoningCard(turn.listKey, turn.reportedReasoning,
             allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
-            generationComplete = turn.status != RunStatus.RUNNING)
+            generationComplete = turn.status != RunStatus.RUNNING,
+            revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(displayedTurn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent,
                 reasoningBody = { reported, connector ->
                     ReasoningStepRow(turn.listKey, reported, connector,
                         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
-                        generationComplete = turn.status != RunStatus.RUNNING)
+                        generationComplete = turn.status != RunStatus.RUNNING,
+                        revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance)
                 }) { text, modifier ->
                 RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId, modifier,
                     generationComplete = generationComplete)
             }
         } else {
-            AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete, toolContent)
+            AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete, revealResetEpoch, onVisibleAdvance, toolContent)
         }
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = conversationColors().error,
@@ -546,10 +548,11 @@ internal fun AssistantTurn(
 }
 
 @Composable
-private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, toolContent: @Composable (WorkStepUi) -> Unit) {
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, toolContent: @Composable (WorkStepUi) -> Unit) {
     turn.workProcess?.let { WorkProcessCard(it, turn.listKey,
         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
-        generationComplete = turn.status != RunStatus.RUNNING, toolContent = toolContent) }
+        generationComplete = turn.status != RunStatus.RUNNING,
+        revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
         RevealedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), reveal, "final",
             generationComplete = generationComplete)

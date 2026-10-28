@@ -340,30 +340,58 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
     }
 
 
-    fun testActiveReasoningReplacesOnlyTheDuplicateAnswerFallback() {
+    fun testReplyIdentityAndReasoningWaitForRealContentWithoutAnExtraPlaceholder() {
         prepareSummaries("actual summary")
         ui.mainClock.autoAdvance = false
-        var reported by mutableStateOf(listOf(ReportedReasoning("r", "...", 0L, 0L)))
+        var turn by mutableStateOf(ChatTurnUi.Assistant("progress", status = RunStatus.RUNNING, isStreaming = true))
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    AssistantTurn(ChatTurnUi.Assistant("progress", status = RunStatus.RUNNING, isStreaming = true,
-                        reportedReasoning = reported), ChatScreenActions())
+                    AssistantTurn(turn, ChatScreenActions())
                 }
             } }
             ui.mainClock.advanceTimeBy(32)
-            ui.onAllNodesWithText("正在思考…").assertCountEquals(1)
-            mainThread { reported = listOf(ReportedReasoning("r", "actual summary", 0L, 0L)) }
+            ui.onNodeWithTag("reply-identity:progress").assertDoesNotExist()
+            ui.onAllNodesWithText("正在思考…").assertCountEquals(0)
+            for (placeholder in listOf("", "  ", "...", "…")) {
+                mainThread { turn = turn.copy(reportedReasoning = listOf(ReportedReasoning("r", placeholder, 0L, 0L))) }
+                ui.mainClock.advanceTimeBy(32)
+                ui.onNodeWithTag("reply-identity:progress").assertDoesNotExist()
+                ui.onNodeWithTag("reported-reasoning:progress").assertDoesNotExist()
+            }
+            mainThread { turn = turn.copy(reportedReasoning = listOf(ReportedReasoning("r", "actual summary", 0L, 0L))) }
             ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithTag("reply-identity:progress").assertIsDisplayed()
             ui.onAllNodesWithText("正在思考…").assertCountEquals(1)
             ui.onNodeWithText("actual summary").assertIsDisplayed()
-            mainThread { reported = emptyList() }
-            ui.mainClock.advanceTimeBy(32)
-            ui.onNodeWithTag("reported-reasoning:progress").assertDoesNotExist()
-            ui.onAllNodesWithText("正在思考…").assertCountEquals(1)
+            mainThread { turn = turn.copy(reportedReasoning = listOf(ReportedReasoning("r", "actual summary", 1_200L))) }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithTag("reply-identity:progress").assertIsDisplayed()
+            ui.onNodeWithText("已思考").assertIsDisplayed()
+            ui.onAllNodesWithText("正在思考…").assertCountEquals(0)
         } finally {
             ui.mainClock.autoAdvance = true
         }
+    }
+
+    fun testTextAndErrorAppearWithIdentityOnlyAfterWaiting() {
+        var turn by mutableStateOf(ChatTurnUi.Assistant("text-progress", status = RunStatus.RUNNING, isStreaming = true))
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                AssistantTurn(turn, ChatScreenActions())
+            }
+        } }
+        ui.onNodeWithTag("reply-identity:text-progress").assertDoesNotExist()
+        mainThread { turn = turn.copy(finalText = "real answer") }
+        awaitAnswer("real answer")
+        ui.onNodeWithTag("reply-identity:text-progress").assertIsDisplayed()
+        ui.onNodeWithText("real answer").assertIsDisplayed()
+        ui.onAllNodesWithText("正在思考…").assertCountEquals(0)
+        mainThread { turn = ChatTurnUi.Assistant("text-progress", status = RunStatus.RUNNING, isStreaming = true) }
+        ui.onNodeWithTag("reply-identity:text-progress").assertDoesNotExist()
+        mainThread { turn = turn.copy(status = RunStatus.FAILED, error = "connection failed", isStreaming = false) }
+        ui.onNodeWithTag("reply-identity:text-progress").assertIsDisplayed()
+        ui.onNodeWithText("connection failed").assertIsDisplayed()
     }
 
     fun testPlaceholderIsReadableProgressInsteadOfADisabledButton() {

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat
 
+import app.daiyu.android.ui.app.destructiveColors
+
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.animation.AnimatedVisibility
@@ -243,14 +245,14 @@ private fun SwipeableManageChatRow(
                     // At rest the opaque foreground covers this entire layer. Keep its
                     // layout/semantics, but do not record a hidden icon and background.
                     .drawWithContent { if (offsetX < 0f) drawContent() }
-                    .background(MiuixTheme.colorScheme.errorContainer)
+                    .background(destructiveColors().container)
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Delete,
                     contentDescription = stringResource(R.string.action_delete),
-                    tint = MiuixTheme.colorScheme.onErrorContainer,
+                    tint = destructiveColors().content,
                 )
             }
             Box(modifier = Modifier.fillMaxWidth().offset { IntOffset(offsetX.roundToInt(), 0) }) {

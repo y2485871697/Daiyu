@@ -116,6 +116,7 @@ import app.daiyu.android.ui.model.ConversationSummaryUi
 import app.daiyu.android.ui.model.MessageSearchHit
 import app.daiyu.android.ui.screens.assistants.AssistantEditScreen
 import app.daiyu.android.ui.screens.assistants.AssistantPickerDialog
+import app.daiyu.android.assistants.create
 import app.daiyu.android.ui.screens.chat.ManageChatsScreen
 import app.daiyu.android.ui.screens.chat.conversation.*
 import app.daiyu.android.ui.screens.settings.*
@@ -2680,6 +2681,13 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { if (composerShortcutPick === pick) composerShortcutPick = null })
                 }
                 assistantSelectionOwner?.let { owner -> key(owner) {
+                val editAssistant = { id: String ->
+                    if (assistantOwnerMatches(owner) && retainedPage != "assistant-edit") {
+                        assistantEditReturnPage = retainedPage
+                        assistantEditReturnToSidebar = false
+                        assistantEditingId = id; retainedPage = "assistant-edit"
+                    }
+                }
                 AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
                         selectedId = owner.expectedAssistantId, useGlobalSelection = false,
                         editing = retainedPage == "assistant-edit",
@@ -2700,10 +2708,11 @@ class MainActivity : ComponentActivity() {
                             }
                             refresh()
                         } },
-                        onEdit = { id -> if(assistantOwnerMatches(owner) && allowTaskConfigurationChange()) {
-                            assistantEditReturnPage = retainedPage
-                            assistantEditReturnToSidebar = false
-                            assistantEditingId = id; retainedPage = "assistant-edit"
+                        onEdit = { id -> if (allowTaskConfigurationChange()) editAssistant(id) },
+                        onCreate = { guard {
+                            if (assistantOwnerMatches(owner) && retainedPage != "assistant-edit") {
+                                editAssistant(assistantStore.create().id)
+                            }
                         } },
                         onDismiss = { if(assistantSelectionOwner===owner) {
                             assistantPicker = false

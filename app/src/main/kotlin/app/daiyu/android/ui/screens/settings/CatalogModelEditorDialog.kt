@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.components.deletionButtonColors
+
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -74,7 +76,7 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                             Spacer(Modifier.height(12.dp))
                             TextButton("删除模型", enabled = enabled && canDelete,
                                 modifier = Modifier.fillMaxWidth().testTag("local-model-delete:${initial.id}"),
-                                colors = ButtonDefaults.textButtonColorsPrimary(color = colors.errorContainer, textColor = colors.onErrorContainer),
+                                colors = deletionButtonColors(),
                                 onClick = onDelete)
                         }
                         if (value.contextWindow.isNotBlank() && value.contextWindow.toIntOrNull()?.let { it > 0 } != true)

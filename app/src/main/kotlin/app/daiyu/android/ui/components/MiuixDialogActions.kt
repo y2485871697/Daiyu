@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components
 
+import app.daiyu.android.ui.app.destructiveColors
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -95,6 +97,6 @@ fun MiuixDialogActions(
 
 @Composable
 internal fun deletionButtonColors() = ButtonDefaults.textButtonColorsPrimary(
-    color = MiuixTheme.colorScheme.errorContainer,
-    textColor = MiuixTheme.colorScheme.onErrorContainer,
+    color = destructiveColors().container,
+    textColor = destructiveColors().content,
 )

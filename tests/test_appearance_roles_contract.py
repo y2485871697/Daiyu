@@ -70,8 +70,8 @@ class AppearanceRolesContractTest(unittest.TestCase):
 
     def test_settings_subagent_confirms_use_danger_containers_without_changing_menus(self):
         settings = source('ui/SubAgentSettingsScreen.kt')
-        self.assertEqual(2, settings.count('containerColor = MaterialTheme.colorScheme.errorContainer'))
-        self.assertEqual(2, settings.count('contentColor = MaterialTheme.colorScheme.onErrorContainer'))
+        self.assertEqual(2, settings.count('containerColor = destructiveColors().container'))
+        self.assertEqual(2, settings.count('contentColor = destructiveColors().content'))
         self.assertIn('repository.removePreset(preset.id)', settings)
         self.assertIn('editor.remove(profile.id)', settings)
 
@@ -81,8 +81,8 @@ class AppearanceRolesContractTest(unittest.TestCase):
         self.assertIn('deletion -> colors.dangerContainer', buttons)
         self.assertIn('deletion -> colors.onDangerContainer', buttons)
         dialogs = source('ui/components/MiuixDialogActions.kt')
-        self.assertIn('color = MiuixTheme.colorScheme.errorContainer', dialogs)
-        self.assertIn('textColor = MiuixTheme.colorScheme.onErrorContainer', dialogs)
+        self.assertIn('color = destructiveColors().container', dialogs)
+        self.assertIn('textColor = destructiveColors().content', dialogs)
         self.assertIn('else if (destructive)', dialogs)
         revoke = source('ui/screens/settings/WorkspaceSettingsScreen.kt')
         self.assertNotIn('deletionAppearance', revoke)
@@ -92,8 +92,8 @@ class AppearanceRolesContractTest(unittest.TestCase):
 
     def test_subagent_delete_is_explicit_and_disabled_guards_remain(self):
         dialog = source('ui/components/SubAgentProfileConfigDialog.kt')
-        for fragment in ('deletion = editing', 'primaryColor = MiuixTheme.colorScheme.errorContainer',
-                         'onPrimaryColor = MiuixTheme.colorScheme.onErrorContainer',
+        for fragment in ('deletion = editing', 'primaryColor = destructiveColors().container',
+                         'onPrimaryColor = destructiveColors().content',
                          'if (deletion) deletionButtonColors()', 'session.canDelete(latestEditor, latestEnabled)',
                          'session.canDelete(latestEditor, latestEnabled, ticket)'):
             self.assertIn(fragment, dialog)
@@ -103,8 +103,8 @@ class AppearanceRolesContractTest(unittest.TestCase):
                      'ui/screens/settings/GenerationSettingsScreen.kt'):
             self.assertIn('deletionButtonColors()', source(path))
         inline = source('ui/screens/settings/ProviderInlineEditors.kt')
-        self.assertIn('containerColor = MiuixTheme.colorScheme.errorContainer', inline)
-        self.assertIn('contentColor = MiuixTheme.colorScheme.onErrorContainer', inline)
+        self.assertIn('containerColor = destructiveColors().container', inline)
+        self.assertIn('contentColor = destructiveColors().content', inline)
         self.assertIn('tint = LocalContentColor.current', inline)
         for path in ('ui/screens/settings/LocalCatalogModelsScreen.kt', 'ui/screens/settings/McpSettingsScreen.kt',
                      'ui/screens/settings/PrivateWorkspacePanel.kt', 'ui/screens/chat/ManageChatsScreen.kt'):

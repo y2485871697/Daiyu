@@ -40,7 +40,7 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
         val assets = FileAssistantAssets(instrumentation.targetContext)
         show { dismiss ->
             AssistantPickerDialog(true, emptyList(), null, {}, {}, dismiss,
-                onCopy = {}, onDelete = {}, assets = assets)
+                onCopy = {}, onDelete = {}, onCreate = {}, assets = assets)
         }
         node("assistant-done").assertIsDisplayed().performClick()
         node("assistant-sheet").assertDoesNotExist()

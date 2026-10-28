@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.TextLayoutResult
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.ui.components.deletionButtonColors
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.settings.ProviderActionButton
 import app.daiyu.android.ui.screens.settings.ProviderSettingsTheme
@@ -127,8 +128,8 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                         ProviderSettingsTheme {
                             primary = MiuixTheme.colorScheme.primary
                             onPrimary = MiuixTheme.colorScheme.onPrimary
-                            deleteFill = MiuixTheme.colorScheme.errorContainer
-                            deleteText = MiuixTheme.colorScheme.onErrorContainer
+                            deleteFill = Color(0xFFE60012)
+                            deleteText = Color.White
                             key(dark, fontScale) {
                                 Box(Modifier.fillMaxSize().systemBarsPadding()) {
                                     Column(Modifier.width(250.dp).background(Color.Magenta).testTag("provider-action-host")) {
@@ -136,9 +137,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
                                             val buttonModifier = Modifier.testTag("provider-action:$index")
                                             if (index == titles.lastIndex) {
                                                 ProviderActionButton(title, { clicks[index]++ }, buttonModifier,
-                                                    enabled = enabled.value, colors = ButtonDefaults.textButtonColorsPrimary(
-                                                        color = MiuixTheme.colorScheme.errorContainer,
-                                                        textColor = MiuixTheme.colorScheme.onErrorContainer))
+                                                    enabled = enabled.value, colors = deletionButtonColors())
                                             } else {
                                                 ProviderActionButton(title, { clicks[index]++ }, buttonModifier, enabled = enabled.value)
                                             }

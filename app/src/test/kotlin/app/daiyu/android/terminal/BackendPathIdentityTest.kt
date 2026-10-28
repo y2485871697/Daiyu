@@ -100,7 +100,9 @@ class BackendPathIdentityTest {
         assertTrue(snapshot[2] is BackendPathIdentity.FileSystem)
         val identity = snapshot[2] as BackendPathIdentity.FileSystem
         assertEquals(workspace.toPath().toRealPath().toString(), identity.realPath)
-        assertEquals(Files.readAttributes(workspace.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java).fileKey().toString(), identity.key)
+        val attributes = Files.readAttributes(workspace.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java)
+        assertEquals(attributes.fileKey()?.toString(), identity.key)
+        assertEquals(attributes.creationTime(), identity.created)
         assertEquals(snapshot, BackendSelection.pathIdentities(files, chroot = true) { "trusted" })
     }
 
@@ -109,6 +111,15 @@ class BackendPathIdentityTest {
         val first = BackendSelection.pathIdentities(listOf(file), chroot = true) { error("not a transport") }
         val replacement = temporary.newFile("replacement")
         Files.move(replacement.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        val originalIdentity = first.single() as BackendPathIdentity.FileSystem
+        val replaced = Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java)
+        if (originalIdentity.key == null && replaced.fileKey() == null) {
+            val replacementCreated = java.nio.file.attribute.FileTime.fromMillis(originalIdentity.created.toMillis() + 86_400_000L)
+            Files.getFileAttributeView(file.toPath(), java.nio.file.attribute.BasicFileAttributeView::class.java)
+                .setTimes(null, null, replacementCreated)
+            assertEquals(replacementCreated,
+                Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java).creationTime())
+        }
         assertNotEquals(first, BackendSelection.pathIdentities(listOf(file), chroot = true) { error("not a transport") })
     }
 

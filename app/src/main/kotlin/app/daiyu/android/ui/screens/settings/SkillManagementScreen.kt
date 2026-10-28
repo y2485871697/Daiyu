@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import app.daiyu.android.ui.app.destructiveColors
+
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import app.daiyu.android.ui.app.DaiyuPalette
@@ -524,7 +526,7 @@ private fun SkillSheet(title: String, onDismiss: () -> Unit, content: @Composabl
 private fun SkillActionButton(text: String, onClick: () -> Unit, enabled: Boolean = true,
     primary: Boolean = false, modifier: Modifier = Modifier, deletionAppearance: Boolean = false) {
     if (deletionAppearance) ConversationAgentButton(text, enabled = enabled, primary = true, onClick = onClick,
-        primaryColor = MiuixTheme.colorScheme.errorContainer, onPrimaryColor = MiuixTheme.colorScheme.onErrorContainer,
+        primaryColor = destructiveColors().container, onPrimaryColor = destructiveColors().content,
         modifier = modifier.heightIn(min = 48.dp))
     else ConversationAgentButton(text, enabled = enabled, primary = primary, onClick = onClick,
         modifier = modifier.heightIn(min = 48.dp))

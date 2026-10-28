@@ -6938,7 +6938,6 @@ class MainActivity : ComponentActivity() {
                 loaded.isFailure -> "本地模型目录读取失败，请关闭后重新打开或到模型设置核对"
                 result?.activeEditor != null && saved == null -> "当前提供商凭据或配置不可用，请到模型设置修复"
                 result?.choices.isNullOrEmpty() -> "尚无可用提供商，请到模型设置保存或启用"
-                result?.activeEditor == null -> "请选择本地目录中的模型"
                 else -> null
             }
             chatModelPicker = (session?.state ?: ChatModelPickerState("", emptyList()))

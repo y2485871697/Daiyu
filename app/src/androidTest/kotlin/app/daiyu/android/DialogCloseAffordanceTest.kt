@@ -51,7 +51,7 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
         show { dismiss ->
             ChatModelPicker(ChatModelPickerState("", emptyList()), {}, dismiss)
         }
-        for (text in listOf("模型设置", "刷新", "取消", "当前供应商 · 本地目录", "暂无可选模型")) {
+        for (text in listOf("模型设置", "刷新", "取消", "当前供应商 · 本地目录", "暂无可选模型", "请选择本地目录中的模型")) {
             ui.onNodeWithText(text).assertDoesNotExist()
         }
         awaitNodeWindowFocus(node("chat-model-picker"))

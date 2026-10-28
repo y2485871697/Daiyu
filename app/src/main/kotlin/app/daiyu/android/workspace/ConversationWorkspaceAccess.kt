@@ -41,33 +41,16 @@ internal class ConversationWorkspaceAccess(private val context: Context,
             ConversationWorkspaceSource(source, "Rootfs 不可用", "", path)
         return ConversationWorkspaceEditor(raw, displayed, source, path)
     }
-    fun binding(sourceId: String, path: String): ConversationWorkspaceBinding {
-        val trimmed = path.trim()
-        return if (sourceId == "private") {
-            val default = java.io.File(context.filesDir, "workspace").absolutePath
-            ConversationWorkspaceBinding.Private(trimmed.takeUnless { it == default })
-        } else {
-            val root = roots().firstOrNull { sourceId(it) == sourceId } ?: error("workspace_rootfs_changed")
-            ConversationWorkspaceBinding.Rootfs(root.environmentId, root.generation, trimmed)
-        }
-    }
+    fun binding(sourceId: String, path: String): ConversationWorkspaceBinding =
+        ConversationWorkspaceSelection(context.filesDir).binding(sourceId, path)
+
     fun directory(sourceId: String, path: String): ConversationWorkspaceDirectory {
-        val storage = context.filesDir.canonicalFile
-        if (sourceId == "private" && path in listOf(context.filesDir.absolutePath, storage.path)) {
-            val files = PrivateWorkspaceFiles(PrivateWorkspacePaths.storageRoot(context.filesDir))
-            return ConversationWorkspaceDirectory(storage.path, null, files.directoryNames(), selectable = false)
-        }
-        val raw = ConversationWorkspaceCodec.encode(binding(sourceId, path))
+        val selection = ConversationWorkspaceSelection(context.filesDir)
+        val raw = ConversationWorkspaceCodec.encode(selection.binding(sourceId, path))
         return freeze(raw).use { run ->
-            val resolved = run.resolved
-            val host = resolved.hostDirectory
-            val guest = resolved.guestDirectory
-            val current = guest ?: host.path
-            val parent = if (guest == "/") null else if (guest != null) {
-                guest.substringBeforeLast('/', "").ifEmpty { "/" }
-            } else checkNotNull(host.parentFile).path
+            val host = run.resolved.hostDirectory
             val files = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(context.filesDir, host))
-            ConversationWorkspaceDirectory(current, parent, files.directoryNames())
+            ConversationWorkspaceDirectory(host.path, selection.parentPath(host), files.directoryNames())
         }
     }
 

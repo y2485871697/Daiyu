@@ -1773,7 +1773,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun browseConversationWorkspace(visit: WorkspaceVisit, source: String = visit.source, path: String = visit.path) {
         if (!workspaceCurrent(visit) || workspaceVisit !== visit || visit.busy || visit.listing) return
-        val loading = visit.copy(choosing = true, listing = true, error = null)
+        val loading = visit.copy(source = source, path = path, choosing = true, listing = true, error = null)
         workspaceVisit = loading
         lifecycleScope.launch {
             try {
@@ -1809,9 +1809,9 @@ class MainActivity : ComponentActivity() {
             } catch (failure: Exception) {
                 when (failure.message) {
                     "workspace_rootfs_changed" -> "Rootfs 已更换或不可用，请重新选择"
-                    "workspace_private_root_required" -> "请选择应用私有目录中的路径"
-                    "workspace_symlink_not_supported" -> "工作区不支持符号链接，请填写实际目录"
-                    else -> "工作区路径不可用，请填写已存在的目录"
+                    "workspace_private_root_required", "workspace_selection_root_required" -> "只能选择工作区及其子目录"
+                    "workspace_symlink_not_supported" -> "工作区不支持符号链接，请选择实际目录"
+                    else -> "工作区路径不可用，请选择已存在的目录"
                 }
             }
             if (workspaceCurrent(visit)) {
@@ -2664,23 +2664,14 @@ class MainActivity : ComponentActivity() {
                 workspaceVisit?.let { visit ->
                     if (workspaceCurrent(visit)) {
                         app.daiyu.android.ui.components.ConversationWorkspaceSheet(
-                            visible = true, sources = visit.editor.sources.map {
-                                app.daiyu.android.ui.components.WorkspaceSourceOption(it.id, it.title, it.rootPath, it.initialPath)
-                            }, path = visit.path, busy = visit.busy, error = visit.error,
+                            visible = true, path = visit.path, busy = visit.busy, error = visit.error,
                             choosing = visit.choosing, listing = visit.listing,
                             directory = visit.directory?.let { directory ->
                                 app.daiyu.android.ui.components.WorkspaceDirectoryOption(directory.path, directory.parentPath,
                                     directory.folders, directory.selectable)
                             },
-                            onBrowse = { browseConversationWorkspace(visit) },
-                            onSourceChange = { source ->
-                                visit.editor.sources.firstOrNull { it.id == source }?.let { option ->
-                                    browseConversationWorkspace(visit, source, option.initialPath)
-                                }
-                            }, onNavigate = { path -> browseConversationWorkspace(visit, path = path) },
-                            onSources = { if (!visit.busy && !visit.listing && workspaceVisit === visit && workspaceCurrent(visit)) {
-                                workspaceVisit = visit.copy(directory = null, error = null)
-                            } }, onCancel = { cancelWorkspaceSelection(visit) },
+                            onBrowse = { browseConversationWorkspace(visit, "private", java.io.File(filesDir, "workspace").absolutePath) },
+                            onNavigate = { path -> browseConversationWorkspace(visit, path = path) }, onCancel = { cancelWorkspaceSelection(visit) },
                             onSave = { saveConversationWorkspace(visit) },
                             onDismiss = { if (workspaceVisit?.token === visit.token) revokeWorkspaceVisit() })
                     } else LaunchedEffect(visit.token) { if (workspaceVisit?.token === visit.token) workspaceVisit = null }

@@ -23,7 +23,6 @@ import app.daiyu.android.ui.app.resolveAppearanceActions
 import kotlin.math.abs
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.ConversationWorkspaceSheet
-import app.daiyu.android.ui.components.WorkspaceSourceOption
 import app.daiyu.android.ui.screens.chat.conversation.*
 
 class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
@@ -35,7 +34,6 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
     private var dismisses = 0
     private var visible by mutableStateOf(true)
     private var busy by mutableStateOf(false)
-    private var sourceId by mutableStateOf("private")
     private var path by mutableStateOf("/private/workspace")
 
     private var composerDraft by mutableStateOf("可选择的正文\n第二行\n第三行\n第四行\n第五行\n第六行\n第七行")
@@ -244,22 +242,18 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
     private fun setDirectory(next: String) {
         path = next
         directory = app.daiyu.android.ui.components.WorkspaceDirectoryOption(next,
-            if (next == "/") null else next.substringBeforeLast('/').ifEmpty { "/" }, listOf("项目 空格", "second"))
+            if (next == original) null else next.substringBeforeLast('/').ifEmpty { "/" }, listOf("项目 空格", "second"))
     }
 
     private fun showSheet(appearance: AppearanceSettings = AppearanceSettings()) {
         mainThread { activity.setContent {
             AgentAppTheme(appearance, applyInterfaceScale = false) {
                 ConversationWorkspaceSheet(visible = visible,
-                    sources = listOf(
-                        WorkspaceSourceOption("private", "应用私有", "/private", original),
-                        WorkspaceSourceOption("rootfs", "rootfs", "/approved/rootfs", "/")),
                     path = path, busy = busy, choosing = choosing, listing = listing,
                     directory = directory, error = if (choosing) "路径不可用" else null,
                     onBrowse = { choosing = true; setDirectory(path) },
-                    onSourceChange = { sourceId = it; setDirectory(if (it == "rootfs") "/" else original) },
-                    onNavigate = { setDirectory(it) }, onSources = { directory = null },
-                    onCancel = { choosing = false; sourceId = "private"; path = original; directory = null },
+                    onNavigate = { setDirectory(it) },
+                    onCancel = { choosing = false; path = original; directory = null },
                     onSave = { saves++ }, onDismiss = { dismisses++; visible = false })
             }
         } }
@@ -286,15 +280,22 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("conversation-workspace-sheet").assertExists()
     }
 
-    fun testCancelRestoresCardAndSourceRootCanSelectRootfs() {
+    fun testWorkspaceRootStopsParentNavigationAndCancelKeepsBinding() {
         showSheet()
         node("workspace-path-card").performClick()
+        node("workspace-parent").assertIsNotEnabled()
+        node("workspace-save").assertIsEnabled()
+        node("workspace-source:rootfs").assertDoesNotExist()
+        node("workspace-folder:项目 空格").performClick()
+        node("workspace-parent").assertIsEnabled()
+        node("workspace-current-path").assertTextEquals("$original/项目 空格")
+        node("workspace-parent").performClick()
+        node("workspace-current-path").assertTextEquals(original)
+        node("workspace-parent").assertIsNotEnabled()
         ui.runOnIdle { directory = null }
         node("workspace-save").assertIsNotEnabled()
-        node("workspace-source:rootfs").performClick()
-        node("workspace-current-path").assertTextEquals("/")
-        node("workspace-folder:项目 空格").performClick()
-        node("workspace-current-path").assertTextEquals("/项目 空格")
+        node("workspace-parent").assertIsNotEnabled()
+        node("workspace-source:rootfs").assertDoesNotExist()
         node("workspace-cancel").performClick()
         node("workspace-path-card").assertExists()
         node("workspace-save").assertDoesNotExist()
@@ -402,8 +403,8 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         visible = false
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                ConversationWorkspaceSheet(false, emptyList(), "", onBrowse = {}, onSourceChange = {},
-                    onNavigate = {}, onSources = {}, onCancel = {},
+                ConversationWorkspaceSheet(false, "", onBrowse = {},
+                    onNavigate = {}, onCancel = {},
                     onSave = { saves++ }, onDismiss = { dismisses++ })
             }
         } }

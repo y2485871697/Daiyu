@@ -22,13 +22,19 @@ class ConversationWorkspaceDirectoryDeviceTest : InstrumentationTestCase() {
         File(root, "file.txt").writeText("not a folder")
         val listing = access.directory("private", root.path)
         assertTrue(Files.isSameFile(root.toPath(), File(listing.path).toPath()))
-        assertTrue(Files.isSameFile(storage.toPath(), File(checkNotNull(listing.parentPath)).toPath()))
+        assertNull(listing.parentPath)
         assertEquals(listOf("项目 空格"), listing.folders)
         assertTrue(listing.selectable)
         assertNull(access.editor(null).binding)
         assertEquals(root.path, access.editor(null).path)
-        assertFalse(access.directory("private", storage.path).selectable)
-        assertNull(access.directory("private", storage.path).parentPath)
+        val child = access.directory("private", File(root, "项目 空格").path)
+        assertTrue(Files.isSameFile(root.toPath(), File(checkNotNull(child.parentPath)).toPath()))
+        assertNull(access.directory("private", checkNotNull(child.parentPath)).parentPath)
+        try { access.directory("private", storage.path); fail("parent must not be browsed") }
+        catch (expected: IllegalArgumentException) { assertEquals("workspace_private_root_required", expected.message) }
+        val sibling = File(storage, "workspace-other").apply { mkdir() }
+        try { access.directory("private", sibling.path); fail("prefix sibling must not be browsed") }
+        catch (expected: IllegalArgumentException) { assertEquals("workspace_selection_root_required", expected.message) }
     }
 
     fun testFolderListingDoesNotSilentlyStopAfterOneHundredFiles() = fixture { storage, access ->
@@ -51,6 +57,33 @@ class ConversationWorkspaceDirectoryDeviceTest : InstrumentationTestCase() {
         try { access.directory("private", storage.parentFile.path); fail("outside root must be rejected") }
         catch (expected: IllegalArgumentException) { assertEquals("workspace_private_root_required", expected.message) }
         try { access.directory("missing:generation", "/"); fail("unapproved rootfs must not fall back") }
-        catch (expected: IllegalStateException) { assertEquals("workspace_rootfs_changed", expected.message) }
+        catch (expected: IllegalArgumentException) { assertEquals("workspace_selection_root_required", expected.message) }
     }
+
+    fun testConfirmationRechecksSelectionAfterDirectoryReplacement() = fixture { storage, access ->
+        val root = File(storage, "workspace").apply { mkdir() }
+        val child = File(root, "child").apply { mkdir() }
+        val outside = File(storage, "outside").apply { mkdir() }
+        access.directory("private", child.path)
+        assertTrue(child.delete())
+        Files.createSymbolicLink(child.toPath(), outside.toPath())
+        try { access.binding("private", child.path); fail("confirmation must reject replaced directory") }
+        catch (expected: IllegalStateException) { assertEquals("workspace_symlink_not_supported", expected.message) }
+        assertNull(access.editor(null).binding)
+    }
+
+
+    fun testFirstBrowseCreatesOnlySelectableWorkspaceRoot() = fixture { storage, access ->
+        val root = File(storage, "workspace")
+        assertFalse(root.exists())
+        val listing = access.directory("private", root.path)
+        assertTrue(Files.isSameFile(root.toPath(), File(listing.path).toPath()))
+        assertTrue(listing.selectable)
+        assertNull(listing.parentPath)
+        assertTrue(listing.folders.isEmpty())
+        assertEquals(ConversationWorkspaceBinding.Private(), access.binding("private", listing.path))
+        assertNull(access.editor(null).binding)
+        assertEquals(listOf("workspace"), storage.list()!!.toList())
+    }
+
 }

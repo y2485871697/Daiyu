@@ -20,7 +20,9 @@ class ConversationWorkspaceSourceTest {
         assertFalse(source.contains("MiuixTheme.colorScheme"))
         assertTrue(source.contains("onClick = onSave"))
         assertTrue(source.contains("onClick = onCancel"))
-        assertTrue(source.contains("onSourceChange(source.id)"))
+        assertFalse(source.contains("onSourceChange"))
+        assertFalse(source.contains("onSources"))
+        assertTrue(source.contains("!busy && !listing && directory?.parentPath != null"))
         assertTrue(source.contains("primaryColor = actions.secondaryContainer, onPrimaryColor = actions.onSecondary"))
         assertTrue(source.contains("primaryColor = actions.primary, onPrimaryColor = actions.onPrimary"))
         for (forbidden in listOf("java.io", "java.nio", "LocalContext", "filesDir", "SharedPreferences",

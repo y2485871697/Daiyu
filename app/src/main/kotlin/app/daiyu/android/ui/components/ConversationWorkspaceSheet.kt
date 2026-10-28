@@ -36,14 +36,12 @@ import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.resolveAppearanceActions
 
 /** Display-only metadata; filesystem access and the draft belong to the conversation owner. */
-data class WorkspaceSourceOption(val id: String, val title: String, val rootPath: String, val initialPath: String)
 data class WorkspaceDirectoryOption(val path: String, val parentPath: String?, val folders: List<String>,
     val selectable: Boolean = true)
 
 @Composable
 fun ConversationWorkspaceSheet(
     visible: Boolean,
-    sources: List<WorkspaceSourceOption>,
     path: String,
     busy: Boolean = false,
     error: String? = null,
@@ -51,9 +49,7 @@ fun ConversationWorkspaceSheet(
     listing: Boolean = false,
     directory: WorkspaceDirectoryOption? = null,
     onBrowse: () -> Unit,
-    onSourceChange: (String) -> Unit,
     onNavigate: (String) -> Unit,
-    onSources: () -> Unit,
     onCancel: () -> Unit,
     onSave: () -> Unit,
     onDismiss: () -> Unit,
@@ -86,12 +82,12 @@ fun ConversationWorkspaceSheet(
                         }
                     } else {
                         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ConversationAgentIconButton(enabled = !busy && !listing,
-                                onClick = { directory?.parentPath?.let(onNavigate) ?: onSources() },
+                            ConversationAgentIconButton(enabled = !busy && !listing && directory?.parentPath != null,
+                                onClick = { directory?.parentPath?.let(onNavigate) },
                                 modifier = Modifier.size(48.dp).testTag("workspace-parent")) {
                                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "上一级", tint = colors.accent)
                             }
-                            Text(directory?.path ?: "/", style = MaterialTheme.typography.bodyMedium,
+                            Text(directory?.path ?: path, style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.weight(1f).testTag("workspace-current-path"), maxLines = 2,
                                 overflow = TextOverflow.Ellipsis)
                         }
@@ -101,12 +97,7 @@ fun ConversationWorkspaceSheet(
                                 CircularProgressIndicator(Modifier.size(28.dp).align(Alignment.Center), color = colors.accent)
                             } else {
                                 LazyColumn(Modifier.fillMaxSize().testTag("workspace-directories")) {
-                                    if (directory == null) {
-                                        items(sources, key = { it.id }) { source ->
-                                            WorkspaceFolderRow(source.title, "workspace-source:${source.id}", !busy,
-                                                onClick = { onSourceChange(source.id) })
-                                        }
-                                    } else {
+                                    if (directory != null) {
                                         items(directory.folders, key = { it }) { name ->
                                             WorkspaceFolderRow(name, "workspace-folder:$name", !busy,
                                                 onClick = { onNavigate(directory.path.trimEnd('/') + "/" + name) })

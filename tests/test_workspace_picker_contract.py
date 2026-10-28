@@ -65,14 +65,14 @@ class WorkspacePickerContract(unittest.TestCase):
         self.assertIn('directory = loading.directory?.copy(selectable = false)', failure)
         self.assertIn('visit.directory?.selectable != true', main)
 
-    def test_browser_keeps_approved_host_guest_and_pins(self):
+    def test_browser_stays_within_workspace_and_keeps_pinned_listing(self):
         access = self.text('workspace/ConversationWorkspaceAccess.kt')
         directory = access.split('fun directory(', 1)[1].split('fun resolve(', 1)[0]
         self.assertIn('freeze(raw).use', directory)
-        self.assertIn('resolved.guestDirectory', directory)
-        self.assertIn('selectable = false', directory)
+        self.assertIn('selection.binding(sourceId, path)', directory)
+        self.assertIn('selection.parentPath(host)', directory)
         self.assertIn('files.directoryNames()', directory)
-        self.assertIn('PrivateWorkspacePaths.storageRoot(context.filesDir)', directory)
+        self.assertNotIn('storageRoot', directory)
         self.assertIn('conversationWorkspaces.directory(source, path)', self.text('ChatController.kt'))
 
     def test_listing_reuses_pinned_no_follow_without_old_scan_limit(self):

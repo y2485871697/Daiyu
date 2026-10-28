@@ -159,4 +159,43 @@ class ProviderRegistryTest {
             assertEquals(2, actual.providers.size)
         } finally { workers.shutdownNow() }
     }
+    @Test fun canonicalAliasesShareChangeSignalsButDifferentFilesDoNot() {
+        val file = stateFile()
+        val writer = ProviderRegistry(file)
+        writer.snapshot()
+        val reader = ProviderRegistry(File(file.parentFile, "../registry/state.bin"))
+        val unrelated = ProviderRegistry(File(temporary.root, "other/state.bin"))
+        val before = reader.changesFlow.value
+        val unrelatedBefore = unrelated.changesFlow.value
+        writer.change(0) { it.copy(providers = it.providers + provider()) }
+        assertEquals(before + 1, reader.changesFlow.value)
+        assertEquals(writer.snapshot(), reader.snapshot())
+        assertEquals(unrelatedBefore, unrelated.changesFlow.value)
+    }
+
+    @Test fun sameIdsStillNotifyForEnableChangesAndExplicitConfigurationEdits() {
+        val registry = ProviderRegistry(stateFile())
+        val before = registry.snapshot()
+        val signal = registry.changesFlow.value
+        registry.change(before.revision) { it.copy(activeSlotId = null,
+            providers = it.providers.map { provider -> provider.copy(enabled = false) }) }
+        assertEquals(before.providers.map { it.slotId }, registry.snapshot().providers.map { it.slotId })
+        assertTrue(registry.changesFlow.value > signal)
+        val disabledSignal = registry.changesFlow.value
+        val revision = registry.snapshot().revision
+        registry.notifyChanged()
+        assertEquals(disabledSignal + 1, registry.changesFlow.value)
+        assertEquals(revision, registry.snapshot().revision)
+    }
+
+    @Test fun rejectedUpdatesDoNotNotifySubscribers() {
+        val registry = ProviderRegistry(stateFile())
+        registry.snapshot()
+        val signal = registry.changesFlow.value
+        rejects<StaleProviderRegistryException> { registry.change(1) { it } }
+        rejects<IllegalArgumentException> { registry.change(0) { it.copy(activeSlotId = "missing") } }
+        rejects<IllegalStateException> { registry.change(0) { error("admission rejected") } }
+        assertEquals(signal, registry.changesFlow.value)
+    }
+
 }

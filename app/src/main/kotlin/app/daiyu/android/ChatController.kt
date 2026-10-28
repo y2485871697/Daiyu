@@ -933,6 +933,7 @@ class ChatController internal constructor(private val application:Application,
         val lifetime = synchronized(this) {
             resources?.takeIf { it.runner === entry.runner }?.also { fenceRun(it) }
         }
+        lifetime?.let(::refreshBalancesAfterStreaming)
         entry.runner?.stop()
         entry.catalog?.close()
         if (lifetime != null) handler.post { synchronized(this) { cleanupRun(lifetime) } }
@@ -1587,6 +1588,7 @@ class ChatController internal constructor(private val application:Application,
         val auxiliary: ControllerAuxiliaryVision? = null,
         val summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null,
         val provider: ProviderSnapshot, val modelBinding: Pair<String, String>? = null) {
+        var balanceRefreshRequested = false
         var browserVisual: ControllerBrowserVisual? = null
         var reconnectNotice: String? = null
         var childrenPauseRequested = false
@@ -4069,6 +4071,8 @@ class ChatController internal constructor(private val application:Application,
                     if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
                         it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {
                         val before = checkNotNull(active)
+                        if (before.status == RunStatus.RUNNING && it.status != RunStatus.RUNNING)
+                            resources?.let(::refreshBalancesAfterStreaming)
                         active=it;notifyChanged()
                         before
                     } else null
@@ -4277,6 +4281,7 @@ class ChatController internal constructor(private val application:Application,
                             lifetime.waiting=false
                             lifetime.result=(active ?: lifetime.initial).copy(error="保存失败，运行已停止；原检查点保留，重新打开后仅恢复历史")
                             problem=lifetime.result?.error
+                            refreshBalancesAfterStreaming(lifetime)
                             fenceRun(lifetime)
                             handler.post {lifetime.runner.stop()}
                         }
@@ -4330,11 +4335,19 @@ class ChatController internal constructor(private val application:Application,
         if(!accepted) stopRun(lifetime)
         notifyChanged()
     }
+    private fun refreshBalancesAfterStreaming(lifetime: RunResources) {
+        val refresh = synchronized(this) {
+            if (closed || resources !== lifetime || lifetime.balanceRefreshRequested) false
+            else { lifetime.balanceRefreshRequested = true; true }
+        }
+        if (refresh) providerBalances.requestRefresh()
+    }
     private fun stopRun(lifetime:RunResources) {
         synchronized(this) {
             if (resources !== lifetime) return
             fenceRun(lifetime)
         }
+        refreshBalancesAfterStreaming(lifetime)
         handler.post {
             lifetime.auxiliary?.cancel()
             lifetime.runner.stop()
@@ -4685,7 +4698,9 @@ class ChatController internal constructor(private val application:Application,
             if (balance != null) providers.withEditor(providers.editor(editor.slotId)) {
                 owner.commit {
                     check(balance.store.configurationForEditing() == expectedBalanceConfiguration) { "余额配置已变化" }
-                    if (balanceConfiguration != null) balance.store.save(balanceConfiguration) else balance.store.clear()
+                    if (balanceConfiguration != expectedBalanceConfiguration) kotlinx.coroutines.runBlocking {
+                        if (balanceConfiguration != null) balance.save(balanceConfiguration) else balance.clear()
+                    }
                 }
             }
             try { providers.catalogSnapshot(providers.editor(editor.slotId)); null }
@@ -5309,6 +5324,7 @@ class ChatController internal constructor(private val application:Application,
                 fenceRun(lifetime)
             }
         } ?: return false
+        refreshBalancesAfterStreaming(lifetime)
         lifetime.runner.stop()
         lifetime.auxiliary?.cancel()
         browserChildrenChanged()
@@ -5323,6 +5339,7 @@ class ChatController internal constructor(private val application:Application,
                 it.initial.conversationId==owner.conversationId && owner.role==Message.ASSISTANT_ROLE}
                 ?.also {fenceRun(it)}
         } ?: return false
+        refreshBalancesAfterStreaming(lifetime)
         lifetime.auxiliary?.cancel()
         synchronized(this) { browserChildren.filter { it.parent.identity.runId == owner.runId }.toList() }
             .forEach { it.close() }
@@ -5342,6 +5359,7 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) {pendingPlatformAction}?.let(::rejectPlatformAction)
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         val lifetime=synchronized(this) {resources?.also {fenceRun(it)}} ?: return
+        refreshBalancesAfterStreaming(lifetime)
         lifetime.auxiliary?.cancel()
         lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}

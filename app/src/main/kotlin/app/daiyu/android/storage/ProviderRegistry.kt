@@ -12,6 +12,9 @@ import java.nio.file.StandardCopyOption
 import java.util.Collections
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 internal data class RegisteredProvider(val slotId: String, val name: String, val enabled: Boolean)
 internal data class ProviderRegistrySnapshot(
@@ -27,6 +30,10 @@ internal class ProviderRegistry(file: File) {
     private val file = file.canonicalFile
     private val monitor = monitors.computeIfAbsent(this.file.path) { Any() }
 
+    private val notifications = changes.computeIfAbsent(this.file.path) { MutableStateFlow(0L) }
+    internal val changesFlow get() = notifications.asStateFlow()
+    internal fun notifyChanged() { notifications.update { it + 1 } }
+
     fun snapshot(): ProviderRegistrySnapshot = access { it }
     internal fun <T> access(block: (ProviderRegistrySnapshot) -> T): T = exclusive { block(readOrCreate()) }
     internal fun change(expectedRevision: Long,
@@ -38,6 +45,7 @@ internal class ProviderRegistry(file: File) {
         val next = freeze(update(old).copy(revision = old.revision + 1))
         validate(next)
         write(next)
+        notifyChanged()
         next
     }
     private fun readOrCreate(): ProviderRegistrySnapshot {
@@ -106,6 +114,7 @@ internal class ProviderRegistry(file: File) {
         private const val VERSION = 1
         private const val MAX_PROVIDERS = 64
         private const val MAX_BYTES = 64 * 1024
+        private val changes = ConcurrentHashMap<String, MutableStateFlow<Long>>()
         private val monitors = ConcurrentHashMap<String, Any>()
         private val heldPaths = ThreadLocal.withInitial { mutableSetOf<String>() }
         internal fun validSlotId(value: String): Boolean = value == PRIMARY ||

@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real MainActivity/settings/back/composer wiring with a process-owned, isolated in-memory P05
  * host. No user balance namespace, Keystore, real network or paid model API is used by this fixture.
- * System backgrounding deliberately leaves settings composed: cancellation must be ON_STOP based.
+ * The settings manual-query owner still cancels on ON_STOP; the app-wide coordinator remains active.
  */
 class BalanceProductionActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
@@ -186,7 +186,7 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
             stopped
         }
         assertEquals("CNY 12.34", runtime.state.value.project().balanceText)
-        assertFalse(runtime.isPolling)
+        assertTrue(testHost.isPolling)
         hold.set(false)
         fail.set(true)
         mainThread {

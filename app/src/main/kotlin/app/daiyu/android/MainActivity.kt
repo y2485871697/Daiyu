@@ -138,7 +138,6 @@ internal val RetainedPausedResumeAction = androidx.compose.ui.semantics.Semantic
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
     private var balanceRuntime by mutableStateOf<app.daiyu.android.balance.BalanceRuntime?>(null)
-    private var balanceLifecycles: Map<String, Pair<app.daiyu.android.balance.BalanceRuntime, app.daiyu.android.balance.BalanceLifecycleBinding>> = emptyMap()
     private val pets get() = (application as ChatApplication).pets
     private val openPetSettings: () -> Unit = {
         if (activityUsable()) { dismissSidebar(); retainedPage = "pet-settings" }
@@ -1963,6 +1962,8 @@ class MainActivity : ComponentActivity() {
             else -> ChatMenuAction.VOICE_INPUT
         }
         refreshAutomaticCompression()
+        controller.providerBalances.start(lifecycleScope, controller.providers::providerIdsFlow,
+            { controller.providers.snapshot().providers.map { it.slotId } })
         refreshConfirmedModelLabel()
         nextBrowserSaveRequestCode = state?.getInt("browser-save-next", 14000) ?: 14000
         if (state?.getBoolean("balance-page", false) == true) retainedPageState = "balance-settings"
@@ -5391,6 +5392,7 @@ class MainActivity : ComponentActivity() {
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
         contextManagementEntryEpoch++
         browserVisualEpoch++
+        controller.providerBalances.onResume(lifecycleScope, android.os.SystemClock.uptimeMillis())
         if (retainedPage == "chat") refreshConfirmedModelLabel()
         if (selectionReady) publishChat() // Re-arm foreground read confirmation; never acknowledge on background refresh.
         prepareMessageActionSnapshot()
@@ -5586,7 +5588,6 @@ class MainActivity : ComponentActivity() {
         reconnectSettingsPageOwner = null
         gatewayOwner?.revoke(); gatewayOwner = null
         gatewayEditing = null; gatewayProviderEditor = null; gatewayDraft = null
-        balanceLifecycles.values.forEach { it.second.close() }; balanceLifecycles = emptyMap()
         cancelGuiEditor()
         fenceVideoRoute()
         controller.detachVideoUi(videoUi)
@@ -6675,19 +6676,14 @@ class MainActivity : ComponentActivity() {
         balanceRuntime = null
         lifecycleScope.launch {
             val loaded = withContext(Dispatchers.IO) {
-                val runtimes = runCatching { controller.providers.snapshot().providers.filter { it.enabled } }
-                    .getOrDefault(emptyList()).mapNotNull { provider ->
-                        runCatching { provider.slotId to controller.providerBalances.get(provider.slotId) }.getOrNull()
-                    }.toMap()
-                val saved = runCatching {
+                runCatching {
                     val editor = controller.providers.activeEditor()
                     val runtime = controller.providerBalances.get(editor.slotId)
                     val editing = controller.providers.withEditor(editor) { it.loadForEditing() }
                     Triple(editor, editing, runtime)
                 }.getOrNull()
-                saved to runtimes
             }
-            val saved = loaded.first
+            val saved = loaded
             if (activityUsable() && modelLabelRead === request) {
                 confirmedModelLabel = saved?.second?.settings?.model?.ifBlank { "模型" } ?: "模型"
                 confirmedReasoningModel = saved?.second?.settings?.let {
@@ -6697,12 +6693,6 @@ class MainActivity : ComponentActivity() {
                 publishChat(rowsChanged = false)
                 contextModelRevision++
                 balanceRuntime = saved?.third
-                balanceLifecycles.filter { (slot, binding) -> loaded.second[slot] !== binding.first }
-                    .values.forEach { it.second.close() }
-                balanceLifecycles = loaded.second.mapValues { (slot, runtime) ->
-                    balanceLifecycles[slot]?.takeIf { it.first === runtime } ?: (runtime to
-                        app.daiyu.android.balance.BalanceLifecycleBinding(lifecycle, lifecycleScope, runtime, poll = true))
-                }
             }
         }
     }
@@ -6736,7 +6726,7 @@ class MainActivity : ComponentActivity() {
     private fun openChatModels() {
         requireActivityUsable()
         dismissChatModels()
-        balanceLifecycles.values.forEach { it.second.requestRefresh() }
+        controller.providerBalances.requestRefresh(lifecycleScope)
         val owner = Any(); chatModelOwner = owner
         reloadChatModels(owner)
     }

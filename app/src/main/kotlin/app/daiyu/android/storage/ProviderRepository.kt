@@ -5,6 +5,7 @@ import app.daiyu.android.model.catalog.*
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.flow.map
 
 internal data class ProviderEditorSlot(val slotId: String, val registryRevision: Long)
 internal data class ProviderRunConfiguration(val editor: ProviderEditorSlot, val settings: ModelSettings, val configurationRevision: Long = -1,
@@ -21,6 +22,8 @@ internal class ProviderRepository(
     constructor(context: Context, primary: ModelSettingsStore = ModelSettingsStore(context)) : this(
         ProviderRegistry(File(context.filesDir, "provider-registry/state-v1.bin")), stores(context, primary))
     fun snapshot() = registry.snapshot()
+    // Configuration edits must re-emit even when the provider IDs have not changed.
+    fun providerIdsFlow() = registry.changesFlow.map { snapshot().providers.map { it.slotId } }
     fun register(expectedRevision: Long, name: String, admit: () -> Unit = {}) = registry.change(expectedRevision) { old ->
         admit(); ProviderRegistry.requireValidName(name)
         val id = UUID.randomUUID().toString()
@@ -113,7 +116,7 @@ internal class ProviderRepository(
             if (updated != provider) registry.change(state.revision) { old ->
                 old.copy(providers = old.providers.map { if (it.slotId == editor.slotId) updated else it },
                     activeSlotId = old.activeSlotId.takeUnless { !updated.enabled && it == editor.slotId })
-            }
+            } else registry.notifyChanged()
         }
     }
     fun catalogSnapshot(editor: ProviderEditorSlot): SavedModelCatalogSnapshot<CatalogModelParameters> =

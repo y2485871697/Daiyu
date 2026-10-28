@@ -4,15 +4,8 @@ import android.content.Context
 import app.daiyu.android.storage.ProviderRegistry
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
 
 /** Stable provider slots own independent encrypted records; names and chat keys are not identities. */
 internal class ProviderBalanceRuntimeHost(
@@ -25,8 +18,7 @@ internal class ProviderBalanceRuntimeHost(
     private val lifecycleLock = Any()
     private var closed = false
     private val removing = mutableSetOf<String>()
-    private val synchronizationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val synchronizationJobs = ConcurrentHashMap<String, Job>()
+    private var coordinator: ProviderBalanceCoordinator? = null
     private val hosts = ConcurrentHashMap<String, BalanceRuntimeHost>()
     private val ready = ConcurrentHashMap<String, BalanceRuntime>()
 
@@ -39,24 +31,23 @@ internal class ProviderBalanceRuntimeHost(
         val runtime = host.get()
         return synchronized(lifecycleLock) {
             check(!closed && slotId !in removing && hosts[slotId] === host) { "余额宿主已变化" }
-            if (ready.putIfAbsent(slotId, runtime) == null) {
-                synchronizationJobs[slotId] = synchronizationScope.launch {
-                    runtime.state.map { it.revision to (it.result as? BalanceResult.Available) }
-                        .distinctUntilChanged().collect { (revision, available) ->
-                            if (available == null) return@collect
-                            val snapshot = runtime.state.value
-                            if (snapshot.revision != revision || snapshot.result != available) return@collect
-                            val (configuration, result) = runtime.store.successForSharing(snapshot) ?: return@collect
-                            val recipients = ready.values.filter { it !== runtime }.map { it to it.state.value.revision }
-                            recipients.forEach { (target, revision) ->
-                                target.acceptSharedSuccess(revision, configuration, result)
-                            }
-                        }
-                }
-            }
+            ready.putIfAbsent(slotId, runtime)
             runtime
         }
     }
+    fun start(scope: CoroutineScope, providersFlow: () -> Flow<List<String>>, providers: () -> List<String>) =
+        synchronized(lifecycleLock) {
+            check(!closed) { "余额宿主已关闭" }
+            val scheduler = coordinator ?: ProviderBalanceCoordinator(providersFlow, providers, ::get)
+                .also { coordinator = it }
+            scheduler.start(scope)
+        }
+    fun requestRefresh(scope: CoroutineScope): Job? = synchronized(lifecycleLock) { coordinator }?.requestRefresh(scope)
+    fun requestRefresh(): Job? = synchronized(lifecycleLock) { coordinator }?.requestRefresh()
+    fun onResume(scope: CoroutineScope, nowMillis: Long) =
+        synchronized(lifecycleLock) { coordinator }?.onResume(scope, nowMillis)
+    val isPolling: Boolean get() = synchronized(lifecycleLock) { coordinator?.isRunning == true }
+
     suspend fun queryDraft(configuration: BalanceConfiguration): BalanceResult {
         configuration.validate()
         check(configuration.queryEnabled)
@@ -68,21 +59,19 @@ internal class ProviderBalanceRuntimeHost(
         val removed = synchronized(lifecycleLock) {
             check(!closed && ready[slotId] === runtime && removing.add(slotId)) { "余额宿主已变化" }
             ready.remove(slotId)
-            hosts.remove(slotId) to synchronizationJobs.remove(slotId)
+            hosts.remove(slotId)
         }
         try {
-            removed.second?.cancelAndJoin()
             runtime.stop()
             runtime.clear()
         } finally {
-            removed.first?.close()
+            removed?.close()
             synchronized(lifecycleLock) { removing.remove(slotId) }
         }
     }
     override fun close() = synchronized(lifecycleLock) {
         closed = true
-        synchronizationScope.cancel()
-        synchronizationJobs.clear()
+        coordinator?.close(); coordinator = null
         ready.values.forEach { it.stop() }
         hosts.values.forEach { it.close() }
         ready.clear(); hosts.clear()

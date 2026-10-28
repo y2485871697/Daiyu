@@ -21,18 +21,38 @@ class ModelPickerBalanceContract(unittest.TestCase):
         for forbidden in ('project()', 'balanceText', 'activeSlotId', 'manualRefresh(', 'startPolling('):
             self.assertNotIn(forbidden, mapping)
 
-    def test_foreground_refresh_is_not_limited_to_the_selected_provider(self):
+    def test_global_refresh_matches_original_activity_and_picker_hooks(self):
         host = source('MainActivity.kt')
-        refresh = host.split('private fun refreshConfirmedModelLabel()', 1)[1].split('private fun refreshAutomaticCompression()', 1)[0]
-        self.assertIn('controller.providers.snapshot().providers.filter { it.enabled }', refresh)
-        self.assertIn('provider.slotId to controller.providerBalances.get(provider.slotId)', refresh)
-        self.assertIn('balanceLifecycles = loaded.second.mapValues', refresh)
-        self.assertIn('balanceLifecycles[slot]?.takeIf { it.first === runtime }', refresh)
-        self.assertIn('BalanceLifecycleBinding(lifecycle, lifecycleScope, runtime, poll = true)', refresh)
-        self.assertNotIn('balanceLifecycles.values.forEach { it.second.close() }', refresh)
+        self.assertIn('controller.providerBalances.start(lifecycleScope, controller.providers::providerIdsFlow', host)
+        self.assertIn('controller.providers.snapshot().providers.map { it.slotId }', host)
+        self.assertIn('controller.providerBalances.onResume(lifecycleScope, android.os.SystemClock.uptimeMillis())', host)
+        self.assertNotIn('balanceLifecycles', host)
         opened = host.split('private fun openChatModels()', 1)[1].split('private fun dismissChatModels()', 1)[0]
-        self.assertIn('balanceLifecycles.values.forEach { it.second.requestRefresh() }', opened)
-        self.assertIn('balanceLifecycles.values.forEach { it.second.close() }; balanceLifecycles = emptyMap()', host)
+        self.assertIn('controller.providerBalances.requestRefresh(lifecycleScope)', opened)
+        coordinator = source('balance/ProviderBalanceCoordinator.kt')
+        self.assertIn('30_000L', coordinator)
+        self.assertIn('>= 15_000L', coordinator)
+        self.assertIn('it.configured && it.queryEnabled', coordinator)
+        self.assertNotIn('sharesQueryWith', coordinator)
+
+    def test_stream_end_and_stop_refresh_once_but_not_pause_or_delta(self):
+        controller = source('ChatController.kt')
+        self.assertIn('before.status == RunStatus.RUNNING && it.status != RunStatus.RUNNING', controller)
+        helper = controller.split('private fun refreshBalancesAfterStreaming(', 1)[1].split('private fun stopRun(', 1)[0]
+        self.assertIn('resources !== lifetime || lifetime.balanceRefreshRequested', helper)
+        self.assertIn('providerBalances.requestRefresh()', helper)
+        for begin, end in (('private fun stopGenerationParent(', 'internal fun abandonGeneration('),
+                           ('private fun stopRun(', 'private fun cleanupRun('),
+                           ('internal fun stopMain(', 'internal fun stop(owner:'),
+                           ('internal fun stop(owner:', 'fun stop() {'),
+                           ('fun stop() {', 'internal fun close() {')):
+            section = controller.split(begin, 1)[1].split(end, 1)[0]
+            self.assertIn('refreshBalancesAfterStreaming', section)
+        for begin, end in (('internal fun pause(owner:', 'internal fun resume(owner:'),
+                           ('private fun notifyChanged()', '/** Real accepted runner events')):
+            self.assertNotIn('refreshBalancesAfterStreaming', controller.split(begin, 1)[1].split(end, 1)[0])
+        failure = controller.split('保存失败，运行已停止；原检查点保留', 1)[1].split('private fun', 1)[0]
+        self.assertIn('refreshBalancesAfterStreaming(lifetime)', failure)
 
     def test_provider_header_uses_static_shared_balance_component(self):
         picker = source('ui/screens/chat/conversation/ChatModelPicker.kt')

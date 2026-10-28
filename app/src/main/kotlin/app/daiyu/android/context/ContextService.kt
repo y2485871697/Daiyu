@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.os.CancellationSignal
 import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.storage.ConversationModelSelections
 import app.daiyu.android.storage.MessageHistoryCodec
 import app.daiyu.android.storage.SQLiteText
 import app.daiyu.android.domain.*
@@ -380,12 +381,14 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             m.blocks.none { it is MessageBlock.Tool && it.result == null }
         }) { "不能截断未完成工具批次" }
         val copy = ConversationId(UUID.randomUUID().toString())
+        val modelBinding = ConversationModelSelections.read(db, id)
         val values = db.rawQuery("SELECT title,folder,assistant_id,workspace_binding FROM conversations WHERE id=?", arrayOf(id.value)).use { c ->
             require(c.moveToFirst()); ContentValues().apply { put("id", copy.value); put("title", c.getString(0) + " · 分支")
                 put("folder", c.getString(1)); put("assistant_id", c.getString(2)); put("workspace_binding", c.getString(3))
                 put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis()) }
         }
         db.insertOrThrow("conversations", null, values)
+        ConversationModelSelections.write(db, copy, modelBinding)
         val runs = mutableMapOf<RunId, RunId>()
         val ids = mutableMapOf<Triple<ConversationId, RunId, MessageId>, MessageId>()
         fun remap(m: Message, oldId: MessageId): MessageId = ids.getOrPut(Triple(m.conversationId, m.runId, oldId)) {
@@ -457,6 +460,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             put("through_message", through.value); put("parent_revision", ContextRevision.digest(original.take(index + 1))) }) != -1L)
         val inheritedWorkspace = values.getAsString("workspace_binding")
         listOf(id, copy).forEach { owner ->
+            check(ConversationModelSelections.read(db, owner) == modelBinding) { "分支模型绑定已变化；已回滚" }
             db.rawQuery("SELECT workspace_binding FROM conversations WHERE id=?", arrayOf(owner.value)).use {
                 check(it.moveToFirst() && it.getString(0) == inheritedWorkspace) { "分支工作区绑定已变化；已回滚" }
             }

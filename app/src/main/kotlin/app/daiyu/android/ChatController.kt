@@ -4602,17 +4602,36 @@ class ChatController internal constructor(private val application:Application,
         try { executor.execute {
             var changed = false
             var branchReasoning: app.daiyu.android.delegation.ReasoningEffort? = null
+            var branchChildren: String? = null
+            fun retainBranchConfiguration(id: ConversationId): Boolean {
+                if (!database.readableDatabase.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(id.value)).use { it.moveToFirst() }) return false
+                val reasoningSaved = try {
+                    reasoningPreference.retainAccepted(id.value, checkNotNull(branchReasoning)); true
+                } catch (_: Exception) { false }
+                val childrenSaved = try {
+                    childPreferences.importOwner(SubAgentConfigKey.Conversation(id.value), checkNotNull(branchChildren))
+                } catch (_: Exception) { false }
+                return reasoningSaved && childrenSaved
+            }
+            fun branchUnknown(locator: app.daiyu.android.context.BranchLocator, configurationConfirmed: Boolean) =
+                MessageActionResult.Unknown("分支提交、原件发布或配置保存未确认；仅核实目标，不要再次分支或重放工具" +
+                    if (configurationConfirmed) "" else "；目标思考或子代理配置未确认，请重新保存后再发送",
+                    locator.copy(staticIdentities = locator.staticIdentities.toList())).also { receipt ->
+                    synchronized(this) { pendingBranchOutcomes.add(receipt) }
+                }
             val result = try {
-                if (action == MessageAction.BRANCH)
+                if (action == MessageAction.BRANCH) {
                     branchReasoning = reasoningPreference.snapshot(target.conversationId.value)
+                    branchChildren = childPreferences.export(SubAgentConfigKey.Conversation(target.conversationId.value))
+                }
                 when (action) {
                     MessageAction.EDIT_USER -> messageActionStore.originalUserEdit(target).let {
                         MessageActionResult.EditDraft(it.text, target, it.videos)
                     }
                     MessageAction.BRANCH -> {
                         val copy = messageActionStore.branch(target); changed = true
-                        reasoningPreference.retainAccepted(copy.id.value, checkNotNull(branchReasoning))
-                        MessageActionResult.Branch(copy)
+                        if (retainBranchConfiguration(copy.id)) MessageActionResult.Branch(copy)
+                        else branchUnknown(app.daiyu.android.context.BranchLocator(copy.id, emptyList()), false)
                     }
                     MessageAction.DELETE_TURN -> {
                         // Validate before even an in-memory revocation; deleteTurn repeats CAS
@@ -4653,14 +4672,9 @@ class ChatController internal constructor(private val application:Application,
                 MessageActionResult.Rejected("分支已确认未提交；原会话和原件保留，未重试")
             } catch (failure: app.daiyu.android.context.BranchOutcomeUnknown) {
                 changed = true
-                val reasoningConfirmed = try {
-                    reasoningPreference.retainAccepted(failure.locator.conversationId.value, checkNotNull(branchReasoning)); true
-                } catch (_: Exception) { false }
-                MessageActionResult.Unknown("分支提交或原件发布未确认；仅核实目标，不要再次分支或重放工具" +
-                    if (reasoningConfirmed) "" else "；目标思考偏好未确认，请重新保存后再发送",
-                    failure.locator.copy(staticIdentities = failure.locator.staticIdentities.toList())).also { receipt ->
-                    synchronized(this) { pendingBranchOutcomes.add(receipt) }
-                }
+                val configurationConfirmed = try { retainBranchConfiguration(failure.locator.conversationId) }
+                    catch (_: Exception) { false }
+                branchUnknown(failure.locator, configurationConfirmed)
             } catch (failure: IllegalArgumentException) {
                 MessageActionResult.Rejected(failure.message ?: "消息身份或安全历史基线不匹配；未重放请求")
             } catch (_: Exception) {

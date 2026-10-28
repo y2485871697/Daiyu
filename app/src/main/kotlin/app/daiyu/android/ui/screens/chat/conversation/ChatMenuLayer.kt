@@ -82,6 +82,7 @@ private class MenuOverlay(
     val maxHeight: Dp?,
     val offset: DpOffset,
     val screenMargin: Dp,
+    val outsideClickFeedback: () -> Boolean,
     val content: @Composable () -> Unit,
 )
 
@@ -142,7 +143,7 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
                             }
                         },
                         content = {
-                            Box(Modifier.fillMaxSize().conversationClickable { if (menu.expanded()) menu.onDismiss() })
+                            Box(Modifier.fillMaxSize().conversationClickable(clickFeedback = menu.outsideClickFeedback()) { if (menu.expanded()) menu.onDismiss() })
                             ChatGlassMenuSurface(backdrop, Modifier
                                 .graphicsLayer {
                                     val scale = 0.15f + 0.85f * motion.fraction.value
@@ -209,6 +210,7 @@ internal fun ChatAnchoredMenu(
     offset: DpOffset = DpOffset.Zero,
     screenMargin: Dp = 9.dp,
     anchorBounds: Rect? = null,
+    outsideClickFeedback: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val layer = LocalMenuLayer.current
@@ -217,6 +219,7 @@ internal fun ChatAnchoredMenu(
     val latestDismiss by rememberUpdatedState(onDismiss)
     val latestExpanded by rememberUpdatedState(expanded)
     val latestAnchorBounds by rememberUpdatedState(anchorBounds)
+    val latestOutsideClickFeedback by rememberUpdatedState(outsideClickFeedback)
     var mounted by remember { mutableStateOf(expanded) }
     LaunchedEffect(expanded) {
         if (expanded) mounted = true
@@ -229,7 +232,7 @@ internal fun ChatAnchoredMenu(
         anchor = coordinates.parentLayoutCoordinates?.boundsInRoot() ?: coordinates.boundsInRoot()
     })
     if ((expanded || mounted) && layer != null) {
-        val menu = remember(maxHeight, offset, screenMargin) { MenuOverlay({ latestExpanded }, { latestAnchorBounds ?: anchor }, { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin) { Box(modifier) { latestContent() } } }
+        val menu = remember(maxHeight, offset, screenMargin) { MenuOverlay({ latestExpanded }, { latestAnchorBounds ?: anchor }, { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin, { latestOutsideClickFeedback }) { Box(modifier) { latestContent() } } }
         LaunchedEffect(layer, menu, expanded) {
             if (expanded) {
                 layer.active?.takeIf { it !== menu }?.onDismiss?.invoke()

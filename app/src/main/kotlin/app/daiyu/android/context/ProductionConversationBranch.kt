@@ -43,7 +43,8 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
         data class Snapshot(val history: List<Message>, val prefix: List<Message>, val mapped: List<Message>,
             val sourceValues: List<JSONObject>, val attachments: List<JSONObject>, val archives: List<JSONObject>,
             val inputs: List<List<MessageVideoInput>>, val generation: StaticGenerationBranch.Capture?,
-            val replyIdentities: List<app.daiyu.android.assistants.AssistantReplyIdentity?>)
+            val replyIdentities: List<app.daiyu.android.assistants.AssistantReplyIdentity?>,
+            val modelBinding: ConversationModelBinding?)
         fun sourceValues(sql: SQLiteDatabase) = BackupHistoryRows.read(sql, "conversations",
             listOf("id", "title", "folder", "assistant_id", "workspace_binding", "pinned", "draft", "updated"), " WHERE id=?", arrayOf(id.value))
         fun attachments(sql: SQLiteDatabase) = BackupHistoryRows.read(sql, "neutral_assets",
@@ -74,7 +75,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             if (generation == null) requireNoGenerationOriginals(sql, prefix)
             Snapshot(original, prefix, mapped, sourceValues(sql), attachments(sql), archives(sql),
                 original.map { SQLiteMessageVideoStore.readVerified(sql, it) }, capture,
-                prefix.map { AssistantReplyIdentities.read(sql, it) })
+                prefix.map { AssistantReplyIdentities.read(sql, it) }, ConversationModelSelections.read(sql, id))
         }
         val selectedVideoInputs = snapshot.prefix.map { row ->
             snapshot.inputs[snapshot.history.indexOfFirst { it.id == row.id }].filter { input ->
@@ -143,6 +144,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 fun verifySource() {
                     authorize(db)
                     check(ContextService.read(db, id) == snapshot.history) { "来源历史已变化" }
+                    check(ConversationModelSelections.read(db, id) == snapshot.modelBinding) { "来源模型绑定已变化" }
                     check(sourceValues(db).map { it.toString() } == snapshot.sourceValues.map { it.toString() })
                     check(attachments(db).map { it.toString() } == snapshot.attachments.map { it.toString() })
                     check(archives(db).map { it.toString() } == snapshot.archives.map { it.toString() })
@@ -164,6 +166,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                     put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis())
                 }
                 check(db.insertOrThrow("conversations", null, values) != -1L)
+                ConversationModelSelections.write(db, copy, snapshot.modelBinding)
                 app.daiyu.android.storage.UsageStatisticsStore.created(db, copy.value, values.getAsLong("updated"))
                 copied.forEachIndexed { position, mapped ->
                     check(db.insertOrThrow("messages", null, ContextService.messageValues(mapped)) != -1L)
@@ -185,6 +188,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 // exact destination static collection and absence of fabricated live receipts.
                 val actual = ContextService.read(db, copy)
                 check(actual == copied)
+                check(ConversationModelSelections.read(db, copy) == snapshot.modelBinding) { "分支模型绑定读回不匹配" }
                 actual.forEachIndexed { index, message ->
                     check(AssistantReplyIdentities.read(db, message) == snapshot.replyIdentities[index]) { "分支回复身份读回不匹配" }
                     check(MessageVideoInputCodec.encode(message, SQLiteMessageVideoStore.readVerified(db, message)) ==

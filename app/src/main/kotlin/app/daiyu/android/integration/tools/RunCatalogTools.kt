@@ -218,7 +218,7 @@ internal class RunCatalogTools(
             createdCommands = commandFactory?.let { factory ->
                 createResource { factory(owner, authorization) }
             }
-            ordinary = ordinaryFactory?.invoke(owner, capabilities, authorization).orEmpty()
+            ordinary = createResource { ordinaryFactory?.invoke(owner, capabilities, authorization).orEmpty() }
             val publish = synchronized(closeLock) {
                 commands = createdCommands
                 // Retain late resources even after close so their physical drain is observed.

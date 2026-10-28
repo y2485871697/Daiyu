@@ -10,7 +10,8 @@ import org.junit.Test
 import java.io.File
 
 class RunCommandToolsTest {
-    private class Fixture(private val automaticConsent: Boolean = false, linuxState: app.daiyu.android.terminal.TerminalLinuxState? = null) {
+    private class Fixture(private val automaticConsent: Boolean = false, linuxState: app.daiyu.android.terminal.TerminalLinuxState? = null,
+        androidConfiguration: TerminalConfiguration = TerminalConfiguration(workingDirectory = File("/fixed"))) {
         val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val task = TaskAuthorization("s", "r")
@@ -26,26 +27,32 @@ class RunCommandToolsTest {
         var failClose = false
         var cancelled = false
         var onOpen: () -> Unit = {}
+        var openError: String? = null
+        val configurations = mutableListOf<TerminalConfiguration>()
+        val disclosures = mutableListOf<String>()
         var execution = "executed"
         var ownerCurrent = true
         var duringConsent: () -> Unit = {}
         val effects = mutableListOf<WriteEffect>()
         val executedCommands = mutableListOf<String>()
         private val gate = CommandApprovalGate({ fail("automatic consent must not post UI") }, { ownerCurrent && it === owner })
-        val leaf = RunCommandTools(TerminalConfiguration(workingDirectory = File("/fixed")), owner, task, null,
+        val leaf = RunCommandTools(androidConfiguration, owner, task, null,
             approve = { context, effect, disclosure ->
                 assertSame(task, context.authorization)
                 effects.add(effect)
+                disclosures.add(disclosure)
                 duringConsent()
                 if (automaticConsent) gate.await(CommandApprovalRequest(owner, context.invocation.id.value,
                     effect, disclosure), context.cancelled)
                 else { prompts++; approved }
-            }, linuxState = linuxState, create = { _, _ ->
+            }, linuxState = linuxState, create = { _, configuration ->
+                configurations.add(configuration)
                 created++; onCreate()
                 object : CommandTransport {
                     override fun execute(name: String, arguments: JSONObject): JSONObject {
                         if (name == "terminal_open") {
                             onOpen()
+                            openError?.let { return JSONObject().put("ok", false).put("error", it) }
                             return JSONObject().put("ok", true).put("session_id", "session")
                         }
                         executions++
@@ -255,6 +262,50 @@ class RunCommandToolsTest {
         val result = java.util.concurrent.CompletableFuture<RunCatalogCloseResult>()
         fixture.leaf.observeClose { result.complete(it) }
         assertTrue(result.get(2, java.util.concurrent.TimeUnit.SECONDS) is RunCatalogCloseResult.Unknown)
+    }
+
+    @Test fun selectedRootModeFreezesHostIdentityWithoutExecutingAProbe() {
+        val cwd = File("/fixed")
+        var discoveries = 0
+        val root = RunCommandTools.androidConfiguration(app.daiyu.android.runningmode.RunningMode.ROOT,
+            cwd, mapOf("PATH" to "/system/bin")) { discoveries++; "/system/bin/su" }
+        assertTrue(root.root)
+        assertEquals("/system/bin/su", root.rootExecutable)
+        assertEquals(1, discoveries)
+        for (mode in listOf(app.daiyu.android.runningmode.RunningMode.NORMAL, app.daiyu.android.runningmode.RunningMode.SHIZUKU)) {
+            val normal = RunCommandTools.androidConfiguration(mode, cwd, emptyMap()) { fail("must not discover Root"); null }
+            assertFalse(normal.root)
+        }
+        val missing = RunCommandTools.androidConfiguration(app.daiyu.android.runningmode.RunningMode.ROOT,
+            cwd, emptyMap()) { null }
+        assertTrue(missing.root)
+        assertEquals("/system/bin/su", missing.rootExecutable)
+    }
+
+    @Test fun rootIdentityAndExecutableArePartOfExactCommandGrant() {
+        val normal = Fixture()
+        val root = Fixture(androidConfiguration = TerminalConfiguration(root = true, workingDirectory = File("/fixed"), rootExecutable = "/system/bin/su"))
+        val otherSu = Fixture(androidConfiguration = TerminalConfiguration(root = true, workingDirectory = File("/fixed"), rootExecutable = "/sbin/su"))
+        normal.dispatch(); root.dispatch(); otherSu.dispatch()
+        assertNotEquals(normal.effects.single().target, root.effects.single().target)
+        assertNotEquals(root.effects.single().target, otherSu.effects.single().target)
+        assertTrue(root.configurations.single().root)
+        assertEquals("/system/bin/su", root.configurations.single().rootExecutable)
+        assertTrue(root.disclosures.single().contains("Android Root"))
+        assertFalse(normal.configurations.single().root)
+        assertEquals(normal.executedCommands, root.executedCommands)
+        normal.leaf.close(); root.leaf.close(); otherSu.leaf.close()
+    }
+
+    @Test fun failedRootOpenNeverCreatesAnAppUidFallbackOrDispatchesCommand() {
+        val fixture = Fixture(androidConfiguration = TerminalConfiguration(root = true, workingDirectory = File("/fixed"), rootExecutable = "/system/bin/su"))
+        fixture.openError = "root_unavailable"
+        val result = fixture.dispatch()
+        assertTrue(result is DispatchOutcome.NotExecuted)
+        assertTrue(result.toString().contains("root_unavailable"))
+        assertEquals(0, fixture.executions)
+        assertTrue(fixture.configurations.all { it.root })
+        fixture.leaf.close()
     }
 
 }

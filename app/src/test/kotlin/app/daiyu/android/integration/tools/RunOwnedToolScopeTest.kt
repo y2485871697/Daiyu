@@ -26,15 +26,16 @@ class RunOwnedToolScopeTest {
         var closes = 0
         val effect = WriteEffect("ordinary", "write", "owner", "exact")
         override val tools = listOf(object : RegisteredTool {
-            override val definition = ToolDefinition("ordinary_write", 1, "test", "ordinary", ToolEffect.WRITE, ToolSchema(emptyList()))
+            override val definition = app.daiyu.android.domain.tools.ToolDefinition("ordinary_write", 1, "test", "ordinary", ToolEffect.WRITE, ToolSchema(emptyList()))
             override fun prepare(arguments: ToolArguments) = write(effect) { calls++; ExecutionReceipt.Confirmed("done") }
         }, object : RegisteredTool {
-            override val definition = ToolDefinition("ordinary_read", 1, "test", "ordinary", ToolEffect.READ_ONLY, ToolSchema(emptyList()))
+            override val definition = app.daiyu.android.domain.tools.ToolDefinition("ordinary_read", 1, "test", "ordinary", ToolEffect.READ_ONLY, ToolSchema(emptyList()))
             override fun prepare(arguments: ToolArguments) = diagnosticRead { ExecutionReceipt.Confirmed("diagnostic") }
         })
         fun creating() = beginCreation()
         fun created() = endCreation()
         fun hold() = retain(AutoCloseable { closes++ })
+        fun hold(resource: AutoCloseable) = retain(resource)
     }
     private inner class Fixture {
         val owner = owner()
@@ -88,4 +89,37 @@ class RunOwnedToolScopeTest {
         f.scope.close()
         assertEquals(1, f.scope.closes)
     }
+    @Test fun observeCloseWaitsForSynchronousCloseAndReportsItsFailure() {
+        val f = Fixture()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        f.scope.hold(AutoCloseable {
+            entered.countDown()
+            check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            throw IllegalStateException("close failed")
+        })
+        val stopping = Thread { f.scope.close() }.apply { start() }
+        assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        val drained = java.util.concurrent.atomic.AtomicReference<RunCatalogCloseResult>()
+        try {
+            f.scope.observeClose { drained.set(it) }
+            assertNull("a close request is not physical cleanup", drained.get())
+        } finally {
+            release.countDown()
+            stopping.join(5000)
+        }
+        assertFalse(stopping.isAlive)
+        assertTrue(drained.get() is RunCatalogCloseResult.Unknown)
+    }
+
+    @Test fun lateRetainedCloseFailureCannotReportDrained() {
+        val f = Fixture()
+        f.scope.creating()
+        var drained: RunCatalogCloseResult? = null
+        f.scope.observeClose { drained = it }
+        try { f.scope.hold(AutoCloseable { throw IllegalStateException("late close failed") }) }
+        finally { f.scope.created() }
+        assertTrue(drained is RunCatalogCloseResult.Unknown)
+    }
+
 }

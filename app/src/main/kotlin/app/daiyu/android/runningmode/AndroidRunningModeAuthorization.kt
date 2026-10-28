@@ -10,11 +10,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 internal class AndroidRunningModeAuthorization(private val shizuku: ShizukuAuthorization) : RunningModeAuthorization {
+    companion object {
+        internal fun rootExecutable(): String? = (listOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su") +
+            System.getenv("PATH").orEmpty().split(':').filter { it.startsWith('/') }.map { "$it/su" })
+            .distinct().firstOrNull { File(it).isFile && File(it).canExecute() }
+    }
     override suspend fun requestRoot(): Boolean = withContext(Dispatchers.IO) {
         // Discover only; execute one fixed UID probe, never try a second su after a denial.
-        val executable = (listOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su") +
-            System.getenv("PATH").orEmpty().split(':').filter { it.startsWith('/') }.map { "$it/su" })
-            .distinct().firstOrNull { File(it).isFile && File(it).canExecute() } ?: return@withContext false
+        val executable = rootExecutable() ?: return@withContext false
         val process = try { ProcessBuilder(executable, "-c", "/system/bin/id -u").redirectErrorStream(true).start() }
             catch (_: Exception) { return@withContext false }
         try {

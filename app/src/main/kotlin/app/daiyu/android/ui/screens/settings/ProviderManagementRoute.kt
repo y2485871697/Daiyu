@@ -15,6 +15,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ChatController
+import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.ModelSettingsSaveOwner
 import app.daiyu.android.model.catalog.CatalogLocalEditResult
 import app.daiyu.android.model.catalog.CatalogModelParameters
@@ -97,7 +98,8 @@ private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.co
 internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: () -> Boolean,
     onBack: () -> Unit, onDetailBack: () -> Unit = onBack, engineeringUi: Boolean = false,
     initialSlot: String? = null, pageTitleOverride: String? = null,
-) = ProviderSettingsTheme {
+    conversationId: ConversationId? = null,
+) = key(conversationId) { ProviderSettingsTheme {
     val repo = controller.providers
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -107,6 +109,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var permit by remember { mutableStateOf(ProviderPagePermit()) }
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var registry by remember { mutableStateOf<ProviderRegistrySnapshot?>(null, referentialEqualityPolicy()) }
+    var currentProviderSlotId by remember { mutableStateOf<String?>(null) }
     var summaries by remember { mutableStateOf<Map<String, ProviderCardSummary>>(emptyMap()) }
     var query by remember { mutableStateOf("") }
     val directoryListState = rememberLazyListState()
@@ -173,11 +176,14 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             runCatching { store.localModelCatalogSnapshot()?.models?.size }.getOrNull())
                     }
                 }
-                Triple(value, detailCurrent, cards)
+                val slot = runCatching { controller.conversationModelEditing(conversationId).first.slotId }.getOrNull()
+                Triple(value, detailCurrent, cards) to slot
             } }
             if (!current(p) || serial != request) return@launch
             checkingRegistry = false
-            result.fold(onSuccess = { (value, detailCurrent, cards) ->
+            result.fold(onSuccess = { (loaded, slot) ->
+                val (value, detailCurrent, cards) = loaded
+                currentProviderSlotId = slot
                 selectedSlots = selectedSlots?.intersect(value.providers.map { it.slotId }.toSet())
                 registry = value
                 summaries = cards
@@ -186,7 +192,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }
             }, onFailure = {
                 if (detail != null) closeDetail()
-                registry = null; notice = "提供商列表读取失败；未创建替代配置。"
+                registry = null; currentProviderSlotId = null; notice = "提供商列表读取失败；未创建替代配置。"
             })
         }
     }
@@ -657,6 +663,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 onAddSpeech = { if (current(p) && enabled) creating = NewProviderDraft(ProviderProtocol.CHAT_COMPLETIONS, speechOnly = true) },
                 onOpen = { if (current(p) && modelDeletionEnabled) open(it.slotId) },
                 navigationEnabled = modelDeletionEnabled,
+                currentProviderSlotId = currentProviderSlotId,
                 onSelect = { if (current(p) && enabled && registry === displayedRegistry && selectedSlots == null) selectedSlots = setOf(it.slotId) },
                 selectedSlots = selectedSlots,
                 onSelectionChange = { if (current(p) && enabled && registry === displayedRegistry && selection != null && selectedSlots === selection) selectedSlots = it },
@@ -685,4 +692,4 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             onConfirm = { if (confirmation === confirm && current(p) && enabled) { confirmation = null; confirm.action() } },
             onDismiss = { if (confirmation === confirm) confirmation = null })
     }
-}
+} }

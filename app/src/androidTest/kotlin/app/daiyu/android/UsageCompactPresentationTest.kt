@@ -3,6 +3,12 @@ package app.daiyu.android
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -11,6 +17,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.ConversationTokenUsageDialog
 import app.daiyu.android.ui.components.UsageAction
@@ -39,6 +46,45 @@ class UsageCompactPresentationTest : WiredActivityTestCase() {
         ui.onNodeWithText("30").assertExists()
         ui.onNodeWithText("▾ 缓存明细").performClick()
         ui.onNodeWithText(cachedLabel).assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testTotalUsesPreviewNeutralColorWithoutChangingMetricTypographyOrAccent() {
+        for (dark in listOf(false, true)) for (customAccent in listOf<Int?>(null, 0xFF25836F.toInt())) {
+            val appearance = AppearanceSettings(
+                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                primaryAccentColor = customAccent,
+            )
+            mainThread { activity.setContent {
+                AgentAppTheme(appearance, applyInterfaceScale = false) {
+                    ConversationTokenUsageDialog(true,
+                        ConversationTokenUsageUi(inputTokens = 100, outputTokens = 20,
+                            cachedTokens = 30, cacheCreationTokens = 5), onDismiss = {})
+                }
+            } }
+            awaitUniqueTag("conversation-usage-body")
+            fun measured(text: String): TextLayoutResult {
+                val layouts = mutableListOf<TextLayoutResult>()
+                ui.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(
+                    SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+                return layouts.single()
+            }
+            val neutral = Color(if (dark) 0xFFB2A9C7 else 0xFF716A82)
+            val total = measured("120").layoutInput.style
+            assertEquals(neutral, total.color)
+            assertEquals("Total value must share the preview's neutral role", measured("累计用量").layoutInput.style.color, total.color)
+            assertEquals(16.sp, total.fontSize)
+            assertEquals(22.sp, total.lineHeight)
+            assertEquals(FontWeight.SemiBold, total.fontWeight)
+            val accent = app.daiyu.android.ui.app.resolveSelectionAccent(appearance, dark)
+            for (value in listOf("65", "20")) {
+                val row = measured(value).layoutInput.style
+                assertEquals(accent, row.color)
+                assertEquals(14.sp, row.fontSize)
+                assertEquals(FontWeight.Medium, row.fontWeight)
+            }
+            ui.onNodeWithText(activity.getString(R.string.stats_page_cached_tokens)).assertDoesNotExist()
+        }
         assertEquals(0, fixture.opens.get())
     }
 

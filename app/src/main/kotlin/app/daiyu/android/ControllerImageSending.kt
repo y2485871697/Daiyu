@@ -260,6 +260,19 @@ internal class ControllerImageAttempt(
  */
 internal class ControllerMessageImages(private val database: ConversationDatabase,
     private val assets: MessageImageAssetStore) {
+    /** Host-selected current message only; never resolve a model-provided path or owner. */
+    fun generationInputs(message: Message): Map<String, app.daiyu.android.model.generation.GenerationInput> {
+        require(message.role == Message.USER_ROLE)
+        app.daiyu.android.domain.MessageImages.validate(message)
+        val expected = app.daiyu.android.media.MessageImageOwner(message.conversationId.value, message.id.value)
+        return message.blocks.filterIsInstance<MessageBlock.Image>().associate { block ->
+            val ref = block.reference
+            val stored = app.daiyu.android.media.MessageImageReference(expected, ref.id, ref.mime,
+                ref.bytes, ref.sha256, ref.width, ref.height)
+            ref.id to app.daiyu.android.model.generation.GenerationInput(assets.resolver.read(expected, stored), ref.mime)
+        }
+    }
+
     fun freeze(history: List<Message>, provider: ProviderSnapshot, candidate: Message? = null,
         cancelled: () -> Boolean = { false }): FrozenMessageImagePlan {
         val wanted = MessageHistory.expand(history).filter { row -> row.blocks.any { it is MessageBlock.Image } }

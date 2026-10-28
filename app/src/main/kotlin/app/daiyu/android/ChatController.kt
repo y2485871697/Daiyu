@@ -3920,6 +3920,7 @@ class ChatController internal constructor(private val application:Application,
             it.copy(enabledSkillIds = it.enabledSkillIds.toList())
         } else null
         val prepared = try {
+            val androidCommands = RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory)
             val ordinaryGeneration = if (ordinaryRun) try { GenerationSettingsStore(application).loadSnapshot() }
                 catch (_: GenerationSettingsException) { null } else null
             val ordinaryShizuku = if (ordinaryRun && application is ChatApplication) shizukuAccess.refresh() else null
@@ -4026,23 +4027,26 @@ class ChatController internal constructor(private val application:Application,
                             jobHost.freezeTerminalLaunchOnWorker(jobReference, application.cacheDir,
                                 workspace.resolved.hostDirectory, workspace.linux(jobReference))
                     }.launch
-                    val androidLaunch = TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf(
-                        "HOME" to application.filesDir.path, "TMPDIR" to application.cacheDir.path,
-                        "PATH" to "/system/bin:/system/xbin"), workspace.resolved.hostDirectory)
-                    val jobConfigurations = mutableMapOf("android" to app.daiyu.android.terminal.TerminalConfiguration(
-                        workingDirectory = androidLaunch.cwd, environment = androidLaunch.environment))
+                    val androidLaunch = TerminalPtyLaunch.Android(listOf("/system/bin/sh"), androidCommands.environment,
+                        checkNotNull(androidCommands.workingDirectory))
+                    val jobConfigurations = mutableMapOf("android" to androidCommands)
                     try { jobLinux?.let { jobConfigurations["linux"] = it.commandConfiguration() } }
                     finally { jobLinux?.close() }
-                    listOfNotNull(RunOrdinaryPlatformTools(realOwner, task,
-                            app.daiyu.android.platform.actions.AndroidPlatformActionBackend(application)),
-                        if (ordinaryBrowserSettings?.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) null else
-                            RunOrdinaryBrowserTools(application, realOwner, task, checkNotNull(ordinaryAssistant), assistant.id,
-                                checkNotNull(ordinaryBrowserSettings)) { binding -> ordinaryBrowserOpened(assistant, binding) },
-                        RunOrdinaryGuiTools(realOwner, task, location),
-                        ordinaryShizuku?.uid?.let { uid -> RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid) },
-                        ordinaryGeneration?.let { settings -> RunOrdinaryGenerationTools(realOwner, task, settings,
-                            retainGenerationResources(settings.accountScope)) { isRunUnfenced(assistant) } },
-                        RunOrdinaryJobTools(application, realOwner, task, grants, jobConfigurations,
+                    val generationInputs = if (ordinaryGeneration?.profiles?.any {
+                        it.protocol != app.daiyu.android.model.generation.GenerationProtocol.OPENAI_IMAGES_JSON
+                    } == true) messageImages.generationInputs(user) else emptyMap()
+                    val scopes = mutableListOf<RunOwnedToolScope>()
+                    try {
+                        scopes.add(RunOrdinaryPlatformTools(realOwner, task,
+                            app.daiyu.android.platform.actions.AndroidPlatformActionBackend(application)))
+                        if (ordinaryBrowserSettings?.access != app.daiyu.android.browser.session.BrowserAccess.DISABLED)
+                            scopes.add(RunOrdinaryBrowserTools(application, realOwner, task, checkNotNull(ordinaryAssistant), assistant.id,
+                                checkNotNull(ordinaryBrowserSettings)) { binding -> ordinaryBrowserOpened(assistant, binding) })
+                        scopes.add(RunOrdinaryGuiTools(realOwner, task, location))
+                        ordinaryShizuku?.uid?.let { uid -> scopes.add(RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid)) }
+                        ordinaryGeneration?.let { settings -> scopes.add(RunOrdinaryGenerationTools(realOwner, task, settings,
+                            retainGenerationResources(settings.accountScope), generationInputs) { isRunUnfenced(assistant) }) }
+                        scopes.add(RunOrdinaryJobTools(application, realOwner, task, grants, jobConfigurations,
                             launch = { environment -> if (environment == "android") androidLaunch else {
                                 if (jobHost == null || jobReference == null || "linux" !in jobConfigurations) null else
                                     jobHost.freezeTerminalLaunchOnWorker(jobReference, application.cacheDir,
@@ -4053,6 +4057,14 @@ class ChatController internal constructor(private val application:Application,
                                     else { retainedTerminalJobs.add(session); true }
                                 }
                             }))
+                        scopes.toList()
+                    } catch (failure: Throwable) {
+                        scopes.forEach { scope ->
+                            try { scope.close() }
+                            catch (cleanup: Throwable) { if (cleanup !== failure) failure.addSuppressed(cleanup) }
+                        }
+                        throw failure
+                    }
                 },
                 platformAction=platformAction?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
@@ -4119,7 +4131,7 @@ class ChatController internal constructor(private val application:Application,
                     try {
                         RunCommandTools.android(application, realOwner, task, launch,
                             workingDirectory = workspace.resolved.hostDirectory, linuxState = linuxBinding.state,
-                            approve = { context, effect, disclosure ->
+                            androidConfiguration = androidCommands, approve = { context, effect, disclosure ->
                             commandApprovals.await(CommandApprovalRequest(realOwner, context.invocation.id.value,
                                 effect, disclosure), context.cancelled)
                         })

@@ -251,6 +251,34 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         }.apply { isAccessible = true }
         return { select.invoke(activity, ticket, owner, session, session.state.providerId); Unit }
     }
+    fun testUnboundChatModelPickerOmitsLocalDirectoryPromptAndKeepsSelection() {
+        seedChatPickerCatalog()
+        app.daiyu.android.storage.ConversationModelSelections.write(fixture.database.writableDatabase, null, null)
+        assertNull(fixture.database.modelBinding(null))
+        val calls = guardChatPickerNetwork()
+        val before = fixture.settings.load()
+        setDraft("没有选定模型时保留草稿")
+        val database = fixture.database.exportBackup()
+        val modelButton = node("chat-model")
+        awaitNodeWindowFocus(modelButton)
+        modelButton.assertIsDisplayed().assertIsEnabled().performClick()
+        awaitChatPickerLoaded()
+        ui.onNodeWithText("请选择本地目录中的模型").assertDoesNotExist()
+        val provider = app.daiyu.android.storage.ProviderRegistry.PRIMARY
+        node("chat-model-provider:$provider").assertIsDisplayed().performClick()
+        val option = "chat-model-option:$provider:second"
+        node("chat-model-list").scrollToDescendant(hasTestTag(option))
+        node(option).assertIsDisplayed().assertIsEnabled().performClick()
+        awaitControl("unbound chat model selected") { !fixture.controller.dataBusy }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        assertChatBinding("second")
+        assertEquals(before, fixture.settings.load())
+        assertEquals(database, fixture.database.exportBackup())
+        assertDraft("没有选定模型时保留草稿")
+        assertChatPickerOffline(calls)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testChatModelButtonOpensPickerAndSelectionPreservesConfigurationAndDraft() {
         seedChatPickerCatalog()
         val calls = guardChatPickerNetwork()

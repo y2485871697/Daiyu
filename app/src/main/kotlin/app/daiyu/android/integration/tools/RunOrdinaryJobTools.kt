@@ -26,13 +26,15 @@ internal class RunOrdinaryJobTools(private val context: Context, owner: RunExecu
             require(command.isNotBlank() && '\u0000' !in command)
             // A launch is captured by the trusted host before advertisement, never by model paths.
             val frozen = configurations.getValue(environment)
+            require(mode != "daemon" || !frozen.root) { "android_root_daemon_not_supported" }
             require(mode != "daemon" || environment == "android" || frozen.linux?.rootScope != null) { "linux_daemon_not_supported" }
             val effect = TerminalJobPlan.effectFor(owner.conversationId, owner.runId, frozen, command, mode)
             return write(effect) { context ->
                 val real = launch(environment) ?: return@write ExecutionReceipt.NotExecuted("terminal_environment_unavailable")
                 val pin = pinWorkspace()
                 val plan = try {
-                    TerminalJobPlan(owner.conversationId, owner.runId, real, command, mode, pin).also {
+                    TerminalJobPlan(owner.conversationId, owner.runId, real, command, mode, pin,
+                        androidConfiguration = frozen.takeIf { environment == "android" }).also {
                         check(it.effect == effect) { "terminal_launch_changed" }
                     }
                 } catch (failure: Throwable) {

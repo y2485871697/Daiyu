@@ -34,6 +34,38 @@ class OrdinaryToolWiringContract(unittest.TestCase):
         self.assertIn('it.effect == effect', execute)
         self.assertIn('session.start(context)', execute)
 
+    def test_root_configuration_reaches_both_command_and_job_without_model_identity_override(self):
+        controller = (K / 'ChatController.kt').read_text()
+        command = (K / 'integration/tools/RunCommandTools.kt').read_text()
+        job = (K / 'integration/tools/RunOrdinaryJobTools.kt').read_text()
+        self.assertIn('RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory)', controller)
+        self.assertIn('mutableMapOf("android" to androidCommands)', controller)
+        self.assertIn('androidConfiguration = androidCommands, approve', controller)
+        self.assertIn('androidConfiguration = frozen.takeIf { environment == "android" }', job)
+        self.assertIn('mode == app.daiyu.android.runningmode.RunningMode.ROOT', command)
+        self.assertIn('.put("root", config?.root).put("root_executable", config?.rootExecutable)', command)
+        self.assertNotIn('ArgumentField("root"', command)
+
+    def test_each_job_has_an_independent_transport_scope(self):
+        job = (K / 'integration/tools/TerminalJobSession.kt').read_text()
+        self.assertIn('transportScope = java.util.UUID.randomUUID().toString()', job)
+        self.assertIn('registry.configure(plan.transportScope, plan.configuration', job)
+        self.assertNotIn('registry.configure(plan.sessionId, plan.configuration', job)
+        catalog = (K / 'integration/tools/RunCatalogTools.kt').read_text()
+        self.assertIn('ordinary = createResource { ordinaryFactory?.invoke(', catalog)
+
+    def test_image_edit_uses_only_current_message_verified_snapshot(self):
+        generation = (K / 'integration/tools/RunOrdinaryGenerationTools.kt').read_text()
+        host = (K / 'ControllerImageSending.kt').read_text()
+        self.assertIn('OPENAI_IMAGE_EDIT_MULTIPART -> !video && sources.isNotEmpty()', generation)
+        self.assertIn('references = listOfNotNull(source), mask = mask', generation)
+        self.assertIn('private val inputs = inputAssets.toMap()', generation)
+        self.assertIn('app.daiyu.android.domain.MessageImages.validate(message)', host)
+        self.assertIn('GenerationInput(assets.resolver.read(expected, stored), ref.mime)', host)
+        self.assertIn('messageImages.generationInputs(user)', (K / 'ChatController.kt').read_text())
+        for forbidden in ('ArgumentField("path"', 'ArgumentField("url"', 'ArgumentField("base64"'):
+            self.assertNotIn(forbidden, generation)
+
     def test_unknown_tool_fallback_does_not_match_known_dynamic_names(self):
         presentation = (K / 'ui/screens/chat/conversation/ToolCardPresentation.kt').read_text()
         for name in ('inspect_child_tasks', 'get_child_task', 'control_child_task', 'conversation_reference_read'):

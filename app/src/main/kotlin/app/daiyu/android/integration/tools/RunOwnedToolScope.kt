@@ -58,14 +58,24 @@ internal abstract class RunOwnedToolScope(
         }
     protected fun <T : AutoCloseable> retain(resource: T,
         observe: ((RunCatalogCloseResult) -> Unit) -> Unit = { it(RunCatalogCloseResult.Drained) }): T {
-        val stop = synchronized(resources) { resources.add(Resource(resource, observe)); closed }
-        if (stop) resource.close()
+        val stop = synchronized(resources) {
+            resources.add(Resource(resource, observe))
+            closed.also { if (it) creations++ }
+        }
+        if (stop) try { resource.close() }
+        catch (_: Exception) { synchronized(resources) { closeFailed = true } }
+        finally { endCreation() }
         return resource
     }
     open fun markUnknown() { unknown = true }
     override fun close() {
-        val stop = synchronized(resources) { if (closed) return; closed = true; resources.toList() }
-        stop.forEach { runCatching { it.closeable.close() }.onFailure { closeFailed = true } }
+        val stop = synchronized(resources) { if (closed) return; closed = true; creations++; resources.toList() }
+        try {
+            stop.forEach { resource ->
+                try { resource.closeable.close() }
+                catch (_: Exception) { synchronized(resources) { closeFailed = true } }
+            }
+        } finally { endCreation() }
     }
     fun observeClose(done: (RunCatalogCloseResult) -> Unit) {
         close()
@@ -73,7 +83,7 @@ internal abstract class RunOwnedToolScope(
             if (creations != 0) { creationWaiters.add { observeClose(done) }; return }
             resources.toList()
         }
-        if (closeFailed) { done(RunCatalogCloseResult.Unknown("run_tool_close_unconfirmed")); return }
+        if (synchronized(resources) { closeFailed }) { done(RunCatalogCloseResult.Unknown("run_tool_close_unconfirmed")); return }
         if (retained.isEmpty()) { done(RunCatalogCloseResult.Drained); return }
         val lock = Any()
         var pending = retained.size

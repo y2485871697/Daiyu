@@ -9,6 +9,7 @@ import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import android.text.style.URLSpan
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.CompositionLocalProvider
@@ -38,11 +40,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
@@ -262,9 +263,14 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
     val cellLengths = remember(table) { (listOf(table.header) + table.rows).map { row ->
         row.map { markdownInlineLength(it).coerceAtLeast(1) }
     } }
-    val border = MiuixTheme.colorScheme.outline.copy(alpha = 0.35f)
+    val gridColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.28f)
+    val gridWidth = 1.dp
+    val tableShape = RoundedCornerShape(8.dp)
+    val tableWidth = widths.fold(0.dp) { total, width -> total + width }
     val headerBackground = MiuixTheme.colorScheme.surfaceVariant
-    Column(Modifier.fillMaxWidth().clipToBounds().horizontalScroll(rememberScrollState())) {
+    Column(Modifier.widthIn(max = tableWidth).fillMaxWidth().testTag("markdown-table")
+        .border(gridWidth, gridColor, tableShape).clip(tableShape)
+        .horizontalScroll(rememberScrollState())) {
         var remaining = visibleCharacters
         for (rowIndex in 0..table.rows.size) {
             if (remaining <= 0) break
@@ -273,15 +279,17 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
             remaining = (remaining - cellLengths[rowIndex].sum()).coerceAtLeast(0)
             Row(Modifier.drawBehind {
                 if (rowIndex == 0) drawRect(headerBackground)
-                val stroke = 0.5.dp.toPx()
+                val stroke = gridWidth.toPx()
+                if (rowIndex > 0) {
+                    drawLine(gridColor, Offset(0f, stroke / 2f), Offset(size.width, stroke / 2f), stroke)
+                }
                 var consumed = 0f
-                widths.forEach { width ->
-                    val pixels = width.roundToPx().toFloat()
-                    val left = if (layoutDirection == LayoutDirection.Ltr) consumed else size.width - consumed - pixels
-                    drawRect(border, Offset(left + stroke / 2f, stroke / 2f),
-                        Size((pixels - stroke).coerceAtLeast(0f), (size.height - stroke).coerceAtLeast(0f)),
-                        style = Stroke(stroke))
-                    consumed += pixels
+                widths.forEachIndexed { column, width ->
+                    consumed += width.roundToPx()
+                    if (column < widths.lastIndex) {
+                        val x = if (layoutDirection == LayoutDirection.Ltr) consumed else size.width - consumed
+                        drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), stroke)
+                    }
                 }
             }) {
                 var cellRemaining = rowVisible

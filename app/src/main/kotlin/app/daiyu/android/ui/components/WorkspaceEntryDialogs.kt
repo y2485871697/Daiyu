@@ -17,8 +17,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.icons.DaiyuIcons
-import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
-import app.daiyu.android.ui.screens.assistants.AssistantSearchField
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import app.daiyu.android.workspace.WorkspaceEntryPolicy
 import top.yukonga.miuix.kmp.basic.Text
@@ -30,26 +28,13 @@ internal fun WorkspaceEntryDialogs(name: String, directory: Boolean, enabled: ()
     onExport: (() -> Unit)? = null) {
     var stage by remember { mutableStateOf("actions") }
     var invalidName by remember { mutableStateOf(false) }
-    var renameValue by remember(name) { mutableStateOf(name) }
-    var renameFocused by remember { mutableStateOf(false) }
     val colors = usagePalette()
     when (stage) {
-        "rename" -> ChatSelectionSheet(if (invalidName) "名称无效，请重新输入" else "重命名",
-            onDismiss = { if (enabled()) onDismiss() }, showCloseButton = false, footer = {
-                AssistantPreviewButton("取消", { if (enabled()) onDismiss() },
-                    Modifier.weight(1f).testTag("dialog-cancel"), enabled = enabled())
-                AssistantPreviewButton("保存", {
-                    if (enabled()) {
-                        if (runCatching { WorkspaceEntryPolicy.requireName(renameValue) }.isFailure) invalidName = true
-                        else { stage = "submitted"; onRename(renameValue) }
-                    }
-                }, Modifier.weight(1f).testTag("dialog-confirm"), primary = true, enabled = enabled())
-            }) {
-                AssistantSearchField(renameValue, { renameValue = it }, placeholder = "名称", focused = renameFocused,
-                    onFocusChanged = { renameFocused = it }, showSearchIcon = false,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 13.dp).testTag("workspace-rename-field"),
-                    fieldModifier = Modifier.testTag("prompt-input"))
-            }
+        "rename" -> WorkspaceNameDialog(if (invalidName) "名称无效，请重新输入" else "重命名", name, "文件夹名称", "保存",
+            onConfirm = { value ->
+                if (runCatching { WorkspaceEntryPolicy.requireName(value) }.isFailure) invalidName = true
+                else { stage = "submitted"; onRename(value) }
+            }, onDismiss = onDismiss, enabled = enabled)
         "delete" -> DaiyuConfirmDialog("删除${if (directory) "文件夹" else "文件"}",
             if (directory) "将删除“$name”及其中的全部内容，无法撤销。" else "将删除“$name”，无法撤销。",
             "删除", true, onConfirm = { if (enabled()) { stage = "submitted"; onDelete() } },

@@ -52,7 +52,8 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
         first = self.steps[0]
         for required in (
             'name = it.take(80); confirmation = null',
-            'if (advancedCreation) SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled)',
+            'SettingsExpandableContent(advancedCreation)',
+            'SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled)',
             'SettingsRow("选择音色名额"',
             'if (resources.voices.state.value.any { it.account == account?.fingerprint &&',
             'else navigate("SYNC")',

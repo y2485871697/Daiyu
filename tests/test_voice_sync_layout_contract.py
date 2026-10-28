@@ -70,9 +70,9 @@ class VoiceSyncLayoutContractTest(unittest.TestCase):
 
     def test_save_fetches_every_time_before_encrypted_write_and_success(self):
         storage = body(self.sync, 'SettingsCard(Modifier.testTag("voice-sync-storage-card"))')
-        self.assertEqual(1, storage.count('SettingsRow('))
-        self.assertIn('SettingsRow("保存账户信息"', storage)
-        self.assertIn('if (!enabled || ak.isBlank() || sk.isBlank()) null', storage)
+        self.assertEqual(0, storage.count('SettingsRow('))
+        self.assertIn('VoiceAccountSaveButton("保存账户信息", "voice-sync-save"', storage)
+        self.assertIn('enabled = enabled && ak.isNotBlank() && sk.isNotBlank()', storage)
         self.assertNotIn('project.isBlank()', storage)
         self.assertNotIn('projects.isEmpty()', storage)
         markers = ['val p = refreshProjects(a, s, preferred)', 'withContext(Dispatchers.IO)',

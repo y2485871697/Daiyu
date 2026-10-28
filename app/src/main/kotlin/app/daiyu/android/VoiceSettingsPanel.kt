@@ -247,10 +247,7 @@ internal fun VoiceSettingsPanel(
                 item { VoiceSettingsCard {
                     SettingsTextField("声音复刻 API Key", accountKeyDraft, { if (!busy) accountKeyDraft = it },
                         password = true, enabled = !busy, compact = true)
-                    TextButton("保存账户", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        .fillMaxWidth().testTag("voice-account-save"),
-                        minHeight = 48.dp, cornerRadius = 24.dp,
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                    VoiceAccountSaveButton("保存账户", "voice-account-save",
                         enabled = !busy && accountKeyDraft.isNotBlank(), onClick = {
                         if (current() && !busy && stopAudio()) {
                             val value = VoiceConfiguration(engine = "DOUBAO", provider = "personal-doubao",

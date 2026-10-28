@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
+import app.daiyu.android.ui.screens.settings.SettingsExpandableContent
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -40,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -191,10 +192,10 @@ private fun QuestionCardContent(
                 Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
                 color = colors.accent, style = questionTextStyle(10, 1.5f, FontWeight.Medium),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp).rotate(if (expanded) 180f else 0f),
+            Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp).settingsDisclosureRotation(expanded, expandedDegrees = 180f),
                 tint = colors.muted)
         }
-        if (expanded) {
+        SettingsExpandableContent(expanded) {
             QuestionDivider(colors.line)
             Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 12.dp)) {
                 Text(value.question.question, color = colors.text, style = questionTextStyle(11, 1.7f))

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
+import app.daiyu.android.ui.screens.settings.SettingsExpandableContent
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -167,7 +169,7 @@ private fun Disclosure(title: String, tag: String, body: @Composable () -> Unit)
     var open by remember(title) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         ToolDisclosureHeader(title, open, Modifier.testTag(tag)) { open = !open }
-        if (open) body()
+        SettingsExpandableContent(open) { body() }
     }
 }
 
@@ -179,8 +181,8 @@ internal fun ToolDisclosureHeader(title: String, expanded: Boolean, modifier: Mo
         .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
         .padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight, null,
-            Modifier.size(14.dp).testTag("tool-disclosure-arrow:$title"), tint = colors.muted)
+        Icon(DaiyuIcons.ChevronRight, null,
+            Modifier.size(14.dp).settingsDisclosureRotation(expanded).testTag("tool-disclosure-arrow:$title"), tint = colors.muted)
         Text(title, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp), color = colors.muted)
     }
 }

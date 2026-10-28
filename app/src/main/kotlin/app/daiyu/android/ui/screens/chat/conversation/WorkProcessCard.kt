@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -83,8 +84,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                 if (!stacked) Text("$stepCount 项 · ${work.summary}", Modifier.widthIn(max = summaryWidth),
                     color = colors.muted, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
-                    if (expanded) "收起$title" else "展开$title", Modifier.size(14.dp), tint = colors.muted)
+                Icon(DaiyuIcons.ChevronRight,
+                    if (expanded) "收起$title" else "展开$title", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
             }
         }
         AnimatedVisibility(expanded) {
@@ -176,8 +177,8 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                     }
                     if (!stacked) Text(stateLabel, Modifier.widthIn(max = 88.dp).width(IntrinsicSize.Max), color = tint,
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp))
-                    Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
-                        if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(14.dp), tint = colors.muted)
+                    Icon(DaiyuIcons.ChevronRight,
+                        if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
                 }
             }
             if (step.activity in setOf(ToolActivityUi.STOPPING, ToolActivityUi.STOPPED, ToolActivityUi.INTERRUPTED) &&

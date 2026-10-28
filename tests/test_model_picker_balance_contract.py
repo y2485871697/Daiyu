@@ -72,7 +72,7 @@ class ModelPickerBalanceContract(unittest.TestCase):
         self.assertIn('chat-model-count:${provider.id}', name_column)
         self.assertRegex(name_column, r'chat-model-count:\$\{provider.id\}.*?\)\)\s*}')
         self.assertNotIn('ProviderBalanceIndicator', name_column)
-        self.assertLess(trailing.index('ProviderBalanceIndicator'), trailing.index('Icon(DaiyuIcons.ChevronDown'))
+        self.assertLess(trailing.index('ProviderBalanceIndicator'), trailing.index('Icon(DaiyuIcons.ChevronRight'))
         self.assertIn('verticalAlignment = Alignment.CenterVertically', picker.split('item(key = "heading:${provider.id}")', 1)[1].split('Column(Modifier.weight(1f)', 1)[0])
 
     def test_all_picker_entrances_share_provider_scoped_read_only_balances(self):

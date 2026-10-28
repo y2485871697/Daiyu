@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.stats
 
+import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import app.daiyu.android.ui.navigation.PageBackHandler as BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -30,7 +31,6 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.automirrored.rounded.Notes
@@ -392,9 +392,9 @@ private fun ModelUsageFilterCard(
                         .padding(start = 12.dp, end = 4.dp),
                 )
                 androidx.compose.material3.Icon(
-                    imageVector = if (expanded) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight,
+                    imageVector = Icons.Rounded.ChevronRight,
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(18.dp).settingsDisclosureRotation(expanded),
                     tint = usagePalette().muted,
                 )
             }
@@ -597,11 +597,11 @@ private fun ModelUsageRow(
                 modifier = Modifier.weight(1f),
             )
             androidx.compose.material3.Icon(
-                imageVector = if (expanded) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight,
+                imageVector = Icons.Rounded.ChevronRight,
                 contentDescription = null,
                 modifier = Modifier
                     .padding(start = 6.dp)
-                    .size(18.dp),
+                    .size(18.dp).settingsDisclosureRotation(expanded),
                 tint = usagePalette().muted,
             )
         }

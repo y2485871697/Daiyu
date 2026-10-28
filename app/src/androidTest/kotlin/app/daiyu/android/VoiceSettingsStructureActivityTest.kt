@@ -516,12 +516,15 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             assertEquals(cardBounds.right, bounds.right, 1f)
         }
         for ((title, tag) in listOf(
-            "当前项目" to "project", "读取我的名额" to "read", "保存账户信息" to "storage",
+            "当前项目" to "project", "读取我的名额" to "read",
             "打开火山访问密钥管理" to "console",
         )) {
             reveal("settings-row:$title", "同步音色名额")
                 .assert(hasAnyAncestor(hasTestTag("voice-sync-$tag-card")))
         }
+        reveal("voice-sync-save", "同步音色名额").assertTextContains("保存账户信息")
+            .assertIsNotEnabled().assert(hasAnyAncestor(hasTestTag("voice-sync-storage-card")))
+        node("settings-row:保存账户信息").assertDoesNotExist()
         for (removed in listOf("获取项目列表", "刷新项目列表", "手动填写项目（备用）", "清除已记住的信息")) {
             node("settings-row:$removed").assertDoesNotExist()
         }
@@ -586,11 +589,24 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             if (title != null) reveal("settings-row:$title", "制作声音")
                 .assert(hasAnyAncestor(hasTestTag("voice-create-$tag-card")))
         }
+        val advancedTag = "settings-row:高级：新建后付费音色"
+        reveal(advancedTag, "制作声音").performClick()
+        reveal("settings-switch:新建后付费音色", "制作声音").assertIsDisplayed()
+        reveal(advancedTag, "制作声音").assertTextContains("高级：新建后付费音色")
+        node("settings-row:收起高级设置").assertDoesNotExist()
+        reveal(advancedTag, "制作声音").performClick()
+        node("settings-switch:新建后付费音色").assertDoesNotExist()
         reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
         reveal("settings-field:声音名称", "制作声音").performTextReplacement("local creation draft")
         awaitImeFrame(node("settings-field:声音名称"), visible = true)
         reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
         reveal("settings-field:名额 ID", "制作声音").performTextReplacement("invalid")
+        awaitImeFrame(node("settings-field:名额 ID"), visible = true)
+        reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
+        node("settings-field:名额 ID").assertDoesNotExist()
+        reveal("settings-row:备用方式：从控制台复制 ID", "制作声音").performClick()
+        reveal("settings-field:名额 ID", "制作声音").assertTextContains("invalid")
+        reveal("settings-field:名额 ID", "制作声音").performClick()
         ui.onAllNodesWithText("在豆包控制台进入声音复刻音色列表", substring = true).assertCountEquals(0)
         ui.onAllNodesWithText("优先使用已有或免费名额", substring = true).assertCountEquals(0)
         awaitImeFrame(node("settings-field:名额 ID"), visible = true)
@@ -617,6 +633,30 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
         assertEquals(reading, fixture.controller.voiceRuntime.configuration.value)
         assertEquals(conversation, fixture.controller.voiceRuntime.conversationConfiguration.value)
         assertEquals(account, fixture.controller.voiceRuntime.accountConfigurations.value.getValue("DOUBAO"))
+        assertEquals(0, fixture.opens.get())
+    }
+
+
+    fun testImportedVoiceFallbackKeepsTitleAndDraftAcrossCollapse() {
+        systemProfiles()
+        runBlocking { fixture.controller.voiceRuntime.saveAccount(VoiceConfiguration(engine = "DOUBAO", provider = "fixture",
+            endpoint = "https://openspeech.bytedance.com", key = "synthetic-only", model = "seed-tts-2.0",
+            voice = app.daiyu.android.voice.providers.DoubaoVoices.DEFAULT_ID)) }
+        val before = fixture.controller.voiceRuntime.accountConfigurations.value
+        enter(); section("我的声音"); node("voice-account-open").performClick()
+        node("voice-account-add").performClick()
+        ui.onNodeWithTag("voice-personal-action:IMPORT").performClick()
+        awaitUniqueTag("page:导入声音")
+        val header = "settings-row:备用方式：从控制台复制 ID"
+        node("settings-field:已有音色 ID").assertDoesNotExist()
+        reveal(header, "导入声音").performClick()
+        reveal("settings-field:已有音色 ID", "导入声音").performTextReplacement("S_local_draft")
+        awaitImeFrame(node("settings-field:已有音色 ID"), visible = true)
+        reveal(header, "导入声音").assertTextContains("备用方式：从控制台复制 ID").performClick()
+        node("settings-field:已有音色 ID").assertDoesNotExist()
+        reveal(header, "导入声音").performClick()
+        reveal("settings-field:已有音色 ID", "导入声音").assertTextContains("S_local_draft")
+        assertEquals(before, fixture.controller.voiceRuntime.accountConfigurations.value)
         assertEquals(0, fixture.opens.get())
     }
 

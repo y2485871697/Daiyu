@@ -1,15 +1,30 @@
 package app.daiyu.android
 
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
+import app.daiyu.android.ui.haptics.miuix.TextButton
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 
 @Composable
 internal fun VoiceSettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Card(modifier.padding(horizontal = 12.dp, vertical = 6.dp), content = content)
+}
+
+@Composable
+internal fun VoiceAccountSaveButton(text: String, tag: String, enabled: Boolean, onClick: () -> Unit) {
+    val colors = assistantPreviewPalette()
+    TextButton(text, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        .fillMaxWidth().testTag(tag),
+        minHeight = 48.dp, cornerRadius = 24.dp,
+        colors = ButtonDefaults.textButtonColorsPrimary(color = colors.primary, textColor = colors.onPrimary),
+        enabled = enabled, onClick = onClick)
 }
 
 internal fun VoiceConfiguration.withSpeech(value: VoiceConfiguration) = copy(

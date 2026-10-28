@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
@@ -23,7 +24,7 @@ import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -144,7 +145,8 @@ internal fun ChatModelPicker(
                         val open = if (search.isNotEmpty()) provider.id !in searchCollapsed else expanded == provider.id
                         val surface = Color.White.copy(alpha = if (colors.dark) .012f else .14f)
                         item(key = "heading:${provider.id}") {
-                            Row(Modifier.testTag("chat-model-provider:${provider.id}").fillMaxWidth()
+                            Row(Modifier.animateItem(fadeInSpec = null, placementSpec = tween(220), fadeOutSpec = null)
+                                .testTag("chat-model-provider:${provider.id}").fillMaxWidth()
                                 .modelGroupSurface(top = true, bottom = !open, surface = surface, line = colors.line)
                                 .clickable(role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
                                     if (search.isNotEmpty()) searchCollapsed = if (open) searchCollapsed + provider.id else searchCollapsed - provider.id
@@ -166,14 +168,14 @@ internal fun ChatModelPicker(
                                         modifier = Modifier.testTag("chat-model-provider-balance:${provider.id}"),
                                         textStyle = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
                                 }
-                                Icon(DaiyuIcons.ChevronDown, null, Modifier.testTag("chat-model-provider-expand:${provider.id}").size(18.dp).rotate(if (open) 0f else -90f), tint = colors.muted)
+                                Icon(DaiyuIcons.ChevronRight, null, Modifier.testTag("chat-model-provider-expand:${provider.id}").size(18.dp).settingsDisclosureRotation(open), tint = colors.muted)
                             }
                         }
                         if (open) itemsIndexed(provider.models, key = { _, model -> "model:${provider.id}:${model.id}" }) { index, model ->
                             val selected = provider.id == state.providerId && model.id == state.current
                             val tag = if (provider.id == state.providerId) "chat-model-option:${model.id}"
                                 else "chat-model-option:${provider.id}:${model.id}"
-                            Box(Modifier.fillMaxWidth()
+                            Box(Modifier.animateItem(fadeInSpec = tween(220), placementSpec = tween(220), fadeOutSpec = null).fillMaxWidth()
                                 .modelGroupSurface(top = false, bottom = index == provider.models.lastIndex, surface = surface, line = colors.line)
                                 .padding(start = 4.dp, end = 4.dp, bottom = if (index == provider.models.lastIndex) 4.dp else 2.dp)) {
                                 Row(Modifier.testTag(tag).fillMaxWidth().alpha(if (visuallyEnabled) 1f else .45f)
@@ -205,7 +207,9 @@ internal fun ChatModelPicker(
                                 }
                             }
                         }
-                        item(key = "gap:${provider.id}") { Spacer(Modifier.height(12.dp)) }
+                        item(key = "gap:${provider.id}") {
+                            Spacer(Modifier.animateItem(fadeInSpec = null, placementSpec = tween(220), fadeOutSpec = null).height(12.dp))
+                        }
                     }
                     if (groups.isEmpty() && search.isNotEmpty() && !state.loading) item(key = "empty") {
                         Text("没有找到匹配的模型", color = colors.muted, fontSize = 14.sp, lineHeight = 22.sp,

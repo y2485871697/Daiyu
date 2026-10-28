@@ -35,14 +35,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
-import app.daiyu.android.ui.haptics.miuix.TextButton
 import app.daiyu.android.ui.haptics.miuix.IconButton
 import app.daiyu.android.ui.icons.ChatPreviewIcons
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import androidx.compose.ui.unit.sp
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Keeps a swallowed lease-stop failure fail-closed for the lifetime of this mounted port. */
 internal class AccountLeafPreviewGuard(port: VoiceAccountPreviewPort) {
@@ -327,10 +326,7 @@ internal fun VoiceAccountPanel(
                 VoiceSettingsCard {
                     SettingsTextField("声音复刻 API Key", accountKey, { if (!busy) { accountKey = it; confirmation = null } },
                         password = true, enabled = !busy, compact = true)
-                    TextButton("保存账户", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        .fillMaxWidth().testTag("voice-account-save"),
-                        minHeight = 48.dp, cornerRadius = 24.dp,
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                    VoiceAccountSaveButton("保存账户", "voice-account-save",
                         enabled = !busy && current() && accountKey.isNotBlank() && onAccountKeyChange != null, onClick = {
                             val key = accountKey
                             execute { onAccountKeyChange?.invoke(key) }
@@ -367,7 +363,8 @@ internal fun VoiceAccountPanel(
                     }))
                 } }
                 item { SettingsCard(Modifier.testTag("voice-sync-storage-card")) {
-                    SettingsRow("保存账户信息", showChevron = true, onClick = if (!enabled || ak.isBlank() || sk.isBlank()) null else ({
+                    VoiceAccountSaveButton("保存账户信息", "voice-sync-save",
+                        enabled = enabled && ak.isNotBlank() && sk.isNotBlank(), onClick = {
                         val a = ak; val s = sk; val preferred = project
                         execute("账户保存未确认，请核对 AK／SK、项目访问权限及本机存储后重试。") { report ->
                             val p = refreshProjects(a, s, preferred)
@@ -377,7 +374,7 @@ internal fun VoiceAccountPanel(
                             }
                             report("账户信息已加密保存在本机")
                         }
-                    }))
+                    })
                 } }
                 item { SettingsCard(Modifier.testTag("voice-sync-console-card")) {
                     SettingsRow("打开火山访问密钥管理", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/iam/keymanage/") })
@@ -400,8 +397,12 @@ internal fun VoiceAccountPanel(
                                 else navigate("SYNC")
                             }
                         }))
-                    SettingsRow("备用方式：从控制台复制 ID", showChevron = true, onClick = if (busy) null else ({ manualId = !manualId }))
-                    if (manualId) {
+                    SettingsRow("备用方式：从控制台复制 ID", onClick = if (busy) null else ({ manualId = !manualId }), trailing = {
+                        DaiyuIcon(DaiyuIcons.ChevronRight, if (manualId) "收起" else "展开",
+                            modifier = Modifier.settingsDisclosureRotation(manualId),
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
+                    })
+                    SettingsExpandableContent(manualId) {
                         SettingsNote("在豆包控制台进入声音复刻音色列表，将“已复刻”切换为“全部”或“未复刻”，复制 S_ 开头的音色 ID。API Key 与音色须属于同一项目。")
                         SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
                         AccountField("已有音色 ID", existingId, busy) { existingId = it; confirmation = null }
@@ -426,8 +427,14 @@ internal fun VoiceAccountPanel(
                     AccountField("声音名称", name, busy) { name = it.take(80); confirmation = null }
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-advanced-card")) {
-                    SettingsRow(if (advancedCreation) "收起高级设置" else "高级：新建后付费音色", onClick = { advancedCreation = !advancedCreation })
-                    if (advancedCreation) SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) { postpaid = it; confirmation = null }
+                    SettingsRow("高级：新建后付费音色", onClick = { advancedCreation = !advancedCreation }, trailing = {
+                        DaiyuIcon(DaiyuIcons.ChevronRight, if (advancedCreation) "收起" else "展开",
+                            modifier = Modifier.settingsDisclosureRotation(advancedCreation),
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
+                    })
+                    SettingsExpandableContent(advancedCreation) {
+                        SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) { postpaid = it; confirmation = null }
+                    }
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-sync-card")) {
                     SettingsRow("选择音色名额", summary = if (postpaid) null else creationSlots
@@ -442,8 +449,12 @@ internal fun VoiceAccountPanel(
                         }))
                 } }
                 item { SettingsCard(Modifier.testTag("voice-create-manual-card")) {
-                    SettingsRow("备用方式：从控制台复制 ID", showChevron = true, onClick = if (busy) null else ({ manualId = !manualId }))
-                    if (manualId) {
+                    SettingsRow("备用方式：从控制台复制 ID", onClick = if (busy) null else ({ manualId = !manualId }), trailing = {
+                        DaiyuIcon(DaiyuIcons.ChevronRight, if (manualId) "收起" else "展开",
+                            modifier = Modifier.settingsDisclosureRotation(manualId),
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
+                    })
+                    SettingsExpandableContent(manualId) {
                         SettingsRow("打开豆包控制台", onClick = { if (current()) uriHandler.openUri("https://console.volcengine.com/speech/app") })
                         AccountField("名额 ID", slotId, busy) { slotId = it; confirmation = null }
                     }

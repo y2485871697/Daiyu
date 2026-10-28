@@ -82,14 +82,11 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
     def test_clone_account_uses_compact_secret_eye_and_explicit_theme_pill_save(self):
         panel = source('VoiceSettingsPanel.kt')
         account = panel.split('if (child == "DOUBAO_ACCOUNT") {', 1)[1].split('val pageTitle =', 1)[0]
-        field, button = account.split('TextButton("保存账户"', 1)
+        field, button = account.split('VoiceAccountSaveButton("保存账户", "voice-account-save"', 1)
         self.assertIn('SettingsTextField("声音复刻 API Key"', field)
         self.assertIn('password = true, enabled = !busy, compact = true', field)
         self.assertIn('{ if (!busy) accountKeyDraft = it }', field)
-        for required in ('fillMaxWidth().testTag("voice-account-save")',
-                         'minHeight = 48.dp, cornerRadius = 24.dp',
-                         'colors = ButtonDefaults.textButtonColorsPrimary()',
-                         'enabled = !busy && accountKeyDraft.isNotBlank()',
+        for required in ('enabled = !busy && accountKeyDraft.isNotBlank()',
                          'runtime.saveAccount(value)', 'key = accountKeyDraft.trim()'):
             self.assertIn(required, button)
         self.assertNotIn('SettingsRow("保存账户"', account)
@@ -141,9 +138,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
     def test_saved_doubao_account_editor_uses_eye_pill_and_returns_real_new_snapshot(self):
         leaf = source('VoiceAccountPanel.kt')
         account = leaf.split('if (page == "ACCOUNT") item', 1)[1].split('if (page == "SYNC")', 1)[0]
-        for marker in ('password = true, enabled = !busy, compact = true', 'TextButton("保存账户"',
-                       'fillMaxWidth().testTag("voice-account-save")', 'minHeight = 48.dp, cornerRadius = 24.dp',
-                       'colors = ButtonDefaults.textButtonColorsPrimary()', 'onAccountKeyChange?.invoke(key)'):
+        for marker in ('password = true, enabled = !busy, compact = true', 'VoiceAccountSaveButton("保存账户", "voice-account-save"', 'onAccountKeyChange?.invoke(key)'):
             self.assertIn(marker, account)
         self.assertNotIn('SettingsRow("保存账户"', account)
         page = source('ProductionVoiceAccountPage.kt')

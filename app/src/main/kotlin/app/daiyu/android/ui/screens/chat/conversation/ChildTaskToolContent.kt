@@ -1,9 +1,10 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
+import app.daiyu.android.ui.screens.settings.SettingsExpandableContent
 import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -117,10 +118,10 @@ internal fun ChildTaskDisclosure(
             Text(ToolRichDetails.scrub(row.agent, limit = 80), Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1)
             Text(row.status, color = if (row.completed) colors.primary else colors.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1)
-            Icon(DaiyuIcons.ChevronDown, null, Modifier.size(14.dp).rotate(if (expanded) 180f else 0f),
+            Icon(DaiyuIcons.ChevronDown, null, Modifier.size(14.dp).settingsDisclosureRotation(expanded, expandedDegrees = 180f),
                 tint = colors.onSurfaceVariantSummary)
         }
-        if (expanded) details()
+        SettingsExpandableContent(expanded) { details() }
         controls()
     }
 }

@@ -12,6 +12,11 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class ShizukuCommandTransportTest {
+    // Model the Android File target semantics even when this fake-backend test runs on Windows.
+    private class AndroidFile(private val androidPath: String) : File(androidPath) {
+        override fun getPath(): String = androidPath
+        override fun isAbsolute(): Boolean = androidPath.startsWith('/')
+    }
     private class Backend(uid: Int = 2000) : ShizukuBackend {
         override val identity = ShizukuIdentity(uid, "service", "permission")
         val commands = mutableListOf<ShizukuCommand>()
@@ -40,7 +45,7 @@ class ShizukuCommandTransportTest {
             close(); if (delayedClose) closeCallback = onResult else onResult(closeResult)
         }
     }
-    private val config = TerminalConfiguration(backend = "shizuku", workingDirectory = File("/work 'quoted'"),
+    private val config = TerminalConfiguration(backend = "shizuku", workingDirectory = AndroidFile("/work 'quoted'"),
         environment = mapOf("TEST" to "a'b\nc", "PATH" to "/system/bin"))
     private class Fixture(val configuration: TerminalConfiguration, val uid: Int? = 2000, val backend: Backend = Backend()) {
         val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"), Message.ASSISTANT_ROLE,
@@ -65,6 +70,17 @@ class ShizukuCommandTransportTest {
         fun read(job: String) = dispatcher.dispatchOwned(task,
             listOf(ToolInvocation(ToolCallId("read-$job"), "terminal_read", JSONObject().put("job_id", job).toString())), owner) { false }
             .single().outcome as DispatchOutcome.Confirmed
+    }
+    @Test fun invalidAndroidCwdIsRejectedWithoutConnecting() {
+        var connects = 0
+        for (path in listOf("relative", "/invalid\u0000cwd")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                ShizukuCommandTransport(config.copy(workingDirectory = AndroidFile(path)), 2000) {
+                    connects++; Backend()
+                }
+            }
+        }
+        assertEquals(0, connects)
     }
     @Test fun ordinaryCommandUsesRealShizukuAdapterAndOriginalLedgerForBothUids() {
         for (uid in listOf(0, 2000)) {
@@ -115,7 +131,7 @@ class ShizukuCommandTransportTest {
         }
         val effects = listOf(effect(config, 0), effect(config, 2000),
             effect(config.copy(backend = "android")), effect(config.copy(backend = "android", root = true)),
-            effect(config.copy(workingDirectory = File("/other")), 2000),
+            effect(config.copy(workingDirectory = AndroidFile("/other")), 2000),
             effect(config.copy(environment = mapOf("TEST" to "different")), 2000))
         assertEquals(effects.size, effects.toSet().size)
     }

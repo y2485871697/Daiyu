@@ -99,9 +99,7 @@ internal class RunShizukuCommands(
                     close(); return ExecutionReceipt.Unknown("shizuku_execution_interrupted")
                 }
                 val page = backend.poll(handle, offset, 16_384)
-                if (page.offset != offset || page.nextOffset != offset + page.bytes.size || page.bytes.size > 16_384 ||
-                    page.retainedBytes !in page.nextOffset..262_144 ||
-                    page.bytes.size != minOf(16_384, page.retainedBytes - offset)) {
+                if (!page.validAt(offset, 16_384)) {
                     close(); return ExecutionReceipt.Unknown("shizuku_invalid_output_page")
                 }
                 output.write(page.bytes)

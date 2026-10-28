@@ -46,3 +46,7 @@ interface ShizukuBackend : AutoCloseable {
     fun closeWithResult(onResult: (ShizukuCloseResult) -> Unit)
     override fun close()
 }
+
+internal fun ShizukuCommandPage.validAt(expectedOffset: Int, limit: Int): Boolean =
+    offset == expectedOffset && nextOffset == expectedOffset + bytes.size && bytes.size <= limit &&
+        retainedBytes in nextOffset..262_144 && bytes.size == minOf(limit, retainedBytes - expectedOffset)

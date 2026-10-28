@@ -3113,7 +3113,9 @@ class ChatController internal constructor(private val application:Application,
             token.terminalLaunch = launch
             val jobWorkspace = workspace.retain()
             val plan = try { TerminalJobPlan(conversation?.id ?: ConversationId(UUID.randomUUID().toString()),
-                RunId(UUID.randomUUID().toString()), launch, command, mode, jobWorkspace) }
+                RunId(UUID.randomUUID().toString()), launch, command, mode, jobWorkspace,
+                    androidConfiguration = if (launch is TerminalPtyLaunch.Android)
+                        RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory) else null) }
                 catch (failure: Throwable) { jobWorkspace.close(); throw failure }
             val pending = ControllerTerminalJobPreparation(application, conversation, draft, profile, provider, plan)
             synchronized(this) {
@@ -3924,6 +3926,7 @@ class ChatController internal constructor(private val application:Application,
             val ordinaryGeneration = if (ordinaryRun) try { GenerationSettingsStore(application).loadSnapshot() }
                 catch (_: GenerationSettingsException) { null } else null
             val ordinaryShizuku = if (ordinaryRun && application is ChatApplication) shizukuAccess.refresh() else null
+            var ordinaryShizukuScope: RunOrdinaryShizukuTools? = null
             val liveMcp = if (mcpPreparation == null && virtualDisplay == null && gui == null && video == null &&
                 browserBinding == null && terminalRun == null && terminalJobRun == null && generation == null &&
                 shizukuPreparation == null && shizukuAuthorization == null && platformAction == null) {
@@ -4043,7 +4046,11 @@ class ChatController internal constructor(private val application:Application,
                             scopes.add(RunOrdinaryBrowserTools(application, realOwner, task, checkNotNull(ordinaryAssistant), assistant.id,
                                 checkNotNull(ordinaryBrowserSettings)) { binding -> ordinaryBrowserOpened(assistant, binding) })
                         scopes.add(RunOrdinaryGuiTools(realOwner, task, location))
-                        ordinaryShizuku?.uid?.let { uid -> scopes.add(RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid)) }
+                        ordinaryShizuku?.uid?.let { uid ->
+                            val scope = RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid)
+                            ordinaryShizukuScope = scope
+                            scopes.add(scope)
+                        }
                         ordinaryGeneration?.let { settings -> scopes.add(RunOrdinaryGenerationTools(realOwner, task, settings,
                             retainGenerationResources(settings.accountScope), generationInputs) { isRunUnfenced(assistant) }) }
                         scopes.add(RunOrdinaryJobTools(application, realOwner, task, grants, jobConfigurations,
@@ -4131,7 +4138,9 @@ class ChatController internal constructor(private val application:Application,
                     try {
                         RunCommandTools.android(application, realOwner, task, launch,
                             workingDirectory = workspace.resolved.hostDirectory, linuxState = linuxBinding.state,
-                            androidConfiguration = androidCommands, approve = { context, effect, disclosure ->
+                            androidConfiguration = androidCommands, shizukuUid = ordinaryShizuku?.uid,
+                            shizukuBackend = { ordinaryShizukuScope?.backendForCommands() },
+                            approve = { context, effect, disclosure ->
                             commandApprovals.await(CommandApprovalRequest(realOwner, context.invocation.id.value,
                                 effect, disclosure), context.cancelled)
                         })

@@ -32,6 +32,7 @@ internal class TerminalJobPlan(
         is TerminalPtyLaunch.Android -> {
             require(launch.argv == listOf("/system/bin/sh")) { "terminal_job_android_app_shell_only" }
             (androidConfiguration ?: TerminalConfiguration(workingDirectory = launch.cwd, environment = launch.environment)).also {
+                require(it.backend != "shizuku") { "android_shizuku_jobs_not_supported" }
                 require(it.backend == "android" && it.linux == null && it.workingDirectory == launch.cwd &&
                     it.environment == launch.environment) { "terminal_job_android_configuration_mismatch" }
             }

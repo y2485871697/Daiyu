@@ -275,6 +275,7 @@ class RunCommandToolsTest {
         for (mode in listOf(app.daiyu.android.runningmode.RunningMode.NORMAL, app.daiyu.android.runningmode.RunningMode.SHIZUKU)) {
             val normal = RunCommandTools.androidConfiguration(mode, cwd, emptyMap()) { fail("must not discover Root"); null }
             assertFalse(normal.root)
+            assertEquals(if (mode == app.daiyu.android.runningmode.RunningMode.SHIZUKU) "shizuku" else "android", normal.backend)
         }
         val missing = RunCommandTools.androidConfiguration(app.daiyu.android.runningmode.RunningMode.ROOT,
             cwd, emptyMap()) { null }

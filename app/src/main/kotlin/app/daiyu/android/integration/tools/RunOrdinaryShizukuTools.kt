@@ -20,14 +20,7 @@ internal class RunOrdinaryShizukuTools(owner: RunExecutionOwner, authorization: 
             val timeout = if (arguments.contains("timeout_ms")) arguments.integer("timeout_ms") else 30_000L
             val effect = RunShizukuCommands.writeEffect(uid, script, timeout)
             return write(effect) { context ->
-                if (!attempted) {
-                    attempted = true
-                    val connection = access.connect(uid)
-                    retain(connection)
-                    val real = connection.openBackend(scope)
-                    backend = retain(real) { done -> real.closeWithResult { result -> done(result.catalogResult()) } }
-                }
-                val real = backend ?: return@write ExecutionReceipt.NotExecuted("shizuku_backend_unavailable_no_retry")
+                val real = backendForCommands() ?: return@write ExecutionReceipt.NotExecuted("shizuku_backend_unavailable_no_retry")
                 if (real.identity.uid != uid) return@write ExecutionReceipt.NotExecuted("shizuku_identity_changed")
                 val commands = RunShizukuCommands(real, admission = ::live,
                     commandApproved = { it == effect }, expectedSessionId = authorization.sessionId,
@@ -38,6 +31,20 @@ internal class RunOrdinaryShizukuTools(owner: RunExecutionOwner, authorization: 
             }
         }
     })
+    /** Both ordinary entrypoints share one run-owned connection; connect() must not rotate it per tool. */
+    @Synchronized internal fun backendForCommands(): ShizukuBackend? {
+        if (!live()) return null
+        if (!attempted) {
+            beginCreation()
+            attempted = true
+            try {
+                val connection = retain(access.connect(uid))
+                val real = connection.openBackend(scope)
+                backend = retain(real) { done -> real.closeWithResult { result -> done(result.catalogResult()) } }
+            } finally { endCreation() }
+        }
+        return backend.takeIf { live() }
+    }
     private fun ShizukuCloseResult.catalogResult(): RunCatalogCloseResult = when (this) {
         ShizukuCloseResult.Drained -> RunCatalogCloseResult.Drained
         is ShizukuCloseResult.Unknown -> RunCatalogCloseResult.Unknown(reason)

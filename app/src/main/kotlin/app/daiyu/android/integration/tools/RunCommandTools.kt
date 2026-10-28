@@ -48,6 +48,7 @@ internal class RunCommandTools(
     private val approve: (ToolExecutionContext, WriteEffect, String) -> Boolean,
     private val create: (String, TerminalConfiguration) -> CommandTransport,
     private val linuxState: TerminalLinuxState? = null,
+    private val shizukuUid: Int? = null,
 ) : AutoCloseable {
     companion object {
         const val CAPABILITY = "terminal.command.consent"
@@ -60,8 +61,16 @@ internal class RunCommandTools(
             workingDirectory: java.io.File, environment: Map<String, String>,
             rootExecutable: () -> String? = app.daiyu.android.runningmode.AndroidRunningModeAuthorization::rootExecutable): TerminalConfiguration {
             val root = mode == app.daiyu.android.runningmode.RunningMode.ROOT
-            return TerminalConfiguration(root = root, workingDirectory = workingDirectory, environment = environment.toMap(),
+            return TerminalConfiguration(backend = if (mode == app.daiyu.android.runningmode.RunningMode.SHIZUKU) "shizuku" else "android", root = root, workingDirectory = workingDirectory, environment = environment.toMap(),
                 rootExecutable = if (root) rootExecutable() ?: "/system/bin/su" else "/system/bin/su")
+        }
+
+        internal fun transport(configuration: TerminalConfiguration, shizukuUid: Int?,
+            shizukuBackend: () -> app.daiyu.android.shizuku.ShizukuBackend?,
+            terminal: () -> CommandTransport): CommandTransport = when (configuration.backend) {
+            "shizuku" -> ShizukuCommandTransport(configuration, shizukuUid, shizukuBackend)
+            "android", "linux" -> terminal()
+            else -> error("terminal_backend_unsupported")
         }
 
         fun android(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
@@ -69,20 +78,24 @@ internal class RunCommandTools(
             workingDirectory: java.io.File = app.daiyu.android.workspace.PrivateWorkspacePaths(context.filesDir).ensureRoot(),
             linuxState: TerminalLinuxState? = null,
             androidConfiguration: TerminalConfiguration = androidConfiguration(context, workingDirectory),
+            shizukuUid: Int? = null,
+            shizukuBackend: () -> app.daiyu.android.shizuku.ShizukuBackend? = { null },
             approve: (ToolExecutionContext, WriteEffect, String) -> Boolean): RunCommandTools {
             val configuration = androidConfiguration
-            require(configuration.backend == "android" && configuration.linux == null && configuration.workingDirectory == workingDirectory)
+            require(configuration.backend in setOf("android", "shizuku") && configuration.linux == null && configuration.workingDirectory == workingDirectory)
             return RunCommandTools(configuration, owner, authorization, linux, approve, create = { environment, frozen ->
-                val registry = TerminalRegistry(context)
-                try { registry.configure("${owner.runId.value}-$environment", frozen, owner.conversationId.value) }
-                catch (failure: Exception) { registry.close(); throw failure }
-                object : CommandTransport {
-                    override fun execute(name: String, arguments: JSONObject) = registry.execute(name, arguments)
-                    override fun read(id: String, offset: Long, limit: Int) = registry.inspectJob(id, offset, limit)
-                    override fun close() = registry.close()
-                    override fun awaitTermination(timeoutMillis: Long) = registry.awaitOrdinaryTermination(timeoutMillis)
+                transport(frozen, shizukuUid, shizukuBackend) {
+                    val registry = TerminalRegistry(context)
+                    try { registry.configure("${owner.runId.value}-$environment", frozen, owner.conversationId.value) }
+                    catch (failure: Exception) { registry.close(); throw failure }
+                    object : CommandTransport {
+                        override fun execute(name: String, arguments: JSONObject) = registry.execute(name, arguments)
+                        override fun read(id: String, offset: Long, limit: Int) = registry.inspectJob(id, offset, limit)
+                        override fun close() = registry.close()
+                        override fun awaitTermination(timeoutMillis: Long) = registry.awaitOrdinaryTermination(timeoutMillis)
+                    }
                 }
-            }, linuxState = linuxState)
+            }, linuxState = linuxState, shizukuUid = shizukuUid)
         }
     }
     private val lock = Any()
@@ -122,6 +135,7 @@ internal class RunCommandTools(
         val backend = config?.linux
         val frozen = JSONObject().put("conversation", owner.conversationId.value).put("run", owner.runId.value)
             .put("environment", environment).put("mode", "sync").put("timeout_ms", timeout)
+            .put("backend", config?.backend).put("shizuku_uid", if (config?.backend == "shizuku") shizukuUid else null)
             .put("root", config?.root).put("root_executable", config?.rootExecutable)
             .put("cwd", config?.workingDirectory?.path)
             .put("env", JSONObject(config?.environment?.toSortedMap().orEmpty()))
@@ -144,7 +158,7 @@ internal class RunCommandTools(
     }
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = app.daiyu.android.domain.tools.ToolDefinition("terminal_exec", 1,
-            "在已选择的 Android ${if (android.root) "Root" else "应用 UID"} 身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
+            "在已选择的 Android ${if (android.backend == "shizuku") "Shizuku（仅真实授权服务，不回退应用 UID）" else if (android.root) "Root" else "应用 UID"} 身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("command", ArgumentType.Text(maxLength = 32768, minimumLength = 1)),
                 ArgumentField("environment", ArgumentType.Text(choices = setOf("android", "linux"))),
@@ -158,7 +172,7 @@ internal class RunCommandTools(
             val effect = WriteEffect("terminal.command", "exec", target(environment, timeout),
                 java.util.Base64.getEncoder().encodeToString(command.toByteArray(Charsets.UTF_8)))
             val config = configuration(environment)
-            val disclosure = "环境：$environment\n身份：${if (environment == "android") (if (android.root) "Android Root（实际 UID 必须为 0；失效不降级）" else "Android 应用 UID（非 Root）") else if (config?.linux?.rootScope != null) "chroot / Host Root（独立进程域，不回退 Android）" else "PRoot / Android 应用 UID（不回退 Android）"}\n" +
+            val disclosure = "环境：$environment\n身份：${if (environment == "android") (if (android.backend == "shizuku") "Android Shizuku（预期 UID=$shizukuUid；连接失败不降级）" else if (android.root) "Android Root（实际 UID 必须为 0；失效不降级）" else "Android 应用 UID（非 Root）") else if (config?.linux?.rootScope != null) "chroot / Host Root（独立进程域，不回退 Android）" else "PRoot / Android 应用 UID（不回退 Android）"}\n" +
                 "工作目录：${config?.linux?.guestWorkingDirectory ?: config?.workingDirectory?.path}\n" +
                 "环境变量：${config?.linux?.environment.orEmpty() + config?.environment.orEmpty()}\n" +
                 "共享映射：${config?.linux?.sharedMounts.orEmpty()}\n等待上限：${timeout}ms\n\n完整命令：\n$command"
@@ -251,7 +265,7 @@ internal class RunCommandTools(
             .put("session_id", opened.getString("session_id")).put("command", command)
             .put("mode", "sync").put("timeout_ms", timeout))
         return when (raw.optString("execution")) {
-            "executed" -> ExecutionReceipt.Confirmed(raw.toString())
+            "executed" -> ExecutionReceipt.Confirmed(raw.toString(), isError = !raw.optBoolean("ok"))
             "not_executed" -> ExecutionReceipt.NotExecuted(raw.optString("error", "terminal_not_executed"))
             else -> {
                 synchronized(lock) { unknown = true }

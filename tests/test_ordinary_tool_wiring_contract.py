@@ -40,11 +40,28 @@ class OrdinaryToolWiringContract(unittest.TestCase):
         job = (K / 'integration/tools/RunOrdinaryJobTools.kt').read_text()
         self.assertIn('RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory)', controller)
         self.assertIn('mutableMapOf("android" to androidCommands)', controller)
-        self.assertIn('androidConfiguration = androidCommands, approve', controller)
+        self.assertIn('androidConfiguration = androidCommands, shizukuUid = ordinaryShizuku?.uid', controller)
         self.assertIn('androidConfiguration = frozen.takeIf { environment == "android" }', job)
         self.assertIn('mode == app.daiyu.android.runningmode.RunningMode.ROOT', command)
         self.assertIn('.put("root", config?.root).put("root_executable", config?.rootExecutable)', command)
         self.assertNotIn('ArgumentField("root"', command)
+
+    def test_selected_shizuku_uses_real_shared_backend_without_fallback(self):
+        controller = (K / 'ChatController.kt').read_text()
+        command = (K / 'integration/tools/RunCommandTools.kt').read_text()
+        job = (K / 'integration/tools/RunOrdinaryJobTools.kt').read_text()
+        plan = (K / 'integration/tools/TerminalJobSession.kt').read_text()
+        scope = (K / 'integration/tools/RunOrdinaryShizukuTools.kt').read_text()
+        self.assertIn('"shizuku" -> ShizukuCommandTransport(', command)
+        self.assertIn('shizukuBackend = { ordinaryShizukuScope?.backendForCommands() }', controller)
+        self.assertIn('backendForCommands()', scope)
+        self.assertEqual(scope.count('access.connect(uid)'), 1)
+        self.assertIn('androidConfiguration = if (launch is TerminalPtyLaunch.Android)', controller)
+        before = job.split('return write(effect)', 1)[0]
+        self.assertIn('if (frozen.backend == "shizuku")', before)
+        self.assertIn('admit = { denial(it) ?: refused }', before)
+        self.assertIn('require(it.backend != "shizuku")', plan)
+        self.assertIn('.put("backend", config?.backend).put("shizuku_uid",', command)
 
     def test_each_job_has_an_independent_transport_scope(self):
         job = (K / 'integration/tools/TerminalJobSession.kt').read_text()

@@ -14,6 +14,10 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
     private val assetsWrites = AtomicInteger()
     private val creates = AtomicInteger()
     private var admitted = true
+    private var interactionsAllowed = true
+    private val blockedInteractions = AtomicInteger()
+    private val selections = AtomicInteger()
+    private val dismissals = AtomicInteger()
     private lateinit var store: AssistantStore
 
     override fun setUp() {
@@ -43,8 +47,11 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 MiuixTheme {
-                    AssistantPickerDialog(true, store, assets, {}, {}, {},
-                        onCreate = { creates.incrementAndGet() }, canMutate = { admitted })
+                    AssistantPickerDialog(true, store, assets, { selections.incrementAndGet() }, {},
+                        { dismissals.incrementAndGet() }, onCreate = { creates.incrementAndGet() },
+                        canMutate = { admitted }, canInteract = {
+                            interactionsAllowed.also { if (!it) blockedInteractions.incrementAndGet() }
+                        })
                 }
             }
         }
@@ -105,4 +112,36 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
         assertEquals(1, writes.get())
         assertEquals(3, store.list().size)
     }
+    fun testRunningGateRejectsSelectionAndLongPressWithoutClosingThenUnlocks() {
+        mainThread { interactionsAllowed = false }
+        ui.onNodeWithTag("assistant-item-picker-b").performClick()
+        ui.onNodeWithTag("assistant-item-picker-a").performTouchInput { longClick() }
+        ui.waitForIdle()
+        assertEquals(0, selections.get())
+        assertEquals(0, dismissals.get())
+        assertEquals(2, blockedInteractions.get())
+        ui.onNodeWithTag("assistant-action-edit").assertDoesNotExist()
+        ui.onNodeWithTag("assistant-item-picker-b").assertIsDisplayed()
+        assertEquals("picker-a", store.selectedId.value)
+        assertEquals(0, writes.get())
+        mainThread { interactionsAllowed = true }
+        ui.onNodeWithTag("assistant-item-picker-b").performClick()
+        ui.waitUntil(5_000) { selections.get() == 1 && dismissals.get() == 1 }
+    }
+
+    fun testTaskStartedAfterDeleteConfirmationLeavesProfileAndAssetsUntouched() {
+        ui.onNodeWithTag("assistant-item-picker-a").performTouchInput { longClick() }
+        ui.onNodeWithTag("assistant-action-delete").performClick()
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.assistant_delete_title)).assertIsDisplayed()
+        mainThread { interactionsAllowed = false }
+        ui.onNode(hasText(instrumentation.targetContext.getString(R.string.action_delete)) and hasClickAction())
+            .performClick()
+        ui.waitForIdle()
+        assertEquals(1, blockedInteractions.get())
+        assertEquals(0, writes.get())
+        assertEquals(0, assetsWrites.get())
+        assertEquals(2, store.list().size)
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.assistant_delete_title)).assertIsDisplayed()
+    }
+
 }

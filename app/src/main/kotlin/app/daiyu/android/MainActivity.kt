@@ -1708,6 +1708,11 @@ class MainActivity : ComponentActivity() {
     private var chatModelSelectionFailed = false
     private var chatModelCancelled = AtomicBoolean(false)
     private var chatModelOwner: Any? = null
+    private fun allowTaskConfigurationChange(): Boolean {
+        if (!controller.taskConfigurationBusy()) return true
+        toast("请先结束任务")
+        return false
+    }
     private var assistantPicker by mutableStateOf(false)
     private var assistantSelectionOwner by mutableStateOf<AssistantSelectionOwner?>(null)
     private fun openAssistantPicker(global: Boolean = false) {
@@ -2440,8 +2445,9 @@ class MainActivity : ComponentActivity() {
                             if (paneState.selectedFolderId == name) paneState = paneState.copy(selectedFolderId = null)
                             updatePane()
                         } },
-                        onSelectAssistant = { id -> guard { assistantStore.select(id) } },
+                        onSelectAssistant = { id -> guard { if (allowTaskConfigurationChange()) assistantStore.select(id) } },
                         onEditAssistant = { id -> guard {
+                            if (!allowTaskConfigurationChange()) return@guard
                             checkNotNull(assistantStore.read(id)) { "助手已不存在" }
                             assistantEditReturnPage = retainedPage
                             assistantEditReturnToSidebar = true
@@ -2684,8 +2690,14 @@ class MainActivity : ComponentActivity() {
                         selectedId = owner.expectedAssistantId, useGlobalSelection = false,
                         editing = retainedPage == "assistant-edit",
                         canMutate = { assistantOwnerMatches(owner) && !controller.dataBusy },
+                        canInteract = { assistantOwnerMatches(owner) && allowTaskConfigurationChange() },
+                        onDelete = { id -> guard {
+                            if (!assistantOwnerMatches(owner) || !allowTaskConfigurationChange()) return@guard
+                            controller.deleteAssistant(id)
+                        } },
                         onSelect = { id -> guard {
                             check(assistantOwnerMatches(owner)) { "选择器所属页面已变化；未改变绑定" }
+                            if (!allowTaskConfigurationChange()) return@guard
                             if(owner.global) assistantStore.select(id)
                             else {
                                 val conversationId=ConversationId(checkNotNull(owner.conversationId))
@@ -2694,7 +2706,7 @@ class MainActivity : ComponentActivity() {
                             }
                             refresh()
                         } },
-                        onEdit = editAssistant,
+                        onEdit = { id -> if (allowTaskConfigurationChange()) editAssistant(id) },
                         onCreate = { guard {
                             if (assistantOwnerMatches(owner) && retainedPage != "assistant-edit") {
                                 editAssistant(assistantStore.create().id)
@@ -2775,8 +2787,10 @@ class MainActivity : ComponentActivity() {
                     options = ReasoningEffort.textChoices(confirmedReasoningModel),
                     onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
                         if (activityUsable() && selected?.id?.value == thinkingOwner) {
-                            try { reasoningPreference.set(thinkingOwner, effort); publishChat() }
-                            catch (_: Exception) { toast("思考偏好保存未确认；请重新保存") }
+                            if (allowTaskConfigurationChange()) try {
+                                if (controller.setChatReasoning(thinkingOwner, effort)) publishChat()
+                                else toast("请先结束任务")
+                            } catch (_: Exception) { toast("思考偏好保存未确认；请重新保存") }
                         }
                     })
             }
@@ -6240,7 +6254,7 @@ class MainActivity : ComponentActivity() {
         backupStatus = controller.dataStatus
         chatModelPicker = chatModelPicker?.let { picker -> picker.copy(enabled = !picker.loading && !picker.switching &&
             !chatModelSelectionFailed && (chatModelProviderEditor == null || chatModelSettings != null) &&
-            chatModelProviderChoices.isNotEmpty() && chatModelSession != null && controller.active == null &&
+            chatModelProviderChoices.isNotEmpty() && chatModelSession != null &&
             !controller.dataBusy && controller.ready) }
         controlOwner = controller.active?.takeIf { it.conversationId == selected?.id && it.status == RunStatus.RUNNING }
         if (controller.dataBusy) {
@@ -6682,7 +6696,7 @@ class MainActivity : ComponentActivity() {
             }
             chatModelPicker = (session?.state ?: ChatModelPickerState("", emptyList()))
                 .copy(loading = false, enabled = result != null && (result.activeEditor == null || saved != null) &&
-                    result.choices.isNotEmpty() && controller.active == null && !controller.dataBusy && controller.ready,
+                    result.choices.isNotEmpty() && !controller.dataBusy && controller.ready,
                     message = message)
         }
     }
@@ -6695,6 +6709,7 @@ class MainActivity : ComponentActivity() {
         if (owner == null || chatModelOwner !== owner || chatModelSession !== session) return
         val picker = chatModelPicker ?: return
         if (picker.switching) return
+        if (!allowTaskConfigurationChange()) return
         val saved = chatModelSettings
         val target = chatModelProviderChoices[providerId] ?: return
         val cancelled = chatModelCancelled

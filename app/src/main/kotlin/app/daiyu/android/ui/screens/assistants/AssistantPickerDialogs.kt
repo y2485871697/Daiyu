@@ -64,6 +64,7 @@ fun AssistantPickerDialog(
     onCreate: () -> Unit,
     editing: Boolean = false,
     onOutsideDismiss: () -> Unit = onDismiss,
+    canInteract: () -> Boolean = { true },
 ) {
     var searchFocused by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -108,7 +109,8 @@ fun AssistantPickerDialog(
             verticalArrangement = Arrangement.spacedBy(5.dp * s)) {
             items(filtered, key = { it.id }) { profile ->
                 AssistantProfileCard(profile, profile.id == selectedId,
-                    onClick = { onSelect(profile.id); onDismiss() }, onLongClick = { actionProfileId = profile.id }, assets = assets,
+                    onClick = { if (canInteract()) { onSelect(profile.id); onDismiss() } },
+                    onLongClick = { if (canInteract()) actionProfileId = profile.id }, assets = assets,
                     modifier = Modifier.testTag("assistant-item-${profile.id}"))
             }
             if (filtered.isEmpty()) item {
@@ -121,13 +123,13 @@ fun AssistantPickerDialog(
     actionProfile?.let { profile ->
         AssistantActionsDialog(profile, assets = assets, canDelete = assistants.size > 1,
             onCopy = { actionProfileId = null; onCopy(profile.id) },
-            onEdit = { onEdit(profile.id) },
-            onDelete = { actionProfileId = null; deleteProfile = profile }, onDismiss = { actionProfileId = null },
+            onEdit = { if (canInteract()) onEdit(profile.id) },
+            onDelete = { if (canInteract()) { actionProfileId = null; deleteProfile = profile } }, onDismiss = { actionProfileId = null },
             onOutsideDismiss = onOutsideDismiss)
     }
     deleteProfile?.let { profile ->
         AssistantDeleteDialog(profile, assets = assets, canDelete = assistants.size > 1, onDismiss = { deleteProfile = null },
-            onConfirm = { deleteProfile = null; onDelete(profile.id) }, onOutsideDismiss = onOutsideDismiss)
+            onConfirm = { if (canInteract()) { deleteProfile = null; onDelete(profile.id) } }, onOutsideDismiss = onOutsideDismiss)
     }
 }
 
@@ -146,6 +148,8 @@ fun AssistantPickerDialog(
     canMutate: () -> Boolean = { true },
     editing: Boolean = false,
     onOutsideDismiss: () -> Unit = onDismiss,
+    canInteract: () -> Boolean = { true },
+    onDelete: ((String) -> Unit)? = null,
 ) {
     val profiles by store.assistants.collectAsState()
     val active by store.selectedId.collectAsState()
@@ -167,12 +171,16 @@ fun AssistantPickerDialog(
                 store.save(copy.copy(avatarFileName = assets.copyAvatar(fileName, copy.id)))
             }
         } },
-        onDelete = { id -> mutate {
-            val avatar = store.read(id)?.avatarFileName
-            store.delete(id)
-            assets.deleteMemory(id)
-            assets.deleteAvatar(avatar)
-        } }, assets = assets, editing = editing, onOutsideDismiss = onOutsideDismiss)
+        onDelete = { id ->
+            if (onDelete != null) {
+                if (canMutate()) onDelete(id)
+            } else mutate {
+                val avatar = store.read(id)?.avatarFileName
+                store.delete(id)
+                assets.deleteMemory(id)
+                assets.deleteAvatar(avatar)
+            }
+        }, assets = assets, editing = editing, onOutsideDismiss = onOutsideDismiss, canInteract = canInteract)
 }
 
 @OptIn(ExperimentalFoundationApi::class)

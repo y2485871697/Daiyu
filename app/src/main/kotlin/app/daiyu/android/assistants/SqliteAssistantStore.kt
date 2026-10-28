@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 
+internal class AssistantInUseException : IllegalStateException("请先结束任务")
+
 /** Application-owned projection. The database, not preferences or the flow, is authoritative. */
 class SqliteAssistantStore(private val database: ConversationDatabase) : AssistantStore {
     // An unavailable store is visible as an empty projection, never a replacement seed.
@@ -88,6 +90,8 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
         val before = readSnapshot(db)
         require(before.profiles.any { it.id == id }) { "助手不存在" }
         require(before.profiles.size > 1) { "必须保留至少一个助手" }
+        if (db.rawQuery("SELECT 1 FROM conversations c JOIN messages m ON m.conversation_id=c.id WHERE c.assistant_id=? AND m.status='RUNNING' LIMIT 1",
+            arrayOf(id)).use { it.moveToFirst() }) throw AssistantInUseException()
         check(db.delete("assistants", "id=?", arrayOf(id)) == 1)
         if (before.selectedId == id) check(db.update("assistant_selection", ContentValues().apply {
             put("selected_id", before.profiles.first { it.id != id }.id)

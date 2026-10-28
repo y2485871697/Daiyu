@@ -239,4 +239,28 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         } finally { db.writableDatabase.execSQL("DROP TRIGGER corrupt_null_backup") }
     }
 
+    fun testRunningAssistantInAnotherConversationCannotBeDeletedButIdleBindingCan() {
+        val db = database(); val store = SqliteAssistantStore(db)
+        store.save(AssistantProfile("other", "其他", ""))
+        val running = db.create("default")
+        val viewing = db.create("other")
+        db.draft(viewing.id, "other draft")
+        store.select("other")
+        val (user, assistant) = pair(running.id)
+        db.send(user, assistant, expectedAssistantId = "default")
+        val profiles = store.list()
+        try { store.delete("default"); fail("running assistant deleted") }
+        catch (failure: IllegalStateException) { assertEquals("请先结束任务", failure.message) }
+        assertEquals(profiles, store.list())
+        assertEquals("other", store.selectedId.value)
+        assertEquals("default", db.assistantId(running.id))
+        assertEquals("other", db.assistantId(viewing.id))
+        assertEquals("other draft", db.conversations().first { it.id == viewing.id }.draft)
+        assertEquals(RunStatus.RUNNING, db.messages(running.id).last().second.status)
+        db.save(assistant.copy(status = RunStatus.COMPLETED))
+        store.delete("default")
+        assertNull(store.read("default"))
+        assertEquals("default", db.assistantId(running.id))
+    }
+
 }

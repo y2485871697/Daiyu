@@ -30,7 +30,7 @@ class AssistantCreationContractTest(unittest.TestCase):
                       'assistantEditReturnPage = retainedPage', 'assistantEditReturnToSidebar = false',
                       'assistantEditingId = id; retainedPage = "assistant-edit"'):
             self.assertIn(token, edit)
-        self.assertIn('onEdit = editAssistant', host)
+        self.assertIn('onEdit = { id -> if (allowTaskConfigurationChange()) editAssistant(id) }', host)
 
     def test_real_touch_regressions_cover_create_save_cancel_and_stale_admission(self):
         tests = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'

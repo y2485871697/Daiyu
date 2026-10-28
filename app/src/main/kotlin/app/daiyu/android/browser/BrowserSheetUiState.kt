@@ -35,6 +35,12 @@ internal class BrowserSheetUiState {
         observedUrl = currentUrl
     }
 
+    fun addressInput(current: () -> Boolean, dismissing: () -> Boolean): (TextFieldValue) -> Unit = { value ->
+        val sameText = value.text == address.text
+        val blur = dismissing() || showHistory || showSettings || showDownloads
+        if (current() && !(sameText && blur)) editAddress(value)
+    }
+
     fun editAddress(value: TextFieldValue) {
         address = value
         dirty = value.text != observedUrl

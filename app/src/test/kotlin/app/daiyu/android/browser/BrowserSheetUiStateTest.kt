@@ -6,6 +6,62 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BrowserSheetUiStateTest {
+    @Test fun revokedAddressInputCannotOverwriteItsSuccessorsSelectionOrText() {
+        val state = BrowserSheetUiState()
+        state.synchronize(0, "https://example.com/")
+        val retained = TextFieldValue("unfinished address", TextRange(2, 9), TextRange(1, 10))
+        state.editAddress(retained)
+        var oldCurrent = true
+        val oldInput = state.addressInput({ oldCurrent }, { false })
+        oldCurrent = false
+        oldInput(retained.copy(selection = TextRange(9), composition = null))
+        assertEquals(retained, state.address)
+        val newInput = state.addressInput({ true }, { false })
+        val next = retained.copy(selection = TextRange(9, 2))
+        newInput(next)
+        oldInput(TextFieldValue("stale input"))
+        oldInput(next.copy(selection = TextRange(9), composition = null))
+        state.synchronize(0, "https://example.com/")
+        assertEquals(next, state.address)
+    }
+
+    @Test fun addressInputPreservesSelectionDuringDismissalAndEachBrowserPanel() {
+        for (range in listOf(TextRange(2, 9), TextRange(9, 2))) {
+            val state = BrowserSheetUiState()
+            state.synchronize(0, "https://example.com/")
+            var dismissing = false
+            val input = state.addressInput({ true }, { dismissing })
+            val retained = TextFieldValue("unfinished address", range, TextRange(1, 10))
+            for (panel in 0..3) {
+                state.editAddress(retained)
+                dismissing = panel == 0
+                state.showHistory = panel == 1
+                state.showSettings = panel == 2
+                state.showDownloads = panel == 3
+                input(retained.copy(selection = TextRange(range.max), composition = null))
+                assertEquals("panel $panel must not discard the retained selection", retained, state.address)
+                val edited = TextFieldValue("real replacement $panel", TextRange(3))
+                input(edited)
+                assertEquals("actual text edits must remain accepted", edited, state.address)
+            }
+        }
+    }
+
+    @Test fun currentAddressInputAcceptsUserCursorSelectionCompositionAndTextChanges() {
+        val state = BrowserSheetUiState()
+        state.synchronize(0, "https://example.com/")
+        val input = state.addressInput({ true }, { false })
+        val selected = TextFieldValue("unfinished address", TextRange(9, 2), TextRange(1, 10))
+        input(selected)
+        assertEquals(selected, state.address)
+        val cursor = selected.copy(selection = TextRange(9), composition = null)
+        input(cursor)
+        assertEquals(cursor, state.address)
+        val edited = TextFieldValue("edited", TextRange(2))
+        input(edited)
+        assertEquals(edited, state.address)
+    }
+
     @Test fun firstTabProjectionObservesEditsAfterSameValueSynchronization() {
         val state = BrowserSheetUiState()
         var invalidated = false

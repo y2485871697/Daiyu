@@ -96,6 +96,7 @@ internal fun BrowserSheet(
     tabPool: BrowserUiPool,
     onDismiss: () -> Unit,
     uiState: BrowserSheetUiState = remember { BrowserSheetUiState() },
+    addressInputCurrent: () -> Boolean = { tabPool.visit?.snapshot()?.live == true },
 ) {
     val tabs by tabPool.tabs.collectAsState()
     val selectedTabId by tabPool.selectedTabId.collectAsState()
@@ -246,7 +247,9 @@ internal fun BrowserSheet(
                     Box(modifier = Modifier.weight(1f)) {
                         androidx.compose.foundation.text.BasicTextField(
                             value = urlInput,
-                            onValueChange = uiState::editAddress,
+                            onValueChange = uiState.addressInput(addressInputCurrent) {
+                                app.daiyu.android.ui.components.InputDismissal.inProgress
+                            },
                             singleLine = true,
                             enabled = !isAgentBusy,
                             textStyle = LocalTextStyle.current.copy(

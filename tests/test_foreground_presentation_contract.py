@@ -76,7 +76,7 @@ class ForegroundPresentationContract(unittest.TestCase):
         self.assertIn('browserResumeTarget?.presentation = app.daiyu.android.browser.BrowserSheetUiState()', main)
         visual = (SRC / 'ui/screens/browser/BrowserVisualScreen.kt').read_text()
         self.assertIn('val presentation = uiState ?: remember { BrowserSheetUiState() }', visual)
-        self.assertIn('BrowserSheet(pool, onBack, presentation)', visual)
+        self.assertRegex(visual, r"BrowserSheet\(\s*pool, onBack, presentation,\s*addressInputCurrent = \{ visit != null && ownerCurrent\(\) \},\s*\)")
         sheet = (SRC / 'browser/ported/ui/browser/BrowserSheet.kt').read_text()
         self.assertIn('uiState.displayedAddress(selectedTabId, currentURL)', sheet)
         self.assertIn('uiState.synchronize(selectedTabId, currentURL)', sheet)

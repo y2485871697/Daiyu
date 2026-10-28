@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
@@ -45,7 +46,7 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
                     background = colors.background
                     expected = colors.onSurfaceVariantSummary.copy(alpha = .5f).compositeOver(background)
                     previous = colors.outline.copy(alpha = .55f).compositeOver(background)
-                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    BoxWithConstraints(Modifier.fillMaxWidth().statusBarsPadding()) {
                         Box(Modifier.width(minOf(maxWidth, 360.dp)).background(background)) { ChatTimelineDivider(entry) }
                     }
                 }

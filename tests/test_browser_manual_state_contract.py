@@ -134,3 +134,31 @@ class BrowserManualStateContractTest(unittest.TestCase):
                          'Snapshot.sendApplyNotifications()', 'assertFalse(invalidated)',
                          'assertTrue("first-tab projection must observe address edits", invalidated)'):
             self.assertIn(fragment, unit)
+
+    def test_address_input_is_bound_to_its_visit_and_preserves_modal_blur_selection(self):
+        state = (APP / 'browser/BrowserSheetUiState.kt').read_text()
+        gate = state.split('fun addressInput(', 1)[1].split('fun editAddress(', 1)[0]
+        for token in ('current: () -> Boolean', 'dismissing: () -> Boolean',
+                      'value.text == address.text',
+                      'dismissing() || showHistory || showSettings || showDownloads',
+                      'if (current() && !(sameText && blur)) editAddress(value)'):
+            self.assertIn(token, gate)
+        sheet = (APP / 'browser/ported/ui/browser/BrowserSheet.kt').read_text()
+        self.assertIn('addressInputCurrent: () -> Boolean = { tabPool.visit?.snapshot()?.live == true }', sheet)
+        self.assertIn('onValueChange = uiState.addressInput(addressInputCurrent)', sheet)
+        self.assertIn('app.daiyu.android.ui.components.InputDismissal.inProgress', sheet)
+        self.assertNotIn('onValueChange = uiState::editAddress', sheet)
+        screen = (APP / 'ui/screens/browser/BrowserVisualScreen.kt').read_text()
+        self.assertIn('addressInputCurrent = { visit != null && ownerCurrent() }', screen)
+        main = (APP / 'MainActivity.kt').read_text()
+        self.assertIn('ownerCurrent = { browserVisualPageCurrent(original) }', main)
+        unit = (ROOT / 'app/src/test/kotlin/app/daiyu/android/browser/BrowserSheetUiStateTest.kt').read_text()
+        for name in ('revokedAddressInputCannotOverwriteItsSuccessorsSelectionOrText',
+                     'addressInputPreservesSelectionDuringDismissalAndEachBrowserPanel',
+                     'currentAddressInputAcceptsUserCursorSelectionCompositionAndTextChanges'):
+            self.assertIn('fun ' + name + '()', unit)
+        self.assertIn('listOf(TextRange(2, 9), TextRange(9, 2))', unit)
+        self.assertIn('oldInput(TextFieldValue("stale input"))', unit)
+        android = (ANDROID / 'BrowserPageLifecycleActivityTest.kt').read_text()
+        self.assertGreaterEqual(android.count('SemanticsProperties.TextSelectionRange, range'), 3)
+        self.assertNotIn('requestFocus()', android)

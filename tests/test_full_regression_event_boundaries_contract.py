@@ -48,7 +48,7 @@ class FullRegressionEventBoundariesContractTest(unittest.TestCase):
 
     def test_timeline_samples_each_actual_line_without_relaxing_pixel_geometry(self):
         source = (ANDROID / 'ui/screens/chat/conversation/ChatTimelineDividerTest.kt').read_text()
-        for token in ('minOf(maxWidth, 360.dp)', 'listOf("left", "right")',
+        for token in ('minOf(maxWidth, 360.dp)', 'Modifier.fillMaxWidth().statusBarsPadding()', 'listOf("left", "right")',
                       'timeline-line-$side:contrast', 'lineBounds.center.x - rowBounds.left',
                       '.5.dp.roundToPx()', 'stripe.size', 'stripe.any { distance(it, expected) < .035f }',
                       'distance(previous, background) + .04f'):

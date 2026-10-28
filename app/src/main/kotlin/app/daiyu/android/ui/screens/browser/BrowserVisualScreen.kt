@@ -37,6 +37,11 @@ internal fun BrowserVisualScreen(
     }
     OpenMinisBrowserTheme(darkTheme = MiuixTheme.colorScheme.surface.luminance() < 0.5f) {
         val presentation = uiState ?: remember { BrowserSheetUiState() }
-        WithoutPressRipple { BrowserSheet(pool, onBack, presentation) }
+        WithoutPressRipple {
+            BrowserSheet(
+                pool, onBack, presentation,
+                addressInputCurrent = { visit != null && ownerCurrent() },
+            )
+        }
     }
 }

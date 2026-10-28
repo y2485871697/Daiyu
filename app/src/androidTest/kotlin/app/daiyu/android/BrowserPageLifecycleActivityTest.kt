@@ -111,6 +111,10 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
             }
         }
         node("browser-visual-history").performClick()
+        mainThread {
+            assertEquals(address, retained.address.text)
+            assertEquals(range, retained.address.selection)
+        }
         val query = "unsaved history search"
         ui.onNode(hasSetTextAction() and hasText(activity.getString(R.string.om_browser_history_search)))
             .performTextReplacement(query)
@@ -142,6 +146,8 @@ class BrowserPageLifecycleActivityTest : WiredActivityTestCase() {
         }
         ui.onNodeWithText(activity.getString(R.string.om_browser_history_done)).performClick()
         node("browser-visual-address").assertTextContains(address)
+        node("browser-visual-address").assert(SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange, range))
         backToChat(activity)
         openHuman()
         mainThread {

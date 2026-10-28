@@ -1,7 +1,6 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -14,6 +13,19 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 class PrivateWorkspacePanelTest : WiredActivityTestCase() {
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    @Suppress("UNCHECKED_CAST")
+    private fun retainedLongClickCallback(target: SemanticsNodeInteraction): () -> Unit {
+        val callback = target.fetchSemanticsNode().layoutInfo.getModifierInfo().asSequence()
+            .map { it.modifier }
+            .filterIsInstance<androidx.compose.ui.platform.InspectableValue>()
+            .filter { it.nameFallback == "combinedClickable" }
+            .flatMap { it.inspectableElements }
+            .single { it.name == "onLongClick" }.value
+        return callback as () -> Unit
+    }
+
+
     fun testPrivateBrowseDeleteConfirmationAndRetainedPageRevocation() {
         assertPrivateBrowseDeleteConfirmationAndRetainedPageRevocation(compact = false)
     }
@@ -54,7 +66,7 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
             ui.waitUntil(5_000) { ui.onAllNodesWithText("条目已删除").fetchSemanticsNodes().isNotEmpty() }
             reveal("workspace-private-parent", "私有文件测试").performClick()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-private-entry:sub").fetchSemanticsNodes().size == 1 }
-            val retained = checkNotNull(reveal("workspace-private-entry:sub", "私有文件测试").fetchSemanticsNode().config[SemanticsActions.OnLongClick].action)
+            val retained = retainedLongClickCallback(reveal("workspace-private-entry:sub", "私有文件测试"))
             realPauseResume(activity, atPause = { retained() })
             mainThread { retained() }
             ui.onNodeWithText("删除文件").assertDoesNotExist()
@@ -134,7 +146,7 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
             node("workspace-private-create-folder").performClick()
             awaitUniqueTag("prompt-input")
             node("prompt-input").performTextReplacement("stale")
-            val retained = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            val retained = retainedClickCallback(node("dialog-confirm"))
             mainThread { ownerActive.set(false); retained() }
             assertTrue(gate.get())
             assertFalse(File(root, "stale").exists())

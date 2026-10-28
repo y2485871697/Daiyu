@@ -96,7 +96,7 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         node("sponsor-alipay").performClick()
         node("sponsor-alipay").assertIsSelected()
         ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
-        node("preview-dialog-scrim").performClick()
+        node("preview-dialog-scrim").assertHasClickAction().performSemanticsAction(SemanticsActions.OnClick) { click -> assertTrue(click()) }
         awaitSponsorClosed()
         entry("赞助").performClick()
         awaitSponsorReady()
@@ -107,7 +107,7 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         awaitSponsorClosed()
         entry("赞助").performClick()
         awaitSponsorReady()
-        node("preview-dialog-scrim").performClick()
+        node("preview-dialog-scrim").assertHasClickAction().performSemanticsAction(SemanticsActions.OnClick) { click -> assertTrue(click()) }
         awaitSponsorClosed()
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(settings, fixture.settings.loadForEditing().settings)

@@ -11,6 +11,13 @@ MENU = SCREEN.split('if (menu) ChatSelectionSheet(', 1)[1].split('private fun Te
 
 
 class TerminalSheetStyleContractTest(unittest.TestCase):
+    def test_history_dialog_remembered_state_is_scoped_to_visit_not_lease(self):
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        surface = host.split('@Composable private fun TerminalTasksSurface()', 1)[1].split('private fun ', 1)[0]
+        self.assertIn('key(visit) {', surface)
+        self.assertLess(surface.index('key(visit) {'), surface.index('TerminalTasksDialog('))
+        self.assertNotIn('key(lease)', surface)
+
     def test_terminal_modals_use_existing_glass_shells(self):
         self.assertIn('AssistantPreviewDialog(show = true, title = "会话"', SESSIONS)
         self.assertIn('AssistantPreviewDialog(show = true, title = "后台任务"', TASKS)

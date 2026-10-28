@@ -190,6 +190,12 @@ class LinuxInstallRecoveryBoundaryTest : TestCase() {
                 assertEquals(f.installation, coordinator.state.value.prepared!!.installation)
                 assertTrue(unknownLock.isDirectory)
                 assertTrue(journal.readText().startsWith("daiyu-install-request-v1"))
+            } else if (scenario == "crash-after-approve") {
+                assertTrue(coordinator.blocksManual)
+                assertEquals(approval.installation, coordinator.state.value.registration?.installation)
+                assertFalse(checkNotNull(coordinator.state.value.receipt).directorySyncConfirmed)
+                assertEquals(0, completions)
+                assertTrue(journal.readText().startsWith("daiyu-install-request-v1"))
             } else {
                 assertFalse(coordinator.blocksManual)
                 assertNull(coordinator.state.value.prepared)

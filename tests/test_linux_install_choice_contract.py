@@ -39,9 +39,10 @@ class LinuxInstallChoiceContract(unittest.TestCase):
             self.assertLess(choose.index(token), choose.index('choicePreferences.save(nextChoice)'))
         self.assertLess(choose.index('if (!choicePreferences.save(nextChoice))'), choose.index('installChoice = nextChoice'))
         self.assertIn('选项未保存，请重试。', choose)
-        self.assertIn('it.label.equals(nextDistribution, ignoreCase = true) && it.executionMode == nextMode', choose)
-        self.assertIn('host.selectLinux(choice.reference)', choose)
-        self.assertIn('选项已保存，但当前使用的环境未切换，请稍后重试。', choose)
+        self.assertNotIn('.selectLinux(', choose)
+        self.assertNotIn('page.select(', choose)
+        self.assertIn('page.select(reference)', screen)
+        self.assertIn('currentSwitchTarget.value == target', screen)
         self.assertNotIn('distributionDraft = null', choose)
         self.assertNotIn('modeDraft = null', choose)
 

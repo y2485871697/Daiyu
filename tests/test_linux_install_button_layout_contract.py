@@ -65,7 +65,7 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
         self.assertLess(effect.index('if (current?.busy == true)'), effect.rindex('installRequest = null'))
         self.assertNotIn('confirmInstall', source)
         self.assertNotIn('下载并安装', source)
-        self.assertIn('title = "启用环境"', source)
+        self.assertNotIn('title = "启用环境"', source)
         self.assertIn('DaiyuConfirmDialog("完成环境设置"', source)
 
     def test_choice_tab_and_mode_changes_clear_both_click_fields(self):
@@ -73,7 +73,7 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
         choose = source.split('fun choose(', 1)[1].split('val nextChoice =', 1)[0]
         self.assertIn('installRequest = null', choose)
         self.assertIn('awaitingInstallPreparation = false', choose)
-        self.assertIn('tabScope = Any(); installRequest = null; awaitingInstallPreparation = false; confirmUse = false; confirmPending = false; tab = it', source)
+        self.assertIn('tabScope = Any(); installRequest = null; awaitingInstallPreparation = false; confirmPending = false; tab = it', source)
 
     def test_residual_request_is_really_discarded_once_and_active_click_is_preserved(self):
         source = SCREEN.read_text()
@@ -96,12 +96,12 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
         for text in ['TextButton("继续安装"', 'TextButton("取消安装"', 'TextButton("继续上次安装"', 'onInstall =', 'onCancel =']:
             self.assertNotIn(text, source)
         helper = source.split('private fun LinuxInstallAction(', 1)[1]
-        for text in ['当前设备暂不可用', '恢复安装', '重试完成安装', '启用环境', '继续设置', '完成安装', '操作未确认成功：']:
+        for text in ['当前设备暂不可用', '恢复安装', '重试完成安装', '重试完成设置', '继续设置', '完成安装', '操作未确认成功：']:
             self.assertIn(text, helper)
         self.assertIn('state.busy -> Unit', helper)
         self.assertIn('Text(notice, color = MiuixTheme.colorScheme.error)', helper)
         self.assertIn('state.recoveryBlocked || state.cleanupPending', helper)
-        self.assertIn('title = "启用环境"', source)
+        self.assertNotIn('title = "启用环境"', source)
         self.assertIn('DaiyuConfirmDialog("完成环境设置"', source)
 
     def test_original_rotating_ball_is_busy_only_next_to_install_summary(self):
@@ -141,6 +141,34 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
         self.assertIn('!active(page)', discard)
         self.assertIn('target?.discard(prepared)', discard)
         self.assertNotIn('allowChroot()', discard)
+
+    def test_switch_is_explicit_in_original_configuration_position_and_keeps_restart_copy(self):
+        source = SCREEN.read_text()
+        choose = source.split('fun choose(', 1)[1].split('val currentInstallation', 1)[0]
+        self.assertNotIn('page.select(', choose)
+        self.assertNotIn('selectLinux(', choose)
+        config = source.split('item("linux-configuration") {', 1)[1].split('item("linux-tools-heading")', 1)[0]
+        for token in ['if (needsSwitch)', 'testTag("linux-switch-environment")', 'Text("切换环境"',
+                      'currentSwitchTarget.value == target', 'choiceCurrent()', 'page.select(reference)']:
+            self.assertIn(token, config)
+        self.assertLess(config.index('LinuxChoiceRow("运行方式"'), config.index('testTag("linux-switch-environment")'))
+        self.assertNotIn('TextButton("启用环境"', source)
+        self.assertNotIn('confirmUse', source)
+        self.assertIn('环境已安装，重启应用后可用', source)
+        self.assertIn('remember(page, runningMode, installChoice) { Any() }', source)
+
+    def test_durable_install_runs_registration_then_selection_before_retiring_original_journal(self):
+        coordinator = (ROOT / 'app/src/main/kotlin/app/daiyu/android/terminal/install/LinuxInstallCoordinator.kt').read_text()
+        install = coordinator.split('private suspend fun installedState(', 1)[1].split('internal fun prepareRegistration()', 1)[0]
+        self.assertLess(install.index('if (!receipt.directorySyncConfirmed) return published'), install.index('catalog.freeze('))
+        self.assertIn('return registerAndSelect(prepared, approval, epoch)', install)
+        chain = coordinator.split('private suspend fun registerAndSelect(', 1)[1].split('/** Direct token cancellation', 1)[0]
+        self.assertLess(chain.index('catalog.approveInstallation'), chain.index('catalog.select('))
+        self.assertLess(chain.index('catalog.select('), chain.index('installer.completeRegistration('))
+        self.assertIn('val active = entries.any { it == approval.installation }', chain)
+        self.assertIn('if (active)', chain)
+        self.assertIn('admissionEpoch == epoch', chain)
+        self.assertIn('重启应用后可用', chain)
 
 
 if __name__ == '__main__':

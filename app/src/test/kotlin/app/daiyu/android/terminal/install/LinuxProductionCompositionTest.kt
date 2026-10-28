@@ -3,6 +3,7 @@ package app.daiyu.android.terminal.install
 import app.daiyu.android.terminal.hostLinuxCatalog
 import app.daiyu.android.terminal.hostDirectorySync
 import app.daiyu.android.terminal.hostLinuxStore
+import app.daiyu.android.terminal.hostLinuxFileKey as appHostFileKey
 import app.daiyu.android.terminal.FrozenLinuxApproval
 import app.daiyu.android.terminal.LinuxGenerationRef
 import app.daiyu.android.terminal.LinuxExecutionMode
@@ -26,7 +27,11 @@ class LinuxProductionCompositionTest : TestCase() {
     private class Transactions : LinuxInstallTransactions {
         val owner = Any()
         var completions = 0
-        override fun completeRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval) { completions++ }
+        var completeFailure: Exception? = null
+        override fun completeRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval) {
+            completeFailure?.let { throw it }
+            completions++
+        }
         var rememberFailure: Exception? = null
         override fun remember(prepared: PreparedLinuxInstall) { rememberFailure?.let { throw it } }
         val discarded = mutableListOf<PreparedLinuxInstall>()
@@ -82,6 +87,14 @@ class LinuxProductionCompositionTest : TestCase() {
             check(admit()) { "linux_catalog_admission_revoked" }
             return approve(approval)
         }
+        val selections = mutableListOf<LinuxInstallation>()
+        var selectFailure: Exception? = null
+        var active = true
+        override suspend fun select(installation: LinuxInstallation, admit: () -> Boolean) {
+            check(admit()) { "linux_selection_admission_revoked" }
+            selectFailure?.let { throw it }
+            selections.add(installation)
+        }
         var freezes = 0
         val approvals = mutableListOf<FrozenLinuxApproval>()
         var fail = true
@@ -95,7 +108,7 @@ class LinuxProductionCompositionTest : TestCase() {
             approvals.add(approval)
             beforeApprove?.invoke()
             if (fail) throw IOException("after-rename directory sync failed")
-            return listOf(approval.installation)
+            return if (active) listOf(approval.installation) else emptyList()
         }
         override suspend fun remove(reference: LinuxGenerationRef) = emptyList<LinuxInstallation>()
     }
@@ -265,7 +278,7 @@ class LinuxProductionCompositionTest : TestCase() {
         assertTrue(installProbeUnknown(value, true))
     }
 
-    fun testTwoConfirmationsDurabilityAndOriginalFrozenRetryAcrossPageRecreation() = runTest {
+    fun testPublicationDurabilityAutomaticallyRegistersAndRetriesOriginalFrozenObjectAcrossPageRecreation() = runTest {
         val transactions = Transactions()
         val catalog = Catalog()
         val install = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), catalog, this)
@@ -288,9 +301,7 @@ class LinuxProductionCompositionTest : TestCase() {
         runCurrent()
         val frozen = install.state.value.registration!!
         assertEquals(1, catalog.freezes)
-        assertEquals(0, catalog.approvals.size)
-        assertTrue(first.approveInstalled(frozen))
-        runCurrent()
+        assertEquals(1, catalog.approvals.size)
         assertTrue(install.state.value.registrationPending)
         first.close()
         val second = controller.enterPage()
@@ -331,7 +342,10 @@ class LinuxProductionCompositionTest : TestCase() {
     }
 
     fun testQueuedRegistrationIsFencedOnPageLeaveAndKeepsOriginalForExplicitRetry() = runTest {
-        val transactions = Transactions().apply { durable = true }
+        val transactions = Transactions().apply {
+            durable = true
+            beforeRememberRegistration = { throw IOException("initial_registration_description_failed") }
+        }
         val catalog = Catalog().apply { fail = false }
         val install = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), catalog, this)
         val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this, installation = install)
@@ -342,6 +356,7 @@ class LinuxProductionCompositionTest : TestCase() {
         first.install(install.state.value.prepared!!)
         runCurrent()
         val frozen = install.state.value.registration!!
+        transactions.beforeRememberRegistration = null
         assertTrue(first.approveInstalled(frozen))
         first.close() // before StandardTestDispatcher can admit catalog IO
         val second = controller.enterPage()
@@ -359,7 +374,10 @@ class LinuxProductionCompositionTest : TestCase() {
     }
 
     fun testLeavingDuringRequestSnapshotStillFencesFirstCatalogIo() = runTest {
-        val transactions = Transactions().apply { durable = true }
+        val transactions = Transactions().apply {
+            durable = true
+            beforeRememberRegistration = { throw IOException("initial_registration_description_failed") }
+        }
         val catalog = Catalog().apply { fail = false }
         val install = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), catalog, this)
         val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this, installation = install)
@@ -370,6 +388,7 @@ class LinuxProductionCompositionTest : TestCase() {
         page.install(install.state.value.prepared!!)
         runCurrent()
         val frozen = install.state.value.registration!!
+        transactions.beforeRememberRegistration = null
         transactions.beforeRememberRegistration = { page.close() }
         page.approveInstalled(frozen)
         runCurrent()
@@ -380,7 +399,10 @@ class LinuxProductionCompositionTest : TestCase() {
     }
 
     fun testControllerCloseFencesQueuedRegistrationWithoutDroppingIntent() = runTest {
-        val transactions = Transactions().apply { durable = true }
+        val transactions = Transactions().apply {
+            durable = true
+            beforeRememberRegistration = { throw IOException("initial_registration_description_failed") }
+        }
         val catalog = Catalog().apply { fail = false }
         val install = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), catalog, this)
         val settingsWorker = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() +
@@ -393,6 +415,7 @@ class LinuxProductionCompositionTest : TestCase() {
         page.install(install.state.value.prepared!!)
         runCurrent()
         val frozen = install.state.value.registration!!
+        transactions.beforeRememberRegistration = null
         assertTrue(page.approveInstalled(frozen))
         controller.close() // Cancels settings worker, not the installation receipt owner.
         runCurrent()
@@ -402,8 +425,11 @@ class LinuxProductionCompositionTest : TestCase() {
         assertFalse(install.approveRegistration(frozen))
     }
 
-    fun testStartedRegistrationReceiptSurvivesPageRevocationAndCoordinatorClose() = runTest {
-        val transactions = Transactions().apply { durable = true }
+    fun testStartedCatalogReceiptSurvivesCloseButDoesNotStartASelectionAfterRevocation() = runTest {
+        val transactions = Transactions().apply {
+            durable = true
+            beforeRememberRegistration = { throw IOException("initial_registration_description_failed") }
+        }
         val release = kotlinx.coroutines.CompletableDeferred<Unit>()
         val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
         val catalog = Catalog().apply {
@@ -422,6 +448,7 @@ class LinuxProductionCompositionTest : TestCase() {
         page.install(install.state.value.prepared!!)
         runCurrent()
         val frozen = install.state.value.registration!!
+        transactions.beforeRememberRegistration = null
         page.approveInstalled(frozen)
         runCurrent()
         assertTrue(entered.isCompleted)
@@ -429,9 +456,11 @@ class LinuxProductionCompositionTest : TestCase() {
         controller.close()
         release.complete(Unit)
         runCurrent()
-        assertTrue(install.state.value.registered)
-        assertFalse(install.state.value.registrationPending)
+        assertFalse(install.state.value.registered)
+        assertTrue(install.state.value.registrationPending)
         assertSame(frozen, catalog.approvals.single())
+        assertTrue(catalog.selections.isEmpty())
+        assertEquals(0, transactions.completions)
         assertTrue(admission.current().isEmpty())
     }
 
@@ -459,7 +488,8 @@ class LinuxProductionCompositionTest : TestCase() {
                 }
                 app.daiyu.android.terminal.hostDirectorySync(dir)
             }, { if (calls.incrementAndGet() == 2) queued.countDown() })
-            val adapter = app.daiyu.android.terminal.LinuxSettingsCatalogAdapter(catalog)
+            val adapter = app.daiyu.android.terminal.LinuxSettingsCatalogAdapter(catalog,
+                selection = hostLinuxStore(File(root, "selection")))
             val transactions = Transactions()
             val prepared = transactions.prepare(LinuxRootfsCatalog.find("alpine", "arm64-v8a")!!,
                 "primary", configuration)
@@ -470,12 +500,10 @@ class LinuxProductionCompositionTest : TestCase() {
                 kotlinx.coroutines.withTimeout(5000) { install.state.first { !it.busy } }
             }
             awaitIdle()
-            assertTrue(install.confirmPublishedDurability(prepared))
-            runCurrent()
             val blockerApproval = catalog.freezeForApproval(configuration.copy(environmentId = "blocker"))
             val blocker = launch(kotlinx.coroutines.Dispatchers.IO) { catalog.approve(blockerApproval) }
             assertTrue(holding.await(5, java.util.concurrent.TimeUnit.SECONDS))
-            assertTrue(install.approveRegistration(frozen))
+            assertTrue(install.confirmPublishedDurability(prepared))
             runCurrent()
             assertTrue(queued.await(5, java.util.concurrent.TimeUnit.SECONDS))
             install.cancel() // after withContext(IO), while the actual production gate is held
@@ -532,10 +560,9 @@ class LinuxProductionCompositionTest : TestCase() {
         runCurrent()
         assertSame(originalApproval, install.state.value.registration)
         assertEquals(0, catalog.freezes) // no replacement registry generation on restart
-        assertEquals(0, catalog.approvals.size)
-        assertTrue(install.approveRegistration(originalApproval))
-        runCurrent()
+        assertEquals(1, catalog.approvals.size)
         assertTrue(install.state.value.registered)
+        assertFalse(install.approveRegistration(originalApproval))
         assertSame(originalApproval, catalog.approvals.single())
         assertEquals(0, transactions.installs)
         assertEquals(1, transactions.confirmations)
@@ -645,7 +672,9 @@ class LinuxProductionCompositionTest : TestCase() {
         assertEquals(1, transactions.cleanupRetries)
         assertEquals(1, transactions.installs)
         assertEquals(1, catalog.freezes)
-        assertEquals(0, catalog.approvals.size)
+        assertEquals(1, catalog.approvals.size)
+        assertEquals(1, catalog.selections.size)
+        assertTrue(coordinator.state.value.registered)
         coordinator.close()
     }
 
@@ -673,6 +702,182 @@ class LinuxProductionCompositionTest : TestCase() {
         assertEquals(1, transactions.cleanupRetries)
         assertEquals(2, transactions.confirmations)
         coordinator.close()
+    }
+
+    fun testDurableInstallAutomaticallyRegistersSelectsAndRetiresForBothModesAndDistributions() = runTest {
+        for (mode in LinuxExecutionMode.entries) for (distribution in listOf("alpine", "debian")) {
+            val tx = Transactions().apply { durable = true }
+            val catalog = Catalog().apply { fail = false }
+            val admission = LinuxSettingsAdmission(emptySet())
+            val install = LinuxInstallCoordinator(tx, ::helpers, File("/private/linux"), catalog, this,
+                executionMode = mode, chrootAbi = { "arm64-v8a" })
+            val controller = LinuxSettingsController(catalog, admission, this,
+                installation = install.takeIf { mode == LinuxExecutionMode.PROOT },
+                chrootInstallation = install.takeIf { mode == LinuxExecutionMode.CHROOT }, allowChroot = { true })
+            val page = controller.enterPage(); runCurrent()
+            assertTrue(page.prepareInstall(distribution, "primary", mode)); runCurrent()
+            val prepared = checkNotNull(install.state.value.prepared)
+            assertTrue(page.install(prepared)); runCurrent()
+            assertTrue(install.state.value.registered)
+            assertFalse(install.state.value.registrationPending)
+            assertEquals(1, tx.installs)
+            assertEquals(1, tx.completions)
+            assertEquals(1, catalog.freezes)
+            assertEquals(listOf(catalog.approvals.single().installation), catalog.selections)
+            assertTrue(checkNotNull(install.state.value.notice).contains("重启应用"))
+            assertTrue(admission.current().isEmpty())
+            assertFalse(page.approveInstalled(catalog.approvals.single()))
+            page.close(); install.close()
+        }
+    }
+
+    fun testSelectionAndRetirementFailuresRetainOriginalApprovalWithoutReinstalling() = runTest {
+        for (stage in listOf("selection", "retirement")) {
+            val tx = Transactions().apply { durable = true }
+            val catalog = Catalog().apply { fail = false }
+            if (stage == "selection") catalog.selectFailure = IOException("selection_fsync")
+            else tx.completeFailure = IOException("retirement_fsync")
+            val install = LinuxInstallCoordinator(tx, ::helpers, File("/private/linux"), catalog, this)
+            runCurrent(); install.prepare("debian", "primary"); runCurrent()
+            val prepared = checkNotNull(install.state.value.prepared)
+            install.downloadAndInstall(prepared); runCurrent()
+            val original = checkNotNull(install.state.value.registration)
+            assertFalse(install.state.value.registered)
+            assertTrue(install.state.value.registrationPending)
+            assertTrue(install.state.value.operationFailed)
+            assertFalse(install.downloadAndInstall(prepared))
+            catalog.selectFailure = null; tx.completeFailure = null
+            assertTrue(install.approveRegistration(original)); runCurrent()
+            assertTrue(install.state.value.registered)
+            assertTrue(catalog.approvals.all { it === original })
+            assertEquals(1, catalog.freezes)
+            assertEquals(1, tx.installs)
+            assertEquals(1, tx.completions)
+            install.close()
+        }
+    }
+
+    fun testTombstonedRegistrationRetiresWithoutSelectingOrReplacingApproval() = runTest {
+        val tx = Transactions().apply { durable = true }
+        val catalog = Catalog().apply { fail = false; active = false }
+        val install = LinuxInstallCoordinator(tx, ::helpers, File("/private/linux"), catalog, this)
+        runCurrent(); install.prepare("debian", "primary"); runCurrent()
+        install.downloadAndInstall(checkNotNull(install.state.value.prepared)); runCurrent()
+        assertTrue(install.state.value.registered)
+        assertTrue(catalog.selections.isEmpty())
+        assertEquals(1, catalog.freezes)
+        assertEquals(1, tx.completions)
+        assertTrue(checkNotNull(install.state.value.notice).contains("撤销"))
+        install.close()
+    }
+
+    fun testAdapterSelectsOnlyApprovedExactInstallationAndPersistsItWithoutGrantingStartupAdmission() = runTest {
+        val root = java.nio.file.Files.createTempDirectory("auto-selection").toFile()
+        try {
+            val guest = File(root, "guest").apply { mkdirs() }
+            File(guest, "bin").mkdir(); File(guest, "bin/sh").writeText("inert shell")
+            val proot = File(root, "proot").apply { writeText("inert proot"); setExecutable(true) }
+            val loader = File(root, "loader").apply { writeText("inert loader") }
+            fun hash(file: File) = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+            val catalog = hostLinuxCatalog(File(root, "catalog"))
+            val approval = catalog.freezeForApproval(LinuxInstallation("debian", "env", "input", guest,
+                proot, hash(proot), loader, hash(loader)))
+            val store = hostLinuxStore(File(root, "user-terminal/linux-selection"))
+            val adapter = app.daiyu.android.terminal.LinuxSettingsCatalogAdapter(catalog, selection = store)
+            assertTrue(runCatching { adapter.select(approval.installation) }.isFailure)
+            assertNull(adapter.selected())
+            catalog.approve(approval)
+            assertTrue(runCatching { adapter.select(approval.installation) { false } }.isFailure)
+            assertNull(adapter.selected())
+            adapter.select(approval.installation)
+            assertEquals(LinuxGenerationRef(approval.installation.environmentId, approval.installation.generation), adapter.selected())
+            assertTrue(File(root, "user-terminal/linux-selection/selected-linux.json").isFile)
+            assertTrue(runCatching { adapter.select(approval.installation.copy(generation = "foreign")) }.isFailure)
+            catalog.remove(checkNotNull(adapter.selected()))
+            assertTrue(runCatching { adapter.select(approval.installation) }.isFailure)
+        } finally { root.deleteRecursively() }
+    }
+
+    fun testAdapterSerializesSelectionWithRemovalUntilItsPersistenceReceipt() = runTest {
+        val root = java.nio.file.Files.createTempDirectory("selection-remove-order").toFile()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val selectionDone = java.util.concurrent.atomic.AtomicBoolean(false)
+        val removalDone = java.util.concurrent.atomic.AtomicBoolean(false)
+        try {
+            val guest = File(root, "guest").apply { mkdirs() }
+            File(guest, "bin").mkdir(); File(guest, "bin/sh").writeText("inert shell")
+            val proot = File(root, "proot").apply { writeText("inert proot"); setExecutable(true) }
+            val loader = File(root, "loader").apply { writeText("inert loader") }
+            fun hash(file: File) = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+            val catalog = hostLinuxCatalog(File(root, "catalog"))
+            val approval = catalog.freezeForApproval(LinuxInstallation("debian", "env", "input", guest,
+                proot, hash(proot), loader, hash(loader)))
+            catalog.approve(approval)
+            val directory = File(root, "selection")
+            var blockSelection = true
+            val store = app.daiyu.android.terminal.LinuxEnvironmentStore(directory, { dir ->
+                if (blockSelection && dir == directory && File(dir, "selected-linux.json").isFile) {
+                    entered.countDown(); check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                }
+                hostDirectorySync(dir)
+            }, ::appHostFileKey)
+            val adapter = app.daiyu.android.terminal.LinuxSettingsCatalogAdapter(catalog, selection = store)
+            val selecting = launch(kotlinx.coroutines.Dispatchers.IO) {
+                adapter.select(approval.installation); selectionDone.set(true)
+            }
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val removeEntered = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val reference = LinuxGenerationRef(approval.installation.environmentId, approval.installation.generation)
+            val removing = launch(kotlinx.coroutines.Dispatchers.IO) {
+                removeEntered.complete(Unit); adapter.remove(reference); removalDone.set(true)
+            }
+            removeEntered.await()
+            assertFalse(removalDone.get())
+            assertFalse(selectionDone.get())
+            assertEquals(listOf(approval.installation), catalog.load())
+            release.countDown(); selecting.join(); removing.join()
+            assertTrue(selectionDone.get()); assertTrue(removalDone.get())
+            assertTrue(catalog.load().isEmpty())
+            blockSelection = false
+            assertTrue(runCatching { adapter.select(approval.installation) }.isFailure)
+        } finally { release.countDown(); root.deleteRecursively() }
+    }
+
+    fun testSwitchOnlyPersistsTheExplicitTrustedTargetAndRevokedQueuedPageCannotSelect() = runTest {
+        val first = LinuxInstallation("alpine", "alpine", "first", File("/fixture/alpine"))
+        val second = LinuxInstallation("debian", "debian", "second", File("/fixture/debian"))
+        var selected = LinuxGenerationRef("alpine", "first")
+        var selects = 0
+        val catalog = object : LinuxSettingsCatalogAccess {
+            override fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval = error("must not freeze")
+            override suspend fun load() = listOf(first, second)
+            override suspend fun selected() = selected
+            override suspend fun select(installation: LinuxInstallation, admit: () -> Boolean) {
+                check(admit()); selects++
+                selected = LinuxGenerationRef(installation.environmentId, installation.generation)
+            }
+            override suspend fun approve(approval: FrozenLinuxApproval): List<LinuxInstallation> = error("must not approve")
+            override suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation> = error("must not install")
+            override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = false
+            override suspend fun remove(reference: LinuxGenerationRef): List<LinuxInstallation> = error("must not remove")
+        }
+        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this)
+        val oldPage = controller.enterPage(); runCurrent()
+        val target = LinuxGenerationRef("debian", "second")
+        assertEquals(0, selects)
+        assertTrue(oldPage.select(target)); oldPage.close()
+        runCurrent(); assertEquals(0, selects)
+        val page = controller.enterPage(); runCurrent()
+        assertFalse(oldPage.select(target))
+        assertFalse(page.select(LinuxGenerationRef("debian", "foreign")))
+        assertTrue(page.select(target)); runCurrent()
+        assertEquals(target, selected)
+        assertEquals(target, page.state.value.selected)
+        assertEquals(1, selects)
+        page.close()
     }
 
     fun testPlatformGateAndPinnedPairs() {

@@ -25,10 +25,6 @@ import app.daiyu.android.ui.components.OptionSelectionItem
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import app.daiyu.android.ui.haptics.miuix.Button
 import top.yukonga.miuix.kmp.basic.Text
 import app.daiyu.android.ui.haptics.miuix.TextButton
@@ -68,33 +64,37 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
         else pendingMode ?: modeDraft ?: selected?.executionMode ?: LinuxExecutionMode.PROOT
     val installation = if (mode == LinuxExecutionMode.CHROOT) chroot else proot
     val otherInstallation = if (mode == LinuxExecutionMode.CHROOT) proot else chroot
-    val scope = rememberCoroutineScope()
-    var selecting by remember(page) { mutableStateOf(false) }
     var message by remember(page) { mutableStateOf<String?>(null) }
     var tab by remember(page, filesOnly) { mutableStateOf(if (filesOnly) LinuxSettingsTab.FILES else LinuxSettingsTab.BASIC) }
     var tabScope by remember(page) { mutableStateOf(Any()) }
     val renderedTabScope = tabScope
     fun basicCurrent() = !filesOnly && tab == LinuxSettingsTab.BASIC && tabScope === renderedTabScope && !page.state.value.revoked
-    val choiceScope = remember(page, runningMode) { Any() }
+    val choiceScope = remember(page, runningMode, installChoice) { Any() }
     val currentChoiceScope = rememberUpdatedState(choiceScope)
     fun choiceCurrent() = basicCurrent() && currentChoiceScope.value === choiceScope
     var awaitingInstallPreparation by remember(page, runningMode) { mutableStateOf(false) }
     var installRequest by remember(page, runningMode) { mutableStateOf<LinuxInstallChoice?>(null) }
     val discardedRequests = remember(page) { mutableSetOf<PreparedLinuxInstall>() }
-    var confirmUse by remember(page) { mutableStateOf(false) }
     var confirmPending by remember(page) { mutableStateOf(false) }
     DisposableEffect(page) { onDispose { page.close() } }
     LaunchedEffect(host) { host?.refreshLinux() }
+    LaunchedEffect(state.selected) { host?.refreshLinux() }
     LaunchedEffect(proot?.registered, chroot?.registered) {
         if (proot?.registered == true || chroot?.registered == true) { page.refresh(); host?.refreshLinux() }
     }
     val leave: () -> Unit = { if (page.revoke()) onBack() }
     BackHandler { leave() }
-    val pageEnabled = !state.busy && !state.revoked && !selecting
+    val pageEnabled = !state.busy && !state.revoked
     val enabled = pageEnabled && state.pendingApproval == null && state.pendingRemoval == null
     val choiceEnabled = enabled && terminal?.canOpen != false && !controller.installationBlocksManual
     val matching = state.entries.filter { it.distribution.equals(distribution, ignoreCase = true) && it.executionMode == mode }
     val installed = state.listConfirmed && matching.isNotEmpty()
+    val selectedReference = state.selected ?: terminal?.linux?.selected
+    val switchTarget = matching.firstOrNull { LinuxGenerationRef(it.environmentId, it.generation) == selectedReference }
+        ?: matching.firstOrNull()
+    val needsSwitch = installed && switchTarget != null &&
+        LinuxGenerationRef(switchTarget.environmentId, switchTarget.generation) != selectedReference
+    val currentSwitchTarget = rememberUpdatedState(switchTarget)
     val installationMatches = installation?.prepared?.let {
         it.artifact.distribution.equals(distribution, ignoreCase = true) && it.installation.executionMode == mode
     } == true
@@ -107,28 +107,17 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
         if (!choiceCurrent() || !choiceEnabled || nextMode == LinuxExecutionMode.CHROOT && runningModeStore.mode.value != RunningMode.ROOT) return
         installRequest = null
         awaitingInstallPreparation = false
-        confirmUse = false
         val nextChoice = LinuxInstallChoice(nextDistribution, nextMode)
         if (!choicePreferences.save(nextChoice)) { message = "选项未保存，请重试。"; return }
         installChoice = nextChoice
         message = null
-        val choice = terminal?.linux?.choices?.firstOrNull {
-            it.label.equals(nextDistribution, ignoreCase = true) && it.executionMode == nextMode
-        }
-        if (host != null && choice != null && choice.reference != terminal.linux.selected) {
-            selecting = true
-            scope.launch {
-                try {
-                    val result = withContext(Dispatchers.IO) { host.selectLinux(choice.reference).get() }
-                    if (!result.ok) message = "选项已保存，但当前使用的环境未切换，请稍后重试。"
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { message = "选项已保存，但当前使用的环境未切换，请稍后重试。" }
-                finally { selecting = false }
-            }
-        }
     }
 
-    val rootfs = linuxBrowsableRootfs(state, distribution, mode, terminal?.linux?.selected)
+    val currentInstallation = state.entries.firstOrNull {
+        LinuxGenerationRef(it.environmentId, it.generation) == selectedReference
+    }
+    val rootfs = linuxBrowsableRootfs(state, currentInstallation?.distribution ?: distribution,
+        currentInstallation?.executionMode ?: mode, selectedReference)
     Column(modifier.fillMaxSize().background(settingsPageBackground())
         .navigationBarsPadding().testTag("linux-settings-view")) {
         Box(Modifier.weight(1f)) {
@@ -154,7 +143,8 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                                 if (installation?.busy == true) InfiniteProgressIndicator(
                                     modifier = Modifier.testTag("linux-install-progress"), size = 20.dp)
                                 Text(when {
-                                    selecting || state.busy -> "正在读取环境…"
+                                    state.busy -> "正在读取环境…"
+                                    installationMatches && installation?.notice?.startsWith("环境授权已撤销") == true -> "环境授权已撤销"
                                     pendingRequest && installation?.unknown == true -> "安装结果未确认，请先检查"
                                     pendingRequest && installation?.recoveryBlocked == true -> "上次安装未恢复，请先检查"
                                     pendingRequest && installation?.cleanupPending == true -> "安装尚未完成"
@@ -172,8 +162,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                             }, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                             }
                             if (!installed || pendingRequest) LinuxInstallAction(displayedInstallation, page, mode, enabled,
-                                ownerCurrent = ::basicCurrent,
-                                onEnable = { if (basicCurrent()) confirmUse = true })
+                                ownerCurrent = ::basicCurrent)
                         }
                     }
                     message?.let { SettingsNote(it, error = true) }
@@ -199,7 +188,20 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                             selectedIndex = if (mode == LinuxExecutionMode.CHROOT) 1 else 0,
                             popupScope = choiceScope, ownerCurrent = ::choiceCurrent,
                             onSelect = { choose(distribution, if (it == 0) LinuxExecutionMode.PROOT else LinuxExecutionMode.CHROOT) })
-                        if ((!installed || pendingRequest) && displayedInstallation?.let {
+                        if (needsSwitch) {
+                            val switchEnabled = choiceEnabled && !controller.installationBlocksManual
+                            Button(enabled = switchEnabled,
+                                colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.buttonColorsPrimary(),
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                                    .fillMaxWidth().heightIn(min = 48.dp).testTag("linux-switch-environment"), onClick = {
+                                    val target = switchTarget
+                                    if (switchEnabled && choiceCurrent() && currentSwitchTarget.value == target &&
+                                        (target.executionMode != LinuxExecutionMode.CHROOT || runningModeStore.mode.value == RunningMode.ROOT)) {
+                                        val reference = LinuxGenerationRef(target.environmentId, target.generation)
+                                        page.select(reference)
+                                    }
+                                }) { Text("切换环境", color = if (switchEnabled) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton) }
+                        } else if ((!installed || pendingRequest) && displayedInstallation?.let {
                             it.unavailableReason == null && !it.busy && !it.unknown && !it.recoveryBlocked &&
                                 !it.cleanupPending && !it.registrationPending && !it.registered &&
                                 it.receipt == null && it.registration == null
@@ -237,11 +239,10 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
         }
         if (!filesOnly) LinuxSettingsTabs(tab) {
             if (tabScope === renderedTabScope && tab != it) {
-                tabScope = Any(); installRequest = null; awaitingInstallPreparation = false; confirmUse = false; confirmPending = false; tab = it
+                tabScope = Any(); installRequest = null; awaitingInstallPreparation = false; confirmPending = false; tab = it
             }
         }
     }
-    val installationIdle = installation != null && !installation.busy && !installation.unknown && !installation.recoveryBlocked && !installation.cleanupPending && installation.unavailableReason == null
     LaunchedEffect(installRequest, installation, tabScope, runningMode, state.revoked) {
         val request = installRequest ?: return@LaunchedEffect
         if (!basicCurrent() || request.distribution != distribution || request.executionMode != mode ||
@@ -276,11 +277,6 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
             }
         }
     }
-    val registration = installation?.registration
-    if (confirmUse && registration != null && installationMatches && registration.installation.distribution.equals(distribution, true) && registration.installation.executionMode == mode && installationIdle && !installation.registered && installation.receipt?.directorySyncConfirmed == true) DaiyuConfirmDialog(
-        title = "启用环境", message = "允许应用使用此 Linux 环境？完成后重启应用生效。", confirmText = "允许使用", destructive = false,
-        onConfirm = { if (basicCurrent()) { confirmUse = false; page.approveInstalled(registration) } },
-        onDismiss = { if (basicCurrent()) confirmUse = false })
     state.pendingApproval?.let { pending ->
         if (confirmPending && pageEnabled && (pending.installation.executionMode != LinuxExecutionMode.CHROOT || rootMode)) DaiyuConfirmDialog("完成环境设置",
             "允许应用使用 ${distributionName(pending.installation.distribution)} 环境？" +
@@ -330,7 +326,7 @@ private fun LinuxChoiceRow(title: String, value: String, tag: String, enabled: B
 
 @Composable
 private fun LinuxInstallAction(state: LinuxInstallState?, page: LinuxSettingsPageOwner, mode: LinuxExecutionMode,
-    enabled: Boolean, ownerCurrent: () -> Boolean, onEnable: () -> Unit) {
+    enabled: Boolean, ownerCurrent: () -> Boolean) {
     val prepared = state?.prepared
     val ready = enabled && state != null && !state.busy && state.unavailableReason == null
     when {
@@ -339,7 +335,8 @@ private fun LinuxInstallAction(state: LinuxInstallState?, page: LinuxSettingsPag
         state.unknown || state.recoveryBlocked -> TextButton("恢复安装", enabled = ready, onClick = { if (ownerCurrent()) page.recoverInstall(mode) })
         state.cleanupPending && prepared != null -> TextButton("重试完成安装", enabled = ready, onClick = { if (ownerCurrent()) page.retryInstallCleanup(prepared) })
         state.registered -> Unit
-        state.registration != null && state.receipt?.directorySyncConfirmed == true -> TextButton("启用环境", enabled = ready, onClick = onEnable)
+        state.registration != null && state.receipt?.directorySyncConfirmed == true -> TextButton("重试完成设置", enabled = ready,
+            onClick = { if (ownerCurrent()) page.approveInstalled(state.registration) })
         state.receipt?.directorySyncConfirmed == true -> TextButton("继续设置", enabled = ready, onClick = { if (ownerCurrent()) page.prepareInstalledRegistration(mode) })
         state.receipt != null && prepared != null -> TextButton("完成安装", enabled = ready, onClick = { if (ownerCurrent()) page.confirmPublishedDurability(prepared) })
         else -> Unit

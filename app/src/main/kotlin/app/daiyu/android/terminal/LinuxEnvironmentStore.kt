@@ -65,7 +65,8 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     internal fun installationIdentity(installation: LinuxInstallation): List<String> = validate(installation)
 
     /** User-selected installation, never implicit fallback to another distribution. */
-    fun select(installation: LinuxInstallation) = synchronized(control) {
+    fun select(installation: LinuxInstallation, admit: () -> Boolean = { true }) = synchronized(control) {
+        check(admit()) { "linux_selection_admission_revoked" }
         check(trustedInstallation == null) { "linux_immutable_generation_store" }
         check(shared.leases == 0) { "linux_environment_in_use" }
         val frozen = installation.copy(sharedMounts = installation.sharedMounts.toMap())
@@ -73,6 +74,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         val bytes = encode(frozen).toString().toByteArray(Charsets.UTF_8)
         require(bytes.size <= 32768) { "linux_installation_metadata_limit" }
         runnerPins.admitted(requireEmpty = true) {
+            check(admit()) { "linux_selection_admission_revoked" }
             TerminalDurability.replace(selection, bytes, directorySync = directorySync)
         }
     }

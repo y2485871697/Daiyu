@@ -145,7 +145,13 @@ class LinuxSettingsApplication private constructor(
                 .map { LinuxGenerationRef(it.environmentId, it.generation) }.toSet())
             // Host metadata is fixed for this entire owner lifetime. New approvals never replace it.
             val owner = TerminalUiOwner(TerminalEnvironmentHost.android(context.applicationContext, snapshot), admission::current)
-            val access = LinuxSettingsCatalogAdapter(catalog) { mode -> LinuxRuntimePlatform.requireSupported(mode); Unit }
+            val selectionStore = LinuxEnvironmentStore(File(context.filesDir, "user-terminal/linux-selection"),
+                TerminalDurability::syncDirectory, ::strictLinuxFileKey,
+                File(context.filesDir.canonicalFile, "linux-chroot-installations"), rootfsAccess = rootfsAccess)
+            val access = LinuxSettingsCatalogAdapter(catalog, { mode ->
+                LinuxRuntimePlatform.requireSupported(mode)
+                check(mode != LinuxExecutionMode.CHROOT || allowChroot()) { "linux_root_mode_required" }
+            }, selectionStore)
             val installation = app.daiyu.android.terminal.install.LinuxInstallCoordinator.android(context, access)
             val chrootInstallation = app.daiyu.android.terminal.install.LinuxInstallCoordinator.android(context, access, LinuxExecutionMode.CHROOT)
             val settings = LinuxSettingsController(access, admission, startupEntries = snapshot, installation = installation,

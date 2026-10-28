@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 
-/** Separate file publication and registration confirmations, neither of which opens a terminal. */
+/** Publication, registration and selection receipts; none opens a terminal. */
 data class LinuxInstallState(
     val busy: Boolean = false,
     val unavailableReason: String? = null,
@@ -87,6 +87,7 @@ class LinuxInstallCoordinator internal constructor(
     private var closed = false
     private var admissionEpoch = 0L
     private var activeOperation: Any? = null
+    private var operationEpoch = 0L
 
     init { recover() }
 
@@ -103,7 +104,8 @@ class LinuxInstallCoordinator internal constructor(
             original.copy(notice = "已只读核验原请求；UNKNOWN 仍保留，未执行探针、清理锁或授予授权。")
         } else if (recovered == null) LinuxInstallState(notice = "未发现待恢复请求；未下载、执行或注册。")
         else if (!recovered.unknown && recovered.registration != null &&
-            catalog.registrationRecorded(recovered.registration)) {
+            catalog.registrationRecorded(recovered.registration) &&
+            catalog.load().none { it == recovered.registration.installation }) {
             // A previous approval (including a tombstone) completes this request. Recovery
             // never re-approves or manufactures a generation, and never clears UNKNOWN.
             installer.completeRegistration(recovered.prepared, recovered.registration)
@@ -150,15 +152,16 @@ class LinuxInstallCoordinator internal constructor(
         LinuxInstallState()
     }
 
-    /** The first explicit confirmation grants only this one download/extract/probe/publication. */
+    /** One install click covers publication, trusted registration and persisted selection. */
     internal fun downloadAndInstall(prepared: PreparedLinuxInstall): Boolean = submit(
         eligible = { it.prepared === prepared && it.receipt == null && !it.unknown && !it.recoveryBlocked },
         cancellable = true,
     ) {
         val activeToken = synchronized(lock) { checkNotNull(token) }
+        val epoch = synchronized(lock) { operationEpoch }
         val receipt = installer.install(prepared, activeToken)
-        // Never freeze/register from a visible marker without a durable publication receipt.
-        installedState(prepared, receipt)
+        // Never register from a visible marker without a durable publication receipt.
+        installedState(prepared, receipt, epoch)
     }
 
     /** A click explicitly retries publication durability, not another download or registration. */
@@ -178,21 +181,20 @@ class LinuxInstallCoordinator internal constructor(
         else installedState(prepared, receipt)
     }
 
-    private fun installedState(prepared: PreparedLinuxInstall, receipt: LinuxInstallReceipt): LinuxInstallState {
+    private suspend fun installedState(prepared: PreparedLinuxInstall, receipt: LinuxInstallReceipt,
+        epoch: Long = synchronized(lock) { operationEpoch }): LinuxInstallState {
         val retainedRegistration = synchronized(lock) { mutable.value.registration }
         val published = LinuxInstallState(prepared = prepared, receipt = receipt, registration = retainedRegistration,
-            notice = if (receipt.directorySyncConfirmed) "文件已持久化；尚未批准注册。请独立核对下方完整冻结配置。"
+            notice = if (receipt.directorySyncConfirmed) "文件已持久化，正在启用环境。"
                 else "目标已可见，但发布持久化未确认。检查文件不等于发布成功；请重试确认同一请求。")
         // Even a later freeze failure must not erase a publication receipt or enable re-download.
         synchronized(lock) { mutable.value = published.copy(busy = true) }
         if (!receipt.directorySyncConfirmed) return published
         val approval = retainedRegistration ?: catalog.freeze(receipt.installation)
         val frozen = published.copy(registration = approval)
-        // Persist even an unapproved preview's identity: restart is not a reason to mint a
-        // replacement catalog generation. A failed description save keeps this exact object.
+        // Retain the original registration identity across persistence failures and restart.
         synchronized(lock) { mutable.value = frozen.copy(busy = true) }
-        installer.rememberRegistration(prepared, approval)
-        return frozen
+        return registerAndSelect(prepared, approval, epoch)
     }
 
     internal fun prepareRegistration(): Boolean = submit(eligible = {
@@ -201,13 +203,12 @@ class LinuxInstallCoordinator internal constructor(
         val current = synchronized(lock) { mutable.value }
         val approval = catalog.freeze(checkNotNull(current.receipt).installation)
         val frozen = current.copy(registration = approval,
-            notice = "注册冻结预览已准备；仍须另行明确批准。")
-        synchronized(lock) { mutable.value = frozen }
-        installer.rememberRegistration(checkNotNull(current.prepared), approval)
-        frozen
+            notice = "正在完成环境设置。")
+        synchronized(lock) { mutable.value = frozen.copy(busy = true) }
+        registerAndSelect(checkNotNull(current.prepared), approval, synchronized(lock) { operationEpoch })
     }
 
-    /** Second explicit confirmation. A failed write always retains this exact frozen object. */
+    /** Explicit retry retains the exact frozen object after registration or selection failure. */
     internal fun approveRegistration(approval: FrozenLinuxApproval): Boolean = synchronized(lock) {
         val epoch = admissionEpoch
         submit(
@@ -216,19 +217,30 @@ class LinuxInstallCoordinator internal constructor(
             fenceQueued = true,
         ) {
             val prepared = checkNotNull(synchronized(lock) { mutable.value.prepared })
-            installer.rememberRegistration(prepared, approval)
-            // Catalog invokes this once AFTER its dispatcher and real gate waits, before IO.
-            // Cancellation and acceptance linearize on the short coordinator lock only.
-            catalog.approveInstallation(approval) {
-                synchronized(lock) {
-                    !closed && admissionEpoch == epoch && mutable.value.registration === approval
-                }
-            }
-            // Never cancel the receipt owner after acceptance, even if the page has left.
-            installer.completeRegistration(prepared, approval)
-            synchronized(lock) { mutable.value }.copy(registrationPending = false, registered = true,
-                notice = "注册请求已持久完成；已有撤销不会恢复，新增批准仅下次应用进程启动生效。未选择、打开或热换终端。")
+            registerAndSelect(prepared, approval, epoch)
         }
+    }
+
+    private suspend fun registerAndSelect(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval,
+        epoch: Long): LinuxInstallState {
+        synchronized(lock) { mutable.value = mutable.value.copy(registrationPending = true) }
+        installer.rememberRegistration(prepared, approval)
+        val entries = catalog.approveInstallation(approval) {
+            synchronized(lock) {
+                !closed && admissionEpoch == epoch && mutable.value.registration === approval
+            }
+        }
+        val active = entries.any { it == approval.installation }
+        if (active) {
+            // A completed catalog write is retained, but leaving the page must not start a new selection write.
+            catalog.select(approval.installation) {
+                synchronized(lock) { !closed && admissionEpoch == epoch && mutable.value.registration === approval }
+            }
+        }
+        installer.completeRegistration(prepared, approval)
+        return synchronized(lock) { mutable.value }.copy(registrationPending = false, registered = true,
+            notice = if (active) "环境已启用，重启应用后可用。"
+                else "环境授权已撤销；未重新启用或改变当前选择。")
     }
 
     /** Direct token cancellation, also called on page revocation. Not just coroutine cancellation. */
@@ -251,6 +263,7 @@ class LinuxInstallCoordinator internal constructor(
             (original.cleanupPending && !cleaning) || (original.unknown && !recovering) || !eligible(original)) return@synchronized false
         token = if (cancellable) LinuxInstallCancellation() else null
         val epoch = admissionEpoch
+        operationEpoch = epoch
         val identity = Any().also { activeOperation = it }
         mutable.value = before(original).copy(busy = true, notice = null, operationFailed = false)
         worker.launch {

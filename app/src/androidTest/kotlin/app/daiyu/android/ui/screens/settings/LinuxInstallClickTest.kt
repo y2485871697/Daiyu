@@ -69,6 +69,10 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
     private val dispatcher = QueuedDispatcher()
     private val transactions = Transactions()
     private var approvals = 0
+    private var selections = 0
+    private val entries = mutableListOf<LinuxInstallation>()
+    private var selectedReference: LinuxGenerationRef? = null
+    private var failSelection = false
     private var controller: LinuxSettingsController? = null
     private lateinit var coordinator: LinuxInstallCoordinator
     private lateinit var page: LinuxSettingsPageOwner
@@ -79,15 +83,25 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
     })
     private val catalog = object : LinuxSettingsCatalogAccess {
         override fun freeze(configuration: LinuxInstallation) = FrozenLinuxApproval(configuration)
-        override suspend fun load() = emptyList<LinuxInstallation>()
+        override suspend fun load() = entries.toList()
+        override suspend fun selected() = selectedReference
+        override suspend fun select(installation: LinuxInstallation, admit: () -> Boolean) {
+            check(admit()); check(!failSelection) { "fixture_selection_failed" }
+            selections++; selectedReference = LinuxGenerationRef(installation.environmentId, installation.generation)
+        }
         override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = false
         override suspend fun approve(approval: FrozenLinuxApproval): List<LinuxInstallation> {
             approvals++
-            error("unexpected_automatic_registration")
+            entries.removeAll { it.environmentId == approval.installation.environmentId }
+            entries.add(approval.installation)
+            return entries.toList()
         }
         override suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation> {
+            check(admit())
             approvals++
-            error("unexpected_automatic_registration")
+            entries.removeAll { it.environmentId == approval.installation.environmentId }
+            entries.add(approval.installation)
+            return entries.toList()
         }
         override suspend fun remove(reference: LinuxGenerationRef) = error("unexpected_removal")
     }
@@ -95,6 +109,7 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
     private fun show(distribution: String = "debian", mode: LinuxExecutionMode = LinuxExecutionMode.PROOT,
         preparedBeforeEntry: Boolean = false) {
         controller?.close()
+        entries.clear(); selectedReference = null
         assertTrue(modes.save(if (mode == LinuxExecutionMode.CHROOT) RunningMode.ROOT else RunningMode.NORMAL))
         val worker = CoroutineScope(SupervisorJob() + dispatcher)
         coordinator = LinuxInstallCoordinator(transactions,
@@ -139,10 +154,9 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
     }
 
     private fun assertNoLegacyActions() {
-        for (text in listOf("继续安装", "取消安装", "继续上次安装", "下载并安装")) {
+        for (text in listOf("继续安装", "取消安装", "继续上次安装", "下载并安装", "启用环境", "允许使用")) {
             ui.onNodeWithText(text).assertDoesNotExist()
         }
-        assertEquals(0, approvals)
         assertEquals(0, fixture.opens.get())
     }
 
@@ -163,7 +177,10 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
             transactions.installs == expected &&
                 (!coordinator.state.value.busy || coordinator.state.value.discarding)
         }
-        ui.waitForIdle()
+        repeat(5) {
+            if (dispatcher.pending) dispatcher.drain()
+            ui.waitForIdle()
+        }
         assertEquals(expected, transactions.installs)
         assertNoLegacyActions()
     }
@@ -183,9 +200,11 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
         assertNoLegacyActions()
     }
 
-    fun testOneClickInstallsAllDistributionsAndModesWithoutDiscardOrRegistration() {
+    fun testOneClickInstallsAndEnablesAllDistributionsAndModesWithoutASecondConfirmation() {
         for (distribution in listOf("alpine", "debian")) for (mode in LinuxExecutionMode.entries) {
             val before = transactions.installs
+            val approvalsBefore = approvals
+            val selectionsBefore = selections
             show(distribution, mode)
             assertFreshButton()
             clickInstall()
@@ -193,7 +212,14 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
             assertTrue(coordinator.state.value.receipt?.directorySyncConfirmed == true)
             assertTrue(transactions.discarded.isEmpty())
             assertFalse(dispatcher.pending)
-            ui.onNodeWithText("启用环境").assertExists()
+            assertTrue(coordinator.state.value.registered)
+            assertEquals(approvalsBefore + 1, approvals)
+            assertEquals(selectionsBefore + 1, selections)
+            assertEquals(LinuxGenerationRef(distribution, checkNotNull(coordinator.state.value.registration).installation.generation), selectedReference)
+            ui.onNodeWithText("环境已安装，重启应用后可用").assertExists()
+            node("linux-install-environment").assertDoesNotExist()
+            node("linux-switch-environment").assertDoesNotExist()
+            ui.onNodeWithText("启用环境").assertDoesNotExist()
             ui.onNodeWithText("允许使用").assertDoesNotExist()
             node("linux-install-progress").assertDoesNotExist()
         }
@@ -318,6 +344,29 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
         assertTrue(transactions.discarded.all { it === original })
         assertFreshButton()
         assertEquals(1, transactions.prepares)
+    }
+
+    fun testSelectionFailureRetainsOriginalAndDoesNotLoopOrReinstall() {
+        failSelection = true
+        show()
+        clickInstall(); finishInstall(1)
+        val original = checkNotNull(coordinator.state.value.registration)
+        assertTrue(coordinator.state.value.registrationPending)
+        assertFalse(coordinator.state.value.registered)
+        assertEquals(1, approvals)
+        assertEquals(0, selections)
+        assertFalse(dispatcher.pending)
+        ui.onNodeWithText("环境启用尚未确认").assertExists()
+        ui.onNodeWithText("重试完成设置").assertExists()
+        failSelection = false
+        ui.onNodeWithText("重试完成设置").performClick()
+        dispatcher.drain(); ui.waitForIdle(); dispatcher.drain(); ui.waitForIdle()
+        assertTrue(coordinator.state.value.registered)
+        assertSame(original, coordinator.state.value.registration)
+        assertEquals(1, transactions.installs)
+        assertEquals(2, approvals)
+        assertEquals(1, selections)
+        assertNoLegacyActions()
     }
 
     fun testOriginalTwentyDpBallAndInstallingSummaryAppearOnlyWhileBusy() {

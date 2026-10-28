@@ -50,6 +50,7 @@ data class LinuxSettingsState(
     val pendingApproval: FrozenLinuxApproval? = null,
     val pendingRemoval: LinuxGenerationRef? = null,
     val listConfirmed: Boolean = false,
+    val selected: LinuxGenerationRef? = null,
     val notice: String? = null,
     val error: Boolean = false,
 )
@@ -62,10 +63,15 @@ internal interface LinuxSettingsCatalogAccess {
     suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation>
     suspend fun registrationRecorded(approval: FrozenLinuxApproval): Boolean
     suspend fun remove(reference: LinuxGenerationRef): List<LinuxInstallation>
+    suspend fun selected(): LinuxGenerationRef? = null
+    suspend fun select(installation: LinuxInstallation, admit: () -> Boolean = { true }): Unit = error("linux_selection_unavailable")
 }
 
 internal class LinuxSettingsCatalogAdapter(private val catalog: TrustedLinuxCatalog,
-    private val requireRuntime: (LinuxExecutionMode) -> Unit = {}) : LinuxSettingsCatalogAccess {
+    private val requireRuntime: (LinuxExecutionMode) -> Unit = {},
+    private val selection: LinuxEnvironmentStore? = null) : LinuxSettingsCatalogAccess {
+    private val selectionChanges = Mutex()
+
     override fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval {
         requireRuntime(configuration.executionMode)
         return catalog.freezeForApproval(configuration)
@@ -80,7 +86,21 @@ internal class LinuxSettingsCatalogAdapter(private val catalog: TrustedLinuxCata
         return catalog.approveInstallation(approval, admit)
     }
     override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = catalog.registrationRecorded(approval)
-    override suspend fun remove(reference: LinuxGenerationRef) = catalog.remove(reference)
+    override suspend fun remove(reference: LinuxGenerationRef) = selectionChanges.withLock { catalog.remove(reference) }
+    override suspend fun selected(): LinuxGenerationRef? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val status = selection?.status() ?: return@withContext null
+        if (status.getString("state") == "FILES_READY")
+            LinuxGenerationRef(status.getString("environment_id"), status.getString("generation")) else null
+    }
+    override suspend fun select(installation: LinuxInstallation, admit: () -> Boolean) = selectionChanges.withLock {
+        requireRuntime(installation.executionMode)
+        check(catalog.load().any { it == installation }) { "linux_installation_not_approved" }
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            check(admit()) { "linux_selection_admission_revoked" }
+            requireRuntime(installation.executionMode)
+            checkNotNull(selection) { "linux_selection_unavailable" }.select(installation, admit)
+        }
+    }
 }
 
 /**
@@ -195,7 +215,22 @@ class LinuxSettingsController internal constructor(
     internal fun refresh(page: LinuxSettingsPageOwner): Boolean = submit(page,
         failure = "读取或验证目录失败；不是空列表。未覆盖目录，已有显示可能过期。", invalidateListOnFailure = true) {
         val entries = catalog.load()
-        return@submit { state -> state.copy(entries = entries, listConfirmed = true, notice = "已读取并验证批准目录。") }
+        val selected = catalog.selected()
+        return@submit { state -> state.copy(entries = entries, selected = selected, listConfirmed = true, notice = "已读取并验证批准目录。") }
+    }
+
+    internal fun select(page: LinuxSettingsPageOwner, reference: LinuxGenerationRef): Boolean = submit(page,
+        failure = "环境切换未确认，请重试；运行中的终端需先结束。",
+        eligible = { state -> !installationBlocksManual && state.listConfirmed && state.pendingApproval == null &&
+            state.pendingRemoval == null && state.entries.any { ref(it) == reference &&
+                (it.executionMode != LinuxExecutionMode.CHROOT || allowChroot()) } }) {
+        val entries = catalog.load()
+        val installation = entries.single { ref(it) == reference }
+        check(installation.executionMode != LinuxExecutionMode.CHROOT || allowChroot()) { "linux_root_mode_required" }
+        catalog.select(installation) { synchronized(lock) { active(page) &&
+            (installation.executionMode != LinuxExecutionMode.CHROOT || allowChroot()) } }
+        return@submit { state -> state.copy(entries = entries, selected = reference, listConfirmed = true,
+            notice = "环境选择已保存；本进程新增环境重启应用后可用。") }
     }
 
     internal fun approve(page: LinuxSettingsPageOwner, approval: FrozenLinuxApproval): Boolean {
@@ -309,6 +344,7 @@ class LinuxSettingsPageOwner internal constructor(
         controller.installAction(this, prepared.installation.executionMode) { it.confirmPublishedDurability(prepared) }
     fun prepareInstalledRegistration(mode: LinuxExecutionMode = LinuxExecutionMode.PROOT) = controller.installAction(this, mode) { it.prepareRegistration() }
     fun approveInstalled(approval: FrozenLinuxApproval) = controller.installAction(this, approval.installation.executionMode) { it.approveRegistration(approval) }
+    fun select(reference: LinuxGenerationRef) = controller.select(this, reference)
     fun cancelInstall() = controller.cancelInstall(this)
     /** Returns true only once, when this was still the active page; useful for back callbacks. */
     fun revoke(): Boolean = controller.revoke(this)

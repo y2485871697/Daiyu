@@ -14,7 +14,7 @@ import app.daiyu.android.terminal.*
 import app.daiyu.android.ui.app.AgentAppTheme
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Layout/selection checks use an empty catalog and never install or open a terminal. */
+/** Layout/selection fixtures never install or open a terminal. */
 class LinuxSettingsScreenTest : WiredActivityTestCase() {
     private val writes = AtomicInteger()
     private var settings: LinuxSettingsController? = null
@@ -25,14 +25,19 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
     })
     private var owner: LinuxSettingsPageOwner? = null
     private val loads = AtomicInteger()
+    private val selects = AtomicInteger()
+    private var currentSelection: LinuxGenerationRef? = null
+    private var failSwitch = false
     private var pageTitle = "Linux 工具环境"
     private val choicePreferences by lazy {
         instrumentation.targetContext.getSharedPreferences("linux-choice-test-${java.util.UUID.randomUUID()}", android.content.Context.MODE_PRIVATE)
     }
     private fun show(entries: List<LinuxInstallation> = emptyList(), filesOnly: Boolean = false,
         onOpenTerminal: (() -> Unit)? = null,
-        preferenceOverride: android.content.SharedPreferences? = null) {
+        preferenceOverride: android.content.SharedPreferences? = null,
+        selectedReference: LinuxGenerationRef? = null) {
         settings?.close()
+        currentSelection = selectedReference
         pageTitle = if (filesOnly) "工作区" else "Linux 工具环境"
         val catalog = object : LinuxSettingsCatalogAccess {
             override fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval { writes.incrementAndGet(); error("no configuration writes") }
@@ -40,6 +45,13 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
             override suspend fun approve(approval: FrozenLinuxApproval): List<LinuxInstallation> { writes.incrementAndGet(); error("no approval") }
             override suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation> { writes.incrementAndGet(); error("no installation") }
             override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = false
+            override suspend fun selected() = currentSelection
+            override suspend fun select(installation: LinuxInstallation, admit: () -> Boolean) {
+                check(admit())
+                selects.incrementAndGet()
+                check(!failSwitch) { "fixture_selection_failed" }
+                currentSelection = LinuxGenerationRef(installation.environmentId, installation.generation)
+            }
             override suspend fun remove(reference: LinuxGenerationRef): List<LinuxInstallation> { writes.incrementAndGet(); error("no removal") }
         }
         val preferences = LinuxInstallChoicePreferences(preferenceOverride ?: choicePreferences)
@@ -291,6 +303,71 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         setRunningMode(RunningMode.ROOT)
         revealLinux("linux-execution-choice").assertTextContains("Root 模式 · chroot")
         assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    private fun installedPair(mode: LinuxExecutionMode = LinuxExecutionMode.PROOT) = listOf(
+        LinuxInstallation("alpine", "alpine", "alpine-gen", java.io.File("/fixture/alpine"),
+            java.io.File("/fixture/proot"), "a".repeat(64), java.io.File("/fixture/loader"), "b".repeat(64), executionMode = mode),
+        LinuxInstallation("debian", "debian", "debian-gen", java.io.File("/fixture/debian"),
+            java.io.File("/fixture/proot"), "a".repeat(64), java.io.File("/fixture/loader"), "b".repeat(64), executionMode = mode))
+
+    fun testBrowsingInstalledEnvironmentDoesNotSwitchUntilOriginalConfigurationButtonIsClicked() {
+        val entries = installedPair()
+        val alpine = LinuxGenerationRef("alpine", "alpine-gen")
+        val debian = LinuxGenerationRef("debian", "debian-gen")
+        assertTrue(LinuxInstallChoicePreferences(choicePreferences).save(LinuxInstallChoice("alpine", LinuxExecutionMode.PROOT)))
+        show(entries = entries, selectedReference = alpine)
+        node("linux-switch-environment").assertDoesNotExist()
+        node("linux-distribution-choice").performClick()
+        node("linux-choice:linux-distribution-choice:1").performClick()
+        assertEquals(0, selects.get())
+        assertEquals(alpine, currentSelection)
+        revealLinux("linux-switch-environment").assertIsEnabled().assertTextContains("切换环境").performClick()
+        ui.waitUntil(5_000) { checkNotNull(owner).state.value.selected == debian && !checkNotNull(owner).state.value.busy }
+        assertEquals(1, selects.get())
+        assertEquals(debian, currentSelection)
+        node("linux-switch-environment").assertDoesNotExist()
+        node("linux-install-environment").assertDoesNotExist()
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSwitchFailureIsExplicitlyRetriedWithoutLosingBrowserChoice() {
+        val entries = installedPair()
+        val alpine = LinuxGenerationRef("alpine", "alpine-gen")
+        assertTrue(LinuxInstallChoicePreferences(choicePreferences).save(LinuxInstallChoice("debian", LinuxExecutionMode.PROOT)))
+        failSwitch = true
+        show(entries = entries, selectedReference = alpine)
+        assertEquals(0, selects.get())
+        revealLinux("linux-switch-environment").performClick()
+        ui.waitUntil(5_000) { checkNotNull(owner).state.value.error && !checkNotNull(owner).state.value.busy }
+        assertEquals(alpine, currentSelection)
+        node("linux-distribution-choice").assertTextContains("Debian")
+        failSwitch = false
+        revealLinux("linux-switch-environment").assertIsEnabled().performClick()
+        ui.waitUntil(5_000) { checkNotNull(owner).state.value.selected == LinuxGenerationRef("debian", "debian-gen") }
+        assertEquals(2, selects.get())
+        assertEquals(0, writes.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRetainedSwitchCallbackExpiresAfterChoiceChangeAndFilesRoundTrip() {
+        val entries = installedPair()
+        val alpine = LinuxGenerationRef("alpine", "alpine-gen")
+        assertTrue(LinuxInstallChoicePreferences(choicePreferences).save(LinuxInstallChoice("debian", LinuxExecutionMode.PROOT)))
+        show(entries = entries, selectedReference = alpine)
+        val oldSwitch = checkNotNull(revealLinux("linux-switch-environment").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        node("linux-distribution-choice").performClick()
+        node("linux-choice:linux-distribution-choice:0").performClick()
+        mainThread { oldSwitch() }
+        assertEquals(0, selects.get())
+        node("linux-distribution-choice").performClick()
+        node("linux-choice:linux-distribution-choice:1").performClick()
+        mainThread { oldSwitch() }
+        assertEquals(0, selects.get())
+        val oldBeforeFiles = checkNotNull(revealLinux("linux-switch-environment").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        node("linux-tab:files").performClick(); node("linux-tab:basic").performClick()
+        mainThread { oldBeforeFiles() }
+        assertEquals(alpine, currentSelection)
+        assertEquals(0, selects.get()); assertEquals(0, fixture.opens.get())
     }
 
     fun testPreferenceWriteFailureKeepsConfirmedChoiceAndShowsError() {

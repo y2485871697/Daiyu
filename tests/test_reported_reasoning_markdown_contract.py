@@ -28,11 +28,20 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         self.assertIn("if (hasSummary) Modifier.conversationClickable", source)
         self.assertIn("semantics(mergeDescendants = true)", source)
 
-    def test_answer_fallback_does_not_duplicate_active_card_status(self):
-        source = (CHAT / "ChatMessageList.kt").read_text().split("private fun AssistantTextContent", 1)[1]
-        fallback = source.split('Text("正在思考…"', 1)[0]
-        self.assertIn("!isReportedReasoningActive(", fallback)
-        self.assertIn("turn.reportedReasoning, turn.isStreaming", fallback)
+    def test_answer_has_no_extra_thinking_placeholder(self):
+        source = (CHAT / "ChatMessageList.kt").read_text()
+        self.assertNotIn('Text("正在思考…"', source)
+        card = (CHAT / "ReportedReasoningCard.kt").read_text()
+        self.assertIn('if (isThinking) "正在思考…" else "已思考"', card)
+
+    def test_reply_identity_waits_for_content_without_blocking_readiness(self):
+        source = (CHAT / "ChatMessageList.kt").read_text()
+        assistant = source.split("internal fun AssistantTurn(", 1)[1].split("private fun AssistantTextContent", 1)[0]
+        self.assertIn("if (turn.hasVisibleResponse())", assistant)
+        gate = assistant.index("if (turn.hasVisibleResponse())")
+        self.assertLess(assistant.index("SideEffect { onContentReady(contentReady) }"), gate)
+        self.assertLess(assistant.index("SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }"), gate)
+        self.assertLess(gate, assistant.index('Modifier.testTag("reply-identity:'))
 
     def test_restoration_prepares_reasoning_with_the_existing_budget(self):
         source = (CHAT / "RestoredMarkdown.kt").read_text()

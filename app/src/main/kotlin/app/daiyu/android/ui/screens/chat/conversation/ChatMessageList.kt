@@ -497,7 +497,7 @@ internal fun AssistantTurn(
     SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }
     SideEffect { onRevealSettled(reveal.settled) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    if (turn.hasVisibleResponse()) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val identity = turn.assistantIdentity
         val avatar by produceState<android.graphics.Bitmap?>(null, identity?.avatarPng) {
             value = withContext(Dispatchers.IO) { runCatching { identity?.avatarBitmap() }.getOrNull() }
@@ -552,10 +552,6 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
     if (turn.finalText.isNotBlank()) {
         ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), visibleCharacters = reveal.limit("final"),
             generationComplete = generationComplete)
-    } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null &&
-        !isReportedReasoningActive(turn.reportedReasoning, turn.isStreaming)) {
-        Text("正在思考…", color = conversationColors().muted,
-            style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp))
     }
 }
 

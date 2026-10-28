@@ -22,6 +22,111 @@ import javax.crypto.KeyGenerator
 
 /** Actual settings form/store; only ephemeral synthetic encrypted data under an isolated noBackup root. */
 class McpSettingsScreenTest : WiredActivityTestCase() {
+    fun testLoopbackDefaultTransportDiscoversLargeCatalogAndPersistsIt() {
+        val policy = android.security.NetworkSecurityPolicy.getInstance()
+        assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"))
+        for (host in listOf("example.com", "192.168.1.2", "127.0.0.1.attacker.invalid")) {
+            assertFalse(policy.isCleartextTrafficPermitted(host))
+        }
+        val listener = java.net.ServerSocket(0, 4, java.net.InetAddress.getByName("127.0.0.1")).apply { soTimeout = 10_000 }
+        val methods = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val serving = worker.submit {
+            repeat(3) {
+                listener.accept().use { socket ->
+                    socket.soTimeout = 10_000
+                    val reader = socket.getInputStream().bufferedReader(Charsets.UTF_8)
+                    check(reader.readLine() == "POST /mcp HTTP/1.1")
+                    val headers = linkedMapOf<String, String>()
+                    while (true) {
+                        val line = checkNotNull(reader.readLine())
+                        if (line.isEmpty()) break
+                        headers[line.substringBefore(':').lowercase()] = line.substringAfter(':').trim()
+                    }
+                    check("authorization" !in headers)
+                    val chars = CharArray(checkNotNull(headers["content-length"]).toInt())
+                    var count = 0
+                    while (count < chars.size) {
+                        val read = reader.read(chars, count, chars.size - count)
+                        check(read > 0); count += read
+                    }
+                    val request = JSONObject(String(chars)); val method = request.getString("method")
+                    methods.add(method)
+                    val result = when (method) {
+                        "initialize" -> JSONObject().put("protocolVersion", "2025-03-26")
+                            .put("capabilities", JSONObject().put("tools", JSONObject()))
+                            .put("serverInfo", JSONObject().put("name", "fixture").put("version", "1"))
+                        "notifications/initialized" -> null
+                        "tools/list" -> JSONObject().put("tools", org.json.JSONArray().also { tools ->
+                            repeat(57) { index -> tools.put(JSONObject().put("name", "tool_$index")
+                                .put("description", "说明".repeat(800)).put("inputSchema", JSONObject().put("type", "object"))) }
+                        })
+                        else -> error("unexpected fixture request")
+                    }
+                    val body = if (result == null) byteArrayOf() else JSONObject().put("jsonrpc", "2.0")
+                        .put("id", request.getLong("id")).put("result", result).toString().toByteArray(Charsets.UTF_8)
+                    val status = if (result == null) "202 Accepted" else "200 OK"
+                    val header = "HTTP/1.1 $status\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+                    socket.getOutputStream().apply { write(header.toByteArray(Charsets.US_ASCII)); write(body); flush() }
+                }
+            }
+        }
+        val server = McpServer("test", "mt", "http://127.0.0.1:${listener.localPort}/mcp", "")
+        val session = McpHttpSession(server)
+        val root = File(instrumentation.targetContext.cacheDir, "mcp-loopback-wire-${UUID.randomUUID()}").apply { mkdirs() }
+        val context = object : ContextWrapper(instrumentation.targetContext) { override fun getNoBackupFilesDir() = root }
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val store = McpSettingsStore(context) { key }; val owner = McpSettingsOwner()
+        try {
+            val tools = session.discover()
+            serving.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            assertEquals(listOf("initialize", "notifications/initialized", "tools/list"), methods.toList())
+            assertEquals(57, tools.size)
+            store.save(listOf(server.withPolicy(catalog = tools, allowedTools = tools.map { it.name }.toSet())), owner, store.snapshot())
+            assertTrue(File(root, "mcp-private-v1.bin").length() > 65536)
+            assertEquals(57, McpSettingsStore(context) { key }.snapshot().servers.single().catalog.size)
+        } finally {
+            session.close(); listener.close(); serving.cancel(true); worker.shutdownNow()
+            worker.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)
+            owner.revoke(); root.deleteRecursively()
+        }
+    }
+    fun testLoopbackHttpCanBeAddedAndReopenedWithoutTokenOrNetworkAccess() {
+        val root = File(instrumentation.targetContext.cacheDir, "mcp-loopback-form-${UUID.randomUUID()}").apply { mkdirs() }
+        val context = object : ContextWrapper(instrumentation.targetContext) { override fun getNoBackupFilesDir() = root }
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val store = McpSettingsStore(context) { key }; val owner = McpSettingsOwner()
+        var managementOpens = 0
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {}, managementFactory = {
+                    managementOpens++; error("saving must not open a transport")
+                })
+            } } }
+            ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and
+                SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
+                    "能力默认可用；保存只更新服务器配置，不会执行工具。")).fetchSemanticsNodes().isNotEmpty() }
+            node("mcp-settings-add").performClick()
+            node("mcp-server-label").performTextReplacement("mt")
+            node("mcp-server-endpoint").performTextReplacement("http://127.0.0.1:8787/mcp")
+            node("mcp-settings-save").scrollToVisible().performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("mcp-settings-form").fetchSemanticsNodes().isEmpty() }
+            val saved = McpSettingsStore(context) { key }.snapshot().servers.single()
+            assertEquals("mt", saved.label)
+            assertEquals("http://127.0.0.1:8787/mcp", saved.endpoint)
+            assertEquals("", saved.bearer)
+            node("mcp-settings-edit").scrollToVisible().performClick()
+            assertEquals(saved.endpoint, node("mcp-server-endpoint").fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+            assertEquals("", node("mcp-server-bearer").fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+            node("mcp-settings-save").scrollToVisible().performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("mcp-settings-form").fetchSemanticsNodes().isEmpty() }
+            assertEquals("", store.snapshot().servers.single().bearer)
+            assertEquals(0, managementOpens)
+            assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
+        } finally {
+            mainThread { activity.setContent {} }; owner.revoke(); root.deleteRecursively()
+        }
+    }
     fun testEmptyCardAndBothAddEntrypointsKeepHorizontalThemedActionsWithoutSaving() {
         for (dark in listOf(false, true)) {
             val root = File(instrumentation.targetContext.cacheDir, "mcp-layout-${UUID.randomUUID()}").apply { mkdirs() }

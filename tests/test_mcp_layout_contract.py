@@ -1,6 +1,7 @@
 """MCP source wiring contracts; actual Compose layout/pixels are tested on Android."""
 from pathlib import Path
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/settings/McpSettingsScreen.kt'
@@ -64,6 +65,32 @@ class McpLayoutContractTest(unittest.TestCase):
                      'managementFactory(store).refresh(before, server.id, owner)',
                      'label = server?.label.orEmpty(); endpoint = server?.endpoint.orEmpty(); bearer = ""'):
             self.assertIn(text, self.source)
+
+    def test_loopback_http_is_the_only_android_cleartext_exception(self):
+        manifest = ET.parse(ROOT / 'app/src/main/AndroidManifest.xml').getroot()
+        application = manifest.find('application')
+        android = '{http://schemas.android.com/apk/res/android}'
+        self.assertEqual('false', application.get(android + 'usesCleartextTraffic'))
+        self.assertEqual('@xml/network_security_config', application.get(android + 'networkSecurityConfig'))
+        config = ET.parse(ROOT / 'app/src/main/res/xml/network_security_config.xml').getroot()
+        self.assertEqual('false', config.find('base-config').get('cleartextTrafficPermitted'))
+        exceptions = config.findall('domain-config')
+        self.assertEqual(1, len(exceptions))
+        self.assertEqual('true', exceptions[0].get('cleartextTrafficPermitted'))
+        domains = exceptions[0].findall('domain')
+        self.assertEqual(1, len(domains))
+        self.assertEqual('127.0.0.1', domains[0].text)
+        self.assertEqual('false', domains[0].get('includeSubdomains'))
+
+    def test_loopback_form_and_default_socket_transport_have_android_regressions(self):
+        text = ANDROID.read_text()
+        for value in ('testLoopbackHttpCanBeAddedAndReopenedWithoutTokenOrNetworkAccess',
+                      'testLoopbackDefaultTransportDiscoversLargeCatalogAndPersistsIt',
+                      'java.net.ServerSocket(', 'val session = McpHttpSession(server)',
+                      'policy.isCleartextTrafficPermitted("127.0.0.1")',
+                      'assertEquals(0, managementOpens)',
+                      'http://127.0.0.1:8787/mcp'):
+            self.assertIn(value, text)
 
     def test_android_coverage_includes_themes_geometry_color_and_both_entrypoints(self):
         text = ANDROID.read_text()

@@ -5,9 +5,14 @@ import org.json.JSONObject
 
 /** Bounded JSON, duplicate keys rejected before JSONObject can erase them. No permissive JSONTokener. */
 internal object McpJson {
-    fun objectValue(text: String): JSONObject {
-        require(text.length <= 65536) { "mcp_json_limit" }
-        val parser = Parser(text)
+    enum class Limit(val bytes: Int, val depth: Int, val nodes: Int) {
+        STANDARD(65536, 12, 4096),
+        CATALOG(1024 * 1024, 32, 32768),
+        SETTINGS(2 * 1024 * 1024, 32, 32768),
+    }
+    fun objectValue(text: String, limit: Limit = Limit.STANDARD): JSONObject {
+        require(text.length <= limit.bytes) { "mcp_json_limit" }
+        val parser = Parser(text, limit)
         val value = parser.value(0)
         parser.space()
         require(parser.end() && value is JSONObject) { "mcp_json_object_required" }
@@ -35,14 +40,14 @@ internal object McpJson {
         is String -> JSONObject.quote(value)
         else -> value.toString()
     }
-    private class Parser(val text: String) {
+    private class Parser(val text: String, val limit: Limit) {
         var p = 0
         var nodes = 0
         fun end() = p == text.length
         fun space() { while (p < text.length && text[p] in " \t\r\n") p++ }
         fun take(c: Char): Boolean { space(); if (p < text.length && text[p] == c) { p++; return true }; return false }
         fun value(depth: Int): Any {
-            require(depth <= 12 && ++nodes <= 4096) { "mcp_json_limit" }; space()
+            require(depth <= limit.depth && ++nodes <= limit.nodes) { "mcp_json_limit" }; space()
             require(p < text.length)
             return when (text[p]) {
                 '{' -> {

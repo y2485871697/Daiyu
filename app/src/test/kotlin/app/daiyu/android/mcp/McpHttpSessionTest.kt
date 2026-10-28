@@ -59,6 +59,55 @@ class McpHttpSessionTest {
             } finally { session.close() }
         }
     }
+    @Test fun largeNestedToolCatalogDoesNotRaiseTheToolCallResponseLimit() {
+        val catalog = org.json.JSONArray()
+        repeat(57) { catalog.put(JSONObject().put("name", "tool_$it").put("description", "fixture".repeat(200))
+            .put("inputSchema", JSONObject().put("type", "object"))) }
+        var output: Any = org.json.JSONArray((0 until 20000).toList())
+        repeat(20) { output = JSONObject().put("nested", output) }
+        catalog.getJSONObject(0).put("outputSchema", output)
+        val calls = AtomicInteger()
+        val session = McpHttpSession(server, OkHttpClient.Builder().addInterceptor { chain ->
+            calls.incrementAndGet()
+            val buffer = Buffer(); chain.request().body!!.writeTo(buffer)
+            val input = McpJson.objectValue(buffer.readUtf8())
+            val method = input.getString("method")
+            if (method == "notifications/initialized") {
+                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(202).message("fixture")
+                    .body("".toResponseBody()).build()
+            } else {
+                val result = when (method) {
+                    "initialize" -> JSONObject(init)
+                    "tools/list" -> JSONObject().put("tools", catalog)
+                    "tools/call" -> JSONObject().put("content", org.json.JSONArray().put(JSONObject()
+                        .put("type", "text").put("text", "x".repeat(65536))))
+                    else -> error("unexpected fixture request")
+                }
+                val body = JSONObject().put("jsonrpc", "2.0").put("id", input.getLong("id")).put("result", result).toString()
+                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("fixture")
+                    .header("Content-Type", "application/json").body(body.toResponseBody("application/json".toMediaType())).build()
+            }
+        }.build())
+        try {
+            assertEquals(57, session.discover().size)
+            assertThrows(IllegalArgumentException::class.java) { session.call("tool_0", "{}") }
+            assertEquals(4, calls.get())
+        } finally { session.close() }
+    }
+    @Test fun catalogAndSettingsBudgetsRetainStrictJsonAndBoundedDepthAndNodeCounts() {
+        val large = JSONObject().put("items", org.json.JSONArray((0 until 20000).toList())).toString()
+        assertThrows(IllegalArgumentException::class.java) { McpJson.objectValue(large) }
+        assertEquals(20000, McpJson.objectValue(large, McpJson.Limit.CATALOG).getJSONArray("items").length())
+        for (limit in McpJson.Limit.values()) {
+            assertThrows(IllegalArgumentException::class.java) { McpJson.objectValue("{\"x\":1,\"x\":2}", limit) }
+            assertThrows(IllegalArgumentException::class.java) { McpJson.objectValue("{\"x\":\"${"a".repeat(limit.bytes)}\"}", limit) }
+            var nested = "{}"
+            repeat(limit.depth + 1) { nested = "{\"x\":$nested}" }
+            assertThrows(IllegalArgumentException::class.java) { McpJson.objectValue(nested, limit) }
+            val wide = JSONObject().put("items", org.json.JSONArray((0 until limit.nodes).toList())).toString()
+            assertThrows(IllegalArgumentException::class.java) { McpJson.objectValue(wide, limit) }
+        }
+    }
     @Test fun defaultTransportDisablesRedirectConnectionRetryAuthenticationAndBoundsReadBeforeAllocation() {
         val session = McpHttpSession(server)
         try {

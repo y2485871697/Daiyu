@@ -14,6 +14,45 @@ import javax.crypto.KeyGenerator
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34], shadows = [HostAtomicFileShadow::class])
 class McpSettingsStoreTest {
+    @Test fun loopbackHttpWithEmptyTokenRoundTripsWithoutAdmittingOtherHttpTargets() {
+        val context = RuntimeEnvironment.getApplication()
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val store = McpSettingsStore(context) { key }; val owner = McpSettingsOwner()
+        store.clear(owner)
+        try {
+            val server = McpServer("test", "mt", "http://127.0.0.1:8787/mcp", "")
+            store.save(listOf(server), owner, store.snapshot())
+            val restored = McpSettingsStore(context) { key }.snapshot().servers.single()
+            assertEquals("mt", restored.label)
+            assertEquals(server.endpoint, restored.endpoint)
+            assertEquals("", restored.bearer)
+            for (endpoint in listOf("http://host.invalid/mcp", "http://192.168.1.2:8787/mcp",
+                "http://0.0.0.0/mcp", "http://127.0.0.2/mcp", "http://127.0.0.1.attacker.invalid/mcp",
+                "http://user:pass@127.0.0.1/mcp", "http://127.0.0.1/mcp?token=secret", "http://127.0.0.1/mcp#fragment")) {
+                assertThrows(IllegalArgumentException::class.java) { McpServer("test", "mt", endpoint, "") }
+            }
+        } finally { store.clear(owner) }
+    }
+    @Test fun largeCatalogRoundTripsWithNestedSchemasAndAnEmptyToken() {
+        val context = RuntimeEnvironment.getApplication()
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val store = McpSettingsStore(context) { key }; val owner = McpSettingsOwner()
+        store.clear(owner)
+        try {
+            var schema = org.json.JSONObject().put("type", "object")
+            repeat(5) { schema = org.json.JSONObject().put("type", "object")
+                .put("properties", org.json.JSONObject().put("nested", schema)) }
+            val tools = (0 until 57).map { McpRemoteTool("tool_$it", "说明".repeat(800), schema.toString()) }
+            val server = McpServer("test", "mt", "http://127.0.0.1:8787/mcp", "", catalog = tools)
+            store.save(listOf(server), owner, store.snapshot())
+            assertTrue(File(context.noBackupFilesDir, "mcp-private-v1.bin").length() > 65536)
+            val restored = McpSettingsStore(context) { key }.snapshot().servers.single()
+            assertEquals(57, restored.catalog.size)
+            assertEquals("", restored.bearer)
+            assertEquals(server.allowedTools, restored.allowedTools)
+            assertTrue(server.catalog.zip(restored.catalog).all { (old, fresh) -> old.sameMetadata(fresh) })
+        } finally { store.clear(owner) }
+    }
     @Test fun privateEnvelopeIsEncryptedRandomizedAndDoesNotRestoreApprovalAcrossAbaOrCiphertextRollback() {
         val context = RuntimeEnvironment.getApplication()
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()

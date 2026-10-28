@@ -35,7 +35,8 @@ internal class McpServer(val id: String, val label: String, val endpoint: String
         require(catalog.size <= 64 && catalog.map { it.name }.distinct().size == catalog.size)
         require(allowedTools.all { name -> catalog.any { it.name == name } }) { "mcp_policy_unknown_tool" }
         val url = endpoint.toHttpUrl()
-        require(url.isHttps && url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null)
+        require((url.isHttps || (url.scheme == "http" && url.host == "127.0.0.1")) &&
+            url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null)
     }
     override fun toString() = "McpServer(redacted)"
 }
@@ -115,7 +116,8 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
             .put("catalog", JSONArray().also { tools -> it.catalog.forEach { tool -> tools.put(tool.json()) } })
             .put("allowed_tools", JSONArray(it.allowedTools.sorted()))) }
         val bytes = JSONObject().put("revision", value.revision).put("servers", array).toString().toByteArray(Charsets.UTF_8)
-        require(bytes.size <= 60000)
+        require(bytes.size <= McpJson.Limit.SETTINGS.bytes)
+        McpJson.objectValue(bytes.toString(Charsets.UTF_8), McpJson.Limit.SETTINGS)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key()); cipher.updateAAD(aad)
         val encrypted = cipher.iv + cipher.doFinal(bytes)
@@ -141,11 +143,11 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return McpSettings("empty", emptyList())
         try {
             val payload = file.openRead().use { input ->
-                McpHttpSession.boundedRead(input, 60028).also { require(it.size >= 29) }
+                McpHttpSession.boundedRead(input, McpJson.Limit.SETTINGS.bytes + 28).also { require(it.size >= 29) }
             }
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, payload, 0, 12)); cipher.updateAAD(aad)
-            val json = McpJson.objectValue(cipher.doFinal(payload, 12, payload.size - 12).toString(Charsets.UTF_8))
+            val json = McpJson.objectValue(cipher.doFinal(payload, 12, payload.size - 12).toString(Charsets.UTF_8), McpJson.Limit.SETTINGS)
             val list = json.getJSONArray("servers"); require(list.length() <= 8)
             val revision = McpJson.text(json, "revision")
             require(revision.matches(Regex("[a-f0-9-]{36}")))

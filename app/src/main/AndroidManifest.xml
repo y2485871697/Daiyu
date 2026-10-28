@@ -45,7 +45,7 @@
             <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
-    <application android:name=".ChatApplication" android:usesCleartextTraffic="false" android:dataExtractionRules="@xml/data_extraction_rules" android:allowBackup="false" android:fullBackupContent="false" android:label="@string/app_name"
+    <application android:name=".ChatApplication" android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/network_security_config" android:dataExtractionRules="@xml/data_extraction_rules" android:allowBackup="false" android:fullBackupContent="false" android:label="@string/app_name"
         android:icon="@drawable/task17_launcher_f6f7f9_2491ff" android:roundIcon="@drawable/task17_launcher_f6f7f9_2491ff" android:theme="@style/Theme.Daiyu"
         android:supportsRtl="true">
         <!-- Cross-app notification read special access only. Not posting, not a run/model grant.

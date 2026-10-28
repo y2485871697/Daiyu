@@ -84,7 +84,7 @@ import kotlinx.coroutines.withContext
                     list + McpServer(id, label, endpoint, secret, sameConnection && old!!.enabled,
                         if (sameConnection) old!!.catalog else emptyList(), if (sameConnection) old!!.allowedTools else emptySet())
                 }
-            } catch (_: Exception) { status = "配置无效，请检查名称和 HTTPS 地址。"; return }
+            } catch (_: Exception) { status = "配置无效，请检查名称、地址（HTTPS 或本机 127.0.0.1 HTTP）和 Token 格式。"; return }
             busy = true
             scope.launch {
                 val result = withContext(Dispatchers.IO) {

@@ -97,7 +97,8 @@ internal class McpHttpSession(
     private fun rpc(method: String, params: JSONObject, initializing: Boolean = false): JSONObject {
         val id = synchronized(lock) { check(!closed); ++nextId }
         val envelope = JSONObject().put("jsonrpc", "2.0").put("id", id).put("method", method).put("params", params)
-        val response = exchange(envelope.toString(), initializing, false)
+        val response = exchange(envelope.toString(), initializing, false,
+            if (method == "tools/list") McpJson.Limit.CATALOG else McpJson.Limit.STANDARD)
         require(McpJson.text(response, "jsonrpc") == "2.0")
         val responseId = response.get("id")
         require(responseId is Number && responseId.toString() == id.toString()) { "mcp_response_id_mismatch" }
@@ -116,7 +117,8 @@ internal class McpHttpSession(
     private fun notification() {
         exchange(JSONObject().put("jsonrpc", "2.0").put("method", "notifications/initialized").toString(), false, true)
     }
-    private fun exchange(payload: String, initializing: Boolean, notification: Boolean): JSONObject {
+    private fun exchange(payload: String, initializing: Boolean, notification: Boolean,
+        responseLimit: McpJson.Limit = McpJson.Limit.STANDARD): JSONObject {
         require(payload.toByteArray(Charsets.UTF_8).size <= 65536)
         val call = synchronized(lock) {
             check(!closed && active == null && ++requests <= 32) { "mcp_session_unavailable" }
@@ -151,11 +153,11 @@ internal class McpHttpSession(
                     require(media?.type == "application" && media.subtype == "json" && media.charset(Charsets.UTF_8) == Charsets.UTF_8) {
                         "mcp_response_format_unsupported"
                     }
-                    require(body.contentLength() <= 65536)
-                    val bytes = boundedRead(body.byteStream(), 65536)
+                    require(body.contentLength() <= responseLimit.bytes)
+                    val bytes = boundedRead(body.byteStream(), responseLimit.bytes)
                     val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                         .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
-                    McpJson.objectValue(text)
+                    McpJson.objectValue(text, responseLimit)
                 }
             }
         } finally {

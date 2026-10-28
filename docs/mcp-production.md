@@ -4,7 +4,7 @@
 
 ## 实际入口
 
-1. 设置搜索 `MCP` → **MCP 服务器**（`SettingsCatalog` 的 `MCP_SETTINGS` route，真实 `MainActivity` 页面）。最多保存 8 个不同 ID 的服务器。地址仅限 HTTPS；拒绝 URL 用户名、密码、query、fragment。可选 Bearer 不回填、不显示、不写入日志/备份。访问页面、保存、删除和修复清除都不连接服务器，也不制造任务批准。
+1. 设置搜索 `MCP` → **MCP 服务器**（`SettingsCatalog` 的 `MCP_SETTINGS` route，真实 `MainActivity` 页面）。最多保存 8 个不同 ID 的服务器。地址支持 HTTPS，以及本机 `http://127.0.0.1`（端口可配置）；其他 HTTP 仍拒绝。主网络配置默认禁止明文，只对精确 `127.0.0.1` 放行，不包含子域名。拒绝 URL 用户名、密码、query、fragment。可选 Bearer 不回填、不显示、不写入日志/备份。访问页面、保存、删除和修复清除都不连接服务器，也不制造任务批准。
 2. 聊天的 **MCP 本轮精确调用审批**，仅限无附件文本：填写
    ```json
    {"server":"my_server","tool":"tool_name","arguments":{"target":"one"}}
@@ -29,7 +29,7 @@
 - JSON-RPC `initialize` → `notifications/initialized` → 单页 `tools/list` → 精确 `tools/call`；协商版本仅 `2025-03-26`。
 - POST `Accept: application/json, text/event-stream` 满足协商要求，但**目前只解码 application/json UTF-8 回应**。SSE、GET 事件流、反向请求、batch、分页 cursor、资源/图片内容均拒绝，不试探第二 transport，不重发同一个调用。
 - 初始化返回的可选 `Mcp-Session-Id` 仅绑定到这一个冻结 URL/client；后续请求携带同一 ID，服务器不能替换或临时补发新 ID。协议版本 header 固定。RPC id 类型/值、jsonrpc 字符串、result/error 互斥、serverInfo/capability/目录与工具结果形状均验证；工具内容仅 text，可选 structuredContent 必须 object。
-- 严格 JSON parser 拒绝重复键、非标准 JSON、无效 UTF-16、尾随内容；最多 64 KiB、12 层、4096 节点、字符串 32768 字符、数字 128 字符。响应先按字节限量再严格 UTF-8 解码。最多 64 个目录工具、32 个结果内容块、每 session 32 个请求；完整批准参数最多 32768 UTF-8 字节。
+- 严格 JSON parser 拒绝重复键、非标准 JSON、无效 UTF-16、尾随内容；普通请求与工具调用响应维持 64 KiB、12 层、4096 节点；`tools/list` 目录响应单独允许 1 MiB、32 层、32768 节点，以容纳服务器附带的 outputSchema 等元数据。加密配置 envelope 单独限制为 2 MiB、32 层、32768 节点；旧小配置保持兼容。各模式仍限制字符串 32768 字符、数字 128 字符，保留严格重复键与 Unicode 校验。响应先按字节限量再严格 UTF-8 解码。最多 64 个目录工具、32 个结果内容块、每 session 32 个请求；完整批准参数最多 32768 UTF-8 字节。
 - 禁止重定向、connection retry、HTTP authentication/proxy authentication。额外 network interceptor 在 OkHttp follow-up 逻辑之前拒绝非 2xx，避免 `503 Retry-After: 0` 等独立于 connection retry 的自动重发。没有请求/响应日志 interceptor。连接 10s、读写 20s、总 call 30s。
 - tools/call 一旦进入 transport 后出错、取消、响应格式异常、结果 owner/config 已撤销，都按 **UNKNOWN**；不伪称 NotExecuted，也不依赖异常文本证明没有副作用。规范 isError=true 的有效工具结果是确认的错误回包，而非自动重试信号。
 

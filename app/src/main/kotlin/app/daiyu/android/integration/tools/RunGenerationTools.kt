@@ -138,6 +138,17 @@ internal class RunGenerationTools(
         else -> null
     }
 
+    /** Ordinary dynamic facade keeps the original call and the same exact invocation grant. */
+    internal fun executeApproved(context: ToolExecutionContext, batch: GenerationRunConfig.Batch): ExecutionReceipt {
+        val frozen = config ?: return ExecutionReceipt.NotExecuted("generation_unconfigured")
+        val effect = writeEffect(accountScope, owner, frozen, batch)
+        if (context.owner !== owner || context.authorization !== authorization ||
+            context.authorization.allowedWrites != setOf(effect) ||
+            context.invocation.name != if (batch.protocol == GenerationProtocol.OPENAI_VIDEO_MULTIPART) VIDEO_TOOL else IMAGE_TOOL)
+            return ExecutionReceipt.NotExecuted("generation_invocation_mismatch")
+        return execute(context, frozen, batch, effect)
+    }
+
     private fun execute(context: ToolExecutionContext, frozen: GenerationRunConfig,
         batch: GenerationRunConfig.Batch, effect: WriteEffect): ExecutionReceipt {
         // Never use synthetic/default owner or a random operation/call ID.

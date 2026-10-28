@@ -38,7 +38,8 @@ internal fun toolBodyLayout(category: String, details: ToolCategoryDetailsUi): T
         else -> emptySet()
     }
     val labels = when (category) {
-        "memory", "personal_search", "files", "workspace", "browser", "apps", "delegation", "child_control", "image_read", "speech", "gui" -> setOf("列表范围")
+        "memory", "personal_search", "files", "workspace", "browser", "apps", "image_read", "speech", "gui" -> setOf("列表范围")
+        "delegation", "child_control" -> setOf("列表范围", "请求任务数", "返回任务数", "返回结果数", "可用配置数", "当前委派配置可用", "子任务已结束", "返回状态", "控制回执", "记录状态", "读取偏移", "正文下次偏移", "进度下次偏移")
         "skills" -> setOf("技能", "资源", "技能数", "列表范围")
         "generation" -> setOf("生成阶段", "生成进度", "列表范围")
         "mcp" -> setOf("原工具", "列表范围")

@@ -126,6 +126,29 @@ class TerminalJobSessionTest {
         assertEquals(0, f.creates.get())
         assertEquals(RunCatalogCloseResult.Drained, f.close())
     }
+    @Test fun confirmedDispatchAcknowledgesAcceptanceNotCompletion() {
+        val backend = object : Backend() {
+            override fun execute(name: String, arguments: JSONObject): JSONObject =
+                super.execute(name, arguments).also { if (name == "terminal_exec") it.put("state", "dispatched") }
+        }
+        val plan = plan()
+        val token = owner()
+        val auth = TaskAuthorization("run", "run", setOf(plan.effect))
+        val session = TerminalJobSession.approved(plan, auth) { backend }
+        val capabilities = SessionCapabilities("run", setOf(TerminalJobSession.CAPABILITY))
+        session.bind(token, capabilities, auth)
+        val dispatcher = ToolDispatcher(ToolRegistry().apply { session.tools(capabilities).forEach(::register) }.snapshot(),
+            capabilities, ToolLedger(InMemoryToolLedgerStore()))
+        val result = dispatcher.dispatchOwned(auth, listOf(ToolInvocation(ToolCallId("accepted"),
+            TerminalJobSession.START, "{}")), token).single().outcome as DispatchOutcome.Confirmed
+        val payload = JSONObject(result.payload)
+        assertTrue(payload.getBoolean("accepted"))
+        assertFalse(payload.getBoolean("completed"))
+        assertEquals(backend.id, payload.getString("job_id"))
+        session.close()
+        assertTrue(session.awaitCloseOnWorker(1000))
+    }
+
     @Test fun exactApprovedCommandReachesOneRegistrySessionAndUnknownNeverResendsWithNewCallId() {
         val f = Fixture()
         assertTrue(f.call() is DispatchOutcome.Unknown)

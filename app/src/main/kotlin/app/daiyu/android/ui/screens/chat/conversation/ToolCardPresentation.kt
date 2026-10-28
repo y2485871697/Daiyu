@@ -32,7 +32,8 @@ internal object ToolCardPresentations {
         group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆")
         group("skills", "skills_list" to "查找技能", "skills_read" to "读取技能说明", "skills_read_resource" to "读取技能资源")
         group("delegation", "run_child_models" to "批量委派", "start_child_tasks" to "后台委派")
-        group("child_control", "direct_child_task" to "指导子任务")
+        group("child_control", "direct_child_task" to "指导子任务", "inspect_child_tasks" to "查看子任务",
+            "get_child_task" to "读取子任务结果", "control_child_task" to "控制子任务")
         group("terminal", "terminal_exec" to "执行命令", "terminal_read" to "读取命令输出", "terminal_pty_step" to "执行终端步骤", "terminal_pty_read" to "读取输出", "shizuku_execute" to "执行命令")
         group("background_job", "terminal_job_start" to "启动后台任务", "terminal_job_read" to "读取后台结果")
         group("files", "list_files" to "列目录", "file_metadata" to "读取文件信息", "read_text_file" to "读取文件")
@@ -43,7 +44,7 @@ internal object ToolCardPresentations {
         group("personal_search", "search_media" to "检索媒体元数据", "calendar_events" to "检索日历", "search_contacts" to "检索联系人", "app_notifications" to "读取本应用通知", "current_notifications" to "检索通知", "notification_history" to "检索通知历史")
         group("system_action", "platform_set_alarm" to "设置闹钟", "platform_set_timer" to "设置计时器", "platform_set_volume" to "调整音量", "platform_media_key" to "控制媒体", "platform_set_wifi" to "切换 Wi-Fi")
         group("generation", "generate_images" to "生成图片", "generate_videos" to "生成视频")
-        group("context", "context_archive_page" to "读取历史档案", "context_usage" to "查询上下文")
+        group("context", "conversation_reference_read" to "读取会话引用", "context_archive_page" to "读取历史档案", "context_usage" to "查询上下文")
         group("user_question", "ask_user" to "向用户提问")
     }
     private val browserActions = mapOf("list_tabs" to "查看标签页", "get_readable" to "读取正文", "get_text" to "读取正文", "find_elements" to "查找元素", "get_page_info" to "读取页面信息", "get_backbone" to "读取页面结构", "screenshot" to "网页截图", "new_tab" to "新建标签页", "close_tab" to "关闭标签页", "navigate" to "打开页面", "click" to "网页点击", "type" to "网页输入", "hover" to "悬停网页元素", "scroll" to "网页滚动", "execute_js" to "执行网页脚本", "fetch" to "获取网页资源", "get_cookies" to "读取 Cookie", "set_cookies" to "设置 Cookie", "scroll_and_collect" to "滚动收集网页内容", "set_user_agent" to "设置浏览器标识", "set_viewport" to "设置网页视口", "wait_for_selector" to "等待网页元素", "wait_for_dom_stable" to "等待页面稳定", "reload" to "刷新网页", "go_back" to "网页后退", "go_forward" to "网页前进")
@@ -51,16 +52,17 @@ internal object ToolCardPresentations {
 
     fun present(toolName: String, arguments: String, result: String?): Presentation {
         val args = parse(arguments)
-        var kind = tools[toolName] ?: if (toolName.matches(Regex("mcp_[0-7]_call"))) "mcp" to "调用 MCP 工具" else "generic" to "执行其他工具"
+        var kind = tools[toolName] ?: if (isMcpToolName(toolName)) "mcp" to "调用 MCP 工具" else "generic" to "执行其他工具"
         val branch = when (toolName) {
             "browser_read", "browser_write" -> browserActions[args?.optString("action")]
             "screen", "screen_action" -> guiActions[args?.optString("operation")]
             "search_media" -> if (args?.optString("kind") == "audio") "检索音乐" else "检索相册"
+            "control_child_task" -> mapOf("continue" to "继续子任务", "pause" to "暂停子任务", "stop" to "停止子任务")[args?.optString("action")]
             "direct_child_task" -> mapOf("APPEND" to "追加子任务", "REPLACE" to "替换子任务", "REDISPATCH" to "失败后重新委派")[args?.optString("kind")]
             else -> null
         }
         if (toolName == "search_media") kind = kind.first to requireNotNull(branch)
-        if (toolName in setOf("browser_read", "browser_write", "screen", "screen_action", "direct_child_task")) {
+        if (toolName in setOf("browser_read", "browser_write", "screen", "screen_action", "direct_child_task", "control_child_task")) {
             kind = if (branch == null) "generic" to "执行其他工具" else kind.first to branch
         }
         // Free-form strings (commands, URLs, paths, errors, prompts, opaque MCP data) are not echoed.
@@ -68,7 +70,7 @@ internal object ToolCardPresentations {
             "browser" -> listOf("tab_id", "max_chars", "offset", "amount")
             "files", "skills", "memory" -> listOf("max_bytes", "offset", "limit")
             "personal_search", "apps" -> listOf("limit", "max_age_hours")
-            "system_action" -> listOf("hour", "minute", "duration_seconds", "percent")
+            "system_action" -> listOf("hour", "minute", "seconds", "index", "duration_seconds", "percent")
             else -> emptyList()
         }
         val params = listOf(numbers(args, paramKeys), when (toolName) {
@@ -90,6 +92,8 @@ internal object ToolCardPresentations {
                 choice(output, "state", terminalStates), choice(output, "mode", mapOf("async" to "异步任务", "daemon" to "守护任务")))
             "run_child_models" -> listOf(arrayCount(output, "results", "返回任务数"))
             "start_child_tasks" -> listOf(arrayCount(output, "tasks", "入队任务数"), flags(output, listOf("accepted", "completed")))
+            "inspect_child_tasks" -> listOf(arrayCount(output, "tasks", "返回任务数"), flags(output, listOf("current_configuration_available")))
+            "get_child_task", "control_child_task" -> listOf(flags(output, listOf("new_request", "settled")))
             "direct_child_task" -> listOf(flags(output, listOf("new_request")))
             "screen" -> listOf(arrayCount(output, "nodes", "节点数"), numbers(output, listOf("width", "height", "expires_after_ms")), flags(output, listOf("truncated")))
             "screen_action" -> listOf(flags(output, listOf("verified_ui_result")))
@@ -151,6 +155,6 @@ internal object ToolCardPresentations {
     private val labels = mapOf("total_bytes" to "总字节数", "wait_status" to "原始等待状态", "frameCount" to "帧数", "expires_after_ms" to "观察有效毫秒",
         "pty" to "伪终端", "persistent_shell" to "持久会话", "opened" to "会话已打开", "has_more" to "还有输出", "log_truncated" to "日志已截断",
         "leader_exited" to "主进程已退出", "scope_drain_confirmed" to "进程组排空已确认", "output_complete" to "输出已读完", "log_available" to "日志可读取",
-        "accepted" to "已接纳", "completed" to "子任务已完成", "new_request" to "新请求", "truncated" to "节点已截断", "verified_ui_result" to "界面结果已核实",
-        "ownerTransportReady" to "宿主通道就绪", "displayInitialized" to "显示已初始化", "hasFrame" to "已有画面", "sourceEmpty" to "画面源为空","tab_id" to "标签", "max_chars" to "字符上限", "max_bytes" to "字节上限", "offset" to "偏移", "amount" to "滚动量", "limit" to "数量上限", "max_age_hours" to "回溯小时", "hour" to "小时", "minute" to "分钟", "duration_seconds" to "计时秒数", "percent" to "百分比", "exit_code" to "退出码", "bytes" to "字节数", "next_offset" to "下次偏移", "size" to "大小", "count" to "数量", "total" to "总数", "width" to "宽度", "height" to "高度", "duration_ms" to "时长毫秒")
+        "accepted" to "已接纳", "completed" to "子任务已完成", "current_configuration_available" to "当前委派配置可用", "settled" to "子任务已结束", "new_request" to "新请求", "truncated" to "节点已截断", "verified_ui_result" to "界面结果已核实",
+        "ownerTransportReady" to "宿主通道就绪", "displayInitialized" to "显示已初始化", "hasFrame" to "已有画面", "sourceEmpty" to "画面源为空","tab_id" to "标签", "max_chars" to "字符上限", "max_bytes" to "字节上限", "offset" to "偏移", "amount" to "滚动量", "limit" to "数量上限", "max_age_hours" to "回溯小时", "hour" to "小时", "minute" to "分钟", "seconds" to "计时秒数", "index" to "音量档位", "duration_seconds" to "计时秒数", "percent" to "百分比", "exit_code" to "退出码", "bytes" to "字节数", "next_offset" to "下次偏移", "size" to "大小", "count" to "数量", "total" to "总数", "width" to "宽度", "height" to "高度", "duration_ms" to "时长毫秒")
 }

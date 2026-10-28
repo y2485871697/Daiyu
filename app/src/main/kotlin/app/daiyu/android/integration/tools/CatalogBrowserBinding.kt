@@ -47,6 +47,7 @@ internal class CatalogBrowserBinding private constructor(
     }
 
     val session: BrowserToolSession get() = host.session
+    internal val screenshotStore get() = host.screenshotStore
 
     internal val visibleSupported: Boolean get() = synchronized(lock) { !closed && host.webHost != null }
 

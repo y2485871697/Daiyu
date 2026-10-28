@@ -40,6 +40,11 @@ internal class TerminalJobPlan(
         require(String(command.toByteArray(Charsets.UTF_8), Charsets.UTF_8) == command)
         require(!configuration.root)
         require(mode != "daemon" || launch is TerminalPtyLaunch.Android || (launch as? TerminalPtyLaunch.Linux)?.rootScope != null) { "linux_daemon_not_supported" }
+        effect = effectFor(conversationId, runId, configuration, command, mode)
+    }
+    companion object {
+        internal fun effectFor(conversationId: ConversationId, runId: RunId,
+            configuration: TerminalConfiguration, command: String, mode: String): WriteEffect {
         val backend = configuration.linux
         val description = JSONObject().put("conversation", conversationId.value).put("run", runId.value)
             .put("backend", configuration.backend).put("cwd", configuration.workingDirectory?.path)
@@ -51,8 +56,10 @@ internal class TerminalJobPlan(
             .put("root_scope", backend?.rootScope?.binding() ?: JSONObject.NULL)
         val target = MessageDigest.getInstance("SHA-256").digest(description.toString().toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 255) }
-        effect = WriteEffect("terminal.job", "start", target, "$mode:" +
+        return WriteEffect("terminal.job", "start", target, "$mode:" +
             java.util.Base64.getEncoder().encodeToString(command.toByteArray(Charsets.UTF_8)))
+        }
+
     }
 }
 
@@ -128,7 +135,7 @@ internal class TerminalJobSession private constructor(
         return listOf(tool(START, true), tool(READ, false))
     }
 
-    private fun start(context: ToolExecutionContext): ExecutionReceipt {
+    internal fun start(context: ToolExecutionContext): ExecutionReceipt {
         // External cancellation never runs under our monitor. Recheck identity/close at claim.
         val cancelled = context.cancelled()
         synchronized(lock) {
@@ -172,6 +179,11 @@ internal class TerminalJobSession private constructor(
         if (raw.optString("execution") == "not_executed") {
             synchronized(lock) { definitelyNotStarted = true }
             return ExecutionReceipt.NotExecuted(raw.optString("error", "terminal_job_not_dispatched"))
+        }
+        if (raw.optBoolean("ok") && raw.optString("state") == "dispatched" &&
+            jobId != null && raw.optString("job_id") == jobId) {
+            return ExecutionReceipt.Confirmed(JSONObject(raw.toString()).put("execution", "accepted")
+                .put("accepted", true).put("completed", false).toString())
         }
         markUnknown()
         return ExecutionReceipt.Unknown("terminal_job_dispatched_or_unconfirmed:${jobId ?: "no_handle"}")

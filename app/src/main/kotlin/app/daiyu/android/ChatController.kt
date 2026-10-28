@@ -352,6 +352,35 @@ class ChatController internal constructor(private val application:Application,
         lifetime?.let { stop(it.initial) }
     }
     internal val interactiveMode = app.daiyu.android.config.InteractiveModePreference(preferences)
+    private var toolLocationUi: RunScreenLocationUi? = null
+    internal fun attachToolLocationUi(ui: RunScreenLocationUi) { toolLocationUi = ui }
+    internal fun detachToolLocationUi(ui: RunScreenLocationUi) { if (toolLocationUi === ui) toolLocationUi = null }
+    private fun presentToolLocation(question: RunScreenLocation.Question) {
+        handler.post {
+            val ui = toolLocationUi
+            if (ui == null || closed) question.answer(null)
+            else {
+                question.whenAnswered { handler.post { ui.dismiss(question) } }
+                ui.show(question)
+            }
+        }
+    }
+    private fun ordinaryBrowserOpened(assistant: Message, binding: CatalogBrowserBinding) {
+        handler.post {
+            synchronized(this) {
+                val lifetime = resources?.takeIf { it.initial.id == assistant.id && it.initial.runId == assistant.runId &&
+                    it.initial.conversationId == assistant.conversationId && !it.fenced && !closed } ?: return@synchronized
+                if (lifetime.browserVisual == null && binding.visibleSupported) {
+                    lifetime.browserVisual = ControllerBrowserVisual(assistant, binding,
+                        ownerCurrent = { isRunUnfenced(assistant) }, pauseOriginal = { pause(assistant) },
+                        originalPaused = { lifetime.runner.state().let {
+                            it.phase == app.daiyu.android.domain.runtime.ExecutionPhase.PAUSED && it.pauseRequested
+                        } }, resumeOriginal = { resume(assistant) }, stopOriginal = { stop(assistant) })
+                    notifyChanged()
+                }
+            }
+        }
+    }
     private val executor=Executors.newSingleThreadExecutor()
     private val conversationConfigurationExecutor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
@@ -3883,7 +3912,17 @@ class ChatController internal constructor(private val application:Application,
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null
         var preparingLiveMcp: app.daiyu.android.mcp.McpLiveScope? = null
+        val ordinaryRun = platformAction == null && mcpPreparation == null && browserBinding == null &&
+            browserPreparation == null && terminalRun == null && terminalJobRun == null && generation == null &&
+            shizukuPreparation == null && shizukuAuthorization == null && virtualDisplay == null && gui == null && video == null
+        val ordinaryBrowserSettings = if (ordinaryRun) browserSettings.snapshot() else null
+        val ordinaryAssistant = if (ordinaryRun) checkNotNull(assistantStore.read(assistantContext.assistantId)).let {
+            it.copy(enabledSkillIds = it.enabledSkillIds.toList())
+        } else null
         val prepared = try {
+            val ordinaryGeneration = if (ordinaryRun) try { GenerationSettingsStore(application).loadSnapshot() }
+                catch (_: GenerationSettingsException) { null } else null
+            val ordinaryShizuku = if (ordinaryRun && application is ChatApplication) shizukuAccess.refresh() else null
             val liveMcp = if (mcpPreparation == null && virtualDisplay == null && gui == null && video == null &&
                 browserBinding == null && terminalRun == null && terminalJobRun == null && generation == null &&
                 shizukuPreparation == null && shizukuAuthorization == null && platformAction == null) {
@@ -3939,7 +3978,13 @@ class ChatController internal constructor(private val application:Application,
                     (if (terminalRun == null && terminalJobRun == null && gui == null && virtualDisplay == null &&
                         video == null && generation == null) setOf(RunCommandTools.CAPABILITY) else emptySet()) +
                     (if (virtualDisplay == null) emptySet() else setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY)) +
-                    (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)))
+                    (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)) +
+                    (if (!ordinaryRun) emptySet() else app.daiyu.android.platform.actions.PlatformActionKind.entries.map { it.capability }.toSet() +
+                        setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY, TerminalJobSession.CAPABILITY) +
+                        (if (ordinaryGeneration == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
+                        (if (ordinaryShizuku?.uid == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
+                        (if (ordinaryBrowserSettings?.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) emptySet()
+                            else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY))))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
                 if(!withChildren) null else { owner, grants, authorization ->
@@ -3965,6 +4010,50 @@ class ChatController internal constructor(private val application:Application,
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
                 backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope, liveMcp=liveMcp,
                 workspacePin = workspace, referenceReader = referenceReader,
+                ordinaryFactory = if (!ordinaryRun) null else { realOwner, grants, task ->
+                    val location = RunScreenLocation(realOwner, taskSurfaceStore, application.packageName,
+                        current = { isRunUnfenced(assistant) }, present = ::presentToolLocation)
+                    val jobHost = ((application as? ChatApplication)?.terminalProvider?.state?.value as?
+                        app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
+                    val jobLinuxState = jobHost?.linuxStateOnWorker()
+                    val jobReference = workspace.resolved.rootfs?.let { app.daiyu.android.terminal.LinuxGenerationRef(it.environmentId, it.generation) }
+                        ?: jobLinuxState?.selected
+                    val jobLinuxRoot = jobHost?.workspaceRootsOnWorker()?.firstOrNull {
+                        it.environmentId == jobReference?.environmentId && it.generation == jobReference?.generation
+                    }
+                    val jobLinux = app.daiyu.android.integration.tools.CommandLinuxBinding.freeze(jobLinuxState, jobReference) {
+                        if (jobHost == null || jobReference == null || jobLinuxRoot == null) null else
+                            jobHost.freezeTerminalLaunchOnWorker(jobReference, application.cacheDir,
+                                workspace.resolved.hostDirectory, workspace.linux(jobReference))
+                    }.launch
+                    val androidLaunch = TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf(
+                        "HOME" to application.filesDir.path, "TMPDIR" to application.cacheDir.path,
+                        "PATH" to "/system/bin:/system/xbin"), workspace.resolved.hostDirectory)
+                    val jobConfigurations = mutableMapOf("android" to app.daiyu.android.terminal.TerminalConfiguration(
+                        workingDirectory = androidLaunch.cwd, environment = androidLaunch.environment))
+                    try { jobLinux?.let { jobConfigurations["linux"] = it.commandConfiguration() } }
+                    finally { jobLinux?.close() }
+                    listOfNotNull(RunOrdinaryPlatformTools(realOwner, task,
+                            app.daiyu.android.platform.actions.AndroidPlatformActionBackend(application)),
+                        if (ordinaryBrowserSettings?.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) null else
+                            RunOrdinaryBrowserTools(application, realOwner, task, checkNotNull(ordinaryAssistant), assistant.id,
+                                checkNotNull(ordinaryBrowserSettings)) { binding -> ordinaryBrowserOpened(assistant, binding) },
+                        RunOrdinaryGuiTools(realOwner, task, location),
+                        ordinaryShizuku?.uid?.let { uid -> RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid) },
+                        ordinaryGeneration?.let { settings -> RunOrdinaryGenerationTools(realOwner, task, settings,
+                            retainGenerationResources(settings.accountScope)) { isRunUnfenced(assistant) } },
+                        RunOrdinaryJobTools(application, realOwner, task, grants, jobConfigurations,
+                            launch = { environment -> if (environment == "android") androidLaunch else {
+                                if (jobHost == null || jobReference == null || "linux" !in jobConfigurations) null else
+                                    jobHost.freezeTerminalLaunchOnWorker(jobReference, application.cacheDir,
+                                        workspace.resolved.hostDirectory, workspace.linux(jobReference))
+                            } }, pinWorkspace = { workspace.retain() }, retainJob = { session ->
+                                synchronized(this) {
+                                    if (closed || retainedTerminalJobs.size >= 64) false
+                                    else { retainedTerminalJobs.add(session); true }
+                                }
+                            }))
+                },
                 platformAction=platformAction?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
                     grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->

@@ -24,11 +24,11 @@ internal object ToolCategoryDetails {
         "max_chars" to "字符上限", "limit" to "数量上限", "width" to "宽度", "height" to "高度",
         "duration_ms" to "时长毫秒", "exit_code" to "退出码", "wait_status" to "原始等待状态",
         "tab_id" to "标签", "frameCount" to "帧数", "hour" to "小时", "minute" to "分钟",
-        "duration_seconds" to "计时秒数", "percent" to "百分比", "max_age_hours" to "回溯小时",
+        "seconds" to "计时秒数", "index" to "音量档位", "duration_seconds" to "计时秒数", "percent" to "百分比", "max_age_hours" to "回溯小时",
         "level" to "电量百分比", "capacity" to "容量", "used" to "已使用", "available" to "可用",
         "request_count" to "请求数", "input_tokens" to "已报告输入", "output_tokens" to "已报告输出",
         "cached_tokens" to "已报告缓存", "expires_after_ms" to "有效毫秒", "revision" to "修订")
-    private val flags = mapOf("accepted" to "已接纳", "completed" to "任务已完成", "new_request" to "新请求",
+    private val flags = mapOf("accepted" to "已接纳", "completed" to "任务已完成", "current_configuration_available" to "当前委派配置可用", "settled" to "子任务已结束", "new_request" to "新请求",
         "pty" to "伪终端", "persistent_shell" to "持久会话", "opened" to "会话已打开", "has_more" to "还有输出",
         "log_truncated" to "日志已截断", "output_complete" to "输出已读完", "log_available" to "日志可读取",
         "leader_exited" to "主进程已退出", "scope_drain_confirmed" to "进程组排空已确认",
@@ -67,8 +67,8 @@ internal object ToolCategoryDetails {
                 "技能与资源" to "技能说明与兼容性以实际返回为准；阅读卡片不会安装或运行技能。"
             }
             "delegation", "child_control" -> {
-                count(args, "tasks", "请求任务数"); count(output, "tasks", "返回任务数"); count(output, "results", "返回结果数")
-                boolean(output, "accepted", "completed", "new_request")
+                count(args, "tasks", "请求任务数"); count(output, "tasks", "返回任务数"); count(output, "results", "返回结果数"); count(output, "available_profiles", "可用配置数")
+                boolean(output, "accepted", "completed", "new_request", "current_configuration_available", "settled"); state(output)
                 val tasks = output?.optJSONArray("tasks") ?: output?.optJSONArray("results")
                 if (tasks != null) for (index in 0 until minOf(tasks.length(), 16)) {
                     val task = tasks.optJSONObject(index) ?: continue
@@ -112,7 +112,7 @@ internal object ToolCategoryDetails {
                 "检索范围与命中" to "个人条目按需展开，号码与验证码保持隐藏；没有结果不等于没有个人活动。"
             }
             "system_action" -> {
-                numeric(args, "hour", "minute", "duration_seconds", "percent"); boolean(args, "enabled"); boolean(output, "accepted", "enabled")
+                numeric(args, "hour", "minute", "seconds", "index", "duration_seconds", "percent"); boolean(args, "enabled"); boolean(output, "accepted", "enabled")
                 "请求与系统回执" to "请求值不代表系统确认值；结果未确认时不显示重试或重复执行入口。"
             }
             "generation", "image_read" -> {

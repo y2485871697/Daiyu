@@ -16,14 +16,16 @@ internal object GuiScreenToolFactory {
     private fun admission(session: GuiRunSession, context: ToolExecutionContext): ExecutionReceipt.NotExecuted? =
         session.admission(context.owner, context.authorization)?.let { ExecutionReceipt.NotExecuted(it.code) }
 
-    private class ReadTool(private val session: GuiRunSession) : RegisteredTool {
-        override val definition = ToolDefinition("screen", 1,
+    internal fun readDefinition(): ToolDefinition = ToolDefinition("screen", 1,
             "Explicitly authorized, bounded accessibility observation or one explicitly requested platform screenshot. " +
                 "Observation IDs expire and cannot be reused after a UI change/action. No automatic screenshot.",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("operation", ArgumentType.Text(16, setOf("observe", "screenshot"))),
                 ArgumentField("observation_id", ArgumentType.Text(64, minimumLength = 1), required = false),
             )))
+
+    private class ReadTool(private val session: GuiRunSession) : RegisteredTool {
+        override val definition = readDefinition()
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val screenshot = arguments.text("operation") == "screenshot"
             require(screenshot == arguments.contains("observation_id")) { "invalid_arguments" }
@@ -38,8 +40,7 @@ internal object GuiScreenToolFactory {
             }
         }
     }
-    private class ActionTool(private val session: GuiRunSession) : RegisteredTool {
-        override val definition = ToolDefinition("screen_action", 1,
+    internal fun actionDefinition(): ToolDefinition = ToolDefinition("screen_action", 1,
             "One exact user-confirmed accessibility node or global action, bound to the same observation_id. " +
                 "No coordinate fallback/retry. Android acceptance is not verified business success.",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
@@ -48,6 +49,9 @@ internal object GuiScreenToolFactory {
                 ArgumentField("node_id", ArgumentType.Integer(0, 127), required = false),
                 ArgumentField("text", ArgumentType.Text(4096), required = false),
             )))
+
+    private class ActionTool(private val session: GuiRunSession) : RegisteredTool {
+        override val definition = actionDefinition()
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val action = GuiAction(arguments.text("observation_id"),
                 GuiOperation.valueOf(arguments.text("operation").uppercase()),

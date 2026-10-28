@@ -117,7 +117,7 @@ internal fun UsageMetric(label: String, value: String, modifier: Modifier = Modi
             color = if (total) colors.toolbar else colors.text, lineHeight = 20.sp)
         Text(value, fontSize = if (total) 16.sp else 14.sp, fontWeight = if (total) FontWeight.SemiBold else FontWeight.Medium,
             textAlign = TextAlign.End,
-            color = if (total) colors.text else colors.accent, lineHeight = 22.sp)
+            color = if (total) colors.toolbar else colors.accent, lineHeight = 22.sp)
     }
 }
 

@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.SemanticsProperties
 import kotlinx.coroutines.runBlocking
 import app.daiyu.android.model.catalog.CatalogCommitResult
@@ -103,6 +104,19 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             .assert(hasAnyAncestor(hasTestTag("voice-recognition-method-card"))).performClick()
         node("voice-section-select").assertDoesNotExist()
         node("settings-radio:本机识别").assertExists()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testConversationDownloadCardMatchesSiblingCardGeometry() {
+        systemProfiles(); enter(); section("语音对话")
+        val cloud = reveal("voice-cloud-enable", "语音设置").fetchSemanticsNode().boundsInRoot
+        val pack = reveal("voice-offline-pack-card", "语音设置").fetchSemanticsNode().boundsInRoot
+        val download = ui.onNode(hasAnyAncestor(hasTestTag("voice-offline-pack-card")) and
+            (hasTestTag("offline-speech-download") or hasTestTag("offline-speech-cancel-download")))
+            .assertHeightIsAtLeast(64.dp).fetchSemanticsNode().boundsInRoot
+        assertEquals(cloud.left, download.left, 1f)
+        assertEquals(cloud.right, download.right, 1f)
+        assertTrue(download.left >= pack.left && download.right <= pack.right)
         assertEquals(0, fixture.opens.get())
     }
 

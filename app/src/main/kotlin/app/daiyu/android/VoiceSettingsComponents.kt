@@ -8,8 +8,8 @@ import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Card
 
 @Composable
-internal fun VoiceSettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), content = content)
+internal fun VoiceSettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(modifier.padding(horizontal = 12.dp, vertical = 6.dp), content = content)
 }
 
 internal fun VoiceConfiguration.withSpeech(value: VoiceConfiguration) = copy(

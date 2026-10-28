@@ -8,10 +8,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.daiyu.android.ui.components.DaiyuConfirmDialog
+import app.daiyu.android.VoiceSettingsCard
+import app.daiyu.android.ui.components.usagePalette
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
+import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
+import top.yukonga.miuix.kmp.basic.Text
 import app.daiyu.android.voice.offline.OfflineSpeechPack
 import app.daiyu.android.voice.offline.SpeechInputPolicy
 import app.daiyu.android.voice.offline.SpeechModelManifest
@@ -19,14 +24,14 @@ import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable
-internal fun OfflineSpeechPackCard(context: Context, ownerCurrent: () -> Boolean) {
+internal fun OfflineSpeechPackCard(context: Context, ownerCurrent: () -> Boolean, conversationStyle: Boolean = false) {
     val pack by OfflineSpeechPack.state.collectAsStateWithLifecycle()
     LaunchedEffect(context) { OfflineSpeechPack.initialize(context) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var confirm by remember { mutableStateOf(false) }
     val owner by rememberUpdatedState(ownerCurrent)
     fun canAct() = owner() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-    SettingsCard(Modifier.testTag("voice-offline-pack-card")) {
+    val content: @Composable ColumnScope.() -> Unit = {
         SettingsRow(when { pack.downloading -> "取消下载"; pack.ready -> "语音包已就绪"; else -> "下载语音包" },
             tag = if (pack.downloading) "offline-speech-cancel-download" else "offline-speech-download",
             summary = when {
@@ -41,12 +46,47 @@ internal fun OfflineSpeechPackCard(context: Context, ownerCurrent: () -> Boolean
             progress = { (pack.downloadedBytes.toFloat() / SpeechModelManifest.totalBytes).coerceIn(0f, 1f) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp))
     }
-    if (confirm) DaiyuConfirmDialog("下载语音包",
-        "将从 Hugging Face 下载约 ${SpeechModelManifest.totalBytes / 1_000_000} MB 的语音模型，可能产生流量。下载不会开启麦克风，也不会自动启用听写。引擎为 Apache-2.0；模型权重授权尚未明确，请确认符合你的使用场景。",
-        "下载", false, onConfirm = {
-            confirm = false
-            if (canAct()) OfflineSpeechPack.download(context)
-        }, onDismiss = { confirm = false })
+    val modifier = Modifier.testTag("voice-offline-pack-card")
+    if (conversationStyle) VoiceSettingsCard(modifier, content)
+    else SettingsCard(modifier, content)
+    if (confirm) OfflineSpeechDownloadConfirmation(onConfirm = {
+        confirm = false
+        if (canAct()) OfflineSpeechPack.download(context)
+    }, onDismiss = { confirm = false })
+}
+
+@Composable
+internal fun OfflineSpeechDownloadConfirmation(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val colors = usagePalette()
+    ChatSelectionSheet(
+        title = "下载语音包",
+        onDismiss = onDismiss,
+        showCloseButton = false,
+        footer = {
+            AssistantPreviewButton(
+                text = "取消",
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("dialog-cancel"),
+                secondary = true,
+            )
+            AssistantPreviewButton(
+                text = "下载",
+                onClick = onConfirm,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("dialog-confirm"),
+                primary = true,
+            )
+        },
+    ) {
+        Text(
+            text = "将从下载约141 MB的语音模型，可能产生流量。",
+            color = colors.muted,
+            fontSize = 15.sp,
+            lineHeight = 23.sp,
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
+                .verticalScroll(rememberScrollState()).padding(top = 6.dp, bottom = 20.dp)
+                .testTag("offline-speech-download-message"),
+        )
+    }
 }
 
 @Composable

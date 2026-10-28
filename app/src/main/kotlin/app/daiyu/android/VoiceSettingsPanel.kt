@@ -415,7 +415,7 @@ internal fun VoiceSettingsPanel(
                                     SettingsRow("识别服务", summary = draft.asrResource.ifBlank { "请选择" }, showChevron = true, onClick = if (busy) null else ({ dialog = "ASR_RESOURCE" }))
                                 }
                             } }
-                            if (section == "CONVERSATION" && draft.dictation != "DOUBAO") item { OfflineSpeechPackCard(context, ::current) }
+                            if (section == "CONVERSATION" && draft.dictation != "DOUBAO") item { OfflineSpeechPackCard(context, ::current, conversationStyle = true) }
                             item { VoiceSettingsCard {
                                 SettingsSwitchRow("云端朗读", cloud, busy = busy, tag = "voice-cloud-enable", summary = "关闭时使用系统语音。") { enabled ->
                                     if (current() && !busy && stopAudio()) {

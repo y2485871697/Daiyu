@@ -240,7 +240,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     val selection = TextRange(projected.toVisible(rawOffset(value.selection.start)),
                                         projected.toVisible(rawOffset(value.selection.end)))
                                     val composition = rawComposition?.let { TextRange(projected.toVisible(it.start), projected.toVisible(it.end)) }
-                                    val accepted = if (references.references.isEmpty() && projected.references.isEmpty()) {
+                                    val accepted = if (!state.dictationPreview && references.references.isEmpty() && projected.references.isEmpty()) {
                                         if (next != state.text) actions.onTextChange(next)
                                         actions.onSelectionChange(rawOffset(value.selection.start), rawOffset(value.selection.end))
                                         true

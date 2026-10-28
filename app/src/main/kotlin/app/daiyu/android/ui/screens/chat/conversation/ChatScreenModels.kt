@@ -137,6 +137,7 @@ data class ComposerUi(
     val contextUsageText: String? = null,
     val contextTokensText: String? = null,
     val listening: Boolean = false,
+    val dictationPreview: Boolean = false,
     val enabled: Boolean = true,
     val controlOwnerKey: String? = null,
     val mainContextCompressing: Boolean = false,
@@ -163,7 +164,7 @@ data class ComposerUi(
     val gptSpeedSaving: Boolean = false,
 )
 
-internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !mainContextCompressing && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
+internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !mainContextCompressing && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && !dictationPreview && when (phase) {
     ComposerPhase.IDLE -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable
     ComposerPhase.PAUSED, ComposerPhase.RUNNING -> text.isNotBlank() && supplementAvailable
 }

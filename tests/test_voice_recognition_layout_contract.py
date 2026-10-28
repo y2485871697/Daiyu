@@ -23,9 +23,11 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         cls.fields = (SRC / "ui/screens/settings/SettingsUiComponents.kt").read_text()
         cls.asr = body(cls.panel, 'if (child == "ASR")')
 
-    def test_section_selector_uses_narrow_shared_settings_card(self):
+    def test_section_selector_keeps_card_width_and_compact_height(self):
         selector = body(self.panel, 'if (child == null) Column(')
-        self.assertIn('SettingsCard(Modifier.widthIn(max = 240.dp)', selector)
+        self.assertIn('SettingsCard(Modifier.testTag("voice-section-selector-card"))', selector)
+        self.assertNotIn('.widthIn(', selector)
+        self.assertNotIn('.width(', selector)
         self.assertIn('testTag("voice-section-selector-card")', selector)
         self.assertIn('testTag("voice-section-select")', selector)
         self.assertIn('.heightIn(min = 48.dp)', selector)

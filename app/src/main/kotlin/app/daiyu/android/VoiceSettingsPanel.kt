@@ -277,7 +277,7 @@ internal fun VoiceSettingsPanel(
             Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
                 .padding(horizontal = sidePadding).nestedScroll(scrollBehavior.nestedScrollConnection)) {
                 if (child == null) Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    SettingsCard(Modifier.widthIn(max = 240.dp).testTag("voice-section-selector-card")) {
+                    SettingsCard(Modifier.testTag("voice-section-selector-card")) {
                         Row(Modifier.fillMaxWidth().testTag("voice-section-select").clickable {
                             if (current() && !busy) choosingSection = !choosingSection
                         }.heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),

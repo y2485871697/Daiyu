@@ -25,12 +25,16 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             .scrollToVisible().performClick()
         node("voice-section-select").assertTextContains(title)
     }
-    fun testSectionSelectorIsNarrowAndMenuHeightAnimates() {
+    fun testSectionSelectorKeepsCardWidthAndMenuHeightAnimates() {
         enter()
         val selector = node("voice-section-selector-card")
         val collapsed = selector.fetchSemanticsNode().boundsInRoot
         val home = node("voice-recognition-input-card").fetchSemanticsNode().boundsInRoot
-        assertTrue("Entry selector stays narrower than ordinary settings cards", collapsed.width < home.width)
+        assertEquals("Entry selector keeps ordinary card width", home.width, collapsed.width, 1f)
+        assertEquals("Entry selector keeps the left card edge", home.left, collapsed.left, 1f)
+        assertEquals("Entry selector keeps the right card edge", home.right, collapsed.right, 1f)
+        assertTrue("Only the entry height is more compact", collapsed.height < home.height)
+        node("voice-section-select").assertHeightIsAtLeast(48.dp)
         ui.mainClock.autoAdvance = false
         try {
             node("voice-section-select").performClick()
@@ -39,7 +43,11 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             val openingHeight = selector.fetchSemanticsNode().boundsInRoot.height
             ui.mainClock.advanceTimeBy(300)
             ui.waitForIdle()
-            val openHeight = selector.fetchSemanticsNode().boundsInRoot.height
+            val expanded = selector.fetchSemanticsNode().boundsInRoot
+            val openHeight = expanded.height
+            assertEquals(home.width, expanded.width, 1f)
+            assertEquals(home.left, expanded.left, 1f)
+            assertEquals(home.right, expanded.right, 1f)
             assertTrue("Opening has an intermediate height", openingHeight > collapsed.height && openingHeight < openHeight)
             node("voice-section-select").performClick()
             ui.mainClock.advanceTimeBy(80)

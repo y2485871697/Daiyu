@@ -85,8 +85,11 @@ class LinuxInstallButtonLayoutContract(unittest.TestCase):
         self.assertIn('TextButton("继续上次安装"', status)
         self.assertIn('else LinuxInstallAction(displayedInstallation, page, mode, enabled,', status)
         helper = source.split('private fun LinuxInstallAction(', 1)[1]
-        for text in ['当前设备暂不可用', '取消安装', '恢复安装', '重试完成安装', '启用环境', '继续设置', '完成安装', '继续安装', '操作未完成，请重试。']:
+        for text in ['当前设备暂不可用', '取消安装', '恢复安装', '重试完成安装', '启用环境', '继续设置', '完成安装', '继续安装', '操作未确认成功：']:
             self.assertIn(text, helper)
+        self.assertIn('Text(notice, color = MiuixTheme.colorScheme.error)', helper)
+        self.assertIn('state.recoveryBlocked || state.cleanupPending', helper)
+        self.assertNotIn('操作未完成，请重试。', helper)
         self.assertIn('else -> Unit', helper)
         self.assertNotIn('"安装环境"', helper)
 

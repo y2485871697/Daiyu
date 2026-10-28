@@ -4,6 +4,7 @@ import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URI
 import java.nio.channels.Channels
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -13,8 +14,8 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * New transport adapter for the install boundary. It does not discover mirrors, follow redirects,
- * retry on a different origin, cache credentials, or trust Content-Length instead of actual bytes.
+ * Downloads only the selected catalog mirror and its bounded HTTPS redirects. GitHub releases may
+ * redirect to their fixed asset CDN. Size and hash remain pinned to the catalog; no mirror fallback.
  * Cancellation uses HttpURLConnection.disconnect + closing the live stream (not a polling-only
  * coroutine). Call on a parent IO worker, never on the UI thread.
  */
@@ -27,23 +28,48 @@ class VerifiedArtifactDownloader internal constructor(
                           cancellation: LinuxInstallCancellation) {
         require(artifact.mirrors.contains(mirror)) { "linux_install_unknown_mirror" }
         cancellation.check()
-        val connection = connect(mirror.uri.toURL())
+        val activeConnection = AtomicReference<HttpURLConnection?>()
         val input = AtomicReference<InputStream?>()
         var created = false
         var complete = false
         val subscription = cancellation.register {
             // Some providers unblock read on close, others on disconnect; always attempt both.
-            runCatching { connection.disconnect() }
+            runCatching { activeConnection.get()?.disconnect() }
             runCatching { input.getAndSet(null)?.close() }
         }
         try {
             cancellation.check()
-            connection.instanceFollowRedirects = false
-            connection.connectTimeout = 30_000
-            connection.readTimeout = 30_000
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("Accept-Encoding", "identity")
-            check(connection.responseCode == HttpURLConnection.HTTP_OK) { "linux_download_http" }
+            var uri = mirror.uri
+            var redirects = 0
+            val connection: HttpURLConnection
+            while (true) {
+                cancellation.check()
+                val current = connect(uri.toURL())
+                activeConnection.set(current)
+                cancellation.check()
+                current.instanceFollowRedirects = false
+                current.connectTimeout = 30_000
+                current.readTimeout = 30_000
+                current.requestMethod = "GET"
+                current.setRequestProperty("Accept-Encoding", "identity")
+                val status = current.responseCode
+                cancellation.check()
+                if (status == HttpURLConnection.HTTP_OK) {
+                    connection = current
+                    break
+                }
+                check(status in setOf(301, 302, 303, 307, 308)) { "linux_download_http_$status" }
+                check(redirects++ < 5) { "linux_download_redirect_limit" }
+                val location = current.getHeaderField("Location")
+                check(!location.isNullOrBlank() && location.length <= 8192) { "linux_download_redirect_location" }
+                val next = try { uri.resolve(URI(location)) }
+                    catch (_: IllegalArgumentException) { error("linux_download_redirect_location") }
+                    catch (_: java.net.URISyntaxException) { error("linux_download_redirect_location") }
+                check(redirectAllowed(mirror.uri, next)) { "linux_download_redirect_origin" }
+                current.disconnect()
+                activeConnection.compareAndSet(current, null)
+                uri = next
+            }
             val declared = connection.contentLengthLong
             check(declared == -1L || declared == artifact.compressedBytes) { "linux_download_size" }
             val encoding = connection.contentEncoding
@@ -76,13 +102,22 @@ class VerifiedArtifactDownloader internal constructor(
                 cancellation.check()
                 output.flush()
                 channel.force(true)
-                complete = true
             }
+            cancellation.publish { complete = true }
         } finally {
             subscription.close()
             runCatching { input.getAndSet(null)?.close() }
-            runCatching { connection.disconnect() }
+            runCatching { activeConnection.get()?.disconnect() }
             if (created && !complete) Files.deleteIfExists(destination.toPath())
         }
+    }
+
+    private fun redirectAllowed(origin: URI, target: URI): Boolean {
+        if (!target.scheme.equals("https", true) || target.rawUserInfo != null ||
+            target.rawFragment != null || target.port !in setOf(-1, 443)) return false
+        val host = target.host ?: return false
+        return host.equals(origin.host, true) ||
+            (origin.host.equals("github.com", true) &&
+                host.equals("release-assets.githubusercontent.com", true))
     }
 }

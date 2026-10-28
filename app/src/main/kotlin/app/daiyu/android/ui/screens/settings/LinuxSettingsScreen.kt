@@ -339,6 +339,8 @@ private fun LinuxInstallAction(state: LinuxInstallState?, page: LinuxSettingsPag
         }
         else -> Unit
     }
-    if (state?.notice?.startsWith("操作未确认成功：") == true && !state.busy)
-        Text("操作未完成，请重试。", color = MiuixTheme.colorScheme.error)
+    state?.notice?.takeIf {
+        !state.busy && (it.startsWith("操作未确认成功：") || state.unknown ||
+            state.recoveryBlocked || state.cleanupPending)
+    }?.let { notice -> Text(notice, color = MiuixTheme.colorScheme.error) }
 }

@@ -13,16 +13,16 @@ import java.util.concurrent.CancellationException
 
 /** All payloads and helpers are inert text; runner/transport/extractor are test doubles. */
 class RootlessLinuxInstallerTest : TestCase() {
-    private class Fixture(val root: File) {
+    private class Fixture(val root: File, distribution: String = "alpine") {
         val payload = "verified archive fixture".toByteArray()
         val mirror = RootfsMirror("primary", URI("https://example.invalid/rootfs.tar.gz"))
-        val artifact = LinuxRootfsArtifact("fixture-1", "alpine", "fixture", "arm64-v8a",
+        val artifact = LinuxRootfsArtifact("fixture-1", distribution, "fixture", "arm64-v8a",
             RootfsArchive.TAR_GZIP, payload.size.toLong(), hash(payload), listOf(mirror))
         val privateRoot = File(root, "linux-installations")
         val proot = File(root, "proot").apply { writeText("inert proot"); setExecutable(true) }
         val loader = File(root, "loader").apply { writeText("inert loader") }
         val target = File(privateRoot, "environment/generation/rootfs")
-        val installation = LinuxInstallation("alpine", "environment", "generation", target,
+        val installation = LinuxInstallation(distribution, "environment", "generation", target,
             proot, hash(proot.readBytes()), loader, hash(loader.readBytes()))
         var requests = 0
         var extractions = 0
@@ -38,7 +38,8 @@ class RootlessLinuxInstallerTest : TestCase() {
         fun installer(sync: (File) -> Unit = {},
                       move: ((File, File) -> Unit)? = null,
                       managedRoot: File = privateRoot,
-                      mode: LinuxExecutionMode = LinuxExecutionMode.PROOT): RootlessLinuxInstaller = RootlessLinuxInstaller(
+                      mode: LinuxExecutionMode = LinuxExecutionMode.PROOT,
+                      force: (java.nio.channels.FileChannel) -> Unit = { it.force(true) }): RootlessLinuxInstaller = RootlessLinuxInstaller(
             managedRoot,
             LinuxRootfsExtraction { _, _, stage, token ->
                 extractions++
@@ -67,7 +68,7 @@ class RootlessLinuxInstallerTest : TestCase() {
             { from, to ->
                 moves++
                 if (move != null) move(from, to) else { Files.move(from.toPath(), to.toPath()); Unit }
-            }, fileOps = object : RootlessLinuxInstaller.FileOps by fileOps {
+            }, fileForce = force, fileOps = object : RootlessLinuxInstaller.FileOps by fileOps {
                 override fun deleteIfExists(path: java.nio.file.Path): Boolean {
                     beforeDelete?.invoke(path)
                     return Files.deleteIfExists(path)
@@ -76,9 +77,9 @@ class RootlessLinuxInstallerTest : TestCase() {
         )
     }
 
-    private fun fixture(block: (Fixture) -> Unit) {
+    private fun fixture(distribution: String = "alpine", block: (Fixture) -> Unit) {
         val root = Files.createTempDirectory("linux-install-test-").toFile()
-        try { block(Fixture(root)) } finally { root.deleteRecursively() }
+        try { block(Fixture(root, distribution)) } finally { root.deleteRecursively() }
     }
 
     fun testChrootPreparationAndRecoveryNeverResolveOrPersistProotHelpers() = fixture { f ->
@@ -114,6 +115,30 @@ class RootlessLinuxInstallerTest : TestCase() {
         assertFalse(f.privateRoot.exists()); assertEquals(0, f.requests)
     }
 
+    fun testCatalogPreparationCoversBothDistributionsAbisAndExecutionModes() = fixture { f ->
+        assertEquals(4, LinuxRootfsCatalog.artifacts.size)
+        var preparedCount = 0
+        for (artifact in LinuxRootfsCatalog.artifacts) for (mode in LinuxExecutionMode.entries) {
+            val configuration = if (mode == LinuxExecutionMode.PROOT) {
+                f.installation.copy(distribution = artifact.distribution)
+            } else {
+                f.installation.copy(distribution = artifact.distribution, proot = null, prootSha256 = "",
+                    loader = null, loaderSha256 = "", executionMode = mode)
+            }
+            val prepared = f.installer(mode = mode).prepare(artifact, "primary", configuration)
+            assertSame(artifact, prepared.artifact)
+            assertEquals(artifact.mirrors.first(), prepared.mirror)
+            assertEquals(mode, prepared.installation.executionMode)
+            assertEquals(f.target, prepared.targetRootfs)
+            preparedCount++
+        }
+        assertEquals(8, preparedCount)
+        assertEquals(0, f.requests)
+        assertEquals(0, f.extractions)
+        assertEquals(0, f.probes)
+        assertFalse(f.privateRoot.exists())
+    }
+
     fun testPreparationAndApprovalHaveZeroRequestsAndNoFilesystemEffects() = fixture { f ->
         val installer = f.installer()
         val prepared = installer.prepare(f.artifact, "primary", f.installation)
@@ -142,6 +167,85 @@ class RootlessLinuxInstallerTest : TestCase() {
         assertFalse(File(f.root, "selected-linux.json").exists())
         assertFalse(File(f.root, "trusted-linux-catalog.json").exists())
         assertEquals(listOf("rootfs"), f.target.parentFile.list()!!.toList())
+    }
+
+    fun testBothDistributionsRemoveArchiveStagingAndWriterLeaseAfterSuccessOrCancellation() {
+        for (distribution in listOf("alpine", "debian")) {
+            fixture(distribution) { f ->
+                val installer = f.installer()
+                val prepared = installer.prepare(f.artifact, "primary", f.installation)
+                val receipt = installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)
+                assertTrue(receipt.directorySyncConfirmed)
+                assertEquals(f.installation, installer.inspectPublished(prepared))
+                assertEquals(listOf("rootfs"), f.target.parentFile.list()!!.toList())
+            }
+            fixture(distribution) { f ->
+                val installer = f.installer()
+                val prepared = installer.prepare(f.artifact, "primary", f.installation)
+                f.afterExtract = { f.cancellation.cancel() }
+                cancelled { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+                assertFalse(f.target.exists())
+                assertTrue(f.target.parentFile.list()!!.isEmpty())
+                assertEquals(0, f.probes)
+            }
+        }
+    }
+
+    fun testFailedRequestForceRemovesOnlyOwnedTemporaryFileAndAllowsRetry() = fixture { f ->
+        var fail = true
+        val installer = f.installer(force = {
+            if (fail) { fail = false; throw IOException("request force failed") }
+            it.force(true)
+        })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        rejected { installer.rememberRequest(prepared) }
+        assertFalse(File(f.privateRoot, ".install-request.tmp").exists())
+        assertFalse(File(f.privateRoot, ".install-request").exists())
+        installer.rememberRequest(prepared)
+        assertTrue(File(f.privateRoot, ".install-request").isFile)
+        assertFalse(File(f.privateRoot, ".install-request.tmp").exists())
+        assertEquals(0, f.requests)
+    }
+
+    fun testPreexistingRequestTemporaryFileIsNeverDeletedOrReplaced() = fixture { f ->
+        assertTrue(f.privateRoot.mkdirs())
+        val temporary = File(f.privateRoot, ".install-request.tmp").apply { writeText("other owner") }
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        rejected { installer.rememberRequest(prepared) }
+        assertEquals("other owner", temporary.readText())
+        assertFalse(File(f.privateRoot, ".install-request").exists())
+    }
+
+    fun testRequestCleanupFailureRetainsOriginalErrorAndOwnedTemporaryFile() = fixture { f ->
+        val original = IOException("request force failed")
+        f.beforeDelete = { if (it.fileName.toString() == ".install-request.tmp") throw IOException("request cleanup failed") }
+        val installer = f.installer(force = { throw original })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        try { installer.rememberRequest(prepared); fail("expected force failure") }
+        catch (failure: IOException) {
+            assertSame(original, failure)
+            assertEquals("request cleanup failed", failure.suppressed.single().message)
+        }
+        assertTrue(File(f.privateRoot, ".install-request.tmp").isFile)
+        assertFalse(File(f.privateRoot, ".install-request").exists())
+    }
+
+    fun testPublishedRequestSurvivesDirectorySyncFailureWithoutTemporaryFile() = fixture { f ->
+        var fail = true
+        val journal = File(f.privateRoot, ".install-request")
+        val installer = f.installer(sync = {
+            if (it == f.privateRoot && journal.exists() && fail) {
+                fail = false
+                throw IOException("request directory sync failed")
+            }
+        })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        rejected { installer.rememberRequest(prepared) }
+        val saved = journal.readBytes()
+        assertFalse(File(f.privateRoot, ".install-request.tmp").exists())
+        installer.rememberRequest(prepared)
+        assertTrue(saved.contentEquals(journal.readBytes()))
     }
 
     fun testArchiveCleanupFailurePreservesReceiptAndLeaseUntilExplicitRetry() = fixture { f ->

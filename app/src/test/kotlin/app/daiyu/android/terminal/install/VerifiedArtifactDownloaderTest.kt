@@ -25,14 +25,15 @@ class VerifiedArtifactDownloaderTest : TestCase() {
         MessageDigest.getInstance("SHA-256").digest(payload).joinToString("") { "%02x".format(it) }, listOf(mirror))
 
     private class Connection(val body: InputStream, val declaredSize: Long = -1,
-                             val code: Int = 200) : HttpURLConnection(URL("https://example.invalid/rootfs.tar.gz")) {
+                             val code: Int = 200, val location: String? = null, val encoding: String? = null) : HttpURLConnection(URL("https://example.invalid/rootfs.tar.gz")) {
         val disconnects = AtomicInteger()
         override fun connect() {}
         override fun disconnect() { disconnects.incrementAndGet() }
         override fun usingProxy() = false
         override fun getResponseCode() = code
         override fun getContentLengthLong() = declaredSize
-        override fun getContentEncoding(): String? = null
+        override fun getContentEncoding(): String? = encoding
+        override fun getHeaderField(name: String): String? = if (name.equals("Location", true)) location else null
         override fun getInputStream() = body
     }
 
@@ -60,7 +61,7 @@ class VerifiedArtifactDownloaderTest : TestCase() {
         }
     }
 
-    fun testRedirectAndIncorrectContentLengthAreRejectedWithoutCreatingDestination() = fixture { destination ->
+    fun testRedirectWithoutLocationAndIncorrectContentLengthAreRejectedWithoutCreatingDestination() = fixture { destination ->
         listOf(Connection(ByteArrayInputStream(payload), code = 302),
             Connection(ByteArrayInputStream(payload), declaredSize = payload.size + 1L)).forEach { connection ->
             rejected { VerifiedArtifactDownloader { connection }.download(artifact(), mirror, destination, LinuxInstallCancellation()) }
@@ -116,6 +117,141 @@ class VerifiedArtifactDownloaderTest : TestCase() {
             token.cancel()
             closed.countDown()
             worker.join(2000)
+        }
+    }
+
+    fun testRelativeHttpsRedirectStatusesPreserveVerificationAndCloseEveryConnection() = fixture { destination ->
+        for (status in listOf(301, 302, 303, 307, 308)) {
+            val redirect = Connection(ByteArrayInputStream(byteArrayOf()), code = status, location = "/asset")
+            val asset = Connection(ByteArrayInputStream(payload))
+            val requested = mutableListOf<URL>()
+            VerifiedArtifactDownloader { url ->
+                requested += url
+                if (requested.size == 1) redirect else asset
+            }.download(artifact(), mirror, destination, LinuxInstallCancellation())
+            assertEquals(listOf(mirror.uri.toString(), "https://example.invalid/asset"), requested.map { it.toString() })
+            assertTrue(payload.contentEquals(destination.readBytes()))
+            assertTrue(redirect.disconnects.get() > 0)
+            assertTrue(asset.disconnects.get() > 0)
+            assertFalse(redirect.instanceFollowRedirects)
+            assertFalse(asset.instanceFollowRedirects)
+            assertTrue(destination.delete())
+        }
+    }
+
+    fun testBothDebianAbisAcceptOnlyFixedGithubReleaseAssetCdn() = fixture { destination ->
+        val debian = LinuxRootfsCatalog.artifacts.filter { it.distribution == "debian" }
+        assertEquals(2, debian.size)
+        for (catalog in debian) {
+            val selected = catalog.mirrors.first()
+            val pinned = LinuxRootfsArtifact("fixture", catalog.distribution, catalog.version, catalog.abi,
+                catalog.archive, payload.size.toLong(), artifact().sha256, listOf(selected))
+            val redirect = Connection(ByteArrayInputStream(byteArrayOf()), code = 302,
+                location = "https://release-assets.githubusercontent.com/github-production-release-asset/asset?signature=fixture")
+            val asset = Connection(ByteArrayInputStream(payload))
+            var opens = 0
+            VerifiedArtifactDownloader { url ->
+                opens++
+                if (opens == 1) redirect else {
+                    assertEquals("release-assets.githubusercontent.com", url.host)
+                    asset
+                }
+            }.download(pinned, selected, destination, LinuxInstallCancellation())
+            assertEquals(2, opens)
+            assertTrue(payload.contentEquals(destination.readBytes()))
+            assertTrue(destination.delete())
+        }
+    }
+
+    fun testBothDistributionsAbisAndAllSelectedMirrorsUseTheSameVerifiedDownloader() = fixture { destination ->
+        assertEquals(4, LinuxRootfsCatalog.artifacts.size)
+        assertEquals(8, LinuxRootfsCatalog.artifacts.sumOf { it.mirrors.size })
+        for (catalog in LinuxRootfsCatalog.artifacts) for (selected in catalog.mirrors) {
+            val pinned = LinuxRootfsArtifact("fixture", catalog.distribution, catalog.version, catalog.abi,
+                catalog.archive, payload.size.toLong(), artifact().sha256, listOf(selected))
+            val connection = Connection(ByteArrayInputStream(payload))
+            VerifiedArtifactDownloader { url ->
+                assertEquals(selected.uri.toURL(), url)
+                connection
+            }.download(pinned, selected, destination, LinuxInstallCancellation())
+            assertTrue(payload.contentEquals(destination.readBytes()))
+            assertTrue(destination.delete())
+        }
+    }
+
+    fun testUntrustedRedirectsAreRejectedBeforeOpeningTarget() = fixture { destination ->
+        for (target in listOf("http://example.invalid/asset", "https://other.invalid/asset",
+            "https://example.invalid:444/asset", "https://user:password@example.invalid/asset",
+            "https://example.invalid/asset#fragment", "https://release-assets.githubusercontent.com/asset",
+            "https://github.com.evil.invalid/asset", "file:///tmp/archive", "http://[")) {
+            val redirect = Connection(ByteArrayInputStream(byteArrayOf()), code = 302, location = target)
+            var opens = 0
+            rejected { VerifiedArtifactDownloader { opens++; redirect }
+                .download(artifact(), mirror, destination, LinuxInstallCancellation()) }
+            assertEquals(target, 1, opens)
+            assertFalse(destination.exists())
+            assertTrue(redirect.disconnects.get() > 0)
+        }
+    }
+
+    fun testRedirectLoopStopsAfterFiveHopsAndDisconnectsEveryOpenedConnection() = fixture { destination ->
+        val connections = mutableListOf<Connection>()
+        rejected {
+            VerifiedArtifactDownloader {
+                Connection(ByteArrayInputStream(byteArrayOf()), code = 302, location = "/again").also(connections::add)
+            }.download(artifact(), mirror, destination, LinuxInstallCancellation())
+        }
+        assertEquals(6, connections.size)
+        assertTrue(connections.all { it.disconnects.get() > 0 })
+        assertFalse(destination.exists())
+    }
+
+    fun testBadHashAfterRedirectStillDeletesPartialArtifact() = fixture { destination ->
+        var opens = 0
+        rejected {
+            VerifiedArtifactDownloader {
+                if (++opens == 1) Connection(ByteArrayInputStream(byteArrayOf()), code = 302, location = "/asset")
+                else Connection(ByteArrayInputStream(ByteArray(payload.size)))
+            }.download(artifact(), mirror, destination, LinuxInstallCancellation())
+        }
+        assertEquals(2, opens)
+        assertFalse(destination.exists())
+    }
+
+    fun testCancellationDuringRedirectConnectionOpenClosesNewConnectionAndDoesNotOpenAsset() = fixture { destination ->
+        val token = LinuxInstallCancellation()
+        val first = Connection(ByteArrayInputStream(byteArrayOf()), code = 302, location = "/next")
+        val second = Connection(ByteArrayInputStream(payload))
+        var opens = 0
+        try {
+            VerifiedArtifactDownloader {
+                if (++opens == 1) first else second.also { token.cancel() }
+            }.download(artifact(), mirror, destination, token)
+            fail("expected cancellation")
+        } catch (_: java.util.concurrent.CancellationException) { }
+        assertEquals(2, opens)
+        assertTrue(first.disconnects.get() > 0)
+        assertTrue(second.disconnects.get() > 0)
+        assertFalse(destination.exists())
+    }
+
+    fun testExactlyFiveRedirectsThenVerifiedPayloadSucceeds() = fixture { destination ->
+        var opens = 0
+        VerifiedArtifactDownloader {
+            if (++opens <= 5) Connection(ByteArrayInputStream(byteArrayOf()), code = 302, location = "/hop$opens")
+            else Connection(ByteArrayInputStream(payload))
+        }.download(artifact(), mirror, destination, LinuxInstallCancellation())
+        assertEquals(6, opens)
+        assertTrue(payload.contentEquals(destination.readBytes()))
+    }
+
+    fun testEncodedResponseAndOversizedLocationAreRejected() = fixture { destination ->
+        for (connection in listOf(Connection(ByteArrayInputStream(payload), encoding = "gzip"),
+            Connection(ByteArrayInputStream(byteArrayOf()), code = 302, location = "/" + "x".repeat(8192)))) {
+            rejected { VerifiedArtifactDownloader { connection }
+                .download(artifact(), mirror, destination, LinuxInstallCancellation()) }
+            assertTrue(connection.disconnects.get() > 0)
+            assertFalse(destination.exists())
         }
     }
 

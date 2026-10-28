@@ -314,9 +314,10 @@ class RootlessLinuxInstaller internal constructor(
         }
     }
 
-    private fun writeForced(file: File, bytes: ByteArray) {
+    private fun writeForced(file: File, bytes: ByteArray, onCreated: () -> Unit = {}) {
         securePath(file)
         FileChannel.open(file.toPath(), CREATE_NEW, WRITE).use { channel ->
+            onCreated()
             val buffer = ByteBuffer.wrap(bytes)
             while (buffer.hasRemaining()) channel.write(buffer)
             fileForce(channel)
@@ -327,10 +328,23 @@ class RootlessLinuxInstaller internal constructor(
         val journal = File(privateRoot, REQUEST)
         val temporary = File(privateRoot, "$REQUEST.tmp")
         securePath(journal)
-        writeForced(temporary, bytes)
-        Files.move(temporary.toPath(), journal.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        directorySync(privateRoot)
+        var created = false
+        var published = false
+        try {
+            writeForced(temporary, bytes) { created = true }
+            Files.move(temporary.toPath(), journal.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            published = true
+            directorySync(privateRoot)
+        } catch (failure: Exception) {
+            if (created && !published) {
+                try {
+                    fileOps.deleteIfExists(temporary.toPath())
+                    directorySync(privateRoot)
+                } catch (cleanup: Exception) { failure.addSuppressed(cleanup) }
+            }
+            throw failure
+        }
     }
 
     /** Call ONLY after the user explicitly accepts this exact entry/mirror/generation/target. */

@@ -33,11 +33,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 class ProviderSettingsTabsActivityTest : WiredActivityTestCase() {
     fun testInactiveTabsMatchUseCurrentConfigurationAndKeepSelectionAndDisabledBehavior() {
         val saved = fixture.settings.load()
-        val appearances = listOf(
-            AppearanceSettings(),
-            AppearanceSettings(primaryAccentColor = 0xffa23565.toInt(), secondaryAccentColor = 0xff287c96.toInt()),
-            AppearanceSettings(paletteSeedColor = 0xffd7c7ad.toInt(), secondaryAccentColor = 0xff5b328d.toInt()),
-        )
+        val appearances = listOf(AppearanceSettings(), AppearanceSettings(pureBlackEnabled = true))
         for (dark in listOf(false, true)) for (appearance in appearances) {
             val selected = mutableStateOf(false)
             val enabled = mutableStateOf(true)

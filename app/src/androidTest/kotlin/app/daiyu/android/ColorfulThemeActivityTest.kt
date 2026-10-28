@@ -19,8 +19,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
 import app.daiyu.android.data.model.AppearanceSettings
-import app.daiyu.android.data.model.AppearanceAccentColor
-import app.daiyu.android.data.model.AppearancePaletteStyle
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.DaiyuPalette
@@ -91,33 +89,6 @@ class ColorfulThemeActivityTest : WiredActivityTestCase() {
                     contrast(if (dark) accent.dark else accent.light, surface) >= 3.0)
             }
             if (dark && pureBlack) assertEquals(Color.Black, background)
-        }
-    }
-
-    fun testRetainedColorPreferencesDoNotOverrideFixedPalette() {
-        val savedOptions = listOf(
-            AppearanceSettings(),
-            AppearanceSettings(monetEnabled = true),
-            AppearanceSettings(paletteStyle = AppearancePaletteStyle.EXPRESSIVE,
-                accentColor = AppearanceAccentColor.RED),
-            AppearanceSettings(monetEnabled = true, paletteStyle = AppearancePaletteStyle.FIDELITY,
-                accentColor = AppearanceAccentColor.TEAL),
-        )
-        for (dark in listOf(false, true)) for (pureBlack in listOf(false, true)) {
-            val palette = if (dark) DaiyuPalette.dark else DaiyuPalette.light
-            val expected = listOf(palette.primary, palette.onPrimary, palette.secondary,
-                if (dark && pureBlack) Color.Black else palette.background,
-                if (dark && pureBlack) Color.Black else palette.surface,
-                palette.onSurface, palette.onSurfaceVariantSummary)
-            for (appearance in savedOptions) {
-                var actual = emptyList<Color>()
-                show(dark, pureBlack, appearance) {
-                    val colors = MiuixTheme.colorScheme
-                    actual = listOf(colors.primary, colors.onPrimary, colors.secondary,
-                        colors.background, colors.surface, colors.onSurface, colors.onSurfaceVariantSummary)
-                }
-                assertEquals("dark=$dark pureBlack=$pureBlack appearance=$appearance", expected, actual)
-            }
         }
     }
 

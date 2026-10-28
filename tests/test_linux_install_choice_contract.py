@@ -65,7 +65,7 @@ class LinuxInstallChoiceContract(unittest.TestCase):
         theme = (SETTINGS / 'LinuxSettingsTheme.kt').read_text()
         switch = (SOURCE / 'ui/components/subagent/ConversationAgentStyle.kt').read_text()
         palette = (SOURCE / 'ui/app/DaiyuPalette.kt').read_text()
-        self.assertIn('LocalAppearanceSettings.current.resolvedPrimaryAccent ?: Color(0xFF82728F)', palette)
+        self.assertIn('Color(0xFF82728F)', palette)
         self.assertIn('import app.daiyu.android.ui.app.DaiyuPalette', switch)
         actual_switch = switch.split('@Composable internal fun ConversationAgentSwitch(', 1)[1].split('@Composable internal fun ConversationAgentButton(', 1)[0]
         self.assertIn('.background(if (checked) DaiyuPalette.switchTrack else Color(0x28b4aabb))', actual_switch)
@@ -83,19 +83,6 @@ class LinuxInstallChoiceContract(unittest.TestCase):
         self.assertIn('MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton', screen)
         self.assertIn('import app.daiyu.android.ui.app.DaiyuPalette', theme)
 
-    def test_custom_primary_keeps_the_original_white_foreground(self):
-        theme = (SETTINGS / 'LinuxSettingsTheme.kt').read_text()
-        self.assertIn('import app.daiyu.android.ui.app.resolvedPrimaryAccent', theme)
-        self.assertIn('val onPrimary = Color.White', theme)
-        self.assertNotIn('val onPrimary = colorContentColor(primary)', theme)
-        nav = (ANDROID / 'LinuxSettingsNavigationTest.kt').read_text()
-        self.assertIn('assertEquals(Color.White, colors.onPrimary)', nav)
-        self.assertNotIn('assertEquals(Color.Black, colors.onPrimary)', nav)
-        self.assertIn('testCustomPrimaryKeepsOriginalWhiteForegroundInBothThemes', nav)
-        self.assertIn('for (accent in listOf(0xff000000.toInt(), 0xffe6c7f2.toInt(), 0xffffffff.toInt()))', nav)
-        self.assertIn('val foreground = Color.White', nav)
-        self.assertNotIn('to Color.Black', nav)
-        self.assertIn('assertEquals(colors.onPrimary, materialColors.onPrimary)', nav)
 
     def test_upload_is_upward_existing_vector_but_remains_real_import(self):
         panel = (SETTINGS / 'PrivateWorkspacePanel.kt').read_text()

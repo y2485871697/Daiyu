@@ -22,7 +22,7 @@ class SettingsDisclosureMotionContractTest(unittest.TestCase):
         calls = {
             'PetSettingsScreen.kt': ['SettingsExpandableContent(expanded)', 'settingsDisclosureRotation(expanded)'],
             'HapticsSettingsScreen.kt': ['SettingsExpandableContent(expanded && settings.backgroundOn)', 'settingsDisclosureRotation(expanded)'],
-            'AppearanceSettingsScreen.kt': ['SettingsExpandableContent(state.morphLoadingIndicator && loadingExpanded)', 'settingsDisclosureRotation(iconExpanded, expandedDegrees = 180f)'],
+            'AppearanceSettingsScreen.kt': ['settingsDisclosureRotation(iconExpanded, expandedDegrees = 180f)'],
             'IconAppearanceEditor.kt': ['SettingsExpandableContent(expanded)', 'currentExpanded && currentOwner()'],
             'ProviderInlineEditors.kt': ['SettingsExpandableContent(expanded)', 'settingsDisclosureRotation(expanded, expandedDegrees = 180f)'],
             'SettingsHomeScreen.kt': ['SettingsExpandableContent(relayExpanded)', 'settingsDisclosureRotation(relayExpanded)'],

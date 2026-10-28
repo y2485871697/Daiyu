@@ -6,12 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import app.daiyu.android.ui.app.LocalAppearanceDark
-import app.daiyu.android.ui.app.resolveAppearanceColors
-import app.daiyu.android.ui.app.resolveAppearanceActions
-import app.daiyu.android.ui.app.resolveUserBubbleColors
-import app.daiyu.android.ui.app.LocalAppearanceSettings
-import app.daiyu.android.ui.app.resolvedPrimaryAccent
-import app.daiyu.android.ui.app.styleColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -49,19 +43,7 @@ internal fun conversationColors(): ConversationColors {
     else ConversationColors(false, Color(0xFF36333F), Color(0xFF918997),
         Color(0xFF756980), Color(0xFFF0ECFC), Color(0x8CFAF8FC), Color(0x2692819F),
         Color(0x108A779A), Color(0xFF6B8574), Color(0xFFAD626E), Color(0xFFA48D65))
-    val appearance = LocalAppearanceSettings.current
-    val bubble = resolveUserBubbleColors(appearance, dark)
-    val actions = resolveAppearanceActions(appearance, dark)
-    if (appearance.paletteSeedColor != null) {
-        val theme = resolveAppearanceColors(appearance, dark)
-        return base.copy(accent = appearance.resolvedPrimaryAccent ?: base.accent,
-            bubble = bubble.container, bubbleText = bubble.content, surface = theme.surfaceContainer,
-            line = theme.dividerLine, soft = actions.secondaryContainer)
-    }
-    return base.copy(accent = appearance.resolvedPrimaryAccent ?: base.accent,
-        bubble = bubble.container, bubbleText = bubble.content, surface = appearance.styleColor(base.surface),
-        line = appearance.styleColor(base.line),
-        soft = if (appearance.secondaryAccentColor != null) actions.secondaryContainer else appearance.styleColor(base.soft))
+    return base
 }
 
 /** Keep native click semantics and interaction tracking, without a ripple indication. */

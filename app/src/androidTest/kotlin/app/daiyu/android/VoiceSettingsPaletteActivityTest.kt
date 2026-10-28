@@ -69,12 +69,12 @@ class VoiceSettingsPaletteActivityTest : WiredActivityTestCase() {
     }
 
     fun testPersonalRoutesShareSettingsBackgroundCardsAndGeometryAcrossThemeChanges() {
-        for (dark in listOf(false, true)) for (seed in listOf(null, 0xFF497B85.toInt())) {
+        for (dark in listOf(false, true)) {
             for (pureBlack in if (dark) listOf(false, true) else listOf(false)) {
                 val appearance = AppearanceSettings(
                     themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                    paletteSeedColor = seed, pureBlackEnabled = pureBlack,
-                    primaryAccentColor = 0xFFAD4168.toInt(),
+                     pureBlackEnabled = pureBlack,
+
                 )
                 mount(appearance, reference = true)
                 val expectedBackground = sample("voice-theme-sample", background = true)
@@ -123,12 +123,12 @@ class VoiceSettingsPaletteActivityTest : WiredActivityTestCase() {
     }
 
     fun testQuotaChoicesUseSettingsCardFillAndKeepSelectionAndDisabledActions() {
-        for (dark in listOf(false, true)) for (seed in listOf(null, 0xFF497B85.toInt())) {
+        for (dark in listOf(false, true)) {
             val selected = mutableStateOf(false)
             var choices = 0
             val appearance = AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                paletteSeedColor = seed,
+
             )
             mainThread { activity.setContent {
                 AgentAppTheme(appearance, applyInterfaceScale = false) {
@@ -152,7 +152,7 @@ class VoiceSettingsPaletteActivityTest : WiredActivityTestCase() {
             }
             assertColor(fill("quota-fill-reference"), fill("quota-fill-choice"))
             node("quota-fill-choice").assertIsNotSelected().performClick().assertIsSelected()
-            assertColor(UsagePalette(dark, appearance).selectionContainer, fill("quota-fill-choice"))
+            assertColor(UsagePalette(dark).selectionContainer, fill("quota-fill-choice"))
             assertEquals(1, choices)
             node("quota-disabled").assertIsNotEnabled().performTouchInput { click() }
             assertEquals(1, choices)

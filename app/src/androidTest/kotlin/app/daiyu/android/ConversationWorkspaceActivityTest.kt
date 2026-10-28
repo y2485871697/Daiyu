@@ -499,17 +499,12 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(0, saves); assertEquals(1, dismisses) }
     }
 
-    fun testPickerUsesIndependentSavedAccentsAndHasNoCloseInBothThemes() {
+    fun testPickerUsesDefaultActionRolesAndHasNoCloseInBothThemes() {
         for (dark in listOf(false, true)) {
-            for ((primary, secondary) in listOf(
-                null to null,
-                0xff006b3c.toInt() to 0xffffa500.toInt(),
-                0xffffffff.toInt() to 0xff000000.toInt(),
-                0xff000000.toInt() to 0xffffffff.toInt(),
-            )) {
+            for (pureBlack in listOf(false, true)) {
                 val appearance = AppearanceSettings(
                     themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                    primaryAccentColor = primary, secondaryAccentColor = secondary)
+                    pureBlackEnabled = pureBlack)
                 ui.runOnIdle { visible = true; choosing = false; busy = false; listing = false; directory = null; path = original }
                 showSheet(appearance)
                 node("workspace-close").assertDoesNotExist()
@@ -517,7 +512,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
                 node("workspace-add").performTouchInput { click() }
                 node("workspace-close").assertDoesNotExist()
                 ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
-                val actions = resolveAppearanceActions(appearance, dark)
+                val actions = resolveAppearanceActions(dark)
                 assertPickerColorPair(node("workspace-save"), actions.primary, actions.onPrimary)
                 assertPickerColorPair(node("workspace-create-folder"), actions.primary, actions.onPrimary)
                 assertPickerColorPair(node("workspace-cancel"), actions.secondaryContainer, actions.onSecondary)

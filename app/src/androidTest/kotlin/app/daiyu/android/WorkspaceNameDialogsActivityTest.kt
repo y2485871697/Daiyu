@@ -35,8 +35,7 @@ class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
         confirmedName = null
         mainThread {
             appearance.value = AppearanceSettings(
-                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                primaryAccentColor = 0xFF246BCE.toInt(), secondaryAccentColor = 0xFF8C4561.toInt())
+                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT)
             activity.setContent {
                 AgentAppTheme(appearance.value, applyInterfaceScale = false) { key(visit) {
                     if (open.value) {
@@ -87,7 +86,7 @@ class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
 
     private fun assertButtonRoles(rename: Boolean, dark: Boolean) {
         ui.waitForIdle()
-        val colors = AssistantPreviewPalette(dark, appearance.value)
+        val colors = AssistantPreviewPalette(dark)
         for ((tag, text, background, foreground) in listOf(
             ButtonRole("dialog-cancel", "取消", colors.secondaryContainer, colors.onSecondary),
             ButtonRole("dialog-confirm", if (rename) "保存" else "确定", colors.primary, colors.onPrimary))) {
@@ -103,13 +102,12 @@ class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
 
     private data class ButtonRole(val tag: String, val text: String, val background: Color, val foreground: Color)
 
-    fun testBothAccentPairsUpdateWhileOpenAcrossBothThemesAndBlackWhite() {
+    fun testDefaultActionRolesRemainStableWhenPureBlackChangesWhileOpen() {
         for (dark in listOf(false, true)) for (rename in listOf(false, true)) {
             mount(rename, dark)
             assertButtonRoles(rename, dark)
-            for ((primary, secondary) in listOf(0xFF287A64.toInt() to 0xFF93582D.toInt(),
-                0xFF000000.toInt() to 0xFFFFFFFF.toInt())) {
-                mainThread { appearance.value = appearance.value.copy(primaryAccentColor = primary, secondaryAccentColor = secondary) }
+            repeat(2) {
+                mainThread { appearance.value = appearance.value.copy(pureBlackEnabled = !appearance.value.pureBlackEnabled) }
                 assertButtonRoles(rename, dark)
             }
         }

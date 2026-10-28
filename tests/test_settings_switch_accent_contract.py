@@ -12,7 +12,7 @@ class SettingsSwitchAccentContractTest(unittest.TestCase):
     def test_checked_track_token_preserves_reference_and_global_primary_colours(self):
         palette = (SRC / 'ui/app/DaiyuPalette.kt').read_text()
         self.assertIn('val switchTrack: Color', palette)
-        self.assertIn('LocalAppearanceSettings.current.resolvedPrimaryAccent ?: Color(0xFF82728F)', palette)
+        self.assertIn('Color(0xFF82728F)', palette)
         self.assertIn('primary = Color(0xFF7563B4)', palette)
         self.assertIn('primary = Color(0xFFA491F1)', palette)
         style = (SRC / 'ui/components/subagent/ConversationAgentStyle.kt').read_text()
@@ -45,12 +45,6 @@ class SettingsSwitchAccentContractTest(unittest.TestCase):
                          'enabled = settings.generationOn', 'onCheckedChange = null'):
             self.assertIn(retained, haptics)
 
-    def test_appearance_loading_switch_preserves_expansion_and_value_callbacks(self):
-        appearance = (SETTINGS / 'AppearanceSettingsScreen.kt').read_text()
-        self.assertEqual(1, appearance.count(f'checkedTrackColor = {TOKEN}'))
-        self.assertEqual(1, appearance.count(f'checkedBorderColor = {TOKEN}'))
-        self.assertIn('else loadingExpanded = !loadingExpanded', appearance)
-        self.assertIn('onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) }', appearance)
 
     def test_skill_muted_and_disabled_states_stay_distinct(self):
         skill = (SETTINGS / 'SkillManagementScreen.kt').read_text().split('private fun SkillSwitch(', 1)[1].split('private class SkillInstallPageOwner', 1)[0]

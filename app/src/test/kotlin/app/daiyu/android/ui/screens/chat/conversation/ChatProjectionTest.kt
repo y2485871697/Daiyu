@@ -40,30 +40,13 @@ class ChatProjectionTest {
         assertEquals(-1, ChatScrollRequest(3, "owner", false, listKey = "missing").targetIndex(turns))
     }
 
-    @Test fun beforeResponseOnlyNeedsKnownOutputAndActualRuntime() {
-        val state = ComposerUi(phase = ComposerPhase.RUNNING, morphLoadingBeforeResponseOnly = true)
-        assertFalse(state.showGenerationLoading()) // RUNNING is not evidence.
-        assertFalse(state.copy(executionPhase = ExecutionPhase.STREAMING).showGenerationLoading())
-        val before = state.copy(executionPhase = ExecutionPhase.STREAMING, hasAssistantOutput = false)
-        assertTrue(before.showGenerationLoading())
-        assertFalse(before.copy(hasAssistantOutput = true).showGenerationLoading())
-        assertTrue(before.copy(hasAssistantOutput = true, morphLoadingBeforeResponseOnly = false).showGenerationLoading())
-        assertFalse(before.copy(morphLoadingIndicator = false).showGenerationLoading())
-        assertFalse(before.copy(phase = ComposerPhase.PAUSED).showGenerationLoading())
-        for (phase in listOf(ExecutionPhase.PAUSED, ExecutionPhase.WAITING_USER, ExecutionPhase.TERMINAL)) {
-            assertFalse(before.copy(executionPhase = phase).showGenerationLoading())
+    @Test fun generationIndicatorUsesOnlyActualRunningPhase() {
+        val active = setOf(ExecutionPhase.IDLE, ExecutionPhase.BOUNDARY, ExecutionPhase.STREAMING,
+            ExecutionPhase.RECONNECTING, ExecutionPhase.TOOL_EXECUTING)
+        for (composer in ComposerPhase.entries) for (execution in ExecutionPhase.entries.toList() + null) {
+            val state = ComposerUi(phase = composer, executionPhase = execution)
+            assertEquals("composer=$composer runtime=$execution", composer == ComposerPhase.RUNNING && execution in active,
+                state.showGenerationLoading())
         }
-        assertTrue(before.copy(executionPhase = ExecutionPhase.RECONNECTING).showGenerationLoading())
-    }
-
-    @Test fun activeOwnerOutputIncludesEarlierAssistantSegmentsButNotUserSupplement() {
-        val empty = owner().copy(historySegments = emptyList())
-        assertFalse(assistantOutputExists(empty))
-        assertFalse(assistantOutputExists(empty.copy(blocks = listOf(MessageBlock.Text("empty", "  ")))))
-        assertTrue(assistantOutputExists(owner()))
-        val userOnly = owner().copy(historySegments = owner().historySegments.filter { it.role == Message.USER_ROLE })
-        assertFalse(assistantOutputExists(userOnly))
-        assertTrue(assistantOutputExists(empty.copy(blocks = listOf(MessageBlock.Tool(
-            ToolInvocation(ToolCallId("tool"), "search", "{}"), null)))))
     }
 }

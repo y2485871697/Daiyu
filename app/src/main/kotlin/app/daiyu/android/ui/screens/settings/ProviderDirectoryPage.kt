@@ -2,7 +2,6 @@ package app.daiyu.android.ui.screens.settings
 
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.components.deletionButtonColors
-import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import app.daiyu.android.ui.haptics.clickable
@@ -175,7 +174,7 @@ internal fun ProviderDirectoryPage(
             Row(Modifier.fillMaxWidth().horizontalCutoutPadding().padding(horizontal = sidePadding)
                 .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)
                 .testTag("provider-selection-actions"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val accents = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)
+                val accents = resolveAppearanceActions(LocalAppearanceDark.current)
                 TextButton(text = "取消", enabled = enabled, onClick = onCancelSelection,
                     colors = ButtonDefaults.textButtonColors(
                         color = accents.secondaryContainer, textColor = accents.onSecondary),

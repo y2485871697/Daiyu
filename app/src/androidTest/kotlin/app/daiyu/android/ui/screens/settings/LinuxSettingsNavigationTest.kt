@@ -27,15 +27,13 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
     private lateinit var colors: Colors
     private lateinit var materialColors: ColorScheme
 
-    private fun show(dark: Boolean = false, fontScale: Float = 1f, locationsEnabled: Boolean = true,
-        primaryAccentColor: Int? = null) {
+    private fun show(dark: Boolean = false, fontScale: Float = 1f, locationsEnabled: Boolean = true) {
         val showKey = Any()
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                        primaryAccentColor = primaryAccentColor),
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = false) {
                         LinuxSettingsTheme {
                         val themeColors = MiuixTheme.colorScheme
@@ -108,24 +106,23 @@ class LinuxSettingsNavigationTest : WiredActivityTestCase() {
         }
     }
 
-    fun testCustomPrimaryKeepsOriginalWhiteForegroundInBothThemes() {
+    fun testDefaultPrimaryKeepsOriginalWhiteForegroundInBothThemes() {
         for (dark in listOf(false, true)) {
-            for (accent in listOf(0xff000000.toInt(), 0xffe6c7f2.toInt(), 0xffffffff.toInt())) {
-                val foreground = Color.White
-                show(dark = dark, primaryAccentColor = accent)
-                ui.waitForIdle()
-                assertEquals(Color(accent), colors.primary)
-                assertEquals(foreground, colors.onPrimary)
-                assertPrimaryThemePairsMatch()
-                assertColorPair(ui.onNodeWithTag("linux-tab-indicator:basic", useUnmergedTree = true),
-                    colors.primary, foreground)
-                assertColorPair(node("linux-files:workspace"), colors.primary, foreground)
-                node("linux-tab:files").performClick().assertIsSelected()
-                node("linux-files:rootfs").performClick().assertIsSelected()
-                assertColorPair(ui.onNodeWithTag("linux-tab-indicator:files", useUnmergedTree = true),
-                    colors.primary, foreground)
-                assertColorPair(node("linux-files:rootfs"), colors.primary, foreground)
-            }
+            val foreground = Color.White
+            show(dark = dark)
+            ui.waitForIdle()
+            assertEquals(Color(0xFF82728F), colors.primary)
+            assertEquals(foreground, colors.onPrimary)
+            assertPrimaryThemePairsMatch()
+            assertColorPair(ui.onNodeWithTag("linux-tab-indicator:basic", useUnmergedTree = true),
+                colors.primary, foreground)
+            assertColorPair(node("linux-files:workspace"), colors.primary, foreground)
+            node("linux-tab:files").performClick().assertIsSelected()
+            node("linux-files:rootfs").performClick().assertIsSelected()
+            assertColorPair(ui.onNodeWithTag("linux-tab-indicator:files", useUnmergedTree = true),
+                colors.primary, foreground)
+            assertColorPair(node("linux-files:rootfs"), colors.primary, foreground)
+
         }
     }
 

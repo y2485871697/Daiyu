@@ -6,135 +6,97 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppearanceSettingsStoreTest {
-    private val custom = AppearanceSettings(paletteStyle = AppearancePaletteStyle.EXPRESSIVE,
-        paletteSeedColor = 0xFF439965.toInt(), primaryAccentColor = 0xFF996543.toInt(),
-        secondaryAccentColor = 0xFF436599.toInt(), interfaceScale = .9f,
-        pureBlackEnabled = true, messageTimestampsEnabled = true)
+    private val retained = AppearanceSettings(themeMode = AppearanceThemeMode.DARK,
+        interfaceScale = .9f, pureBlackEnabled = true, messageTimestampsEnabled = true,
+        blurEnabled = false, topBarBlurStyle = AppearanceTopBarBlurStyle.PROGRESSIVE,
+        swipeDismissEnabled = false, predictiveBackEnabled = true,
+        iconLightColor = 0xFF123456.toInt(), iconDarkColor = 0xFF234567.toInt(), iconCatColor = 0xFF345678.toInt())
+    private val retired = listOf("monet", "palette", "accent", "palette_seed", "primary_accent", "secondary_accent", "user_bubble_mode", "user_bubble_color", "morph_loading", "morph_before_response_only")
 
-    @Test fun missingKeysKeepOriginalDefaultsAndAllStylesRoundTrip() {
-        val preferences = Preferences()
-        assertEquals(AppearanceSettings(), AppearanceSettingsStore(preferences.value).load())
-        for (style in AppearancePaletteStyle.entries) {
-            val expected = custom.copy(paletteStyle = style)
-            assertEquals(expected, AppearanceSettingsStore(preferences.value).save(expected))
-            assertEquals(expected, AppearanceSettingsStore(preferences.value).load())
-        }
-        assertEquals(9, preferences.commits)
-    }
-
-    @Test fun styleDefaultRemovesOnlySeedAndPreservesBothAccents() {
+    @Test fun retainedDefaultsAndSettingsRoundTrip() {
         val preferences = Preferences()
         val store = AppearanceSettingsStore(preferences.value)
-        store.save(custom)
-        val expected = custom.withColorStyle(AppearanceSettings())
-        assertEquals(expected, store.save(expected))
-        assertFalse(preferences.raw.containsKey("palette_seed"))
-        assertEquals(custom.primaryAccentColor, preferences.raw["primary_accent"])
-        assertEquals(custom.secondaryAccentColor, preferences.raw["secondary_accent"])
-        assertEquals(expected, AppearanceSettingsStore(preferences.value).load())
-    }
-
-    @Test fun accentDefaultRemovesBothOverridesAndPreservesStyle() {
-        val preferences = Preferences()
-        val store = AppearanceSettingsStore(preferences.value)
-        store.save(custom)
-        val expected = custom.withAccentColors(AppearanceSettings())
-        assertEquals(expected, store.save(expected))
-        assertFalse(preferences.raw.containsKey("primary_accent"))
-        assertFalse(preferences.raw.containsKey("secondary_accent"))
-        assertEquals(custom.paletteSeedColor, preferences.raw["palette_seed"])
-        assertEquals(expected, AppearanceSettingsStore(preferences.value).load())
-    }
-
-    @Test fun normalizationMakesCustomColorsOpaqueWithoutCreatingMissingOverrides() {
-        val preferences = Preferences()
-        val store = AppearanceSettingsStore(preferences.value)
-        val saved = store.save(AppearanceSettings(paletteSeedColor = 0x00112233,
-            primaryAccentColor = 0x00445566, secondaryAccentColor = 0x00778899))
-        assertEquals(0xFF112233.toInt(), saved.paletteSeedColor)
-        assertEquals(0xFF445566.toInt(), saved.primaryAccentColor)
-        assertEquals(0xFF778899.toInt(), saved.secondaryAccentColor)
-        assertEquals(saved, AppearanceSettingsStore(preferences.value).load())
-        store.save(AppearanceSettings())
         assertEquals(AppearanceSettings(), store.load())
-        assertFalse(preferences.raw.containsKey("palette_seed"))
-        assertFalse(preferences.raw.containsKey("primary_accent"))
-        assertFalse(preferences.raw.containsKey("secondary_accent"))
-    }
-
-    @Test fun failedCommitRejectsTheColorUpdateInsteadOfReturningItAsSaved() {
-        val preferences = Preferences()
-        preferences.commitResult = false
-        try {
-            AppearanceSettingsStore(preferences.value).save(custom)
-            fail("failed preference commit must not return a saved appearance")
-        } catch (failure: IllegalStateException) {
-            assertEquals("外观设置保存失败", failure.message)
-        }
+        assertEquals(retained, store.save(retained))
+        assertEquals(retained, AppearanceSettingsStore(preferences.value).load())
         assertEquals(1, preferences.commits)
     }
 
-    @Test fun userBubbleModesRoundTripAndUnknownModesKeepOriginalAppearance() {
-        val preferences = Preferences()
-        val store = AppearanceSettingsStore(preferences.value)
-        assertEquals(UserBubbleMode.THEME, store.load().userBubbleMode)
-        preferences.raw["user_bubble_mode"] = "future-mode"
-        assertEquals(UserBubbleMode.THEME, store.load().userBubbleMode)
-        for (mode in UserBubbleMode.entries) {
-            val saved = store.save(custom.copy(userBubbleMode = mode, userBubbleColor = 0x00448866))
-            assertEquals(0xFF448866.toInt(), saved.userBubbleColor)
-            assertEquals(saved, AppearanceSettingsStore(preferences.value).load())
+    @Test fun oldColorAndLoadingKeysAreIgnoredWithoutWritingDuringLoad() {
+        for (loading in listOf(false, true)) for (beforeOnly in listOf(false, true)) {
+            val preferences = Preferences()
+            retired.forEach { preferences.raw[it] = "retired-wrong-type" }
+            preferences.raw["morph_loading"] = loading
+            preferences.raw["morph_before_response_only"] = beforeOnly
+            preferences.raw["pure_black"] = true
+            preferences.raw["theme"] = "dark"
+            val before = preferences.raw.toMap()
+            assertEquals(AppearanceSettings(themeMode = AppearanceThemeMode.DARK, pureBlackEnabled = true),
+                AppearanceSettingsStore(preferences.value).load())
+            assertEquals(before, preferences.raw)
+            assertEquals(0, preferences.commits)
         }
     }
 
-    @Test fun bubbleDefaultOnlyResetsItsOwnFieldsAndOtherResetsPreserveIt() {
-        val value = custom.copy(userBubbleMode = UserBubbleMode.CUSTOM, userBubbleColor = 0xFF448866.toInt())
-        assertEquals(custom, value.withUserBubbleColors(AppearanceSettings()))
-        assertEquals(value.userBubbleColor, value.withColorStyle(AppearanceSettings()).userBubbleColor)
-        assertEquals(value.userBubbleMode, value.withAccentColors(AppearanceSettings()).userBubbleMode)
+    @Test fun confirmedSaveRemovesOnlyRetiredKeysAndKeepsUnrelatedValues() {
         val preferences = Preferences()
+        retired.forEach { preferences.raw[it] = false }
+        preferences.raw["unrelated"] = "keep"
         val store = AppearanceSettingsStore(preferences.value)
-        store.save(value)
-        store.save(value.withUserBubbleColors(AppearanceSettings()))
-        assertFalse(preferences.raw.containsKey("user_bubble_color"))
-        assertEquals(custom.primaryAccentColor, preferences.raw["primary_accent"])
-        assertEquals(custom.paletteSeedColor, preferences.raw["palette_seed"])
+        assertEquals(retained, store.save(retained))
+        retired.forEach { assertFalse("retired key $it", preferences.raw.containsKey(it)) }
+        assertEquals("keep", preferences.raw["unrelated"])
+        assertEquals(retained, AppearanceSettingsStore(preferences.value).load())
+        assertEquals(1, preferences.commits)
     }
 
-    @Test fun failedCommitKeepsConfirmedAppearanceAcrossNewStoresUntilSuccessfulRetry() {
+    @Test fun normalizationKeepsScaleLimitsAndOpaqueIconColors() {
+        val store = AppearanceSettingsStore(Preferences().value)
+        val saved = store.save(retained.copy(interfaceScale = 20f, iconCatColor = 0x00112233))
+        assertEquals(MAX_INTERFACE_SCALE, saved.interfaceScale, 0f)
+        assertEquals(0xFF112233.toInt(), saved.iconCatColor)
+        assertEquals(DEFAULT_INTERFACE_SCALE, retained.copy(interfaceScale = Float.NaN).normalized().interfaceScale, 0f)
+    }
+
+    @Test fun failedCommitRejectsUpdateAndKeepsConfirmedStateAcrossStoresUntilRetry() {
         val preferences = Preferences()
         val store = AppearanceSettingsStore(preferences.value)
-        val previous = store.save(custom)
-        val draft = custom.copy(userBubbleMode = UserBubbleMode.CUSTOM, userBubbleColor = 0xFF448866.toInt())
+        val previous = store.save(retained)
+        val draft = retained.copy(pureBlackEnabled = false)
         preferences.commitResult = false
-        try { store.save(draft); fail("commit failure must reject the draft") } catch (_: IllegalStateException) { }
-        assertEquals("custom", preferences.raw["user_bubble_mode"])
+        try { store.save(draft); fail("commit failure must reject the draft") } catch (failure: IllegalStateException) {
+            assertEquals("外观设置保存失败", failure.message)
+        }
+        assertEquals(false, preferences.raw["pure_black"])
         repeat(2) { assertEquals(previous, AppearanceSettingsStore(preferences.value).load()) }
         preferences.commitResult = true
         assertEquals(draft, AppearanceSettingsStore(preferences.value).save(draft))
         assertEquals(draft, AppearanceSettingsStore(preferences.value).load())
     }
 
-    @Test fun failedFirstSaveKeepsInitialAppearanceWithoutNeedingAPriorLoad() {
+    @Test fun failedFirstSaveKeepsInitialAppearanceWithoutPriorLoad() {
         val preferences = Preferences()
         preferences.commitResult = false
-        try { AppearanceSettingsStore(preferences.value).save(custom) } catch (_: IllegalStateException) { }
+        try { AppearanceSettingsStore(preferences.value).save(retained); fail("commit failure expected") }
+        catch (failure: IllegalStateException) { assertEquals("外观设置保存失败", failure.message) }
         assertEquals(AppearanceSettings(), AppearanceSettingsStore(preferences.value).load())
     }
 
-    @Test fun commitExceptionAndReadbackMismatchBothKeepConfirmedAppearance() {
+    @Test fun commitExceptionAndReadbackMismatchKeepConfirmedState() {
         val preferences = Preferences()
         val store = AppearanceSettingsStore(preferences.value)
-        val previous = store.save(custom)
-        val draft = custom.copy(userBubbleMode = UserBubbleMode.OFF)
+        val previous = store.save(retained)
+        val draft = retained.copy(pureBlackEnabled = false)
         preferences.commitFailure = IllegalStateException("disk error")
-        try { store.save(draft); fail("commit exception must reject the draft") } catch (_: IllegalStateException) { }
+        try { store.save(draft); fail("commit exception expected") } catch (_: IllegalStateException) { }
         assertEquals(previous, AppearanceSettingsStore(preferences.value).load())
         preferences.commitFailure = null
-        preferences.afterCommit = { preferences.raw["user_bubble_mode"] = "custom" }
-        try { store.save(draft); fail("readback mismatch must reject the draft") } catch (failure: IllegalStateException) {
+        preferences.afterCommit = { preferences.raw["scale"] = 1f }
+        try { store.save(draft); fail("readback mismatch expected") } catch (failure: IllegalStateException) {
             assertEquals("外观设置回读不一致，请重新保存", failure.message)
         }
+        assertEquals(false, preferences.raw["pure_black"])
+        assertEquals(1f, preferences.raw["scale"])
         assertEquals(previous, AppearanceSettingsStore(preferences.value).load())
         preferences.afterCommit = {}
         assertEquals(draft, store.save(draft))

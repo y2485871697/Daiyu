@@ -2,7 +2,6 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
-import androidx.compose.material3.SwitchDefaults
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,7 +43,6 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import app.daiyu.android.ui.app.DaiyuPalette
-import app.daiyu.android.ui.app.daiyuSwitchColors
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import kotlin.math.roundToInt
@@ -90,7 +88,6 @@ private fun ThemeChoice(mode: AppearanceThemeMode, selected: Boolean, onClick: (
 internal fun AppearanceSettingsScreen(
     state: AppearanceSettings,
     onChange: (AppearanceSettings) -> Unit,
-    onColorChange: (AppearanceSettings) -> Boolean,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     iconContent: @Composable (expanded: Boolean) -> Unit = {},
@@ -99,8 +96,6 @@ internal fun AppearanceSettingsScreen(
 ) {
     val colors = MiuixTheme.colorScheme
     var scaleDraft by remember(state.interfaceScale) { mutableStateOf(state.interfaceScale) }
-    var colorEditor by remember { mutableStateOf<AppearanceColorEditor?>(null) }
-    var loadingExpanded by remember { mutableStateOf(false) }
     var iconExpanded by rememberSaveable { mutableStateOf(false) }
     var choosingBlur by remember { mutableStateOf(false) }
     val blurStyles = listOf("高斯模糊", "渐进模糊")
@@ -123,9 +118,6 @@ internal fun AppearanceSettingsScreen(
             }
         }
     }
-    colorEditor?.let { editor ->
-        AppearanceColorSheet(editor, state, onColorChange, onDismiss = { colorEditor = null })
-    }
     SettingsScaffoldPage(title = "外观与主题", onBack = onBack, modifier = modifier) {
         item(key = "appearance_theme") {
             SettingsSectionTitle("主题模式")
@@ -141,9 +133,6 @@ internal fun AppearanceSettingsScreen(
         item(key = "appearance_colors") {
             SettingsSectionTitle("色彩与背景")
             SettingsCard {
-                SettingsRow("色彩风格", onClick = { colorEditor = AppearanceColorEditor.STYLE })
-                SettingsRow("强调色", onClick = { colorEditor = AppearanceColorEditor.ACCENTS })
-                SettingsRow("聊天气泡", onClick = { colorEditor = AppearanceColorEditor.BUBBLES })
                 SettingsSwitchRow("纯黑背景", state.pureBlackEnabled) { onChange(state.copy(pureBlackEnabled = it)) }
             }
         }
@@ -202,22 +191,6 @@ internal fun AppearanceSettingsScreen(
                 if (blurSupported) {
                     if (state.blurEnabled) {
                         SettingsRow("顶栏模糊样式", summary = blurStyles[state.topBarBlurStyle.ordinal], onClick = { choosingBlur = true })
-                    }
-                }
-                SettingsRow("圆形加载指示器", tag = "settings-switch:圆形加载指示器",
-                    onClick = {
-                        if (!state.morphLoadingIndicator) {
-                            onChange(state.copy(morphLoadingIndicator = true)); loadingExpanded = true
-                        } else loadingExpanded = !loadingExpanded
-                    }, trailing = {
-                        SettingsSwitch(checked = state.morphLoadingIndicator,
-                            colors = daiyuSwitchColors(SwitchDefaults.colors(checkedTrackColor = DaiyuPalette.switchTrack,
-                                checkedBorderColor = DaiyuPalette.switchTrack)),
-                            onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) })
-                    })
-                SettingsExpandableContent(state.morphLoadingIndicator && loadingExpanded) {
-                    SettingsSwitchRow("仅消息生成前", state.morphLoadingBeforeResponseOnly) {
-                        onChange(state.copy(morphLoadingBeforeResponseOnly = it))
                     }
                 }
             }

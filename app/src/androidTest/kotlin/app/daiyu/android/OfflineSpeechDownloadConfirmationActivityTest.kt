@@ -30,8 +30,7 @@ class OfflineSpeechDownloadConfirmationActivityTest : WiredActivityTestCase() {
         val open = mutableStateOf(true)
         mainThread {
             appearance.value = AppearanceSettings(
-                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                primaryAccentColor = 0xFF246BCE.toInt(), secondaryAccentColor = 0xFF8C4561.toInt())
+                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT)
             activity.setContent {
                 AgentAppTheme(appearance.value, applyInterfaceScale = false) {
                     val current = LocalDensity.current
@@ -79,7 +78,7 @@ class OfflineSpeechDownloadConfirmationActivityTest : WiredActivityTestCase() {
 
     private fun assertRoles(dark: Boolean) {
         ui.waitForIdle()
-        val expected = AssistantPreviewPalette(dark, appearance.value)
+        val expected = AssistantPreviewPalette(dark)
         for ((tag, text, background, foreground) in listOf(
             ButtonRole("dialog-cancel", "取消", expected.secondaryContainer, expected.onSecondary),
             ButtonRole("dialog-confirm", "下载", expected.primary, expected.onPrimary))) {
@@ -93,12 +92,11 @@ class OfflineSpeechDownloadConfirmationActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testBothAccentRolesUpdateWhileOpenInLightAndDarkThemes() {
+    fun testDefaultActionRolesRemainStableWhenPureBlackChangesWhileOpen() {
         for (dark in listOf(false, true)) {
             mount(dark)
             assertRoles(dark)
-            mainThread { appearance.value = appearance.value.copy(
-                primaryAccentColor = 0xFF287A64.toInt(), secondaryAccentColor = 0xFF93582D.toInt()) }
+            mainThread { appearance.value = appearance.value.copy(pureBlackEnabled = !appearance.value.pureBlackEnabled) }
             assertRoles(dark)
         }
     }

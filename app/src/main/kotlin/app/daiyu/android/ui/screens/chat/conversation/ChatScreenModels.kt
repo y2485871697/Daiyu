@@ -152,10 +152,6 @@ data class ComposerUi(
     val videoSendBlocked: Boolean = false,
     /** Actual runtime evidence, independent of pause-request/control-button projection. */
     val executionPhase: app.daiyu.android.domain.runtime.ExecutionPhase? = null,
-    /** Null means the current owner's output is not available; never guess from RUNNING. */
-    val hasAssistantOutput: Boolean? = null,
-    val morphLoadingIndicator: Boolean = true,
-    val morphLoadingBeforeResponseOnly: Boolean = false,
     val editorGeneration: Long = 0,
     val voiceMode: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
     val voiceModes: Set<ChatMenuAction> = setOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO),

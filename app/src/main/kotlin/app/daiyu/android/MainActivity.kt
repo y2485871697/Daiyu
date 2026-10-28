@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.screens.chat.attachments.ImageAttachments
@@ -46,7 +45,6 @@ import app.daiyu.android.ui.navigation.RootExitConfirmation
 import androidx.lifecycle.lifecycleScope
 import app.daiyu.android.tasksurface.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -81,7 +79,6 @@ import app.daiyu.android.context.ContextManagementControllerAdapter
 import app.daiyu.android.ui.screens.chat.context.ContextManagementRoute
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceSettingsStore
-import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.domain.*
@@ -105,7 +102,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import app.daiyu.android.ui.SubAgentSettingsScreen
 import app.daiyu.android.ui.app.AgentAppTheme
-import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.colorContentColor
 import app.daiyu.android.ui.components.*
@@ -2579,7 +2575,6 @@ class MainActivity : ComponentActivity() {
                     "appearance" -> AppearanceSettingsScreen(
                         state = appearance,
                         onChange = { saveAppearance(it) },
-                        onColorChange = { saveAppearance(it) },
                         onBack = { retainedPage = "settings" },
                         iconContent = { expanded ->
                             IconAppearanceEditor(iconCoordinator, expanded,
@@ -6780,12 +6775,7 @@ class MainActivity : ComponentActivity() {
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                     supplementDraft.pending != null,
                 executionPhase = state?.phase,
-                hasAssistantOutput = controlOwner?.let { owner ->
-                    controller.active?.takeIf { it.id == owner.id && it.runId == owner.runId &&
-                        it.conversationId == owner.conversationId }?.let(::assistantOutputExists)
-                },
-                morphLoadingIndicator = appearance.morphLoadingIndicator,
-                morphLoadingBeforeResponseOnly = appearance.morphLoadingBeforeResponseOnly))
+            ))
     }
     private fun requestScroll(id: String? = null, follow: Boolean = true, segmentIndex: Int? = null) {
         chatState = chatState.copy(scrollRequest = ChatScrollRequest(++scrollSerial, id, follow, segmentIndex))

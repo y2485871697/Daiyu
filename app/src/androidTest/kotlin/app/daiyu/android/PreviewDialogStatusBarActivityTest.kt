@@ -41,13 +41,14 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
     private val outerBottomSheet = mutableStateOf(false)
     private var dismissals = 0
 
-    private fun show(dark: Boolean, bottomSheet: Boolean, seed: Int? = null,
+    private fun show(dark: Boolean, bottomSheet: Boolean, pureBlack: Boolean = false,
         initiallyOpen: Boolean = true, backgroundOverride: Color? = null, scrim: Color? = null,
         siblingWindows: Boolean = false, nestedInnerTheme: Boolean = false) {
         mainThread {
             appearance.value = AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                paletteSeedColor = seed,
+                pureBlackEnabled = pureBlack,
+
             )
             dismissals = 0
             outerBottomSheet.value = bottomSheet
@@ -143,9 +144,9 @@ class PreviewDialogStatusBarActivityTest : WiredActivityTestCase() {
     }
 
     fun testCenteredAndBottomOverlaysRetainHostBarsAcrossThemesAndExactBackgrounds() {
-        for (dark in listOf(false, true)) for (seed in listOf(null, 0xFF000000.toInt(), 0xFFFFFFFF.toInt())) {
+        for (dark in listOf(false, true)) for (pureBlack in listOf(false, true)) {
             for (bottomSheet in listOf(false, true)) {
-                show(dark, bottomSheet, seed)
+                show(dark, bottomSheet, pureBlack)
                 assertDialogWindowAndHostBars("modal-outer")
                 closeOuter()
             }

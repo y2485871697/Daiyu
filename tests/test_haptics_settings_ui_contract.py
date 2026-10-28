@@ -34,7 +34,7 @@ class HapticsSettingsUiContractTest(unittest.TestCase):
                      'keyPointForegroundColor = intensityAccent'):
             self.assertIn(text, self.source)
         palette = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/assistants/AssistantPreviewComponents.kt').read_text()
-        self.assertIn('private val actions = resolveAppearanceActions(appearance, dark)', palette)
+        self.assertIn('private val actions = resolveAppearanceActions(dark)', palette)
         self.assertIn('val primary = actions.primary', palette)
         button = palette.split('internal fun AssistantPreviewButton(', 1)[1]
         self.assertIn('primary -> colors.primary', button)

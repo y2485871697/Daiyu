@@ -189,53 +189,26 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertTrue(events.isEmpty()) }
     }
 
-    private fun assertAppearanceColorSheetAndDismiss(title: String) {
-        awaitDialogEnter(node("assistant-sheet"))
-        node("appearance-color-default").assertIsDisplayed()
-        node("appearance-color-confirm").assertIsDisplayed()
-        node("appearance-color-pad:${if (title == "强调色") "主强调色" else "界面色彩"}").assertExists()
-        if (title == "强调色") node("appearance-color-pad:次强调色").assertExists()
-        awaitNodeWindowFocus(node("assistant-sheet"))
-        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-        ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
-        }
-    }
-
-    fun testAppearanceSelectionAndWholeRowSwitchUpdateControlledState() {
+    fun testAppearanceKeepsThemeAndBlackAndRemovesRetiredOptions() {
         var state by mutableStateOf(AppearanceSettings())
-        mainThread {
-            activity.setContent {
-                AgentAppTheme(state, false) {
-                    AppearanceSettingsScreen(state, onChange = { state = it }, onColorChange = { state = it ; true }, onBack = {})
-                }
+        mainThread { activity.setContent {
+            AgentAppTheme(state, false) {
+                AppearanceSettingsScreen(state, onChange = { state = it }, onBack = {})
             }
-        }
+        } }
         node("settings-radio:深色").performClick().assertIsSelected()
         reveal("settings-switch:纯黑背景", "外观与主题").performClick().assertIsOn()
+        for (title in listOf("色彩风格", "强调色", "聊天气泡")) {
+            node("settings-row:$title").assertDoesNotExist()
+        }
+        reveal("settings-switch:消息时间戳", "外观与主题").performClick().assertIsOn()
+        node("settings-switch:圆形加载指示器").assertDoesNotExist()
+        node("settings-switch:仅消息生成前").assertDoesNotExist()
         ui.runOnIdle {
             assertEquals(AppearanceThemeMode.DARK, state.themeMode)
             assertTrue(state.pureBlackEnabled)
+            assertTrue(state.messageTimestampsEnabled)
         }
-        val beforePaletteClicks = state
-        for (title in listOf("强调色", "色彩风格")) {
-            reveal("settings-row:$title", "外观与主题").assertHasClickAction().performClick()
-            node("page:外观与主题").assertExists()
-            ui.onAllNodesWithTag("prompt-choice:0", useUnmergedTree = true).assertCountEquals(0)
-            assertAppearanceColorSheetAndDismiss(title)
-            ui.runOnIdle { assertEquals(beforePaletteClicks, state) }
-        }
-        reveal("settings-switch:消息时间戳", "外观与主题").performClick().assertIsOn()
-        reveal("settings-switch:圆形加载指示器", "外观与主题").performClick()
-        reveal("settings-switch:仅消息生成前", "外观与主题").performClick().assertIsOn()
-        ui.runOnIdle { assertTrue(state.morphLoadingIndicator); assertTrue(state.morphLoadingBeforeResponseOnly) }
-        reveal("settings-switch:圆形加载指示器", "外观与主题")
-        ui.onNode(isToggleable() and hasAnyAncestor(hasTestTag("settings-switch:圆形加载指示器")),
-            useUnmergedTree = true).performClick()
-        ui.runOnIdle { assertFalse(state.morphLoadingIndicator); assertTrue(state.morphLoadingBeforeResponseOnly) }
-        node("settings-switch:仅消息生成前").assertDoesNotExist()
-        reveal("settings-switch:圆形加载指示器", "外观与主题").performClick()
-        ui.runOnIdle { assertTrue(state.morphLoadingBeforeResponseOnly) }
         node("page:外观与主题").performScrollToIndex(0)
         capture("appearance-dark")
     }
@@ -253,7 +226,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                     val density = LocalDensity.current
                     CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
                         AgentAppTheme(state, true) {
-                            AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it }, onColorChange = { requests.add(it); state = it ; true }, onBack = {})
+                            AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it },  onBack = {})
                         }
                     }
                 }
@@ -300,7 +273,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(state, false) {
-                    AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it }, onColorChange = { requests.add(it); state = it ; true }, onBack = {})
+                    AppearanceSettingsScreen(state, onChange = { requests.add(it); state = it },  onBack = {})
                 }
             }
         }
@@ -332,7 +305,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                         key(dark, scale) {
                             AgentAppTheme(state, true) {
                                 Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("appearance-host")) {
-                                    AppearanceSettingsScreen(state, onChange = { state = it }, onColorChange = { state = it ; true }, onBack = {})
+                                    AppearanceSettingsScreen(state, onChange = { state = it },  onBack = {})
                                 }
                             }
                         }
@@ -345,118 +318,16 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                 ui.onNodeWithText(title).assertIsDisplayed()
             }
             val host = node("appearance-host").fetchSemanticsNode().boundsInRoot
-            for (tag in listOf("settings-row:图标", "settings-row:色彩风格", "settings-row:强调色",
+            for (tag in listOf("settings-row:图标", "settings-switch:纯黑背景",
                 "settings-switch:横移返回手势", "settings-switch:预测性返回手势")) {
                 val bounds = reveal(tag, "外观与主题").assertHasClickAction().fetchSemanticsNode().boundsInRoot
                 assertTrue(bounds.left >= host.left && bounds.right <= host.right)
             }
             val before = state
-            for (title in listOf("色彩风格", "强调色")) {
-                reveal("settings-row:$title", "外观与主题").performClick()
-                assertAppearanceColorSheetAndDismiss(title)
-            }
             ui.runOnIdle { assertEquals(before, state) }
             reveal("settings-switch:横移返回手势", "外观与主题").performClick()
             ui.runOnIdle { assertEquals(!before.swipeDismissEnabled, state.swipeDismissEnabled) }
         }
-        assertEquals(0, fixture.opens.get())
-    }
-
-    fun testColorSheetsKeepDefaultsAndDraftsIndependentUntilConfirm() {
-        val original = AppearanceSettings(paletteStyle = app.daiyu.android.data.model.AppearancePaletteStyle.VIBRANT,
-            paletteSeedColor = 0xFF439965.toInt(), primaryAccentColor = 0xFF996543.toInt(),
-            secondaryAccentColor = 0xFF436599.toInt(), interfaceScale = .9f)
-        var state by mutableStateOf(original)
-        val saves = mutableListOf<AppearanceSettings>()
-        mainThread {
-            activity.setContent {
-                AgentAppTheme(state, true) {
-                    AppearanceSettingsScreen(state, onChange = { saves += it; state = it }, onColorChange = { saves += it; state = it ; true }, onBack = {})
-                }
-            }
-        }
-        fun open(title: String) {
-            reveal("settings-row:$title", "外观与主题").performTouchInput { click() }
-            awaitDialogEnter(node("assistant-sheet"))
-        }
-        fun awaitClosed() {
-            ui.waitUntil(5_000) {
-                ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
-            }
-        }
-        open("强调色")
-        node("appearance-color-default").performClick()
-        ui.runOnIdle { assertEquals(original, state); assertTrue(saves.isEmpty()) }
-        androidx.test.espresso.Espresso.pressBack()
-        awaitClosed()
-        open("强调色")
-        node("appearance-color-default").performClick()
-        node("appearance-color-confirm").performClick()
-        awaitClosed()
-        val accentReset = original.withAccentColors(AppearanceSettings())
-        ui.runOnIdle { assertEquals(listOf(accentReset), saves); assertEquals(accentReset, state) }
-        mainThread { state = original; saves.clear() }
-        open("色彩风格")
-        node("appearance-style:neutral").scrollToVisible()
-        node("appearance-style:neutral").assertIsNotSelected()
-        node("appearance-color-default").performClick()
-        node("appearance-style:neutral").assertIsSelected()
-        ui.runOnIdle { assertEquals(original, state); assertTrue(saves.isEmpty()) }
-        node("appearance-color-confirm").performClick()
-        awaitClosed()
-        ui.runOnIdle {
-            assertEquals(listOf(original.withColorStyle(AppearanceSettings())), saves)
-            assertEquals(original.primaryAccentColor, state.primaryAccentColor)
-            assertEquals(original.secondaryAccentColor, state.secondaryAccentColor)
-        }
-        assertEquals(0, fixture.opens.get())
-    }
-
-    fun testUserBubbleDraftKeepsFailedSaveAndOnlyCommitsItsOwnGroup() {
-        val original = AppearanceSettings(primaryAccentColor = 0xFF448866.toInt(), secondaryAccentColor = 0xFF884466.toInt(),
-            paletteSeedColor = 0xFF446688.toInt())
-        var state by mutableStateOf(original)
-        var accept = false
-        val requests = mutableListOf<AppearanceSettings>()
-        mainThread {
-            activity.setContent {
-                AgentAppTheme(state, true) {
-                    AppearanceSettingsScreen(state, onChange = { state = it }, onColorChange = {
-                        requests += it
-                        if (accept) { state = it; true } else false
-                    }, onBack = {})
-                }
-            }
-        }
-        fun open() {
-            reveal("settings-row:聊天气泡", "外观与主题").performTouchInput { click() }
-            awaitDialogEnter(node("assistant-sheet"))
-        }
-        fun closed() {
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("assistant-sheet", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
-        }
-        open()
-        node("settings-radio:自定义颜色").scrollToVisible().performClick()
-        node("appearance-swatch:用户气泡:${0xFF407FCE}").scrollToVisible().performClick()
-        ui.runOnIdle { assertEquals(original, state); assertTrue(requests.isEmpty()) }
-        node("appearance-color-confirm").performClick()
-        node("appearance-color-save-error").assertExists()
-        ui.runOnIdle { assertEquals(original, state); accept = true }
-        node("appearance-color-confirm").performClick()
-        closed()
-        val expected = original.copy(userBubbleMode = app.daiyu.android.data.model.UserBubbleMode.CUSTOM,
-            userBubbleColor = 0xFF407FCE.toInt())
-        ui.runOnIdle { assertEquals(expected, state); assertEquals(listOf(expected, expected), requests) }
-        open()
-        node("appearance-color-default").performClick()
-        androidx.test.espresso.Espresso.pressBack()
-        closed()
-        ui.runOnIdle { assertEquals(expected, state); assertEquals(2, requests.size) }
-        open()
-        node("appearance-color-default").performClick()
-        node("appearance-color-confirm").performClick()
-        closed()
-        ui.runOnIdle { assertEquals(original, state) }
         assertEquals(0, fixture.opens.get())
     }
 
@@ -466,7 +337,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(state, false) {
-                    AppearanceSettingsScreen(state, onChange = { requests.add(it) }, onColorChange = { requests.add(it) ; true }, onBack = {})
+                    AppearanceSettingsScreen(state, onChange = { requests.add(it) },  onBack = {})
                 }
             }
         }

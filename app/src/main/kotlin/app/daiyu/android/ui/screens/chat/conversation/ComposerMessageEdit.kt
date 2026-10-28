@@ -31,18 +31,28 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun ComposerCancelEdit(enabled: Boolean, onCancel: () -> Unit) {
     val colors = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)
-    Box(Modifier.widthIn(min = 72.dp).heightIn(min = 40.dp)
-        .testTag("message-edit-cancel").clip(RoundedCornerShape(12.dp))
-        .background(colors.secondaryContainer)
-        .conversationClickable(enabled = enabled, onClickLabel = "取消编辑", onClick = onCancel)
-        .padding(horizontal = 8.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-        Text("取消编辑", color = colors.onSecondary,
-            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 20.sp,
-                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
-                lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-                    androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-                    androidx.compose.ui.text.style.LineHeightStyle.Trim.None)),
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Box(
+        Modifier.widthIn(min = 72.dp).heightIn(min = 40.dp)
+            .testTag("message-edit-cancel")
+            .conversationClickable(enabled = enabled, onClickLabel = "取消编辑", onClick = onCancel)
+            .padding(vertical = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.widthIn(min = 72.dp).heightIn(min = 26.dp)
+                .testTag("message-edit-cancel-background")
+                .clip(RoundedCornerShape(12.dp)).background(colors.secondaryContainer)
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("取消编辑", color = colors.onSecondary,
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 20.sp,
+                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+                    lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                        androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                        androidx.compose.ui.text.style.LineHeightStyle.Trim.None)),
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

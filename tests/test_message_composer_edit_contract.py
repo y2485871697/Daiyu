@@ -66,6 +66,22 @@ class MessageComposerEditContract(unittest.TestCase):
         self.assertNotIn('.height(', button)
         self.assertNotIn('max =', button)
 
+    def test_cancel_background_is_compact_without_reducing_the_touch_slot(self):
+        button = (UI / 'ComposerMessageEdit.kt').read_text().split('internal fun ComposerCancelEdit', 1)[1].split('/**', 1)[0]
+        touch, background = button.split('        Box(', 1)
+        for expected in ('heightIn(min = 40.dp)', '.testTag("message-edit-cancel")',
+                         '.conversationClickable(enabled = enabled', 'onClick = onCancel',
+                         '.padding(vertical = 3.dp)'):
+            self.assertIn(expected, touch)
+        self.assertNotIn('.background(', touch)
+        self.assertNotIn('.clip(', touch)
+        for expected in ('heightIn(min = 26.dp)', '.testTag("message-edit-cancel-background")',
+                         '.background(colors.secondaryContainer)', 'horizontal = 8.dp, vertical = 3.dp'):
+            self.assertIn(expected, background)
+        self.assertNotIn('.conversationClickable(', background)
+        self.assertNotIn('fillMaxHeight', background)
+        self.assertNotIn('.height(', background)
+
     def test_image_only_edit_has_explicit_submit_state(self):
         models = (UI / 'ChatScreenModels.kt').read_text()
         self.assertIn('val editingMessageCanSubmit: Boolean = false', models)

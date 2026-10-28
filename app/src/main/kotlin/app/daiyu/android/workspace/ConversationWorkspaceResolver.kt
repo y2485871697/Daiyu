@@ -16,7 +16,7 @@ internal class ConversationWorkspaceResolver(private val filesDir: File) {
         when (binding) {
             is ConversationWorkspaceBinding.Private -> {
                 val host = if (binding.path == null) defaultPrivateRoot() else {
-                    require(normalAbsolutePath(binding.path)) { "workspace_private_root_required" }
+                    require(normalPrivateAbsolutePath(binding.path)) { "workspace_private_root_required" }
                     existingPrivateDirectory(File(binding.path))
                 }
                 ResolvedConversationWorkspace(binding, host, null, null)
@@ -104,6 +104,16 @@ internal class ConversationWorkspaceResolver(private val filesDir: File) {
 
     private fun rejectSymlink(directory: File) {
         check(!Files.isSymbolicLink(directory.toPath())) { "workspace_symlink_not_supported" }
+    }
+
+    private fun normalPrivateAbsolutePath(path: String): Boolean {
+        if ('\u0000' in path) return false
+        val hostPath = File(path).toPath()
+        val root = hostPath.root ?: return false
+        val spelling = path.replace(File.separatorChar, '/')
+        val prefix = root.toString().replace(File.separatorChar, '/')
+        return hostPath.isAbsolute && spelling.startsWith(prefix) &&
+            normalAbsolutePath("/" + spelling.substring(prefix.length))
     }
 
     private fun normalAbsolutePath(path: String): Boolean =

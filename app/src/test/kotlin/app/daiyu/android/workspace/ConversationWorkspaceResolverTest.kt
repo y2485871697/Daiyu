@@ -159,7 +159,8 @@ class ConversationWorkspaceResolverTest {
             assertEquals(host, result.hostDirectory)
             assertEquals(guest, result.guestDirectory)
             assertEquals(approved, result.rootfs)
-            val relative = approved.rootfs.toPath().relativize(result.hostDirectory.toPath()).toString()
+            val relative = approved.rootfs.toPath().relativize(result.hostDirectory.toPath())
+                .joinToString("/") { it.toString() }
             assertEquals(guest, if (relative.isEmpty()) "/" else "/$relative")
         }
         assertFalse(File(files, "workspace").exists())

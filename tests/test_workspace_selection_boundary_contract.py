@@ -43,6 +43,22 @@ class WorkspaceSelectionBoundary(unittest.TestCase):
         self.assertIn('ConversationWorkspaceSource("private", "应用私有目录", context.filesDir.absolutePath, defaultPath)', access)
         self.assertIn('只能选择工作区及其子目录', main)
 
+    def test_private_host_paths_and_posix_guest_paths_keep_separate_syntax(self):
+        resolver = (BASE / 'workspace/ConversationWorkspaceResolver.kt').read_text()
+        private = resolver.split('is ConversationWorkspaceBinding.Private ->', 1)[1].split(
+            'is ConversationWorkspaceBinding.Rootfs ->', 1)[0]
+        guest = resolver.split('is ConversationWorkspaceBinding.Rootfs ->', 1)[1].split(
+            '} catch (failure: IOException)', 1)[0]
+        self.assertIn('normalPrivateAbsolutePath(binding.path)', private)
+        self.assertIn('normalAbsolutePath(binding.guestPath)', guest)
+        self.assertIn('path.replace(File.separatorChar,', resolver)
+        self.assertIn('hostPath.isAbsolute', resolver)
+        self.assertIn('normalAbsolutePath("/" + spelling.substring(prefix.length))', resolver)
+        self.assertNotIn('binding.path.replace', private)
+        tests = (ROOT / 'app/src/test/kotlin/app/daiyu/android/workspace/ConversationWorkspaceSelectionTest.kt').read_text()
+        self.assertIn('nativeAndForwardSeparatorsKeepTheSameSelectionBoundary', tests)
+        self.assertIn('child.absolutePath.replace(File.separatorChar,', tests)
+
     def test_general_resolver_keeps_existing_binding_compatibility(self):
         resolver = (BASE / 'workspace/ConversationWorkspaceResolver.kt').read_text()
         self.assertIn('is ConversationWorkspaceBinding.Rootfs', resolver)

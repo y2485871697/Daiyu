@@ -43,6 +43,21 @@ class ConversationWorkspaceSelectionTest {
         assertNull(selection.parentPath(root))
     }
 
+    @Test fun nativeAndForwardSeparatorsKeepTheSameSelectionBoundary() = fixture { files, _ ->
+        val root = File(files, "workspace").apply { mkdir() }
+        val child = File(root, "native/child").apply { mkdirs() }
+        val selection = ConversationWorkspaceSelection(files)
+        for (path in listOf(child.absolutePath, child.absolutePath.replace(File.separatorChar, '/'))) {
+            assertEquals(ConversationWorkspaceBinding.Private(child.path), selection.binding("private", path))
+        }
+        val separator = File.separator
+        for (path in listOf("$root$separator${separator}native", "$child$separator",
+            "$root${separator}native${separator}..${separator}native${separator}child",
+            "$root${separator}.${separator}native")) {
+            rejected("workspace_private_root_required") { selection.binding("private", path) }
+        }
+    }
+
     @Test fun samePrefixSiblingAndOtherPrivateDirectoriesAreRejected() = fixture { files, _ ->
         File(files, "workspace").mkdir()
         val selection = ConversationWorkspaceSelection(files)

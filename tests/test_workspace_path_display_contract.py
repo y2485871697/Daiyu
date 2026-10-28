@@ -47,7 +47,7 @@ class WorkspacePathDisplayContract(unittest.TestCase):
         self.assertIn('ClipData.newPlainText("工作区路径", path)', callback)
         self.assertNotIn('workspacePathPresentation', callback)
         self.assertNotIn('.trim()', callback)
-        self.assertIn('onCopyPath = { copyWorkspacePath(visit, it) }', main)
+        self.assertIn('onCopyPath = { if (dialogActionsCurrent(lease)) copyWorkspacePath(visit, it) }', main)
 
 
 if __name__ == '__main__':

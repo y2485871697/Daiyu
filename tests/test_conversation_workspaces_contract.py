@@ -10,14 +10,14 @@ class ConversationWorkspacesContract(unittest.TestCase):
 
     def test_live_owner_wires_each_operation_and_selection(self):
         main = self.source('MainActivity.kt')
-        for name in ['onSelectWorkspace = { selectConversationWorkspace(visit, it) }',
-                     'onDeleteWorkspaces = { removeConversationWorkspaces(visit, it) }',
-                     'onEditWorkspace = { editConversationWorkspace(visit, it) }',
+        for name in ['onSelectWorkspace = { if (dialogActionsCurrent(lease)) selectConversationWorkspace(visit, it) }',
+                     'onDeleteWorkspaces = { if (dialogActionsCurrent(lease)) removeConversationWorkspaces(visit, it) }',
+                     'onEditWorkspace = { if (dialogActionsCurrent(lease)) editConversationWorkspace(visit, it) }',
                      'replaceIndex = visit.editingWorkspaceIndex',
                      'editingWorkspaceIndex = editingIndex',
                      'editingIndex = null)',
                      'activeWorkspaceIndex = visit.editor.workspaces.activeIndex',
-                     'workspaceCurrent(saving) && workspaceVisit === saving',
+                     'workspacePresented(saving) && workspaceVisit === saving',
                      'controller.workspaceEditorOnWorker(visit.conversation)',
                      'selectionMode = false, selectedWorkspaces = emptySet()']:
             self.assertIn(name, main)

@@ -84,6 +84,51 @@ class BottomSheetDismissMotionActivityTest : WiredActivityTestCase() {
         SemanticsMatcher.expectValue(DialogDismissing, true), useUnmergedTree = true,
     ).fetchSemanticsNode().config[DialogMotionProgress]
 
+    fun testOrdinaryPauseDoesNotDismissAnySharedSheet() {
+        for (kind in 0..2) {
+            show(kind)
+            realPauseResume(activity)
+            val tag = if (kind == 2) "daiyu-choice-sheet" else "motion-confirm"
+            awaitNodeWindowFocus(node(tag))
+            node(tag).assertIsDisplayed()
+            assertEquals(0, dismissals)
+            assertEquals(0, outsideDismissals)
+            assertEquals(0, disposals)
+            assertEquals(0, confirmationClicks)
+            sendBack()
+            ui.mainClock.advanceTimeBy(3_000)
+            ui.waitForIdle()
+            assertEquals(1, dismissals)
+        }
+    }
+
+    fun testPauseDuringExitCannotDeliverDismissToReplacementForegroundCallback() {
+        show(1)
+        val previousAutoAdvance = ui.mainClock.autoAdvance
+        try {
+            ui.mainClock.autoAdvance = false
+            sendBack()
+            ui.mainClock.advanceTimeBy(80)
+            val progress = exitingProgress()
+            assertTrue(progress > 0f && progress < 1f)
+            realPauseResume(activity, atPause = { callbackRevision.value = 42 })
+            ui.mainClock.advanceTimeBy(3_000)
+            ui.waitForIdle()
+            node("motion-confirm").assertIsDisplayed()
+            assertEquals(0, dismissals)
+            assertEquals(0, outsideDismissals)
+            assertEquals(0, disposals)
+            awaitNodeWindowFocus(node("motion-confirm"))
+            sendBack()
+            ui.mainClock.advanceTimeBy(3_000)
+            ui.waitForIdle()
+            assertEquals(1, dismissals)
+            assertEquals(42, deliveredRevision)
+        } finally {
+            ui.mainClock.autoAdvance = previousAutoAdvance
+        }
+    }
+
     fun testBackRetainsEachSharedSheetThroughIntermediateFramesAndOnlyClosesOnce() {
         for (kind in 0..2) {
             show(kind)

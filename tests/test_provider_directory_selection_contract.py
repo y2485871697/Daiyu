@@ -64,9 +64,43 @@ class ProviderDirectorySelectionContractTest(unittest.TestCase):
         self.assertIn("if (selectedSlots != null) { clearTransientPrompts(); return }", route)
         self.assertIn("fun clearTransientPrompts() { confirmation = null; selectedSlots = null }", route)
         self.assertIn("BackHandler(previewEnabled = selectedSlots == null", route)
-        self.assertIn("if (registry?.revision != value.revision) selectedSlots = null", route)
+        pause = route.split('if (event == Lifecycle.Event.ON_PAUSE)', 1)[1].split('} else if (event == Lifecycle.Event.ON_RESUME)', 1)[0]
+        self.assertNotIn("clearTransientPrompts()", pause)
+        self.assertIn("confirmation = null", pause)
+        self.assertIn("permit.revoke()", pause)
+        self.assertIn("selectedSlots = selectedSlots?.intersect(value.providers.map { it.slotId }.toSet())", route)
         self.assertIn("selectedSlots === selection", route)
         self.assertIn("if (selectedSlots === selected) mutate(expected, p, completed", route)
+
+    def test_selection_resume_prunes_full_snapshot_and_has_real_home_regression(self):
+        route = (UI / "ProviderManagementRoute.kt").read_text()
+        self.assertIn("current(p) && enabled && registry === displayedRegistry && selection != null", route)
+        self.assertIn("checkingRegistry = true; pendingOpen = true", route)
+        runtime = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/SelectionPresentationLifecycleActivityTest.kt").read_text()
+        for entry in ("testProviderHiddenSelectionSurvivesRepeatedPauseAndHomeWithOldButtonsRevoked",
+                      "testProviderRevisionChangePrunesOnlyRemovedIdsWithoutSelectingNewRows",
+                      "GLOBAL_ACTION_HOME", "Lifecycle.Event.ON_STOP", "RetainedListSelectionAction"):
+            self.assertIn(entry, runtime)
+
+    def test_deleted_current_model_reuses_only_presentation_not_old_config_or_grants(self):
+        route = (UI / "ProviderManagementRoute.kt").read_text()
+        for guard in ('restore.editing.copy(settings = restore.editing.settings.copy(model = "")) == editing',
+                      'retained?.catalogIdentity == identity',
+                      'catalog.models.none { it.id == restore.editing.settings.model }',
+                      'if (clearedDeletedModel) loaded.pageUi = checkNotNull(restore).pageUi'):
+            self.assertIn(guard, route)
+        page = (UI / "ProviderPageUiState.kt").read_text()
+        self.assertIn('selectedModelIds = mutableStateOf<Set<String>?>(null)', page)
+        self.assertNotIn('DialogActionLease', page)
+        runtime = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/SelectionPresentationLifecycleActivityTest.kt").read_text()
+        self.assertIn('testDeletingCurrentModelRetainsModelTabAndSurvivingSelection', runtime)
+
+    def test_oauth_restoration_releases_the_registry_check_after_same_revision(self):
+        route = (UI / "ProviderManagementRoute.kt").read_text()
+        oauth = route.split("target.attachOAuth(auth)", 1)[1].split("} else discardOAuth(auth)", 1)[0]
+        self.assertIn("checkingRegistry = false", oauth)
+        self.assertIn("pendingOpen = false", oauth)
+        self.assertIn("sameRegistry && current(permit)", route)
 
     def test_batch_delete_uses_the_existing_guarded_controller_and_one_cas(self):
         route = (UI / "ProviderManagementRoute.kt").read_text()

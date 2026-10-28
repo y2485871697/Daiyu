@@ -2,6 +2,9 @@ package app.daiyu.android.ui.components
 
 import androidx.compose.animation.core.animate
 import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.spring
@@ -77,6 +80,15 @@ internal fun DialogMotionProvider(
         val largeScreen = size.width / density >= 840f && size.height / density >= 480f
         val latestDismiss by rememberUpdatedState(onDismiss)
         val latestOutsideDismiss by rememberUpdatedState(onOutsideDismiss)
+        val lifecycle = LocalLifecycleOwner.current.lifecycle
+        DisposableEffect(lifecycle, motion) {
+            val observer = LifecycleEventObserver { _, event ->
+                // A dismiss animation must not acquire a replacement foreground callback.
+                if (event == Lifecycle.Event.ON_PAUSE) motion.dismissSource = null
+            }
+            lifecycle.addObserver(observer)
+            onDispose { lifecycle.removeObserver(observer) }
+        }
         LaunchedEffect(motion.dismissSource) {
             val source = motion.dismissSource
             val target = if (source == null) 1f else 0f

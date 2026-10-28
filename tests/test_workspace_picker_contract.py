@@ -64,7 +64,7 @@ class WorkspacePickerContract(unittest.TestCase):
         self.assertIn('choosing = false, listing = false, directory = null', cancel)
         self.assertNotIn('saveWorkspace', cancel)
         self.assertIn('!visit.choosing || visit.directory?.selectable != true', main)
-        self.assertIn('workspaceCurrent(loading) && workspaceVisit === loading', main)
+        self.assertIn('workspacePresented(loading) && workspaceVisit === loading', main)
 
     def test_failed_navigation_invalidates_previous_selection(self):
         main = self.text('MainActivity.kt')

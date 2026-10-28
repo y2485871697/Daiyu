@@ -52,7 +52,13 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         node("page:模型提供商").assertExists()
         select(ProviderRegistry.PRIMARY)
         realPauseResume(activity)
-        node("provider-selection-actions").assertDoesNotExist()
+        node("provider-selection-actions").assertIsDisplayed()
+        row(ProviderRegistry.PRIMARY).assertIsOn()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(hasTestTag("provider-cancel-selection") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        node("provider-cancel-selection").performClick()
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(settings, fixture.settings.load())
         assertEquals(0, fixture.opens.get())

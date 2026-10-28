@@ -15,10 +15,10 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
     def test_pause_retains_provider_route_and_drafts_but_revokes_authority(self):
         route = source('ProviderManagementRoute.kt')
         pause = route.split('if (event == Lifecycle.Event.ON_PAUSE) {', 1)[1].split('} else if (event == Lifecycle.Event.ON_RESUME)', 1)[0]
-        for kept in ('serial++', 'resumed = false; permit.revoke()', 'detail?.revoke()', 'clearTransientPrompts()'):
+        for kept in ('serial++', 'resumed = false; permit.revoke()', 'detail?.revoke()', 'confirmation = null'):
             self.assertIn(kept, pause)
         self.assertTrue('creating?.revoke()' in pause or 'creating?.balanceTestJob?.cancel()' in pause)
-        for dropped in ('authentication = false', 'creating = null', 'detail = null', 'closeDetail()', 'clearPrompts()'):
+        for dropped in ('authentication = false', 'creating = null', 'detail = null', 'closeDetail()', 'clearPrompts()', 'clearTransientPrompts()', 'selectedSlots = null'):
             self.assertNotIn(dropped, pause)
         self.assertIn('permit = ProviderPagePermit(); resumed = true', route)
 
@@ -77,7 +77,10 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
 
     def test_explicit_exit_still_discards_the_edit_visit(self):
         local = source('LocalCatalogModelsScreen.kt')
-        self.assertIn('onDispose { visit.set(false); cancel();', local)
+        dispose = local.split('onDispose {', 1)[1].split('LaunchedEffect(visit)', 1)[0]
+        self.assertIn('visit.set(false); selectionLease.revoke(); request?.set(true)', dispose)
+        self.assertNotIn('selectedIds = null', dispose)
+        self.assertIn('else { visit.set(false); cancel(); onBack() }', local)
         self.assertIn('if (selectedIds != null) { selectedIds = null; deletingSelected = null }', local)
         self.assertIn('else { visit.set(false); cancel(); onBack() }', local)
         route = source('ProviderManagementRoute.kt')

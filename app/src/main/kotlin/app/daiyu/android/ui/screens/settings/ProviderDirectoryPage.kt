@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -57,6 +58,8 @@ internal data class ProviderCardSummary(val endpoint: String, val protocol: Prov
         }, modelCount?.let { "$it 个模型" }, "禁用".takeUnless { enabled }).joinToString(" · ").takeIf { it.isNotEmpty() },
     ).joinToString("\n")
 }
+
+internal val RetainedListSelectionAction = SemanticsPropertyKey<() -> Unit>("RetainedListSelectionAction")
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -171,10 +174,12 @@ internal fun ProviderDirectoryPage(
                 TextButton(text = "取消", enabled = enabled, onClick = onCancelSelection,
                     colors = ButtonDefaults.textButtonColors(
                         color = accents.secondaryContainer, textColor = accents.onSecondary),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-cancel-selection"))
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-cancel-selection")
+                        .semantics { this[RetainedListSelectionAction] = onCancelSelection })
                 TextButton(text = "删除", enabled = enabled && selectedSlots.isNotEmpty(), onClick = onDeleteSelected,
                     colors = deletionButtonColors(),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-delete-selected"))
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("provider-delete-selected")
+                        .semantics { this[RetainedListSelectionAction] = onDeleteSelected })
             }
         }
     }

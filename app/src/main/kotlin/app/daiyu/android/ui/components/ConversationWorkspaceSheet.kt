@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -45,6 +46,8 @@ import app.daiyu.android.ui.haptics.combinedClickable
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.resolveAppearanceActions
+
+internal val RetainedWorkspaceAction = SemanticsPropertyKey<() -> Unit>("RetainedWorkspaceAction")
 
 /** Display-only metadata; filesystem access and the draft belong to the conversation owner. */
 data class WorkspaceItemOption(val path: String)
@@ -155,7 +158,8 @@ fun ConversationWorkspaceSheet(
                             } else {
                                 ConversationAgentButton("添加", enabled = !busy, primary = true,
                                     primaryColor = actions.primary, onPrimaryColor = actions.onPrimary,
-                                    modifier = Modifier.weight(1f).testTag("workspace-add"), onClick = onBrowse)
+                                    modifier = Modifier.weight(1f).testTag("workspace-add")
+                                        .semantics { this[RetainedWorkspaceAction] = onBrowse }, onClick = onBrowse)
                             }
                         }
                     } else {
@@ -208,7 +212,8 @@ fun ConversationWorkspaceSheet(
                                 modifier = Modifier.weight(1f).testTag("workspace-cancel"), onClick = onCancel)
                             ConversationAgentButton("使用", enabled = !busy && !listing && directory?.selectable == true,
                                 primary = true, primaryColor = actions.primary, onPrimaryColor = actions.onPrimary,
-                                modifier = Modifier.weight(1f).testTag("workspace-save"), onClick = onSave)
+                                modifier = Modifier.weight(1f).testTag("workspace-save")
+                                        .semantics { this[RetainedWorkspaceAction] = onSave }, onClick = onSave)
                         }
                     }
                 }

@@ -769,10 +769,10 @@ class MainActivity : ComponentActivity() {
         !sidebarVisible && inlineMessageEditor == null && controller.ready && !controller.dataBusy && chatState.composer.enabled &&
         pendingTextSend == null && controller.textSendState() == null && !imageHost.sending && !videoSending &&
         !shizukuWritesBlocked && terminalEditor == null && virtualDisplayEditor == null && guiEditor == null
-    private fun shortcutPickCurrent(pick: ComposerShortcutPick) = composerShortcutPick === pick &&
-        composerShortcutAvailable() && voiceForeground && generationResumed() &&
-        selected?.id == pick.owner.conversationId && editorGeneration == pick.owner.editorGeneration &&
-        draftRevision == pick.owner.draftRevision && draft == pick.text
+    private fun shortcutPickPresented(pick: ComposerShortcutPick) = composerShortcutPick === pick &&
+        composerShortcutAvailable() && selected?.id == pick.owner.conversationId &&
+        editorGeneration == pick.owner.editorGeneration && draftRevision == pick.owner.draftRevision && draft == pick.text
+    private fun shortcutPickCurrent(pick: ComposerShortcutPick) = shortcutPickPresented(pick) && voiceForeground && generationResumed()
 
     private fun openComposerShortcut(trigger: app.daiyu.android.ui.screens.chat.conversation.ComposerShortcut, expected: String) {
         if (!composerShortcutAvailable() || !voiceForeground || !generationResumed() || draft != expected) return
@@ -808,8 +808,8 @@ class MainActivity : ComponentActivity() {
                                 it.id, it.skill.name, it.skill.description) }
                     }
                 }
-                if (shortcutPickCurrent(pick)) pick.choices = choices
-            } catch (_: Exception) { if (shortcutPickCurrent(pick)) pick.error = "读取失败，请重新选择" }
+                if (shortcutPickPresented(pick)) pick.choices = choices
+            } catch (_: Exception) { if (shortcutPickPresented(pick)) pick.error = "读取失败，请重新选择" }
         }
     }
     private fun chooseComposerShortcut(pick: ComposerShortcutPick,
@@ -869,8 +869,8 @@ class MainActivity : ComponentActivity() {
     private fun chatReferenceMatches(request: ChatReferencePick) =
         request.owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
             request.editVisit === inlineMessageEditor?.visit && request.text == (inlineMessageEditor?.text ?: draft)
-    private fun revokeChatReferencePick() {
-        composerShortcutPick = null
+    private fun revokeChatReferencePick(preserveShortcut: Boolean = false) {
+        if (!preserveShortcut) composerShortcutPick = null
         val request = chatReferencePick ?: return
         request.live = false; request.uri = null
         // Keep an unreturned slot reserved so its ActivityResult cannot enter a newer request.
@@ -1579,6 +1579,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private var generationOutputsRequest: Any? = null
+    private var generationOutputsOwner: Pair<ConversationId, Long>? = null
+    private fun generationOutputsPresented() = activityUsable() && retainedPage == "chat" && !sidebarVisible &&
+        generationOutputsOwner != null && generationOutputsOwner == selected?.id?.let { it to editorGeneration }
     private var generationReceiptNotice by mutableStateOf<ChatController.GenerationReceiptNotice?>(null)
     private val supplementDraft get() = controller.supplementDraft
     private var restoredSupplementEditor: SupplementEditor? = null
@@ -1756,12 +1759,28 @@ class MainActivity : ComponentActivity() {
         val selectionMode: Boolean = false, val selectedWorkspaces: Set<Int> = emptySet(),
         val editingWorkspaceIndex: Int? = null,
         val directory: app.daiyu.android.workspace.ConversationWorkspaceDirectory? = null)
+    private var ordinaryDialogLease by mutableStateOf<app.daiyu.android.ui.components.DialogActionLease?>(null)
+    private fun dialogActionsCurrent(lease: app.daiyu.android.ui.components.DialogActionLease?) =
+        lease != null && lease.isActive && ordinaryDialogLease === lease && voiceForeground && activityUsable()
+    private fun suspendOrdinaryDialogActions() {
+        ordinaryDialogLease?.revoke()
+        ordinaryDialogLease = null
+        chatModelCancelled.set(true)
+    }
+    private fun resumeOrdinaryDialogActions() {
+        ordinaryDialogLease?.revoke()
+        ordinaryDialogLease = app.daiyu.android.ui.components.DialogActionLease()
+        revalidateWorkspacePresentation()
+        chatModelOwner?.let { reloadChatModels(it, retainPresentation = true) }
+        resumeOutputPresentations()
+    }
     private var workspaceVisit by mutableStateOf<WorkspaceVisit?>(null)
     private var workspaceOpenToken: Any? = null
     private fun revokeWorkspaceVisit() { workspaceOpenToken = null; workspaceVisit = null }
-    private fun workspaceCurrent(visit: WorkspaceVisit) = activityUsable() && voiceForeground &&
+    private fun workspacePresented(visit: WorkspaceVisit) = activityUsable() &&
         retainedPage == "chat" && !sidebarVisible && selected?.id == visit.conversation &&
         workspaceVisit?.token === visit.token && editorGeneration == visit.generation
+    private fun workspaceCurrent(visit: WorkspaceVisit) = workspacePresented(visit) && voiceForeground
     private fun openConversationWorkspace() {
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
             workspaceOpenToken != null || workspaceVisit != null) return
@@ -1769,7 +1788,7 @@ class MainActivity : ComponentActivity() {
         val generation = editorGeneration
         val token = Any()
         workspaceOpenToken = token
-        fun current() = workspaceOpenToken === token && activityUsable() && voiceForeground &&
+        fun current() = workspaceOpenToken === token && activityUsable() &&
             retainedPage == "chat" && !sidebarVisible && selected?.id == owner && editorGeneration == generation
         lifecycleScope.launch {
             try {
@@ -1778,6 +1797,33 @@ class MainActivity : ComponentActivity() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { if (current()) toast("工作区信息读取失败") }
             finally { if (workspaceOpenToken === token) workspaceOpenToken = null }
+        }
+    }
+    private fun revalidateWorkspacePresentation() {
+        val visit = workspaceVisit ?: return
+        if (!workspaceCurrent(visit) || visit.busy || visit.listing) return
+        val loading = visit.copy(busy = true)
+        workspaceVisit = loading
+        lifecycleScope.launch {
+            try {
+                val (editor, directory) = withContext(Dispatchers.IO) {
+                    val editor = controller.workspaceEditorOnWorker(visit.conversation)
+                    editor to if (visit.choosing && editor.binding == visit.editor.binding)
+                        controller.workspaceDirectoryOnWorker(visit.source, visit.path) else null
+                }
+                if (workspacePresented(loading) && workspaceVisit === loading) {
+                    workspaceVisit = if (editor.binding == visit.editor.binding) visit.copy(editor = editor,
+                        directory = directory ?: visit.directory)
+                    else loading.copy(editor = editor, source = editor.selectedSourceId, path = editor.path,
+                        busy = false, choosing = false, listing = false, directory = null,
+                        selectionMode = false, selectedWorkspaces = emptySet(), editingWorkspaceIndex = null,
+                        error = "工作区绑定已变化，请重新选择")
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (workspacePresented(loading) && workspaceVisit === loading) workspaceVisit = visit.copy(
+                    directory = visit.directory?.copy(selectable = false), error = "工作区暂不可用，请重新选择")
+            }
         }
     }
     private fun browseConversationWorkspace(visit: WorkspaceVisit, source: String = visit.source, path: String = visit.path,
@@ -1789,12 +1835,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 val directory = withContext(Dispatchers.IO) { controller.workspaceDirectoryOnWorker(source, path) }
-                if (workspaceCurrent(loading) && workspaceVisit === loading) {
+                if (workspacePresented(loading) && workspaceVisit === loading) {
                     workspaceVisit = loading.copy(source = source, path = directory.path, directory = directory, listing = false)
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) {
-                if (workspaceCurrent(loading) && workspaceVisit === loading) {
+                if (workspacePresented(loading) && workspaceVisit === loading) {
                     workspaceVisit = loading.copy(listing = false, directory = loading.directory?.copy(selectable = false),
                         error = "目录读取失败，请重新选择")
                 }
@@ -1842,15 +1888,17 @@ class MainActivity : ComponentActivity() {
     }
     private fun persistConversationWorkspaces(visit: WorkspaceVisit, change: () -> Boolean) {
         if (!workspaceCurrent(visit) || workspaceVisit !== visit || visit.busy || visit.listing) return
+        val lease = ordinaryDialogLease ?: return
         val saving = visit.copy(busy = true, error = null)
         workspaceVisit = saving
         lifecycleScope.launch {
             try {
                 val editor = withContext(Dispatchers.IO) {
+                    check(lease.isActive) { "workspace_visit_paused" }
                     check(change()) { "workspace_binding_changed" }
                     controller.workspaceEditorOnWorker(visit.conversation)
                 }
-                if (workspaceCurrent(saving) && workspaceVisit === saving) {
+                if (workspacePresented(saving) && workspaceVisit === saving) {
                     workspaceVisit = saving.copy(editor = editor, source = editor.selectedSourceId, path = editor.path,
                         busy = false, choosing = false, listing = false, directory = null,
                         selectionMode = false, selectedWorkspaces = emptySet(), editingWorkspaceIndex = null)
@@ -1859,6 +1907,7 @@ class MainActivity : ComponentActivity() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 val message = when (failure.message) {
+                    "workspace_visit_paused" -> "操作已暂停，请返回前台后重新选择"
                     "workspace_binding_changed" -> "会话正在运行或绑定已变化，请稍后重新打开"
                     "workspace_duplicate" -> "这个目录已在工作区列表中，请直接切换到该工作区"
                     "workspace_collection_too_large" -> "已保存的工作区路径过多，请先移除不需要的工作区"
@@ -1867,7 +1916,7 @@ class MainActivity : ComponentActivity() {
                     "workspace_symlink_not_supported" -> "工作区不支持符号链接，请选择实际目录"
                     else -> "工作区路径不可用，请选择已存在的目录"
                 }
-                if (workspaceCurrent(saving) && workspaceVisit === saving) workspaceVisit = visit.copy(error = message)
+                if (workspacePresented(saving) && workspaceVisit === saving) workspaceVisit = visit.copy(error = message)
             }
         }
     }
@@ -2664,21 +2713,23 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 chatModelPicker?.let { picker ->
+                    val lease = ordinaryDialogLease
                     val owner = chatModelOwner
                     val session = chatModelSession
-                    val dismiss = { if (chatModelOwner === owner) dismissChatModels() }
+                    val dismiss = { if (dialogActionsCurrent(lease) && chatModelOwner === owner) dismissChatModels() }
                     if (session == null) ChatModelPicker(picker, onSelect = {}, onDismiss = dismiss)
                     else LocalCatalogChatModelPicker(session, enabled = picker.enabled,
                         loading = picker.loading, message = picker.message, switching = picker.switching,
-                        onSelect = { selectChatModel(it, owner, session) },
-                        onSelectOtherProvider = { providerId, ticket -> selectChatModel(ticket, owner, session, providerId) },
+                        onSelect = { if (dialogActionsCurrent(lease)) selectChatModel(it, owner, session) },
+                        onSelectOtherProvider = { providerId, ticket -> if (dialogActionsCurrent(lease)) selectChatModel(ticket, owner, session, providerId) },
                         onDismiss = dismiss)
                 }
                 composerShortcutPick?.let { pick ->
+                    val lease = ordinaryDialogLease
                     app.daiyu.android.ui.screens.chat.conversation.ComposerShortcutPicker(
                         pick.trigger.kind, pick.trigger.query, pick.choices, pick.error,
-                        onChoose = { chooseComposerShortcut(pick, it) },
-                        onDismiss = { if (composerShortcutPick === pick) composerShortcutPick = null })
+                        onChoose = { if (dialogActionsCurrent(lease)) chooseComposerShortcut(pick, it) },
+                        onDismiss = { if (dialogActionsCurrent(lease) && composerShortcutPick === pick) composerShortcutPick = null })
                 }
                 assistantSelectionOwner?.let { owner -> key(owner) {
                 val editAssistant = { id: String ->
@@ -2736,21 +2787,22 @@ class MainActivity : ComponentActivity() {
                     } else LaunchedEffect(visit) { if (childStatusVisit === visit) childStatusVisit = null }
                 }
                 workspaceVisit?.let { visit ->
-                    if (workspaceCurrent(visit)) {
+                    val lease = ordinaryDialogLease
+                    if (workspacePresented(visit)) {
                         app.daiyu.android.ui.components.ConversationWorkspaceSheet(
                             visible = true, path = visit.path, busy = visit.busy, error = visit.error,
                             workspaceRoots = visit.editor.privateWorkspaceRoots,
-                            onCopyPath = { copyWorkspacePath(visit, it) },
+                            onCopyPath = { if (dialogActionsCurrent(lease)) copyWorkspacePath(visit, it) },
                             workspaces = visit.editor.workspacePaths.map {
                                 app.daiyu.android.ui.components.WorkspaceItemOption(it)
                             }, activeWorkspaceIndex = visit.editor.workspaces.activeIndex,
-                            onSelectWorkspace = { selectConversationWorkspace(visit, it) },
-                            onEditWorkspace = { editConversationWorkspace(visit, it) },
+                            onSelectWorkspace = { if (dialogActionsCurrent(lease)) selectConversationWorkspace(visit, it) },
+                            onEditWorkspace = { if (dialogActionsCurrent(lease)) editConversationWorkspace(visit, it) },
                             editingWorkspace = visit.editingWorkspaceIndex != null,
-                            onDeleteWorkspaces = { removeConversationWorkspaces(visit, it) },
+                            onDeleteWorkspaces = { if (dialogActionsCurrent(lease)) removeConversationWorkspaces(visit, it) },
                             selectionMode = visit.selectionMode, selectedWorkspaces = visit.selectedWorkspaces,
                             onSelectionChange = { mode, indices ->
-                                if (workspaceCurrent(visit) && workspaceVisit === visit && !visit.busy && !visit.listing) {
+                                if (dialogActionsCurrent(lease) && workspaceCurrent(visit) && workspaceVisit === visit && !visit.busy && !visit.listing) {
                                     workspaceVisit = visit.copy(selectionMode = mode, selectedWorkspaces = indices)
                                 }
                             },
@@ -2760,13 +2812,13 @@ class MainActivity : ComponentActivity() {
                                     directory.folders, directory.selectable)
                             },
                             onBrowse = {
-                                visit.editor.sources.firstOrNull { it.id == "private" }?.let { source ->
+                                visit.editor.sources.firstOrNull { it.id == "private" }?.takeIf { dialogActionsCurrent(lease) }?.let { source ->
                                     browseConversationWorkspace(visit, source.id, source.initialPath, editingIndex = null)
                                 }
                             },
-                            onNavigate = { path -> browseConversationWorkspace(visit, path = path) }, onCancel = { cancelWorkspaceSelection(visit) },
-                            onSave = { saveConversationWorkspace(visit) },
-                            onDismiss = { if (workspaceVisit?.token === visit.token) {
+                            onNavigate = { path -> if (dialogActionsCurrent(lease)) browseConversationWorkspace(visit, path = path) }, onCancel = { if (dialogActionsCurrent(lease)) cancelWorkspaceSelection(visit) },
+                            onSave = { if (dialogActionsCurrent(lease)) saveConversationWorkspace(visit) },
+                            onDismiss = { if (dialogActionsCurrent(lease) && workspaceVisit === visit) {
                                 if (visit.selectionMode && !visit.busy) {
                                     workspaceVisit = visit.copy(selectionMode = false, selectedWorkspaces = emptySet())
                                 } else revokeWorkspaceVisit()
@@ -3686,9 +3738,11 @@ class MainActivity : ComponentActivity() {
         terminalJobsVisit?.revoked?.set(true)
         terminalJobsVisit = null
     }
-    private fun terminalJobsCurrent(visit: TerminalJobsVisit) = terminalPageCurrent(visit.terminalPage) &&
+    private fun terminalJobsPresented(visit: TerminalJobsVisit) = activityUsable() &&
+        retainedPage == "terminal" && terminalPageOwner === visit.terminalPage && !sidebarVisible &&
         terminalJobsVisit === visit && !visit.revoked.get() &&
         selected?.id == visit.conversation && editorGeneration == visit.editorGeneration
+    private fun terminalJobsCurrent(visit: TerminalJobsVisit) = terminalJobsPresented(visit) && voiceForeground
     private fun openTerminalTasks(page: Any) {
         val conversation = selected?.id
         if (!terminalPageCurrent(page)) return
@@ -3698,21 +3752,22 @@ class MainActivity : ComponentActivity() {
         refreshTerminalJobs(visit)
     }
     @Composable private fun TerminalTasksSurface() {
-        val visit = terminalJobsVisit?.takeIf { terminalJobsCurrent(it) } ?: return
+        val visit = terminalJobsVisit?.takeIf { terminalJobsPresented(it) } ?: return
+        val lease = ordinaryDialogLease
         app.daiyu.android.ui.screens.terminal.TerminalTasksDialog(
             busy = visit.busy,
             rows = visit.sessions.map { session -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
                 session.plan.command, terminalTaskSummary(session, visit.taskStatus[session.plan.runId.value]),
                 id = session.plan.runId.value,
-                onRead = { if (terminalJobsCurrent(visit)) terminalJobAction(visit, session, false) },
-                onStop = if (session.jobId == null) null else ({ if (terminalJobsCurrent(visit)) terminalJobAction(visit, session, true) }))
+                onRead = { if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalJobAction(visit, session, false) },
+                onStop = if (session.jobId == null) null else ({ if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalJobAction(visit, session, true) }))
             } + visit.history.map { record -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
                 record.command ?: record.jobId, "状态未知", id = record.jobId,
-                onRead = { if (terminalJobsCurrent(visit)) terminalHistoryPage(visit, record, 0) }) },
+                onRead = { if (dialogActionsCurrent(lease) && terminalJobsCurrent(visit)) terminalHistoryPage(visit, record, 0) }) },
             output = app.daiyu.android.ui.screens.terminal.terminalTaskOutput(visit.output),
             outputId = visit.outputId,
             error = visit.historyError,
-            onDismiss = { if (terminalJobsVisit === visit) revokeTerminalJobsVisit() })
+            onDismiss = { if (dialogActionsCurrent(lease) && terminalJobsVisit === visit) revokeTerminalJobsVisit() })
     }
     private fun terminalTaskSummary(session: app.daiyu.android.integration.tools.TerminalJobSession, state: String?): String {
         val environment = session.plan.configuration.linux?.label ?: "Android"
@@ -3727,17 +3782,18 @@ class MainActivity : ComponentActivity() {
             visit.hasMore = false; visit.nextOffset = 0; visit.output = ""; visit.historyError = null
             return
         }
+        val lease = ordinaryDialogLease ?: return
         visit.busy = true
         visit.historyError = null
         visit.historyPage = null; visit.hasMore = false; visit.nextOffset = 0
         lifecycleScope.launch {
             try {
                 val (snapshot, statuses) = withContext(Dispatchers.IO) {
-                    val snapshot = controller.terminalJobsOnWorker(conversation) { !visit.revoked.get() }
+                    val snapshot = controller.terminalJobsOnWorker(conversation) { lease.isActive && !visit.revoked.get() }
                     snapshot to snapshot.sessions.associate { session -> session.plan.runId.value to
                         controller.inspectTerminalJobOnWorker(conversation, session).optString("state") }
                 }
-                if (terminalJobsCurrent(visit)) {
+                if (terminalJobsPresented(visit)) {
                     visit.taskStatus = statuses
                     visit.sessions = snapshot.sessions
                     visit.history = snapshot.history
@@ -3745,7 +3801,7 @@ class MainActivity : ComponentActivity() {
                     visit.historyError = snapshot.error?.let { "无法读取任务记录" }
                 }
             } catch (_: Exception) {
-                if (terminalJobsCurrent(visit)) {
+                if (terminalJobsPresented(visit)) {
                     visit.historyError = "无法读取任务记录"
                 }
             } finally { visit.busy = false }
@@ -3756,15 +3812,16 @@ class MainActivity : ComponentActivity() {
         if (!terminalJobsCurrent(visit) || visit.busy || record !in visit.history) return
         val conversation = visit.conversation ?: return
         visit.outputId = record.jobId; visit.output = ""
+        val lease = ordinaryDialogLease ?: return
         visit.busy = true
         lifecycleScope.launch(Dispatchers.Main) {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    val head = controller.terminalJobHistoryPageOnWorker(conversation, record, offset, 1) { !visit.revoked.get() }
+                    val head = controller.terminalJobHistoryPageOnWorker(conversation, record, offset, 1) { lease.isActive && !visit.revoked.get() }
                     if (!head.optBoolean("ok")) head else controller.terminalJobHistoryPageOnWorker(conversation, record,
-                        (head.optLong("total_bytes") - 65536).coerceAtLeast(0), 65536) { !visit.revoked.get() }
+                        (head.optLong("total_bytes") - 65536).coerceAtLeast(0), 65536) { lease.isActive && !visit.revoked.get() }
                 }
-                if (terminalJobsCurrent(visit)) {
+                if (terminalJobsPresented(visit)) {
                     visit.output = result.toString(2) // Replace one bounded page; never accumulate the whole log.
                     visit.outputId = record.jobId
                     visit.historyPage = record
@@ -3772,7 +3829,7 @@ class MainActivity : ComponentActivity() {
                     visit.hasMore = result.optBoolean("ok") && result.optBoolean("has_more")
                 }
             } catch (_: Exception) {
-                if (terminalJobsCurrent(visit)) {
+                if (terminalJobsPresented(visit)) {
                     visit.output = "无法读取日志"
                     visit.hasMore = false
                 }
@@ -3785,16 +3842,20 @@ class MainActivity : ComponentActivity() {
         val conversation = visit.conversation ?: return
         visit.historyPage = null; visit.hasMore = false; visit.nextOffset = 0
         if (!stop) { visit.outputId = session.plan.runId.value; visit.output = "" }
+        val lease = ordinaryDialogLease ?: return
         visit.busy = true
         lifecycleScope.launch {
             var stopped = false
             try {
                 val result = withContext(Dispatchers.IO) {
                     // Recheck UI capability before worker admission; the original session/owner is immutable.
-                    if (stop) controller.stopTerminalJobOnWorker(conversation, session) { !visit.revoked.get() }
-                    else controller.terminalJobLogOnWorker(conversation, session)
+                    if (stop) controller.stopTerminalJobOnWorker(conversation, session) { lease.isActive && !visit.revoked.get() }
+                    else {
+                        check(lease.isActive && !visit.revoked.get())
+                        controller.terminalJobLogOnWorker(conversation, session)
+                    }
                 }
-                if (terminalJobsCurrent(visit)) {
+                if (terminalJobsPresented(visit)) {
                     stopped = stop && result.optBoolean("ok") && result.optBoolean("stopped")
                     if (!stop) visit.output = result.toString(2)
                     else if (!result.optBoolean("ok") || !result.optBoolean("stopped")) visit.historyError =
@@ -3802,7 +3863,7 @@ class MainActivity : ComponentActivity() {
                     visit.taskStatus = visit.taskStatus + (session.plan.runId.value to result.optString("state"))
                 }
             } catch (_: Exception) {
-                if (terminalJobsCurrent(visit)) {
+                if (terminalJobsPresented(visit)) {
                     if (stop) visit.historyError = "任务操作未确认" else visit.output = "任务操作未确认"
                 }
             } finally {
@@ -3996,9 +4057,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        generationOutputs?.let { outputs ->
+        generationOutputs?.takeIf { generationOutputsPresented() }?.let { outputs ->
+            val lease = ordinaryDialogLease
+            val request = generationOutputsRequest
+            val close = { if (dialogActionsCurrent(lease) && generationOutputsRequest === request) cancelGenerationOutputs() }
             val originalStaticVisit = staticGenerationVisit
-            app.daiyu.android.ui.components.DaiyuAlertDialog(onDismissRequest = ::cancelGenerationOutputs,
+            app.daiyu.android.ui.components.DaiyuAlertDialog(onDismissRequest = close,
                 title = { androidx.compose.material3.Text("生成产物") },
                 text = {
                     Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
@@ -4019,7 +4083,7 @@ class MainActivity : ComponentActivity() {
                             androidx.compose.material3.Text("静态 ${source.kind} · ${source.mimeType} · ${source.bytes} bytes · ${source.width}×${source.height}")
                             display.thumbnail?.let { bitmap -> androidx.compose.foundation.Image(bitmap = bitmap.asImageBitmap(),
                                 contentDescription = "分支静态生成图片", modifier = Modifier.fillMaxWidth()) }
-                            app.daiyu.android.ui.haptics.material.TextButton(onClick = { backupGuard { pickStaticGenerationOriginal(display.output, originalStaticVisit) } }) {
+                            app.daiyu.android.ui.haptics.material.TextButton(onClick = { if (dialogActionsCurrent(lease)) backupGuard { pickStaticGenerationOriginal(display.output, originalStaticVisit) } }) {
                                 androidx.compose.material3.Text("保存静态原件")
                             }
                         }
@@ -4035,20 +4099,20 @@ class MainActivity : ComponentActivity() {
                                     contentDescription = "备份中的历史生成图片", modifier = Modifier.fillMaxWidth())
                             }
                             app.daiyu.android.ui.haptics.material.TextButton(onClick = {
-                                backupGuard { pickHistoricalGenerationOriginal(history) }
+                                if (dialogActionsCurrent(lease)) backupGuard { pickHistoricalGenerationOriginal(history) }
                             }) { androidx.compose.material3.Text("保存历史原件") }
                         }
                     }
-                }, confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(onClick = ::cancelGenerationOutputs) {
+                }, confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(onClick = close) {
                     androidx.compose.material3.Text("关闭")
                 } })
         }
     }
 
-    private fun cancelBrowserDownloadVisit() {
+    private fun cancelBrowserDownloadVisit(preservePresentation: Boolean = false) {
         browserDownloadVisit?.active?.set(false)
         browserDownloadVisit = null
-        browserDownloadOutputs = null
+        if (!preservePresentation) browserDownloadOutputs = null
         pendingBrowserDownload?.let { selection ->
             // Do not clear another feature's picker or recycle this request code.
             if (pendingBackupRequest == selection.requestCode) pendingBackupRequest = null
@@ -4056,6 +4120,17 @@ class MainActivity : ComponentActivity() {
         pendingBrowserDownload = null
     }
 
+    private fun browserDownloadPresented(listing: BrowserDownloadListing) = activityUsable() &&
+        retainedPage == "chat" && !sidebarVisible && selected?.id == listing.visit.conversation &&
+        editorGeneration == listing.visit.generation
+    private fun resumeOutputPresentations() {
+        if (generationOutputsOwner != null) {
+            if (generationOutputsPresented()) reloadGenerationOutputs() else cancelGenerationOutputs()
+        }
+        browserDownloadOutputs?.let { listing ->
+            if (browserDownloadPresented(listing)) openBrowserDownloadOutputs() else cancelBrowserDownloadVisit()
+        }
+    }
     private fun browserDownloadVisitCurrent(visit: BrowserDownloadVisit) =
         visit.active.get() && browserDownloadVisit === visit && activityUsable() &&
             selected?.id == visit.conversation && editorGeneration == visit.generation &&
@@ -4072,8 +4147,10 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun BrowserDownloadOutputsSurface() {
-        browserDownloadOutputs?.takeIf { browserDownloadVisitCurrent(it.visit) }?.let { listing ->
-            app.daiyu.android.ui.components.DaiyuAlertDialog(onDismissRequest = { browserDownloadOutputs = null },
+        browserDownloadOutputs?.takeIf(::browserDownloadPresented)?.let { listing ->
+            val lease = ordinaryDialogLease
+            val close = { if (dialogActionsCurrent(lease) && browserDownloadOutputs === listing) cancelBrowserDownloadVisit() }
+            app.daiyu.android.ui.components.DaiyuAlertDialog(onDismissRequest = close,
                 title = { androidx.compose.material3.Text("浏览器已完成下载原件") },
                 text = {
                     Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
@@ -4081,13 +4158,13 @@ class MainActivity : ComponentActivity() {
                         listing.references.forEach { reference ->
                             androidx.compose.material3.Text("${reference.lease.owner.kind} · ${reference.size} bytes · SHA-256 ${reference.sha256}")
                             app.daiyu.android.ui.haptics.material.TextButton(
-                                enabled = controller.active == null && !controller.dataBusy,
+                                enabled = dialogActionsCurrent(lease) && browserDownloadVisitCurrent(listing.visit) && controller.active == null && !controller.dataBusy,
                                 modifier = Modifier.testTag("browser-download-save:${reference.id}"),
-                                onClick = { backupGuard { pickBrowserDownloadOriginal(listing, reference) } }
+                                onClick = { if (dialogActionsCurrent(lease)) backupGuard { pickBrowserDownloadOriginal(listing, reference) } }
                             ) { androidx.compose.material3.Text("另存为原文件") }
                         }
                     }
-                }, confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(onClick = { browserDownloadOutputs = null }) {
+                }, confirmButton = { app.daiyu.android.ui.haptics.material.TextButton(onClick = close) {
                     androidx.compose.material3.Text("关闭")
                 } })
         }
@@ -4130,21 +4207,32 @@ class MainActivity : ComponentActivity() {
         pendingStaticOriginal = null
     }
     private fun cancelGenerationOutputs() = clearGenerationOutputs(false)
-    private fun clearGenerationOutputs(preserveStaticSelection: Boolean, preserveMediaSelection: Boolean = false) {
+    private fun clearGenerationOutputs(preserveStaticSelection: Boolean, preserveMediaSelection: Boolean = false,
+        preservePresentation: Boolean = false) {
         if (!preserveMediaSelection) cancelGenerationMedia()
         if (!preserveStaticSelection) cancelStaticGenerationVisit()
         generationOutputsRequest = null
-        generationOutputs = null
-        historicalGenerationOutputs = null
-        staticGenerationOutputs = null
+        if (!preservePresentation) {
+            generationOutputsOwner = null
+            generationOutputs = null
+            historicalGenerationOutputs = null
+            staticGenerationOutputs = null
+        }
     }
 
     private fun openGenerationOutputs() {
         val conversation = selected ?: return
         if (!activityUsable() || !selectionReady || retainedPage != "chat" || sidebarVisible) return
         cancelGenerationOutputs()
+        generationOutputsOwner = conversation.id to editorGeneration
+        reloadGenerationOutputs()
+    }
+    private fun reloadGenerationOutputs() {
+        val conversation = selected ?: return
+        if (!generationOutputsPresented() || !voiceForeground) return
         val request = Any().also { generationOutputsRequest = it }
-        val visit = java.util.concurrent.atomic.AtomicBoolean(true).also { staticGenerationVisit = it }
+        val visit = staticGenerationVisit?.takeIf { it.get() }
+            ?: java.util.concurrent.atomic.AtomicBoolean(true).also { staticGenerationVisit = it }
         val generation = editorGeneration
         if (!controller.loadGenerationOutputs(conversation.id) { outputs ->
             if (activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
@@ -4803,12 +4891,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun cancelBrowserEditor(preserveGenerationSelection: Boolean = false, preserveStaticSelection: Boolean = false,
-        preserveMediaSelection: Boolean = false) {
+        preserveMediaSelection: Boolean = false, preserveOutputPresentation: Boolean = false) {
         cancelMcpEditor()
         cancelTerminalEditor()
         cancelVirtualDisplayEditor()
         if (!preserveGenerationSelection) cancelGenerationEditor()
-        clearGenerationOutputs(preserveStaticSelection, preserveMediaSelection)
+        clearGenerationOutputs(preserveStaticSelection, preserveMediaSelection, preservePresentation = preserveOutputPresentation)
         browserRequest = null
         browserPreparing = false
         val pending = browserApproval
@@ -5293,6 +5381,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume(); suspendMessageActionEditor(); voiceForeground = true; speechHost.setForeground(true)
+        resumeOrdinaryDialogActions()
         if (retainedPage == "session-gateway" && gatewayReloadPending) loadSessionGateway(restore = true)
         chatReferencePick?.pickerAway = false
         editImagePick?.pickerAway = false
@@ -5357,7 +5446,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onPause() {
         suspendMessageActionEditor()
-        revokeWorkspaceVisit()
+        suspendOrdinaryDialogActions()
         resetRootExitConfirmation()
         cancelPaneConversationSelection()
         controller.detachCommandApprovalUi(commandApprovalUi)
@@ -5367,7 +5456,6 @@ class MainActivity : ComponentActivity() {
             gatewayReloadPending = true; gatewayReplacementAuthorized = false
         }
         revokeContextManagementEntry(closeRoute = false)
-        dismissChatModels()
         historySearchEpoch++
         val mediaPicker = pendingGenerationMediaOriginal
         val preserveMedia = mediaPicker != null && mediaPicker.pickerHopPending && mediaPicker.active.get() &&
@@ -5380,7 +5468,7 @@ class MainActivity : ComponentActivity() {
             val preserve = request.live && request.firstPickerHop && !request.returned &&
                 chatReferenceAvailable() && chatReferenceMatches(request)
             request.firstPickerHop = false; request.pickerAway = preserve
-            if (!preserve) revokeChatReferencePick()
+            if (!preserve) revokeChatReferencePick(preserveShortcut = true)
         }
         editImagePick?.let { request ->
             val preserve = request.live && request.firstPickerHop && !request.returned &&
@@ -5395,7 +5483,6 @@ class MainActivity : ComponentActivity() {
         // Pending location UI cannot survive backgrounding. An already handed-off external GUI
         // overlay MUST survive this pause so the user can switch to the actual target app.
         taskLocationVisit?.let(::cancelTaskLocation)
-        revokeTerminalJobsVisit()
         val preserveLegacy = legacyPickerHop && retainedPage == "legacy-library" &&
             pendingLegacy != null
         legacyPickerHop = false
@@ -5406,7 +5493,7 @@ class MainActivity : ComponentActivity() {
         // revokes it, even if a blocked provider has not returned (not a drain).
         val picker = pendingBrowserDownload
         if (picker == null || pendingBackupRequest != picker.requestCode ||
-            !browserDownloadVisitCurrent(picker.visit)) cancelBrowserDownloadVisit()
+            !browserDownloadVisitCurrent(picker.visit)) cancelBrowserDownloadVisit(preservePresentation = true)
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null
         (application as ChatApplication).let { app ->
@@ -5432,7 +5519,7 @@ class MainActivity : ComponentActivity() {
         // when the picker never returned; a consumed save keeps only its original atomic visit.
         staticPicker?.pickerHopPending = false
         cancelBrowserEditor(preserveGenerationSelection = selectionOnly, preserveStaticSelection = preserveStatic,
-            preserveMediaSelection = preserveMedia)
+            preserveMediaSelection = preserveMedia, preserveOutputPresentation = true)
         speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
         if (selectionReady) selections[selected?.id] = selectionStart to selectionEnd
@@ -5455,12 +5542,10 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
-        composerShortcutPick = null
         closeBrowserVisualVisit(clearTarget = false)
-        if (chatReferencePick?.pickerAway != true) revokeChatReferencePick()
+        if (chatReferencePick?.pickerAway != true) revokeChatReferencePick(preserveShortcut = true)
         revokePlatformActionVisit()
         revokeContextManagementEntry(closeRoute = false)
-        revokeTerminalJobsVisit()
         suspendMessageActionEditor()
         gatewayOwner?.revoke()
         controller.invalidateVideo(videoUi)
@@ -5475,6 +5560,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        suspendOrdinaryDialogActions()
         humanBrowsers.values.forEach { it.close() }
         humanBrowsers.clear()
         cancelGenerationMedia()
@@ -6647,13 +6733,17 @@ class MainActivity : ComponentActivity() {
         chatModelProviderEditor = null; chatModelPicker = null; chatModelSettings = null; chatModelSession = null; chatModelOwner = null
         chatModelSelectionFailed = false; chatModelProviderChoices = emptyMap()
     }
-    private fun reloadChatModels(owner: Any) {
+    private fun reloadChatModels(owner: Any, retainPresentation: Boolean = false) {
         if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner) return
         chatModelCancelled.set(true)
         val cancelled = AtomicBoolean(false); chatModelCancelled = cancelled
-        chatModelProviderEditor = null; chatModelSession = null; chatModelSettings = null; chatModelSelectionFailed = false
-        chatModelProviderChoices = emptyMap()
-        chatModelPicker = ChatModelPickerState("", emptyList(), loading = true, enabled = false)
+        if (!retainPresentation) {
+            chatModelProviderEditor = null; chatModelSession = null; chatModelSettings = null
+            chatModelProviderChoices = emptyMap()
+        }
+        chatModelSelectionFailed = false
+        chatModelPicker = chatModelPicker?.takeIf { retainPresentation }?.copy(loading = true, enabled = false, switching = false)
+            ?: ChatModelPickerState("", emptyList(), loading = true, enabled = false)
         lifecycleScope.launch {
             val loaded = withContext(Dispatchers.IO) { runCatching {
                 val registry = controller.providers.snapshot()
@@ -6719,19 +6809,20 @@ class MainActivity : ComponentActivity() {
         val saved = chatModelSettings
         val target = chatModelProviderChoices[providerId] ?: return
         val cancelled = chatModelCancelled
+        val lease = ordinaryDialogLease ?: return
         try {
             requireActivityUsable()
             check(!chatModelSelectionFailed && picker.enabled && !picker.loading && retainedPage == "chat" && controller.ready &&
                 controller.active == null && !controller.dataBusy)
             chatModelPicker = picker.copy(switching = true)
             controller.selectActiveProviderCatalogModel(chatModelProviderEditor, saved, target.editor, target.settings, ticket,
-                cancelled = { cancelled.get() }) { success ->
+                cancelled = { cancelled.get() || !lease.isActive }) { success ->
                 if (activityUsable()) {
                     if (success) {
                         controller.revokeImageProvider()
                         refreshConfirmedModelLabel()
                     }
-                    if (chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
+                    if (dialogActionsCurrent(lease) && chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
                         if (success) { dismissChatModels(); refresh() }
                         else {
                             chatModelSelectionFailed = true

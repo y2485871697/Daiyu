@@ -10,6 +10,7 @@ internal class ProviderPageUiState {
         private set
     val modelTab = mutableStateOf(false)
     val modelQuery = mutableStateOf("")
+    val selectedModelIds = mutableStateOf<Set<String>?>(null)
 
     fun checkpointModelPositionForResume() {
         val previous = modelListState

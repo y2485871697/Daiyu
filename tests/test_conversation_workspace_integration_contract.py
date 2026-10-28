@@ -6,9 +6,13 @@ class WorkspaceIntegration(unittest.TestCase):
   s=(r/'MainActivity.kt').read_text()
   self.assertIn('onOpenWorkspace = { if (currentChat()) openConversationWorkspace() }',s)
   self.assertIn('workspaceOpenToken = token',s)
-  self.assertIn('workspaceOpenToken === token && activityUsable() && voiceForeground',s)
+  self.assertIn('workspaceOpenToken === token && activityUsable() &&',s)
+  self.assertIn('workspacePresented(visit) && voiceForeground',s)
   self.assertIn('selected?.id == owner && editorGeneration == generation',s)
-  for n in ['override fun onPause()', 'private var retainedPage: String', '@Volatile private var selected: Conversation?']:
+  pause=s.split('override fun onPause()',1)[1].split('override fun onStop()',1)[0]
+  self.assertIn('suspendOrdinaryDialogActions()',pause)
+  self.assertNotIn('revokeWorkspaceVisit()',pause)
+  for n in ['private var retainedPage: String', '@Volatile private var selected: Conversation?']:
    self.assertIn('revokeWorkspaceVisit()',s.split(n,1)[1][:650])
  def test_worker_owns_pin_before_cancellable_delivery(self):
   s=(r/'MainActivity.kt').read_text().split('private fun createTerminalSession',1)[1].split('private fun openTerminal',1)[0]

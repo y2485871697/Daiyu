@@ -54,7 +54,8 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
         select("bulk-first"); mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         node("local-model-selection-actions").assertDoesNotExist(); node("page:主模型服务商").assertExists()
         select("bulk-first"); realPauseResume(activity)
-        node("local-model-selection-actions").assertDoesNotExist()
+        node("local-model-selection-actions").assertIsDisplayed()
+        row("bulk-first").assertIsOn()
         assertEquals(before, fixture.settings.localModelCatalogSnapshot()); assertEquals(saved, fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
@@ -115,9 +116,13 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
         val oldConfirm = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[
             androidx.compose.ui.semantics.SemanticsActions.OnClick].action)
         realPauseResume(activity)
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("正在读取本地模型").fetchSemanticsNodes().isEmpty() }
-        node("local-model-selection-actions").assertDoesNotExist()
-        select("bulk-second"); node("local-model-delete-selected").performClick()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(hasTestTag("local-model-delete-selected") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        node("local-model-selection-actions").assertIsDisplayed()
+        row("bulk-first").assertIsOn()
+        row("bulk-second").performClick(); node("local-model-delete-selected").performClick()
         awaitUniqueTag("dialog-confirm"); awaitNodeWindowFocus(node("dialog-confirm")); awaitVisualIdle()
         mainThread { oldConfirm() }
         node("dialog-confirm").assertExists()

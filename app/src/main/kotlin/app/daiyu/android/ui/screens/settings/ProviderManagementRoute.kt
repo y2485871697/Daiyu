@@ -178,7 +178,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             if (!current(p) || serial != request) return@launch
             checkingRegistry = false
             result.fold(onSuccess = { (value, detailCurrent, cards) ->
-                if (registry?.revision != value.revision) selectedSlots = null
+                selectedSlots = selectedSlots?.intersect(value.providers.map { it.slotId }.toSet())
                 registry = value
                 summaries = cards
                 if (!detailCurrent && detail === previousDetail) {
@@ -207,11 +207,20 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 val (configurationRevision, editing) = repo.withEditor(editor) { store ->
                     store.modelCatalog.readConfiguration { revision -> revision to store.loadForEditing() }
                 }
-                val identity = repo.withEditor(editor) { it.localModelCatalogSnapshot()?.providerIdentity }
+                val catalog = repo.withEditor(editor) { it.localModelCatalogSnapshot() }
+                val identity = catalog?.providerIdentity
                 val balance = controller.providerBalances.get(slot).store.configurationForEditing()
+                val clearedDeletedModel = restore != null && restore.editor == editor &&
+                    restore.editing.settings.model.isNotBlank() && editing.settings.model.isEmpty() &&
+                    restore.editing.copy(settings = restore.editing.settings.copy(model = "")) == editing &&
+                    restore.balanceConfiguration == balance &&
+                    retained?.catalogIdentity == identity && catalog != null &&
+                    catalog.models.none { it.id == restore.editing.settings.model }
                 repo.withEditor(editor) { }
                 ProviderDetail(editor, registration.name, registration.enabled, editing, configurationRevision,
-                    repo.catalogPersistence(editor), identity, balance, snapshot)
+                    repo.catalogPersistence(editor), identity, balance, snapshot).also { loaded ->
+                    if (clearedDeletedModel) loaded.pageUi = checkNotNull(restore).pageUi
+                }
             } }
             if (!current(p) || serial != request) return@launch
             loading = false
@@ -274,10 +283,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 resumed = false; permit.revoke(); detail?.revoke(); creating?.balanceTestJob?.cancel()
                 creating?.let { it.draft = it.draft.copy(protocolChangeAuthorized = false,
                     requestOptionsReplacementAuthorized = false, headersReplacementAuthorized = false) }
-                clearTransientPrompts(); checkingRegistry = false
+                confirmation = null; checkingRegistry = false
             } else if (event == Lifecycle.Event.ON_RESUME) {
                 permit = ProviderPagePermit(); resumed = true
-                pendingOpen = true
+                checkingRegistry = true; pendingOpen = true
             }
         }
         lifecycle.addObserver(observer)
@@ -298,7 +307,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 target != null && creating === target && target.oauthOnly && target.registration.registeredSlot == null) {
                 target.attachOAuth(auth)
                 target.error = null
-                pendingOpen = false
+                checkingRegistry = false; pendingOpen = false
             } else discardOAuth(auth)
             // Clear the effect key only after the final suspension and credential hand-off.
             oauthResult = null; oauthReturned = false; oauthAttempt = null; oauthRegistryRevision = null; oauthDraft = null
@@ -642,7 +651,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 navigationEnabled = modelDeletionEnabled,
                 onSelect = { if (current(p) && enabled && registry === displayedRegistry && selectedSlots == null) selectedSlots = setOf(it.slotId) },
                 selectedSlots = selectedSlots,
-                onSelectionChange = { if (current(p) && enabled && selection != null && selectedSlots === selection) selectedSlots = it },
+                onSelectionChange = { if (current(p) && enabled && registry === displayedRegistry && selection != null && selectedSlots === selection) selectedSlots = it },
                 onCancelSelection = { if (current(p) && enabled && selectedSlots === selection) clearTransientPrompts() },
                 onDeleteSelected = {
                     val expected = displayedRegistry

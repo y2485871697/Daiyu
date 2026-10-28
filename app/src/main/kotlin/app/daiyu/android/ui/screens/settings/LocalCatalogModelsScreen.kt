@@ -88,11 +88,13 @@ internal fun <T> LocalCatalogModelsScreen(
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     backPreviewEnabled: Boolean = true,
     editingEnabled: Boolean = enabled,
+    selectionState: MutableState<Set<String>?> = remember(providerIdentity, persistence) { mutableStateOf(null) },
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
     val currentEnabled by rememberUpdatedState(enabled)
     val visit = remember(providerIdentity, persistence) { AtomicBoolean(true) }
+    var selectionLease by remember(providerIdentity, persistence) { mutableStateOf(app.daiyu.android.ui.components.DialogActionLease()) }
     var snapshot by remember(providerIdentity, persistence) { mutableStateOf<SavedModelCatalogSnapshot<T>?>(null) }
     var request by remember { mutableStateOf<AtomicBoolean?>(null) }
     var loaded by remember { mutableStateOf(false) }
@@ -106,23 +108,25 @@ internal fun <T> LocalCatalogModelsScreen(
     var editorStale by remember { mutableStateOf(false) }
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var deleting by remember { mutableStateOf<CatalogModelSelection<T>?>(null) }
-    var selectedIds by remember(providerIdentity, persistence) { mutableStateOf<Set<String>?>(null) }
+    var selectedIds by selectionState
     var deletingSelected by remember { mutableStateOf<List<CatalogModelSelection<T>>?>(null) }
     fun current() = visit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun cancel() {
+        selectionLease.revoke()
         request?.set(true); request = null; snapshot = null; loaded = false; editing = null; deleting = null; adding = null
         selectedIds = null; deletingSelected = null
     }
     fun pause() {
+        selectionLease.revoke()
         request?.set(true); request = null; deleting = null
-        selectedIds = null; deletingSelected = null
+        deletingSelected = null
         // New identities fence pre-pause callbacks without unmounting the form or its input.
         editing = editing?.copy()
         adding = adding?.let { Any() }
     }
     fun reload() {
         if (!current() || request != null) return
-        deleting = null; selectedIds = null; deletingSelected = null; loaded = false
+        deleting = null; deletingSelected = null; loaded = false
         val token = AtomicBoolean(false); request = token
         scope.launch {
             try {
@@ -137,6 +141,7 @@ internal fun <T> LocalCatalogModelsScreen(
                         editorStale = true
                         notice = "目录已变化，草稿已保留；请取消后重新打开。"
                     }
+                    selectedIds = selectedIds?.intersect(value?.models.orEmpty().map { it.id }.toSet())
                     snapshot = value; loaded = true
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -220,10 +225,13 @@ internal fun <T> LocalCatalogModelsScreen(
     DisposableEffect(lifecycle, visit) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) { resumed = false; pause() }
-            if (event == Lifecycle.Event.ON_RESUME) { resumed = true; reload() }
+            if (event == Lifecycle.Event.ON_RESUME) { selectionLease = app.daiyu.android.ui.components.DialogActionLease(); resumed = true; reload() }
         }
         lifecycle.addObserver(observer)
-        onDispose { visit.set(false); cancel(); lifecycle.removeObserver(observer) }
+        onDispose {
+            visit.set(false); selectionLease.revoke(); request?.set(true); request = null
+            lifecycle.removeObserver(observer)
+        }
     }
     LaunchedEffect(visit) { reload() }
     val back = { if (current()) {
@@ -265,8 +273,10 @@ internal fun <T> LocalCatalogModelsScreen(
             onDismiss = { if (deletingSelected === selections) deletingSelected = null })
     }
     val selection = selectedIds
+    val capturedSelectionLease = selectionLease
+    fun selectionCurrent() = current() && capturedSelectionLease.isActive && selectionLease === capturedSelectionLease
     fun changeSelection(value: Set<String>) {
-        if (current() && currentEnabled && request == null && selectedIds === selection) selectedIds = value
+        if (selectionCurrent() && currentEnabled && request == null && selectedIds === selection) selectedIds = value
     }
     Column(Modifier.fillMaxSize().background(settingsPageBackground())) {
         SettingsScaffoldPage(pageTitle, onBack = back, modifier = Modifier.weight(1f),
@@ -331,7 +341,7 @@ internal fun <T> LocalCatalogModelsScreen(
                         onClick = { if (selection != null) changeSelection(
                             if (model.id in selection) selection - model.id else selection + model.id) },
                         onLongClickLabel = "选择模型", onLongClick = {
-                            if (current() && currentEnabled && request == null && selectedIds == null && editing == null && adding == null && deleting == null && deletingSelected == null && ticket != null && matches(ticket)) {
+                            if (selectionCurrent() && currentEnabled && request == null && selectedIds == null && editing == null && adding == null && deleting == null && deletingSelected == null && ticket != null && matches(ticket)) {
                                 notice = null; selectedIds = setOf(model.id)
                             }
                         })) {
@@ -383,18 +393,22 @@ internal fun <T> LocalCatalogModelsScreen(
                 .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)
                 .testTag("local-model-selection-actions"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val accents = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)
+                val cancelSelection = { if (selectionCurrent() && selectedIds === selection) { selectedIds = null; deletingSelected = null } }
+                val deleteSelection = {
+                    if (selectionCurrent() && currentEnabled && request == null && selectedIds === selection) {
+                        val tickets = snapshot?.let { base -> selection.mapNotNull(base::selectionFor) }.orEmpty()
+                        if (tickets.size == selection.size && tickets.all(::matches)) deletingSelected = tickets
+                    }
+                }
                 TextButton(text = "取消", enabled = editorEnabled,
-                    onClick = { if (current() && selectedIds === selection) { selectedIds = null; deletingSelected = null } },
+                    onClick = cancelSelection,
                     colors = ButtonDefaults.textButtonColors(color = accents.secondaryContainer, textColor = accents.onSecondary),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("local-model-cancel-selection"))
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("local-model-cancel-selection")
+                        .semantics { this[RetainedListSelectionAction] = cancelSelection })
                 TextButton(text = "删除", enabled = editorEnabled && selection.isNotEmpty(),
-                    onClick = {
-                        if (current() && currentEnabled && request == null && selectedIds === selection) {
-                            val tickets = snapshot?.let { base -> selection.mapNotNull(base::selectionFor) }.orEmpty()
-                            if (tickets.size == selection.size && tickets.all(::matches)) deletingSelected = tickets
-                        }
-                    }, colors = deletionButtonColors(),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("local-model-delete-selected"))
+                    onClick = deleteSelection, colors = deletionButtonColors(),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("local-model-delete-selected")
+                        .semantics { this[RetainedListSelectionAction] = deleteSelection })
             }
         }
     }

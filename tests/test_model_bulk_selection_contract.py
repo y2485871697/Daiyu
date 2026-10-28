@@ -20,9 +20,25 @@ class ModelBulkSelectionContract(unittest.TestCase):
                   'previewEnabled = backPreviewEnabled && selectedIds == null', 'deletingSelected !== selections',
                   'selectedIds === selection', 'selections.all(::matches)'):
             self.assertIn(f,s)
-        for start,end in (('fun pause()', 'fun reload()'), ('fun reload()', 'fun matches('), ('fun cancel()', 'fun pause()')):
+        for start,end in (('fun pause()', 'fun reload()'), ('fun reload()', 'fun matches(')):
             section=s.split(start,1)[1].split(end,1)[0]
-            self.assertIn('selectedIds = null', section); self.assertIn('deletingSelected = null',section)
+            self.assertNotIn('selectedIds = null', section)
+            self.assertIn('deletingSelected = null', section)
+        cancel=s.split('fun cancel()',1)[1].split('fun pause()',1)[0]
+        self.assertIn('selectedIds = null', cancel)
+        self.assertIn('selectionLease.revoke()', s.split('fun pause()',1)[1].split('fun reload()',1)[0])
+        self.assertIn('capturedSelectionLease.isActive && selectionLease === capturedSelectionLease', s)
+        self.assertGreaterEqual(s.count('selectionCurrent() &&'), 4)
+        self.assertIn('selectedIds = selectedIds?.intersect(value?.models.orEmpty().map { it.id }.toSet())', s)
+    def test_selection_resume_renews_capability_and_has_real_home_regression(self):
+        source = (UI/'LocalCatalogModelsScreen.kt').read_text()
+        self.assertIn('selectionLease = app.daiyu.android.ui.components.DialogActionLease(); resumed = true; reload()', source)
+        runtime = (ROOT/'app/src/androidTest/kotlin/app/daiyu/android/SelectionPresentationLifecycleActivityTest.kt').read_text()
+        for entry in ('testModelHiddenSelectionSurvivesRepeatedPauseAndHomeWithOldButtonsRevoked',
+                      'testModelRevisionChangePrunesOnlyRemovedIdsAndKeepsSurvivingSelection',
+                      'GLOBAL_ACTION_HOME', 'oldCancel(); oldDelete()', 'assertIsNotEnabled()'):
+            self.assertIn(entry, runtime)
+
     def test_settings_button_is_sibling_of_full_content_column(self):
         s=(UI/'LocalCatalogModelsScreen.kt').read_text()
         self.assertIn('val ticket = snapshot?.selectionFor(model.id)',s)

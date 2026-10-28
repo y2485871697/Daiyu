@@ -79,6 +79,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     val modelListState = pageUi?.modelListState ?: rememberLazyListState()
     val modelQuery = pageUi?.modelQuery ?: remember(providerIdentity, persistence) { mutableStateOf("") }
     val selectedTab = pageUi?.modelTab ?: remember(providerIdentity, persistence) { mutableStateOf(false) }
+    val selectedModelIds = pageUi?.selectedModelIds ?: remember(providerIdentity, persistence) { mutableStateOf<Set<String>?>(null) }
     var modelTab by selectedTab
     var localRevision by remember { mutableStateOf(0L) }
     val fetch: (ModelSettingsDraftUi) -> Unit = { value ->
@@ -101,21 +102,21 @@ internal fun <T> ProviderCatalogSettingsScreen(
     val tabs: LazyListScope.() -> Unit = {
         if (twoTabs) item(key = "provider-tabs") {
             ProviderSettingsTabs(modelTab, modelDeletionEnabled && !state.saving) { selected ->
-                if (ownerCurrent()) { session.invalidate(); modelTab = selected }
+                if (ownerCurrent()) { session.invalidate(); selectedModelIds.value = null; modelTab = selected }
             }
         }
     }
     var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
     PageBackStack(if (managingLocal && localModelActions != null) "local-models" else null) {
         if (managingLocal && localModelActions != null) {
-            LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, modelDeletionEnabled, editingEnabled = enabled, onBack = { managingLocal = false },
-                listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior)
+            LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, modelDeletionEnabled, editingEnabled = enabled, onBack = { selectedModelIds.value = null; managingLocal = false },
+                listState = modelListState, queryState = modelQuery, selectionState = selectedModelIds, scrollBehavior = modelScrollBehavior)
             return@PageBackStack
         }
         if (twoTabs && modelTab && localModelActions != null) {
             key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, modelDeletionEnabled && !state.saving, editingEnabled = enabled,
                 onBack = onBack, pageTitle = pageTitle, managementEndpoint = draft.endpoint,
-                listState = modelListState, queryState = modelQuery, scrollBehavior = modelScrollBehavior,
+                listState = modelListState, queryState = modelQuery, selectionState = selectedModelIds, scrollBehavior = modelScrollBehavior,
                 fetchingModels = state.loading, onFetchModels = if (enabled && !state.loading && !state.saving) ({ fetch(draft) }) else null, headerContent = {
                     tabs()
                     item {
@@ -125,7 +126,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
         } else ModelSettingsScreen(
             pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs, providerName = providerName,
             listState = configurationListState, speechOnly = speechOnly,
-            onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
+            onManageLocalModels = localModelActions?.let { { session.invalidate(); selectedModelIds.value = null; managingLocal = true } },
             engineeringUi = engineeringUi,
             testConnection = testConnection?.let { test -> { value, cancelled, deliver ->
                 session.invalidate(); test(value, cancelled, deliver)

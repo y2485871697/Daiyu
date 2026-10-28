@@ -169,8 +169,8 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                     .testTag("markdown-code-viewport")
                     .then(if (verticalScrollEnabled) Modifier.nestedScroll(containedScroll) else Modifier)
                     .verticalScroll(vertical, enabled = verticalScrollEnabled).horizontalScroll(horizontal)
-                    .padding(12.dp)) {
-                    BasicText(text, Modifier.testTag("markdown-code-text"), softWrap = false,
+                    .padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    BasicText(markdownCodeDisplayText(block, text), Modifier.testTag("markdown-code-text"), softWrap = false,
                         style = TextStyle(color = colors.text, fontFamily = FontFamily.Monospace,
                             fontSize = 14.sp, lineHeight = 22.sp, textAlign = TextAlign.Left))
                 }

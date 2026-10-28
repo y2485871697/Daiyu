@@ -771,8 +771,9 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         val siteText = annotation(site)
         assertTrue(siteText.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
         assertEquals(1, siteText.getLinkAnnotations(0, siteText.length).size)
-        val codeNode = ui.onNodeWithText(code, useUnmergedTree = true)
-        assertTrue(annotation(codeNode).getLinkAnnotations(0, code.length).isEmpty())
+        val displayCode = code.removeSuffix("\n")
+        val codeNode = ui.onNodeWithText(displayCode, useUnmergedTree = true)
+        assertTrue(annotation(codeNode).getLinkAnnotations(0, displayCode.length).isEmpty())
         val unsafe = "<div>raw</div> [x](javascript:alert)"
         val unsafeText = annotation(ui.onNodeWithText(unsafe, useUnmergedTree = true))
         assertTrue(unsafeText.getLinkAnnotations(0, unsafeText.length).isEmpty())
@@ -820,6 +821,33 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue(opened.isEmpty())
     }
 
+    fun testClosedCodeHasCompactVerticalSpacingAndKeepsExactPayload() {
+        val original = "  echo 代鱼  \n"
+        val density = activity.resources.displayMetrics.density
+        show {
+            CompositionLocalProvider(LocalDensity provides Density(density, fontScale = 1f)) {
+                Column(Modifier.width(300.dp)) {
+                    MessageMarkdown("```sh\n${original}```")
+                }
+            }
+        }
+        awaitNodes(hasTestTag("markdown-code-block"))
+        val text = ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true)
+        text.assertTextEquals(original.removeSuffix("\n"))
+        val layouts = mutableListOf<TextLayoutResult>()
+        text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        assertEquals("closing fence must not add an empty display line", 1, layouts.single().lineCount)
+        val textBounds = text.fetchSemanticsNode().boundsInRoot
+        val viewportBounds = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals("compact top padding", 4f * density, textBounds.top - viewportBounds.top, 2f)
+        assertEquals("compact bottom padding", 4f * density, viewportBounds.bottom - textBounds.bottom, 2f)
+        ui.onNodeWithTag("markdown-code-copy", useUnmergedTree = true).performClick()
+        mainThread {
+            val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            assertEquals(original, clipboard.primaryClip!!.getItemAt(0).text.toString())
+        }
+    }
+
     fun testCodeKeepsReadableWidthAndAdaptsHeightAcrossUpdates() {
         var code by mutableStateOf("ls -la")
         val density = activity.resources.displayMetrics.density
@@ -848,7 +876,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertReadableWidth()
         val oneLineHeight = viewportHeight()
         val textHeight = ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
-        assertEquals("one line needs only its text and padding", textHeight + 24f * density, oneLineHeight, 2f)
+        assertEquals("one line needs only its text and padding", textHeight + 8f * density, oneLineHeight, 2f)
         assertTrue("the cap is not a minimum height", oneLineHeight < 128f * density)
         assertEquals(0f, verticalRange().maxValue(), 1f)
         assertEquals(0f, horizontalRange().maxValue(), 1f)
@@ -868,7 +896,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue("height grows with the visible lines", viewportHeight() > oneLineHeight + 1f)
         assertTrue("three lines do not fill the maximum viewport", viewportHeight() < maxBodyHeightPx - 1f)
         val threeLineTextHeight = ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
-        assertEquals("three lines leave no unused body height", threeLineTextHeight + 24f * density, viewportHeight(), 2f)
+        assertEquals("three lines leave no unused body height", threeLineTextHeight + 8f * density, viewportHeight(), 2f)
         assertEquals(0f, verticalRange().maxValue(), 1f)
         ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
 
@@ -1120,7 +1148,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             val growingHeight = viewport.fetchSemanticsNode().boundsInRoot.height
             assertTrue("stream grows naturally before the cap", growingHeight > initialHeight + 1f)
             val growingTextHeight = ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
-            assertEquals("stream has no extra height below the cap", growingTextHeight + 24f * activity.resources.displayMetrics.density, growingHeight, 2f)
+            assertEquals("stream has no extra height below the cap", growingTextHeight + 8f * activity.resources.displayMetrics.density, growingHeight, 2f)
             assertEquals(0f, viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue(), 1f)
             ui.onNodeWithTag("markdown-code-unlock", useUnmergedTree = true).assertDoesNotExist()
             mainThread { code = code.copy(text = (1..60).joinToString("\n") { "echo $it" }) }

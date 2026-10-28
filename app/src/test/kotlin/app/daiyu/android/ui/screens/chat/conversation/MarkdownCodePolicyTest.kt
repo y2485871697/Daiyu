@@ -27,4 +27,21 @@ class MarkdownCodePolicyTest {
         val code = MarkdownBlock.Code("echo 代鱼\n", "sh", closed = false)
         assertFalse(markdownCodeProducing(code, Int.MAX_VALUE, generationComplete = true))
     }
+    @Test fun closedCodeHidesOnlyTheFinalLineTerminatorWithoutChangingPayload() {
+        listOf("", "\n", "echo hi", "echo hi\n", "\n  echo 代鱼  \n\n", "\tvalue \n").forEach { original ->
+            val code = MarkdownBlock.Code(original, "sh", closed = true)
+            assertEquals(original.removeSuffix("\n"), markdownCodeDisplayText(code, original))
+            assertEquals(original, code.text)
+        }
+    }
+    @Test fun openOrPartiallyRevealedCodeKeepsItsCurrentTrailingLine() {
+        val original = "echo first\necho second\n"
+        val open = MarkdownBlock.Code(original, "sh", closed = false)
+        assertEquals(original, markdownCodeDisplayText(open, original))
+        val closed = open.copy(closed = true)
+        val partial = "echo first\n"
+        assertEquals(partial, markdownCodeDisplayText(closed, partial))
+        assertEquals("", markdownCodeDisplayText(closed, ""))
+    }
+
 }

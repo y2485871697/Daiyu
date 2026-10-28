@@ -32,6 +32,15 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertNotIn("requiredWidth", self.code)
         self.assertNotIn("unbounded = true", self.code)
 
+    def test_body_uses_compact_vertical_padding_and_display_only_newline_projection(self):
+        self.assertIn(".padding(horizontal = 12.dp, vertical = 4.dp)", self.code)
+        self.assertIn('BasicText(markdownCodeDisplayText(block, text), Modifier.testTag("markdown-code-text")', self.code)
+        policy = (BASE / "MarkdownCodePolicy.kt").read_text()
+        self.assertIn("block.closed && visibleText.length == block.text.length", policy)
+        self.assertIn('visibleText.removeSuffix("\\n")', policy)
+        self.assertNotIn(".trim(", policy)
+        self.assertNotIn(".trimEnd(", policy)
+
     def test_header_actions_have_exact_order_and_no_extra_visible_labels(self):
         for tag in ("download", "expand", "unlock", "copy"):
             self.assertIn('"markdown-code-' + tag + '"', self.code)

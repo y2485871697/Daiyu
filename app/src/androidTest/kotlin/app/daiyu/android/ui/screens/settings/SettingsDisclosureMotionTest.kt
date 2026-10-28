@@ -104,13 +104,27 @@ class SettingsDisclosureMotionTest private constructor(
             toggle()
             ui.mainClock.advanceTimeBy(96)
             val opening = height()
+            assertTrue("opening must be in flight", opening > collapsed)
             mainThread { expanded.value = false }
+            val closingStartTime = ui.mainClock.currentTime
+            val closingStart = height()
+            val closingTop = afterTop()
+            assertEquals(closingStartTime, ui.mainClock.currentTime)
             ui.mainClock.advanceTimeBy(48)
             val reversing = height()
-            assertTrue(reversing < opening && reversing > collapsed)
+            assertTrue("closing must move down: start=$closingStart actual=$reversing collapsed=$collapsed",
+                reversing < closingStart)
+            assertTrue("closing must remain in flight", reversing > collapsed)
+            assertTrue("following row must move up while closing", afterTop() < closingTop)
             mainThread { expanded.value = true }
+            val reopeningStartTime = ui.mainClock.currentTime
+            val reopeningStart = height()
+            val reopeningTop = afterTop()
+            assertEquals(reopeningStartTime, ui.mainClock.currentTime)
+            assertTrue("reverse before fully collapsed", reopeningStart > collapsed)
             ui.mainClock.advanceTimeBy(48)
-            assertTrue(height() > reversing)
+            assertTrue("reopening must move up: start=$reopeningStart actual=${height()}", height() > reopeningStart)
+            assertTrue("following row must move down while reopening", afterTop() > reopeningTop)
             ui.mainClock.advanceTimeBy(400)
             ui.onAllNodesWithTag("motion-field").assertCountEquals(1)
             toggle()

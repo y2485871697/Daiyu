@@ -94,7 +94,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
             assertFalse(checkNotNull(fixture.controller.runState(owner)).pauseRequested)
             assertEquals(1L, session.cancelled.count)
         }
-        val root = ui.onRoot()
+        val root = ui.onNode(isRoot() and hasAnyDescendant(hasTestTag("chat-draft")))
         node("chat-control").assertIsDisplayed().assertIsEnabled().performTouchInput { down(center) }
         try {
             ui.mainClock.advanceTimeBy(android.view.ViewConfiguration.getLongPressTimeout().toLong() + 200L)

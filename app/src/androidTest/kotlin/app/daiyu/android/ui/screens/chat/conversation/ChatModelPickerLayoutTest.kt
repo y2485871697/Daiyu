@@ -180,9 +180,15 @@ class ChatModelPickerLayoutTest : WiredActivityTestCase() {
             }
             fun assertNoHighlight(tag: String) {
                 val actual = background(tag)
-                assertTrue("$tag must not keep the selected background (dark=$dark)",
+                assertTrue("$tag must not keep the selected background (dark=$dark, actual=$actual, selected=$expected)",
                     kotlin.math.abs(actual.red - expected.red) + kotlin.math.abs(actual.green - expected.green) +
                         kotlin.math.abs(actual.blue - expected.blue) > .03f)
+                if (dark) {
+                    val unselected = Color(0xFF101218)
+                    assertEquals("$tag unselected red", unselected.red, actual.red, .006f)
+                    assertEquals("$tag unselected green", unselected.green, actual.green, .006f)
+                    assertEquals("$tag unselected blue", unselected.blue, actual.blue, .006f)
+                }
             }
             node("chat-model-option:same").assertIsSelected()
             node("chat-model-option:next").assertIsNotSelected()

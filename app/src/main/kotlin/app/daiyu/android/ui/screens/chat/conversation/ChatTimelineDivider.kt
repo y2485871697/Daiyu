@@ -88,7 +88,7 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
     val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
     Row(Modifier.fillMaxWidth().alpha(alpha).testTag("timeline:${entry.id}").padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f).height(.5.dp).background(line))
+        Box(Modifier.weight(1f).height(.5.dp).background(line).testTag("timeline-line-left:${entry.id}"))
         Row(Modifier.clip(RoundedCornerShape(8.dp)).clickable(
             interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = entry !is ChatTimelineEntry.ContextLimit, onClick = { showDetails = true })
             .semantics { contentDescription = if (entry is ChatTimelineEntry.ContextLimit) label else "$label. $title" }.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -100,7 +100,7 @@ internal fun ChatTimelineDivider(entry: ChatTimelineEntry, nowMs: () -> Long = S
             Text(label, style = MiuixTheme.textStyles.footnote2, color = color, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         }
-        Box(Modifier.weight(1f).height(.5.dp).background(line))
+        Box(Modifier.weight(1f).height(.5.dp).background(line).testTag("timeline-line-right:${entry.id}"))
     }
     if (showDetails && entry !is ChatTimelineEntry.ContextLimit) {
         val summary = when (entry) {

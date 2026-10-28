@@ -41,7 +41,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class ChatInitialPositionTest : WiredActivityTestCase() {
-    private data class Draw(val owner: String, val tail: Boolean, val bottom: Float, val frameOwner: String)
+    private data class Draw(val owner: String, val tail: Boolean, val bottom: Float, val frameOwner: String, val probeEpoch: Int)
+    private var probeEpoch by mutableStateOf(0)
+    private val capturedProbes = CopyOnWriteArrayList<Pair<String, Int>>()
     private var owner by mutableStateOf("first")
     private var request by mutableStateOf(ChatScrollRequest(1))
     private var body by mutableStateOf("")
@@ -80,6 +82,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                             viewportTop = it.boundsInRoot().top
                             viewportBottom = viewportTop + it.size.height
                         }.drawWithContent {
+                            val probe = visit to probeEpoch
                             // Capture the composed viewport, not a child's display-list recording.
                             val frame = graphics.createGraphicsLayer()
                             val top = viewportTop
@@ -104,13 +107,14 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                                             }
                                             if (bottom >= 0) {
                                                 recognized = true
-                                                draws += Draw(paintOwner, tail, top + bottom + 1f, visit)
+                                                draws += Draw(paintOwner, tail, top + bottom + 1f, visit, probe.second)
                                             }
                                         }
                                     }
                                     if (!recognized && pixels.buffer.any { it ushr 24 != 0 }) {
-                                        draws += Draw("unmarked visible content", false, top + pixels.height, visit)
+                                        draws += Draw("unmarked visible content", false, top + pixels.height, visit, probe.second)
                                     }
+                                    capturedProbes += probe
                                 } catch (failure: Throwable) {
                                     captureFailure.compareAndSet(null, failure)
                                 } finally {
@@ -154,11 +158,29 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         }
     }
 
+    private fun requestProbe(): Pair<String, Int> {
+        var probe: Pair<String, Int>? = null
+        ui.runOnUiThread {
+            probeEpoch++
+            probe = owner to probeEpoch
+        }
+        return checkNotNull(probe)
+    }
+
+    private fun awaitProbe(probe: Pair<String, Int>) {
+        ui.waitUntil(5_000) {
+            throwCaptureFailure()
+            probe in capturedProbes
+        }
+        awaitCapturedFrames()
+    }
+
     private fun frames(count: Int = 12) {
         repeat(count) {
+            val probe = requestProbe()
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
-            awaitCapturedFrames()
+            awaitProbe(probe)
         }
     }
 
@@ -225,7 +247,8 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
             assertTrue(draws.none { it.frameOwner == "cold" })
             assertTrue(reads.flatten().none { it.startsWith("cold-") })
             assertTrue(advances.none { it.startsWith("cold-") })
-            ui.onAllNodesWithTag("chat-turn:cold-tail", useUnmergedTree = true).assertCountEquals(0)
+            ui.onAllNodesWithTag("chat-turn:cold-tail").assertCountEquals(0)
+            ui.onAllNodesWithTag("chat-turn:cold-tail", useUnmergedTree = true).assertCountEquals(1)
             release.countDown()
             ui.mainClock.autoAdvance = true
             awaitDraw("cold")
@@ -241,10 +264,13 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         draws.clear()
         ui.onNodeWithTag("chat-messages").performTouchInput { swipeDown() }
         ui.waitForIdle()
-        awaitCapturedFrames()
+        val probe = requestProbe()
+        awaitProbe(probe)
+        val saved = draws.filter { it.frameOwner == "first" && it.probeEpoch == probe.second }
+        assertTrue("Expected a newly captured visible viewport after the history swipe", saved.isNotEmpty())
         val bottom = viewportBottom - 24f * activity.resources.displayMetrics.density
         assertTrue("The saved fixture must actually be away from the bottom",
-            draws.filter { it.frameOwner == "first" }.maxOf { it.bottom } > bottom + 10f)
+            saved.maxOf { it.bottom } > bottom + 10f)
         switchTo("second")
         awaitDraw("second")
         draws.removeAll { it.owner == "first" }

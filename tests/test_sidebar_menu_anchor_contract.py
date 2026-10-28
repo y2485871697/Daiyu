@@ -41,6 +41,12 @@ class SidebarMenuAnchorContractTest(unittest.TestCase):
                          "assertEquals(0, fixture.opens.get())"):
             self.assertIn(fragment, method)
 
+    def test_key_scrolls_drive_the_compose_clock_before_touch_geometry(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneVisualTest.kt').read_text()
+        method = source.split('fun testLongPressMenuFollowsTouchAfterScrollingAndReopeningWithinNarrowHost()', 1)[1].split('fun testShortcuts', 1)[0]
+        for key in ('touch-8', 'touch-6', 'touch-35'):
+            self.assertRegex(method, r'performScrollToKey\("' + key + r'"\)\s+awaitVisualIdle\(\)')
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BrowserSheetUiStateTest {
+    @Test fun firstTabProjectionObservesEditsAfterSameValueSynchronization() {
+        val state = BrowserSheetUiState()
+        var invalidated = false
+        val scope = Any()
+        val observer = androidx.compose.runtime.snapshots.SnapshotStateObserver { it() }
+        observer.start()
+        try {
+            observer.observeReads(scope, { _: Any -> invalidated = true }) {
+                assertEquals("", state.displayedAddress(0, "").text)
+            }
+            state.synchronize(0, "")
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            assertFalse(invalidated)
+            val edit = TextFieldValue("unfinished address, do not navigate", TextRange(2, 9))
+            state.editAddress(edit)
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            assertEquals(edit, state.address)
+            assertTrue("first-tab projection must observe address edits", invalidated)
+        } finally {
+            observer.stop()
+            observer.clear()
+        }
+    }
+
     @Test fun detachedPoolAndSameTabPollingKeepUnsavedAddressAndSelection() {
         val state = BrowserSheetUiState()
         state.synchronize(0, "https://example.com/")

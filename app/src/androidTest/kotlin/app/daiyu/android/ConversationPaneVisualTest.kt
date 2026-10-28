@@ -554,11 +554,14 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             }
             longPress(0, .2f, .25f)
             node("drawer-list").performScrollToKey("touch-8")
+            awaitVisualIdle()
             val firstPosition = longPress(8, .9f, .75f)
             node("drawer-list").performScrollToKey("touch-6")
+            awaitVisualIdle()
             val movedPosition = longPress(8, .9f, .25f)
             assertTrue("Same row must move before reopening", kotlin.math.abs(firstPosition.top - movedPosition.top) > 1f)
             node("drawer-list").performScrollToKey("touch-35")
+            awaitVisualIdle()
             longPress(35, .9f, .75f)
             val row = bounds("drawer-conversation:touch-35")
             node("drawer-conversation:touch-35").performSemanticsAction(SemanticsActions.OnLongClick) { assertTrue(it()) }

@@ -59,6 +59,16 @@ class SettingsDisclosureMotionContractTest(unittest.TestCase):
         self.assertNotIn('Thread.sleep', source)
         self.assertNotIn('Settings.Global', source)
 
+    def test_reversal_samples_start_after_the_retarget_helper_frame(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/settings/SettingsDisclosureMotionTest.kt').read_text()
+        test = source.split('fun testRapidReversalFollowsTheLatestTarget()', 1)[1].split('fun testZeroAndDoubleDurationScale()', 1)[0]
+        self.assertLess(test.index('mainThread { expanded.value = false }'), test.index('val closingStart = height()'))
+        self.assertLess(test.index('mainThread { expanded.value = true }'), test.index('val reopeningStart = height()'))
+        for token in ('reversing < closingStart', 'reversing > collapsed', 'height() > reopeningStart',
+                      'afterTop() < closingTop', 'afterTop() > reopeningTop'):
+            self.assertIn(token, test)
+        self.assertEqual(2, test.count('advanceTimeBy(48)'))
+
 
 if __name__ == '__main__':
     unittest.main()

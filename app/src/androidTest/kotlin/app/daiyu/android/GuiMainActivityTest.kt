@@ -79,8 +79,13 @@ class GuiMainActivityTest : WiredActivityTestCase() {
         assertNull(fixture.controller.textSendState())
         assertEquals(0, fixture.opens.get())
         assertTrue(fixture.database.conversations().isEmpty())
-        fixture.session(held = false)
-        node("chat-send").performClick()
+        val ordinary = fixture.session(held = false)
+        node("chat-send").assertIsEnabled()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ordinary.entered.count == 0L && fixture.opens.get() == 1
+        }
         awaitTextSendResult(activity)
         awaitControl("ordinary model opened without GUI") { fixture.opens.get() == 1 }
         assertNull(fixture.controller.guiEntry())

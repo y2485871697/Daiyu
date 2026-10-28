@@ -5,6 +5,10 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.state.ToggleableState
 
 class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
+    internal override fun createFixture(): RunControlFixture = super.createFixture().also {
+        it.settings.modelCatalogSnapshot()
+    }
+
     private fun awaitLocalCatalogReady() {
         reveal("local-model-add", lazyKey = "catalog-state")
         ui.waitUntil(5_000) {

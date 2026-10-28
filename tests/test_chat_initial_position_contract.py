@@ -87,6 +87,22 @@ class ChatInitialPositionContract(unittest.TestCase):
             wait = body.split('ui.waitUntil(5_000) {', 1)[1]
             self.assertLess(wait.index('throwCaptureFailure()'), wait.index('pendingCaptures.get()' if helper == 'awaitCapturedFrames' else 'draws.any'))
 
+    def test_controlled_frames_require_new_successful_viewport_samples(self):
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatInitialPositionTest.kt').read_text()
+        self.assertIn('val probe = visit to probeEpoch', device)
+        self.assertIn('capturedProbes += probe', device)
+        completion = device.split('val pixels = frame.toImageBitmap().toPixelMap()', 1)[1].split('catch (failure:', 1)[0]
+        self.assertIn('capturedProbes += probe', completion)
+        frames = device.split('private fun frames(', 1)[1].split('private fun throwCaptureFailure(', 1)[0]
+        self.assertLess(frames.index('val probe = requestProbe()'), frames.index('advanceTimeByFrame()'))
+        self.assertIn('awaitProbe(probe)', frames)
+        wait = device.split('private fun awaitProbe(', 1)[1].split('private fun frames(', 1)[0]
+        self.assertLess(wait.index('throwCaptureFailure()'), wait.index('probe in capturedProbes'))
+        self.assertIn('ui.onAllNodesWithTag("chat-turn:cold-tail").assertCountEquals(0)', device)
+        self.assertIn('useUnmergedTree = true).assertCountEquals(1)', device)
+        self.assertIn('saved.isNotEmpty()', device)
+        self.assertIn('saved.maxOf { it.bottom } > bottom + 10f', device)
+
 
 if __name__ == '__main__':
     unittest.main()

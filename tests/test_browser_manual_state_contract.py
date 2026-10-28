@@ -122,3 +122,15 @@ class BrowserManualStateContractTest(unittest.TestCase):
         self.assertIn('assertSame(originalView, parent.getChildAt(0))', test)
         self.assertIn('"$action must invalidate visible configuration deduplication", second.isLoading', test)
         self.assertIn('assertEquals(appliedRequests, requests.get())', test)
+
+    def test_first_tab_address_projection_always_observes_editable_snapshot(self):
+        state = (APP / 'browser/BrowserSheetUiState.kt').read_text()
+        projection = state.split('fun displayedAddress(', 1)[1].split('fun synchronize(', 1)[0]
+        self.assertLess(projection.index('val retainedAddress = address'), projection.index('return when'))
+        self.assertIn('selectedTab == null -> retainedAddress', projection)
+        self.assertIn('else -> retainedAddress', projection)
+        unit = (ROOT / 'app/src/test/kotlin/app/daiyu/android/browser/BrowserSheetUiStateTest.kt').read_text()
+        for fragment in ('SnapshotStateObserver', 'observeReads(', 'state.synchronize(0, "")',
+                         'Snapshot.sendApplyNotifications()', 'assertFalse(invalidated)',
+                         'assertTrue("first-tab projection must observe address edits", invalidated)'):
+            self.assertIn(fragment, unit)

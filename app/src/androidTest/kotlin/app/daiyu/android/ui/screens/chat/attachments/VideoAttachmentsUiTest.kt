@@ -273,7 +273,12 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
     fun testCompactComposerBlockedVideoNeverSendsCaptionAndConfirmationFreezesText() {
         show(compact = true)
         ui.onNodeWithContentDescription("附件").performClick()
-        node("chat-attachment:ATTACH_VIDEO").performClick()
+        node("chat-attachment:ATTACH_VIDEO").performSemanticsAction(
+            androidx.compose.ui.semantics.SemanticsActions.OnClick) { assertTrue(it()) }
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.runOnIdle { picker.launches.size == 1 }
+        }
         mainThread { picker.result(picker.launches.single()) }
         awaitReady()
         mainThread { busy.value = true }

@@ -17,10 +17,14 @@ internal class BrowserSheetUiState {
     var showDownloads by mutableStateOf(false)
     var historyQuery by mutableStateOf("")
 
-    fun displayedAddress(selectedTab: Int?, currentUrl: String): TextFieldValue = when {
-        selectedTab == null -> address
-        selectedTab != tab || !dirty && currentUrl != observedUrl -> TextFieldValue(currentUrl)
-        else -> address
+    fun displayedAddress(selectedTab: Int?, currentUrl: String): TextFieldValue {
+        // Keep the first tab projection subscribed even before synchronize runs.
+        val retainedAddress = address
+        return when {
+            selectedTab == null -> retainedAddress
+            selectedTab != tab || !dirty && currentUrl != observedUrl -> TextFieldValue(currentUrl)
+            else -> retainedAddress
+        }
     }
 
     fun synchronize(selectedTab: Int?, currentUrl: String) {

@@ -78,7 +78,7 @@ class ModelPickerBalanceContract(unittest.TestCase):
         picker = source('ui/screens/chat/conversation/ChatModelPicker.kt')
         self.assertIn('val colors = usagePalette()', picker)
         self.assertIn('val selectedBackground = colors.selectionContainer', picker)
-        self.assertIn('background(if (selected) selectedBackground else Color.Transparent)', picker)
+        self.assertIn('background(when { selected -> selectedBackground; colors.dark -> colors.background; else -> Color.Transparent })', picker)
         self.assertIn('background(if (selected) colors.accent else Color.Transparent)', picker)
         usage = source('ui/components/UsagePresentation.kt')
         collaboration = source('ui/screens/assistants/AssistantPreviewComponents.kt')

@@ -3,6 +3,8 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,7 +45,9 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
                     background = colors.background
                     expected = colors.onSurfaceVariantSummary.copy(alpha = .5f).compositeOver(background)
                     previous = colors.outline.copy(alpha = .55f).compositeOver(background)
-                    Box(Modifier.width(360.dp).background(background)) { ChatTimelineDivider(entry) }
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        Box(Modifier.width(minOf(maxWidth, 360.dp)).background(background)) { ChatTimelineDivider(entry) }
+                    }
                 }
             } }
             awaitUniqueTag("timeline:contrast")
@@ -51,13 +55,22 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
             val timeline = ui.onNodeWithTag("timeline:contrast").assertIsDisplayed()
             ui.onNodeWithText("主代理 · 已压缩 49 条消息").assertIsDisplayed()
             val pixels = captureScreenNode(timeline).toPixelMap()
-            val inset = with(density) { 24.dp.roundToPx() }
+            val rowBounds = timeline.fetchSemanticsNode().boundsInRoot
             fun distance(a: Color, b: Color): Float = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
-            val center = pixels.height / 2
-            for (x in listOf(inset, pixels.width - 1 - inset)) {
+            for (side in listOf("left", "right")) {
+                val lineBounds = ui.onNodeWithTag("timeline-line-$side:contrast")
+                    .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                assertTrue("$side line must have positive width", lineBounds.width > 0f)
+                assertEquals("$side geometry must keep half-dp height",
+                    with(density) { .5.dp.roundToPx() }.coerceAtLeast(1).toFloat(), lineBounds.height, .01f)
+                val x = (lineBounds.center.x - rowBounds.left).toInt()
+                val center = (lineBounds.center.y - rowBounds.top).toInt()
+                assertTrue("$side sample outside capture: bounds=$lineBounds row=$rowBounds size=${pixels.width}x${pixels.height}",
+                    x in 0 until pixels.width && center in 0 until pixels.height)
                 val stripe = (center - 3..center + 3).filter { it in 0 until pixels.height }
                     .map { pixels[x, it] }.filter { distance(it, background) > .02f }
-                assertEquals(with(density) { .5.dp.roundToPx() }.coerceAtLeast(1), stripe.size)
+                assertEquals("$side line thickness; dark=$dark custom=$custom bounds=$lineBounds sample=$x,$center",
+                    with(density) { .5.dp.roundToPx() }.coerceAtLeast(1), stripe.size)
                 assertTrue("line color follows theme; dark=$dark custom=$custom",
                     stripe.any { distance(it, expected) < .035f })
                 assertTrue("line must be clearer than the old outline; dark=$dark custom=$custom",

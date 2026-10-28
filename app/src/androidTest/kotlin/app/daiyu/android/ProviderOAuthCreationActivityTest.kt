@@ -93,7 +93,7 @@ class ProviderOAuthCreationActivityTest : WiredActivityTestCase() {
             awaitLoginButton("重新登录 OpenAI", hits)
         } finally { instrumentation.removeMonitor(monitor) }
         reveal("provider-name", "新建提供商").assertEditableText("Created Codex")
-        reveal("provider-oauth-login", "新建提供商").assertTextContains("重新登录")
+        reveal("provider-oauth-login", "新建提供商").assertTextEquals("重新登录 OpenAI")
         assertEquals(before, fixture.controller.providers.snapshot())
         reveal("model-save", "新建提供商", "model_save").assertIsEnabled().performClick()
         awaitUniqueTag("page:Created Codex")

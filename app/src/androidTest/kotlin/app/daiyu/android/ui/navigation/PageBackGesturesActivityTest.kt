@@ -301,6 +301,32 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testNewSwipeInterruptsCancelledReturnWithoutWaitingForSpring() {
+        predictive = false
+        mount(capturePreviousPage = true)
+        val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .05f, height * .6f))
+                moveTo(Offset(width * .12f, height * .6f), 16)
+                moveTo(Offset(width * .40f, height * .6f), 80)
+            }
+            ui.mainClock.advanceTimeByFrame()
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithTag("page-back-host").performTouchInput { cancel() }
+            ui.mainClock.advanceTimeByFrame()
+            val resetting = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            assertTrue("spring has not returned to rest", resetting.left > initial.left)
+            assertEquals(0, backCount)
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                swipe(Offset(width * .05f, height * .6f), Offset(width * .90f, height * .6f), 320)
+            }
+            assertEquals(1, backCount)
+            assertEquals(0, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testMiddleOfPageSwipeNavigatesWithPredictionDisabled() {
         predictive = false
         mount()

@@ -97,12 +97,12 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_swipe_is_full_page_and_lets_children_arbitrate_before_claiming(self):
         for guard in ('canNavigateBack && swipeDismissEnabled && resumed && !imeVisible',
-                      'if (state.active || state.transitionBlocked || state.committing || state.dispatching) return@awaitEachGesture', 'event.changes.size != 1',
+                      'if (state.active || entering || state.committing || state.dispatching) return@awaitEachGesture', 'event.changes.size != 1',
                       'if (change.id != down.id) break', 'if (consumedMovement) break',
                       'change.position == change.previousPosition',
                       'viewConfiguration.longPressTimeoutMillis',
                       'dy > viewConfiguration.touchSlop', 'dx <= dy * 1.5f',
-                      'if (claimed) PointerEventPass.Initial else PointerEventPass.Final', 'LayoutDirection.Ltr'):
+                      'if (claimed || interruptingReturn) PointerEventPass.Initial else PointerEventPass.Final', 'LayoutDirection.Ltr'):
             self.assertIn(guard, self.host)
         for obsolete in ('edgeWidth', 'fromEdge', 'down.isConsumed',
                          'change.id != down.id || change.isConsumed'):

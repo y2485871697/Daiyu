@@ -359,16 +359,23 @@ internal fun PageBackGestureHost(
         (!state.previewAllowed || departure.forwardSkipped))
     state.transitionBlocked = activeDeparture || (state.previewAllowed && !state.active && progress > 0f)
     val showDeparture = departure != null && departing && departure.frame.image != null && !departure.forwardSkipped && state.previewAllowed
+    val entering by rememberUpdatedState(activeDeparture && departure?.forward == true)
+    val returning by rememberUpdatedState(showDeparture && departure?.forward == false)
+    val claimSwipe by rememberUpdatedState {
+        departing = false
+        state.transitionBlocked = false
+    }
     CompositionLocalProvider(LocalPageBackGesture provides state, LocalPageBackStackPath provides stackPath,
         LocalPageBackPreviewFrame provides frame.takeIf { captureFromContent }) {
         Box(modifier.fillMaxSize().testTag("page-back-host").clipToBounds().background(background).onSizeChanged { viewport = it }.then(
-            if (canNavigateBack && swipeDismissEnabled && resumed && !imeVisible && !departing) Modifier.pointerInput(state, layoutDirection) {
+            if (canNavigateBack && swipeDismissEnabled && resumed && !imeVisible) Modifier.pointerInput(state, layoutDirection) {
                 val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val gestureWidth = size.width
                     val threshold = gestureWidth * 0.5f + viewConfiguration.touchSlop
-                    if (state.active || state.transitionBlocked || state.committing || state.dispatching) return@awaitEachGesture
+                    if (state.active || entering || state.committing || state.dispatching) return@awaitEachGesture
+                    val interruptingReturn = returning
                     val owner = Any()
                     val predictiveGeneration = state.predictiveGeneration
                     val velocity = VelocityTracker().also { it.addPosition(down.uptimeMillis, down.position) }
@@ -376,8 +383,8 @@ internal fun PageBackGestureHost(
                     var consumedMovement = false
                     try {
                         while (true) {
-                            // Let children arbitrate first; after claiming, consume before their Main pass.
-                            val event = awaitPointerEvent(if (claimed) PointerEventPass.Initial else PointerEventPass.Final)
+                            // The return overlay blocks children; observe ahead of it until the next swipe claims.
+                            val event = awaitPointerEvent(if (claimed || interruptingReturn) PointerEventPass.Initial else PointerEventPass.Final)
                             if (event.changes.size != 1 || !state.alive || state.predictiveGeneration != predictiveGeneration || (state.active && state.predictive)) break
                             val change = event.changes.single()
                             if (change.id != down.id) break
@@ -411,6 +418,7 @@ internal fun PageBackGestureHost(
                                     (dy > viewConfiguration.touchSlop && dx <= dy * 1.5f)) break
                                 if (dx <= viewConfiguration.touchSlop || dx <= dy * 1.5f) continue
                                 claimed = true
+                                claimSwipe()
                             }
                             val distance = (dx - viewConfiguration.touchSlop).coerceAtLeast(0f)
                             state.update(owner, distance / gestureWidth, predictive = false, direction = direction)

@@ -198,6 +198,52 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    private fun assertRapidNestedSwipeReturns(rtl: Boolean = false) {
+        screen = "settings"
+        mount(local = true, rtl = rtl)
+        mainThread { localPage = 1 }
+        ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        mainThread { localPage = 2 }
+        ui.waitForIdle()
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        ui.mainClock.autoAdvance = false
+        try {
+            for (expectedPage in listOf<Int?>(1, null)) {
+                val previousCount = backCount
+                val start = if (previousCount == 0) { if (rtl) .95f else .05f }
+                    else { if (rtl) .20f else .80f }
+                val end = if (previousCount == 0) { if (rtl) .35f else .65f }
+                    else { if (rtl) .02f else .98f }
+                if (previousCount == 1) {
+                    ui.onNodeWithTag("page-back-departure").assertExists()
+                    val host = ui.onNodeWithTag("page-back-host").fetchSemanticsNode().boundsInRoot
+                    val outgoing = ui.onNodeWithTag("page-back-departure").fetchSemanticsNode().boundsInRoot
+                    val progress = if (rtl) (host.right - outgoing.right) / host.width
+                        else (outgoing.left - host.left) / host.width
+                    assertTrue("first departure is still running", progress > 0f && progress < 1f)
+                    val startX = host.left + host.width * start
+                    assertTrue("second down hits outgoing overlay", startX > outgoing.left && startX < outgoing.right)
+                }
+                ui.onNodeWithTag("page-back-host").performTouchInput {
+                    swipe(Offset(width * start, height * .6f), Offset(width * end, height * .6f),
+                        if (previousCount == 0) 320L else 80L)
+                }
+                assertEquals(expectedPage, localPage)
+                assertEquals(previousCount + 1, backCount)
+                if (previousCount == 0) awaitDepartureCapture()
+                assertEquals("settings", screen)
+                assertEquals(1, controllers)
+                assertEquals(0, disposed)
+            }
+            assertEquals(0, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testRapidNestedSwipeReturnsBeforeDepartureFinishes() = assertRapidNestedSwipeReturns()
+
+    fun testRapidNestedSwipeReturnsInRtlBeforeDepartureFinishes() = assertRapidNestedSwipeReturns(rtl = true)
+
     fun testPreviewSuppressionAlsoSuppressesOrdinaryReturnDeparture() {
         mount(gesturesEnabled = false, previewEnabled = false)
         changeScreen("settings")

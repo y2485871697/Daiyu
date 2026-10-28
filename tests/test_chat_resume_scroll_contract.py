@@ -62,7 +62,13 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance)', self.chat)
         self.assertIn('remember(identity, resetEpoch) { sources.toList() }', self.typing)
         self.assertIn('remember(identity, resetEpoch) { MarkdownTypingState(baseline) }', self.typing)
+        self.assertIn(
+            'return rememberMarkdownReveal(sources, projection, turn.isStreaming, '
+            'turn.status != RunStatus.RUNNING, resetEpoch, onVisibleAdvance)',
+            ' '.join(self.typing.split()),
+        )
         self.assertIn('remember(motion, parts, baselineLength, streaming, terminal)', self.typing)
+        self.assertIn('motion.update(parts, baselineLength, streaming, terminal)', self.typing)
         self.assertNotIn('key(revealResetEpoch)', self.chat)
         resume_gate = (
             'resumeFollowPending && tail != null && '

@@ -7,6 +7,11 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -105,4 +110,78 @@ class MarkdownProjectionTest {
         val result = projectMarkdown(emptyList(), parser = { error("no text") })
         assertTrue(result.blocks.isEmpty())
     }
+    @Test fun streamingAppendsPublishTheRunningSnapshotAndOnlyTheLatestPendingOne() = runBlocking {
+        withTimeout(5_000) {
+            val requests = Channel<List<String>>(Channel.UNLIMITED)
+            val entered = Channel<String>(Channel.UNLIMITED)
+            val published = Channel<MarkdownProjection>(Channel.UNLIMITED)
+            val release = CountDownLatch(1)
+            val seen = java.util.concurrent.CopyOnWriteArrayList<String>()
+            val parser = { text: String ->
+                seen += text
+                if (text == "first") {
+                    entered.trySend(text)
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+                MarkdownParser.parse(text)
+            }
+            val job = launch {
+                collectMarkdownProjections(requests.receiveAsFlow(), parser, MarkdownProjectionCache()) { published.trySend(it) }
+            }
+            try {
+                requests.send(listOf("first"))
+                assertEquals("first", entered.receive())
+                repeat(200) { requests.send(listOf("first" + "x".repeat(it + 1))) }
+                yield()
+                release.countDown()
+                val first = published.receive()
+                assertEquals(listOf("first"), first.sources)
+                assertEquals(MarkdownParser.parse("first"), first.blocks["first"])
+                val latest = published.receive()
+                assertEquals(listOf("first" + "x".repeat(200)), latest.sources)
+                assertEquals(2, seen.size)
+                // Keep the request stream open: progress must not wait for generation to finish.
+                requests.send(listOf("first" + "x".repeat(201)))
+                assertEquals(listOf("first" + "x".repeat(201)), published.receive().sources)
+                requests.close()
+                job.join()
+            } finally { release.countDown(); job.cancelAndJoin(); requests.close() }
+        }
+    }
+
+    @Test fun replacementCancelsTheOldSnapshotWithoutPublishingItsLateCompletion() = runBlocking {
+        withTimeout(5_000) {
+            val requests = Channel<List<String>>(Channel.UNLIMITED)
+            val entered = Channel<Unit>(Channel.UNLIMITED)
+            val published = Channel<MarkdownProjection>(Channel.UNLIMITED)
+            val release = CountDownLatch(1)
+            val parser = { text: String ->
+                if (text == "old") {
+                    entered.trySend(Unit)
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+                MarkdownParser.parse(text)
+            }
+            val job = launch {
+                collectMarkdownProjections(requests.receiveAsFlow(), parser, MarkdownProjectionCache()) { published.trySend(it) }
+            }
+            try {
+                requests.send(listOf("old")); entered.receive()
+                requests.send(listOf("replacement")); yield()
+                release.countDown()
+                assertEquals(listOf("replacement"), published.receive().sources)
+                requests.close(); job.join()
+                assertTrue(published.tryReceive().isFailure)
+            } finally { release.countDown(); job.cancelAndJoin(); requests.close() }
+        }
+    }
+
+    @Test fun appendCompatibilityRejectsReplacementDeletionAndReordering() {
+        assertTrue(isMarkdownAppend(listOf("first", "second"), listOf("first", "second appended")))
+        assertFalse(isMarkdownAppend(listOf("first", "second"), listOf("second", "first")))
+        assertFalse(isMarkdownAppend(listOf("first", "second"), listOf("first")))
+        assertFalse(isMarkdownAppend(listOf("first"), listOf("replacement")))
+        assertFalse(isMarkdownAppend(listOf("first"), listOf("first", "new part")))
+    }
+
 }

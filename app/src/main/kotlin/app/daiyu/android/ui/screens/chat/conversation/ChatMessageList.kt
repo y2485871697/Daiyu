@@ -143,6 +143,7 @@ internal fun ChatMessageList(
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
     val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
+    val displayedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val revealedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
@@ -169,7 +170,8 @@ internal fun ChatMessageList(
         } ?: return
         val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
         if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
-            (readyTurns[tail.listKey] != tail || !tail.isStreaming && revealedTurns[tail.listKey] != tail)) return
+            (if (tail.isStreaming) displayedTurns[tail.listKey] != tail
+                else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) return
         val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
         val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
         if (correction == 0) return
@@ -273,7 +275,8 @@ internal fun ChatMessageList(
                     }
                     val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
                     if (resumeFollowPending && tail != null && layout.visibleItemsInfo.any { it.key == tail.listKey } &&
-                        (readyTurns[tail.listKey] != tail || !tail.isStreaming && revealedTurns[tail.listKey] != tail)) {
+                        (if (tail.isStreaming) displayedTurns[tail.listKey] != tail
+                            else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
                         motion.reset()
                         continue
                     }
@@ -386,6 +389,9 @@ internal fun ChatMessageList(
                                         actions.onVisibleTextAdvance(turn.listKey)
                                     }
                                 },
+                                onContentDisplayed = { displayed ->
+                                    if (displayed) displayedTurns[turn.listKey] = turn else displayedTurns.remove(turn.listKey)
+                                },
                                 onRevealSettled = { settled ->
                                     if (settled) revealedTurns[turn.listKey] = turn else revealedTurns.remove(turn.listKey)
                                 }) { ready ->
@@ -462,6 +468,7 @@ internal fun AssistantTurn(
     revealResetEpoch: Long = 0L,
     onVisibleAdvance: () -> Unit = {},
     onRevealSettled: (Boolean) -> Unit = {},
+    onContentDisplayed: (Boolean) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
 ) = key(turn.listKey) {
     val sources = remember(turn.content, turn.finalText) {
@@ -470,12 +477,26 @@ internal fun AssistantTurn(
     }
     val projection = rememberMarkdownProjection(sources)
     val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance)
+    val contentReady = projection?.sources == sources
+    val generationComplete = turn.status != RunStatus.RUNNING && contentReady
+    val displayedTurn = remember(turn, projection) {
+        if (projection == null) turn
+        else if (turn.content.isEmpty()) turn.copy(finalText = projection.sources.single())
+        else {
+            var textIndex = 0
+            turn.copy(content = turn.content.map { content ->
+                if (content is MessageContentUi.Text) content.copy(text = projection.sources[textIndex++]) else content
+            })
+        }
+    }
     var hasProjectedBody by remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { mutableStateOf(false) }
-    val initialBodyPending = sources.any { it.isNotBlank() } && projection == null && !hasProjectedBody
-    SideEffect { if (projection != null && sources.any { it.isNotBlank() }) hasProjectedBody = true }
-    SideEffect { onContentReady(projection != null) }
+    val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
+    val initialBodyPending = sources.any { it.isNotBlank() } && !hasDisplayBody && !hasProjectedBody
+    SideEffect { if (hasDisplayBody) hasProjectedBody = true }
+    SideEffect { onContentReady(contentReady) }
+    SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }
     SideEffect { onRevealSettled(reveal.settled) }
-    DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false) } }
+    DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val identity = turn.assistantIdentity
         val avatar by produceState<android.graphics.Bitmap?>(null, identity?.avatarPng) {
@@ -494,17 +515,17 @@ internal fun AssistantTurn(
             generationComplete = turn.status != RunStatus.RUNNING)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
-            MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent,
+            MessageContent(displayedTurn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent,
                 reasoningBody = { reported, connector ->
                     ReasoningStepRow(turn.listKey, reported, connector,
                         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
                         generationComplete = turn.status != RunStatus.RUNNING)
                 }) { text, modifier ->
                 ProjectedMessageMarkdown(text.text, projection?.blocks?.get(text.text), modifier,
-                    visibleCharacters = reveal.limit(text.itemId), generationComplete = turn.status != RunStatus.RUNNING)
+                    visibleCharacters = reveal.limit(text.itemId), generationComplete = generationComplete)
             }
         } else {
-            AssistantTextContent(turn, actions, projection, reveal, toolContent)
+            AssistantTextContent(displayedTurn, actions, projection, reveal, generationComplete, toolContent)
         }
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = conversationColors().error,
@@ -524,13 +545,13 @@ internal fun AssistantTurn(
 }
 
 @Composable
-private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, toolContent: @Composable (WorkStepUi) -> Unit) {
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, reveal: MarkdownReveal, generationComplete: Boolean, toolContent: @Composable (WorkStepUi) -> Unit) {
     turn.workProcess?.let { WorkProcessCard(it, turn.listKey,
         allowLiveTiming = turn.isStreaming && turn.status == RunStatus.RUNNING,
         generationComplete = turn.status != RunStatus.RUNNING, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
         ProjectedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), visibleCharacters = reveal.limit("final"),
-            generationComplete = turn.status != RunStatus.RUNNING)
+            generationComplete = generationComplete)
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null &&
         !isReportedReasoningActive(turn.reportedReasoning, turn.isStreaming)) {
         Text("正在思考…", color = conversationColors().muted,

@@ -31,13 +31,14 @@ internal fun rememberMarkdownReveal(
     val baseline = remember(identity, resetEpoch) { sources.toList() }
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text })
     val baselineLength = remember(baselineProjection) {
-        baselineProjection?.let { parsed -> baseline.sumOf {
-            markdownBlocksLength(parsed.blocks.getValue(it.text)).toLong()
+        baselineProjection?.takeIf { isMarkdownAppend(it.sources, baseline.map { source -> source.text }) }?.let { parsed -> parsed.sources.sumOf {
+            markdownBlocksLength(parsed.blocks.getValue(it)).toLong()
         }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt() }
     }
     val parts = remember(sources, projection) {
-        projection?.let { parsed -> sources.map {
-            MarkdownTypingPart(it, markdownBlocksLength(parsed.blocks.getValue(it.text)))
+        projection?.let { parsed -> sources.mapIndexed { index, source ->
+            val displayed = source.copy(text = parsed.sources[index])
+            MarkdownTypingPart(displayed, markdownBlocksLength(parsed.blocks.getValue(displayed.text)))
         } }
     }
     val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
@@ -55,5 +56,6 @@ internal fun rememberMarkdownReveal(
     }
     val visible = if (frame.target === target) frame.visible else target?.start ?: 0
     return MarkdownReveal(target, visible,
-        projection != null && target != null && target.parts.map { it.source } == sources && visible >= target.total)
+        projection?.sources == sources.map { it.text } && target != null &&
+            target.parts.map { it.source } == sources && visible >= target.total)
 }

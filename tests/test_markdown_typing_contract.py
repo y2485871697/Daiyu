@@ -47,7 +47,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("UserMessageText(text.text, modifier)", self.chat)
 
     def test_projection_ready_and_reveal_settled_are_separate_current_turn_gates(self):
-        self.assertIn("SideEffect { onContentReady(projection != null) }", self.chat)
+        self.assertIn("SideEffect { onContentReady(contentReady) }", self.chat)
         self.assertIn("SideEffect { onRevealSettled(reveal.settled) }", self.chat)
         self.assertEqual(2, self.chat.count("revealedTurns[it.listKey] == it"))
         self.assertEqual(2, self.chat.count("readyTurns[it.listKey] == it"))

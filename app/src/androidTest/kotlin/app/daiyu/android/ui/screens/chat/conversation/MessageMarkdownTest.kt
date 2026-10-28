@@ -61,6 +61,52 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
 
+    fun testStreamingAppendsDisplayCompletedSnapshotsWhileNewerParsesRemainBlocked() {
+        val first = "First **bold** snapshot."
+        val second = "$first More text."
+        val third = "$second Latest text."
+        val secondEntered = CountDownLatch(1)
+        val thirdEntered = CountDownLatch(1)
+        val releaseSecond = CountDownLatch(1)
+        val releaseThird = CountDownLatch(1)
+        val ready = AtomicBoolean()
+        val settled = AtomicBoolean()
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == second) { secondEntered.countDown(); releaseSecond.await() }
+            if (text == third) { thirdEntered.countDown(); releaseThird.await() }
+            MarkdownParser.parse(text)
+        }
+        var turn by mutableStateOf(ChatTurnUi.Assistant("continuous-stream", finalText = first,
+            status = RunStatus.RUNNING, isStreaming = true))
+        try {
+            show { CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                Column(Modifier.testTag("continuous-stream")) {
+                    AssistantTurn(turn, ChatScreenActions(), onContentReady = { ready.set(it) },
+                        onRevealSettled = { settled.set(it) })
+                }
+            } }
+            body("continuous-stream", "First bold snapshot.").assertIsDisplayed()
+            mainThread { turn = turn.copy(finalText = second) }
+            ui.waitUntil(5_000) { secondEntered.count == 0L }
+            mainThread { turn = turn.copy(finalText = third) }
+            ui.waitForIdle()
+            assertFalse(ready.get()); assertFalse(settled.get())
+            releaseSecond.countDown()
+            ui.waitUntil(5_000) { thirdEntered.count == 0L }
+            val intermediate = body("continuous-stream", "First bold snapshot. More text.")
+            intermediate.assertIsDisplayed()
+            assertTrue(annotation(intermediate).spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+            assertEquals(1L, releaseThird.count)
+            assertFalse(ready.get()); assertFalse(settled.get())
+            mainThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
+            ui.waitForIdle()
+            assertFalse(ready.get()); assertFalse(settled.get())
+            releaseThird.countDown()
+            body("continuous-stream", "First bold snapshot. More text. Latest text.").assertIsDisplayed()
+            ui.waitUntil(5_000) { ready.get() && settled.get() }
+        } finally { releaseSecond.countDown(); releaseThird.countDown() }
+    }
+
     fun testPreparedMixedHistoryHasExactProjectionInItsFirstComposition() {
         val first = "Prepared **mixed** ${java.util.UUID.randomUUID()}."
         val second = "Second `code` segment."

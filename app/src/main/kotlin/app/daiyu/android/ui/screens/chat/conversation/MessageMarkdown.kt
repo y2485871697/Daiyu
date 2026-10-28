@@ -35,6 +35,8 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
@@ -72,8 +74,10 @@ import top.yukonga.miuix.kmp.basic.Text
 @Composable
 internal fun MessageMarkdown(text: String, modifier: Modifier = Modifier, markdown: Boolean = true) {
     if (markdown) {
-        val blocks = rememberMarkdownProjection(listOf(text))?.blocks?.get(text)
-        ProjectedMessageMarkdown(text, blocks, modifier)
+        val projection = rememberMarkdownProjection(listOf(text))
+        val displayed = projection?.sources?.singleOrNull() ?: text
+        ProjectedMessageMarkdown(displayed, projection?.blocks?.get(displayed), modifier,
+            generationComplete = displayed == text)
     } else ParsedMessageMarkdown(text, null, modifier)
 }
 
@@ -86,11 +90,12 @@ internal fun rememberMarkdownProjection(sources: List<String>): MarkdownProjecti
     val cached = remember(sources, parserIdentity) {
         markdownProjectionCache.get(sources, parser) ?: markdownProjectionCache.getPrepared(sources, parser)
     }
-    val completed by produceState<MarkdownProjection?>(cached, sources, parserIdentity) {
-        value = cached ?: projectMarkdown(sources, parser)
+    val requested by rememberUpdatedState(sources)
+    val completed by produceState<MarkdownProjection?>(cached, parserIdentity) {
+        collectMarkdownProjections(snapshotFlow { requested }, parser) { value = it }
     }
-    // A return visit must reuse its AST before the replacement effect starts.
-    return completed?.takeIf { it.sources == sources && it.parser === parser } ?: cached
+    // Cached returns are exact; an in-flight append may display its last completed snapshot.
+    return cached ?: completed?.takeIf { it.parser === parser && isMarkdownAppend(it.sources, sources) }
 }
 
 @Composable

@@ -10,7 +10,7 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()
         self.assertIn("rememberMarkdownProjection(listOf(summary.text))", source)
         self.assertIn("ProjectedMessageMarkdown(", source)
-        self.assertIn("projection?.blocks?.get(summary.text)", source)
+        self.assertIn("projection?.blocks?.get(displayed)", source)
         self.assertNotRegex(source, r"\bText\(it\.text")
         self.assertNotIn("MarkdownParser.parse", source)
 

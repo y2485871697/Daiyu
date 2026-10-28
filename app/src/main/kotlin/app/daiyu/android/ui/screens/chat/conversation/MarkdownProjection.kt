@@ -3,6 +3,13 @@ package app.daiyu.android.ui.screens.chat.conversation
 import app.daiyu.android.MarkdownBlock
 import app.daiyu.android.MarkdownParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -52,4 +59,36 @@ internal suspend fun projectMarkdown(
     currentCoroutineContext().ensureActive()
     cache.put(projection)
     return projection
+}
+
+internal fun isMarkdownAppend(previous: List<String>, next: List<String>): Boolean =
+    previous.size == next.size && previous.indices.all { next[it].startsWith(previous[it]) }
+
+// Finish each accepted snapshot; merge arriving appends instead of starving the parser.
+internal suspend fun collectMarkdownProjections(
+    requests: Flow<List<String>>,
+    parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser,
+    cache: MarkdownProjectionCache = markdownProjectionCache,
+    publish: (MarkdownProjection) -> Unit,
+) = coroutineScope {
+    var previous: List<String>? = null
+    var pending = Channel<List<String>>(Channel.CONFLATED)
+    var worker: Job? = null
+    try {
+        requests.collect { request ->
+            val sources = request.toList()
+            if (previous == null || !isMarkdownAppend(previous!!, sources)) {
+                worker?.cancelAndJoin()
+                pending.close()
+                pending = Channel(Channel.CONFLATED)
+                val queue = pending
+                worker = launch {
+                    for (snapshot in queue) publish(projectMarkdown(snapshot, parser, cache))
+                }
+            }
+            previous = sources
+            pending.send(sources)
+        }
+    } finally { pending.close() }
+    worker?.join()
 }

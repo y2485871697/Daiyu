@@ -16,6 +16,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.daiyu.android.MarkdownBlock
+import app.daiyu.android.MarkdownParser
+import java.util.concurrent.CountDownLatch
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.RunStatus
@@ -66,6 +69,54 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
         return top("chat-turn:tail")
+    }
+
+    fun testStreamingPrefixResumesFollowingBeforeTheLatestProjectionCompletes() {
+        val first = "Streaming **body**."
+        val second = first + "\n\n" + "New paragraph.\n\n".repeat(18)
+        val third = second + "Latest paragraph."
+        val secondEntered = CountDownLatch(1)
+        val thirdEntered = CountDownLatch(1)
+        val releaseSecond = CountDownLatch(1)
+        val releaseThird = CountDownLatch(1)
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            if (text == second) { secondEntered.countDown(); releaseSecond.await() }
+            if (text == third) { thirdEntered.countDown(); releaseThird.await() }
+            MarkdownParser.parse(text)
+        }
+        var text by mutableStateOf(first)
+        try {
+            mainThread {
+                owner = Owner().apply { registry.currentState = Lifecycle.State.RESUMED }
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        CompositionLocalProvider(LocalLifecycleOwner provides owner, LocalMarkdownParser provides parser) {
+                            Box(Modifier.size(320.dp, 240.dp)) {
+                                ChatMessageList(List(6) { ChatTurnUi.User("u$it", "history $it") } +
+                                    ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING,
+                                        isStreaming = true, finalText = text),
+                                    ChatScreenActions(), scrollRequest = ChatScrollRequest(1), turnExtras = {
+                                        Text("resume prefix marker")
+                                    })
+                            }
+                        }
+                    }
+                }
+            }
+            ui.waitUntil(5_000) { ui.onAllNodes(hasText("Streaming body."), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            ui.onNodeWithText("resume prefix marker").assertIsDisplayed()
+            mainThread { owner.registry.currentState = Lifecycle.State.CREATED; text = second }
+            ui.waitUntil(5_000) { secondEntered.count == 0L }
+            mainThread { text = third }
+            releaseSecond.countDown()
+            ui.waitUntil(5_000) { thirdEntered.count == 0L }
+            mainThread { owner.registry.currentState = Lifecycle.State.RESUMED }
+            ui.waitForIdle()
+            ui.onNodeWithText("resume prefix marker").assertIsDisplayed()
+            ui.onAllNodes(hasText("New paragraph."), useUnmergedTree = true).assertCountEquals(18)
+            assertEquals("Following cannot require the blocked exact projection", 1L, releaseThird.count)
+        } finally { releaseSecond.countDown(); releaseThird.countDown() }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testStoppedGrowthDoesNotScrollAndResumeAlignsWithoutAnEasingTail() {

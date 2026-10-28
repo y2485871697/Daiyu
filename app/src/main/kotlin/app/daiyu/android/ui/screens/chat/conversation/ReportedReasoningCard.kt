@@ -112,9 +112,10 @@ internal fun ReportedReasoningCard(
                     summaries.forEach { summary ->
                         key(ownerKey, summary.itemId) {
                             val projection = rememberMarkdownProjection(listOf(summary.text))
+                            val displayed = projection?.sources?.singleOrNull() ?: summary.text
                             ProjectedMessageMarkdown(
-                                summary.text, projection?.blocks?.get(summary.text), Modifier.fillMaxWidth(),
-                                generationComplete = generationComplete,
+                                displayed, projection?.blocks?.get(displayed), Modifier.fillMaxWidth(),
+                                generationComplete = generationComplete && displayed == summary.text,
                             )
                         }
                     }

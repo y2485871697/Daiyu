@@ -328,7 +328,8 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertEquals(1, platform.creates)
         platform.listeners.last().onPartialResults(result("not final"))
         instrumentation.waitForIdleSync()
-        assertDraft("original")
+        assertDraft("not final")
+        assertEquals("original", fixture.database.draft())
         assertEquals("not final", host.state.value.preview)
         platform.listeners.last().onResults(result("editable result"))
         instrumentation.waitForIdleSync()
@@ -336,6 +337,120 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
         assertNull(fixture.controller.active)
         assertEquals(1, platform.destroys)
+    }
+
+    fun testLivePartialsRenderInComposerWithoutPersistingOrAppendingAndFinalCommitsOnce() {
+        setDraft("before OLD after")
+        setSelection(10, 7)
+        voice()
+        val attempt = platform.listeners.last()
+        attempt.onReadyForSpeech(Bundle())
+        val target = host.state.value.target
+        for (partial in listOf("你", "你们好", "你好")) {
+            attempt.onPartialResults(partial)
+            assertDraft("before $partial after")
+            assertSelection(7 + partial.length, 7 + partial.length)
+            assertEquals("before OLD after", fixture.database.draft())
+            assertEquals(target, host.state.value.target)
+            assertTrue(host.state.value.listening)
+        }
+        for (tag in listOf("offline-speech-status", "offline-speech-preview", "dictation-partial", "dictation-stop"))
+            node(tag).assertDoesNotExist()
+        mainThread { retainedControls(activity).onSend("before 你好 after") }
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
+        attempt.onResults("你好！")
+        assertDraft("before 你好！ after")
+        assertEquals("before 你好！ after", fixture.database.draft())
+        assertSelection(10, 10)
+        assertNull(host.state.value.target)
+        assertEquals(1, platform.destroys)
+    }
+
+    fun testCancellingLivePartialRestoresOriginalDraftAndRejectsLateFinal() {
+        setDraft("original")
+        setSelection(0, 8)
+        voice()
+        val attempt = platform.listeners.last()
+        attempt.onReadyForSpeech(Bundle())
+        attempt.onPartialResults("临时识别")
+        assertDraft("临时识别")
+        assertEquals("original", fixture.database.draft())
+        voice(expectNewAttempt = false)
+        assertDraft("original")
+        attempt.onResults("late final")
+        assertDraft("original")
+        assertEquals("original", fixture.database.draft())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testUserEditsLivePartialAndOldRecognitionCannotOverwriteIt() {
+        setDraft("leftOLDtail")
+        setSelection(4, 7)
+        voice()
+        val attempt = platform.listeners.last()
+        attempt.onPartialResults("语音")
+        assertDraft("left语音tail")
+        setDraft("left用户修改tail")
+        assertNull(host.state.value.target)
+        attempt.onResults("late overwrite")
+        assertDraft("left用户修改tail")
+        assertEquals("left用户修改tail", fixture.database.draft())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testEditingPartialBackToOriginalStillRetiresRecognition() {
+        for (original in listOf("", "base")) {
+            setDraft(original)
+            setSelection(0, original.length)
+            voice()
+            val attempt = platform.listeners.last()
+            attempt.onPartialResults("临时识别")
+            assertDraft("临时识别")
+            setDraft(original)
+            assertDraft(original)
+            assertNull(host.state.value.target)
+            attempt.onResults("late final")
+            assertDraft(original)
+            assertEquals(original, fixture.database.draft())
+            assertEquals(0, fixture.opens.get())
+        }
+    }
+
+    fun testMovingCursorInPartialRestoresOriginalWithoutPromotingTheHypothesis() {
+        setDraft("leftOLDtail")
+        setSelection(4, 7)
+        voice()
+        val attempt = platform.listeners.last()
+        attempt.onPartialResults("语音")
+        assertDraft("left语音tail")
+        setSelection(0, 0)
+        assertDraft("leftOLDtail")
+        assertSelection(0, 0)
+        assertNull(host.state.value.target)
+        attempt.onResults("late overwrite")
+        assertEquals("leftOLDtail", fixture.database.draft())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testStalePartialEditAndSendCallbacksCannotActOnTheNextHypothesis() {
+        setDraft("original")
+        setSelection(0, 8)
+        voice()
+        val attempt = platform.listeners.last()
+        attempt.onPartialResults("第一版")
+        assertDraft("第一版")
+        val stale = retainedControls(activity)
+        attempt.onPartialResults("最新识别")
+        assertDraft("最新识别")
+        mainThread {
+            assertFalse(checkNotNull(stale.onProjectedDraftEdit).invoke("第一版", "陈旧修改", 4, 4))
+            stale.onSend("original")
+        }
+        assertDraft("最新识别")
+        assertEquals("original", fixture.database.draft())
+        assertNotNull(host.state.value.target)
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testSystemDictationReplacesOnlyCapturedForwardSelection() {

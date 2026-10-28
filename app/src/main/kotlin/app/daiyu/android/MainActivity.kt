@@ -430,6 +430,35 @@ class MainActivity : ComponentActivity() {
         dictationDraft = target to app.daiyu.android.voice.offline.SpeechDraft(projection.text,
             projection.toVisible(selectionStart), projection.toVisible(selectionEnd))
     }
+    private data class DictationProjection(
+        val target: DictationDraftTarget, val original: String,
+        val preview: app.daiyu.android.voice.offline.SpeechDraft.Preview,
+        val text: String, val cursor: Int,
+    ) {
+        fun originalOffset(offset: Int) = ComposerReferences(original).toSource(
+            preview.originalOffset(ComposerReferences(text).toVisible(offset)))
+    }
+    private fun currentDictationProjection(
+        offline: app.daiyu.android.voice.offline.OfflineComposerHost.State = offlineHost.state.value,
+        system: app.daiyu.android.voice.ComposerDictationState = dictationHost.state.value,
+        remote: Pair<DictationDraftTarget, String>? = remoteVoice.preview.value,
+    ): DictationProjection? {
+        if (inlineMessageEditor != null) return null
+        val captured = dictationDraft ?: return null
+        val target = captured.first
+        if (!voiceEditorCurrent(target)) return null
+        val text = when {
+            offline.target == target -> offline.preview
+            system.target == target -> system.preview
+            remote?.first == target -> remote.second
+            else -> return null
+        }
+        if (text.isEmpty()) return null
+        val original = ComposerReferences(draft)
+        val preview = captured.second.preview(original.text, text) ?: return null
+        val next = original.edit(preview.text)
+        return DictationProjection(target, draft, preview, next, ComposerReferences(next).toSource(preview.cursor))
+    }
     private fun applyRecognizedDraft(target: DictationDraftTarget, recognized: String) {
         val captured = dictationDraft?.takeIf { it.first == target }?.second
         check(voiceEditorCurrent(target) && captured != null) { "dictation_editor_changed" }
@@ -557,6 +586,7 @@ class MainActivity : ComponentActivity() {
                 voiceRuntime.configuration.value?.dictation != "DOUBAO" },
             currentText = { ComposerReferences(draft).text },
             applyDraft = { _, text, cursor ->
+                dictationDraft = null
                 val next = ComposerReferences(draft).edit(text)
                 updateDraft(next)
                 check(draft == next) { "offline_dictation_draft_not_saved" }
@@ -568,8 +598,9 @@ class MainActivity : ComponentActivity() {
         invalidateConfiguredVoice()
         dictationHost.invalidate()
         val projection = ComposerReferences(draft)
-        offlineHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision),
-            projection.text, projection.toVisible(selectionStart), projection.toVisible(selectionEnd))
+        val target = DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision)
+        captureDictationDraft(target)
+        offlineHost.start(target, projection.text, projection.toVisible(selectionStart), projection.toVisible(selectionEnd))
     }
     private val imageHost by lazy { ImageChatHost.obtain(controller, { if (activityUsable()) publishChat() },
         { if (activityUsable()) toast(it) }, ::settleImageReceipt) }
@@ -2981,6 +3012,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun chatActions(): ChatScreenActions {
+        val dictationProjection = currentDictationProjection()
         val renderedOwner = controlOwner
         val renderedConversation = chatState.conversationKey
         val renderedRevealOwner = controller.active?.takeIf { it.conversationId.value == renderedConversation }
@@ -3188,7 +3220,7 @@ class MainActivity : ComponentActivity() {
             prompt = ConfirmPrompt("删除这条消息及后面的内容？", "", "确定",
                 action = { messageCallbacks.onDeleteTurn(id) }, showCloseButton = false, secondaryCancel = true)
         }, onRetryStep = messageCallbacks.onRetryStep,
-        onOpenSidebar = { openSidebar() }, onTextChange = { text -> if (editorMatches()) {
+        onOpenSidebar = { openSidebar() }, onTextChange = { text -> if (editorMatches() && currentDictationProjection() == null) {
             val editor = inlineMessageEditor
             if (editor == null) updateDraft(text)
             else if (!controller.dataBusy) {
@@ -3198,7 +3230,28 @@ class MainActivity : ComponentActivity() {
         onProjectedDraftEdit = { expected, next, start, end ->
             val editor = inlineMessageEditor
             if (!editorMatches() || controller.dataBusy || renderedDraftRevision != draftRevision ||
-                (editor?.text ?: draft) != expected) false
+                currentDictationProjection() != dictationProjection ||
+                (dictationProjection?.text ?: editor?.text ?: draft) != expected) false
+            else if (dictationProjection != null) {
+                if (next == expected) {
+                    if (start != dictationProjection.cursor || end != dictationProjection.cursor) {
+                        invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
+                        selectionStart = dictationProjection.originalOffset(start)
+                        selectionEnd = dictationProjection.originalOffset(end)
+                        publishChat(rowsChanged = false)
+                    }
+                    true
+                } else {
+                    invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
+                    updateDraft(next)
+                    if (draft != next) false else {
+                        selectionStart = start.coerceIn(0, next.length)
+                        selectionEnd = end.coerceIn(0, next.length)
+                        publishChat(rowsChanged = false)
+                        true
+                    }
+                }
+            }
             else if (editor != null) {
                 inlineMessageEditor = editor.copy(text = next, selectionStart = start.coerceIn(0, next.length),
                     selectionEnd = end.coerceIn(0, next.length))
@@ -3216,11 +3269,11 @@ class MainActivity : ComponentActivity() {
         },
         onSelectionChange = { start, end ->
             val editor = inlineMessageEditor
-            if (editorMatches() && editor != null && !controller.dataBusy) {
+            if (editorMatches() && currentDictationProjection() == null && editor != null && !controller.dataBusy) {
                 inlineMessageEditor = editor.copy(selectionStart = start.coerceIn(0, editor.text.length),
                     selectionEnd = end.coerceIn(0, editor.text.length))
                 publishChat(rowsChanged = false)
-            } else if (editorMatches() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+            } else if (editorMatches() && currentDictationProjection() == null && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                 chatState.composer.enabled && !imageHost.sending && (selectionStart != start || selectionEnd != end)) {
                 offlineHost.invalidate()
                 if (dictationDraft != null) { dictationHost.invalidate(); invalidateConfiguredVoice() }
@@ -3239,6 +3292,7 @@ class MainActivity : ComponentActivity() {
         onCompressionSendBlocked = { toast("正在压缩上下文") },
         onSend = send@{ text ->
             if (compressionSendBlocked()) return@send
+            if (currentDictationProjection() != null) return@send
             val editor = inlineMessageEditor
             if (editor != null) {
                 if (currentChat() && editorMatches() && !controller.dataBusy && text == editor.text && editor.canSubmit && !editReferencePending(editor) &&
@@ -3259,6 +3313,7 @@ class MainActivity : ComponentActivity() {
         } },
         onSupplement = supplement@{ text ->
             if (compressionSendBlocked()) return@supplement
+            if (currentDictationProjection() != null) return@supplement
             if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
             offlineHost.invalidate()
             gestureOwner()?.let { submitSupplement(it, text) }
@@ -3352,8 +3407,15 @@ class MainActivity : ComponentActivity() {
         val system by dictationHost.state.collectAsStateWithLifecycle()
         val offline by offlineHost.state.collectAsStateWithLifecycle()
         val remote by remoteVoice.listeningTarget.collectAsStateWithLifecycle()
+        val remotePreview by remoteVoice.preview.collectAsStateWithLifecycle()
         val universal by universalVoice.state.collectAsStateWithLifecycle()
-        return chatState.composer.copy(listening = composerListening(system, offline, remote, universal))
+        val projection = currentDictationProjection(offline, system, remotePreview)
+        return chatState.composer.copy(
+            text = projection?.text ?: chatState.composer.text,
+            selectionStart = projection?.cursor ?: chatState.composer.selectionStart,
+            selectionEnd = projection?.cursor ?: chatState.composer.selectionEnd,
+            dictationPreview = projection != null,
+            listening = composerListening(system, offline, remote, universal))
     }
 
     private fun composerListening(
@@ -3428,7 +3490,7 @@ class MainActivity : ComponentActivity() {
                 offlineSpeechReturnPage = "chat"
                 retainedPage = "offline-speech"
             } })
-        if (pack.enabled && (engineeringUi || offline.listening)) app.daiyu.android.ui.haptics.miuix.TextButton(
+        if (engineeringUi && pack.enabled) app.daiyu.android.ui.haptics.miuix.TextButton(
             text = if (offline.listening) "取消离线听写" else "离线听写（本机麦克风）",
             modifier = Modifier.testTag("offline-speech-microphone"),
             onClick = {
@@ -3436,9 +3498,10 @@ class MainActivity : ComponentActivity() {
                     editorGeneration == capturedGeneration && draftRevision == capturedRevision &&
                     selected?.id?.value == capturedConversation) startOfflineDictation()
             })
-        if (offline.status.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = offline.status,
-            modifier = Modifier.testTag("offline-speech-status").semantics { liveRegion = LiveRegionMode.Polite })
-        if (offline.preview.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = "离线识别预览（尚未写入草稿）：${offline.preview}",
+        app.daiyu.android.ui.components.DictationStatusNotice(
+            app.daiyu.android.voice.ComposerDictationState(offline.target, offline.listening, status = offline.status),
+            engineeringUi, tag = "offline-speech-status")
+        if (engineeringUi && offline.preview.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = "离线识别预览（尚未写入草稿）：${offline.preview}",
             modifier = Modifier.testTag("offline-speech-preview"))
         val cascadeStatus by cascadeVoice.status.collectAsStateWithLifecycle()
         val conversationVoiceConfig by voiceRuntime.conversationConfiguration.collectAsStateWithLifecycle()
@@ -3476,7 +3539,9 @@ class MainActivity : ComponentActivity() {
             })
         }
         val remoteStatus by remoteVoice.status.collectAsStateWithLifecycle()
-        if (remoteStatus.isNotEmpty()) {
+        if (!engineeringUi && !remoteVoice.duplexActive) app.daiyu.android.ui.components.DictationStatusNotice(
+            app.daiyu.android.voice.ComposerDictationState(target = remoteVoice.dictationTarget, status = remoteStatus), false)
+        if (remoteStatus.isNotEmpty() && (engineeringUi || remoteVoice.duplexActive)) {
             top.yukonga.miuix.kmp.basic.Text(remoteStatus,
                 modifier = Modifier.testTag("remote-voice-status").semantics { liveRegion = LiveRegionMode.Polite })
             app.daiyu.android.ui.haptics.miuix.TextButton(text = "停止云端语音", modifier = Modifier.testTag("remote-voice-stop"), onClick = {
@@ -3487,11 +3552,11 @@ class MainActivity : ComponentActivity() {
         }
         val state by dictationHost.state.collectAsStateWithLifecycle()
         app.daiyu.android.ui.components.DictationStatusNotice(state, engineeringUi)
-        if (state.preview.isNotEmpty()) {
+        if (engineeringUi && state.preview.isNotEmpty()) {
             top.yukonga.miuix.kmp.basic.Text(text = "识别预览（非最终草稿）：${state.preview}",
                 modifier = Modifier.testTag("dictation-partial"))
         }
-        if (state.listening) {
+        if (engineeringUi && state.listening) {
             val target = state.target
             app.daiyu.android.ui.haptics.miuix.TextButton(text = "停止听写", modifier = Modifier.testTag("dictation-stop"),
                 onClick = { if (dictationHost.state.value.target == target) dictationHost.invalidate() })

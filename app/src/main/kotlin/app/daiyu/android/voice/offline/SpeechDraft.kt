@@ -9,10 +9,23 @@ internal class SpeechDraft(text: String, start: Int, end: Int) {
     var cursor: Int = start
         private set
 
+    data class Preview(val text: String, val cursor: Int, val start: Int, val end: Int) {
+        fun originalOffset(offset: Int): Int = when {
+            offset <= start -> offset
+            offset >= cursor -> end + offset - cursor
+            else -> start
+        }.coerceIn(0, text.length - (cursor - start) + (end - start))
+    }
+
+    private val originalEnd = text.length - after.length
+    fun preview(current: String, recognized: String): Preview? =
+        if (current != expectedText) null
+        else Preview(before + recognized + after, before.length + recognized.length, before.length, originalEnd)
+
     fun accept(current: String, recognized: String): String? {
-        if (current != expectedText) return null
-        expectedText = before + recognized + after
-        cursor = before.length + recognized.length
+        val next = preview(current, recognized) ?: return null
+        expectedText = next.text
+        cursor = next.cursor
         return expectedText
     }
 }

@@ -61,6 +61,7 @@ fun AssistantPickerDialog(
     onCopy: (String) -> Unit,
     onDelete: (String) -> Unit,
     assets: AssistantAssets,
+    onCreate: () -> Unit,
     editing: Boolean = false,
     onOutsideDismiss: () -> Unit = onDismiss,
 ) {
@@ -85,8 +86,7 @@ fun AssistantPickerDialog(
         showCloseButton = false,
         onOutsideDismiss = onOutsideDismiss,
         footer = {
-            // Creation remains a visual placeholder until its editor flow is connected.
-            AssistantPreviewButton(stringResource(R.string.assistant_new), {},
+            AssistantPreviewButton(stringResource(R.string.assistant_new), onCreate,
                 Modifier.weight(1f).testTag("assistant-new"), secondary = true, icon = AssistantPreviewIcons.Add)
             AssistantPreviewButton(stringResource(R.string.assistant_done), onDismiss,
                 Modifier.weight(1f).testTag("assistant-done"), primary = true)
@@ -140,6 +140,7 @@ fun AssistantPickerDialog(
     onSelect: (String) -> Unit,
     onEdit: (String) -> Unit,
     onDismiss: () -> Unit,
+    onCreate: () -> Unit,
     selectedId: String? = null,
     useGlobalSelection: Boolean = true,
     canMutate: () -> Boolean = { true },
@@ -157,6 +158,7 @@ fun AssistantPickerDialog(
         }
     }
     AssistantPickerDialog(show, profiles, if(useGlobalSelection) selectedId ?: active else selectedId, onSelect, onEdit, onDismiss,
+        onCreate = { if (canMutate()) onCreate() },
         onCopy = { id -> mutate {
             val source = requireNotNull(store.read(id)) { "助手不存在" }
             val copy = store.duplicate(id)

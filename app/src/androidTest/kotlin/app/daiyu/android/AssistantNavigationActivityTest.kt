@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import android.view.KeyEvent
+import app.daiyu.android.assistants.create
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
@@ -75,6 +76,124 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         } else ui.onNodeWithContentDescription("返回").performClick()
         ui.waitForIdle()
+    }
+
+    private fun selectBoundConversation() {
+        val bound = fixture.controller.assistantStore.create("Existing bound assistant")
+        val conversation = fixture.database.create(bound.id)
+        mainThread { activity.select(conversation) }
+        awaitUniqueTag("chat-draft")
+        assertEquals(bound.id, fixture.database.assistantId(conversation.id))
+        assertFalse(bound.id == fixture.controller.assistantStore.selectedId.value)
+    }
+
+    fun testNewAssistantOpensEditorAndSavesWithoutChangingBinding() {
+        selectBoundConversation()
+        val store = fixture.controller.assistantStore
+        val selected = store.selectedId.value
+        val bindings = fixture.database.conversations().associate { it.id to fixture.database.assistantId(it.id) }
+        for (fromSettings in listOf(false, true)) {
+            openPicker(fromSettings)
+            val originTag = if (fromSettings) "page:设置" else "chat-draft"
+            val origin = node(originTag).fetchSemanticsNode().id
+            val before = store.list()
+            if (fromSettings) {
+                node("assistant-search-input").performTextInput("no matching assistant")
+                dismissIme()
+            }
+            val newButton = node("assistant-new").assertIsDisplayed().assertIsEnabled()
+            val staleCreate = newButton.fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+            newButton.performClick()
+            awaitUniqueTag("assistant-editor")
+            awaitNodeWindowFocus(node("assistant-editor"))
+            awaitDialogEnter(node("assistant-editor"))
+            mainThread { staleCreate() }
+            ui.onNodeWithTag("assistant-list").assertDoesNotExist()
+            assertEquals(origin, node(originTag).fetchSemanticsNode().id)
+            assertEquals(before.size + 1, store.list().size)
+            val created = store.list().single { candidate -> before.none { it.id == candidate.id } }
+            assertEquals("新助手", created.name)
+            assertEquals("", created.prompt)
+            assertEquals("", created.description)
+            assertNull(created.avatarFileName)
+            assertTrue(created.memoryEnabled)
+            assertTrue(created.enabledSkillIds.isEmpty())
+            node("assistant-edit-save").assertIsNotEnabled()
+            val name = "Created from $originTag"
+            node("assistant-edit-name").scrollToVisible()
+                .performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString(name)) }
+            dismissIme()
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag("assistant-edit-save").fetchSemanticsNodes()
+                    .singleOrNull()?.config?.contains(SemanticsProperties.Disabled) == false
+            }
+            node("assistant-edit-save").assertIsEnabled().performClick()
+            awaitUniqueTag("assistant-list")
+            if (fromSettings) {
+                node("assistant-search-input").performTextClearance()
+                dismissIme()
+            }
+            node("assistant-list").scrollToDescendant(hasTestTag("assistant-item-${created.id}"))
+            node("assistant-item-${created.id}").assertIsDisplayed()
+            val restored = app.daiyu.android.assistants.SqliteAssistantStore(fixture.database)
+            assertEquals(created.copy(name = name), restored.read(created.id))
+            assertEquals(selected, restored.selectedId.value)
+            assertEquals(before.size + 1, restored.list().size)
+            node("assistant-done").performClick()
+            awaitUniqueTag(originTag)
+            assertEquals(origin, node(originTag).fetchSemanticsNode().id)
+            if (fromSettings) backToChat(activity)
+        }
+        assertEquals(bindings, fixture.database.conversations().associate { it.id to fixture.database.assistantId(it.id) })
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testNewAssistantCancelAndOutsideKeepCreatedDefaultsWithoutSavingDraft() {
+        selectBoundConversation()
+        val store = fixture.controller.assistantStore
+        val selected = store.selectedId.value
+        val bindings = fixture.database.conversations().associate { it.id to fixture.database.assistantId(it.id) }
+        for (fromSettings in listOf(false, true)) for (exit in listOf("cancel", "header", "system", "outside")) {
+            openPicker(fromSettings)
+            val before = store.list()
+            node("assistant-new").assertIsDisplayed().assertIsEnabled().performClick()
+            awaitUniqueTag("assistant-editor")
+            awaitNodeWindowFocus(node("assistant-editor"))
+            awaitDialogEnter(node("assistant-editor"))
+            val created = store.list().single { candidate -> before.none { it.id == candidate.id } }
+            node("assistant-edit-name").scrollToVisible()
+                .performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString("Unsaved new assistant")) }
+            dismissIme()
+            awaitDialogImeFrame(node("assistant-editor"), visible = false)
+            when (exit) {
+                "outside" -> {
+                    dismissOutside(fromSettings)
+                    if (fromSettings) {
+                        node("settings-row:助手").assertIsDisplayed().assertIsEnabled().performClick()
+                        awaitUniqueTag("assistant-list")
+                    } else openPicker(fromSettings = false)
+                }
+                "cancel" -> node("assistant-edit-cancel").performClick()
+                else -> back(system = exit == "system")
+            }
+            awaitUniqueTag("assistant-list")
+            assertEquals(before.size + 1, store.list().size)
+            assertEquals(created, store.read(created.id))
+            assertEquals(selected, store.selectedId.value)
+            ui.onNodeWithText("Unsaved new assistant").assertDoesNotExist()
+            actions(created.id)
+            edit()
+            node("assistant-edit-name").assertTextEquals(created.name)
+            node("assistant-edit-cancel").performClick()
+            awaitUniqueTag("assistant-action-edit")
+            back(system = false)
+            awaitUniqueTag("assistant-list")
+            node("assistant-done").performClick()
+            awaitUniqueTag(if (fromSettings) "page:设置" else "chat-draft")
+            if (fromSettings) backToChat(activity)
+        }
+        assertEquals(bindings, fixture.database.conversations().associate { it.id to fixture.database.assistantId(it.id) })
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testHeaderAndSystemBackReturnThroughActionsAndListWithoutSaving() {

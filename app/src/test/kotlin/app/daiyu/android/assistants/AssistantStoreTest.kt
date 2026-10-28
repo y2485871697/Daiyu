@@ -33,6 +33,29 @@ class AssistantStoreTest {
         assertEquals(AssistantDefaults.ENABLED_SKILL_IDS, profile.enabledSkillIds)
     }
 
+    @Test fun createPersistsDistinctDefaultsWithoutChangingSelection() {
+        val preferences = PreferencesFake().preferences
+        val store = SharedPreferencesAssistantStore(preferences)
+        val selected = store.selectedId.value
+        val before = store.list()
+        val first = store.create()
+        val second = store.create()
+        assertNotEquals(first.id, second.id)
+        for (profile in listOf(first, second)) {
+            assertFalse(before.any { it.id == profile.id })
+            assertEquals("新助手", profile.name)
+            assertEquals("", profile.prompt)
+            assertEquals("", profile.description)
+            assertNull(profile.avatarFileName)
+            assertTrue(profile.memoryEnabled)
+            assertTrue(profile.enabledSkillIds.isEmpty())
+            assertTrue(profile.createdAt > 0L)
+        }
+        val restored = SharedPreferencesAssistantStore(preferences)
+        assertEquals(before + listOf(first, second), restored.list())
+        assertEquals(selected, restored.selectedId.value)
+    }
+
     @Test fun saveReadUpdateAndSelectionSurviveReload() {
         val prefs = PreferencesFake()
         val store = SharedPreferencesAssistantStore(prefs.preferences)

@@ -50,7 +50,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
                         density.set(LocalDensity.current)
                         key(fixtureKey) {
                             AssistantPickerDialog(true, profiles, "visual-a", { selected = it }, { edited = it }, { dismissed = true },
-                                onCopy = {}, onDelete = {}, assets = assets)
+                                onCopy = {}, onDelete = {}, onCreate = {}, assets = assets)
                         }
                     }
                 }

@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class AssistantPickerAdmissionTest : WiredActivityTestCase() {
     private val writes = AtomicInteger()
     private val assetsWrites = AtomicInteger()
+    private val creates = AtomicInteger()
     private var admitted = true
     private lateinit var store: AssistantStore
 
@@ -42,7 +43,8 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 MiuixTheme {
-                    AssistantPickerDialog(true, store, assets, {}, {}, {}, canMutate = { admitted })
+                    AssistantPickerDialog(true, store, assets, {}, {}, {},
+                        onCreate = { creates.incrementAndGet() }, canMutate = { admitted })
                 }
             }
         }
@@ -71,10 +73,25 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
         assertEquals(2, store.list().size)
     }
 
-    fun testNewAssistantPlaceholderDoesNotMutateProfilesOrSelection() {
+    fun testNewAssistantDispatchesCreateWithoutSelectingOrTouchingAssets() {
+        awaitNodeWindowFocus(ui.onNodeWithTag("assistant-new"))
+        awaitDialogEnter(ui.onNodeWithTag("assistant-sheet", useUnmergedTree = true))
         ui.onNodeWithTag("assistant-new").assertIsDisplayed().performClick()
+        assertEquals(1, creates.get())
         ui.onNodeWithText("Picker A").assertIsDisplayed()
         ui.onNodeWithText("Picker B").assertIsDisplayed()
+        assertEquals(0, writes.get())
+        assertEquals(0, assetsWrites.get())
+        assertEquals(2, store.list().size)
+        assertEquals("picker-a", store.selectedId.value)
+    }
+
+    fun testStaleNewAssistantDoesNotDispatchCreate() {
+        awaitNodeWindowFocus(ui.onNodeWithTag("assistant-new"))
+        awaitDialogEnter(ui.onNodeWithTag("assistant-sheet", useUnmergedTree = true))
+        mainThread { admitted = false }
+        ui.onNodeWithTag("assistant-new").assertIsDisplayed().performClick()
+        assertEquals(0, creates.get())
         assertEquals(0, writes.get())
         assertEquals(0, assetsWrites.get())
         assertEquals(2, store.list().size)

@@ -191,7 +191,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         val assets = FileAssistantAssets(instrumentation.targetContext)
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(dark, scale) { dismiss -> AssistantPickerDialog(true, emptyList(), null, {}, {}, dismiss,
-                onCopy = {}, onDelete = {}, assets = assets) }
+                onCopy = {}, onDelete = {}, onCreate = {}, assets = assets) }
             assertFloating("assistant-sheet", "assistant-done")
             val expectedHeight = rawBounds(node("assistant-sheet").fetchSemanticsNode()).height
             close("assistant-sheet")
@@ -237,7 +237,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
         val assets = FileAssistantAssets(instrumentation.targetContext)
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(dark, scale, fontScale = 1.3f) { dismiss ->
-                AssistantPickerDialog(true, emptyList(), null, {}, {}, dismiss, onCopy = {}, onDelete = {}, assets = assets)
+                AssistantPickerDialog(true, emptyList(), null, {}, {}, dismiss, onCopy = {}, onDelete = {}, onCreate = {}, assets = assets)
             }
             assertFloating("assistant-sheet", "assistant-done")
             val expectedHeight = rawBounds(node("assistant-sheet").fetchSemanticsNode()).height
@@ -385,7 +385,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
     fun testAssistantUsageChoiceAndModelEditorShareFloatingInsets() {
         val assets = FileAssistantAssets(instrumentation.targetContext)
         show { dismiss -> AssistantPickerDialog(true, emptyList(), null, {}, {}, dismiss,
-            onCopy = {}, onDelete = {}, assets = assets) }
+            onCopy = {}, onDelete = {}, onCreate = {}, assets = assets) }
         assertFloating("assistant-sheet", "assistant-done")
         close("assistant-sheet")
         show { dismiss -> UsageGlassDialog("底部用量弹窗", dismiss) { Box(Modifier.height(60.dp)) } }

@@ -230,7 +230,10 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         assertTrue(menu.left >= play.right - 1f)
         ui.onAllNodesWithText("试听", substring = false).assertCountEquals(0)
         ui.onAllNodesWithText("更多", substring = false).assertCountEquals(0)
-        node("settings-row:S_available").assertTextContains("训练成功", substring = true)
+        ui.onNode(
+            hasText("训练成功", substring = true) and hasAnyAncestor(hasTestTag("settings-row:S_available")),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
         assertNoSideEffects()
         node("voice-menu:S_available").performClick()
         awaitUniqueTag("voice-choice-dialog")
@@ -243,8 +246,12 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("settings-radio:查看状态").performClick()
         ui.onNodeWithText("确认").assertIsEnabled().performClick()
         ui.waitUntil(5_000) { requests.get() == 1 && resources.voices.state.value.any { it.id == "S_available" && it.status == 1 } }
-        node("settings-row:S_available").assertTextContains("训练中", substring = true)
-        node("voice-preview:S_available").assertIsNotEnabled()
+        ui.onNode(
+            hasText("训练中", substring = true) and hasAnyAncestor(hasTestTag("settings-row:S_available")),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
+        node("voice-preview:S_available").assertContentDescriptionEquals("播放试听")
+            .performTouchInput { click() }
         assertEquals(1, requests.get()); assertEquals(0, plays.get()); assertEquals(0, fixture.opens.get())
         assertEquals(beforePreferences, instrumentation.targetContext.getSharedPreferences("voice_account_control_secret_v1", 0).all)
     }
@@ -258,14 +265,17 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("voice-preview:S_available").assertContentDescriptionEquals("播放试听")
         assertEquals(beforeIndex, index.readText()); assertEquals(0, requests.get())
         mount(available = true, flow = "LIST", ready = true, uncertain = true)
-        node("voice-preview:S_available").assertIsNotEnabled()
+        node("voice-preview:S_available").assertContentDescriptionEquals("播放试听")
+            .performTouchInput { click() }
         node("voice-menu:S_available").performClick()
         awaitUniqueTag("voice-choice-dialog")
         awaitNodeWindowFocus(node("voice-choice-dialog"))
         node("settings-radio:查看状态").assertIsEnabled()
-        node("settings-radio:移除本机记录").assertIsNotEnabled()
+        node("settings-radio:移除本机记录").assertIsNotEnabled().performTouchInput { click() }
+        node("voice-choice-dialog").assertExists()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         assertEquals(beforeIndex, index.readText()); assertEquals(0, requests.get())
+        assertEquals(1, plays.get()); assertEquals(1, stops.get())
     }
 
     override fun cleanupAfterLegacy() {

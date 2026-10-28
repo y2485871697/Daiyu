@@ -1364,7 +1364,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     }
 
     fun testAnimationFramesDoNotRecomposeTheRevealOwnerOrReplayItsCards() {
-        val plain = "LEAF " + "word ".repeat(150)
+        val plain = ("LEAF " + "word ".repeat(150)).trimEnd()
         val source = "**$plain**"
         val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
         markdownProjectionCache.put(MarkdownProjection(listOf(""), mapOf("" to emptyList()), parser))

@@ -353,6 +353,7 @@ class ChatController internal constructor(private val application:Application,
     }
     internal val interactiveMode = app.daiyu.android.config.InteractiveModePreference(preferences)
     private val executor=Executors.newSingleThreadExecutor()
+    private val conversationConfigurationExecutor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
     private val imageReceiptHandler=Handler(Looper.getMainLooper())
     // Entry points and callback commits share this controller's monitor. Runner control and
@@ -2038,7 +2039,7 @@ class ChatController internal constructor(private val application:Application,
         val operation = synchronized(this) {
             checkNotNull(reserveConversationConfiguration(conversation)) { "任务占用中" }
         }
-        try { executor.execute {
+        try { conversationConfigurationExecutor.execute {
             val success = try {
                 synchronized(this) { check(!closed && conversationConfigurations.current(operation)) }
                 work()
@@ -4547,7 +4548,7 @@ class ChatController internal constructor(private val application:Application,
         closingStorage=true
         executor.execute {
             try {closeGenerationOutputReaders();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
-            finally {modelDeletionWorker.shutdown();timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
+            finally {conversationConfigurationExecutor.shutdown();modelDeletionWorker.shutdown();timelineExecutor.shutdown();contextManagementExecutor.shutdown();titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }
     private val staticGenerationAssets by lazy { app.daiyu.android.media.StaticGenerationAssets(

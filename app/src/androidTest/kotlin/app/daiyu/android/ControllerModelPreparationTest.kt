@@ -160,12 +160,15 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         lateinit var f: Fixture
         val opens = AtomicInteger()
         f = fresh { config ->
-            f.settings.save(config.copy(model = "replacement-model"))
+            f.settings.save(config.copy(batteryEnabled = false))
             CatalogFixturePort { opens.incrementAndGet(); session("must not run") }
         }
         val conversation = f.db.create("default")
         f.db.draft(conversation.id, "keep until fresh send")
         assertNull(f.controller.send(conversation, "keep until fresh send"))
+        val bound = f.controller.freezeConversationProvider(conversation.id)
+        assertEquals("fixture-model", bound.settings.model)
+        assertFalse(bound.settings.batteryEnabled)
         assertEquals(0, opens.get())
         assertTrue(f.db.messages(conversation.id).isEmpty())
         assertEquals("keep until fresh send", f.db.conversations().single().draft)

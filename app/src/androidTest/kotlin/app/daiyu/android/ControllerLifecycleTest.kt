@@ -165,12 +165,14 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         f.app.getSharedPreferences("model-settings",0).edit().putBoolean("credential-rebind-required",true).commit()
         assertNull(f.controller.send(c,"keep draft"))
         assertTrue(f.controller.problem?.contains("未发起网络请求")==true)
-        f.settings.save(ModelSettings("https://example.invalid","fixture-model","fixture-key",false))
+        assertTrue(f.app.getSharedPreferences("model-settings",0).edit()
+            .remove("credential-rebind-required").commit())
         // A real transaction failure must roll back clearing the conversation draft.
         f.db.writableDatabase.execSQL("CREATE TRIGGER reject_send BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'fixture'); END")
         assertNull(f.controller.send(c,"keep draft"));assertNull(f.controller.send(null,"keep composer"))
         assertEquals("keep draft",f.db.conversations().single().draft);assertEquals("keep composer",f.db.draft())
         assertEquals(1,f.db.conversations().size);assertTrue(f.db.messages(c.id).isEmpty());assertNull(f.controller.active)
+        assertEquals(0,f.calls.get())
         f.db.writableDatabase.execSQL("DROP TRIGGER reject_send")
         // Corrupt a historical row only after accepting and finishing a normal run.
         val s=session(f);assertNotNull(f.controller.send(c,"accepted"))

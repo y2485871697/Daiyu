@@ -142,7 +142,7 @@ class ActivityTest : WiredActivityTestCase() {
 
     fun testDraftSlotsRunningSwitchAndActivityRecreation() {
         val preferences = fixture.application.getSharedPreferences("model-settings", 0)
-        val original = fixture.settings.load()
+        val originalIv = checkNotNull(preferences.getString("iv", null))
         preferences.edit().remove("iv").commit()
         val unattached = " 未创建\n草稿  "
         setDraft(unattached); setSelection(2, 4, relativeToOriginalText = true); node("chat-send").performClick()
@@ -170,7 +170,7 @@ class ActivityTest : WiredActivityTestCase() {
             firstAEditor.onTextChange("stale A after round trip"); firstAEditor.onSelectionChange(0, 0)
         }
         assertDraft("A草稿"); assertSelection(1, 2)
-        fixture.settings.save(original)
+        assertTrue(preferences.edit().putString("iv", originalIv).commit())
         val session = fixture.session("A回复", holdSeconds = 120)
         val beforeSendEditor = retainedControls(activity)
         node("chat-send").performClick(); assertTrue(session.entered.await(5, TimeUnit.SECONDS))

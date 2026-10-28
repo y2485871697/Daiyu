@@ -36,7 +36,7 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
             ui.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, label),
                 useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
-        assertEquals(mode, fixture.settings.load().requestOptions.speedMode)
+        assertEquals(mode, fixture.controller.conversationModelEditing(null).second.settings.requestOptions.speedMode)
     }
 
     private fun measuredPopupTextLayout(result: androidx.compose.ui.text.TextLayoutResult): androidx.compose.ui.text.TextLayoutResult {
@@ -109,7 +109,7 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
         assertEquals("Slider keeps the existing content width", titleBounds.width, sliderBounds.width, 1f)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         node("chat-reasoning").performClick()
-        assertNull(fixture.settings.load().requestOptions.speedMode)
+        assertNull(fixture.controller.conversationModelEditing(null).second.settings.requestOptions.speedMode)
         assertEquals(0, fixture.opens.get())
     }
     fun testPendingSpeedSaveKeepsChatViewportStableForEveryMode() {

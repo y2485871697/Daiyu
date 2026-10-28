@@ -53,8 +53,8 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         val settings = ModelSettingsStore(app, alias)
         val binding = SummaryModelBinding("gui-summary-provider", "gui-summary-model")
         val summary = InMemoryWire(holdSummary)
-        val conversation: Conversation? = if (automatic) seedHistory() else null
-        val originalHistory = conversation?.let { database.messages(it.id).map { row -> row.second } }.orEmpty()
+        val conversation: Conversation?
+        val originalHistory: List<Message>
         val opens = AtomicInteger()
         val factories = AtomicInteger()
         val modelInput = AtomicReference<List<Message>>()
@@ -116,6 +116,8 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             }, providerBalanceHost = { app.balances })
             awaitControl("controller recovery ready") { controller.ready }
             assertNull(controller.problem)
+            conversation = if (automatic) seedHistory() else null
+            originalHistory = conversation?.let { database.messages(it.id).map { row -> row.second } }.orEmpty()
         }
 
         private fun seedHistory(): Conversation {

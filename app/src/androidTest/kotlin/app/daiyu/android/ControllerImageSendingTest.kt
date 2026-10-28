@@ -522,12 +522,16 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         await(f) { f.controller.active == null }
         f.settings.save(f.settings.load().copy(model = "another-exact-model"))
         f.settings.modelCatalogSnapshot()
+        assertTrue(f.db.bindModel(conversation.id, f.db.modelBinding(conversation.id),
+            checkNotNull(f.controller.providers.selectedConversationModel())))
         f.db.draft(conversation.id, "keep this text")
         f.settings.modelCatalog.updateRegisteredModel(f.settings.load().model) { current ->
             val record = checkNotNull(current)
             record.copy(settings = record.settings.copy(visionOverride = false))
         }
-        assertEquals(false, f.controller.providers.freezeActive().settings.visionOverride)
+        val selected = f.controller.freezeConversationProvider(conversation.id).settings
+        assertEquals("another-exact-model", selected.model)
+        assertEquals(false, selected.visionOverride)
         assertNull(f.controller.send(conversation, "keep this text"))
         assertEquals(1, f.probe.opens.get()); assertEquals(2, f.db.messages(conversation.id).size)
         assertEquals("keep this text", f.db.conversations().single().draft)
@@ -536,7 +540,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
                 val record = checkNotNull(current)
                 record.copy(settings = record.settings.copy(visionOverride = supported))
             }
-            val frozen = f.controller.providers.freezeActive().settings
+            val frozen = f.controller.freezeConversationProvider(conversation.id).settings
             assertEquals(supported, frozen.visionOverride)
             assertEquals(true, frozen.requestSnapshot().imageInputSupported)
             assertNotNull(f.controller.send(conversation, "keep this text"))

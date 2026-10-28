@@ -301,8 +301,11 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         pick(1); waitImages(1); setImageCapability(false)
         val previousModel = settings.load().model
         settings.save(settings.load().copy(model = "different-exact-model"))
+        val replacement = checkNotNull(controller.providers.selectedConversationModel())
+        assertTrue(controller.database.bindModel(null, controller.database.modelBinding(null), replacement))
         assertEquals(false, settings.modelCatalog.readRegisteredModel(previousModel)?.settings?.visionOverride)
-        val selected = controller.providers.freezeActive().settings
+        val selected = controller.freezeConversationProvider(null).settings
+        assertEquals("different-exact-model", selected.model)
         assertNull(selected.visionOverride)
         assertEquals(true, selected.requestSnapshot().imageInputSupported)
         node("chat-send").performClick()

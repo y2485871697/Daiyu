@@ -115,11 +115,14 @@ class ModelPickerBalanceContract(unittest.TestCase):
         self.assertIn('background(if (selected) colors.accent else Color.Transparent)', picker)
         usage = source('ui/components/UsagePresentation.kt')
         collaboration = source('ui/screens/assistants/AssistantPreviewComponents.kt')
+        self.assertIn('val accent = resolveSelectionAccent(appearance, dark)', usage)
+        selection_accent = source('ui/app/AppearanceColors.kt').split(
+            'internal fun resolveSelectionAccent(', 1)[1].split('\ninternal fun ', 1)[0]
         def accent_values(text):
-            line = next(line for line in text.splitlines() if 'val accent =' in line).rsplit('?:', 1)[1]
+            line = next(line for line in text.splitlines() if 'appearance.resolvedPrimaryAccent ?:' in line).rsplit('?:', 1)[1]
             return [value.lower() for value in re.findall(r'0[xX][0-9a-fA-F]{8}', line)]
-        self.assertEqual(accent_values(usage), accent_values(collaboration))
-        self.assertEqual(['0xffc6b6d5', '0xff82718f'], accent_values(usage))
+        self.assertEqual(accent_values(selection_accent), accent_values(collaboration))
+        self.assertEqual(['0xffc6b6d5', '0xff82718f'], accent_values(selection_accent))
 
     def test_settings_receipts_and_top_bar_boundary_are_unchanged(self):
         models = source('balance/BalanceModels.kt')

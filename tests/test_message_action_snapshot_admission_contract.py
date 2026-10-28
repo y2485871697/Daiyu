@@ -40,7 +40,7 @@ class MessageActionSnapshotAdmissionContract(unittest.TestCase):
             self.assertIn('fun ' + name + '()', source)
         self.assertIn('retainedControls(activity).onRegenerate(before.last().second.id.value)', source)
         self.assertIn('assertNull(field("messageActionAttempted"))', source)
-        self.assertIn('it.name == "reservePreparation" && it.parameterCount == 1', source)
+        self.assertIn('it.name.startsWith("reservePreparation") && it.parameterCount == 2', source)
         self.assertIn('it.name == "releasePreparation" && it.parameterCount == 1', source)
         self.assertNotIn('getDeclaredField("preparing")', source)
         self.assertIn('assertSame(attempted, field("messageActionAttempted"))', source)

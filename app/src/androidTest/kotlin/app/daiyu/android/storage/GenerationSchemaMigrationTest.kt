@@ -275,14 +275,43 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
     }
 
     fun testEveryVersionOneThroughTenUpgradesThroughRealHelperAndReopens() {
-        for (version in 1..10) {
-            val f = fixture(); seedCore(f, version)
-            f.raw().use { source ->
+        fun assertModelSelectionSchema(db: SQLiteDatabase) {
+            assertEquals(listOf("owner_id", "provider_slot", "local_model_id"),
+                columns(db, "conversation_model_selections"))
+            fun normalized(sql: String) = sql.replace(Regex("\\s+"), "").lowercase()
+            assertEquals(normalized("CREATE TABLE conversation_model_selections(" +
+                "owner_id TEXT PRIMARY KEY,provider_slot TEXT,local_model_id TEXT," +
+                "CHECK((provider_slot IS NULL)=(local_model_id IS NULL)))"),
+                normalized(scalar(db, "SELECT sql FROM sqlite_master WHERE type='table' " +
+                    "AND name='conversation_model_selections'")))
+        }
+        for (version in (1..10).toList() + 29) {
+            val f = fixture(); seedCore(f, if (version == 29) 10 else version)
+            if (version == 29) f.helper().also { it.writableDatabase }.close()
+            // The v29 boundary fixture is current schema minus the new binding table.
+            val before = f.raw().use { source ->
+                source.execSQL("DROP TABLE IF EXISTS conversation_model_selections")
+                if (version == 29) source.version = 29
                 assertEquals(version, source.version)
-                assertFalse(tableExists(source, "message_video_inputs"))
+                assertFalse(tableExists(source, "conversation_model_selections"))
+                if (version == 29) assertVideoSidecarSchema(source)
+                else assertFalse(tableExists(source, "message_video_inputs"))
+                snapshot(source)
             }
             val helper = f.helper(); val db = helper.writableDatabase
-            assertEquals("source v$version", 29, db.version)
+            assertEquals("source v$version", 30, db.version)
+            assertModelSelectionSchema(db)
+            assertEquals(0, count(db, "conversation_model_selections"))
+            if (version == 29) {
+                val migrated = snapshot(db)
+                val added = "conversation_model_selections"
+                assertEquals(before.keys + added, migrated.keys)
+                assertEquals(before.getValue("schema"),
+                    migrated.getValue("schema").filterNot { it.split('\u0000')[2] == added })
+                before.filterKeys { it != "version" && it != "schema" }.forEach { (table, rows) ->
+                    assertEquals(table, rows, migrated[table])
+                }
+            }
             assertVideoSidecarSchema(db)
             assertEquals(0, count(db, "message_video_inputs"))
             assertTrue(tableExists(db, "generation_attempts")); assertTrue(tableExists(db, "generation_outputs"))
@@ -299,6 +328,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
             helper.close()
             val reopenedDb = f.helper().writableDatabase
             assertEquals(30, reopenedDb.version)
+            assertModelSelectionSchema(reopenedDb)
             assertVideoSidecarSchema(reopenedDb)
             assertEquals(after, snapshot(reopenedDb))
         }

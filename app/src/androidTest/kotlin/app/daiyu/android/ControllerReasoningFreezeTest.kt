@@ -55,7 +55,7 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
             assertNotNull(fixture.controller.send(conversation, "second"))
             awaitControl("second complete") { fixture.controller.active == null }
             assertEquals(2, frozen.size)
-            assertEquals("later-model", frozen[1].model)
+            assertEquals("run-control", frozen[1].model)
             assertEquals("none", JSONObject(frozen[1].requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
             assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(null))
             assertEquals(ReasoningEffort.OFF, app.daiyu.android.ui.model.ConversationReasoningPreference(
@@ -86,12 +86,15 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
                 try {
                     awaitControl("controller ready") { fixture.controller.ready }
                     fixture.settings.save(fixture.settings.load().copy(model = model, reasoningOverride = false))
+                    val binding = checkNotNull(fixture.controller.providers.selectedConversationModel())
+                    assertTrue(fixture.database.bindModel(null, fixture.database.modelBinding(null), binding))
                     fixture.controller.reasoningPreference.set(null, effort)
                     fixture.session("answer", held = false)
                     fixture.database.draft("retain exact choice")
                     val conversation = fixture.controller.send(null, "retain exact choice")
                     assertNotNull(conversation)
                     awaitControl("choice complete") { fixture.controller.active == null }
+                    assertEquals(model, frozen.single().model)
                     assertEquals(if (effort == ReasoningEffort.OFF) "none" else effort.wireValue,
                         JSONObject(frozen.single().requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
                     assertEquals(effort, fixture.controller.reasoningPreference.snapshot(conversation!!.id.value))
@@ -107,11 +110,14 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
             awaitControl("controller ready") { fixture.controller.ready }
             fixture.settings.save(fixture.settings.load().copy(endpoint = "https://provider.invalid/v1",
                 protocol = app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS), protocolChangeAuthorized = true)
+            val chatBinding = checkNotNull(fixture.controller.providers.selectedConversationModel())
+            assertTrue(fixture.database.bindModel(null, fixture.database.modelBinding(null), chatBinding))
             fixture.controller.reasoningPreference.set(null, ReasoningEffort.HIGH)
             fixture.session("answer", held = false)
             fixture.database.draft("chat reasoning")
             assertNotNull(fixture.controller.send(null, "chat reasoning"))
             awaitControl("chat complete") { fixture.controller.active == null }
+            assertEquals(app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS, frozen.single().protocol)
             assertEquals("high", JSONObject(frozen.single().requestOptions.customBody).getString("reasoning_effort"))
             assertEquals(1, fixture.opens.get())
         } finally { fixture.close() }

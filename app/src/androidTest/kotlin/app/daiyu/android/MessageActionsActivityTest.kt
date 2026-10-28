@@ -306,12 +306,12 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
     fun testSnapshotRecoversAfterPreparationGateWithoutChangingHistory() {
         snapshotAfterTransientAdmissionRejection {
             val reserve = ChatController::class.java.declaredMethods.single {
-                it.name == "reservePreparation" && it.parameterCount == 1
+                it.name.startsWith("reservePreparation") && it.parameterCount == 2
             }.apply { isAccessible = true }
             val release = ChatController::class.java.declaredMethods.single {
                 it.name == "releasePreparation" && it.parameterCount == 1
             }.apply { isAccessible = true }
-            val token = synchronized(fixture.controller) { reserve.invoke(fixture.controller, null) }
+            val token = synchronized(fixture.controller) { reserve.invoke(fixture.controller, null, null) }
             val releaseGate: () -> Unit = { release.invoke(fixture.controller, token) }
             releaseGate
         }

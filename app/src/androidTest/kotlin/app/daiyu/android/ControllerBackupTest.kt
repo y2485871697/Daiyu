@@ -234,6 +234,8 @@ class ControllerBackupTest:InstrumentationTestCase() {
             try {f.app.settings.load();fail("old key must not bind to new endpoint")} catch(_:CredentialUnavailableException) {}
             assertEquals("",f.app.settings.loadForEditing().settings.apiKey)
         }
+        val binding=checkNotNull(f.controller.providers.selectedConversationModel())
+        assertTrue(f.db.bindModel(null,null,binding))
         assertNull(f.controller.send(null,"must not use the previous key"))
         main {
             assertTrue(f.controller.problem?.contains("未发起网络请求")==true)

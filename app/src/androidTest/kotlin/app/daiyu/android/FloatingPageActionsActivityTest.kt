@@ -58,7 +58,21 @@ class FloatingPageActionsActivityTest : WiredActivityTestCase() {
                 val gap = Offset((left.right + right.left) / 2f, left.center.y) - body.topLeft
                 val pixels = captureScreenNode(node("floating-body")).toPixelMap()
                 val pixel = pixels[gap.x.toInt(), gap.y.toInt()]
-                assertTrue("gap exposes the underlying content", pixel.red > .97f && pixel.blue > .97f && pixel.green < .03f)
+                val referenceY = ((footer.boundsInRoot.top - body.top) / 2f).toInt()
+                val reference = pixels[gap.x.toInt(), referenceY]
+                val buttonCenter = left.center - body.topLeft
+                val buttonPixel = pixels[buttonCenter.x.toInt(), buttonCenter.y.toInt()]
+                fun channelDifference(a: Color, b: Color): Float = maxOf(
+                    kotlin.math.abs(a.red - b.red),
+                    kotlin.math.abs(a.green - b.green),
+                    kotlin.math.abs(a.blue - b.blue),
+                )
+                val context = "fontScale=$fontScale expanded=$expanded gap=$gap " +
+                    "pixel=$pixel reference=$reference button=$buttonPixel"
+                assertTrue("uncovered reference contains the magenta body: $context",
+                    reference.red - reference.green > .5f && reference.blue - reference.green > .5f)
+                assertTrue("gap exposes the underlying content: $context", channelDifference(pixel, reference) < .03f)
+                assertTrue("screen capture includes the overlaid button: $context", channelDifference(buttonPixel, reference) > .1f)
                 ui.runOnIdle {
                     assertEquals(footer.size.height.toFloat(), with(footer.layoutInfo.density) { clearance.toPx() }, 1f)
                 }

@@ -73,7 +73,7 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         repeat(20) { before = repo.register(before.revision, "Floating provider $it") }
         val last = before.providers.last()
         openProviderManagement(); select(ProviderRegistry.PRIMARY)
-        node("page:模型提供商").performScrollToKey("bottom_spacer")
+        node("page:模型提供商").performScrollToKey(last.slotId)
         val card = node("provider-open-${last.slotId}").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val cancel = node("provider-cancel-selection").fetchSemanticsNode().boundsInRoot
         assertTrue("last provider clears the floating buttons", card.bottom <= cancel.top + 1f)

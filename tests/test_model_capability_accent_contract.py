@@ -21,7 +21,7 @@ class ModelCapabilityAccentContractTest(unittest.TestCase):
     def test_all_labels_keep_their_conditions_and_compact_noninteractive_layout(self):
         for fragment in ('"上下文未知"', '"支持视觉".takeIf { form?.vision == true }',
                          '"原生搜索".takeIf { form?.nativeSearch == true }',
-                         'if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型")',
+                         'if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型", tint = DaiyuPalette.selectionAccent)',
                          "horizontalArrangement = Arrangement.spacedBy(6.dp)",
                          "verticalArrangement = Arrangement.spacedBy(4.dp)"):
             self.assertIn(fragment, self.source)

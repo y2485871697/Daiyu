@@ -90,6 +90,11 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         operation = text.split('private fun conversationConfigurationTask(', 1)[1].split('@Synchronized internal fun setChatReasoning', 1)[0]
         for forbidden in ('dataBusy=true', 'dataBusy = true', 'problem=', 'problem =', 'invalidateVideoConfiguration(', 'reservePreparation('):
             self.assertNotIn(forbidden, operation)
+        self.assertIn('private val conversationConfigurationExecutor=Executors.newSingleThreadExecutor()', text)
+        self.assertIn('try { conversationConfigurationExecutor.execute {', operation)
+        self.assertNotIn('try { executor.execute {', operation)
+        close_storage = text.split('private fun closeStorageWhenIdle()', 1)[1].split('private val staticGenerationAssets', 1)[0]
+        self.assertIn('conversationConfigurationExecutor.shutdown()', close_storage.split('finally {', 1)[1])
         self.assertIn('conversationConfigurations.current(operation)', operation)
         self.assertIn('conversationConfigurations.release(operation)', operation)
         assistant = text.split('internal fun bindConversationAssistant(', 1)[1].split('private val conversationWorkspaces', 1)[0]

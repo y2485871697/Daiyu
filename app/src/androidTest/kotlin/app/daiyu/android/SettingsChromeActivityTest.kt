@@ -581,17 +581,24 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         assertNotNull(fixture.application.filesDir)
         assertTrue(fixture.application.filesDir.isAbsolute)
         assertTrue(fixture.application.filesDir.isDirectory)
-        fixture.settings.modelCatalogSnapshot()
+        val catalog = checkNotNull(fixture.settings.localModelCatalogSnapshot())
         RunControlFixture(instrumentation.targetContext).use { other ->
             awaitControl("second isolated controller ready") { other.controller.ready }
+            val otherCatalog = checkNotNull(other.settings.localModelCatalogSnapshot())
+            assertFalse(catalog.providerIdentity == otherCatalog.providerIdentity)
+            assertTrue(other.settings.modelCatalog.deleteProvider(otherCatalog.providerIdentity))
             assertNull(other.settings.localModelCatalogSnapshot())
-            assertNotNull(fixture.settings.localModelCatalogSnapshot())
+            assertEquals(catalog, fixture.settings.localModelCatalogSnapshot())
             assertFalse(fixture.application.filesDir == other.application.filesDir)
         }
     }
 
     fun testMissingCatalogKeepsBothTabsWithoutRegisteringAProviderIdentity() {
         val editor = fixture.controller.providers.editor(app.daiyu.android.storage.ProviderRegistry.PRIMARY)
+        fixture.controller.providers.withEditor(editor) { store ->
+            val catalog = checkNotNull(store.localModelCatalogSnapshot())
+            assertTrue(store.modelCatalog.deleteProvider(catalog.providerIdentity))
+        }
         assertNull(fixture.controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() })
         val before = fixture.settings.load()
         val registry = fixture.controller.providers.snapshot()

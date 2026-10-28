@@ -185,6 +185,8 @@ class ControllerLongHistoryRequestTest : InstrumentationTestCase() {
             controller = c
             awaitState("controller ready after reopen") { c.ready }
             assertNull(c.problem)
+            val binding = checkNotNull(c.providers.selectedConversationModel())
+            assertTrue(db.bindModel(owner.id, null, binding))
             val reopenedOwner = db.conversations().single { it.id == owner.id }
             db.draft(owner.id, pending)
             val accepted = AtomicReference<ChatController.TextSendResult>()

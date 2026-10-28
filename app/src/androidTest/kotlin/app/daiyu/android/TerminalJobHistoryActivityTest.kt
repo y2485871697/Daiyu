@@ -123,16 +123,36 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         val (conversation, _) = seedHistory("paused history must not publish")
         val old = open(conversation)
         val record = (property(old, "getHistory") as List<TerminalJobHistoryReader.Record>).single()
+        val lease = checkNotNull(invoke("getOrdinaryDialogLease"))
+        val staleRead = retainedClickCallback(node("terminal-task-read:0"))
         realPauseResume(activity, beforePause = {
             invoke("terminalHistoryPage", old, record, 0L)
             assertEquals(true, property(old, "getBusy"))
         }) {
-            assertNull(invoke("getTerminalJobsVisit"))
+            assertSame(old, invoke("getTerminalJobsVisit"))
+            assertEquals(false, property(lease, "isActive"))
+            assertEquals(false, invoke("terminalJobsCurrent", old))
         }
-        awaitControl("paused history worker returned") { property(old, "getBusy") == false }
-        assertEquals("", property(old, "getOutput"))
-        assertNull(invoke("getTerminalJobsVisit"))
-        node("terminal-tasks-dialog").assertDoesNotExist()
+        assertSame(old, invoke("getTerminalJobsVisit"))
+        assertEquals(false, property(lease, "isActive"))
+        node("terminal-tasks-dialog").assertExists()
+        mainThread {
+            invoke("openTerminalTasks", checkNotNull(invoke("getTerminalPageOwner")))
+            staleRead()
+            invoke("terminalHistoryPage", old, record, 0L)
+        }
+        val current = checkNotNull(invoke("getTerminalJobsVisit"))
+        assertNotSame(old, current)
+        awaitControl("paused read drained and replacement history published") {
+            property(old, "getBusy") == false && property(current, "getBusy") == false
+        }
+        assertTrue((property(old, "getRevoked") as java.util.concurrent.atomic.AtomicBoolean).get())
+        assertFalse((property(old, "getOutput") as String).contains("paused history must not publish"))
+        assertNull(property(old, "getHistoryPage"))
+        assertSame(current, invoke("getTerminalJobsVisit"))
+        assertEquals("", property(current, "getOutput"))
+        assertNull(property(current, "getHistoryPage"))
+        node("terminal-task-output").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 

@@ -89,6 +89,11 @@ class SharedBalanceProductionActivityTest : WiredActivityTestCase() {
         invoke("refreshConfirmedModelLabel")
         assertSame(primary, runBlocking { testHost.get(ProviderRegistry.PRIMARY) })
 
+        fixture.controller.providers.run {
+            listOf(ProviderRegistry.PRIMARY, secondary).forEach {
+                assertTrue(catalogSnapshot(editor(it)).models.isNotEmpty())
+            }
+        }
         amount.set("8.09")
         invoke("openChatModels")
         ui.waitUntil(5000) { primary.state.value.amountValue?.toPlainString() == "8.09" &&

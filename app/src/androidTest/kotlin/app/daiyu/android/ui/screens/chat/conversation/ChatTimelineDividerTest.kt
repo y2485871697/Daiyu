@@ -38,7 +38,7 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(
                     themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                    paletteSeedColor = if (custom) 0xFF56896C.toInt() else null,
+                    paletteSeedColor = if (custom) 0xFFE4F0E8.toInt() else null,
                     pureBlackEnabled = dark && custom,
                 ), applyInterfaceScale = false) {
                     density = LocalDensity.current

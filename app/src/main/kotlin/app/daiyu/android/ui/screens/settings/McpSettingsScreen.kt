@@ -4,6 +4,7 @@ import app.daiyu.android.ui.navigation.PageBackStack
 import app.daiyu.android.ui.components.imeCursorBrush
 import app.daiyu.android.ui.components.managedInput
 
+import app.daiyu.android.ui.haptics.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +22,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import app.daiyu.android.ui.components.subagent.ConversationAgentHandle
+import app.daiyu.android.ui.components.subagent.ConversationAgentSheet
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.sp
@@ -38,7 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Visiting/saving never connects; explicit refresh only discovers metadata. Neither grants execution. */
+/** Adding a server discovers metadata once; visiting never connects and settings never execute tools. */
 @Composable internal fun McpSettingsScreen(store: McpSettingsStore, owner: McpSettingsOwner,
     ownerCurrent: () -> Boolean, onBack: () -> Unit,
     managementFactory: (McpSettingsStore) -> McpManagement = { McpManagement(it) }) {
@@ -53,6 +59,7 @@ import kotlinx.coroutines.withContext
     var editing by remember(owner) { mutableStateOf(false) }
     var selectedId by remember(owner) { mutableStateOf<String?>(null) }
     var deleting by remember(owner) { mutableStateOf(false) }
+    var describedTool by remember(owner, selectedId) { mutableStateOf<String?>(null) }
     fun current() = owner.current() && ownerCurrent()
     LaunchedEffect(owner) {
         val result = withContext(Dispatchers.IO) { runCatching { store.snapshot() } }
@@ -82,22 +89,37 @@ import kotlinx.coroutines.withContext
                     val secret = if (bearer.isEmpty()) old?.bearer.orEmpty() else bearer
                     val sameConnection = old != null && old.endpoint == endpoint && old.bearer == secret
                     list + McpServer(id, label, endpoint, secret, sameConnection && old!!.enabled,
-                        if (sameConnection) old!!.catalog else emptyList(), if (sameConnection) old!!.allowedTools else emptySet())
+                        if (sameConnection) old!!.catalog else emptyList(), if (sameConnection) old!!.allowedTools else emptySet(),
+                        if (sameConnection) old!!.disabledTools else emptySet())
                 }
             } catch (_: Exception) { status = "配置无效，请检查名称、地址（HTTPS 或本机 127.0.0.1 HTTP）和 Token 格式。"; return }
+            val added = !remove && before.servers.none { it.id == id }
+            val savedId = id
             busy = true
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching { check(owner.current()); store.save(value, owner, before) }
                 }
                 if (current()) {
-                    busy = false; bearer = ""
+                    bearer = ""
                     if (result.isSuccess) {
-                        snapshot = result.getOrThrow(); editing = false; deleting = false
-                        selectedId = if (remove) null else id
+                        val saved = result.getOrThrow()
+                        snapshot = saved; editing = false; deleting = false
+                        selectedId = if (remove) null else savedId
                         status = "已保存；旧的本轮批准已失效，尚未连接服务器。"
-                    }
-                    else status = "保存失败或页面/配置已过期；请重新打开设置。"
+                        if (added) {
+                            status = "已添加，正在刷新工具目录。"
+                            val discovery = withContext(Dispatchers.IO) {
+                                runCatching { managementFactory(store).refresh(saved, savedId, owner) }
+                            }
+                            if (!current()) return@launch
+                            if (discovery.isSuccess) {
+                                snapshot = discovery.getOrThrow()
+                                status = "工具目录已刷新；可提交精确任务，尚未调用工具。"
+                            } else status = "服务器已保存，工具目录刷新失败；请点击刷新重试。"
+                        }
+                    } else status = "保存失败或页面/配置已过期；请重新打开设置。"
+                    busy = false
                 }
             }
         }
@@ -110,6 +132,22 @@ import kotlinx.coroutines.withContext
                     busy = false
                     if (result.isSuccess) { snapshot = result.getOrThrow(); status = "工具目录已刷新；可提交精确任务，尚未调用工具。" }
                     else status = "目录刷新失败或已过期；保留上次目录，未调用工具。"
+                }
+            }
+        }
+        fun setDisabled(before: McpSettings, server: McpServer, disabled: Set<String>) {
+            if (busy || !current() || snapshot !== before || disabled == server.disabledTools) return
+            busy = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { store.save(before.servers.map {
+                        if (it.id == server.id) it.withPolicy(disabledTools = disabled) else it
+                    }, owner, before) }
+                }
+                if (current()) {
+                    busy = false
+                    if (result.isSuccess) { snapshot = result.getOrThrow(); status = "工具开关已保存。" }
+                    else status = "工具开关保存失败或配置已过期；请重新打开设置。"
                 }
             }
         }
@@ -177,13 +215,20 @@ import kotlinx.coroutines.withContext
                             showChevron = true, onClick = if (busy) null else ({ edit(selected) }), tag = "mcp-settings-edit")
                     }
                 }
-                item(key = "tools-heading") { SettingsSectionTitle("工具（${selected.catalog.size}）") }
+                item(key = "tools-heading") {
+                    McpToolsHeading(selected.catalog.size, enabled = !busy && selected.catalog.isNotEmpty(),
+                        onEnableAll = { snapshot?.let { setDisabled(it, selected, emptySet()) } },
+                        onDisableAll = { snapshot?.let { setDisabled(it, selected, selected.catalog.map { tool -> tool.name }.toSet()) } })
+                }
                 if (selected.catalog.isEmpty()) item(key = "tools-empty") { SettingsNote("尚无工具，请刷新工具目录。") }
                 selected.catalog.forEach { tool ->
                     item(key = "tool:${tool.name}") {
                         SettingsCard {
-                            SettingsRow(tool.name, summary = tool.description,
-                                tag = "mcp-tool:${selected.id}:${tool.name}", showChevron = false)
+                            McpToolRow(tool.name, selected.id, checked = selected.eligible(tool.name), enabled = !busy,
+                                onDescribe = { if (current()) describedTool = tool.name },
+                                onCheckedChange = { checked -> snapshot?.let { before ->
+                                    setDisabled(before, selected, if (checked) selected.disabledTools - tool.name else selected.disabledTools + tool.name)
+                                } })
                         }
                     }
                 }
@@ -195,6 +240,9 @@ import kotlinx.coroutines.withContext
                     }
                 }
             }
+        }
+        selected?.catalog?.singleOrNull { it.name == describedTool }?.let { tool ->
+            McpToolDescriptionSheet(tool, onDismiss = { describedTool = null })
         }
         if (editing) WindowDialog(show = true, title = if (selected == null) "添加服务器" else "连接设置",
             onDismissRequest = { editing = false; bearer = "" }) {
@@ -244,4 +292,61 @@ private fun McpConnectionField(value: String, onValueChange: (String) -> Unit, h
                 editor()
             }
         })
+}
+
+@Composable
+private fun McpToolsHeading(count: Int, enabled: Boolean, onEnableAll: () -> Unit, onDisableAll: () -> Unit) {
+    val grouped = LocalSettingsPageStyle.current
+    val style = MiuixTheme.textStyles.body2.copy(fontSize = if (grouped) 13.sp else 14.sp,
+        fontWeight = if (grouped) FontWeight.Medium else FontWeight.SemiBold)
+    val color = if (grouped) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.onSurface
+    Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+        .padding(top = if (grouped) 16.dp else 20.dp, bottom = if (grouped) 1.dp else 2.dp)) {
+        top.yukonga.miuix.kmp.basic.Text("工具（$count）", style = style, color = color,
+            modifier = Modifier.weight(1f).alignByBaseline().testTag("mcp-tools-title").padding(vertical = 8.dp))
+        top.yukonga.miuix.kmp.basic.Text("全部开启", style = style, color = color.copy(alpha = if (enabled) 1f else .38f),
+            modifier = Modifier.alignByBaseline().testTag("mcp-tools-enable-all")
+                .clickable(enabled = enabled, role = Role.Button, onClick = onEnableAll).padding(vertical = 8.dp))
+        Spacer(Modifier.width(16.dp))
+        top.yukonga.miuix.kmp.basic.Text("全部关闭", style = style, color = color.copy(alpha = if (enabled) 1f else .38f),
+            modifier = Modifier.alignByBaseline().testTag("mcp-tools-disable-all")
+                .clickable(enabled = enabled, role = Role.Button, onClick = onDisableAll).padding(vertical = 8.dp))
+    }
+}
+
+@Composable
+private fun McpToolRow(title: String, serverId: String, checked: Boolean, enabled: Boolean,
+    onDescribe: () -> Unit, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).heightIn(min = 64.dp).testTag("mcp-tool:$serverId:$title")
+            .clickable(role = Role.Button, onClick = onDescribe).padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            top.yukonga.miuix.kmp.basic.Text(title, modifier = Modifier.weight(1f), maxLines = 1,
+                overflow = TextOverflow.Ellipsis, style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium),
+                color = MiuixTheme.colorScheme.onSurface)
+            DaiyuIcon(DaiyuIcons.ChevronRight, contentDescription = null,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
+        }
+        SettingsSwitch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange,
+            modifier = Modifier.testTag("mcp-tool-enabled:$serverId:$title").semantics { contentDescription = title })
+    }
+}
+
+@Composable
+private fun McpToolDescriptionSheet(tool: McpRemoteTool, onDismiss: () -> Unit) {
+    val colors = conversationAgentColors()
+    ConversationAgentSheet(onDismiss, useDefaultHeight = true) {
+        Column(Modifier.fillMaxSize().testTag("mcp-tool-description-sheet").padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
+            ConversationAgentHandle()
+            Text(tool.name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
+                modifier = Modifier.testTag("mcp-tool-description-title").padding(bottom = 16.dp))
+            Column(Modifier.weight(1f).fillMaxWidth().testTag("mcp-tool-description-scroll").verticalScroll(rememberScrollState())) {
+                Text(tool.description.ifBlank { "此工具暂无描述。" }, color = colors.text, fontSize = 14.sp, lineHeight = 22.sp,
+                    modifier = Modifier.testTag("mcp-tool-description"))
+            }
+            ConversationAgentButton("完成", primary = true, onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).testTag("mcp-tool-description-done"))
+        }
+    }
 }

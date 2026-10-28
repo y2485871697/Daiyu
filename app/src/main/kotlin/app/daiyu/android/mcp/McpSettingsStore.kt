@@ -18,15 +18,18 @@ import javax.crypto.spec.GCMParameterSpec
 /** Deliberately not a data class: neither URL nor credentials may appear in logs/toString. */
 internal class McpServer(val id: String, val label: String, val endpoint: String, val bearer: String,
     val enabled: Boolean = true, catalog: List<McpRemoteTool> = emptyList(),
-    allowedTools: Set<String> = catalog.map { it.name }.toSet()) {
+    allowedTools: Set<String> = catalog.map { it.name }.toSet(), disabledTools: Set<String> = emptySet()) {
     val catalog: List<McpRemoteTool> = java.util.Collections.unmodifiableList(catalog.toList())
     // Legacy envelope fields are retained for backwards-compatible storage only. The user's
     // exact task submission grants in-app capability, including for previously disabled entries.
     // A known catalog entry is still required: absent server/tool configuration is not permission.
     val allowedTools: Set<String> = java.util.Collections.unmodifiableSet(allowedTools.toSet())
-    fun eligible(tool: String): Boolean = catalog.any { it.name == tool }
+    // Explicit tool availability choices are separate from the legacy capability fields.
+    val disabledTools: Set<String> = java.util.Collections.unmodifiableSet(disabledTools.toSet())
+    fun eligible(tool: String): Boolean = tool !in disabledTools && catalog.any { it.name == tool }
     fun withPolicy(enabled: Boolean = this.enabled, allowedTools: Set<String> = this.allowedTools,
-        catalog: List<McpRemoteTool> = this.catalog) = McpServer(id, label, endpoint, bearer, enabled, catalog, allowedTools)
+        catalog: List<McpRemoteTool> = this.catalog, disabledTools: Set<String> = this.disabledTools) =
+        McpServer(id, label, endpoint, bearer, enabled, catalog, allowedTools, disabledTools)
 
     init {
         require(id.matches(Regex("[a-z][a-z0-9_-]{0,31}")))
@@ -34,6 +37,7 @@ internal class McpServer(val id: String, val label: String, val endpoint: String
         require(endpoint.length <= 2048 && bearer.length <= 4096 && bearer.matches(Regex("[-A-Za-z0-9._~+/=]*")))
         require(catalog.size <= 64 && catalog.map { it.name }.distinct().size == catalog.size)
         require(allowedTools.all { name -> catalog.any { it.name == name } }) { "mcp_policy_unknown_tool" }
+        require(disabledTools.all { name -> catalog.any { it.name == name } }) { "mcp_disabled_unknown_tool" }
         val url = endpoint.toHttpUrl()
         require((url.isHttps || (url.scheme == "http" && url.host == "127.0.0.1")) &&
             url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null)
@@ -114,7 +118,8 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
         value.servers.forEach { array.put(JSONObject().put("id", it.id).put("label", it.label)
             .put("endpoint", it.endpoint).put("bearer", it.bearer).put("enabled", it.enabled)
             .put("catalog", JSONArray().also { tools -> it.catalog.forEach { tool -> tools.put(tool.json()) } })
-            .put("allowed_tools", JSONArray(it.allowedTools.sorted()))) }
+            .put("allowed_tools", JSONArray(it.allowedTools.sorted()))
+            .put("disabled_tools", JSONArray(it.disabledTools.sorted()))) }
         val bytes = JSONObject().put("revision", value.revision).put("servers", array).toString().toByteArray(Charsets.UTF_8)
         require(bytes.size <= McpJson.Limit.SETTINGS.bytes)
         McpJson.objectValue(bytes.toString(Charsets.UTF_8), McpJson.Limit.SETTINGS)
@@ -166,9 +171,15 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
                         require(it.distinct().size == it.size)
                     }.toSet()
                 } else emptySet()
+                val disabled = if (item.has("disabled_tools")) item.getJSONArray("disabled_tools").let { values ->
+                    require(values.length() <= 64)
+                    (0 until values.length()).map { require(values.get(it) is String); values.getString(it) }.also {
+                        require(it.distinct().size == it.size)
+                    }.toSet()
+                } else emptySet()
                 require(!hasPolicy || item.get("enabled") is Boolean)
                 McpServer(McpJson.text(item, "id"), McpJson.text(item, "label"), McpJson.text(item, "endpoint"), McpJson.text(item, "bearer"),
-                    hasPolicy && item.getBoolean("enabled"), tools, allowed)
+                    hasPolicy && item.getBoolean("enabled"), tools, allowed, disabled)
             })
         } catch (_: Exception) { throw IllegalStateException("MCP 私有配置不可读；未执行，请修复服务器配置") }
     }

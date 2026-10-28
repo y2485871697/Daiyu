@@ -30,9 +30,9 @@ internal class McpManagement(private val store: McpSettingsStore,
             throw IllegalStateException("mcp_discovery_failed")
         } finally { pageRegistration(); configurationRegistration() }
         check(owner.current() && store.isCurrent(expected)) { "mcp_settings_stale" }
-        // Refresh config only. New metadata invalidates old frozen runs through the settings
-        // revision; it does not require a second per-tool capability allowlist.
-        val refreshed = server.withPolicy(enabled = true, catalog = tools, allowedTools = tools.map { it.name }.toSet())
+        val names = tools.map { it.name }.toSet()
+        val refreshed = server.withPolicy(enabled = true, catalog = tools, allowedTools = names,
+            disabledTools = server.disabledTools.intersect(names))
         return store.save(expected.servers.map { if (it.id == serverId) refreshed else it }, owner, expected)
     }
 }

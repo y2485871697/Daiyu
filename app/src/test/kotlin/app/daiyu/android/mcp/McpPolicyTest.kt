@@ -29,6 +29,22 @@ class McpPolicyTest {
             McpServer("server", "fixture", "https://mcp.invalid/rpc", "", true, emptyList(), setOf("erase"))
         }
     }
+    @Test fun explicitToolSwitchesDefaultOpenAndBlockDisabledSelectionsBeforeTransport() {
+        val tools = listOf(McpRemoteTool("erase", "erase"), McpRemoteTool("read", "read"))
+        val disabled = mutableSetOf("erase")
+        val server = McpServer("server", "fixture", "https://mcp.invalid/rpc", "", catalog = tools, disabledTools = disabled)
+        disabled.clear()
+        assertFalse(server.eligible("erase")); assertTrue(server.eligible("read"))
+        assertThrows(IllegalArgumentException::class.java) {
+            McpRunScope(McpSettings("policy", listOf(server)), listOf(McpSelection("server", "erase", "{}")),
+                ConversationId("conversation"), RunId("run"), { true }, { error("disabled tool must not connect") })
+        }
+        val enabled = server.withPolicy(disabledTools = emptySet())
+        assertTrue(enabled.eligible("erase")); assertTrue(enabled.eligible("read"))
+        val allOff = enabled.withPolicy(disabledTools = tools.map { it.name }.toSet())
+        assertFalse(allOff.eligible("erase")); assertFalse(allOff.eligible("read"))
+        assertThrows(IllegalArgumentException::class.java) { enabled.withPolicy(disabledTools = setOf("missing")) }
+    }
     @Test fun metadataRoundTripIsCanonicalBoundedAndRecursivelyRedactsCredentialEchoes() {
         val secret = "synthetic-token"
         val tool = McpRemoteTool("read-$secret", "echo $secret",

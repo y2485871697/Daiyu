@@ -90,6 +90,22 @@ class McpManagementTest {
             assertEquals(2, f.store.snapshot().servers.single().catalog.size); f.assertDrained()
         }
     }
+    @Test fun refreshPreservesExplicitOffChoicesEnablesNewToolsAndDropsRemovedChoices() {
+        Fixture().use { f ->
+            val before = f.seed(McpServer("server", "fixture", "https://fixture.invalid/mcp", "", catalog = listOf(
+                McpRemoteTool("erase", "erase"), McpRemoteTool("gone", "gone")), disabledTools = setOf("erase", "gone")))
+            f.listing = """{"tools":[{"name":"erase","description":"changed","inputSchema":{"type":"object"}},{"name":"new","inputSchema":{"type":"object"}}]}"""
+            val after = f.offMain { f.management.refresh(before, "server", f.owner) }
+            val server = after.servers.single()
+            assertEquals(setOf("erase"), server.disabledTools)
+            assertFalse(server.eligible("erase")); assertTrue(server.eligible("new"))
+            val reopened = f.store.snapshot().servers.single()
+            assertEquals(server.disabledTools, reopened.disabledTools)
+            assertFalse(reopened.eligible("erase")); assertTrue(reopened.eligible("new"))
+            assertEquals(listOf("initialize", "notifications/initialized", "tools/list"), f.methods)
+            f.assertDrained()
+        }
+    }
     @Test fun mainThreadAndRevokedPageRejectWithoutOpeningAnyTransport() {
         Fixture().use { f ->
             val before = f.seed()

@@ -36,6 +36,55 @@ class McpLayoutContractTest(unittest.TestCase):
         self.assertIn('status = "已保存；旧的本轮批准已失效，尚未连接服务器。"', self.source)
         self.assertIn('stateDescription = status', self.source)
 
+    def test_tool_rows_are_single_line_with_independent_switch_and_description_sheet(self):
+        row = self.source.split('private fun McpToolRow(', 1)[1].split('private fun McpToolDescriptionSheet(', 1)[0]
+        self.assertNotIn('summary = tool.description', self.source)
+        for text in ('maxLines = 1', 'TextOverflow.Ellipsis', 'heightIn(min = 64.dp)',
+                     'DaiyuIcons.ChevronRight', 'SettingsSwitch(checked = checked',
+                     '"mcp-tool-enabled:$serverId:$title"', 'onClick = onDescribe'):
+            self.assertIn(text, row)
+        self.assertLess(row.index('DaiyuIcons.ChevronRight'), row.index('SettingsSwitch('))
+        sheet = self.source.split('private fun McpToolDescriptionSheet(', 1)[1]
+        for text in ('ConversationAgentSheet(onDismiss, useDefaultHeight = true)', 'ConversationAgentHandle()',
+                     'tool.description.ifBlank', 'Modifier.weight(1f)', '.verticalScroll(rememberScrollState())',
+                     '"mcp-tool-description-title"', '"mcp-tool-description-done"'):
+            self.assertIn(text, sheet)
+        self.assertNotIn('maxLines', sheet)
+
+    def test_bulk_controls_reuse_provider_count_text_style_and_persist_one_owned_snapshot(self):
+        heading = self.source.split('private fun McpToolsHeading(', 1)[1].split('private fun McpToolRow(', 1)[0]
+        for text in ('"全部开启"', '"全部关闭"', 'Modifier.alignByBaseline()', '.clickable(enabled = enabled, role = Role.Button',
+                     '"mcp-tools-enable-all"', '"mcp-tools-disable-all"', 'padding(horizontal = 24.dp)'):
+            self.assertIn(text, heading)
+        self.assertNotIn('ConversationAgentButton', heading)
+        self.assertNotIn('TextButton(', heading)
+        for text in ('snapshot !== before', 'disabled == server.disabledTools', 'it.withPolicy(disabledTools = disabled)',
+                     '}, owner, before)', 'selected.eligible(tool.name)'):
+            self.assertIn(text, self.source)
+
+    def test_add_refreshes_once_after_success_and_does_not_make_visiting_connect(self):
+        save = self.source.split('fun save(remove: Boolean)', 1)[1].split('fun refresh(', 1)[0]
+        self.assertIn('val added = !remove && before.servers.none { it.id == id }', save)
+        self.assertEqual(1, save.count('managementFactory(store).refresh(saved, savedId, owner)'))
+        self.assertLess(save.index('store.save(value, owner, before)'), save.index('managementFactory(store).refresh('))
+        self.assertIn('if (result.isSuccess)', save)
+        self.assertIn('if (added)', save)
+        self.assertIn('服务器已保存，工具目录刷新失败；请点击刷新重试。', save)
+        load = self.source.split('LaunchedEffect(owner)', 1)[1].split('DisposableEffect(owner)', 1)[0]
+        self.assertNotIn('managementFactory', load)
+        self.assertIn('if (sameConnection) old!!.disabledTools else emptySet()', save)
+
+    def test_android_regression_covers_touch_long_text_switches_and_automatic_discovery(self):
+        text = ANDROID.read_text()
+        for value in ('testAddDiscoversOnceCompactRowsAndToolSwitchesPersistIndependentlyFromDescription',
+                      'assertEquals(1, opens)', 'methods.count { it == "tools/list" }', 'assertIsOn()', 'assertIsOff()',
+                      'performTouchInput { click() }', 'SemanticsActions.GetTextLayoutResult', 'isLineEllipsized(0)',
+                      'SemanticsProperties.VerticalScrollAxisRange', '"mcp-tools-disable-all"',
+                      '"mcp-tool-description-sheet"', 'assertEquals(1, managementOpens)',
+                      'instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)',
+                      'awaitToolState(true)', 'awaitToolState(false)'):
+            self.assertIn(value, text)
+
     def test_form_uses_filled_rounded_placeholders_and_password_mask(self):
         self.assertEqual(3, self.form.count('McpConnectionField('))
         self.assertNotIn('OutlinedTextField(', self.form)
@@ -95,11 +144,11 @@ class McpLayoutContractTest(unittest.TestCase):
 
     def test_loopback_form_and_default_socket_transport_have_android_regressions(self):
         text = ANDROID.read_text()
-        for value in ('testLoopbackHttpCanBeAddedAndReopenedWithoutTokenOrNetworkAccess',
+        for value in ('testLoopbackHttpAddRefreshesOnceAndFailureKeepsConnectionForReopen',
                       'testLoopbackDefaultTransportDiscoversLargeCatalogAndPersistsIt',
                       'java.net.ServerSocket(', 'val session = McpHttpSession(server)',
                       'policy.isCleartextTrafficPermitted("127.0.0.1")',
-                      'assertEquals(0, managementOpens)',
+                      'assertEquals(1, managementOpens)',
                       'http://127.0.0.1:8787/mcp'):
             self.assertIn(value, text)
 

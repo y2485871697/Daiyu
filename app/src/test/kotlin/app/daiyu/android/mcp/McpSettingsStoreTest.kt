@@ -121,6 +121,28 @@ class McpSettingsStoreTest {
         unsubscribe(); unsubscribe(); store.clear(owner)
         assertEquals(2, invalidations)
     }
+    @Test fun explicitSwitchesRoundTripAndInvalidateFrozenConfigurationWithoutAffectingOtherServers() {
+        val context = RuntimeEnvironment.getApplication()
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val store = McpSettingsStore(context) { key }; val owner = McpSettingsOwner()
+        store.clear(owner)
+        try {
+            val tools = listOf(McpRemoteTool("erase", "erase"), McpRemoteTool("read", "read"))
+            val server = McpServer("test", "fixture", "https://private.invalid/mcp", "", catalog = tools)
+            val other = McpServer("other", "other", "https://other.invalid/mcp", "", catalog = tools)
+            val before = store.save(listOf(server, other), owner, store.snapshot())
+            var invalidations = 0
+            store.observeInvalidated(before) { invalidations++ }
+            store.save(listOf(server.withPolicy(disabledTools = setOf("erase")), other), owner, before)
+            val reopened = McpSettingsStore(context) { key }.snapshot()
+            assertEquals(1, invalidations); assertFalse(store.isCurrent(before))
+            assertEquals(setOf("erase"), reopened.servers[0].disabledTools)
+            assertFalse(reopened.servers[0].eligible("erase")); assertTrue(reopened.servers[0].eligible("read"))
+            assertTrue(reopened.servers[1].eligible("erase")); assertTrue(reopened.servers[1].disabledTools.isEmpty())
+            store.save(reopened.servers.map { it.withPolicy(disabledTools = emptySet()) }, owner, reopened)
+            assertTrue(store.snapshot().servers.all { it.eligible("erase") })
+        } finally { store.clear(owner) }
+    }
     @Test fun legacyEncryptedConnectionsMigrateDisabledAndPartialPolicyIsRejected() {
         val context = RuntimeEnvironment.getApplication()
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
@@ -144,6 +166,16 @@ class McpSettingsStoreTest {
         assertFalse(store.snapshot().servers.single().eligible("erase"))
         item.put("enabled", true); writeLegacy()
         assertThrows(IllegalStateException::class.java) { store.snapshot() }
+        item.put("enabled", false).put("catalog", org.json.JSONArray().put(McpRemoteTool("erase", "erase").json()))
+            .put("allowed_tools", org.json.JSONArray())
+        writeLegacy()
+        assertTrue(store.snapshot().servers.single().eligible("erase"))
+        assertTrue(store.snapshot().servers.single().disabledTools.isEmpty())
+        for (invalid in listOf(org.json.JSONArray().put("missing"), org.json.JSONArray().put("erase").put("erase"),
+            org.json.JSONArray().put(1), "erase", org.json.JSONObject.NULL)) {
+            item.put("disabled_tools", invalid); writeLegacy()
+            assertThrows(IllegalStateException::class.java) { store.snapshot() }
+        }
         store.clear(owner)
     }
     @Test fun ownerRevocationObserversAreOneShotIncludingLateRegistration() {

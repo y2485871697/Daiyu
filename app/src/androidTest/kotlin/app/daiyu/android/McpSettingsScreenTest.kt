@@ -22,6 +22,124 @@ import javax.crypto.KeyGenerator
 
 /** Actual settings form/store; only ephemeral synthetic encrypted data under an isolated noBackup root. */
 class McpSettingsScreenTest : WiredActivityTestCase() {
+    fun testAddDiscoversOnceCompactRowsAndToolSwitchesPersistIndependentlyFromDescription() {
+        for (dark in listOf(false, true)) {
+            val root = File(instrumentation.targetContext.cacheDir, "mcp-tools-${UUID.randomUUID()}").apply { mkdirs() }
+            val context = object : ContextWrapper(instrumentation.targetContext) { override fun getNoBackupFilesDir() = root }
+            val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+            val store = McpSettingsStore(context) { key }; val owner = McpSettingsOwner()
+            val methods = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val longName = "tool_" + "long_name_".repeat(10)
+            val description = "完整工具描述\n".repeat(180) + "描述结尾标记"
+            val listing = JSONObject().put("tools", org.json.JSONArray()
+                .put(JSONObject().put("name", "read").put("description", "简短描述")
+                    .put("inputSchema", JSONObject().put("type", "object")))
+                .put(JSONObject().put("name", longName).put("description", description)
+                    .put("inputSchema", JSONObject().put("type", "object")))).toString()
+            var opens = 0
+            fun awaitStatus(text: String) { ui.waitUntil(5_000) {
+                ui.onAllNodes(hasTestTag("mcp-settings") and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, text))
+                    .fetchSemanticsNodes().isNotEmpty()
+            } }
+            try {
+                mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(
+                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                    McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {}, managementFactory = {
+                        opens++; discoveryFixture(it, methods, listing)
+                    })
+                } } }
+                awaitStatus("能力默认可用；保存只更新服务器配置，不会执行工具。")
+                assertEquals(0, opens)
+                node("mcp-settings-add").performClick()
+                node("mcp-server-label").performTextReplacement("fixture")
+                node("mcp-server-endpoint").performTextReplacement("https://fixture.invalid/mcp")
+                node("mcp-settings-save").scrollToVisible().performClick()
+                awaitStatus("工具目录已刷新；可提交精确任务，尚未调用工具。")
+                assertEquals(1, opens)
+                assertEquals(listOf("initialize", "notifications/initialized", "tools/list"), methods.toList())
+                val id = store.snapshot().servers.single().id
+                val first = "mcp-tool:$id:read"; val second = "mcp-tool:$id:$longName"
+                val toggle = "mcp-tool-enabled:$id:read"
+                fun awaitToolState(checked: Boolean) { ui.waitUntil(5_000) {
+                    val state = if (checked) androidx.compose.ui.state.ToggleableState.On else androidx.compose.ui.state.ToggleableState.Off
+                    ui.onAllNodes(hasTestTag(toggle) and SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, state))
+                        .fetchSemanticsNodes().isNotEmpty() &&
+                        ui.onAllNodes(hasTestTag("mcp-tools-disable-all") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                } }
+                node(toggle).assertIsOn()
+                node("mcp-tool-enabled:$id:$longName").assertIsOn()
+                ui.onNodeWithText("简短描述").assertDoesNotExist()
+                ui.onNodeWithText(description).assertDoesNotExist()
+                val firstBounds = node(first).fetchSemanticsNode().boundsInRoot
+                val secondBounds = node(second).fetchSemanticsNode().boundsInRoot
+                assertTrue(kotlin.math.abs(firstBounds.height - secondBounds.height) <= 1f)
+                val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                node(second).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                assertEquals(1, layouts.single().lineCount)
+                assertTrue(layouts.single().isLineEllipsized(0))
+                node(second).performTouchInput { click() }
+                node("mcp-tool-description-sheet").assertIsDisplayed()
+                node("mcp-tool-description-title").assertTextEquals(longName)
+                node("mcp-tool-description").assertTextEquals(description)
+                node("mcp-tool-description-scroll").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+                ui.waitForIdle()
+                val scroll = node("mcp-tool-description-scroll").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+                assertTrue(scroll.maxValue() > 0f); assertTrue(scroll.value() >= scroll.maxValue() - 1f)
+                node("mcp-tool-description-done").performTouchInput { click() }
+                node("mcp-tool-description-sheet").assertDoesNotExist()
+                assertTrue(store.snapshot().servers.single().disabledTools.isEmpty())
+                node(toggle).performTouchInput { click() }
+                awaitStatus("工具开关已保存。")
+                node(toggle).assertIsOff(); node("mcp-tool-description-sheet").assertDoesNotExist()
+                assertFalse(McpSettingsStore(context) { key }.snapshot().servers.single().eligible("read"))
+                node(first).performTouchInput { click() }
+                node("mcp-tool-description").assertTextEquals("简短描述")
+                instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                ui.waitUntil(5_000) { ui.onAllNodesWithTag("mcp-tool-description-sheet").fetchSemanticsNodes().isEmpty() }
+                node("mcp-tool-description-sheet").assertDoesNotExist()
+                node(toggle).assertIsOff()
+                assertTrue(owner.current()); node("mcp-refresh:$id").assertExists()
+                node("mcp-tools-enable-all").performTouchInput { click() }
+                awaitToolState(true)
+                node(toggle).assertIsOn()
+                node("mcp-tools-disable-all").performTouchInput { click() }
+                awaitToolState(false)
+                node(toggle).assertIsOff(); node("mcp-tool-enabled:$id:$longName").assertIsOff()
+                assertTrue(McpSettingsStore(context) { key }.snapshot().servers.single().catalog.none {
+                    store.snapshot().servers.single().eligible(it.name)
+                })
+                node("mcp-refresh:$id").performClick()
+                awaitStatus("工具目录已刷新；可提交精确任务，尚未调用工具。")
+                assertEquals(2, opens)
+                assertEquals(2, methods.count { it == "tools/list" })
+                node(toggle).assertIsOff(); node("mcp-tool-enabled:$id:$longName").assertIsOff()
+                assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
+            } finally {
+                mainThread { activity.setContent {} }; owner.revoke(); root.deleteRecursively()
+            }
+        }
+    }
+
+    private fun discoveryFixture(store: McpSettingsStore, methods: MutableList<String>, listing: String) = McpManagement(store) { server ->
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+        McpHttpSession(server, OkHttpClient.Builder().addInterceptor { chain ->
+            val buffer = Buffer(); chain.request().body!!.writeTo(buffer)
+            val input = McpJson.objectValue(buffer.readUtf8()); val method = input.getString("method")
+            methods.add(method)
+            val result = when (method) {
+                "initialize" -> """{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"1"}}"""
+                "notifications/initialized" -> null
+                "tools/list" -> listing
+                else -> error("settings must not execute tools")
+            }
+            val body = if (result == null) "" else JSONObject().put("jsonrpc", "2.0").put("id", input.getLong("id"))
+                .put("result", McpJson.objectValue(result)).toString()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).message("fixture")
+                .code(if (result == null) 202 else 200).header("Content-Type", "application/json")
+                .body(body.toResponseBody("application/json".toMediaType())).build()
+        }.build())
+    }
+
     fun testLoopbackDefaultTransportDiscoversLargeCatalogAndPersistsIt() {
         val policy = android.security.NetworkSecurityPolicy.getInstance()
         assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"))
@@ -91,7 +209,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             owner.revoke(); root.deleteRecursively()
         }
     }
-    fun testLoopbackHttpCanBeAddedAndReopenedWithoutTokenOrNetworkAccess() {
+    fun testLoopbackHttpAddRefreshesOnceAndFailureKeepsConnectionForReopen() {
         val root = File(instrumentation.targetContext.cacheDir, "mcp-loopback-form-${UUID.randomUUID()}").apply { mkdirs() }
         val context = object : ContextWrapper(instrumentation.targetContext) { override fun getNoBackupFilesDir() = root }
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
@@ -100,7 +218,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {}, managementFactory = {
-                    managementOpens++; error("saving must not open a transport")
+                    managementOpens++; error("synthetic discovery unavailable")
                 })
             } } }
             ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and
@@ -111,6 +229,9 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             node("mcp-server-endpoint").performTextReplacement("http://127.0.0.1:8787/mcp")
             node("mcp-settings-save").scrollToVisible().performClick()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("mcp-settings-form").fetchSemanticsNodes().isEmpty() }
+            ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and
+                SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
+                    "服务器已保存，工具目录刷新失败；请点击刷新重试。")).fetchSemanticsNodes().isNotEmpty() }
             val saved = McpSettingsStore(context) { key }.snapshot().servers.single()
             assertEquals("mt", saved.label)
             assertEquals("http://127.0.0.1:8787/mcp", saved.endpoint)
@@ -121,7 +242,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             node("mcp-settings-save").scrollToVisible().performClick()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("mcp-settings-form").fetchSemanticsNodes().isEmpty() }
             assertEquals("", store.snapshot().servers.single().bearer)
-            assertEquals(0, managementOpens)
+            assertEquals(1, managementOpens)
             assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
         } finally {
             mainThread { activity.setContent {} }; owner.revoke(); root.deleteRecursively()
@@ -183,7 +304,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             }
         }
     }
-    fun testDiscoveryPageNeverEnablesServerOrGrantsTools() {
+    fun testVisitingNeverConnectsAndExplicitDiscoveryDoesNotExecuteTools() {
         val root = File(instrumentation.targetContext.cacheDir, "mcp-discovery-screen-${UUID.randomUUID()}").apply { mkdirs() }
         val context = object : ContextWrapper(instrumentation.targetContext) { override fun getNoBackupFilesDir() = root }
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
@@ -248,7 +369,8 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
         val store = McpSettingsStore(context) { key }; val owner = McpSettingsOwner()
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {})
+                McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {},
+                    managementFactory = { error("synthetic discovery unavailable") })
             } } }
             ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "能力默认可用；保存只更新服务器配置，不会执行工具。")).fetchSemanticsNodes().isNotEmpty() }
             node("mcp-server-label").assertDoesNotExist()
@@ -262,9 +384,9 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             node("mcp-settings-save").scrollToVisible().performClick()
             ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and
                 SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
-                    "已保存；旧的本轮批准已失效，尚未连接服务器。")).fetchSemanticsNodes().isNotEmpty() }
+                    "服务器已保存，工具目录刷新失败；请点击刷新重试。")).fetchSemanticsNodes().isNotEmpty() }
             node("mcp-settings-status").assertDoesNotExist()
-            ui.onNodeWithText("已保存；旧的本轮批准已失效，尚未连接服务器。").assertDoesNotExist()
+            ui.onNodeWithText("服务器已保存，工具目录刷新失败；请点击刷新重试。").assertDoesNotExist()
             ui.onNodeWithText("应用内能力默认可用；填写服务器、工具与完整参数并提交即可执行原任务，无需另行许可。").assertDoesNotExist()
             node("mcp-settings-edit").scrollToVisible().assertIsDisplayed()
             ui.onNodeWithText("尚无工具，请刷新工具目录。").assertExists()

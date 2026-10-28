@@ -162,6 +162,42 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         }
         assertEquals(0, executions)
     }
+    fun testAllCategoriesHideAuxiliaryFooterInBothProductionPaths() {
+        var executions = 0
+        val activities = listOf(ToolActivityUi.STOPPING, ToolActivityUi.STOPPED, ToolActivityUi.INTERRUPTED)
+        for (mixed in listOf(false, true)) {
+            (ToolCardPresentations.categories + "future_category").forEachIndexed { index, category ->
+                val activity = activities[index % activities.size]
+                val stateLabel = when (activity) {
+                    ToolActivityUi.STOPPING -> "所属运行停止中"
+                    ToolActivityUi.STOPPED -> "所属运行已停止"
+                    else -> "所属运行已中断"
+                }
+                val title = "footer-$category-$mixed"
+                val result = "recorded-result-$category-$mixed"
+                val step = WorkStepUi(title, title, "", if (index % 2 == 0) WorkStepState.UNKNOWN else WorkStepState.PENDING,
+                    WorkStepOwnerUi("chat", "run", title), "fixture-only", category,
+                    sections = listOf(ToolDetailSectionUi("结果", result)), activity = activity)
+                val turn = if (mixed) ChatTurnUi.Assistant(title, content = listOf(MessageContentUi.Tool(step)))
+                    else ChatTurnUi.Assistant(title, workProcess = WorkProcessUi(
+                        listOf(WorkSegmentUi(steps = listOf(step))), "已停止"))
+                show(turn, ChatScreenActions(onRetryStep = { executions++ }))
+                if (!mixed) ui.onNodeWithTag("work-process-header").performClick()
+                val header = ui.onNodeWithTag("tool-step-header:${step.id}")
+                header.scrollToVisible().assertTextContains(stateLabel)
+                ui.onNodeWithText("工具回执未确认 · 不重放", useUnmergedTree = true).assertDoesNotExist()
+                header.performClick()
+                ui.onNodeWithText(result).scrollToVisible().assertIsDisplayed()
+                ui.onNodeWithText("工具回执未确认 · 不重放", useUnmergedTree = true).assertDoesNotExist()
+                ui.onNodeWithText("Android 宿主权限", substring = true, useUnmergedTree = true).assertDoesNotExist()
+                ui.onNodeWithContentDescription("重试 $title").assertDoesNotExist()
+                header.scrollToVisible().assertTextContains(stateLabel).performClick()
+                ui.onNodeWithText(result).assertDoesNotExist()
+            }
+        }
+        assertEquals(0, executions)
+    }
+
     fun testNonTerminalMemoryHasOneResultAndNoTerminalFieldsInBothProductionPaths() {
         var executions = 0
         for (mixed in listOf(false, true)) {

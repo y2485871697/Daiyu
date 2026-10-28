@@ -183,9 +183,6 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, toolC
                         if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
                 }
             }
-            if (step.activity in setOf(ToolActivityUi.STOPPING, ToolActivityUi.STOPPED, ToolActivityUi.INTERRUPTED) &&
-                step.state in setOf(WorkStepState.PENDING, WorkStepState.UNKNOWN)) Text("工具回执未确认 · 不重放", color = colors.muted,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp))
             AnimatedVisibility(expanded) {
                 CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext(step.name, stateLabel)) {
                     Column(Modifier.padding(bottom = 4.dp).then(

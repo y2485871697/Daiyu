@@ -13,10 +13,10 @@ import app.daiyu.android.voice.ComposerDictationState
 import top.yukonga.miuix.kmp.basic.Text
 
 @Composable
-internal fun DictationStatusNotice(state: ComposerDictationState, engineeringUi: Boolean) {
+internal fun DictationStatusNotice(state: ComposerDictationState, engineeringUi: Boolean, tag: String = "dictation-status") {
     val context = LocalContext.current
     if (engineeringUi && state.status.isNotEmpty()) {
-        Text(state.status, modifier = Modifier.testTag("dictation-status")
+        Text(state.status, modifier = Modifier.testTag(tag)
             .semantics { liveRegion = LiveRegionMode.Polite })
     }
     DisposableEffect(context, engineeringUi, state.status, state.target) {

@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerPlatformActionSendTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         private val root = File(base.cacheDir, "platform-actions-${UUID.randomUUID()}").apply { mkdirs() }
         init { attachBaseContext(base) }
         override fun getFilesDir() = root
@@ -64,7 +65,7 @@ class ControllerPlatformActionSendTest : InstrumentationTestCase() {
             }
         }
         controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0),
-            { port }, platformActions = backend)
+            { port }, platformActions = backend, providerBalanceHost = { app.balances })
         awaitControl("ready") { controller.ready }
         assertNull(controller.problem)
         db.draft(text)
@@ -72,6 +73,7 @@ class ControllerPlatformActionSendTest : InstrumentationTestCase() {
     override fun tearDown() {
         try {
             if (::controller.isInitialized) { controller.stop(); controller.close() }
+            if (::app.isInitialized) app.balances.close()
             if (::db.isInitialized) { db.close(); app.deleteDatabase("conversations.db") }
             if (::app.isInitialized) app.filesDir.deleteRecursively()
             if (::alias.isInitialized) {

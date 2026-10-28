@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
 class ControllerLifecycleTest:InstrumentationTestCase() {
     private class FixtureApplication(base:Context):Application() {
         init {attachBaseContext(base)}
+        val balances = fixtureProviderBalances()
         var settingsRead:(()->Unit)?=null
         override fun getSharedPreferences(name:String,mode:Int):SharedPreferences {
             val raw=super.getSharedPreferences(name,mode)
@@ -71,7 +72,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
                 calls.incrementAndGet()
                 synchronized(sessions) {sessions.removeAt(0)}
             }
-        })
+        }, providerBalanceHost = { app.balances })
         val f=Fixture(app,db,settings,alias,controller,calls,sessions)
         fixtures.add(f)
         if(awaitRecovery) awaitState(f) {controller.ready}
@@ -84,7 +85,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
     override fun tearDown() {
         try {fixtures.forEach {f->
             synchronized(f.sessions) {f.sessions.forEach {it.release.countDown()}}
-            f.controller.stop();f.controller.close();f.db.close()
+            f.controller.stop();f.controller.close();f.app.balances.close();f.db.close()
             f.app.deleteDatabase("conversations.db")
             f.app.getSharedPreferences("model-settings",0).edit().clear().commit()
             f.app.getSharedPreferences("conversation-ui",0).edit().clear().commit()
@@ -289,7 +290,8 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         finally {main {controller.unobserve(listener)}}
     }
     private fun another(f:Fixture):ChatController = ChatController(f.app,ConversationDatabase(f.app),f.settings,
-        f.app.getSharedPreferences("conversation-ui",0),{error("replacement must not replay")})
+        f.app.getSharedPreferences("conversation-ui",0),{error("replacement must not replay")},
+        providerBalanceHost = { f.app.balances })
     fun testSecondControllerRejectsWithoutInterruptingActiveOwner() {
         val f=fresh();val session=session(f)
         assertNotNull(f.controller.send(null,"active"))

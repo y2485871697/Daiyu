@@ -1,5 +1,7 @@
 package app.daiyu.android.model.usage
 
+import app.daiyu.android.fixtureProviderBalances
+
 import app.daiyu.android.CatalogFixturePort
 
 import android.app.Application
@@ -18,7 +20,9 @@ import java.util.concurrent.atomic.AtomicInteger
 
 @Suppress("DEPRECATION")
 class ControllerUsageAttributionTest : InstrumentationTestCase() {
-    private class FixtureApplication(base: Context) : Application() { init { attachBaseContext(base) } }
+    private class FixtureApplication(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
+        init { attachBaseContext(base) } }
     private class Fixture(base: Context, val failChild: Boolean = false) {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(base, "controller-usage-$id-"))
@@ -68,7 +72,7 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
                         }
                     }
                 }
-            })
+            }, providerBalanceHost = { app.balances })
         }
         fun prepare() {
             conversation = database.create("default")
@@ -79,7 +83,7 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
             check(preferences.update(owner) { it.copy(enabled = true, profiles = listOf(profile)) } is ConversationSubAgentPreferences.WriteResult.Saved)
         }
         fun close() {
-            controller.stop(); controller.close()
+            controller.stop(); controller.close(); app.balances.close()
             app.getSharedPreferences("model-settings", 0).edit().clear().commit()
             app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
             app.getSharedPreferences("subagent_configuration", 0).edit().clear().commit()

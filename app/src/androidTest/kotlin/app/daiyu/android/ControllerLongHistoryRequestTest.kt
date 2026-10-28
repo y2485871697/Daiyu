@@ -34,6 +34,7 @@ import javax.net.ssl.HttpsURLConnection
 @Suppress("DEPRECATION")
 class ControllerLongHistoryRequestTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         private val root = File(base.cacheDir, "long-history-${UUID.randomUUID()}").apply { check(mkdirs()) }
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
@@ -180,7 +181,7 @@ class ControllerLongHistoryRequestTest : InstrumentationTestCase() {
             }
             val c = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0), factory,
                 taskSurfaceStore = isolatedTaskSurfaceStore(TaskSurfacePreference.FOREGROUND),
-                titleModelFactory = { error("unexpected title model request") })
+                titleModelFactory = { error("unexpected title model request") }, providerBalanceHost = { app.balances })
             controller = c
             awaitState("controller ready after reopen") { c.ready }
             assertNull(c.problem)
@@ -220,7 +221,7 @@ class ControllerLongHistoryRequestTest : InstrumentationTestCase() {
             assertNull(ContextService(app, db).prepareSend(owner.id).archiveId)
             assertEquals(RunStatus.COMPLETED, db.messages(owner.id).last().second.status)
         } finally {
-            controller?.stop(); controller?.close(); db.close()
+            controller?.stop(); controller?.close(); app.balances.close(); db.close()
             app.deleteDatabase("conversations.db"); app.filesDir.deleteRecursively()
             val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             java.util.Collections.list(keys.aliases()).filter { it.startsWith("$alias.") }.forEach { keys.deleteEntry(it) }

@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerMessageActionsTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         private val root = File(base.cacheDir, "message-actions-${UUID.randomUUID()}").apply { mkdirs() }
         init { attachBaseContext(base) }
         override fun getFilesDir() = root
@@ -67,7 +68,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
                     override fun cancel() {}
                 }
             }
-        })
+        }, providerBalanceHost = { app.balances })
         val fixture = Fixture(app, db, controller, opens, alias).also { fixtures.add(it) }
         val ready = CountDownLatch(1)
         val listener: () -> Unit = { if (controller.ready) ready.countDown() }
@@ -1077,7 +1078,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         try { fixtures.forEach { f ->
-            f.controller.stop(); f.controller.close(); f.db.close()
+            f.controller.stop(); f.controller.close(); f.app.balances.close(); f.db.close()
             f.app.deleteDatabase("conversations.db"); f.app.filesDir.deleteRecursively()
             val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             java.util.Collections.list(keys.aliases()).filter { it.startsWith("${f.alias}.") }.forEach(keys::deleteEntry)

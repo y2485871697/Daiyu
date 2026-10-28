@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerImageSendingTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         private val privateFiles = File(base.cacheDir, "controller-image-${UUID.randomUUID()}")
             .apply { check(mkdirs()) }
         init { attachBaseContext(base) }
@@ -79,7 +80,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
             { error("must use snapshot preserving image factory") }, {
                 check(!Thread.holdsLock(controller))
                 probe.beforeFactory(); probe
-            })
+            }, providerBalanceHost = { app.balances })
         return Fixture(app, db, settings, controller, probe, alias).also {
             fixtures.add(it); await(it) { controller.ready }
         }
@@ -110,6 +111,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
     override fun tearDown() {
         try { fixtures.forEach { f ->
             f.controller.close()
+            f.app.balances.close()
             f.app.deleteDatabase("conversations.db"); f.app.filesDir.deleteRecursively()
             listOf("model-settings", "conversation-ui", "image-send-identities").forEach {
                 f.app.getSharedPreferences(it, 0).edit().clear().commit()
@@ -157,7 +159,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         val factories = AtomicInteger()
         val replacement = ChatController(f.app, db, f.settings, f.app.getSharedPreferences("conversation-ui", 0),
             { factories.incrementAndGet(); error("recovery cannot create a model") },
-            { factories.incrementAndGet(); error("recovery cannot create an image model") })
+            { factories.incrementAndGet(); error("recovery cannot create an image model") }, providerBalanceHost = { f.app.balances })
         val next = f.copy(db = db, controller = replacement)
         fixtures.remove(f); fixtures.add(next)
         await(next) { replacement.ready }

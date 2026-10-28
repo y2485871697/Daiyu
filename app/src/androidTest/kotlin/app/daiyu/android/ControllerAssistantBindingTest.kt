@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerAssistantBindingTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         private val root=File(base.cacheDir,"assistant-controller-${UUID.randomUUID()}").apply { mkdirs() }
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
@@ -53,7 +54,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         settings.save(ModelSettings("https://example.invalid","fixture","key",false))
         val memory=MemoryProbe()
         val controller=ChatController(app,database,settings,app.getSharedPreferences("conversation-ui",0),legacy,
-            assistantModel=factory,assistantAssets=memory,sessionModel=sessionFactory)
+            assistantModel=factory,assistantAssets=memory,sessionModel=sessionFactory, providerBalanceHost = { app.balances })
         val fixture=Fixture(app,database,controller,memory,alias)
         fixtures.add(fixture)
         await(fixture) { controller.ready }
@@ -74,7 +75,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
     }
     override fun tearDown() {
         try { fixtures.forEach { f ->
-            f.controller.stop(); f.controller.close(); f.database.close()
+            f.controller.stop(); f.controller.close(); f.app.balances.close(); f.database.close()
             f.app.deleteDatabase("conversations.db"); f.app.filesDir.deleteRecursively()
             f.app.getSharedPreferences("daiyu-assistants",0).edit().clear().commit()
             val keys=java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -138,7 +139,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         val reopened = ConversationDatabase(f.app)
         val restored = ChatController(f.app, reopened, ModelSettingsStore(f.app, f.alias),
             f.app.getSharedPreferences("conversation-ui", 0), { error("legacy fallback") },
-            assistantAssets = f.memory, sessionModel = sessionFactory)
+            assistantAssets = f.memory, sessionModel = sessionFactory, providerBalanceHost = { f.app.balances })
         try {
             awaitControl("restored controller ready") { restored.ready }
             assertEquals(3, owners.size) // Recovery alone never starts historical network requests.

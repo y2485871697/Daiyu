@@ -19,6 +19,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         "assistant_memory_read", "assistant_memory_search", "inspect_child_tasks", "control_child_task", "get_child_task",
         "terminal_exec", "terminal_read")
     private class FixtureApplication(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         private val privateFiles=File(base.cacheDir,"controller-model-files-${UUID.randomUUID()}").apply {check(mkdirs() || isDirectory)}
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
@@ -50,7 +51,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         settings.save(ModelSettings("https://example.invalid", "fixture-model", "fixture-key", true))
         val preferences = app.getSharedPreferences("conversation-ui", 0)
         if (interactiveEnabled != null) check(preferences.edit().putBoolean("interactive_mode", interactiveEnabled).commit())
-        val controller = ChatController(app, db, settings, preferences, factory)
+        val controller = ChatController(app, db, settings, preferences, factory, providerBalanceHost = { app.balances })
         val f = Fixture(app, db, settings, alias, controller)
         fixtures.add(f)
         awaitState(f) { controller.ready }
@@ -66,7 +67,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     override fun tearDown() {
         try {
             fixtures.forEach { f ->
-                f.controller.stop(); f.controller.close(); f.db.close()
+                f.controller.stop(); f.controller.close(); f.app.balances.close(); f.db.close()
                 f.app.deleteDatabase("conversations.db"); f.app.filesDir.deleteRecursively()
                 f.app.getSharedPreferences("model-settings", 0).edit().clear().commit()
                 f.app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()

@@ -273,8 +273,24 @@ class TerminalEnvironmentHostTest {
             fileKey = ::hostLinuxFileKey, rootfsAccess = common)
         repeat(3) { assertEquals("FILES_READY", gate.status().state) }
         assertTrue(File(root, "linux-rootfs-access-v1").listFiles()!!.none { it.name.startsWith(".runner-pin-") })
-        common.acquire(spec, listOf("root"), export = true).use { assertEquals("BROKEN", gate.status().state) }
+        val nativeKeys = listOf(File(root, "user-terminal"), directory).map {
+            Files.readAttributes(it.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+                java.nio.file.LinkOption.NOFOLLOW_LINKS).fileKey()
+        }
+        if (nativeKeys.all { it != null }) {
+            common.acquire(spec, listOf("root"), export = true).use { assertEquals("BROKEN", gate.status().state) }
+        } else {
+            // Runner-pin host identities do not replace the native legacy-directory identity check.
+            assertEquals('\\', File.separatorChar)
+            val failure = assertThrows(IllegalStateException::class.java) {
+                common.acquire(spec, listOf("root"), export = true)
+            }
+            assertEquals("linux_rootfs_unknown", failure.message)
+        }
         assertEquals("FILES_READY", gate.status().state)
+        for (dir in listOf(File(root, "linux-rootfs-access-v1"), directory)) {
+            assertTrue(dir.listFiles()!!.none { it.name.startsWith(".runner-pin-") })
+        }
         store.select(spec.copy(distribution = "other"))
         assertEquals("BROKEN", gate.status().state)
     }

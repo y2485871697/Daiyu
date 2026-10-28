@@ -25,7 +25,9 @@ import java.util.concurrent.atomic.AtomicReference
 /** Real Controller/Runner/store; reflection only observes retained handles, never changes state. */
 @Suppress("DEPRECATION")
 class ControllerChildRetentionTest : InstrumentationTestCase() {
-    private class FixtureApplication(base: Context) : Application() { init { attachBaseContext(base) } }
+    private class FixtureApplication(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
+        init { attachBaseContext(base) } }
     private class Fixture(base: Context, val submit: Boolean = true, holdParent: Boolean = false,
         holdChildCleanup: Boolean = false) {
         val id = UUID.randomUUID().toString()
@@ -102,7 +104,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                         }
                     }
                 }
-            })
+            }, providerBalanceHost = { app.balances })
         }
         fun prepare() {
             conversation = database.create("default")
@@ -113,7 +115,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                 is ConversationSubAgentPreferences.WriteResult.Saved)
         }
         fun dispose() {
-            childRelease.countDown(); childCleanupRelease.countDown(); parentRelease.countDown(); controller.close()
+            childRelease.countDown(); childCleanupRelease.countDown(); parentRelease.countDown(); controller.close(); app.balances.close()
             app.getSharedPreferences("model-settings", 0).edit().clear().commit()
             app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
             app.getSharedPreferences("subagent_configuration", 0).edit().clear().commit()
@@ -428,7 +430,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         val replacement = ChatController(f.app, reopened, f.settings, f.app.getSharedPreferences("conversation-ui", 0), {
             replacementFactories.incrementAndGet()
             error("UNKNOWN history must not open a provider")
-        })
+        }, providerBalanceHost = { f.app.balances })
         try {
             val ready = CountDownLatch(1)
             val listener: () -> Unit = { if (replacement.ready) ready.countDown() }

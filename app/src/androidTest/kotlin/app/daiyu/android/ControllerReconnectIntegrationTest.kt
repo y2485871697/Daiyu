@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         private val root = File(base.cacheDir, "reconnect-${UUID.randomUUID()}").apply { mkdirs() }
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
@@ -47,7 +48,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
         val settings = ModelSettingsStore(app, alias)
         settings.save(ModelSettings("https://example.invalid", "fixture", "synthetic-key", false, protocol = protocol),
             protocolChangeAuthorized = true)
-        val controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0), factory)
+        val controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0), factory, providerBalanceHost = { app.balances })
         val fixture = Fixture(app, db, controller, settings, alias)
         fixtures.add(fixture)
         awaitControl("controller ready") { controller.ready }
@@ -86,7 +87,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         try { fixtures.forEach { f ->
-            f.controller.stop(); f.controller.close(); f.db.close()
+            f.controller.stop(); f.controller.close(); f.app.balances.close(); f.db.close()
             f.app.deleteDatabase("conversations.db"); f.app.filesDir.deleteRecursively()
             // Only synthetic test-owned aliases are removed; never use a production prefix.
             val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

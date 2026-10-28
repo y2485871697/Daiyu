@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerTitleProductionTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         init { attachBaseContext(base) }
         private val files = File(base.cacheDir, "controller-title-${UUID.randomUUID()}").apply { mkdirs() }
         override fun getFilesDir(): File = files
@@ -69,7 +70,7 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
                     }
                     override fun cancel() { cancelled.incrementAndGet() }
                 } }
-            }, titleSettingsOverride = titleStore)
+            }, titleSettingsOverride = titleStore, providerBalanceHost = { app.balances })
         return Fixture(app, db, controller, titleStore, entered, release, cancelled, calls).also {
             fixtures.add(it); state(it) { controller.ready }; assertNull(controller.problem)
         }
@@ -87,7 +88,7 @@ class ControllerTitleProductionTest : InstrumentationTestCase() {
     }
     override fun tearDown() {
         try { fixtures.forEach {
-            it.release.countDown(); it.controller.close(); it.db.close()
+            it.release.countDown(); it.controller.close(); it.app.balances.close(); it.db.close()
             it.app.deleteDatabase("conversations.db"); it.app.filesDir.deleteRecursively()
         } } finally { super.tearDown() }
     }

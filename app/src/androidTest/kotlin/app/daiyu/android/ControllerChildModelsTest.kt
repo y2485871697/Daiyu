@@ -20,6 +20,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() { init { attachBaseContext(base) } }
     private class Fixture(base: Context, val held: Boolean = false, val background: Boolean = false,
         val sessionAware: Boolean = false, val childModel: String = "child-api") {
+        private val balances = fixtureProviderBalances()
         val sessionOwners = java.util.Collections.synchronizedList(mutableListOf<Pair<String, ConversationId>>())
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(base, "controller-child-$id-"))
@@ -72,7 +73,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                 sessionModel = if (!sessionAware) null else { p, _, session ->
                     sessionOwners.add(p.model to session.conversationId)
                     factory(p.asModelSettings())
-                })
+                }, providerBalanceHost = { balances })
         }
         fun prepare() {
             conversation = database.create("default"); database.draft(conversation.id, "preserve draft")
@@ -81,7 +82,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
             check(preferences.update(owner) { it.copy(enabled = true, profiles = listOf(profile)) } is ConversationSubAgentPreferences.WriteResult.Saved)
         }
         fun close() {
-            release.countDown(); controller.stop(); controller.close()
+            release.countDown(); controller.stop(); controller.close(); balances.close()
             app.getSharedPreferences("model-settings", 0).edit().clear().commit()
             app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
             app.getSharedPreferences("subagent_configuration", 0).edit().clear().commit()

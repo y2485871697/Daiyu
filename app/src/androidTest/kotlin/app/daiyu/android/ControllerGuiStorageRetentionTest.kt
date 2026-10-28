@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
     private class App(base: Context, private val root: File) : Application() {
+        val balances = fixtureProviderBalances()
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
         override fun getFilesDir() = File(root, "files").apply { mkdirs() }
@@ -112,7 +113,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
                     // Only the synthetic summary transport's timer; GUI clocks/expiry are untouched.
                     override fun schedule(delayMillis: Long, expire: () -> Unit) = AutoCloseable {}
                 }))
-            })
+            }, providerBalanceHost = { app.balances })
             awaitControl("controller recovery ready") { controller.ready }
             assertNull(controller.problem)
         }
@@ -172,6 +173,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             summary.release.countDown()
             modelRelease.countDown()
             controlMain { controller.stop(); controller.close() }
+            app.balances.close()
             // Persistence-Unknown intentionally keeps the original entry, executor and SQLite
             // owner until process teardown. Never reset unknown or fake a Controller drain.
             if (closeDone.await(100, TimeUnit.MILLISECONDS)) {

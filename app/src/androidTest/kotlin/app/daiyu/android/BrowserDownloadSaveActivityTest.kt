@@ -58,6 +58,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         init { attachBaseContext(context) }
         override fun getContentResolver() = resolver
     }
+    private val fixtureBalanceHost = fixtureProviderBalances()
     private lateinit var controller: ChatController
     private lateinit var fixture: FixtureApplication
     private lateinit var application: ChatApplication
@@ -113,7 +114,8 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         val preferences = fixture.getSharedPreferences("conversation-ui", 0)
         preferences.edit().putString("selected", conversation.id.value).commit()
         controller = ChatController(fixture, database, ModelSettingsStore(fixture, "unused-browser-save-$id"),
-            preferences, { modelCalls.incrementAndGet(); error("save must not invoke model") })
+            preferences, { modelCalls.incrementAndGet(); error("save must not invoke model") },
+            providerBalanceHost = { fixtureBalanceHost })
         val ready = CountDownLatch(1)
         val observer: () -> Unit = { if (controller.ready) ready.countDown() }
         mainThread { controller.observe(observer); observer() }
@@ -184,6 +186,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
                 step { if (::controller.isInitialized) { controller.close(); drained = true } }
             }
             if (destroyed && drained) {
+                step { fixtureBalanceHost.close() }
                 step { if (::fixture.isInitialized) fixture.deleteDatabase("conversations.db") }
                 step { if (::root.isInitialized) check(!root.exists() || root.deleteRecursively()) }
             }

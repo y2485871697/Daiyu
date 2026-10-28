@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.*
 @Suppress("DEPRECATION")
 class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
     private class App(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
     }
@@ -146,7 +147,7 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
                     retention, store) { host }
                 if (throwAfterRetain) throw IOException("test late factory loss")
                 session
-            })
+            }, providerBalanceHost = { app.balances })
             awaitControl("controller ready") { controller.ready }
         }
         fun submit(): ControllerVirtualDisplayEntry {
@@ -194,6 +195,7 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
             factoryRelease.countDown(); modelRelease.countDown()
             // UNKNOWN intentionally pins the Controller/lease. Never fake a production drain in teardown.
             controlMain { controller.stop(); controller.close() }
+            app.balances.close()
             val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             java.util.Collections.list(keys.aliases()).filter { it == alias || it.startsWith("$alias.") }
                 .forEach { keys.deleteEntry(it) }

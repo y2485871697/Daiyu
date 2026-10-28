@@ -58,6 +58,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         init { attachBaseContext(base) }
         override fun getContentResolver() = resolver
     }
+    private val fixtureBalanceHost = fixtureProviderBalances()
     private lateinit var app: FixtureApplication
     private lateinit var controller: ChatController
     private lateinit var original: ChatController
@@ -103,7 +104,8 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             }
         }
         controller = ChatController(app, ConversationDatabase(app), settings, app.getSharedPreferences("conversation-ui", 0),
-            { error("text-only factory must not be used") }, { beforeFactory(); model })
+            { error("text-only factory must not be used") }, { beforeFactory(); model },
+            providerBalanceHost = { fixtureBalanceHost })
         awaitControl("image controller ready") { controller.ready }
         mainThread {
             val application = instrumentation.targetContext.applicationContext as ChatApplication
@@ -125,6 +127,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             finishHost()
             mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = original }
             controller.close()
+            fixtureBalanceHost.close()
             app.deleteDatabase("conversations.db")
             listOf("model-settings", "conversation-ui", "image-send-identities").forEach {
                 app.getSharedPreferences(it, 0).edit().clear().commit()
@@ -132,7 +135,9 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             java.util.Collections.list(keys.aliases()).filter { it.startsWith(alias) }.forEach { keys.deleteEntry(it) }
             directory.deleteRecursively()
-        } finally { super.tearDown() }
+        } finally {
+            super.tearDown()
+        }
     }
 
     private fun host(): ImageChatHost = MainActivity::class.java.getDeclaredMethod("getImageHost")
@@ -366,7 +371,8 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             controller = ChatController(app, ConversationDatabase(app), settings,
                 app.getSharedPreferences("conversation-ui", 0),
                 { error("read-only recovery cannot create text models") },
-                { error("read-only recovery cannot create image models") })
+                { error("read-only recovery cannot create image models") },
+                providerBalanceHost = { fixtureBalanceHost })
             awaitControl("replacement controller ready") { controller.ready }
             mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
             activity = startMain()
@@ -383,7 +389,8 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             controller = ChatController(app, ConversationDatabase(app), settings,
                 app.getSharedPreferences("conversation-ui", 0),
                 { error("second recovery cannot create text models") },
-                { error("second recovery cannot create image models") })
+                { error("second recovery cannot create image models") },
+                providerBalanceHost = { fixtureBalanceHost })
             awaitControl("second replacement controller ready") { controller.ready }
             mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
             activity = startMain()
@@ -455,7 +462,8 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             beforeFactory = { recoveryFactories.incrementAndGet(); error("recovery must not prepare or create models") }
             controller = ChatController(app, ConversationDatabase(app), settings,
                 app.getSharedPreferences("conversation-ui", 0),
-                { error("image-only fixture") }, { beforeFactory(); model })
+                { error("image-only fixture") }, { beforeFactory(); model },
+                providerBalanceHost = { fixtureBalanceHost })
             awaitControl("existing conversation replacement ready") { controller.ready }
             mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
             activity = startMain()
@@ -488,7 +496,8 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             beforeFactory = {}
             controller = ChatController(app, ConversationDatabase(app), settings,
                 app.getSharedPreferences("conversation-ui", 0),
-                { error("image-only fixture") }, { beforeFactory(); model })
+                { error("image-only fixture") }, { beforeFactory(); model },
+                providerBalanceHost = { fixtureBalanceHost })
             awaitControl("successor controller ready") { controller.ready }
             mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
             activity = startMain()

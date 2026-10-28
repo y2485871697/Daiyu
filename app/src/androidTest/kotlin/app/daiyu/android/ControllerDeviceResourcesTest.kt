@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerDeviceResourcesTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
@@ -51,7 +52,7 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
                     }
                     override fun cancel() { modelRelease.countDown() }
                 } }
-            })
+            }, providerBalanceHost = { app.balances })
         }
         fun startRead() {
             val tools = field(controller, "runTools") as RunCatalogTools
@@ -89,7 +90,7 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
     }
     override fun tearDown() {
         try { fixtures.forEach { f ->
-            f.modelRelease.countDown(); f.releaseRead(); f.controller.stop(); f.controller.close(); f.database.close()
+            f.modelRelease.countDown(); f.releaseRead(); f.controller.stop(); f.controller.close(); f.app.balances.close(); f.database.close()
             f.app.deleteDatabase("conversations.db"); f.app.deleteDatabase("questions.db"); f.database.runtimeLockFile.delete()
             f.app.getSharedPreferences("model-settings", 0).edit().clear().commit(); f.app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
             f.app.getSharedPreferences("platform-read-settings", 0).edit().clear().commit()

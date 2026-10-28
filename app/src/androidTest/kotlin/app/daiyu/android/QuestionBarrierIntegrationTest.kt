@@ -26,7 +26,9 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         private const val CALL = "provider-question-call"
         private const val ARGS = """{"title":"Route choice","question":"Which route?","options":[{"id":"one","label":"First route"},{"id":"two","label":"Second route"}],"allow_other":false,"allow_delegation":false,"allow_note":false}"""
     }
-    private class FixtureApplication(base:Context):Application() {init {attachBaseContext(base)}}
+    private class FixtureApplication(base:Context):Application() {
+        val balances = fixtureProviderBalances()
+        init {attachBaseContext(base)}}
     private class Probe:CatalogFixturePort {
         val opens=AtomicInteger();val nexts=AtomicInteger()
         val failure=AtomicReference<Throwable?>()
@@ -72,7 +74,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             activity=null
             main {application.controller=original}
             fixtures.forEach {f ->
-                f.c.close();f.db.close();f.db.runtimeLockFile.delete()
+                f.c.close();f.app.balances.close();f.db.close();f.db.runtimeLockFile.delete()
                 f.app.deleteDatabase("conversations.db");f.app.deleteDatabase("questions.db")
                 f.app.getSharedPreferences("model-settings",0).edit().clear().commit()
                 f.app.getSharedPreferences("conversation-ui",0).edit().clear().commit()
@@ -97,7 +99,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         f.settings.save(ModelSettings("https://example.invalid","question-fixture","synthetic-question-key",false))
         if (interactiveEnabled) check(f.app.getSharedPreferences("conversation-ui",0).edit().putBoolean("interactive_mode",true).commit())
         seed(f)
-        f.c=ChatController(f.app,f.db,f.settings,f.app.getSharedPreferences("conversation-ui",0),{f.probe})
+        f.c=ChatController(f.app,f.db,f.settings,f.app.getSharedPreferences("conversation-ui",0),{f.probe}, providerBalanceHost = { f.app.balances })
         await(f,"recovery ready") {f.c.ready};assertNull(f.c.problem);return f
     }
     private fun launch(f:Fixture,conversation:Conversation?=null) {

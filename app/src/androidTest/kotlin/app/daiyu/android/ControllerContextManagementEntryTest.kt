@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerContextManagementEntryTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() {
+        val balances = fixtureProviderBalances()
         private val directory = File(base.cacheDir, "context-entry-${UUID.randomUUID()}").apply { mkdirs() }
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
@@ -36,7 +37,7 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
         val calls = AtomicInteger()
         val controller = ChatController(app, db, ModelSettingsStore(app), app.getSharedPreferences("conversation-ui", 0),
             { calls.incrementAndGet(); error("context entry must not resolve chat credentials or send") },
-            contextManagementFactory = factory)
+            contextManagementFactory = factory, providerBalanceHost = { app.balances })
         awaitControl("controller ready before seed") { controller.ready }
         assertNull(controller.problem)
         val conversation = db.create("default")
@@ -67,6 +68,7 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
             fixtures.forEach { f ->
                 controlMain { f.controller.stop() }
                 f.controller.close()
+                f.app.balances.close()
                 f.app.deleteDatabase("conversations.db")
                 f.app.filesDir.deleteRecursively()
             }

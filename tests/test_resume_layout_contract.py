@@ -21,7 +21,7 @@ class ResumeLayoutContractTest(unittest.TestCase):
             self.assertNotIn(workaround, row)
 
     def test_all_audited_temporary_actions_keep_their_existing_chevron_slot(self):
-        expected = {'ui/screens/settings/BackupScreen.kt': 2, 'ui/screens/settings/CompressionSettingsForm.kt': 1, 'ui/screens/settings/LinuxSettingsScreen.kt': 2, 'ui/screens/settings/PetSettingsScreen.kt': 1, 'ui/screens/settings/BrowserSettingsScreen.kt': 1, 'ui/screens/settings/IndependentModelScreen.kt': 1, 'ui/screens/settings/OfflineSpeechSettingsScreen.kt': 1, 'ui/screens/settings/ModelSettingsScreen.kt': 1, 'ui/screens/settings/GuiSettingsPanel.kt': 4, 'ui/screens/settings/McpSettingsScreen.kt': 2, 'ui/screens/settings/SettingsHomeScreen.kt': 1, 'ui/screens/settings/SettingsDiagnosticsHost.kt': 2, 'ui/screens/settings/RequestBodyFieldsEditor.kt': 1, 'ui/screens/settings/ProviderDirectoryPage.kt': 4, 'title/TitleModelSettingsPanel.kt': 1, 'VoiceAccountPanel.kt': 13, 'VoiceSettingsPanel.kt': 14, 'VoiceSettingsPreview.kt': 1}
+        expected = {'ui/screens/settings/BackupScreen.kt': 2, 'ui/screens/settings/CompressionSettingsForm.kt': 1, 'ui/screens/settings/LinuxSettingsScreen.kt': 2, 'ui/screens/settings/PetSettingsScreen.kt': 1, 'ui/screens/settings/BrowserSettingsScreen.kt': 1, 'ui/screens/settings/IndependentModelScreen.kt': 1, 'ui/screens/settings/OfflineSpeechSettingsScreen.kt': 1, 'ui/screens/settings/ModelSettingsScreen.kt': 1, 'ui/screens/settings/GuiSettingsPanel.kt': 4, 'ui/screens/settings/McpSettingsScreen.kt': 2, 'ui/screens/settings/SettingsHomeScreen.kt': 1, 'ui/screens/settings/SettingsDiagnosticsHost.kt': 2, 'ui/screens/settings/RequestBodyFieldsEditor.kt': 1, 'ui/screens/settings/ProviderDirectoryPage.kt': 4, 'title/TitleModelSettingsPanel.kt': 1, 'VoiceAccountPanel.kt': 10, 'VoiceSettingsPanel.kt': 14, 'VoiceSettingsPreview.kt': 1}
         for path, count in expected.items():
             with self.subTest(path=path):
                 text = (SRC / path).read_text()
@@ -32,7 +32,10 @@ class ResumeLayoutContractTest(unittest.TestCase):
         voice = (SRC / "VoiceSettingsPanel.kt").read_text()
         self.assertIn('TextButton("保存连接设置"', voice)
         self.assertNotIn('SettingsRow("保存连接设置"', voice)
-        self.assertIn('TextButton("保存账户"', voice)
+        self.assertIn('VoiceAccountSaveButton("保存账户", "voice-account-save",', voice)
+        helper = (SRC / "VoiceSettingsComponents.kt").read_text()
+        self.assertIn('internal fun VoiceAccountSaveButton(', helper)
+        self.assertIn('ButtonDefaults.textButtonColorsPrimary(color = colors.primary, textColor = colors.onPrimary)', helper)
         self.assertNotIn('SettingsRow("保存账户"', voice)
         self.assertIn('TextButton("保存参考声音"', voice)
         self.assertNotIn('SettingsRow("保存参考声音"', voice)
@@ -52,8 +55,10 @@ class ResumeLayoutContractTest(unittest.TestCase):
         home = (SRC / "ui/screens/settings/SettingsHomeScreen.kt").read_text()
         rootfs = (SRC / "ui/screens/settings/LinuxRootfsPanel.kt").read_text()
         self.assertIn('"donate" -> showSponsor = true', home)
-        self.assertIn("onClick = if (entry.directory)", rootfs)
-        self.assertNotIn("showChevron = true, onClick = if (entry.directory)", rootfs)
+        self.assertIn("onClick = { if (entryCurrent() && entry.directory) load(entry) }", rootfs)
+        row = rootfs.split("SettingsRow(entry.name", 1)[1].split('tag = "linux-rootfs-entry:', 1)[0]
+        self.assertNotIn("showChevron = true", row)
+        self.assertIn('onLongClickLabel = "文件操作"', row)
         offline = (SRC / "ui/screens/settings/OfflineSpeechSettingsScreen.kt").read_text()
         self.assertIn("showChevron = !pack.ready, onClick = if (pack.checking || pack.ready) null", offline)
 

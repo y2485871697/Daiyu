@@ -16,7 +16,7 @@ class PagePositionContract(unittest.TestCase):
         pause = panel.split('Lifecycle.Event.ON_PAUSE)', 1)[1].split('\n', 1)[0]
         self.assertIn('request?.set(true)', pause)
         self.assertNotIn('listing = null', pause)
-        self.assertIn('Lifecycle.Event.ON_RESUME) load()', panel)
+        self.assertIn('Lifecycle.Event.ON_RESUME && !busy) load()', panel)
 
     def test_shared_position_is_separate_from_loading_and_revoked_data(self):
         page = source('ui/screens/settings/WorkspaceSettingsScreen.kt')

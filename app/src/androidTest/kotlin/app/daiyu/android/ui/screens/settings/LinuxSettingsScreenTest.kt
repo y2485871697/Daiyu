@@ -211,7 +211,14 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
             revealLinux("linux-rootfs-entry:etc").performClick()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("linux-rootfs-entry:etc/config").fetchSemanticsNodes().size == 1 }
             node("workspace-private-import").assertDoesNotExist()
-            revealLinux("linux-rootfs-entry:etc/config").assertHasNoClickAction()
+            revealLinux("linux-rootfs-entry:etc/config").performClick()
+            node("linux-rootfs-entry:etc/config").assertExists()
+            node("workspace-entry-action-sheet").assertDoesNotExist()
+            assertEquals("keep", java.io.File(child, "config").readText())
+            revealLinux("linux-rootfs-entry:etc/config").performTouchInput { longClick() }
+            node("workspace-entry-action:rename").assertDoesNotExist()
+            node("workspace-entry-action:delete").assertDoesNotExist()
+            ui.onNodeWithText("Rootfs 系统目录和符号链接不允许重命名或删除").assertExists()
             revealLinux("linux-rootfs-parent").performClick()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("linux-rootfs-entry:etc").fetchSemanticsNodes().size == 1 }
             assertEquals("keep", java.io.File(child, "config").readText())

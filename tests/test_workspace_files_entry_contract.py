@@ -92,7 +92,10 @@ class WorkspaceFilesEntryContract(unittest.TestCase):
                       'testFilesOnlyUsesApprovedRootfsReadOnlyWithoutBottomNavigation',
                       'assertApprovedRootfsReadOnly(filesOnly = true)',
                       'assertApprovedRootfsReadOnly(filesOnly = false)',
-                      'revealLinux("linux-rootfs-entry:etc/config").assertHasNoClickAction()',
+                      'revealLinux("linux-rootfs-entry:etc/config").performClick()',
+                      'revealLinux("linux-rootfs-entry:etc/config").performTouchInput { longClick() }',
+                      'node("workspace-entry-action:rename").assertDoesNotExist()',
+                      'node("workspace-entry-action:delete").assertDoesNotExist()',
                       'assertEquals(0, writes.get())']:
             self.assertIn(token, files)
 

@@ -27,7 +27,7 @@ class DoubaoProviderPortContractTest(unittest.TestCase):
         self.assertIn('allowUnselectedModel = true', body)
         save = source('storage/ModelSettings.kt').split('if (connectionChanged) {', 1)[1].split('} else {', 1)[0]
         self.assertIn('DoubaoSpeech.catalogModels.map', save)
-        self.assertIn('CatalogModelParameters.newModel(RemoteModel(id, label))', save)
+        self.assertIn('CatalogModelParameters.newModel(RemoteModel(id, label), CatalogModelSource.LOCAL)', save)
         self.assertIn('modelCatalog.replaceRegisteredProvider(initialModels)', save)
         self.assertIn('if (speechOnly) modelCatalog.register(initialModels)', save)
         self.assertLess(save.index('catalogReplaced = true'), save.index('modelCatalog.register(initialModels)'))

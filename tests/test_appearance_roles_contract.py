@@ -107,8 +107,11 @@ class AppearanceRolesContractTest(unittest.TestCase):
         self.assertIn('contentColor = destructiveColors().content', inline)
         self.assertIn('tint = LocalContentColor.current', inline)
         for path in ('ui/screens/settings/LocalCatalogModelsScreen.kt', 'ui/screens/settings/McpSettingsScreen.kt',
-                     'ui/screens/settings/PrivateWorkspacePanel.kt', 'ui/screens/chat/ManageChatsScreen.kt'):
+                     'ui/components/WorkspaceEntryDialogs.kt', 'ui/screens/chat/ManageChatsScreen.kt'):
             self.assertIn('deletionAppearance = true', source(path))
+        private = source('ui/screens/settings/PrivateWorkspacePanel.kt')
+        self.assertIn('WorkspaceEntryDialogs(action.entry.name, action.entry.directory, enabled = { actionCurrent(action) },', private)
+        self.assertIn('onRename = { modify(action, it) }, onDelete = { modify(action, null) },', private)
 
     def test_message_delete_keeps_original_neutral_toolbar_color(self):
         bar = source('ui/screens/chat/conversation/MessageActionBar.kt')

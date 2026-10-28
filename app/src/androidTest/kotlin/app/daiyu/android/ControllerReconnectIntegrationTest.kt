@@ -40,13 +40,13 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
     private val fixtures = mutableListOf<Fixture>()
 
     private fun fresh(protocol: ProviderProtocol = ProviderProtocol.RESPONSES,
-        factory: (ModelSettings) -> ModelPort): Fixture {
+        endpoint: String = "https://example.invalid", factory: (ModelSettings) -> ModelPort): Fixture {
         val id = UUID.randomUUID().toString()
         val app = App(testContext(instrumentation.targetContext, "reconnect-$id-"))
         val db = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.reconnect.$id"
         val settings = ModelSettingsStore(app, alias)
-        settings.save(ModelSettings("https://example.invalid", "fixture", "synthetic-key", false, protocol = protocol),
+        settings.save(ModelSettings(endpoint, "fixture", "synthetic-key", false, protocol = protocol),
             protocolChangeAuthorized = true)
         val controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0), factory, providerBalanceHost = { app.balances })
         val fixture = Fixture(app, db, controller, settings, alias)
@@ -209,7 +209,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
         val openTransport = CountDownLatch(1)
         val configs = CopyOnWriteArrayList<ModelSettings>()
         val connections = CopyOnWriteArrayList<LocalHttps>()
-        val f = fresh { config ->
+        val f = fresh(endpoint = "https://api.openai.com/v1/responses") { config ->
             configs.add(config)
             entered.countDown(); check(assemble.await(10, TimeUnit.SECONDS))
             // Return the real model UNCONFIGURED. The Controller must configure THIS factory
@@ -222,7 +222,6 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 LocalHttps(url, if (connections.isEmpty()) partialWire() else finalWire()).also(connections::add)
             }
         }
-        f.settings.save(f.settings.load().copy(endpoint = "https://api.openai.com/v1/responses"))
         f.controller.reasoningPreference.set(null, ReasoningEffort.LOW)
         f.controller.reconnectSettings.save(ReconnectSettings(ReconnectDurationPreset.WINDOW_30S, true))
         f.db.draft("pending")
@@ -273,7 +272,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
         for ((protocol, endpoint, optIn) in cases) {
             val factories = AtomicInteger()
             val connections = CopyOnWriteArrayList<LocalHttps>()
-            val f = fresh(protocol) { config ->
+            val f = fresh(protocol, endpoint) { config ->
                 factories.incrementAndGet()
                 val connect: (URL) -> HttpsURLConnection = { url ->
                     check(connections.isEmpty()) { "ordinary session must not retry or GET" }
@@ -283,7 +282,6 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 if (protocol == ProviderProtocol.MESSAGES) MessagesModel(config, connect)
                 else ResponsesModel(config, connect)
             }
-            f.settings.save(f.settings.load().copy(endpoint = endpoint))
             if (optIn) f.controller.reconnectSettings.save(ReconnectSettings(ReconnectDurationPreset.WINDOW_30S, true))
             else assertFalse(f.controller.reconnectSettings.snapshot().responsesBackgroundEnabled) // Untouched default.
             assertTrue(send(f) is ChatController.TextSendResult.Accepted)

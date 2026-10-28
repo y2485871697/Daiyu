@@ -358,16 +358,29 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
             val oldCode = choose(awaitCopy = false)
             assertTrue(documents.openEntered.await(5, TimeUnit.SECONDS))
             assertTrue(controller.dataBusy)
+            val oldVisit = mainThread { checkNotNull(field("browserDownloadVisit")) }
+            val oldActive = oldVisit.javaClass.getDeclaredField("active").apply { isAccessible = true }
+                .get(oldVisit) as java.util.concurrent.atomic.AtomicBoolean
             mainThread {
+                val retained = checkNotNull(listing())
                 lifecycle("onPause")
-                assertNull(listing())
+                assertSame(retained, listing())
+                assertFalse(oldActive.get())
+                assertNull(field("browserDownloadVisit"))
+                assertNull(field("pendingBrowserDownload"))
                 assertNull(pendingCode())
                 lifecycle("onResume")
+                assertFalse(oldActive.get())
             }
             // Provider is still blocked: cancellation must not pretend the worker drained.
             assertTrue(controller.dataBusy)
             openListing() // New visit cannot revive the captured, now-revoked worker token.
-            mainThread { assertNotNull(listing()); deliver(oldCode) }
+            mainThread {
+                assertNotNull(listing())
+                assertNotSame(oldVisit, checkNotNull(field("browserDownloadVisit")))
+                assertFalse(oldActive.get())
+                deliver(oldCode)
+            }
             assertEquals(1, documents.opens.get())
             assertTrue(controller.dataBusy)
             assertNull(notice.get())
@@ -610,8 +623,17 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         })
         assertEquals(1, documents.opens.get())
         assertTrue(staticBytes.contentEquals(documents.file(destination).readBytes()))
-        mainThread { lifecycle("onPause"); lifecycle("onResume") }
-        assertNull(field("staticGenerationVisit")); assertEquals(0, modelCalls.get())
+        mainThread {
+            val savedVisit = field("staticGenerationVisit") as java.util.concurrent.atomic.AtomicBoolean
+            lifecycle("onPause")
+            assertFalse(savedVisit.get())
+            assertNull(pendingCode())
+            assertNull(field("pendingStaticOriginal"))
+            lifecycle("onResume")
+            assertFalse(savedVisit.get())
+            assertNotSame(savedVisit, field("staticGenerationVisit"))
+        }
+        assertEquals(0, modelCalls.get())
     }
 
     fun testStaticSavedStateRetainsOnlyNextCodeAndRecreationRejectsOldCallback() {

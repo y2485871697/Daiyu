@@ -259,11 +259,16 @@ class ControllerTerminalSendTest : InstrumentationTestCase() {
         assertFalse(controller.confirmTerminal(p, p.preview, draft, p.assistant, p.provider))
         val next = prepare(draft)
         confirm(next)
-        val changed = fixture.settings.load().copy(model = "changed")
+        val current = fixture.settings.load()
+        val changed = current.copy(batteryEnabled = !current.batteryEnabled)
         fixture.settings.save(changed)
+        assertFalse("fixture must change the bound provider snapshot",
+            next.provider == controller.terminalConfiguration(next.conversation).second)
+        val callbacks = java.util.concurrent.atomic.AtomicInteger()
         assertFalse(controller.sendTerminal(next, next.preview, draft, next.assistant, next.provider,
-            ChatController.TextSendTicket()) { fail("stale provider") })
+            ChatController.TextSendTicket()) { callbacks.incrementAndGet() })
         awaitControl("invalid provider drained") { controller.terminalPreparation() == null }
+        assertEquals(0, callbacks.get())
         assertEquals(draft.text, fixture.database.draft())
         assertEquals(0, fixture.opens.get())
     }

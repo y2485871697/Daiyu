@@ -64,7 +64,7 @@ import app.daiyu.android.data.repository.formatStatCount
 import app.daiyu.android.data.repository.formatTokenCount
 import app.daiyu.android.data.repository.heatmapAlpha
 import app.daiyu.android.data.repository.heatmapQuartiles
-import app.daiyu.android.ui.components.MiuixScaffoldPage
+import app.daiyu.android.ui.screens.settings.SettingsScaffoldPage
 import app.daiyu.android.ui.haptics.TouchHaptics
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -106,7 +106,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
         stats = loaded.getOrDefault(UsageStatsSnapshot())
     }
 
-    MiuixScaffoldPage(
+    SettingsScaffoldPage(
         title = stringResource(R.string.stats_page_title),
         compactTitle = true,
         onBack = onBack,
@@ -118,7 +118,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                 UsageAction(text = "重试", modifier = Modifier.testTag("usage-retry"), onClick = { loadAttempt++ })
             }
         }
-        if (loadFailed) return@MiuixScaffoldPage
+        if (loadFailed) return@SettingsScaffoldPage
         item(key = "tabs") {
             UsageStatsTabs(
                 selected = selectedTab,

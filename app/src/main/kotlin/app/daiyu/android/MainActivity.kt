@@ -2294,7 +2294,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         if (ready == null || page == null) TerminalLoadingPage(state, onBack = leave,
-                            title = if (route == "chat-workspace") "工作区" else "Linux 工具环境", compactTitle = true)
+                            title = if (route == "chat-workspace") "工作区" else "Linux 工具环境", compactTitle = true, settingsStyle = true)
                         else key(page) {
                             LinuxSettingsScreen(ready.application.settings, page, host = ready.application.terminalOwner.host,
                                 filesOnly = route == "chat-workspace", createRootfsDirectory = { installation, directory, name, cancelled ->
@@ -2518,7 +2518,7 @@ class MainActivity : ComponentActivity() {
                         val page = legacyPage
                         if (page != null) LegacyLibraryScreen(page, ::pickLegacySource, ::pickLegacyTarget,
                             onBack = { retainedPage = "backup" })
-                        else app.daiyu.android.ui.components.MiuixScaffoldPage("旧版兼容资料库",
+                        else app.daiyu.android.ui.screens.settings.SettingsScaffoldPage("旧版兼容资料库",
                             onBack = { retainedPage = "backup" }, compactTitle = true) {
                             item("reopen") {
                                 app.daiyu.android.ui.haptics.miuix.TextButton("重新打开资料库",
@@ -5811,8 +5811,9 @@ class MainActivity : ComponentActivity() {
         onBack: () -> Unit,
         title: String = "终端",
         compactTitle: Boolean = false,
+        settingsStyle: Boolean = false,
     ) {
-        app.daiyu.android.ui.components.MiuixScaffoldPage(title = title, onBack = onBack, compactTitle = compactTitle) {
+        val content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
             item {
                 app.daiyu.android.ui.screens.settings.SettingsNote(
                     if (state == app.daiyu.android.terminal.TerminalApplicationState.Unavailable)
@@ -5821,6 +5822,11 @@ class MainActivity : ComponentActivity() {
                     error = state == app.daiyu.android.terminal.TerminalApplicationState.Unavailable)
             }
         }
+        if (settingsStyle) app.daiyu.android.ui.screens.settings.SettingsScaffoldPage(
+            title = title, onBack = onBack, content = content,
+        ) else app.daiyu.android.ui.components.MiuixScaffoldPage(
+            title = title, onBack = onBack, compactTitle = compactTitle, content = content,
+        )
     }
     private fun openLinuxSettings(filesOnly: Boolean = false) {
         requireActivityUsable()

@@ -17,7 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.GenerationSettingsEditor
-import app.daiyu.android.ui.components.MiuixScaffoldPage
+import app.daiyu.android.ui.screens.settings.SettingsScaffoldPage
 import app.daiyu.android.ui.screens.settings.GenerationSettingsScreen
 import app.daiyu.android.ui.screens.settings.SettingsNote
 import app.daiyu.android.ui.haptics.miuix.TextButton
@@ -80,7 +80,7 @@ internal fun GenerationSettingsHost(
             )
         } else {
             // No placeholder/default form for corrupt/unconfirmed/unavailable source reads.
-            MiuixScaffoldPage(title = "独立生成模型设置", onBack = leave, modifier = Modifier.weight(1f), compactTitle = true) {
+            SettingsScaffoldPage(title = "独立生成模型设置", onBack = leave, modifier = Modifier.weight(1f), compactTitle = true) {
                 item {
                     SettingsNote(if (state.loading) "正在后台读取生成配置…"
                         else state.errorText ?: "此设置页面已失效，请返回后重新打开。", error = state.failure != null)

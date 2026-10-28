@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -56,16 +58,17 @@ internal fun OptionSelectionItem(
 ) {
     val colors = usagePalette()
     val selectedBackground = if (colors.dark) colors.bubble else Color(0xFFEFEDFB)
+    val background = when {
+        cardStyle && selected -> SolidColor(colors.selectionContainer)
+        cardStyle -> Brush.linearGradient(colors.sheet)
+        selected -> SolidColor(selectedBackground)
+        else -> SolidColor(Color.Transparent)
+    }
     val shape = if (cardStyle) RoundedCornerShape(16.dp) else RoundedCornerShape(12.dp)
     val selectedContent = if (cardStyle) colors.selectionContent else colors.accent
     Row(modifier.fillMaxWidth().alpha(if (enabled) 1f else .45f).clip(shape)
-        .background(when {
-            cardStyle && selected -> colors.selectionContainer
-            cardStyle -> colors.bubble
-            selected -> selectedBackground
-            else -> Color.Transparent
-        })
-        .then(if (cardStyle) Modifier.border(1.dp, if (selected) colors.selectionContent else colors.line, shape) else Modifier)
+        .background(background)
+        .then(if (cardStyle) Modifier.border(1.dp, if (selected) colors.selectionContent else colors.edge, shape) else Modifier)
         .selectable(selected = selected, enabled = enabled, role = Role.RadioButton,
             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
         .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 12.dp),

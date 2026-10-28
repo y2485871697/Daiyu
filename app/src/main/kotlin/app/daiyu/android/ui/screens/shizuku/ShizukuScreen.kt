@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.screens.shizuku
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
@@ -20,6 +22,7 @@ import app.daiyu.android.ui.components.EtaFormTextField
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.screens.settings.SettingsCard
 import app.daiyu.android.ui.screens.settings.SettingsNote
+import app.daiyu.android.ui.screens.settings.SettingsScaffoldPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -102,13 +105,11 @@ internal fun ShizukuScreen(
             } finally { busy = false }
         }
     }
-    MiuixScaffoldPage(
-        title = stringResource(R.string.shizuku_title), onBack = onBack, compactTitle = session == null,
-        actions = {
-            TextButton(stringResource(R.string.shizuku_refresh), onClick = { refresh++ },
-                enabled = !busy, modifier = Modifier.testTag("shizuku-refresh"))
-        }
-    ) {
+    val actions: @Composable RowScope.() -> Unit = {
+        TextButton(stringResource(R.string.shizuku_refresh), onClick = { refresh++ },
+            enabled = !busy, modifier = Modifier.testTag("shizuku-refresh"))
+    }
+    val content: LazyListScope.() -> Unit = {
         item("service") {
             SettingsCard(Modifier.padding(bottom = 12.dp)) {
                 Column(Modifier.padding(16.dp)) {
@@ -140,6 +141,13 @@ internal fun ShizukuScreen(
             }
         }
     }
+    if (session == null) SettingsScaffoldPage(
+        title = stringResource(R.string.shizuku_title), onBack = onBack,
+        actions = actions, content = content,
+    ) else MiuixScaffoldPage(
+        title = stringResource(R.string.shizuku_title), onBack = onBack,
+        actions = actions, content = content,
+    )
 }
 
 @Composable

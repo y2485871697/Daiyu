@@ -16,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.haptics.miuix.IconButton
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -30,15 +29,13 @@ internal fun VoicePersonalScaffold(
     title: String,
     onBack: () -> Unit,
     enabled: Boolean,
-    settingsStyle: Boolean = false,
     onAdd: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
     val colors = assistantPreviewPalette()
     Box(Modifier.fillMaxSize().testTag("voice-account")) {
-        if (settingsStyle) SettingsScaffoldPage(title, onBack, compactTitle = true, content = content)
-        else MiuixScaffoldPage(title, onBack, compactTitle = true, actions = {
+        SettingsScaffoldPage(title, onBack, compactTitle = true, actions = {
             if (onSettings != null) IconButton(onClick = onSettings, enabled = enabled,
                 modifier = Modifier.testTag("voice-account-menu")) {
                 DaiyuIcon(DaiyuIcons.Settings, "声音设置")

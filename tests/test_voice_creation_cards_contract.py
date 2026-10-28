@@ -26,12 +26,12 @@ class VoiceCreationCardsContractTest(unittest.TestCase):
         cls.steps = [block(cls.panel, first)] + [
             block(cls.panel, f'if (page == "CREATE" && step == {step})') for step in (1, 2)]
 
-    def test_only_creation_opts_into_the_real_settings_scaffold(self):
-        self.assertIn('settingsStyle = page == "CREATE"', self.panel)
+    def test_creation_and_sibling_pages_share_the_real_settings_scaffold(self):
         scaffold = (SRC / "VoicePersonalScaffold.kt").read_text()
-        self.assertIn('settingsStyle: Boolean = false', scaffold)
-        self.assertIn('if (settingsStyle) SettingsScaffoldPage(title, onBack, compactTitle = true, content = content)', scaffold)
-        self.assertIn('else MiuixScaffoldPage(title, onBack, compactTitle = true', scaffold)
+        self.assertIn('SettingsScaffoldPage(title, onBack, compactTitle = true, actions = {', scaffold)
+        self.assertNotIn('settingsStyle', scaffold)
+        self.assertNotIn('settingsStyle', self.panel)
+        self.assertNotIn('MiuixScaffoldPage', scaffold)
         self.assertNotIn('LocalSettingsPageStyle provides', scaffold)
 
     def test_each_step_uses_independent_shared_cards_without_custom_paint(self):

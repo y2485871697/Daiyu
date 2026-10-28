@@ -119,7 +119,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
 
     def test_doubao_add_is_bottom_end_and_home_keeps_settings_menu(self):
         scaffold = source('VoicePersonalScaffold.kt').split('internal fun VoicePersonalEmptyPage(', 1)[0]
-        self.assertIn('MiuixScaffoldPage(title, onBack, compactTitle = true, actions = {', scaffold)
+        self.assertIn('SettingsScaffoldPage(title, onBack, compactTitle = true, actions = {', scaffold)
         self.assertIn('testTag("voice-account-menu")', scaffold)
         self.assertIn('DaiyuIcon(DaiyuIcons.Settings, "声音设置")', scaffold)
         actions, bottom = scaffold.split('if (onAdd != null) IconButton', 1)

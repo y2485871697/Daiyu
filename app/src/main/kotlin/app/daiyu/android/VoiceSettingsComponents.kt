@@ -10,11 +10,11 @@ import androidx.compose.ui.platform.testTag
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
+import app.daiyu.android.ui.screens.settings.SettingsCard
 
 @Composable
 internal fun VoiceSettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier.padding(horizontal = 12.dp, vertical = 6.dp), content = content)
+    SettingsCard(modifier, content)
 }
 
 @Composable

@@ -38,13 +38,13 @@ class SettingsCenteredTitleContract(unittest.TestCase):
                      'VoicePersonalScaffold.kt', 'ui/GenerationSettingsHost.kt'):
             with self.subTest(path=path):
                 self.assertIn('compactTitle = true', read(path))
-        self.assertIn('compactTitle = session == null', read('ui/screens/shizuku/ShizukuScreen.kt'))
+        self.assertIn('if (session == null) SettingsScaffoldPage(', read('ui/screens/shizuku/ShizukuScreen.kt'))
         self.assertNotIn('compactTitle = integratedLinux', read('ui/screens/settings/WorkspaceSettingsScreen.kt'))
 
     def test_loading_and_unavailable_settings_do_not_revert_to_large_titles(self):
         main = read('MainActivity.kt')
         self.assertIn('onBack = { retainedPage = "backup" }, compactTitle = true)', main)
-        self.assertIn('title = if (route == "chat-workspace") "工作区" else "Linux 工具环境", compactTitle = true)', main)
+        self.assertIn('title = if (route == "chat-workspace") "工作区" else "Linux 工具环境", compactTitle = true, settingsStyle = true)', main)
         loading = main.split('@Composable private fun TerminalLoadingPage(', 1)[1].split('private fun openLinuxSettings', 1)[0]
         self.assertIn('compactTitle: Boolean = false', loading)
         self.assertIn('compactTitle = compactTitle', loading)

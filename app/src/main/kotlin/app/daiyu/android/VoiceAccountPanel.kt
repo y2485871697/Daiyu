@@ -281,7 +281,7 @@ internal fun VoiceAccountPanel(
             "SYNC" -> "同步音色名额"; "ACCOUNT" -> "声音复刻账户"
             "IMPORT" -> "导入声音"; "CREATE" -> "制作声音"; else -> "我的声音"
         }
-        VoicePersonalScaffold(title, ::back, enabled = !busy && current(), settingsStyle = page == "CREATE",
+        VoicePersonalScaffold(title, ::back, enabled = !busy && current(),
             onAdd = if (page == "LIST") ({ if (current()) addMenu = true }) else null,
             onSettings = if (page == "LIST") ({ if (current()) menu = true }) else null) {
             if (page == "LIST") {

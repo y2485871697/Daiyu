@@ -95,8 +95,8 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         item = (SRC / 'ui/components/OptionSelectionSheet.kt').read_text()
         for token in ('cardStyle: Boolean = false', 'itemSpacing: Dp = 3.dp',
                       'RoundedCornerShape(16.dp)', 'RoundedCornerShape(12.dp)',
-                      'cardStyle && selected -> colors.selectionContainer', 'cardStyle -> colors.bubble',
-                      'Modifier.border(1.dp', 'colors.selectionContent', 'colors.line',
+                      'cardStyle && selected -> SolidColor(colors.selectionContainer)', 'cardStyle -> Brush.linearGradient(colors.sheet)',
+                      'Modifier.border(1.dp', 'colors.selectionContent', 'colors.edge',
                       'Arrangement.spacedBy(itemSpacing)', 'Role.RadioButton',
                       'selected = selected, enabled = enabled', 'heightIn(min = 48.dp)'):
             self.assertIn(token, item)

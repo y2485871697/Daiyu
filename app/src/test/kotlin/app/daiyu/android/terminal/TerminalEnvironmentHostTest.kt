@@ -156,6 +156,10 @@ class TerminalEnvironmentHostTest {
         try { test(root, spec) } finally { root.deleteRecursively() }
     }
 
+    private fun hostRootfsAccess(root: File,
+        fileKey: (java.nio.file.Path) -> Any? = ::hostLinuxFileKey) =
+        LinuxRootfsBackupAccess(root, directorySync = ::hostDirectorySync, fileKey = fileKey)
+
     private fun assertLinuxRefused(root: File, gate: TerminalTrustedLinuxSelection, reference: LinuxGenerationRef) {
         val state = gate.status()
         assertNotEquals("FILES_READY", state.state)
@@ -229,16 +233,17 @@ class TerminalEnvironmentHostTest {
     @Test fun trustedStatusNeverClaimsEvenATemporaryCommonPin() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
         hostLinuxStore(directory).select(spec)
-        val access = LinuxRootfsBackupAccess.forFiles(root)
         val common = File(root, "linux-rootfs-access-v1")
+        var sawPin = false
+        val observedKey: (java.nio.file.Path) -> Any? = { path ->
+            if (common.listFiles()!!.any { it.name.startsWith(".runner-pin-") }) sawPin = true
+            hostLinuxFileKey(path)
+        }
+        val access = hostRootfsAccess(root, observedKey)
         val selection = File(directory, "selected-linux.json")
         val before = selection.readBytes()
-        var sawPin = false
         val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync,
-            fileKey = { path ->
-                if (common.listFiles()!!.any { it.name.startsWith(".runner-pin-") }) sawPin = true
-                hostLinuxFileKey(path)
-            }, rootfsAccess = access)
+            fileKey = observedKey, rootfsAccess = access)
         repeat(3) { assertEquals("FILES_READY", gate.status().state) }
         assertFalse("status must not create even a temporary pin", sawPin)
         assertArrayEquals(before, selection.readBytes())
@@ -249,7 +254,7 @@ class TerminalEnvironmentHostTest {
     @Test fun trustedStatusStillRejectsUnknownCommonPinWithoutChangingIt() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
         hostLinuxStore(directory).select(spec)
-        val common = LinuxRootfsBackupAccess.forFiles(root)
+        val common = hostRootfsAccess(root)
         val pin = File(root, "linux-rootfs-access-v1/.runner-pin-orphan").apply { writeText("unknown") }
         val before = pin.readBytes()
         val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync,
@@ -263,7 +268,7 @@ class TerminalEnvironmentHostTest {
     @Test fun trustedStatusChecksMetadataAndExportWithoutCreatingCommonPins() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
         val store = hostLinuxStore(directory).apply { select(spec) }
-        val common = LinuxRootfsBackupAccess.forFiles(root)
+        val common = hostRootfsAccess(root)
         val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync,
             fileKey = ::hostLinuxFileKey, rootfsAccess = common)
         repeat(3) { assertEquals("FILES_READY", gate.status().state) }

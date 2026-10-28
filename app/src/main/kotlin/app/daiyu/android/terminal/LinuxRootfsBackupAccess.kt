@@ -4,9 +4,13 @@ import java.io.File
 import java.nio.file.Files
 
 /** One conservative usage/export domain for all approved roots, including workspace stores. */
-internal class LinuxRootfsBackupAccess private constructor(private val files: File) {
-    private val directory = File(files, "linux-rootfs-access-v1").also { TerminalDurability.ensureDirectory(it) }
-    private val pins = LinuxRunnerGenerationPins(directory, directorySync = TerminalDurability::syncDirectory)
+internal class LinuxRootfsBackupAccess internal constructor(
+    private val files: File,
+    directorySync: (File) -> Unit = TerminalDurability::syncDirectory,
+    fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
+) {
+    private val directory = File(files, "linux-rootfs-access-v1").also { TerminalDurability.ensureDirectory(it, directorySync) }
+    private val pins = LinuxRunnerGenerationPins(directory, fileKey = fileKey, directorySync = directorySync)
     private var exporting = false
 
     @Synchronized fun inspectAdmission() = pins.admitted {

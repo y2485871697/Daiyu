@@ -8,15 +8,18 @@ CHAT = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class ReportedReasoningMarkdownContractTest(unittest.TestCase):
     def test_summary_uses_background_projection_and_shared_renderer(self):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()
-        self.assertIn("rememberMarkdownProjection(listOf(summary.text), streaming = !generationComplete)", source)
-        self.assertIn("ProjectedMessageMarkdown(", source)
+        self.assertIn("rememberMarkdownProjection(listOf(text), streaming = !generationComplete)", source)
+        self.assertIn("summary.text.takeIf(::hasReportedReasoningText).orEmpty()", source)
+        self.assertIn("RevealedMessageMarkdown(", source)
+        leaf = (CHAT / "MessageMarkdown.kt").read_text().split("internal fun RevealedMessageMarkdown(", 1)[1].split("@Composable", 1)[0]
+        self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", leaf)
         self.assertIn("projection?.blocks?.get(displayed)", source)
         self.assertNotRegex(source, r"\bText\(it\.text")
         self.assertNotIn("MarkdownParser.parse", source)
 
     def test_summary_state_and_code_completion_are_bound_to_their_owner(self):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()
-        self.assertIn("key(ownerKey, summary.itemId)", source)
+        self.assertIn("key(ownerKey, summary.itemId, disclosureExpanded)", source)
         self.assertIn("generationComplete = generationComplete", source)
         caller = (CHAT / "ChatMessageList.kt").read_text()
         card = caller.split("ReportedReasoningCard(", 1)[1].split("if (turn.content", 1)[0]

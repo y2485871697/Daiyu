@@ -2,6 +2,9 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import org.json.JSONObject
 
+internal fun isMcpToolName(name: String): Boolean =
+    name.matches(Regex("mcp_(?:[0-7]|live_[0-9]+_[0-9]+)_call"))
+
 /** Match protocol identifiers, never translated titles or result prose. */
 internal fun toolOperationGlyph(toolName: String, arguments: String): String {
     val args = runCatching { JSONObject(arguments) }.getOrNull()
@@ -11,6 +14,11 @@ internal fun toolOperationGlyph(toolName: String, arguments: String): String {
         "skills_read_resource" -> "resource"
         "run_child_models" -> "batch"
         "start_child_tasks" -> "launchBackground"
+        "inspect_child_tasks" -> "inspect"
+        "get_child_task" -> "receive"
+        "control_child_task" -> when (args?.optString("action")) {
+            "continue" -> "play"; "pause" -> "pause"; "stop" -> "stop"; else -> "generic"
+        }
         "direct_child_task" -> when (args?.optString("kind")) {
             "APPEND" -> "add"; "REPLACE" -> "swap"; "REDISPATCH" -> "retry"; else -> "generic"
         }
@@ -60,7 +68,7 @@ internal fun toolOperationGlyph(toolName: String, arguments: String): String {
         "calendar_events" -> "calendar"
         "search_contacts" -> "contacts"
         "app_notifications", "current_notifications" -> "bell"
-        "notification_history", "context_archive_page" -> "history"
+        "notification_history", "context_archive_page", "conversation_reference_read" -> "history"
         "platform_set_alarm" -> "alarm"
         "platform_set_timer" -> "timer"
         "platform_media_key" -> "media"
@@ -68,6 +76,6 @@ internal fun toolOperationGlyph(toolName: String, arguments: String): String {
         "generate_videos" -> "videoCreate"
         "context_usage" -> "contextRead"
         "ask_user" -> "question"
-        else -> if (toolName.matches(Regex("mcp_[0-7]_call"))) "toolCall" else "generic"
+        else -> if (isMcpToolName(toolName)) "toolCall" else "generic"
     }
 }

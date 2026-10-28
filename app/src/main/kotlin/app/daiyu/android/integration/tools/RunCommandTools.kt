@@ -51,14 +51,27 @@ internal class RunCommandTools(
 ) : AutoCloseable {
     companion object {
         const val CAPABILITY = "terminal.command.consent"
+        internal fun androidConfiguration(context: Context, workingDirectory: java.io.File): TerminalConfiguration =
+            androidConfiguration(app.daiyu.android.runningmode.AndroidRunningModeStore.get(context).mode.value,
+                workingDirectory, mapOf("HOME" to context.filesDir.path, "TMPDIR" to context.cacheDir.path,
+                    "PATH" to "/system/bin:/system/xbin"))
+
+        internal fun androidConfiguration(mode: app.daiyu.android.runningmode.RunningMode,
+            workingDirectory: java.io.File, environment: Map<String, String>,
+            rootExecutable: () -> String? = app.daiyu.android.runningmode.AndroidRunningModeAuthorization::rootExecutable): TerminalConfiguration {
+            val root = mode == app.daiyu.android.runningmode.RunningMode.ROOT
+            return TerminalConfiguration(root = root, workingDirectory = workingDirectory, environment = environment.toMap(),
+                rootExecutable = if (root) rootExecutable() ?: "/system/bin/su" else "/system/bin/su")
+        }
+
         fun android(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
             linux: TerminalPtyLaunch.Linux?,
             workingDirectory: java.io.File = app.daiyu.android.workspace.PrivateWorkspacePaths(context.filesDir).ensureRoot(),
             linuxState: TerminalLinuxState? = null,
+            androidConfiguration: TerminalConfiguration = androidConfiguration(context, workingDirectory),
             approve: (ToolExecutionContext, WriteEffect, String) -> Boolean): RunCommandTools {
-            val configuration = TerminalConfiguration(workingDirectory = workingDirectory,
-                environment = mapOf("HOME" to context.filesDir.path, "TMPDIR" to context.cacheDir.path,
-                    "PATH" to "/system/bin:/system/xbin"))
+            val configuration = androidConfiguration
+            require(configuration.backend == "android" && configuration.linux == null && configuration.workingDirectory == workingDirectory)
             return RunCommandTools(configuration, owner, authorization, linux, approve, create = { environment, frozen ->
                 val registry = TerminalRegistry(context)
                 try { registry.configure("${owner.runId.value}-$environment", frozen, owner.conversationId.value) }
@@ -109,6 +122,7 @@ internal class RunCommandTools(
         val backend = config?.linux
         val frozen = JSONObject().put("conversation", owner.conversationId.value).put("run", owner.runId.value)
             .put("environment", environment).put("mode", "sync").put("timeout_ms", timeout)
+            .put("root", config?.root).put("root_executable", config?.rootExecutable)
             .put("cwd", config?.workingDirectory?.path)
             .put("env", JSONObject(config?.environment?.toSortedMap().orEmpty()))
             .put("argv", org.json.JSONArray(backend?.shellArgv ?: listOf("/system/bin/sh")))
@@ -130,7 +144,7 @@ internal class RunCommandTools(
     }
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = app.daiyu.android.domain.tools.ToolDefinition("terminal_exec", 1,
-            "在 Android 应用身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
+            "在已选择的 Android ${if (android.root) "Root" else "应用 UID"} 身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("command", ArgumentType.Text(maxLength = 32768, minimumLength = 1)),
                 ArgumentField("environment", ArgumentType.Text(choices = setOf("android", "linux"))),
@@ -144,7 +158,7 @@ internal class RunCommandTools(
             val effect = WriteEffect("terminal.command", "exec", target(environment, timeout),
                 java.util.Base64.getEncoder().encodeToString(command.toByteArray(Charsets.UTF_8)))
             val config = configuration(environment)
-            val disclosure = "环境：$environment\n身份：${if (environment == "android") "Android 应用 UID（非 Root）" else if (config?.linux?.rootScope != null) "chroot / Host Root（独立进程域，不回退 Android）" else "PRoot / Android 应用 UID（不回退 Android）"}\n" +
+            val disclosure = "环境：$environment\n身份：${if (environment == "android") (if (android.root) "Android Root（实际 UID 必须为 0；失效不降级）" else "Android 应用 UID（非 Root）") else if (config?.linux?.rootScope != null) "chroot / Host Root（独立进程域，不回退 Android）" else "PRoot / Android 应用 UID（不回退 Android）"}\n" +
                 "工作目录：${config?.linux?.guestWorkingDirectory ?: config?.workingDirectory?.path}\n" +
                 "环境变量：${config?.linux?.environment.orEmpty() + config?.environment.orEmpty()}\n" +
                 "共享映射：${config?.linux?.sharedMounts.orEmpty()}\n等待上限：${timeout}ms\n\n完整命令：\n$command"

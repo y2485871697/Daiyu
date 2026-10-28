@@ -102,6 +102,62 @@ class TerminalJobSessionTest {
             return result.get()
         }
     }
+    @Test fun jobsInSameRunHaveIndependentTransportJournals() {
+        val first = plan()
+        val second = plan()
+        assertEquals(first.sessionId, second.sessionId)
+        assertNotEquals(first.transportScope, second.transportScope)
+        val directory = java.nio.file.Files.createTempDirectory("job-journals").toFile()
+        try {
+            var opens = 0
+            for (plan in listOf(first, second)) {
+                val journal = hostJournal(directory, plan.transportScope)
+                val result = journal.once("open", "terminal_open", JSONObject()) {
+                    opens++
+                    JSONObject().put("ok", true).put("session_id", plan.transportScope)
+                }
+                assertEquals(plan.transportScope, result.getString("session_id"))
+            }
+            assertEquals(2, opens)
+        } finally { directory.deleteRecursively() }
+    }
+
+    @Test fun rootDaemonIsRejectedBeforeTransportWithoutAppUidFallback() {
+        val appPlan = plan()
+        try {
+            TerminalJobPlan(message.conversationId, message.runId, appPlan.launch, appPlan.command, "daemon",
+                androidConfiguration = appPlan.configuration.copy(root = true))
+            fail("unsupported Root daemon admitted")
+        } catch (expected: IllegalArgumentException) {
+            assertEquals("android_root_daemon_not_supported", expected.message)
+        }
+    }
+
+    @Test fun hostRootJobConfigurationIsFrozenAndSeparatedFromAppUidGrant() {
+        val appPlan = plan()
+        val rootConfiguration = appPlan.configuration.copy(root = true, rootExecutable = "/system/bin/su")
+        val rootPlan = TerminalJobPlan(message.conversationId, message.runId, appPlan.launch,
+            appPlan.command, appPlan.mode, androidConfiguration = rootConfiguration)
+        val otherSu = TerminalJobPlan(message.conversationId, message.runId, appPlan.launch,
+            appPlan.command, appPlan.mode, androidConfiguration = rootConfiguration.copy(rootExecutable = "/sbin/su"))
+        assertTrue(rootPlan.configuration.root)
+        assertEquals("/system/bin/su", rootPlan.configuration.rootExecutable)
+        assertNotEquals(appPlan.effect.target, rootPlan.effect.target)
+        assertNotEquals(rootPlan.effect.target, otherSu.effect.target)
+        assertEquals(appPlan.command, rootPlan.command)
+    }
+
+    @Test fun androidJobRejectsConfigurationFromAnotherWorkspace() {
+        val appPlan = plan()
+        try {
+            TerminalJobPlan(message.conversationId, message.runId, appPlan.launch, appPlan.command, appPlan.mode,
+                androidConfiguration = appPlan.configuration.copy(workingDirectory = File("/other")))
+            fail("mismatched host configuration admitted")
+        } catch (expected: IllegalArgumentException) {
+            assertEquals("terminal_job_android_configuration_mismatch", expected.message)
+        }
+    }
+
     @Test fun defaultConsentDoesNotBroadenFrozenJobCommandOrModeGrant() {
         assertFalse(CommandPermissionDefaults.REQUIRE_INTERACTIVE_APPROVAL)
         val original = plan("async")
@@ -126,6 +182,29 @@ class TerminalJobSessionTest {
         assertEquals(0, f.creates.get())
         assertEquals(RunCatalogCloseResult.Drained, f.close())
     }
+    @Test fun confirmedDispatchAcknowledgesAcceptanceNotCompletion() {
+        val backend = object : Backend() {
+            override fun execute(name: String, arguments: JSONObject): JSONObject =
+                super.execute(name, arguments).also { if (name == "terminal_exec") it.put("state", "dispatched") }
+        }
+        val plan = plan()
+        val token = owner()
+        val auth = TaskAuthorization("run", "run", setOf(plan.effect))
+        val session = TerminalJobSession.approved(plan, auth) { backend }
+        val capabilities = SessionCapabilities("run", setOf(TerminalJobSession.CAPABILITY))
+        session.bind(token, capabilities, auth)
+        val dispatcher = ToolDispatcher(ToolRegistry().apply { session.tools(capabilities).forEach(::register) }.snapshot(),
+            capabilities, ToolLedger(InMemoryToolLedgerStore()))
+        val result = dispatcher.dispatchOwned(auth, listOf(ToolInvocation(ToolCallId("accepted"),
+            TerminalJobSession.START, "{}")), token).single().outcome as DispatchOutcome.Confirmed
+        val payload = JSONObject(result.payload)
+        assertTrue(payload.getBoolean("accepted"))
+        assertFalse(payload.getBoolean("completed"))
+        assertEquals(backend.id, payload.getString("job_id"))
+        session.close()
+        assertTrue(session.awaitCloseOnWorker(1000))
+    }
+
     @Test fun exactApprovedCommandReachesOneRegistrySessionAndUnknownNeverResendsWithNewCallId() {
         val f = Fixture()
         assertTrue(f.call() is DispatchOutcome.Unknown)

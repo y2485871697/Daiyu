@@ -102,6 +102,26 @@ class TouchHapticsContractTest(unittest.TestCase):
         for file in (SRC / "ui/screens/chat/conversation").glob("Tool*Dialog.kt"):
             self.assertNotIn(".conversationClickable {}", file.read_text())
 
+    def test_overflow_menu_only_opts_out_of_outside_click_feedback(self):
+        menus = (SRC / "ui/screens/chat/conversation/ChatMenus.kt").read_text()
+        overflow = menus.split("internal fun ChatOverflowMenu(", 1)[1].split("private fun ChatMenuItem(", 1)[0]
+        self.assertIn("outsideClickFeedback = false", overflow)
+        item = menus.split("private fun ChatMenuItem(", 1)[1].split("internal fun ChatAttachmentSheet(", 1)[0]
+        self.assertIn(".conversationClickable(enabled = enabled)", item)
+        self.assertNotIn("clickFeedback = false", item)
+        self.assertEqual(1, menus.count("outsideClickFeedback = false"))
+
+    def test_anchored_menu_routes_latest_outside_policy_without_changing_dismiss(self):
+        layer = (SRC / "ui/screens/chat/conversation/ChatMenuLayer.kt").read_text()
+        self.assertIn("outsideClickFeedback: Boolean = true", layer)
+        self.assertIn("val latestOutsideClickFeedback by rememberUpdatedState(outsideClickFeedback)", layer)
+        self.assertIn("val outsideClickFeedback: () -> Boolean", layer)
+        self.assertIn("{ latestOutsideClickFeedback }", layer)
+        self.assertIn(".conversationClickable(clickFeedback = menu.outsideClickFeedback())", layer)
+        self.assertIn("if (menu.expanded()) menu.onDismiss()", layer)
+        self.assertIn("BackHandler(enabled = menu.expanded(), onBack = menu.onDismiss)", layer)
+        self.assertNotIn("TouchHaptics", layer)
+
     def test_preview_outside_dismiss_is_silent_without_disabling_content_feedback(self):
         text = (SRC / "ui/components/PreviewDialog.kt").read_text()
         scrim = text.split('testTag("preview-dialog-scrim")', 1)[1].split("CompositionLocalProvider", 1)[0]

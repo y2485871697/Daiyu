@@ -77,6 +77,7 @@ internal fun ProviderDirectoryPage(
     onDeleteSelected: () -> Unit = {},
     onCancelSelection: () -> Unit = {},
     navigationEnabled: Boolean = enabled,
+    currentProviderSlotId: String? = null,
 ) {
     val rows = registry?.providers.orEmpty().filter { registration ->
         query.isBlank() || registration.name.contains(query.trim(), ignoreCase = true) ||
@@ -151,7 +152,8 @@ internal fun ProviderDirectoryPage(
                                     .testTag("provider-selection-${registration.slotId}"), contentAlignment = Alignment.Center) {
                                     if (checked) DaiyuIcon(DaiyuIcons.Check, null, tint = colors.onPrimary, size = 18.dp)
                                 }
-                            } else if (registry?.activeSlotId == registration.slotId) DaiyuIcon(DaiyuIcons.Check, "当前提供商", tint = DaiyuPalette.selectionAccent)
+                            } else if (currentProviderSlotId == registration.slotId) DaiyuIcon(DaiyuIcons.Check, "当前提供商",
+                                Modifier.testTag("provider-current-${registration.slotId}"), tint = DaiyuPalette.selectionAccent)
                         },
                         modifier = Modifier.semantics {
                             if (selectedSlots != null) {

@@ -617,6 +617,31 @@ class MainActivity : ComponentActivity() {
             draft, activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible)
 
     }
+    private var toolLocationDialog: android.app.AlertDialog? = null
+    private var toolLocationQuestion: RunScreenLocation.Question? = null
+    private val toolLocationUi = object : RunScreenLocationUi {
+        override fun show(question: RunScreenLocation.Question) {
+            fun available() = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible && selectionReady
+            if (!available()) { question.answer(null); return }
+            toolLocationDialog?.dismiss()
+            toolLocationQuestion = question
+            toolLocationDialog = android.app.AlertDialog.Builder(this@MainActivity)
+                .setTitle("选择本次运行的执行位置")
+                .setMessage("只选择执行位置。后台不可用时不会改用前台；取消后本次运行不再询问。")
+                .setHapticPositiveButton("本次使用前台") { _, _ -> question.answer(if (available()) TaskSurface.FOREGROUND else null) }
+                .setHapticNegativeButton("本次使用后台") { _, _ -> question.answer(if (available()) TaskSurface.BACKGROUND else null) }
+                .setOnCancelListener { question.answer(null) }.create().also { dialog ->
+                    dialog.setOnDismissListener {
+                        question.answer(null)
+                        if (toolLocationDialog === dialog) { toolLocationDialog = null; toolLocationQuestion = null }
+                    }
+                    dialog.show()
+                }
+        }
+        override fun dismiss(question: RunScreenLocation.Question) {
+            if (toolLocationQuestion === question) { toolLocationDialog?.dismiss(); toolLocationDialog = null; toolLocationQuestion = null }
+        }
+    }
     private var commandDialog: android.app.AlertDialog? = null
     private var commandRequest: app.daiyu.android.integration.tools.CommandApprovalRequest? = null
     private val commandApprovalUi = object : app.daiyu.android.integration.tools.CommandApprovalUi {
@@ -649,6 +674,8 @@ class MainActivity : ComponentActivity() {
     }
     private fun revokeCommandApproval() {
         controller.revokeCommandApproval()
+        toolLocationQuestion?.answer(null)
+        toolLocationDialog?.dismiss()
         commandDialog?.dismiss(); commandDialog = null; commandRequest = null
     }
 
@@ -2482,6 +2509,7 @@ class MainActivity : ComponentActivity() {
                         } }
                     }
                     "providers" -> ProviderManagementRoute(controller,
+                        conversationId = selected?.id,
                         ownerCurrent = { activityUsable() && voiceForeground && retainedPage == "providers" && !sidebarVisible },
                         onBack = { closeProvidersPage() },
                         onDetailBack = { if (activityUsable() && retainedPage == "providers") returnToChat() },
@@ -5617,6 +5645,7 @@ class MainActivity : ComponentActivity() {
     override fun onPostResume() {
         super.onPostResume()
         controller.attachCommandApprovalUi(commandApprovalUi)
+        controller.attachToolLocationUi(toolLocationUi)
         legacyLaunchersReady = true
         // ActivityResult can arrive before RESUMED. Do not open a provider until then.
         val browserTarget = browserResumeTarget
@@ -5638,6 +5667,9 @@ class MainActivity : ComponentActivity() {
         resetRootExitConfirmation()
         cancelPaneConversationSelection()
         controller.detachCommandApprovalUi(commandApprovalUi)
+        controller.detachToolLocationUi(toolLocationUi)
+        toolLocationQuestion?.answer(null)
+        toolLocationDialog?.dismiss()
         revokeCommandApproval()
         if (retainedPage == "session-gateway") {
             gatewayOwner?.revoke()

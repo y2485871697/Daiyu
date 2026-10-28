@@ -59,7 +59,7 @@ internal class RunShizukuCommands(
         }
     }
 
-    private fun execute(context: ToolExecutionContext, script: String, timeout: Long, effect: WriteEffect): ExecutionReceipt {
+    internal fun execute(context: ToolExecutionContext, script: String, timeout: Long, effect: WriteEffect): ExecutionReceipt {
         val bound = synchronized(lock) {
             if (closed || !admission()) return ExecutionReceipt.NotExecuted("run_closed")
             val current = owner ?: return ExecutionReceipt.NotExecuted("shizuku_run_not_bound")
@@ -181,7 +181,7 @@ internal class RunShizukuCommands(
     companion object {
         const val TOOL_NAME = "shizuku_execute"
         const val CAPABILITY = "android.shizuku.execute"
-        private val SCHEMA = ToolSchema(listOf(
+        internal val SCHEMA = ToolSchema(listOf(
             ArgumentField("script", ArgumentType.Text(16_384, minimumLength = 1)),
             ArgumentField("timeout_ms", ArgumentType.Integer(1, 120_000), required = false)
         ))

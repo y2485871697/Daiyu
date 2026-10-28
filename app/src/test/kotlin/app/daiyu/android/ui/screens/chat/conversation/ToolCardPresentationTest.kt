@@ -5,6 +5,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ToolCardPresentationTest {
+    @Test fun retainedChildAndLiveMcpToolsDoNotUseUnknownFallback() {
+        listOf("inspect_child_tasks", "get_child_task").forEach { name ->
+            assertEquals("child_control", ToolCardPresentations.present(name, "{}", "{\"tasks\":[]}").category)
+            assertNotEquals("generic", toolOperationGlyph(name, "{}"))
+        }
+        mapOf("continue" to "继续子任务", "pause" to "暂停子任务", "stop" to "停止子任务").forEach { (action, title) ->
+            val args = "{\"action\":\"$action\"}"
+            assertEquals(title, ToolCardPresentations.present("control_child_task", args, null).title)
+            assertNotEquals("generic", toolOperationGlyph("control_child_task", args))
+        }
+        listOf("mcp_0_call", "mcp_7_call", "mcp_live_0_0_call", "mcp_live_12_63_call").forEach { name ->
+            assertEquals("mcp", ToolCardPresentations.present(name, "{}", null).category)
+            assertEquals("toolCall", toolOperationGlyph(name, "{}"))
+        }
+        listOf("mcp_8_call", "mcp_live_x_0_call", "mcp_live_1_call", "mcp_live_1_2_call_extra").forEach { name ->
+            assertEquals("generic", ToolCardPresentations.present(name, "{}", null).category)
+        }
+        val card = ToolCardPresentations.present("inspect_child_tasks", "{}",
+            "{\"tasks\":[],\"current_configuration_available\":true}")
+        assertTrue(card.details.fields.contains(ToolFieldUi("当前委派配置可用", "是")))
+        assertEquals("子任务控制", ToolCardPresentations.processTitle(listOf(card.category)))
+    }
+
     @Test fun taxonomyIncludesAllReservedCategoriesWithoutInventingRecords() {
         assertEquals(21, ToolCardPresentations.categories.size)
         assertTrue(ToolCardPresentations.categories.containsAll(listOf("workspace", "image_read", "speech", "generic")))

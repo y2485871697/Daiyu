@@ -16,10 +16,12 @@ internal class TerminalJobPlan(
     val command: String,
     val mode: String,
     private val workspacePin: AutoCloseable? = null,
+    androidConfiguration: TerminalConfiguration? = null,
 ) {
     private val workspaceReleased = java.util.concurrent.atomic.AtomicBoolean(false)
     fun releaseWorkspace() { if (workspaceReleased.compareAndSet(false, true)) workspacePin?.close() }
     val sessionId = runId.value
+    internal val transportScope = java.util.UUID.randomUUID().toString()
     private var claimed = false
     @Synchronized fun claim() {
         check(!claimed) { "terminal_job_plan_already_claimed" }
@@ -29,7 +31,10 @@ internal class TerminalJobPlan(
     val configuration: TerminalConfiguration = when (launch) {
         is TerminalPtyLaunch.Android -> {
             require(launch.argv == listOf("/system/bin/sh")) { "terminal_job_android_app_shell_only" }
-            TerminalConfiguration(workingDirectory = launch.cwd, environment = launch.environment)
+            (androidConfiguration ?: TerminalConfiguration(workingDirectory = launch.cwd, environment = launch.environment)).also {
+                require(it.backend == "android" && it.linux == null && it.workingDirectory == launch.cwd &&
+                    it.environment == launch.environment) { "terminal_job_android_configuration_mismatch" }
+            }
         }
         is TerminalPtyLaunch.Linux -> launch.commandConfiguration()
     }
@@ -38,11 +43,18 @@ internal class TerminalJobPlan(
         require(mode in setOf("async", "daemon"))
         require(command.isNotBlank() && command.length <= 32768 && '\u0000' !in command)
         require(String(command.toByteArray(Charsets.UTF_8), Charsets.UTF_8) == command)
-        require(!configuration.root)
+        require(configuration.backend != "linux" || !configuration.root)
+        require(mode != "daemon" || !configuration.root) { "android_root_daemon_not_supported" }
         require(mode != "daemon" || launch is TerminalPtyLaunch.Android || (launch as? TerminalPtyLaunch.Linux)?.rootScope != null) { "linux_daemon_not_supported" }
+        effect = effectFor(conversationId, runId, configuration, command, mode)
+    }
+    companion object {
+        internal fun effectFor(conversationId: ConversationId, runId: RunId,
+            configuration: TerminalConfiguration, command: String, mode: String): WriteEffect {
         val backend = configuration.linux
         val description = JSONObject().put("conversation", conversationId.value).put("run", runId.value)
             .put("backend", configuration.backend).put("cwd", configuration.workingDirectory?.path)
+            .put("root", configuration.root).put("root_executable", configuration.rootExecutable)
             .put("environment", JSONObject(configuration.environment.toSortedMap()))
             .put("argv", org.json.JSONArray(backend?.shellArgv ?: listOf("/system/bin/sh")))
             .put("linux_environment", JSONObject(backend?.environment?.toSortedMap().orEmpty()))
@@ -51,8 +63,10 @@ internal class TerminalJobPlan(
             .put("root_scope", backend?.rootScope?.binding() ?: JSONObject.NULL)
         val target = MessageDigest.getInstance("SHA-256").digest(description.toString().toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 255) }
-        effect = WriteEffect("terminal.job", "start", target, "$mode:" +
+        return WriteEffect("terminal.job", "start", target, "$mode:" +
             java.util.Base64.getEncoder().encodeToString(command.toByteArray(Charsets.UTF_8)))
+        }
+
     }
 }
 
@@ -128,7 +142,7 @@ internal class TerminalJobSession private constructor(
         return listOf(tool(START, true), tool(READ, false))
     }
 
-    private fun start(context: ToolExecutionContext): ExecutionReceipt {
+    internal fun start(context: ToolExecutionContext): ExecutionReceipt {
         // External cancellation never runs under our monitor. Recheck identity/close at claim.
         val cancelled = context.cancelled()
         synchronized(lock) {
@@ -172,6 +186,11 @@ internal class TerminalJobSession private constructor(
         if (raw.optString("execution") == "not_executed") {
             synchronized(lock) { definitelyNotStarted = true }
             return ExecutionReceipt.NotExecuted(raw.optString("error", "terminal_job_not_dispatched"))
+        }
+        if (raw.optBoolean("ok") && raw.optString("state") == "dispatched" &&
+            jobId != null && raw.optString("job_id") == jobId) {
+            return ExecutionReceipt.Confirmed(JSONObject(raw.toString()).put("execution", "accepted")
+                .put("accepted", true).put("completed", false).toString())
         }
         markUnknown()
         return ExecutionReceipt.Unknown("terminal_job_dispatched_or_unconfirmed:${jobId ?: "no_handle"}")
@@ -276,7 +295,7 @@ internal class TerminalJobSession private constructor(
                 val registry = try { TerminalRegistry(context) }
                 catch (failure: Exception) { throw TerminalJobNotStarted(failure) }
                 // retain even if configure throws: no command has been started yet.
-                try { registry.configure(plan.sessionId, plan.configuration, plan.conversationId.value) }
+                try { registry.configure(plan.transportScope, plan.configuration, plan.conversationId.value) }
                 catch (failure: Throwable) {
                     try { registry.close() }
                     catch (cleanup: Throwable) { if (cleanup !== failure) failure.addSuppressed(cleanup) }

@@ -72,6 +72,7 @@ internal class RunCatalogTools(
     private val platformAction: PlatformActionScope? = null,
     private val commandFactory: ((RunExecutionOwner, TaskAuthorization) -> RunCommandTools)? = null,
     private val childTaskAccess: RunChildTaskAccess? = null,
+    private val ordinaryFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> List<RunOwnedToolScope>)? = null,
     private val workspacePin: AutoCloseable? = null,
     private val referenceReader: app.daiyu.android.references.ConversationReferenceReader? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
@@ -151,6 +152,7 @@ internal class RunCatalogTools(
     @Volatile private var virtualDisplay: R08VirtualDisplayCatalogLeaf? = null
     private var browserTools: List<RegisteredTool> = emptyList()
     @Volatile private var commands: RunCommandTools? = null
+    @Volatile private var ordinary: List<RunOwnedToolScope> = emptyList()
     @Volatile private var owner: RunExecutionOwner? = null
     private var binding = false
 
@@ -216,6 +218,7 @@ internal class RunCatalogTools(
             createdCommands = commandFactory?.let { factory ->
                 createResource { factory(owner, authorization) }
             }
+            ordinary = createResource { ordinaryFactory?.invoke(owner, capabilities, authorization).orEmpty() }
             val publish = synchronized(closeLock) {
                 commands = createdCommands
                 // Retain late resources even after close so their physical drain is observed.
@@ -281,6 +284,7 @@ internal class RunCatalogTools(
                 terminalJobs?.tools(capabilities)?.forEach { registry.register(it) }
                 commands?.tools()?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }
+                ordinary.flatMap { it.tools }.forEach { registry.register(it) }
                 gui?.let { GuiScreenToolFactory.create(it).forEach { tool -> registry.register(tool) } }
                 mcp?.registeredTools()?.forEach { registry.register(it) }
                 generation?.registeredTools?.forEach { registry.register(it) }
@@ -404,6 +408,7 @@ internal class RunCatalogTools(
             }
         }
         fun unconfirmed() {
+            ordinary.forEach { it.markUnknown() }
             commands?.markUnknown()
             gui?.onCentralUnknown() // missing final central feedback also fails closed, with no retry
             mcp?.markUnknown()
@@ -417,6 +422,7 @@ internal class RunCatalogTools(
         // Includes ledger reservation conflicts and persistence failure AFTER a confirmed adapter reply.
         // Use the entire central result, never a second leaf dispatcher or adapter-only receipts.
         val unknown = results.firstNotNullOfOrNull { it.outcome as? DispatchOutcome.Unknown }
+        if (unknown != null) ordinary.forEach { it.markUnknown() }
         if (unknown != null) gui?.onCentralUnknown() // before any external feedback can throw
         terminalLeaf?.observeOutcomes(results)
         terminalJobs?.observeOutcomes(results)
@@ -443,7 +449,7 @@ internal class RunCatalogTools(
             generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
             // R08 close is revocation only. Never synthesize a release/shutdown operation.
-            claimStops(listOfNotNull(mcp, liveMcp, gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, commands, shizuku, platformAction, background, children, deviceResources, skills, referenceReader))
+            claimStops(listOfNotNull(mcp, liveMcp, gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, commands, shizuku, platformAction, background, children, deviceResources, skills, referenceReader) + ordinary)
         }
         browser?.revoke()
         stopClaimed(resources)
@@ -588,11 +594,12 @@ internal class RunCatalogTools(
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 13
+                remainingObservations = 13 + ordinary.size
                 true
             }
         }
         if (begin) {
+            ordinary.forEach { scope -> observeResourceClose(scope, scope::observeClose) }
             // Independent registrations: one broken resource must not suppress another's drain.
             observeResourceClose(gui) { done ->
                 if (gui == null) done(RunCatalogCloseResult.Drained)
@@ -720,7 +727,7 @@ internal class RunCatalogTools(
 
 /** A close request or consumer timeout is not a GUI release receipt. Pending captures and
  * attached overlays retain the real lease. Unknown keeps the parent's retention record pinned. */
-private fun observeGuiDrain(session: GuiRunSession, complete: (RunCatalogCloseResult) -> Unit) {
+internal fun observeGuiDrain(session: GuiRunSession, complete: (RunCatalogCloseResult) -> Unit) {
     val deadline = android.os.SystemClock.uptimeMillis() + 30_000L
     val handler = android.os.Handler(android.os.Looper.getMainLooper())
     val observe = object : Runnable {
@@ -738,7 +745,7 @@ private fun observeGuiDrain(session: GuiRunSession, complete: (RunCatalogCloseRe
 }
 
 /** Native browser close is nonblocking; retain its owner until observed, not merely requested. */
-private fun observeBrowserDrain(browser: CatalogBrowserBinding, complete: (RunCatalogCloseResult) -> Unit) {
+internal fun observeBrowserDrain(browser: CatalogBrowserBinding, complete: (RunCatalogCloseResult) -> Unit) {
     val deadline = android.os.SystemClock.uptimeMillis() + 30_000L
     val handler = android.os.Handler(android.os.Looper.getMainLooper())
     val observe = object : Runnable {

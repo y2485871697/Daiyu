@@ -133,6 +133,39 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
         boundOwner !== owner || boundAuthorization !== authorization -> GuiResult.Rejected("GUI_RUN_OWNER_MISMATCH")
         else -> null
     }
+    private var dynamic = false
+    @Synchronized internal fun bindDynamic(owner: RunExecutionOwner, authorization: TaskAuthorization) {
+        check(frozenWrites == null && boundOwner == null && !closed.get()) { "gui_approval_frozen" }
+        require(owner.runId.value == identity.runId && authorization.taskId == identity.runId &&
+            authorization.sessionId == identity.sessionId) { "gui_run_owner_mismatch" }
+        dynamic = true
+        frozenWrites = emptySet()
+        boundOwner = owner
+        boundAuthorization = authorization
+    }
+    internal fun dynamicObserve(cancelled: () -> Boolean): GuiResult<GuiObservation> = onWorker(cancelled) {
+        check(dynamic)
+        val approval = GuiRuntime.approveReads(lease, GuiReadApproval(1, 0))
+        if (approval is GuiResult.Rejected) approval else GuiRuntime.observe(lease)
+    }
+    internal fun dynamicAction(action: GuiAction, authorization: TaskAuthorization,
+        cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
+        if (!dynamic || authorization.sessionId != identity.sessionId || authorization.taskId != identity.runId ||
+            authorization.allowedWrites != setOf(action.effect(identity))) GuiResult.Rejected("EXACT_ACTION_NOT_AUTHORIZED")
+        else {
+            val target = GuiRuntime.validateExactTarget(lease, action)
+            if (target !is GuiResult.Value) target as GuiResult.Rejected
+            else {
+                val approved = GuiRuntime.approveAction(lease, action)
+                if (approved !is GuiResult.Value) approved as GuiResult.Rejected else GuiRuntime.action(lease, action)
+            }
+        }
+    }
+    internal fun dynamicScreenshot(observationId: String, cancelled: () -> Boolean): GuiResult<GuiScreenshot> {
+        val approval = onWorker(cancelled) { GuiRuntime.approveReads(lease, GuiReadApproval(0, 1)) }
+        if (approval !is GuiResult.Value) return approval as GuiResult.Rejected
+        return screenshot(observationId, cancelled)
+    }
     fun observe(cancelled: () -> Boolean): GuiResult<GuiObservation> = onWorker(cancelled) { GuiRuntime.observe(lease) }
     fun action(action: GuiAction, cancelled: () -> Boolean): GuiResult<String> = onWorker(cancelled) {
         if (action.effect(identity) !in frozenWrites.orEmpty()) GuiResult.Rejected("EXACT_ACTION_NOT_AUTHORIZED")

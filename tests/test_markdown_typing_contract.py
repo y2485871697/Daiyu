@@ -77,7 +77,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertNotIn("renderInline", table)
         self.assertNotIn("IntrinsicSize", self.ui)
         for token in ["MarkdownText.tableColumnWidthEms(table.header)", "style.fontSize.toDp()", "remember(columnEms, em)",
-                      "table.header.size > 32", "horizontalScroll(rememberScrollState())", "Row(Modifier.drawBehind", "visibleCharacters - offsets[rowIndex][column]"]:
+                      "table.header.size > 32", "horizontalScroll(rememberScrollState())", "Row(Modifier.drawWithCache", "visibleCharacters - offsets[rowIndex][column]"]:
             self.assertIn(token, table)
         hints = (APP / "MarkdownText.kt").read_text().split("internal fun tableCellWidthEm", 1)[1].split("internal fun renderInline", 1)[0]
         self.assertIn("var charactersLeft = 32", hints)

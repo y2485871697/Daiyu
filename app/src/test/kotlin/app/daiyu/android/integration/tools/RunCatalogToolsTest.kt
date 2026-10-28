@@ -51,6 +51,20 @@ class RunCatalogToolsTest {
     private fun denied(block: () -> Unit) {
         try {block();fail("closed scope accepted")} catch (_: IllegalStateException) {}
     }
+    @Test fun ordinaryFactoryFailureCannotReportConfirmedDrain() {
+        val tools = RunCatalogTools(ToolRegistry(), capabilities, ToolLedger(InMemoryToolLedgerStore()),
+            owner.conversationId, owner.runId,
+            ordinaryFactory = { _, _, _ -> throw IllegalStateException("partial ordinary factory") },
+            capture = { _, task -> scope(task) })
+        try { tools.bindOwner(runnerOwner(owner)); fail("factory failure hidden") }
+        catch (expected: IllegalStateException) { assertEquals("partial ordinary factory", expected.message) }
+        val done = CountDownLatch(1)
+        val result = AtomicReference<RunCatalogCloseResult>()
+        tools.closeWithResult { result.set(it); done.countDown() }
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        assertTrue(result.get() is RunCatalogCloseResult.Unknown)
+    }
+
     @Test fun oneLazyCaptureSuppliesPromptAdvertisementDispatchAndReplay() {
         val captures = AtomicInteger();val ledger = InMemoryToolLedgerStore()
         lateinit var auth: TaskAuthorization;lateinit var snapshot: SkillRunSession

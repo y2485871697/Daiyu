@@ -44,6 +44,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -278,26 +279,25 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
     val gridColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.28f)
     val gridWidth = 1.dp
     val tableShape = RoundedCornerShape(8.dp)
-    val tableWidth = widths.fold(0.dp) { total, width -> total + width }
+    val gridStroke = with(LocalDensity.current) { markdownTableGridStrokePx(gridWidth.toPx()) }
+    val gridInset = with(LocalDensity.current) { gridStroke.toDp() }
+    val innerShape = RoundedCornerShape((8.dp - gridInset).coerceAtLeast(0.dp))
+    val tableWidth = widths.fold(0.dp) { total, width -> total + width } + gridInset * 2
     val headerBackground = MiuixTheme.colorScheme.surfaceVariant
     Column(Modifier.widthIn(max = tableWidth).fillMaxWidth().testTag("markdown-table")
-        .border(gridWidth, gridColor, tableShape).clip(tableShape)
+        .border(gridWidth, gridColor, tableShape).clip(tableShape).padding(gridInset).clip(innerShape)
         .horizontalScroll(rememberScrollState())) {
         for (rowIndex in 0..table.rows.size) {
             if (visibleCharacters <= offsets[rowIndex][0]) break
             val row = if (rowIndex == 0) table.header else table.rows[rowIndex - 1]
-            Row(Modifier.drawBehind {
-                if (rowIndex == 0) drawRect(headerBackground)
-                val stroke = gridWidth.toPx()
-                if (rowIndex > 0) {
-                    drawLine(gridColor, Offset(0f, stroke / 2f), Offset(size.width, stroke / 2f), stroke)
-                }
-                var consumed = 0f
-                widths.forEachIndexed { column, width ->
-                    consumed += width.roundToPx()
-                    if (column < widths.lastIndex) {
-                        val x = if (layoutDirection == LayoutDirection.Ltr) consumed else size.width - consumed
-                        drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), stroke)
+            Row(Modifier.drawWithCache {
+                val grid = markdownTableGridRects(widths.map { it.roundToPx() }, size.height.toInt(),
+                    gridStroke, drawTop = rowIndex > 0, rtl = layoutDirection == LayoutDirection.Rtl)
+                onDrawBehind {
+                    if (rowIndex == 0) drawRect(headerBackground)
+                    grid.forEach { rect ->
+                        drawRect(gridColor, Offset(rect.left.toFloat(), rect.top.toFloat()),
+                            Size((rect.right - rect.left).toFloat(), (rect.bottom - rect.top).toFloat()))
                     }
                 }
             }) {

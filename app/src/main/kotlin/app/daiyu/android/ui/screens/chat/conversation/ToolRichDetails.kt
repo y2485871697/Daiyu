@@ -126,7 +126,7 @@ internal object ToolRichDetails {
                 val row = rows.opt(index)
                 if (row is JSONObject) {
                     val cells = columns.mapNotNull { (name, label) -> clean(row.opt(name))?.let { ToolFieldUi(label, it) } }
-                    val documents = if (title == "Cookie属性") emptyList() else listOf("text" to "已记录正文", "content" to "内容", "description" to "说明", "result" to "已读取结果", "partial_result" to "已保留片段", "partial" to "已保留片段", "snippet" to "命中片段", "output" to "已读取输出")
+                    val documents = if (title == "Cookie属性") emptyList() else listOf("text" to "已记录正文", "content" to "内容", "description" to "说明", "result" to "已读取结果", "partial_result" to "已保留片段", "partial" to "已保留片段", "progress" to "任务进度", "detail" to "任务详情", "snippet" to "命中片段", "output" to "已读取输出")
                         .mapNotNull { (name, label) -> (row.opt(name) as? String)?.takeIf { it.isNotBlank() }
                             ?.let { ToolDisclosureUi(label, scrub(it, hidden)) } }
                     val heading = if (private) null else clean(if (title == "Cookie属性") row.opt("name") else row.opt("name") ?: row.opt("title"), 100)
@@ -269,7 +269,7 @@ internal object ToolRichDetails {
             }
             "system_action" -> {
                 listOf("stream" to "通道", "target" to "目标", "action" to "动作", "enabled" to "请求启用", "percent" to "请求百分比", "hour" to "请求小时", "minute" to "请求分钟").forEach { (key, label) -> field(args, key, label) }
-                fields(args, "duration_seconds" to "计时秒数", "panel" to "系统面板", "namespace" to "命名空间", "key" to "设置键", "session" to "媒体会话")
+                fields(args, "seconds" to "计时秒数", "index" to "请求音量档位", "duration_seconds" to "计时秒数", "panel" to "系统面板", "namespace" to "命名空间", "key" to "设置键", "session" to "媒体会话")
                 document(args, "label", "标签"); document(args, "repeat_days", "重复计划")
                 if (args?.has("text") == true) fields += ToolFieldUi("文本长度", args.optString("text").length.toString())
                 field(output, "enabled", "返回启用值"); field(output, "percent", "返回百分比")
@@ -295,11 +295,16 @@ internal object ToolRichDetails {
                 list(output, "artifacts", "产物记录", listOf("id" to "标识", "mime" to "格式", "width" to "宽度", "height" to "高度"))
             }
             "delegation", "child_control" -> {
-                listOf("task_id" to "目标任务", "group_id" to "组", "kind" to "控制动作").forEach { (key, label) -> field(args, key, label) }
+                listOf("task_id" to "目标任务", "group_id" to "组", "kind" to "控制动作", "action" to "请求动作").forEach { (key, label) -> field(args, key, label) }
                 documents(args, "guidance" to "指导内容", "instruction" to "指导内容", "task" to "任务说明")
                 list(output, "results", "已读取子任务结果", listOf("child_run_id" to "子任务", "profile_id" to "代理", "status" to "返回状态"))
                 list(output, "tasks", "工具返回任务记录", listOf("id" to "标识", "child_run_id" to "子任务", "task_id" to "任务", "profile_id" to "代理", "model" to "模型", "role" to "职责", "state" to "返回状态", "status" to "返回状态", "result_id" to "结果标识"))
                 documents(output, "partial_result" to "已保留片段", "partial" to "已保留片段", "result" to "已读取结果", "checkpoint" to "检查点摘要")
+                if (toolName == "get_child_task") {
+                    fields(output, "status" to "记录状态", "offset" to "读取偏移", "next_text_offset" to "正文下次偏移", "next_progress_offset" to "进度下次偏移")
+                    documents(output, "text" to "已读取结果", "progress" to "任务进度", "detail" to "任务详情")
+                }
+                if (toolName == "control_child_task") field(output, "outcome", "控制回执")
                 // Live children are rendered by the host, never promoted from provider JSON.
             }
             "mcp" -> {

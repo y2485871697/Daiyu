@@ -23,16 +23,22 @@ class WorkspacePickerContract(unittest.TestCase):
 
     def test_first_page_is_card_not_inline_editor(self):
         sheet = self.text('ui/components/ConversationWorkspaceSheet.kt')
-        first = sheet.split('if (!choosing) {', 1)[1].split('} else {', 1)[0]
+        first = sheet.split('if (!choosing) {', 1)[1].split('} else {\n                        Row(', 1)[0]
         self.assertIn('workspace-path-card', first)
         self.assertNotIn('BasicTextField', sheet)
         self.assertNotIn('bodySmall', sheet)
         self.assertNotIn('Text("来源"', sheet)
-        self.assertNotIn('ConversationAgentButton', first)
+        self.assertIn('workspace-choices', first)
+        self.assertIn('workspace-add', first)
+        self.assertIn('workspace-delete', first)
+        self.assertIn('combinedClickable', first)
+        self.assertIn('onSelectWorkspace(index)', first)
+        self.assertIn('onDeleteWorkspaces(selectedWorkspaces)', first)
+        self.assertIn('selectionMode', first)
 
     def test_picker_has_fixed_footer_and_our_theme_roles(self):
         sheet = self.text('ui/components/ConversationWorkspaceSheet.kt')
-        self.assertIn('useDefaultHeight = choosing', sheet)
+        self.assertIn('useDefaultHeight = true', sheet)
         self.assertIn('LazyColumn', sheet)
         self.assertLess(sheet.index('LazyColumn'), sheet.index('ConversationAgentButton("取消"'))
         self.assertIn('primaryColor = actions.secondaryContainer, onPrimaryColor = actions.onSecondary', sheet)
@@ -47,7 +53,9 @@ class WorkspacePickerContract(unittest.TestCase):
         self.assertNotIn('testTag("workspace-close")', sheet)
         self.assertNotIn('Icons.Rounded.Close', sheet)
         self.assertNotIn('contentDescription = "关闭"', sheet)
-        self.assertIn('ConversationAgentSheet(onDismiss, useDefaultHeight = choosing,', sheet)
+        self.assertIn('ConversationAgentSheet(onDismiss, useDefaultHeight = true,', sheet)
+        self.assertIn('else \"会话工作区\"', sheet)
+        self.assertIn('Column(Modifier.fillMaxSize()', sheet)
 
     def test_only_use_saves_cancel_discards_draft(self):
         main = self.text('MainActivity.kt')

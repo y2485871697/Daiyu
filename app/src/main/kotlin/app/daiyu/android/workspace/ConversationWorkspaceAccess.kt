@@ -10,7 +10,8 @@ import app.daiyu.android.terminal.TerminalWorkspaceDirectory
 internal data class ConversationWorkspaceSource(val id: String, val title: String, val rootPath: String,
     val initialPath: String, val reference: LinuxGenerationRef? = null)
 internal data class ConversationWorkspaceEditor(val binding: String?, val sources: List<ConversationWorkspaceSource>,
-    val selectedSourceId: String, val path: String)
+    val selectedSourceId: String, val path: String,
+    val workspaces: ConversationWorkspaces, val workspacePaths: List<String>)
 
 internal data class ConversationWorkspaceDirectory(val path: String, val parentPath: String?,
     val folders: List<String>, val selectable: Boolean = true)
@@ -22,7 +23,8 @@ internal class ConversationWorkspaceAccess(private val context: Context,
     private fun sourceId(root: LinuxInstallation) = "${root.environmentId}:${root.generation}"
     fun editor(raw: String?): ConversationWorkspaceEditor {
         val roots = roots()
-        val binding = ConversationWorkspaceCodec.decode(raw)
+        val workspaces = ConversationWorkspaceCodec.decodeWorkspaces(raw)
+        val binding = workspaces.active
         val defaultPath = java.io.File(context.filesDir, "workspace").absolutePath
         val sources = listOf(ConversationWorkspaceSource("private", "应用私有目录", context.filesDir.absolutePath, defaultPath)) +
             roots.map { ConversationWorkspaceSource(sourceId(it), "${it.distribution} Rootfs", it.rootfs.absolutePath,
@@ -39,7 +41,13 @@ internal class ConversationWorkspaceAccess(private val context: Context,
         }
         val displayed = if (sources.any { it.id == source }) sources else sources +
             ConversationWorkspaceSource(source, "Rootfs 不可用", "", path)
-        return ConversationWorkspaceEditor(raw, displayed, source, path)
+        val workspacePaths = workspaces.bindings.map { saved ->
+            when (saved) {
+                is ConversationWorkspaceBinding.Private -> saved.path ?: defaultPath
+                is ConversationWorkspaceBinding.Rootfs -> "${saved.environmentId} Rootfs · ${saved.guestPath}"
+            }
+        }
+        return ConversationWorkspaceEditor(raw, displayed, source, path, workspaces, workspacePaths)
     }
     fun binding(sourceId: String, path: String): ConversationWorkspaceBinding =
         ConversationWorkspaceSelection(context.filesDir).binding(sourceId, path)

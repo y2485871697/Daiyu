@@ -1746,6 +1746,8 @@ class MainActivity : ComponentActivity() {
         val editor: app.daiyu.android.workspace.ConversationWorkspaceEditor,
         val source: String, val path: String, val busy: Boolean = false, val error: String? = null,
         val choosing: Boolean = false, val listing: Boolean = false,
+        val selectionMode: Boolean = false, val selectedWorkspaces: Set<Int> = emptySet(),
+        val editingWorkspaceIndex: Int? = null,
         val directory: app.daiyu.android.workspace.ConversationWorkspaceDirectory? = null)
     private var workspaceVisit by mutableStateOf<WorkspaceVisit?>(null)
     private var workspaceOpenToken: Any? = null
@@ -1771,9 +1773,11 @@ class MainActivity : ComponentActivity() {
             finally { if (workspaceOpenToken === token) workspaceOpenToken = null }
         }
     }
-    private fun browseConversationWorkspace(visit: WorkspaceVisit, source: String = visit.source, path: String = visit.path) {
+    private fun browseConversationWorkspace(visit: WorkspaceVisit, source: String = visit.source, path: String = visit.path,
+        editingIndex: Int? = visit.editingWorkspaceIndex) {
         if (!workspaceCurrent(visit) || workspaceVisit !== visit || visit.busy || visit.listing) return
-        val loading = visit.copy(source = source, path = path, choosing = true, listing = true, error = null)
+        val loading = visit.copy(source = source, path = path, choosing = true, listing = true, error = null,
+            editingWorkspaceIndex = editingIndex)
         workspaceVisit = loading
         lifecycleScope.launch {
             try {
@@ -1790,33 +1794,67 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun editConversationWorkspace(visit: WorkspaceVisit, index: Int) {
+        if (visit.selectionMode || visit.choosing) return
+        val binding = visit.editor.workspaces.bindings.getOrNull(index) ?: return
+        val source = visit.editor.sources.firstOrNull { it.id == "private" } ?: return
+        val path = (binding as? app.daiyu.android.workspace.ConversationWorkspaceBinding.Private)?.path ?: source.initialPath
+        browseConversationWorkspace(visit, source.id, path, editingIndex = index)
+    }
     private fun cancelWorkspaceSelection(visit: WorkspaceVisit) {
         if (workspaceCurrent(visit) && workspaceVisit === visit && !visit.busy) {
             workspaceVisit = visit.copy(source = visit.editor.selectedSourceId, path = visit.editor.path,
-                choosing = false, listing = false, directory = null, error = null)
+                choosing = false, listing = false, directory = null, error = null, editingWorkspaceIndex = null)
         }
     }
     private fun saveConversationWorkspace(visit: WorkspaceVisit) {
         if (!workspaceCurrent(visit) || workspaceVisit !== visit || visit.busy || visit.listing ||
             !visit.choosing || visit.directory?.selectable != true) return
-        workspaceVisit = visit.copy(busy = true, error = null)
+        persistConversationWorkspaces(visit) {
+            controller.saveWorkspaceOnWorker(visit.conversation, visit.editor.binding, visit.source, visit.path,
+                replaceIndex = visit.editingWorkspaceIndex)
+        }
+    }
+    private fun selectConversationWorkspace(visit: WorkspaceVisit, index: Int) {
+        if (visit.choosing || index == visit.editor.workspaces.activeIndex) return
+        persistConversationWorkspaces(visit) {
+            controller.selectWorkspaceOnWorker(visit.conversation, visit.editor.binding, index)
+        }
+    }
+    private fun removeConversationWorkspaces(visit: WorkspaceVisit, indices: Set<Int>) {
+        if (visit.choosing || indices.isEmpty()) return
+        persistConversationWorkspaces(visit) {
+            controller.removeWorkspacesOnWorker(visit.conversation, visit.editor.binding, indices)
+        }
+    }
+    private fun persistConversationWorkspaces(visit: WorkspaceVisit, change: () -> Boolean) {
+        if (!workspaceCurrent(visit) || workspaceVisit !== visit || visit.busy || visit.listing) return
+        val saving = visit.copy(busy = true, error = null)
+        workspaceVisit = saving
         lifecycleScope.launch {
-            val failure = try {
-                val saved = withContext(Dispatchers.IO) {
-                    controller.saveWorkspaceOnWorker(visit.conversation, visit.editor.binding, visit.source, visit.path)
+            try {
+                val editor = withContext(Dispatchers.IO) {
+                    check(change()) { "workspace_binding_changed" }
+                    controller.workspaceEditorOnWorker(visit.conversation)
                 }
-                if (saved) null else "会话正在运行或绑定已变化，请稍后重新打开"
-            } catch (failure: Exception) {
-                when (failure.message) {
+                if (workspaceCurrent(saving) && workspaceVisit === saving) {
+                    workspaceVisit = saving.copy(editor = editor, source = editor.selectedSourceId, path = editor.path,
+                        busy = false, choosing = false, listing = false, directory = null,
+                        selectionMode = false, selectedWorkspaces = emptySet(), editingWorkspaceIndex = null)
+                    refresh()
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                val message = when (failure.message) {
+                    "workspace_binding_changed" -> "会话正在运行或绑定已变化，请稍后重新打开"
+                    "workspace_duplicate" -> "这个目录已在工作区列表中，请直接切换到该工作区"
+                    "workspace_collection_too_large" -> "已保存的工作区路径过多，请先移除不需要的工作区"
                     "workspace_rootfs_changed" -> "Rootfs 已更换或不可用，请重新选择"
                     "workspace_private_root_required", "workspace_selection_root_required" -> "只能选择工作区及其子目录"
                     "workspace_symlink_not_supported" -> "工作区不支持符号链接，请选择实际目录"
                     else -> "工作区路径不可用，请选择已存在的目录"
                 }
-            }
-            if (workspaceCurrent(visit)) {
-                if (failure == null) { workspaceVisit = null; refresh() }
-                else workspaceVisit = visit.copy(error = failure)
+                if (workspaceCurrent(saving) && workspaceVisit === saving) workspaceVisit = visit.copy(error = message)
             }
         }
     }
@@ -2665,15 +2703,32 @@ class MainActivity : ComponentActivity() {
                     if (workspaceCurrent(visit)) {
                         app.daiyu.android.ui.components.ConversationWorkspaceSheet(
                             visible = true, path = visit.path, busy = visit.busy, error = visit.error,
+                            workspaces = visit.editor.workspacePaths.map {
+                                app.daiyu.android.ui.components.WorkspaceItemOption(it)
+                            }, activeWorkspaceIndex = visit.editor.workspaces.activeIndex,
+                            onSelectWorkspace = { selectConversationWorkspace(visit, it) },
+                            onEditWorkspace = { editConversationWorkspace(visit, it) },
+                            editingWorkspace = visit.editingWorkspaceIndex != null,
+                            onDeleteWorkspaces = { removeConversationWorkspaces(visit, it) },
+                            selectionMode = visit.selectionMode, selectedWorkspaces = visit.selectedWorkspaces,
+                            onSelectionChange = { mode, indices ->
+                                if (workspaceCurrent(visit) && workspaceVisit === visit && !visit.busy && !visit.listing) {
+                                    workspaceVisit = visit.copy(selectionMode = mode, selectedWorkspaces = indices)
+                                }
+                            },
                             choosing = visit.choosing, listing = visit.listing,
                             directory = visit.directory?.let { directory ->
                                 app.daiyu.android.ui.components.WorkspaceDirectoryOption(directory.path, directory.parentPath,
                                     directory.folders, directory.selectable)
                             },
-                            onBrowse = { browseConversationWorkspace(visit, "private", java.io.File(filesDir, "workspace").absolutePath) },
+                            onBrowse = { browseConversationWorkspace(visit, "private", java.io.File(filesDir, "workspace").absolutePath, editingIndex = null) },
                             onNavigate = { path -> browseConversationWorkspace(visit, path = path) }, onCancel = { cancelWorkspaceSelection(visit) },
                             onSave = { saveConversationWorkspace(visit) },
-                            onDismiss = { if (workspaceVisit?.token === visit.token) revokeWorkspaceVisit() })
+                            onDismiss = { if (workspaceVisit?.token === visit.token) {
+                                if (visit.selectionMode && !visit.busy) {
+                                    workspaceVisit = visit.copy(selectionMode = false, selectedWorkspaces = emptySet())
+                                } else revokeWorkspaceVisit()
+                            } })
                     } else LaunchedEffect(visit.token) { if (workspaceVisit?.token === visit.token) workspaceVisit = null }
                 }
                 val owner = collaborationOwner

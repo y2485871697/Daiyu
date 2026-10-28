@@ -1,5 +1,6 @@
 package app.daiyu.android.workspace
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal object ConversationWorkspaceCodec {
@@ -12,7 +13,40 @@ internal object ConversationWorkspaceCodec {
             .put("guest_path", binding.guestPath).toString()
     }
 
-    fun decode(value: String?): ConversationWorkspaceBinding {
+    fun encode(workspaces: ConversationWorkspaces): String? {
+        if (workspaces.bindings.size == 1) return encode(workspaces.active)
+        val values = JSONArray()
+        workspaces.bindings.forEach { binding ->
+            values.put(encode(binding)?.let(::JSONObject) ?: JSONObject.NULL)
+        }
+        val encoded = JSONObject().put("version", 2).put("kind", "collection")
+            .put("active", workspaces.activeIndex).put("bindings", values).toString()
+        require(encoded.toByteArray(Charsets.UTF_8).size <= 4096) { "workspace_collection_too_large" }
+        return encoded
+    }
+
+    fun decode(value: String?): ConversationWorkspaceBinding = decodeWorkspaces(value).active
+
+    fun decodeWorkspaces(value: String?): ConversationWorkspaces {
+        if (value == null) return ConversationWorkspaces(listOf(ConversationWorkspaceBinding.Private()), 0)
+        require(value.toByteArray(Charsets.UTF_8).size <= 4096) { "workspace_binding_invalid" }
+        try {
+            val json = app.daiyu.android.model.MessagesRequest.jsonObject(value, maxDepth = 3, rejectDuplicateKeys = true)
+            if (json.optString("kind") != "collection") return ConversationWorkspaces(listOf(decodeSingle(value)), 0)
+            require(json.keys().asSequence().toSet() == setOf("version", "kind", "active", "bindings") &&
+                json.get("version") == 2 && json.get("active") is Int) { "workspace_binding_invalid" }
+            val values = json.getJSONArray("bindings")
+            val bindings = (0 until values.length()).map { index ->
+                if (values.isNull(index)) ConversationWorkspaceBinding.Private()
+                else decodeSingle(values.getJSONObject(index).toString())
+            }
+            return ConversationWorkspaces(bindings, json.getInt("active"))
+        } catch (failure: Exception) {
+            throw IllegalArgumentException("workspace_binding_invalid", failure)
+        }
+    }
+
+    private fun decodeSingle(value: String?): ConversationWorkspaceBinding {
         if (value == null) return ConversationWorkspaceBinding.Private()
         require(value.toByteArray(Charsets.UTF_8).size <= 4096) { "workspace_binding_invalid" }
         try {

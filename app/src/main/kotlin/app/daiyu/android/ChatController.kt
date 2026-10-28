@@ -665,17 +665,35 @@ class ChatController internal constructor(private val application:Application,
 
     internal fun workspaceDirectoryOnWorker(source: String, path: String) = conversationWorkspaces.directory(source, path)
 
-    internal fun saveWorkspaceOnWorker(owner: ConversationId?, expected: String?, source: String, path: String): Boolean {
+    internal fun saveWorkspaceOnWorker(owner: ConversationId?, expected: String?, source: String, path: String,
+        replaceIndex: Int? = null,
+    ): Boolean = updateWorkspacesOnWorker(owner, expected, validationIndex = replaceIndex) {
+        val binding = conversationWorkspaces.binding(source, path)
+        if (replaceIndex == null) it.add(binding) else it.replace(replaceIndex, binding)
+    }
+
+    internal fun selectWorkspaceOnWorker(owner: ConversationId?, expected: String?, index: Int): Boolean =
+        updateWorkspacesOnWorker(owner, expected) { it.select(index) }
+
+    internal fun removeWorkspacesOnWorker(owner: ConversationId?, expected: String?, indices: Set<Int>): Boolean =
+        updateWorkspacesOnWorker(owner, expected, validateActive = false) { it.remove(indices) }
+
+    private fun updateWorkspacesOnWorker(owner: ConversationId?, expected: String?, validateActive: Boolean = true,
+        validationIndex: Int? = null,
+        change: (app.daiyu.android.workspace.ConversationWorkspaces) -> app.daiyu.android.workspace.ConversationWorkspaces,
+    ): Boolean {
         val token = synchronized(this) {
             if (!idleAvailable() || hasLiveChildTasks()) return false
             reservePreparation()
         }
         return try {
-            val binding = conversationWorkspaces.binding(source, path)
-            val encoded = app.daiyu.android.workspace.ConversationWorkspaceCodec.encode(binding)
-            conversationWorkspaces.freeze(encoded).use {
-                database.bindWorkspace(owner, expected, encoded).also { if (it) notifyChanged() }
-            }
+            val workspaces = change(app.daiyu.android.workspace.ConversationWorkspaceCodec.decodeWorkspaces(expected))
+            val encoded = app.daiyu.android.workspace.ConversationWorkspaceCodec.encode(workspaces)
+            fun commit() = database.bindWorkspace(owner, expected, encoded).also { if (it) notifyChanged() }
+            if (validateActive) {
+                val target = validationIndex?.let { workspaces.bindings[it] } ?: workspaces.active
+                conversationWorkspaces.freeze(app.daiyu.android.workspace.ConversationWorkspaceCodec.encode(target)).use { commit() }
+            } else commit()
         } finally { finishPreparation(token) }
     }
     internal fun freezeConversationWorkspaceOnWorker(owner: ConversationId?) =

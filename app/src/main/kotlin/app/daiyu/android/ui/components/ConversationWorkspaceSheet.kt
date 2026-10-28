@@ -9,8 +9,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -22,6 +23,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.components.subagent.ConversationAgentButton
@@ -31,11 +33,13 @@ import app.daiyu.android.ui.components.subagent.ConversationAgentSheet
 import app.daiyu.android.ui.components.subagent.ConversationAgentTypography
 import app.daiyu.android.ui.components.subagent.conversationAgentColors
 import app.daiyu.android.ui.haptics.clickable
+import app.daiyu.android.ui.haptics.combinedClickable
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.resolveAppearanceActions
 
 /** Display-only metadata; filesystem access and the draft belong to the conversation owner. */
+data class WorkspaceItemOption(val path: String)
 data class WorkspaceDirectoryOption(val path: String, val parentPath: String?, val folders: List<String>,
     val selectable: Boolean = true)
 
@@ -53,32 +57,87 @@ fun ConversationWorkspaceSheet(
     onCancel: () -> Unit,
     onSave: () -> Unit,
     onDismiss: () -> Unit,
+    workspaces: List<WorkspaceItemOption> = listOf(WorkspaceItemOption(path)),
+    activeWorkspaceIndex: Int = 0,
+    onSelectWorkspace: (Int) -> Unit = {},
+    onEditWorkspace: (Int) -> Unit = {},
+    editingWorkspace: Boolean = false,
+    onDeleteWorkspaces: (Set<Int>) -> Unit = {},
+    selectionMode: Boolean = false,
+    selectedWorkspaces: Set<Int> = emptySet(),
+    onSelectionChange: (Boolean, Set<Int>) -> Unit = { _, _ -> },
 ) {
     if (!visible) return
     WithoutPressRipple {
         ConversationAgentTypography {
             val colors = conversationAgentColors()
             val actions = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)
-            ConversationAgentSheet(onDismiss, useDefaultHeight = choosing,
+            ConversationAgentSheet(onDismiss, useDefaultHeight = true,
                 modifier = Modifier.testTag("conversation-workspace-sheet")) {
-                Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
+                Column(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {
                     ConversationAgentHandle()
                     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (choosing) "选择工作目录" else "工作区", style = MaterialTheme.typography.titleLarge,
+                        Text(if (choosing) { if (editingWorkspace) "更改工作目录" else "选择工作目录" } else "会话工作区", style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f))
                     }
                     if (!choosing) {
-                        val shape = RoundedCornerShape(14.dp)
-                        Row(Modifier.fillMaxWidth().testTag("workspace-path-card").clip(shape)
-                            .background(colors.field).border(1.dp, colors.line, shape)
-                            .clickable(enabled = !busy, role = Role.Button,
-                                interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onBrowse)
-                            .padding(horizontal = 14.dp, vertical = 18.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(Icons.Rounded.FolderOpen, null, tint = colors.accent, modifier = Modifier.size(22.dp))
-                            Text(path, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
-                                maxLines = 3, overflow = TextOverflow.Ellipsis)
-                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = colors.accent)
+                        val selecting = selectionMode
+                        LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("workspace-choices"),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(workspaces.size, key = { it }) { index ->
+                                val workspace = workspaces[index]
+                                val checked = index in selectedWorkspaces
+                                val active = index == activeWorkspaceIndex
+                                val shape = RoundedCornerShape(14.dp)
+                                Row(Modifier.fillMaxWidth().testTag("workspace-path-card:$index")
+                                    .semantics { selected = if (selecting) checked else active }.clip(shape)
+                                    .background(colors.field).border(1.dp, if (checked || active) colors.accent else colors.line, shape)
+                                    .combinedClickable(enabled = !busy, role = Role.Button,
+                                        interactionSource = remember { MutableInteractionSource() }, indication = null,
+                                        onLongClickLabel = "选择工作区",
+                                        onLongClick = { onSelectionChange(true, selectedWorkspaces + index) },
+                                        onClick = {
+                                            if (selecting) onSelectionChange(true, if (checked) selectedWorkspaces - index
+                                                else selectedWorkspaces + index)
+                                            else onSelectWorkspace(index)
+                                        })
+                                    .padding(horizontal = 14.dp, vertical = 18.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Icon(Icons.Rounded.FolderOpen, null, tint = colors.accent, modifier = Modifier.size(22.dp))
+                                    Text(workspace.path, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
+                                        maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                    if (selecting) {
+                                        Checkbox(checked = checked, onCheckedChange = null,
+                                            colors = CheckboxDefaults.colors(checkedColor = actions.primary,
+                                                checkmarkColor = actions.onPrimary))
+                                    } else {
+                                        if (active) Icon(Icons.Rounded.CheckCircle, "当前工作区", tint = colors.accent)
+                                        ConversationAgentIconButton(enabled = !busy, onClick = { onEditWorkspace(index) },
+                                            modifier = Modifier.size(48.dp).testTag("workspace-edit:$index")) {
+                                            Icon(Icons.Rounded.Edit, "更改工作区目录", tint = colors.accent)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (error != null) WorkspaceError(error)
+                        HorizontalDivider(color = colors.line)
+                        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (selecting) {
+                                ConversationAgentButton("取消", enabled = !busy, primary = true,
+                                    primaryColor = actions.secondaryContainer, onPrimaryColor = actions.onSecondary,
+                                    modifier = Modifier.weight(1f).testTag("workspace-selection-cancel"),
+                                    onClick = { onSelectionChange(false, emptySet()) })
+                                ConversationAgentButton("删除", enabled = !busy && selectedWorkspaces.isNotEmpty(), primary = true,
+                                    primaryColor = MaterialTheme.colorScheme.error, onPrimaryColor = MaterialTheme.colorScheme.onError,
+                                    modifier = Modifier.weight(1f).testTag("workspace-delete"),
+                                    onClick = { onDeleteWorkspaces(selectedWorkspaces) })
+                            } else {
+                                ConversationAgentButton("添加", enabled = !busy, primary = true,
+                                    primaryColor = actions.primary, onPrimaryColor = actions.onPrimary,
+                                    modifier = Modifier.weight(1f).testTag("workspace-add"), onClick = onBrowse)
+                            }
                         }
                     } else {
                         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -138,4 +197,11 @@ private fun WorkspaceFolderRow(name: String, tag: String, enabled: Boolean, onCl
         Icon(Icons.Rounded.FolderOpen, null, tint = colors.accent, modifier = Modifier.size(22.dp))
         Text(name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
+}
+
+@Composable
+private fun WorkspaceError(error: String) {
+    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(vertical = 8.dp).testTag("workspace-error")
+            .semantics { liveRegion = LiveRegionMode.Polite })
 }

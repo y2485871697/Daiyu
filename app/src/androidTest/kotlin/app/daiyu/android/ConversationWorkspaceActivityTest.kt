@@ -48,7 +48,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
             swipe(center, center + Offset(0f, -px(80)))
         }
         awaitUniqueTag("conversation-workspace-sheet")
-        node("workspace-path-card").assertExists()
+        node("workspace-path-card:0").assertExists()
         node("workspace-save").assertDoesNotExist()
         node("workspace-close").assertDoesNotExist()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
@@ -68,10 +68,10 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("conversation-workspace-sheet")
         awaitDialogImeFrame(node("conversation-workspace-sheet"), false)
         node("chat-draft").assertIsNotFocused()
-        node("workspace-path-card").performClick()
+        node("workspace-add").performClick()
         awaitUniqueTag("workspace-current-path")
         node("workspace-cancel").performClick()
-        node("workspace-path-card").assertExists()
+        node("workspace-path-card:0").assertExists()
         node("workspace-close").assertDoesNotExist()
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitHostWindowFocus(activity)
@@ -235,6 +235,16 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(1, opens) }
     }
 
+    private var choices by mutableStateOf(listOf(
+        app.daiyu.android.ui.components.WorkspaceItemOption("/private/workspace"),
+        app.daiyu.android.ui.components.WorkspaceItemOption("/private/second")))
+    private var activeIndex by mutableStateOf(0)
+    private var selectionMode by mutableStateOf(false)
+    private var selectedIndices by mutableStateOf(emptySet<Int>())
+    private var switches = 0
+    private var deletions = 0
+    private var edits = 0
+    private var editingWorkspace by mutableStateOf(false)
     private var choosing by mutableStateOf(false)
     private var listing by mutableStateOf(false)
     private var directory by mutableStateOf<app.daiyu.android.ui.components.WorkspaceDirectoryOption?>(null)
@@ -250,6 +260,17 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
             AgentAppTheme(appearance, applyInterfaceScale = false) {
                 ConversationWorkspaceSheet(visible = visible,
                     path = path, busy = busy, choosing = choosing, listing = listing,
+                    workspaces = choices, activeWorkspaceIndex = activeIndex,
+                    selectionMode = selectionMode, selectedWorkspaces = selectedIndices,
+                    onSelectionChange = { mode, selected -> selectionMode = mode; selectedIndices = selected },
+                    onSelectWorkspace = { switches++; activeIndex = it },
+                    editingWorkspace = editingWorkspace,
+                    onEditWorkspace = { index -> edits++; editingWorkspace = true; choosing = true; setDirectory(choices[index].path) },
+                    onDeleteWorkspaces = { removed ->
+                        deletions++; choices = choices.filterIndexed { index, _ -> index !in removed }
+                        activeIndex = if (choices.isEmpty()) -1 else 0
+                        selectionMode = false; selectedIndices = emptySet()
+                    },
                     directory = directory, error = if (choosing) "路径不可用" else null,
                     onBrowse = { choosing = true; setDirectory(path) },
                     onNavigate = { setDirectory(it) },
@@ -263,15 +284,15 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         awaitVisualIdle()
     }
 
-    fun testFirstPageHasOnlyPathCardAndCardOpensFolderPicker() {
+    fun testFirstPageHasFixedListAndAddOpensFolderPicker() {
         showSheet()
-        node("workspace-path-card").assertExists()
+        node("workspace-path-card:0").assertExists()
         node("workspace-path").assertDoesNotExist()
         node("workspace-save").assertDoesNotExist()
         node("workspace-close").assertDoesNotExist()
         ui.onNodeWithText("来源").assertDoesNotExist()
         ui.onNodeWithText("路径不可用").assertDoesNotExist()
-        node("workspace-path-card").performClick()
+        node("workspace-add").performClick()
         node("workspace-current-path").assertTextEquals(original)
         node("workspace-folder:项目 空格").performClick()
         node("workspace-current-path").assertTextEquals("$original/项目 空格")
@@ -280,9 +301,55 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("conversation-workspace-sheet").assertExists()
     }
 
+    fun testLongPressSelectsWithoutSwitchAndSelectionCanBeEmptyOrCancelled() {
+        showSheet()
+        node("workspace-path-card:1").performClick()
+        ui.runOnIdle { assertEquals(1, switches); assertEquals(1, activeIndex) }
+        node("workspace-path-card:0").performTouchInput { longClick() }
+        node("workspace-delete").assertIsEnabled()
+        node("workspace-add").assertDoesNotExist()
+        ui.runOnIdle { assertEquals(1, switches); assertEquals(setOf(0), selectedIndices) }
+        node("workspace-path-card:0").performClick()
+        node("workspace-delete").assertIsNotEnabled()
+        ui.runOnIdle { assertTrue(selectionMode); assertTrue(selectedIndices.isEmpty()) }
+        node("workspace-selection-cancel").performClick()
+        node("workspace-add").assertExists()
+        ui.runOnIdle { assertEquals(0, deletions); assertEquals(1, switches); assertEquals(1, activeIndex) }
+    }
+
+    fun testEditButtonDoesNotSwitchAndIsHiddenDuringMultiSelection() {
+        showSheet()
+        node("workspace-edit:1").performClick()
+        ui.onNodeWithText("更改工作目录").assertExists()
+        node("workspace-current-path").assertTextEquals("/private/second")
+        ui.runOnIdle { assertEquals(1, edits); assertEquals(0, switches); assertEquals(0, activeIndex) }
+        node("workspace-cancel").performClick()
+        node("workspace-path-card:0").performTouchInput { longClick() }
+        node("workspace-edit:0").assertDoesNotExist()
+        node("workspace-edit:1").assertDoesNotExist()
+        node("workspace-selection-cancel").performClick()
+        node("workspace-edit:1").assertExists()
+        ui.runOnIdle { assertEquals(0, switches); assertEquals(0, saves); assertEquals(1, edits) }
+    }
+
+    fun testMultiDeleteIsOneCallbackAndFooterDoesNotMove() {
+        showSheet()
+        val top = node("conversation-workspace-sheet").fetchSemanticsNode().boundsInRoot.top
+        val footerBottom = node("workspace-add").fetchSemanticsNode().boundsInRoot.bottom
+        node("workspace-path-card:0").performTouchInput { longClick() }
+        node("workspace-path-card:1").performClick()
+        assertEquals(top, node("conversation-workspace-sheet").fetchSemanticsNode().boundsInRoot.top, 1f)
+        assertEquals(footerBottom, node("workspace-delete").fetchSemanticsNode().boundsInRoot.bottom, 1f)
+        ui.runOnIdle { assertEquals(setOf(0, 1), selectedIndices); assertEquals(0, switches) }
+        node("workspace-delete").performClick()
+        node("workspace-add").assertExists()
+        node("workspace-path-card:0").assertDoesNotExist()
+        ui.runOnIdle { assertEquals(1, deletions); assertTrue(choices.isEmpty()); assertEquals(0, switches) }
+    }
+
     fun testWorkspaceRootStopsParentNavigationAndCancelKeepsBinding() {
         showSheet()
-        node("workspace-path-card").performClick()
+        node("workspace-add").performClick()
         node("workspace-parent").assertIsNotEnabled()
         node("workspace-save").assertIsEnabled()
         node("workspace-source:rootfs").assertDoesNotExist()
@@ -297,26 +364,26 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("workspace-parent").assertIsNotEnabled()
         node("workspace-source:rootfs").assertDoesNotExist()
         node("workspace-cancel").performClick()
-        node("workspace-path-card").assertExists()
+        node("workspace-path-card:0").assertExists()
         node("workspace-save").assertDoesNotExist()
         ui.runOnIdle { assertEquals(original, path); assertEquals(0, saves) }
     }
 
     fun testFailedDirectoryCannotSaveAndNavigationCanRecover() {
         showSheet()
-        node("workspace-path-card").performClick()
+        node("workspace-add").performClick()
         ui.runOnIdle { directory = directory?.copy(selectable = false) }
         node("workspace-save").assertIsNotEnabled()
         node("workspace-folder:项目 空格").performClick()
         node("workspace-save").assertIsEnabled()
         node("workspace-cancel").performClick()
-        node("workspace-path-card").assertExists()
+        node("workspace-path-card:0").assertExists()
         ui.runOnIdle { assertEquals(original, path); assertEquals(0, saves) }
     }
 
     fun testLoadingCanCancelButBusyCannotSubmitOrNavigate() {
         showSheet()
-        node("workspace-path-card").performClick()
+        node("workspace-add").performClick()
         ui.runOnIdle { listing = true }
         node("workspace-save").assertIsNotEnabled()
         node("workspace-cancel").performClick()
@@ -345,14 +412,14 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
                 showSheet(appearance)
                 node("workspace-close").assertDoesNotExist()
                 ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
-                node("workspace-path-card").performTouchInput { click() }
+                node("workspace-add").performTouchInput { click() }
                 node("workspace-close").assertDoesNotExist()
                 ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
                 val actions = resolveAppearanceActions(appearance, dark)
                 assertPickerColorPair(node("workspace-save"), actions.primary, actions.onPrimary)
                 assertPickerColorPair(node("workspace-cancel"), actions.secondaryContainer, actions.onSecondary)
                 node("workspace-cancel").performTouchInput { click() }
-                node("workspace-path-card").assertExists()
+                node("workspace-path-card:0").assertExists()
                 ui.runOnIdle { assertEquals(original, path); assertEquals(0, saves); assertEquals(0, dismisses) }
             }
         }

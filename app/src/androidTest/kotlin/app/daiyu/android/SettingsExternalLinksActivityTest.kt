@@ -95,7 +95,8 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("微信收款码").assertIsDisplayed()
         node("sponsor-alipay").performClick()
         node("sponsor-alipay").assertIsSelected()
-        ui.onNodeWithContentDescription("关闭").performClick()
+        ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+        node("preview-dialog-scrim").performClick()
         awaitSponsorClosed()
         entry("赞助").performClick()
         awaitSponsorReady()
@@ -113,6 +114,24 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         backToChat(activity); assertDraft("sponsor unsent")
     }
 
+    fun testRelayLabelsAlignWithParentTitleAndKeepFullRowWidth() {
+        openSettings()
+        entry("ST API").assertIsDisplayed()
+        val parentTitle = ui.onNodeWithText("自用中转站", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val parentRow = node("settings-row:自用中转站").fetchSemanticsNode().boundsInRoot
+        listOf("ST API", "摸鱼").forEach { title ->
+            val row = entry(title)
+            val titleBounds = ui.onNodeWithText(title, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val rowBounds = row.fetchSemanticsNode().boundsInRoot
+            assertEquals(parentTitle.left, titleBounds.left, 1f)
+            assertEquals(parentRow.left, rowBounds.left, 1f)
+            assertEquals(parentRow.right, rowBounds.right, 1f)
+            assertEquals(rowBounds.center.y, titleBounds.center.y, 1f)
+            row.assertHasClickAction()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testPausedOrRetiredSponsorCallbackCannotOpenSheet() {
         openSettings()
         val click = checkNotNull(entry("赞助").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
@@ -121,18 +140,6 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         backToChat(activity)
         assertTrue(intercept { mainThread { click() } }.isEmpty())
         node("sponsor-qr").assertDoesNotExist()
-        assertEquals(0, fixture.opens.get())
-    }
-
-    fun testRelayChildrenUseFullCardLeftAlignment() {
-        openSettings()
-        val st = entry("ST API").fetchSemanticsNode().boundsInRoot
-        val moyu = entry("摸鱼").fetchSemanticsNode().boundsInRoot
-        val parent = node("settings-row:自用中转站").fetchSemanticsNode().boundsInRoot
-        assertEquals(parent.left, st.left, 1f)
-        assertEquals(parent.left, moyu.left, 1f)
-        assertEquals(parent.width, st.width, 1f)
-        assertEquals(parent.width, moyu.width, 1f)
         assertEquals(0, fixture.opens.get())
     }
 

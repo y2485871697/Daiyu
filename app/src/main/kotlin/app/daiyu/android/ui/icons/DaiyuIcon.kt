@@ -24,6 +24,6 @@ internal fun DaiyuIcon(
         imageVector = icon,
         contentDescription = contentDescription,
         modifier = modifier.size(size),
-        colorFilter = ColorFilter.tint(tint),
+        colorFilter = if (tint == Color.Unspecified) null else ColorFilter.tint(tint),
     )
 }

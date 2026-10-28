@@ -33,7 +33,7 @@ internal fun SettingsSponsorDialog(onDismiss: () -> Unit) {
         val name = if (wechatSelected) "donate_wechat.png" else "donate_alipay.jpg"
         assets.open("sponsor/$name").use { BitmapFactory.decodeStream(it).asImageBitmap() }
     }
-    ChatSelectionSheet(title = "", onDismiss = onDismiss) {
+    ChatSelectionSheet(title = "", onDismiss = onDismiss, showCloseButton = false) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistantPreviewButton("微信", onClick = { wechatSelected = true },
                 primary = wechatSelected, secondary = !wechatSelected,

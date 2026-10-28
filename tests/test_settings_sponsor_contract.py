@@ -34,11 +34,11 @@ class SettingsSponsorContractTest(unittest.TestCase):
             path = svg.find('{http://www.w3.org/2000/svg}path').attrib['d']
             self.assertIn(f'addPathNodes("{path}")', icons)
 
-    def test_relay_children_use_the_same_left_row_inset(self):
+    def test_relay_children_share_the_parent_text_column(self):
         home = (SETTINGS / 'SettingsHomeScreen.kt').read_text()
         self.assertIn('SettingsExpandableContent(relayExpanded) {', home)
         self.assertNotIn('SettingsExpandableContent(relayExpanded, Modifier.padding(start = 66.dp))', home)
-        self.assertIn('SettingsRow(child.title, onClick = { open(child) })', home)
+        self.assertIn('leading = { Spacer(Modifier.width(SettingsHomeIconSlotWidth)) }', home)
 
     def test_entry_opens_local_sheet_only_under_existing_lifecycle_gate(self):
         home = (SETTINGS / 'SettingsHomeScreen.kt').read_text()
@@ -52,7 +52,7 @@ class SettingsSponsorContractTest(unittest.TestCase):
 
     def test_sheet_has_no_title_and_reuses_new_shell_and_action_colors(self):
         sheet = (SETTINGS / 'SettingsSponsorDialog.kt').read_text()
-        self.assertIn('ChatSelectionSheet(title = "", onDismiss = onDismiss)', sheet)
+        self.assertIn('ChatSelectionSheet(title = "", onDismiss = onDismiss, showCloseButton = false)', sheet)
         self.assertNotIn('WindowDialog', sheet)
         self.assertNotIn('给煮波恰饭', sheet)
         self.assertNotIn('🍚', sheet)

@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -58,9 +60,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private class SettingsHomeVisit { var active = true }
 
+private val SettingsHomeIconSlotWidth = 38.dp
+
 @Composable
 internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(SettingsHomeIconSlotWidth), contentAlignment = Alignment.Center) {
         DaiyuIcon(icon, contentDescription = null, tint = communityBrandIconColor(icon) ?: daiyuIconColor(icon), size = 23.dp)
     }
 }
@@ -142,7 +146,8 @@ private fun SettingsHomeRows(entries: List<SettingsEntry>, diagnosticsUi: Settin
                     })
                 SettingsExpandableContent(relayExpanded) {
                     entries.filter { it.id in setOf("relay_st", "relay_moyu") }.forEach { child ->
-                        SettingsRow(child.title, onClick = { open(child) })
+                        SettingsRow(child.title, onClick = { open(child) },
+                            leading = { Spacer(Modifier.width(SettingsHomeIconSlotWidth)) })
                     }
                 }
             }

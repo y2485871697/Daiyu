@@ -10,9 +10,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toPixelMap
@@ -24,6 +26,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.MarkdownParser
@@ -41,6 +44,83 @@ class MarkdownTableStyleTest : WiredActivityTestCase() {
     fun testGridAndFourRoundedCornersInLightDarkAndRtl() = checkTableStyle(wide = false)
 
     fun testRoundedFrameStaysFixedWhenWideContentScrolls() = checkTableStyle(wide = true)
+
+    fun testSinglePaintAndEqualPixelWidthsSurviveDensityRtlScrollAndAppend() {
+        val source = "A | B | C | D\n--- | --- | --- | ---\nrow-A | row-B | row-C | row-D\nend-A | end-B | end-C | end-D"
+        var dark by mutableStateOf(false)
+        var direction by mutableStateOf(LayoutDirection.Ltr)
+        var scale by mutableStateOf(1.25f)
+        var appended by mutableStateOf(false)
+        var background = Color.Unspecified
+        var foreground = Color.Unspecified
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                applyInterfaceScale = false) {
+                val colors = MiuixTheme.colorScheme
+                SideEffect { background = colors.background; foreground = colors.onSurface }
+                CompositionLocalProvider(LocalDensity provides Density(scale), LocalLayoutDirection provides direction) {
+                    Box(Modifier.background(colors.background).statusBarsPadding().padding(16.dp)) {
+                        key(dark, direction, scale) {
+                            val text = source + if (appended) "\nnew-A | new-B | new-C | new-D" else ""
+                            val blocks = remember(text) { MarkdownParser.parse(text) }
+                            ParsedMessageMarkdown(text, blocks, Modifier.width(240.dp), generationComplete = false)
+                        }
+                    }
+                }
+            }
+        } }
+        for (density in listOf(1.25f, 2.625f, 3.5f)) for (isDark in listOf(false, true)) {
+            for (layout in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
+                ui.runOnUiThread { scale = density; dark = isDark; direction = layout; appended = false }
+                ui.waitForIdle()
+                val label = "density=$density dark=$isDark layout=$layout"
+                assertSinglePaintGrid(background, foreground, density, layout, label)
+                val frame = ui.onNodeWithTag("markdown-table", useUnmergedTree = true)
+                val before = frame.fetchSemanticsNode().boundsInRoot
+                val axis = frame.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+                frame.performSemanticsAction(SemanticsActions.ScrollBy) { assertTrue(it(13f, 0f)) }
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                assertTrue("$label middle scroll", axis.value() > 0f && axis.value() < axis.maxValue())
+                assertEquals(before, frame.fetchSemanticsNode().boundsInRoot)
+                assertSinglePaintGrid(background, foreground, density, layout, "$label scrolled")
+                val oldRow = ui.onNodeWithText("end-A", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                ui.runOnUiThread { appended = true }
+                ui.waitForIdle()
+                assertEquals(oldRow, ui.onNodeWithText("end-A", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot)
+                assertSinglePaintGrid(background, foreground, density, layout, "$label appended")
+            }
+        }
+    }
+
+    private fun assertSinglePaintGrid(base: Color, foreground: Color, density: Float, layout: LayoutDirection, label: String) {
+        val frame = ui.onNodeWithTag("markdown-table", useUnmergedTree = true)
+        val bounds = frame.fetchSemanticsNode().boundsInRoot
+        val pixels = frame.captureToImage().toPixelMap()
+        val row = ui.onNodeWithText("end-A", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val header = ui.onNodeWithText("A", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val stroke = ceil(density).toInt()
+        val top = (row.top - bounds.top).roundToInt() - (7f * density).roundToInt()
+        val boundary = if (layout == LayoutDirection.Ltr) header.right - bounds.left + (10f * density).roundToInt()
+            else header.left - bounds.left - (10f * density).roundToInt()
+        val center = boundary.roundToInt()
+        val clearY = top + stroke + 1
+        val vertical = (center - stroke * 2..center + stroke * 2).filter { difference(pixels[it, clearY], base) > .08f }
+        val clearX = stroke + (4f * density).roundToInt()
+        val horizontal = (top - stroke..top + stroke * 2).filter { difference(pixels[clearX, it], base) > .08f }
+        assertEquals("$label vertical physical width", stroke, vertical.size)
+        assertEquals("$label horizontal physical width", stroke, horizontal.size)
+        val expected = foreground.copy(alpha = .28f).compositeOver(base)
+        for (x in vertical) for (y in horizontal) {
+            assertTrue("$label intersection ($x,$y) painted more than once", difference(pixels[x, y], expected) < .02f)
+        }
+        // The straight T joints and bottom cap share the body's background, unlike the header transition.
+        for (y in horizontal) for (x in listOf(stroke - 1, stroke, pixels.width - stroke - 1, pixels.width - stroke)) {
+            assertTrue("$label frame joint ($x,$y)", difference(pixels[x, y], expected) < .02f)
+        }
+        for (x in vertical) for (y in pixels.height - stroke * 2 until pixels.height) {
+            assertTrue("$label bottom joint ($x,$y)", difference(pixels[x, y], expected) < .02f)
+        }
+    }
 
     private fun checkTableStyle(wide: Boolean) {
         val labels = if (wide) listOf("A", "B", "C", "D") else listOf("A", "B")

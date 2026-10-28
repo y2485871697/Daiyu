@@ -15,7 +15,8 @@ class MarkdownTableStyleContract(unittest.TestCase):
     def test_grid_has_theme_content_contrast_and_one_dp_strokes(self):
         self.assertIn("val gridColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.28f)", self.table)
         self.assertIn("val gridWidth = 1.dp", self.table)
-        self.assertIn("val stroke = gridWidth.toPx()", self.table)
+        self.assertIn("markdownTableGridStrokePx(gridWidth.toPx())", self.table)
+        self.assertIn("gridStroke.toDp()", self.table)
         self.assertNotIn("outline.copy(alpha = 0.35f)", self.table)
         self.assertNotIn("0.5.dp", self.table)
 
@@ -25,18 +26,25 @@ class MarkdownTableStyleContract(unittest.TestCase):
         clip = self.table.index(".clip(tableShape)")
         scroll = self.table.index(".horizontalScroll(rememberScrollState())")
         self.assertLess(border, clip)
-        self.assertLess(clip, scroll)
+        inset = self.table.index(".padding(gridInset)")
+        inner = self.table.index(".clip(innerShape)")
+        self.assertLess(clip, inset)
+        self.assertLess(inset, inner)
+        self.assertLess(inner, scroll)
         self.assertNotIn("clipToBounds()", self.table)
         self.assertIn("Modifier.widthIn(max = tableWidth).fillMaxWidth()", self.table)
         self.assertIn("widths.fold(0.dp)", self.table)
 
-    def test_each_internal_boundary_is_drawn_once_and_preserves_rtl(self):
-        self.assertIn("if (rowIndex > 0)", self.table)
-        self.assertIn("if (column < widths.lastIndex)", self.table)
-        self.assertIn("layoutDirection == LayoutDirection.Ltr", self.table)
-        self.assertIn("size.width - consumed", self.table)
-        self.assertEqual(2, self.table.count("drawLine(gridColor,"))
-        self.assertNotIn("style = Stroke", self.table)
+    def test_grid_uses_cached_disjoint_pixel_fills_not_crossing_strokes(self):
+        self.assertIn("Row(Modifier.drawWithCache", self.table)
+        self.assertIn("markdownTableGridRects(widths.map { it.roundToPx() }", self.table)
+        self.assertIn("drawTop = rowIndex > 0", self.table)
+        self.assertIn("layoutDirection == LayoutDirection.Rtl", self.table)
+        self.assertIn("drawRect(gridColor,", self.table)
+        self.assertNotIn("drawLine(gridColor,", self.table)
+        grid = (ROOT / (BASE + "MarkdownTableGrid.kt")).read_text()
+        for token in ["ceil(widthPx)", "val top = if (drawTop)", "left, top, left + stroke, height", "width - start - stroke"]:
+            self.assertIn(token, grid)
 
     def test_existing_width_reveal_and_grouping_stay_in_place(self):
         for token in ["table.header.size > 32", "indices.chunked(32)", "MarkdownText.tableColumnWidthEms(table.header)",
@@ -49,7 +57,9 @@ class MarkdownTableStyleContract(unittest.TestCase):
         test = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/MarkdownTableStyleTest.kt").read_text()
         for token in ["testGridAndFourRoundedCornersInLightDarkAndRtl", "testRoundedFrameStaysFixedWhenWideContentScrolls",
                       "AppearanceThemeMode.DARK", "AppearanceThemeMode.LIGHT", "LayoutDirection.Rtl", "captureToImage()",
-                      "rounded corner", "horizontal separator", "vertical separator", "actually scrolled", "assertEquals(before"]:
+                      "rounded corner", "horizontal separator", "vertical separator", "actually scrolled", "assertEquals(before",
+                      "testSinglePaintAndEqualPixelWidthsSurviveDensityRtlScrollAndAppend", "intersection", "frame joint",
+                      "vertical physical width", "horizontal physical width", "middle scroll", "appended"]:
             self.assertIn(token, test)
 
 

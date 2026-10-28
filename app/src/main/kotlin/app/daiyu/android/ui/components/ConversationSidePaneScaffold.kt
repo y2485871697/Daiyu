@@ -377,6 +377,8 @@ private fun ConversationPanePanel(
     LaunchedEffect(state.historyConversations) {
         selectedIds = selectedIds.intersect(state.historyConversations.map { it.id }.toSet())
     }
+    val selectedExportIds = state.historyConversations.filter { it.id in selectedIds }.map { it.id }
+    val batchExport = managing && selectedExportIds.size > 1
     val query = state.searchQuery.trim()
     val visibleConversations = remember(state.conversations, query) {
         state.searchResults()
@@ -457,22 +459,9 @@ private fun ConversationPanePanel(
                 onDeleteFolder = onDeleteFolder,
             )
             Spacer(modifier = Modifier.height(DrawerMetrics.AfterChips))
-            if (managing) Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("已选择 ${selectedIds.size} 项", color = colors.accent,
-                    fontSize = 12.sp, lineHeight = 17.sp,
-                    modifier = Modifier.weight(1f).testTag("drawer-selection-count"))
-                app.daiyu.android.ui.haptics.miuix.TextButton(
-                    text = "导出所选",
-                    enabled = selectedIds.isNotEmpty() && exportEnabled,
-                    onClick = {
-                        onConversationsExport(state.historyConversations.filter { it.id in selectedIds }.map { it.id })
-                    },
-                    modifier = Modifier.testTag("drawer-export-selected"),
-                )
-            }
+            if (managing) Text("已选择 ${selectedIds.size} 项", color = colors.accent,
+                fontSize = 12.sp, lineHeight = 17.sp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag("drawer-selection-count"))
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
@@ -512,7 +501,12 @@ private fun ConversationPanePanel(
                                 onDelete = { onConversationDelete(conversation) },
                                 onMoveToFolder = { onMoveConversationToFolder(conversation) },
                                 onTogglePin = { onConversationTogglePin(conversation) },
-                                onExport = { onConversationExport(conversation) },
+                                batchExport = batchExport,
+                                exportEnabled = exportEnabled,
+                                onExport = {
+                                    if (batchExport) onConversationsExport(selectedExportIds)
+                                    else onConversationExport(conversation)
+                                },
                             )
                         }
                     }
@@ -914,6 +908,8 @@ private fun ConversationTextRow(
     onDelete: () -> Unit,
     onMoveToFolder: () -> Unit,
     onTogglePin: () -> Unit,
+    batchExport: Boolean,
+    exportEnabled: Boolean,
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1075,7 +1071,8 @@ private fun ConversationTextRow(
             DropdownMenuItem(
                 modifier = DrawerMenuItemModifier,
                 contentPadding = DrawerMenuItemPadding,
-                text = { Text(stringResource(R.string.conversation_export)) },
+                enabled = exportEnabled,
+                text = { Text(stringResource(if (batchExport) R.string.conversation_export_batch else R.string.conversation_export)) },
                 leadingIcon = {
                     Icon(
                         imageVector = ConversationPanePreviewIcons.Export,

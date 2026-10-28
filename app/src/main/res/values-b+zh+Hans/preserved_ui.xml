@@ -40,6 +40,7 @@
   <string name="conversation_dock_models">模型</string>
   <string name="ui_permission_health_3048bb">权限检查</string>
   <string name="conversation_export">导出会话</string>
+  <string name="conversation_export_batch">批量导出</string>
   <string name="stats_page_title">用量统计</string>
   <string name="stats_page_heatmap_title">对话热力图</string>
   <string name="stats_page_heatmap_unavailable">暂无按日对话数据</string>

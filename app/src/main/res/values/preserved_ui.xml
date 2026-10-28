@@ -40,6 +40,7 @@
   <string name="conversation_dock_models">Models</string>
   <string name="ui_permission_health_3048bb">Permission check</string>
   <string name="conversation_export">Export conversation</string>
+  <string name="conversation_export_batch">Batch export</string>
   <string name="stats_page_title">Usage stats</string>
   <string name="stats_page_heatmap_title">Chat heatmap</string>
   <string name="stats_page_heatmap_unavailable">Daily conversation data unavailable</string>

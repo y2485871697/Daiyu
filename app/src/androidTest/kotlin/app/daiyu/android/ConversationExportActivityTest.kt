@@ -84,7 +84,7 @@ class ConversationExportActivityTest : WiredActivityTestCase() {
         }
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         node("drawer-manage").performClick()
-        node("drawer-export-selected").assertIsNotEnabled()
+        node("drawer-export-selected").assertDoesNotExist()
         awaitHistory(setOf(first.id.value, last.id.value))
         for (conversation in listOf(first, last)) {
             node("drawer-list").performScrollToKey(conversation.id.value)
@@ -96,10 +96,56 @@ class ConversationExportActivityTest : WiredActivityTestCase() {
         node("drawer-search-input").performTextReplacement("batch-last")
         dismissIme()
         node("drawer-selection-count").assertTextEquals("已选择 2 项")
-        canceledPicker(setOf(first.id.value, last.id.value)) { node("drawer-export-selected").assertIsEnabled().performClick() }
+        val lastTag = "drawer-conversation:${last.id.value}"
+        awaitUniqueTag(lastTag)
+        node(lastTag).performTouchInput { longClick() }
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.conversation_export)).assertDoesNotExist()
+        canceledPicker(setOf(first.id.value, last.id.value)) {
+            ui.onNodeWithText(instrumentation.targetContext.getString(R.string.conversation_export_batch)).assertIsEnabled().performClick()
+        }
         node("drawer-selection-count").assertTextEquals("已选择 2 项")
-        node("drawer-export-selected").assertIsEnabled()
+        node("drawer-export-selected").assertDoesNotExist()
         mainThread { assertEquals(first.id, owner()?.id) }
+    }
+
+    fun testManagementMenuTracksSelectionWithoutAddingTheLongPressedUnselectedRow() {
+        lateinit var first: Conversation
+        lateinit var second: Conversation
+        lateinit var unselected: Conversation
+        mainThread {
+            first = fixture.database.create(); second = fixture.database.create(); unselected = fixture.database.create()
+            activity.select(first)
+        }
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        node("drawer-manage").performClick()
+        awaitHistory(setOf(first.id.value, second.id.value, unselected.id.value))
+        fun row(conversation: Conversation): SemanticsNodeInteraction {
+            node("drawer-list").performScrollToKey(conversation.id.value)
+            val tag = "drawer-conversation:${conversation.id.value}"
+            awaitUniqueTag(tag)
+            return node(tag)
+        }
+        row(first).performClick(); row(second).performClick()
+        row(unselected).performTouchInput { longClick() }
+        canceledPicker(setOf(first.id.value, second.id.value)) {
+            ui.onNodeWithText(instrumentation.targetContext.getString(R.string.conversation_export_batch)).performClick()
+        }
+        node("drawer-selection-count").assertTextEquals("已选择 2 项")
+        row(second).performClick()
+        row(first).performTouchInput { longClick() }
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.conversation_export_batch)).assertDoesNotExist()
+        canceledPicker(setOf(first.id.value)) {
+            ui.onNodeWithText(instrumentation.targetContext.getString(R.string.conversation_export)).performClick()
+        }
+        row(first).performClick()
+        node("drawer-selection-count").assertTextEquals("已选择 0 项")
+        row(unselected).performTouchInput { longClick() }
+        canceledPicker(setOf(unselected.id.value)) {
+            ui.onNodeWithText(instrumentation.targetContext.getString(R.string.conversation_export)).performClick()
+        }
+        node("drawer-export-selected").assertDoesNotExist()
+        mainThread { assertEquals(first.id, owner()?.id) }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testPendingBatchSurvivesRecreationWithoutOpeningAnotherPickerAndCancelsOnlyOnce() {

@@ -25,11 +25,23 @@ class ConversationExportSelectionContract(unittest.TestCase):
         self.assertIn('ids.distinct()', selection)
         self.assertIn('pendingConversationIds = null', selection)
 
-    def test_management_button_uses_all_selected_history_not_visible_filter(self):
+    def test_context_menu_replaces_duplicate_button_and_exports_the_same_selection_it_labels(self):
         ui = (APP / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
-        self.assertIn('Modifier.testTag("drawer-export-selected")', ui)
-        self.assertIn('enabled = selectedIds.isNotEmpty() && exportEnabled', ui)
-        self.assertIn('state.historyConversations.filter { it.id in selectedIds }.map { it.id }', ui)
+        self.assertNotIn('drawer-export-selected', ui)
+        self.assertNotIn('导出所选', ui)
+        self.assertIn('val selectedExportIds = state.historyConversations.filter { it.id in selectedIds }.map { it.id }', ui)
+        self.assertIn('val batchExport = managing && selectedExportIds.size > 1', ui)
+        self.assertIn('batchExport = batchExport', ui)
+        self.assertIn('if (batchExport) onConversationsExport(selectedExportIds)', ui)
+        self.assertIn('else onConversationExport(conversation)', ui)
+        self.assertIn('if (batchExport) R.string.conversation_export_batch else R.string.conversation_export', ui)
+        self.assertIn('enabled = exportEnabled', ui)
+
+    def test_batch_menu_has_all_existing_localizations(self):
+        values = {'values': 'Batch export', 'values-b+zh+Hans': '批量导出', 'values-b+zh+Hant': '批次匯出'}
+        for folder, label in values.items():
+            resource = (ROOT / 'app/src/main/res' / folder / 'preserved_ui.xml').read_text()
+            self.assertIn(f'<string name="conversation_export_batch">{label}</string>', resource)
 
     def test_one_prepared_package_and_output_stream_for_all_selected(self):
         controller = (APP / 'ChatController.kt').read_text()

@@ -2349,6 +2349,13 @@ class MainActivity : ComponentActivity() {
                                         }
                                     else completed(app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED)
                                 },
+                                deleteSelected = { tickets, cancelled, completed ->
+                                    if (localModelCurrent() && !cancelled())
+                                        controller.deleteConfiguredCatalogModels(tickets, cancelled) { result ->
+                                            if (localModelCurrent() && !cancelled()) completed(result)
+                                        }
+                                    else completed(app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED)
+                                },
                             ),
                             createModel = { CatalogModelParameters.newModel(it) },
                             fetchCatalog = ::requestSettingsCatalog,

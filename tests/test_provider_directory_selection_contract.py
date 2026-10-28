@@ -51,8 +51,8 @@ class ProviderDirectorySelectionContractTest(unittest.TestCase):
         header = page.split('item("provider-count")', 1)[1].split('rows.forEach', 1)[0]
         self.assertIn('val titleStyle = MiuixTheme.textStyles.body2.copy', header)
         self.assertIn('fontSize = if (grouped) 13.sp else 14.sp', header)
-        self.assertEqual(2, header.count('style = titleStyle'))
-        self.assertEqual(2, header.count('.alignByBaseline()'))
+        self.assertEqual(3, header.count('style = titleStyle'))
+        self.assertEqual(3, header.count('.alignByBaseline()'))
         self.assertIn('testTag("provider-count-title")', header)
         self.assertIn('testTag("provider-select-all")', header)
         self.assertIn('role = Role.Button', header)

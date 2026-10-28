@@ -109,6 +109,14 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         }
         assertFits(title, titleLayout)
         assertFits(selectAll, actionLayout)
+        val invert = reveal("provider-invert-selection", "模型提供商", "provider-count")
+        val invertLayouts = mutableListOf<TextLayoutResult>()
+        invert.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(invertLayouts) }
+        val invertLayout = invertLayouts.single()
+        assertEquals(titleLayout.layoutInput.style.fontSize, invertLayout.layoutInput.style.fontSize)
+        assertEquals(titleLayout.layoutInput.style.fontWeight, invertLayout.layoutInput.style.fontWeight)
+        assertFits(invert, invertLayout)
+        assertEquals(actualFirstBaseline(title), actualFirstBaseline(invert), 1f)
         assertEquals(actualFirstBaseline(title), actualFirstBaseline(selectAll), 1f)
     }
 
@@ -145,6 +153,23 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         node("provider-cancel-selection").performClick()
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testFilteredInvertPreservesHiddenSelectedProviderAndCanSelectNone() {
+        val before = addRows()
+        openProviderManagement(); select(ProviderRegistry.PRIMARY)
+        reveal("provider-search", "模型提供商").performTextReplacement("Selection First")
+        reveal("provider-invert-selection", "模型提供商", "provider-count").performClick()
+        row(before.providers[1].slotId).assertIsOn()
+        reveal("provider-invert-selection", "模型提供商", "provider-count").performClick()
+        row(before.providers[1].slotId).assertIsOff()
+        reveal("provider-search", "模型提供商").performTextClearance()
+        row(ProviderRegistry.PRIMARY).assertIsOn(); row(before.providers[2].slotId).assertIsOff()
+        row(ProviderRegistry.PRIMARY).performClick()
+        node("provider-delete-selected").assertIsNotEnabled(); node("provider-selection-actions").assertIsDisplayed()
+        reveal("provider-search", "模型提供商").performTextReplacement("not-a-provider")
+        reveal("provider-invert-selection", "模型提供商", "provider-count").assertIsNotEnabled()
+        assertEquals(before, fixture.controller.providers.snapshot()); assertEquals(0, fixture.opens.get())
     }
 
     fun testConfirmedBatchDeletionUsesOneRevisionAndDoesNotSwitchCurrentProvider() {

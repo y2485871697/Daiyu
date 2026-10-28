@@ -139,6 +139,40 @@ internal class FileSavedModelCatalogPersistence<T>(
         if (Thread.currentThread().isInterrupted) CatalogLocalEditResult.CANCELLED else CatalogLocalEditResult.FAILED
     }
 
+    fun deleteSelections(
+        selections: List<CatalogModelSelection<T>>,
+        isCurrentModel: (Set<String>) -> Boolean,
+        isCancelled: () -> Boolean,
+    ): CatalogLocalEditResult = try {
+        exclusive {
+            if (cancelled(isCancelled)) return@exclusive CatalogLocalEditResult.CANCELLED
+            require(selections.isNotEmpty())
+            val first = selections.first()
+            val ids = selections.map { it.record.id }.toSet()
+            require(ids.size == selections.size)
+            val old = readDocument()
+            if (old == null || old.identity != first.providerIdentity || old.revision != first.expectedRevision ||
+                selections.any { it.providerIdentity != old.identity || it.expectedRevision != old.revision })
+                return@exclusive CatalogLocalEditResult.STALE
+            val records = old.models.associateBy { it.id }
+            if (selections.any { selection ->
+                    val encoded = records[selection.record.id]
+                    encoded == null || SavedCatalogModel(encoded.id, encoded.name, codec.decode(encoded.record)) != selection.record
+                }) return@exclusive CatalogLocalEditResult.STALE
+            if (isCurrentModel(ids)) return@exclusive CatalogLocalEditResult.CURRENT_MODEL
+            val next = old.copy(revision = nextRevision(old.revision), models = old.models.filterNot { it.id in ids })
+            if (writeDocument(next) { cancelled(isCancelled) }) CatalogLocalEditResult.APPLIED
+            else CatalogLocalEditResult.CANCELLED
+        }
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        CatalogLocalEditResult.CANCELLED
+    } catch (_: java.util.concurrent.CancellationException) {
+        CatalogLocalEditResult.CANCELLED
+    } catch (_: Exception) {
+        if (Thread.currentThread().isInterrupted) CatalogLocalEditResult.CANCELLED else CatalogLocalEditResult.FAILED
+    }
+
     fun replaceSelection(selection: CatalogModelSelection<T>, replacement: SavedCatalogModel<T>,
         isCancelled: () -> Boolean,
     ): CatalogLocalEditResult = try {

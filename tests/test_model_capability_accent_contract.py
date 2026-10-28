@@ -1,6 +1,7 @@
 """Source guards for model capability tags; rendered colors await Android validation."""
 from pathlib import Path
 import unittest
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/settings"
@@ -9,7 +10,7 @@ SETTINGS = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/settings"
 class ModelCapabilityAccentContractTest(unittest.TestCase):
     def setUp(self):
         self.source = (SETTINGS / "LocalCatalogModelsScreen.kt").read_text()
-        self.tags = self.source.split("labels.forEach { label ->", 1)[1]
+        self.tags = re.search(r"labels\.forEach \{ label ->(.*?)\n\s*}", self.source, re.S).group(1)
 
     def test_every_capability_tag_uses_the_primary_fill_and_matching_text(self):
         self.assertIn("color = MiuixTheme.colorScheme.onPrimary", self.tags)

@@ -189,6 +189,14 @@ class ModelSettingsStore internal constructor(
             preferences.getString("model", "") == selection.record.id
         } }, cancelled)
 
+    internal fun deleteCatalogModels(
+        selections: List<CatalogModelSelection<CatalogModelParameters>>, cancelled: () -> Boolean,
+    ): CatalogLocalEditResult = modelCatalog.deleteSelections(selections,
+        { ids -> synchronized(lock) {
+            check(preferences !in failedStores) { "模型设置存储不可用；请重新保存" }
+            preferences.getString("model", "") in ids
+        } }, cancelled)
+
     internal fun nonSecretConfiguration(): Map<String, Any?> = synchronized(lock) { readNonSecretConfiguration() }
     private fun readNonSecretConfiguration(includeProtocol: Boolean = true): Map<String, Any?> = buildMap {
         listOf("endpoint", "model", "responses-path").forEach { key ->

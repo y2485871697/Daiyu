@@ -78,7 +78,8 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
     def test_explicit_exit_still_discards_the_edit_visit(self):
         local = source('LocalCatalogModelsScreen.kt')
         self.assertIn('onDispose { visit.set(false); cancel();', local)
-        self.assertIn('val back = { if (current()) { visit.set(false); cancel(); onBack() } }', local)
+        self.assertIn('if (selectedIds != null) { selectedIds = null; deletingSelected = null }', local)
+        self.assertIn('else { visit.set(false); cancel(); onBack() }', local)
         route = source('ProviderManagementRoute.kt')
         self.assertIn('if (creating != null) { serial++; clearPrompts(); refresh(); return }', route)
         self.assertIn('onDispose {', route)

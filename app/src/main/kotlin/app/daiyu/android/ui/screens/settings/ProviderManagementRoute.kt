@@ -550,6 +550,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     if (live() && !requestCancelled()) controller.deleteProviderCatalogModel(d.editor, selection,
                         { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
                     else complete(CatalogLocalEditResult.CANCELLED)
+                }, deleteSelected = { selections, requestCancelled, complete ->
+                    if (live() && enabled && !requestCancelled()) controller.deleteProviderCatalogModels(d.editor, selections,
+                        { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
+                    else complete(CatalogLocalEditResult.CANCELLED)
                 }, form = { app.daiyu.android.model.catalog.CatalogModelEdit.from(it) },
                 update = { selection, value, requestCancelled, complete ->
                     if (live() && enabled && !requestCancelled()) controller.updateProviderCatalogModel(d.editor, selection, value,

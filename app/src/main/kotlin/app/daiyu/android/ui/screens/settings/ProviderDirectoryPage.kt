@@ -121,6 +121,12 @@ internal fun ProviderDirectoryPage(
                                 .clickable(enabled = enabled && visibleIds.isNotEmpty(), role = Role.Button,
                                     onClick = { onSelectionChange(if (allSelected) selectedSlots - visibleIds else selectedSlots + visibleIds) })
                                 .padding(vertical = 8.dp))
+                        Text(text = "反选", style = titleStyle,
+                            color = titleColor.copy(alpha = if (enabled && visibleIds.isNotEmpty()) 1f else .38f),
+                            modifier = Modifier.alignByBaseline().padding(start = 12.dp).testTag("provider-invert-selection")
+                                .clickable(enabled = enabled && visibleIds.isNotEmpty(), role = Role.Button,
+                                    onClick = { onSelectionChange((selectedSlots - visibleIds) + (visibleIds - selectedSlots)) })
+                                .padding(vertical = 8.dp))
                     }
                 }
             }

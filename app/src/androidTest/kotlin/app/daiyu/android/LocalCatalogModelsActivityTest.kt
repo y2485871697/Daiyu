@@ -57,7 +57,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         for (modelId in listOf("extra-local", saved.model)) {
             val tag = "local-model:$modelId"
             reveal(tag)
-            val row = ui.onNodeWithTag(tag, useUnmergedTree = true).assertHasNoClickAction()
+            val row = ui.onNodeWithTag(tag, useUnmergedTree = true).assertHasClickAction()
             val name = before.models.single { it.id == modelId }.displayName
             ui.onAllNodes(hasText(name) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
                 .onFirst().performTouchInput { click(center) }

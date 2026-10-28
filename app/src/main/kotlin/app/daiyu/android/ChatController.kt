@@ -4689,6 +4689,17 @@ class ChatController internal constructor(private val application:Application,
     ) = editConfiguredCatalogModel(cancelled, completed) {
         providers.withEditor(editor) { it.deleteCatalogModel(ticket, cancelled) }
     }
+    internal fun deleteProviderCatalogModels(editor: ProviderEditorSlot,
+        tickets: List<app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>>,
+        cancelled: () -> Boolean, completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
+    ) = editConfiguredCatalogModel(cancelled, completed) {
+        providers.withEditor(editor) { it.deleteCatalogModels(tickets, cancelled) }
+    }
+    internal fun deleteConfiguredCatalogModels(
+        tickets: List<app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>>,
+        cancelled: () -> Boolean, completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
+    ) = editConfiguredCatalogModel(cancelled, completed) { settings.deleteCatalogModels(tickets, cancelled) }
+
     internal fun saveModelSettings(value:ModelSettings,protocolChangeAuthorized:Boolean,
         requestOptionsReplacementAuthorized:Boolean,completed:(Boolean)->Unit) =
         saveModelSettings(value, protocolChangeAuthorized, requestOptionsReplacementAuthorized, null, null, completed)

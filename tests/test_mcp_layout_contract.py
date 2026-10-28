@@ -21,9 +21,20 @@ class McpLayoutContractTest(unittest.TestCase):
             self.assertIn(text, self.source)
         self.assertIn('if (snapshot?.servers?.isEmpty() == true)', self.source)
         self.assertIn('stateDescription = status', self.source)
-        self.assertIn('if (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。")', self.source)
+        self.assertIn('if (selected == null && (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。"))', self.source)
         self.assertNotIn('已配置服务器（', self.source)
         self.assertNotIn('尚未添加服务器', self.source)
+
+    def test_detail_omits_explanatory_copy_without_removing_connection_or_empty_tools(self):
+        detail = self.source.split('item(key = "server-settings")', 1)[1].split('if (editing)', 1)[0]
+        settings = detail.split('item(key = "tools-heading")', 1)[0]
+        self.assertNotIn('SettingsNote(', settings)
+        for text in ('SettingsSectionTitle("服务器设置")', 'SettingsRow("连接设置", summary = selected.endpoint',
+                     '"mcp-settings-edit"', 'SettingsNote("尚无工具，请刷新工具目录。")',
+                     'SettingsRow("删除服务器"', '"mcp-settings-delete"'):
+            self.assertIn(text, detail)
+        self.assertIn('status = "已保存；旧的本轮批准已失效，尚未连接服务器。"', self.source)
+        self.assertIn('stateDescription = status', self.source)
 
     def test_form_uses_filled_rounded_placeholders_and_password_mask(self):
         self.assertEqual(3, self.form.count('McpConnectionField('))

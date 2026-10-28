@@ -260,7 +260,14 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             node("mcp-server-endpoint").scrollToVisible().performTextReplacement("https://fixture.invalid/mcp")
             node("mcp-server-bearer").scrollToVisible().performTextReplacement("synthetic-fixture-token")
             node("mcp-settings-save").scrollToVisible().performClick()
-            ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings-status") and hasText("已保存；旧的本轮批准已失效，尚未连接服务器。")).fetchSemanticsNodes().isNotEmpty() }
+            ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings") and
+                SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
+                    "已保存；旧的本轮批准已失效，尚未连接服务器。")).fetchSemanticsNodes().isNotEmpty() }
+            node("mcp-settings-status").assertDoesNotExist()
+            ui.onNodeWithText("已保存；旧的本轮批准已失效，尚未连接服务器。").assertDoesNotExist()
+            ui.onNodeWithText("应用内能力默认可用；填写服务器、工具与完整参数并提交即可执行原任务，无需另行许可。").assertDoesNotExist()
+            node("mcp-settings-edit").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("尚无工具，请刷新工具目录。").assertExists()
             val saved = store.snapshot()
             assertEquals(1, saved.servers.size); assertEquals("synthetic-fixture-token", saved.servers.single().bearer)
             assertEquals(saved.revision, McpSettingsStore(context) { key }.snapshot().revision)
@@ -275,6 +282,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             assertEquals("synthetic-fixture-token", store.snapshot().servers.single().bearer)
             val beforeRevocation = store.snapshot()
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            node("mcp-settings-status").assertTextEquals("已保存；旧的本轮批准已失效，尚未连接服务器。")
             assertTrue(owner.current())
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
             assertFalse(owner.current())

@@ -135,7 +135,7 @@ import kotlinx.coroutines.withContext
                         onClick = { snapshot?.let { refresh(it, selected) } })
                 }
             }) {
-            if (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。") item(key = "status") {
+            if (selected == null && (busy || status != "能力默认可用；保存只更新服务器配置，不会执行工具。")) item(key = "status") {
                 top.yukonga.miuix.kmp.basic.Text(status,
                     modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp).testTag("mcp-settings-status"),
                     style = MiuixTheme.textStyles.body2)
@@ -173,7 +173,6 @@ import kotlinx.coroutines.withContext
                 item(key = "server-settings") {
                     SettingsSectionTitle("服务器设置")
                     SettingsCard {
-                        SettingsNote("应用内能力默认可用；填写服务器、工具与完整参数并提交即可执行原任务，无需另行许可。")
                         SettingsRow("连接设置", summary = selected.endpoint,
                             showChevron = true, onClick = if (busy) null else ({ edit(selected) }), tag = "mcp-settings-edit")
                     }

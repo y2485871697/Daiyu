@@ -105,7 +105,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn("private fun assertCenteredUniformDots", regression)
         self.assertIn("measured.placeholderRects.forEachIndexed", regression)
         self.assertIn("measured.getLineTop(line) + measured.getLineBottom(line)", regression)
-        self.assertIn("assertCenteredUniformDots(titleNode)", regression)
+        self.assertIn('assertCenteredUniformDots(titleNode, "$case step")', regression)
         self.assertIn("assertCenteredUniformDots(ui.onNodeWithText(target", regression)
 
     def test_compact_headers_adapt_locally_and_preserve_disclosure_ownership(self):

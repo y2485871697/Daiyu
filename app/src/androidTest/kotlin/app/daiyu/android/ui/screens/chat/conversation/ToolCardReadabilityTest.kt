@@ -14,6 +14,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -24,6 +25,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.ceil
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -153,19 +155,21 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         return layouts.single()
     }
 
-    private fun assertCenteredUniformDots(target: SemanticsNodeInteraction): Float {
+    private fun assertCenteredUniformDots(target: SemanticsNodeInteraction, case: String): Float {
         val measured = layout(target)
         val textBounds = target.fetchSemanticsNode().boundsInRoot
         val positions = measured.layoutInput.text.text.indices.filter {
             measured.layoutInput.text.text[it] == '·' || measured.layoutInput.text.text[it] == '•'
         }
         assertEquals(positions.size, measured.placeholderRects.size)
-        val expectedDiameter = with(measured.layoutInput.density) { 6.5.sp.toPx() }
+        // Inline placeholders use half of the resolved header font, not separately scaled 6.5sp.
+        val headerFontPx = with(measured.layoutInput.density) { measured.layoutInput.style.fontSize.toPx() }
+        val expectedDiameter = ceil(headerFontPx * .5f)
         val circles = ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true).fetchSemanticsNodes()
         measured.placeholderRects.forEachIndexed { index, nullableRect ->
             val rect = checkNotNull(nullableRect) { "Visible separator must not be ellipsized" }
             val line = measured.getLineForOffset(positions[index])
-            assertEquals("Both dot characters must have the large bullet diameter", expectedDiameter, rect.width, 1f)
+            assertEquals("Both dot characters must have the large bullet diameter; $case fontPx=$headerFontPx rect=$rect", expectedDiameter, rect.width, 1f)
             assertEquals("Bullet placeholder must stay square", rect.width, rect.height, 1f)
             assertEquals("Bullet must be vertically centered in its own text line",
                 (measured.getLineTop(line) + measured.getLineBottom(line)) / 2f, rect.center.y, 1f)
@@ -175,12 +179,23 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             val circle = circles[circleIndex].boundsInRoot
             assertEquals("Drawn bullet must fill its placeholder", bounds.width, circle.width, 1f)
             assertEquals("Drawn bullet must fill its placeholder", bounds.height, circle.height, 1f)
-            val pixels = captureScreenNode(ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true)[circleIndex]).toPixelMap()
+            val image = ui.onAllNodesWithTag(ToolHeaderSeparatorId, useUnmergedTree = true)[circleIndex].captureToImage()
+            val pixels = image.toPixelMap()
             val background = pixels[0, 0]
             fun distance(color: Color): Float = kotlin.math.abs(color.red - background.red) +
                 kotlin.math.abs(color.green - background.green) + kotlin.math.abs(color.blue - background.blue)
             val contrast = distance(pixels[pixels.width / 2, pixels.height / 2])
-            assertTrue("Bullet ink must be visible in both themes", contrast > .2f)
+            val rasterDiagnostic = "$case fontPx=$headerFontPx placeholder=$rect textBounds=$textBounds " +
+                "expectedBounds=$bounds circle=$circle crop=${pixels.width}x${pixels.height} " +
+                "corner=$background center=${pixels[pixels.width / 2, pixels.height / 2]} contrast=$contrast"
+            if (contrast <= .2f) {
+                val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics").apply { mkdirs() }
+                java.io.File(directory, "tool-dot-${android.os.SystemClock.elapsedRealtimeNanos()}.png").outputStream().use {
+                    check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }
+                android.util.Log.e("DaiyuToolHeaderRaster", rasterDiagnostic)
+            }
+            assertTrue("Bullet ink must be visible in both themes; $rasterDiagnostic", contrast > .2f)
             val ink = buildList {
                 for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
                     if (distance(pixels[x, y]) > contrast * .25f) add(x to y)
@@ -189,7 +204,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertTrue("Bullet must have actual painted pixels", ink.isNotEmpty())
             val left = ink.minOf { it.first }; val right = ink.maxOf { it.first }
             val top = ink.minOf { it.second }; val bottom = ink.maxOf { it.second }
-            assertEquals("Visible bullet width must retain the large-dot size", expectedDiameter, (right - left + 1).toFloat(), 2f)
+            assertEquals("Visible bullet width must retain the large-dot size", rect.width, (right - left + 1).toFloat(), 2f)
             assertEquals("Visible bullet must be round", (right - left).toFloat(), (bottom - top).toFloat(), 1f)
             assertEquals("Painted ink must be horizontally centered", (pixels.width - 1) / 2f, (left + right) / 2f, 1f)
             assertEquals("Painted ink must be vertically centered", (pixels.height - 1) / 2f, (top + bottom) / 2f, 1f)
@@ -286,14 +301,15 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertEquals(13.sp, heading.layoutInput.style.fontSize)
             assertEquals(toolHeaderText(target, true), heading.layoutInput.text)
             assertFalse(heading.hasVisualOverflow)
-            val headingDiameter = assertCenteredUniformDots(ui.onNodeWithText(target, useUnmergedTree = true))
+            val case = "dark=$dark scale=$scale fontScale=$fontScale"
+            val headingDiameter = assertCenteredUniformDots(ui.onNodeWithText(target, useUnmergedTree = true), "$case group")
             node("work-process-header").performClick()
             val titleNode = ui.onNodeWithText(stepTitle, useUnmergedTree = true).assertIsDisplayed()
             val measured = layout(titleNode)
             assertEquals(13.sp, measured.layoutInput.style.fontSize)
             assertEquals(toolHeaderText(stepTitle, true), measured.layoutInput.text)
             assertEquals("Group and step bullets must have identical diameters", headingDiameter,
-                assertCenteredUniformDots(titleNode), 1f)
+                assertCenteredUniformDots(titleNode, "$case step"), 1f)
             assertFalse(measured.hasVisualOverflow)
             for (line in 0 until measured.lineCount) assertFalse(measured.isLineEllipsized(line))
             assertEquals(stepTitle.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))

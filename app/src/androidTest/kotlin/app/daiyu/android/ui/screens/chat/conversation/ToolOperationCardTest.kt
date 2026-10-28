@@ -117,7 +117,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val fixture = source(mixed, "target-$name-$backend-$uid-$label-$mixed")
             val payload = org.json.JSONObject().put("ok", true).put("backend", backend).put("uid", uid)
                 .put(if (backend == "shizuku") "output" else "stdout", "target-output").put("exit_code", 0)
-                .also { if (backend != "shizuku") it.put("root", uid == 0)
+                .also { if (backend != "shizuku") it.put("root", uid == 0 && !label.contains("PRoot"))
                     .put("host_root", uid == 0 && !label.contains("PRoot")) }.toString()
             val args = if (name == "terminal_job_read") """{"job_id":"recorded-job"}"""
                 else if (backend == "shizuku") """{"script":"printf target-output"}"""

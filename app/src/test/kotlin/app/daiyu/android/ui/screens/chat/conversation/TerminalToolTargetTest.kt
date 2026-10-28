@@ -45,6 +45,21 @@ class TerminalToolTargetTest {
         }
     }
 
+    @Test fun prootReceiptFlagsMatchTheHostRatherThanGuestUid() {
+        for (tool in listOf("terminal_exec", "terminal_job_read")) {
+            val receipt = JSONObject().put("backend", "linux:debian").put("uid", 0)
+                .put("root", false).put("host_root", false)
+            val target = checkNotNull(TerminalToolTarget.from(tool, receipt))
+            assertEquals("root", target.identity)
+            assertEquals("user", target.hostIdentity)
+            assertEquals("Debian • root（PRoot）", target.label)
+            receipt.put("root", true)
+            val conflicting = checkNotNull(TerminalToolTarget.from(tool, receipt))
+            assertNull(conflicting.hostIdentity)
+            assertEquals("Debian • root", conflicting.label)
+        }
+    }
+
     @Test fun missingReceiptOrUnknownBackendNeverUsesRequestsOrCurrentSettings() {
         val args = """{"backend":"android","environment":"debian","identity":"root","uid":0}"""
         for (receipt in listOf(null, "not-json", "{}", """{"stdout":"backend=android uid=0"}""",

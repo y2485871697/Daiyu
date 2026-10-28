@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -60,8 +61,29 @@ class SelectionAccentAppearanceTest : WiredActivityTestCase() {
                 } }
                 ui.runOnIdle { assertEquals(expected, resolved) }
                 for (tag in listOf("selection-radio", "selection-checkbox", "settings-radio:选中标记")) {
-                    assertTrue("selected accent: $tag; dark=$dark",
-                        matchingPixels(captureScreenNode(node(tag)), expected) > 0)
+                    val target = node(tag)
+                    val image = target.captureToImage()
+                    val matches = matchingPixels(image, expected)
+                    val diagnostic = "selected accent: $tag; dark=$dark expected=$expected " +
+                        "resolved=$resolved matches=$matches image=${image.width}x${image.height} " +
+                        "colorSpace=${image.colorSpace} bounds=${target.fetchSemanticsNode().boundsInRoot}"
+                    if (matches == 0) {
+                        val pixels = image.toPixelMap()
+                        var closest = Color.Transparent
+                        var difference = Float.POSITIVE_INFINITY
+                        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                            val actual = pixels[x, y]
+                            val delta = maxOf(abs(actual.red - expected.red), abs(actual.green - expected.green),
+                                abs(actual.blue - expected.blue))
+                            if (delta < difference) { difference = delta; closest = actual }
+                        }
+                        val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics").apply { mkdirs() }
+                        java.io.File(directory, "selection-$tag-dark-$dark.png").outputStream().use {
+                            check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                        }
+                        android.util.Log.e("DaiyuSelectionRaster", "$diagnostic closest=$closest difference=$difference")
+                    }
+                    assertTrue(diagnostic, matches > 0)
                 }
                 node("selection-radio").performTouchInput { click() }
                 node("selection-checkbox").performTouchInput { click() }
@@ -82,7 +104,7 @@ class SelectionAccentAppearanceTest : WiredActivityTestCase() {
                 node("settings-radio:选中标记").assertIsNotSelected()
                 for (tag in listOf("selection-radio", "selection-checkbox", "settings-radio:选中标记")) {
                     assertEquals("unselected remains neutral: $tag", 0,
-                        matchingPixels(captureScreenNode(node(tag)), expected))
+                        matchingPixels(node(tag).captureToImage(), expected))
                 }
             } finally { mainThread { activity.setContent {} } }
         }

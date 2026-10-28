@@ -90,7 +90,7 @@ class WorkspaceNameDialogsActivityTest : WiredActivityTestCase() {
         for ((tag, text, background, foreground) in listOf(
             ButtonRole("dialog-cancel", "取消", colors.secondaryContainer, colors.onSecondary),
             ButtonRole("dialog-confirm", if (rename) "保存" else "确定", colors.primary, colors.onPrimary))) {
-            val image = node(tag).captureToImage().toPixelMap()
+            val image = captureScreenNode(node(tag)).toPixelMap()
             assertColor(background, image[(image.width * .2f).toInt(), image.height / 2])
             val layouts = mutableListOf<TextLayoutResult>()
             ui.onNode(hasText(text) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)

@@ -32,7 +32,7 @@ class FloatingPageActionsActivityTest : WiredActivityTestCase() {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                        FloatingPageActionsLayout(Modifier.fillMaxSize(), content = { bottomSpacerMinHeight ->
+                        FloatingPageActionsLayout(Modifier.fillMaxSize().testTag("floating-page"), content = { bottomSpacerMinHeight ->
                             clearance = bottomSpacerMinHeight
                             Box(Modifier.fillMaxSize().background(Color.Magenta)
                                 .clickable { backgroundClicks++ }.testTag("floating-body"))
@@ -56,7 +56,8 @@ class FloatingPageActionsActivityTest : WiredActivityTestCase() {
                 val left = node("floating-left").fetchSemanticsNode().boundsInRoot
                 val right = node("floating-right").fetchSemanticsNode().boundsInRoot
                 val gap = Offset((left.right + right.left) / 2f, left.center.y) - body.topLeft
-                val pixels = captureScreenNode(node("floating-body")).toPixelMap()
+                // Capture the common ancestor so the overlaid footer is part of the same draw.
+                val pixels = node("floating-page").captureToImage().toPixelMap()
                 val pixel = pixels[gap.x.toInt(), gap.y.toInt()]
                 val referenceY = ((footer.boundsInRoot.top - body.top) / 2f).toInt()
                 val reference = pixels[gap.x.toInt(), referenceY]

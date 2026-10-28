@@ -2,6 +2,9 @@ package app.daiyu.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,11 +14,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.*
 import app.daiyu.android.ui.haptics.material.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +69,8 @@ fun ConversationWorkspaceSheet(
     onEditWorkspace: (Int) -> Unit = {},
     editingWorkspace: Boolean = false,
     onDeleteWorkspaces: (Set<Int>) -> Unit = {},
+    workspaceRoots: List<String> = emptyList(),
+    onCopyPath: (String) -> Unit = {},
     selectionMode: Boolean = false,
     selectedWorkspaces: Set<Int> = emptySet(),
     onSelectionChange: (Boolean, Set<Int>) -> Unit = { _, _ -> },
@@ -106,8 +113,17 @@ fun ConversationWorkspaceSheet(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Icon(Icons.Rounded.FolderOpen, null, tint = colors.accent, modifier = Modifier.size(22.dp))
-                                    Text(workspace.path, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
-                                        maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                    val display = workspacePathPresentation(workspace.path, workspaceRoots)
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(display.name, style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.testTag("workspace-name:$index"),
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        display.location?.let { location ->
+                                            Text(location, style = MaterialTheme.typography.bodyMedium, color = colors.muted,
+                                                modifier = Modifier.testTag("workspace-location:$index"),
+                                                maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                                        }
+                                    }
                                     if (selecting) {
                                         Checkbox(checked = checked, onCheckedChange = null,
                                             colors = CheckboxDefaults.colors(checkedColor = actions.primary,
@@ -141,15 +157,27 @@ fun ConversationWorkspaceSheet(
                             }
                         }
                     } else {
+                        val fullPath = directory?.path ?: path
                         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             ConversationAgentIconButton(enabled = !busy && !listing && directory?.parentPath != null,
                                 onClick = { directory?.parentPath?.let(onNavigate) },
                                 modifier = Modifier.size(48.dp).testTag("workspace-parent")) {
                                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "上一级", tint = colors.accent)
                             }
-                            Text(directory?.path ?: path, style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f).testTag("workspace-current-path"), maxLines = 2,
-                                overflow = TextOverflow.Ellipsis)
+                            Box(Modifier.weight(1f).heightIn(max = 96.dp)) {
+                                key(fullPath) {
+                                    SelectionContainer {
+                                        Text(fullPath, style = MaterialTheme.typography.bodyMedium,
+                                            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                                                .testTag("workspace-current-path"))
+                                    }
+                                }
+                            }
+                            ConversationAgentIconButton(enabled = !busy && !listing,
+                                onClick = { onCopyPath(fullPath) },
+                                modifier = Modifier.size(48.dp).testTag("workspace-copy-path")) {
+                                Icon(Icons.Rounded.ContentCopy, "复制完整路径", tint = colors.accent)
+                            }
                         }
                         HorizontalDivider(color = colors.line)
                         Box(Modifier.fillMaxWidth().weight(1f).testTag("workspace-directory-body")) {

@@ -1801,6 +1801,12 @@ class MainActivity : ComponentActivity() {
         val path = (binding as? app.daiyu.android.workspace.ConversationWorkspaceBinding.Private)?.path ?: source.initialPath
         browseConversationWorkspace(visit, source.id, path, editingIndex = index)
     }
+    private fun copyWorkspacePath(visit: WorkspaceVisit, path: String) {
+        if (!workspaceCurrent(visit) || workspaceVisit !== visit || !visit.choosing || visit.busy || visit.listing ||
+            path != (visit.directory?.path ?: visit.path)) return
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("工作区路径", path))
+        toast("已复制路径")
+    }
     private fun cancelWorkspaceSelection(visit: WorkspaceVisit) {
         if (workspaceCurrent(visit) && workspaceVisit === visit && !visit.busy) {
             workspaceVisit = visit.copy(source = visit.editor.selectedSourceId, path = visit.editor.path,
@@ -2703,6 +2709,8 @@ class MainActivity : ComponentActivity() {
                     if (workspaceCurrent(visit)) {
                         app.daiyu.android.ui.components.ConversationWorkspaceSheet(
                             visible = true, path = visit.path, busy = visit.busy, error = visit.error,
+                            workspaceRoots = visit.editor.privateWorkspaceRoots,
+                            onCopyPath = { copyWorkspacePath(visit, it) },
                             workspaces = visit.editor.workspacePaths.map {
                                 app.daiyu.android.ui.components.WorkspaceItemOption(it)
                             }, activeWorkspaceIndex = visit.editor.workspaces.activeIndex,

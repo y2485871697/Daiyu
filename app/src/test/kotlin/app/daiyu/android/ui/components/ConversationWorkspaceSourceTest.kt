@@ -37,6 +37,19 @@ class ConversationWorkspaceSourceTest {
         }
     }
 
+    @Test fun pathPresentationDoesNotReplaceNavigationOrClipboardValues() {
+        val source = source("components/ConversationWorkspaceSheet.kt")
+        assertTrue(source.contains("workspacePathPresentation(workspace.path, workspaceRoots)"))
+        assertTrue(source.contains("workspace-name:$" + "index"))
+        assertTrue(source.contains("workspace-location:$" + "index"))
+        assertTrue(source.contains("TextOverflow.MiddleEllipsis"))
+        assertFalse(source.contains("Text(workspace.path,"))
+        assertTrue(source.contains("SelectionContainer"))
+        assertTrue(source.contains("heightIn(max = 96.dp)"))
+        assertTrue(source.contains("onCopyPath(fullPath)"))
+        assertTrue(source.contains("onNavigate(directory.path.trimEnd('/'"))
+    }
+
     @Test fun editorAndStripShareInitialPassWithoutClaimingControls() {
         val composer = source("screens/chat/conversation/ChatComposer.kt")
         val surface = source("screens/chat/conversation/ChatComposerSurface.kt")

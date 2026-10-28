@@ -76,6 +76,16 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         }
         node("workspace-current-path").assertTextEquals(java.io.File(fixture.application.filesDir, "workspace").canonicalPath)
         node("workspace-error").assertDoesNotExist()
+        mainThread {
+            activity.getSystemService(android.content.ClipboardManager::class.java)
+                .setPrimaryClip(android.content.ClipData.newPlainText("sentinel", "not-the-workspace-path"))
+        }
+        node("workspace-copy-path").performClick()
+        mainThread {
+            val clipboard = activity.getSystemService(android.content.ClipboardManager::class.java)
+            assertEquals(java.io.File(fixture.application.filesDir, "workspace").canonicalPath,
+                clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+        }
         node("workspace-cancel").performClick()
         node("workspace-path-card:0").assertExists()
         node("workspace-close").assertDoesNotExist()
@@ -250,6 +260,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
     private var switches = 0
     private var deletions = 0
     private var edits = 0
+    private val copiedPaths = mutableListOf<String>()
     private var editingWorkspace by mutableStateOf(false)
     private var choosing by mutableStateOf(false)
     private var listing by mutableStateOf(false)
@@ -267,6 +278,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
                 ConversationWorkspaceSheet(visible = visible,
                     path = path, busy = busy, choosing = choosing, listing = listing,
                     workspaces = choices, activeWorkspaceIndex = activeIndex,
+                    workspaceRoots = listOf(original), onCopyPath = { copiedPaths += it },
                     selectionMode = selectionMode, selectedWorkspaces = selectedIndices,
                     onSelectionChange = { mode, selected -> selectionMode = mode; selectedIndices = selected },
                     onSelectWorkspace = { switches++; activeIndex = it },
@@ -305,6 +317,67 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("workspace-save").performClick()
         ui.runOnIdle { assertEquals(1, saves); assertEquals(0, dismisses) }
         node("conversation-workspace-sheet").assertExists()
+    }
+
+    fun testCardsShowNamesAndRelativeLocationsWithoutChangingSelection() {
+        val child = "$original/客户甲/common"
+        val other = "$original/客户乙/common"
+        ui.runOnIdle { choices = listOf(original, child, other).map { app.daiyu.android.ui.components.WorkspaceItemOption(it) } }
+        showSheet()
+        ui.onNodeWithTag("workspace-name:0", useUnmergedTree = true).assertTextEquals("workspace")
+        ui.onNodeWithTag("workspace-location:0", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithTag("workspace-name:1", useUnmergedTree = true).assertTextEquals("common")
+        ui.onNodeWithTag("workspace-location:1", useUnmergedTree = true).assertTextEquals("workspace / 客户甲 / common")
+        ui.onNodeWithTag("workspace-location:2", useUnmergedTree = true).assertTextEquals("workspace / 客户乙 / common")
+        node("workspace-path-card:2").performClick()
+        node("workspace-path-card:1").performTouchInput { longClick() }
+        ui.runOnIdle {
+            assertEquals(1, switches); assertEquals(2, activeIndex)
+            assertEquals(setOf(1), selectedIndices); assertEquals(0, edits); assertEquals(0, saves)
+        }
+        node("workspace-selection-cancel").performClick()
+        node("workspace-edit:2").performClick()
+        node("workspace-copy-path").performClick()
+        ui.runOnIdle { assertEquals(listOf(other), copiedPaths); assertEquals(1, switches); assertEquals(0, saves) }
+    }
+
+    fun testDeepPathKeepsRootAndTailAndCopiesExactUnshortenedValue() {
+        val leaf = " 项目 '🐟' 空格 "
+        val full = original + "/" + (1..16).joinToString("/") { "中间目录-$it" } + "/$leaf/src"
+        ui.runOnIdle { choices = listOf(app.daiyu.android.ui.components.WorkspaceItemOption(full)) }
+        showSheet()
+        ui.onNodeWithTag("workspace-name:0", useUnmergedTree = true).assertTextEquals("src")
+        ui.onNodeWithTag("workspace-location:0", useUnmergedTree = true).assertTextEquals("workspace / … / $leaf / src")
+        val footer = node("workspace-add").fetchSemanticsNode().boundsInRoot.bottom
+        val card = node("workspace-path-card:0").fetchSemanticsNode().boundsInRoot
+        val edit = node("workspace-edit:0").fetchSemanticsNode().boundsInRoot
+        assertTrue(edit.left >= card.left && edit.right <= card.right)
+        node("workspace-edit:0").performClick()
+        node("workspace-current-path").assertTextEquals(full)
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        node("workspace-current-path").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        assertEquals(full, layout.layoutInput.text.text)
+        assertFalse(layout.hasVisualOverflow)
+        for (line in 0 until layout.lineCount) assertFalse(layout.isLineEllipsized(line))
+        node("workspace-copy-path").performClick()
+        ui.runOnIdle { assertEquals(listOf(full), copiedPaths); assertEquals(0, switches); assertEquals(0, saves) }
+        node("workspace-cancel").performClick()
+        assertEquals(footer, node("workspace-add").fetchSemanticsNode().boundsInRoot.bottom, 1f)
+        ui.runOnIdle { assertEquals(full, choices.single().path); assertEquals(0, saves) }
+    }
+
+    fun testCopyIsDisabledWhileLoadingOrSavingAndDoesNotDispatchWhenHidden() {
+        showSheet()
+        node("workspace-copy-path").assertDoesNotExist()
+        node("workspace-edit:0").performClick()
+        ui.runOnIdle { listing = true }
+        node("workspace-copy-path").assertIsNotEnabled()
+        ui.runOnIdle { listing = false; busy = true }
+        node("workspace-copy-path").assertIsNotEnabled()
+        ui.runOnIdle { busy = false }
+        node("workspace-copy-path").performClick()
+        ui.runOnIdle { assertEquals(listOf(original), copiedPaths); assertEquals(0, switches); assertEquals(0, saves) }
     }
 
     fun testLongPressSelectsWithoutSwitchAndSelectionCanBeEmptyOrCancelled() {

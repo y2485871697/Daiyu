@@ -11,7 +11,7 @@ internal data class ConversationWorkspaceSource(val id: String, val title: Strin
     val initialPath: String, val reference: LinuxGenerationRef? = null)
 internal data class ConversationWorkspaceEditor(val binding: String?, val sources: List<ConversationWorkspaceSource>,
     val selectedSourceId: String, val path: String,
-    val workspaces: ConversationWorkspaces, val workspacePaths: List<String>)
+    val workspaces: ConversationWorkspaces, val workspacePaths: List<String>, val privateWorkspaceRoots: List<String>)
 
 internal data class ConversationWorkspaceDirectory(val path: String, val parentPath: String?,
     val folders: List<String>, val selectable: Boolean = true)
@@ -47,7 +47,8 @@ internal class ConversationWorkspaceAccess(private val context: Context,
                 is ConversationWorkspaceBinding.Rootfs -> "${saved.environmentId} Rootfs · ${saved.guestPath}"
             }
         }
-        return ConversationWorkspaceEditor(raw, displayed, source, path, workspaces, workspacePaths)
+        val privateWorkspaceRoots = listOf(defaultPath, java.io.File(context.filesDir.canonicalFile, "workspace").path).distinct()
+        return ConversationWorkspaceEditor(raw, displayed, source, path, workspaces, workspacePaths, privateWorkspaceRoots)
     }
     fun binding(sourceId: String, path: String): ConversationWorkspaceBinding =
         ConversationWorkspaceSelection(context.filesDir).binding(sourceId, path)

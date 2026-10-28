@@ -23,14 +23,32 @@ class VoiceRecognitionLayoutContractTest(unittest.TestCase):
         cls.fields = (SRC / "ui/screens/settings/SettingsUiComponents.kt").read_text()
         cls.asr = body(cls.panel, 'if (child == "ASR")')
 
-    def test_section_selector_has_no_filled_container(self):
+    def test_section_selector_uses_narrow_shared_settings_card(self):
         selector = body(self.panel, 'if (child == null) Column(')
-        header = self.panel.split('if (child == null) Column(', 1)[1].split('Row(', 1)[0]
-        self.assertNotIn('.background(', header + selector)
-        self.assertNotIn('.clip(', header + selector)
+        self.assertIn('SettingsCard(Modifier.widthIn(max = 240.dp)', selector)
+        self.assertIn('testTag("voice-section-selector-card")', selector)
         self.assertIn('testTag("voice-section-select")', selector)
+        self.assertIn('.heightIn(min = 48.dp)', selector)
         self.assertIn('choosingSection = !choosingSection', selector)
-        self.assertIn('leavePage {', selector)
+        self.assertNotIn('.background(', selector)
+        self.assertNotIn('.clip(', selector)
+        self.assertNotIn('SettingsRow(', selector)
+
+    def test_section_menu_uses_shared_motion_and_preserves_navigation_guard(self):
+        selector = body(self.panel, 'if (child == null) Column(')
+        self.assertIn('SettingsExpandableContent(expanded = choosingSection)', selector)
+        self.assertNotIn('if (choosingSection) Column(', selector)
+        self.assertIn('.heightIn(max = 220.dp)', selector)
+        self.assertIn('.verticalScroll(rememberScrollState())', selector)
+        self.assertIn('if (choosingSection) leavePage {', selector)
+        self.assertIn('section = entry.first; choosingSection = false', selector)
+        self.assertIn('if (target != profile) drafts[profile] = draft', selector)
+
+    def test_section_selector_keeps_original_arrow(self):
+        selector = body(self.panel, 'if (child == null) Column(')
+        self.assertIn('DaiyuIcon(DaiyuIcons.ChevronDown, contentDescription = "选择语音分组"', selector)
+        self.assertIn('Modifier.rotate(if (choosingSection) 180f else 0f)', selector)
+        self.assertNotIn('settingsDisclosureRotation', selector)
 
     def test_home_omits_extra_offline_entry_and_keeps_download_and_method_cards(self):
         home = self.panel.split('"RECOGNITION" -> {', 1)[1].split('"READ_ALOUD", "CONVERSATION" ->', 1)[0]

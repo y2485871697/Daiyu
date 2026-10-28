@@ -25,6 +25,54 @@ class VoiceSettingsStructureActivityTest : WiredActivityTestCase() {
             .scrollToVisible().performClick()
         node("voice-section-select").assertTextContains(title)
     }
+    fun testSectionSelectorIsNarrowAndMenuHeightAnimates() {
+        enter()
+        val selector = node("voice-section-selector-card")
+        val collapsed = selector.fetchSemanticsNode().boundsInRoot
+        val home = node("voice-recognition-input-card").fetchSemanticsNode().boundsInRoot
+        assertTrue("Entry selector stays narrower than ordinary settings cards", collapsed.width < home.width)
+        ui.mainClock.autoAdvance = false
+        try {
+            node("voice-section-select").performClick()
+            ui.mainClock.advanceTimeBy(80)
+            ui.waitForIdle()
+            val openingHeight = selector.fetchSemanticsNode().boundsInRoot.height
+            ui.mainClock.advanceTimeBy(300)
+            ui.waitForIdle()
+            val openHeight = selector.fetchSemanticsNode().boundsInRoot.height
+            assertTrue("Opening has an intermediate height", openingHeight > collapsed.height && openingHeight < openHeight)
+            node("voice-section-select").performClick()
+            ui.mainClock.advanceTimeBy(80)
+            ui.waitForIdle()
+            val closingHeight = selector.fetchSemanticsNode().boundsInRoot.height
+            assertTrue("Closing has an intermediate height", closingHeight > collapsed.height && closingHeight < openHeight)
+            ui.mainClock.advanceTimeBy(300)
+            ui.waitForIdle()
+            node("voice-section-option:READ_ALOUD").assertDoesNotExist()
+            assertEquals(collapsed.height, selector.fetchSemanticsNode().boundsInRoot.height, 1f)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testSectionSelectorClosingOptionsCannotReceiveTouch() {
+        enter()
+        node("voice-section-select").performClick()
+        val root = ui.onRoot()
+        val option = node("voice-section-option:READ_ALOUD").fetchSemanticsNode().boundsInRoot
+        val touch = option.center - root.fetchSemanticsNode().boundsInRoot.topLeft
+        ui.mainClock.autoAdvance = false
+        try {
+            node("voice-section-select").performClick()
+            ui.mainClock.advanceTimeBy(16)
+            ui.waitForIdle()
+            node("voice-section-option:READ_ALOUD").assertDoesNotExist()
+            root.performTouchInput { click(touch) }
+            ui.mainClock.advanceTimeBy(300)
+            ui.waitForIdle()
+            node("voice-section-select").assertTextContains("语音识别")
+            node("voice-section-option:READ_ALOUD").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     private var voicePreferencesSnapshot: Map<String, *>? = null
     override fun cleanupAfterLegacy() {
         try {

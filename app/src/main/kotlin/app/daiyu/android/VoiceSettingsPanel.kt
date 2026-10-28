@@ -276,25 +276,30 @@ internal fun VoiceSettingsPanel(
         }, modifier = Modifier.testTag("voice-settings")) { padding, scrollBehavior, sidePadding ->
             Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
                 .padding(horizontal = sidePadding).nestedScroll(scrollBehavior.nestedScrollConnection)) {
-                if (child == null) Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Row(Modifier.fillMaxWidth().testTag("voice-section-select").clickable {
-                        if (current() && !busy) choosingSection = !choosingSection
-                    }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(sections.first { it.first == section }.second, modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1)
-                        DaiyuIcon(DaiyuIcons.ChevronDown, contentDescription = "选择语音分组",
-                            modifier = Modifier.rotate(if (choosingSection) 180f else 0f))
-                    }
-                    if (choosingSection) Column(Modifier.heightIn(max = 220.dp).padding(bottom = 8.dp).verticalScroll(rememberScrollState())) {
-                        sections.forEach { entry ->
-                            Text(entry.second, style = MiuixTheme.textStyles.body2,
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    leavePage {
-                                        dialog = null; notice = ""
-                                        val target = if (entry.first == "CONVERSATION") VoiceProfile.CONVERSATION else VoiceProfile.READ_ALOUD
-                                        if (target != profile) drafts[profile] = draft
-                                        section = entry.first; choosingSection = false
-                                    }
-                                }.padding(horizontal = 12.dp, vertical = 10.dp))
+                if (child == null) Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    SettingsCard(Modifier.widthIn(max = 240.dp).testTag("voice-section-selector-card")) {
+                        Row(Modifier.fillMaxWidth().testTag("voice-section-select").clickable {
+                            if (current() && !busy) choosingSection = !choosingSection
+                        }.heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(sections.first { it.first == section }.second, modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1)
+                            DaiyuIcon(DaiyuIcons.ChevronDown, contentDescription = "选择语音分组",
+                                modifier = Modifier.rotate(if (choosingSection) 180f else 0f))
+                        }
+                        SettingsExpandableContent(expanded = choosingSection) {
+                            Column(Modifier.heightIn(max = 220.dp).padding(bottom = 8.dp).verticalScroll(rememberScrollState())) {
+                                sections.forEach { entry ->
+                                    Text(entry.second, style = MiuixTheme.textStyles.body2,
+                                        modifier = Modifier.fillMaxWidth().testTag("voice-section-option:${entry.first}").clickable {
+                                            if (choosingSection) leavePage {
+                                                dialog = null; notice = ""
+                                                val target = if (entry.first == "CONVERSATION") VoiceProfile.CONVERSATION else VoiceProfile.READ_ALOUD
+                                                if (target != profile) drafts[profile] = draft
+                                                section = entry.first; choosingSection = false
+                                            }
+                                        }.padding(horizontal = 12.dp, vertical = 10.dp))
+                                }
+                            }
                         }
                     }
                 }

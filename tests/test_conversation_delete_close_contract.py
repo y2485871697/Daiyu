@@ -1,18 +1,22 @@
-"""Only the conversation-deletion confirmation opts out of its redundant cross."""
+"""Only explicitly scoped confirmations opt out of their redundant cross."""
 from pathlib import Path
 import unittest
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app/src/main/kotlin/app/daiyu/android"
 
 class ConversationDeleteCloseContractTest(unittest.TestCase):
-    def test_only_conversation_deletion_opts_out_at_its_prompt(self):
+    def test_conversation_deletion_opts_out_at_its_prompt(self):
         main = (APP / "MainActivity.kt").read_text()
         deletion = main.split("private fun confirmDelete(", 1)[1].split("private fun editRetainedConversation", 1)[0]
         self.assertIn("showCloseButton = false", deletion)
         self.assertIn("deleteRetainedConversation(id)", deletion)
         prompt = main.split("private class ConfirmPrompt(", 1)[1].split("private var prompt", 1)[0]
         self.assertIn("val showCloseButton: Boolean = true", prompt)
-        self.assertEqual(1, main.count("showCloseButton = false"))
+        for start, end in (("onRegenerate = { id ->", "}, onSpeak ="),
+                           ("onDeleteTurn = { id ->", "}, onRetryStep =")):
+            scoped = main.split(start, 1)[1].split(end, 1)[0]
+            self.assertIn("showCloseButton = false", scoped)
+        self.assertEqual(3, main.count("showCloseButton = false"))
 
     def test_prompt_and_preview_forward_close_visibility_without_changing_callbacks(self):
         main = (APP / "MainActivity.kt").read_text()

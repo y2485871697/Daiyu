@@ -1648,7 +1648,7 @@ class MainActivity : ComponentActivity() {
         override val backup: Boolean = false) : Prompt
     private class ConfirmPrompt(val title: String, val message: String, val confirm: String,
         val destructive: Boolean = false, val action: () -> Unit, override val backup: Boolean = false,
-        val showCloseButton: Boolean = true) : Prompt
+        val showCloseButton: Boolean = true, val secondaryCancel: Boolean = false) : Prompt
     private var prompt by mutableStateOf<Prompt?>(null)
     private var lastOpenedBackupUri: String? = null
     // One validated, bounded URI only: never an Intent/ClipData, descriptor, saved state or grant.
@@ -3160,9 +3160,8 @@ class MainActivity : ComponentActivity() {
             val target = actionSnapshot?.renderedTargets?.get(id) ?: actionSnapshot?.targets?.get(id)
             val index = chatState.turns.indexOfFirst { it.listKey == id || it.id == id }
             if (target != null && index >= 0 && chatState.turns.drop(index + 1).any { it is ChatTurnUi.User }) {
-                prompt = ChoicePrompt("重新生成将删除此回复及后面的消息", listOf("重新生成", "取消"), { choice ->
-                    if (choice == 0) messageCallbacks.onRegenerate(id)
-                })
+                prompt = ConfirmPrompt("重新生成将删除此回复及后面的消息", "", "确定",
+                    action = { messageCallbacks.onRegenerate(id) }, showCloseButton = false, secondaryCancel = true)
             } else messageCallbacks.onRegenerate(id)
         }, onSpeak = speak@{ id ->
             if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
@@ -3186,9 +3185,8 @@ class MainActivity : ComponentActivity() {
             clearInlineMessageEditor(); publishChat(rowsChanged = false)
         } },
         onDeleteTurn = { id ->
-            prompt = ChoicePrompt("删除这条消息及后面的内容？", listOf("删除", "取消"), { choice ->
-                if (choice == 0) messageCallbacks.onDeleteTurn(id)
-            })
+            prompt = ConfirmPrompt("删除这条消息及后面的内容？", "", "确定",
+                action = { messageCallbacks.onDeleteTurn(id) }, showCloseButton = false, secondaryCancel = true)
         }, onRetryStep = messageCallbacks.onRetryStep,
         onOpenSidebar = { openSidebar() }, onTextChange = { text -> if (editorMatches()) {
             val editor = inlineMessageEditor
@@ -5321,7 +5319,7 @@ class MainActivity : ComponentActivity() {
             is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options, preview = retainedPage == "chat",
                 onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
             is ConfirmPrompt -> DaiyuConfirmDialog(current.title, current.message, current.confirm, current.destructive,
-                preview = retainedPage == "chat", showCloseButton = current.showCloseButton,
+                preview = retainedPage == "chat", showCloseButton = current.showCloseButton, secondaryCancel = current.secondaryCancel,
                 onConfirm = { confirmPrompt(current) }, onDismiss = { if (valid()) dismissPrompt(current) })
         }
     }

@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
 import androidx.compose.ui.input.key.Key
+import app.daiyu.android.R
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -26,6 +27,7 @@ class TerminalScreenTest : WiredActivityTestCase() {
     private var state by mutableStateOf(TerminalEnvironmentState())
     private val created = mutableListOf<LinuxGenerationRef?>()
     private var closes = 0
+    private var backs = 0
     private var tasks = 0
     private val sent = mutableListOf<String>()
     private val inputRequest = AtomicReference<PlatformTextInputMethodRequest?>()
@@ -43,7 +45,7 @@ class TerminalScreenTest : WiredActivityTestCase() {
                         onSend = { _, text -> sent += if (simple) text + "\n" else text },
                         onSelectEnvironment = { linux = it }, onSelectSession = {}, onRestart = {},
                         onClose = { closes++ }, onStop = {}, onResize = { _, _, _ -> },
-                        onSimple = { simple = it }, onBack = {}, onOpenEnvironment = {}, onOpenTasks = { tasks++ })
+                        onSimple = { simple = it }, onBack = { backs++ }, onOpenEnvironment = {}, onOpenTasks = { tasks++ })
                 }
                 if (interceptInput) {
                     val interceptor = remember {
@@ -56,6 +58,29 @@ class TerminalScreenTest : WiredActivityTestCase() {
                     InterceptPlatformTextInput(interceptor = interceptor, content = content)
                 } else content()
             }
+        }
+    }
+    fun testTitleIsCenteredInBackRowInBothModesAndBackStaysWired() {
+        show()
+        fun assertTitleInBackRow() {
+            ui.onAllNodesWithText("终端", useUnmergedTree = true).assertCountEquals(1)
+            val title = ui.onNodeWithText("终端", useUnmergedTree = true)
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val host = node("terminal-screen").fetchSemanticsNode().boundsInRoot
+            val back = ui.onNodeWithContentDescription(activity.getString(R.string.action_back))
+                .assertIsDisplayed().assertHasClickAction().fetchSemanticsNode().boundsInRoot
+            assertEquals(host.center.x, title.center.x, 2f)
+            assertEquals(back.center.y, title.center.y, 2f)
+            assertTrue(title.left >= back.right && title.right <= host.right)
+            assertTrue(node("terminal-output-region").fetchSemanticsNode().boundsInRoot.top >= title.bottom)
+        }
+        assertTitleInBackRow()
+        node("terminal-mode").performClick()
+        assertTitleInBackRow()
+        ui.onNodeWithContentDescription(activity.getString(R.string.action_back)).performTouchInput { click() }
+        ui.runOnIdle {
+            assertEquals(1, backs)
+            assertTrue(created.isEmpty()); assertEquals(0, closes); assertTrue(sent.isEmpty())
         }
     }
     fun testEntryIsReadOnlyAndSessionCreationUsesSelectedEnvironment() {

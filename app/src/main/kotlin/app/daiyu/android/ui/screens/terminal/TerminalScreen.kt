@@ -143,7 +143,8 @@ fun TerminalScreenContent(
         }
     }
     WithoutPressRipple {
-        MiuixScaffold(title = "终端", onBack = onBack, modifier = Modifier.testTag("terminal-screen")) { padding, _, side ->
+        MiuixScaffold(title = "终端", onBack = onBack, modifier = Modifier.testTag("terminal-screen"),
+            compactTitle = true) { padding, _, side ->
             Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), start = side, end = side)
                 .navigationBarsPadding().imePadding().testTag("page:终端")) {
                 if (!state.simple) toolbar()

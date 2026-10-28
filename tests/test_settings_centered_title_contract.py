@@ -14,7 +14,8 @@ class SettingsCenteredTitleContract(unittest.TestCase):
     def test_settings_list_and_custom_content_both_select_linux_style(self):
         settings = read('ui/screens/settings/SettingsScaffold.kt')
         self.assertIn('compactTitle: Boolean = true', settings)
-        self.assertIn('compactTitle = compactTitle, content = content', settings)
+        self.assertIn('compactTitle = compactTitle', settings)
+        self.assertIn('content = content', settings)
         custom = settings.split('internal fun SettingsScaffold(', 1)[1]
         self.assertIn('compactTitle = true', custom)
 

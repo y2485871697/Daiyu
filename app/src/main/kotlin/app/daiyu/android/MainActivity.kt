@@ -2201,7 +2201,7 @@ class MainActivity : ComponentActivity() {
                         if (ready == null) TerminalLoadingPage(state, onBack = {
                             if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
                                 closeTerminalPage()
-                        }) else {
+                        }, compactTitle = true) else {
                             val workspace = ready.application.terminalSessions
                             app.daiyu.android.ui.screens.terminal.TerminalScreen(
                                 workspace = workspace,

@@ -30,7 +30,7 @@ class WorkspaceFilesEntryContract(unittest.TestCase):
         for token in ['filesOnly: Boolean = false', 'remember(page, filesOnly)',
                       'mutableStateOf(if (filesOnly) LinuxSettingsTab.FILES else LinuxSettingsTab.BASIC)',
                       'fun basicCurrent() = !filesOnly && tab == LinuxSettingsTab.BASIC',
-                      'if (!filesOnly) LinuxSettingsTabs(tab)',
+                      'if (!filesOnly) LinuxSettingsTabs(tab, enabled = !fileOperationBusy)',
                       'pageTitle = if (filesOnly) "工作区" else "Linux 工具环境", integratedLinux = true',
                       'val selectedReference = state.selected ?: terminal?.linux?.selected',
                       'val currentInstallation = state.entries.firstOrNull {\n'
@@ -41,7 +41,7 @@ class WorkspaceFilesEntryContract(unittest.TestCase):
                       'rootfs = rootfs, onOpenTerminal = onOpenTerminal']:
             self.assertIn(token, screen)
         self.assertEqual(screen.count('.navigationBarsPadding()'), 1)
-        self.assertIn('if (tabScope === renderedTabScope && tab != it)', screen)
+        self.assertIn('if (tabScope === renderedTabScope && tab != it && !fileOperationBusy)', screen)
 
     def test_files_only_current_environment_ignores_install_form_draft_and_pending_mode(self):
         screen = (SOURCE / 'ui/screens/settings/LinuxSettingsScreen.kt').read_text()

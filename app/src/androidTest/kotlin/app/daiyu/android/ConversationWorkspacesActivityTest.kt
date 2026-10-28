@@ -20,9 +20,11 @@ class ConversationWorkspacesActivityTest : WiredActivityTestCase() {
     }
 
     private fun awaitLoadedDirectory(path: String) {
+        val displayPath = app.daiyu.android.ui.components.workspaceDirectoryDisplayPath(path,
+            listOf(File(fixture.application.filesDir, "workspace").path, File(fixture.application.filesDir, "workspace").canonicalPath))
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()
-            ui.onAllNodes(hasTestTag("workspace-current-path") and hasText(path)).fetchSemanticsNodes().size == 1 &&
+            ui.onAllNodes(hasTestTag("workspace-current-path") and hasText(displayPath)).fetchSemanticsNodes().size == 1 &&
                 ui.onAllNodes(hasTestTag("workspace-save") and isEnabled()).fetchSemanticsNodes().size == 1
         }
         node("workspace-error").assertDoesNotExist()
@@ -173,5 +175,44 @@ class ConversationWorkspacesActivityTest : WiredActivityTestCase() {
             ConversationWorkspaceCodec.decode(remaining))
         assertTrue(worker { fixture.controller.removeWorkspacesOnWorker(owner, remaining, setOf(0)) })
         assertTrue(ConversationWorkspaceCodec.decodeWorkspaces(fixture.database.workspaceBinding(owner)).bindings.isEmpty())
+    }
+
+    fun testRealActivityCreatesFolderWithoutSavingOrSwitchingAnyWorkspace() {
+        val root = File(fixture.application.filesDir, "workspace")
+        val name = "新建-${java.util.UUID.randomUUID()}"
+        val created = File(root, name)
+        val owner = fixture.database.create(fixture.database.selectedAssistantId())
+        val other = fixture.database.create(fixture.database.selectedAssistantId())
+        try {
+            mainThread { activity.select(owner) }
+            awaitControl("workspace editor idle") { !fixture.controller.dataBusy }
+            awaitHostWindowFocus(activity)
+            node("chat-workspace-gesture-area").performTouchInput {
+                swipe(center, center + Offset(0f, -80f * activity.resources.displayMetrics.density))
+            }
+            awaitUniqueTag("workspace-add")
+            node("workspace-add").performClick()
+            awaitLoadedDirectory(root.canonicalPath)
+            node("workspace-create-folder").assertIsEnabled().performClick()
+            awaitUniqueTag("prompt-input")
+            node("prompt-input").performTextReplacement(name)
+            node("dialog-cancel").performClick()
+            assertFalse(created.exists())
+            node("workspace-create-folder").performClick()
+            awaitUniqueTag("prompt-input")
+            node("prompt-input").performTextReplacement("../escape")
+            node("dialog-confirm").performClick()
+            node("prompt-input").assertExists()
+            node("prompt-input").performTextReplacement(name)
+            node("dialog-confirm").performClick()
+            ui.waitUntil(5_000) { created.isDirectory }
+            awaitLoadedDirectory(root.canonicalPath)
+            node("workspace-current-path").assertTextEquals("/workspace")
+            node("workspace-folder:$name").assertExists()
+            assertNull(fixture.database.workspaceBinding(owner.id))
+            assertNull(fixture.database.workspaceBinding(other.id))
+            assertNull(fixture.database.workspaceBinding(null))
+            assertEquals(0, fixture.opens.get())
+        } finally { created.deleteRecursively() }
     }
 }

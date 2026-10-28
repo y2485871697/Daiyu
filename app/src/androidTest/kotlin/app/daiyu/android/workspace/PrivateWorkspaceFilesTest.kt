@@ -385,4 +385,46 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         assertEquals("replacement", File(child, "keep").readText())
     }
 
+
+    fun testCreateDirectoryUsesExactNameAndRejectsConflictsCancellationAndStaleParents() = fixture { files, access ->
+        val root = access.list().directory
+        val name = " 项目 '🐟' "
+        access.createDirectory(root, name)
+        val created = access.list().entries.single()
+        assertEquals(name, created.name); assertTrue(created.directory)
+        val directory = access.list(created).directory
+        access.createDirectory(directory, "nested")
+        assertTrue(File(files, "workspace/$name/nested").isDirectory)
+        try { access.createDirectory(root, name); fail("directory replaced") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_directory_exists", failure.message) }
+        File(files, "workspace/file").writeText("keep")
+        try { access.createDirectory(root, "file"); fail("file replaced") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_directory_exists", failure.message) }
+        assertEquals("keep", File(files, "workspace/file").readText())
+        try { access.createDirectory(root, "cancelled") { true }; fail("cancel ignored") } catch (_: InterruptedException) { }
+        assertFalse(File(files, "workspace/cancelled").exists())
+        val actual = File(files, "workspace/$name")
+        assertTrue(actual.renameTo(File(files, "workspace/moved")))
+        assertTrue(actual.mkdir())
+        try { access.createDirectory(directory, "stale"); fail("stale parent accepted") } catch (_: IllegalStateException) { }
+        assertFalse(File(actual, "stale").exists())
+    }
+
+    fun testExplicitRootfsMkdirCapabilityKeepsEveryOtherWriteReadOnly() = fixture { files, _ ->
+        val root = File(files, "rootfs").apply { mkdir() }
+        val paths = PrivateWorkspacePaths.existingRoot(files, root)
+        val readonly = PrivateWorkspaceFiles(paths)
+        val entry = readonly.list().directory
+        try { readonly.createDirectory(entry, "denied"); fail("default read-only mkdir allowed") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_read_only", failure.message) }
+        val creator = PrivateWorkspaceFiles(paths, allowDirectoryCreation = true)
+        creator.createDirectory(entry, "new")
+        assertTrue(File(root, "new").isDirectory)
+        try { creator.importFile(entry, "file", { ByteArrayInputStream(byteArrayOf(1)) }); fail("import allowed") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_read_only", failure.message) }
+        val child = creator.list().entries.single()
+        try { creator.delete(child); fail("delete allowed") }
+        catch (failure: IllegalStateException) { assertEquals("workspace_read_only", failure.message) }
+        assertTrue(File(root, "new").isDirectory)
+    }
 }

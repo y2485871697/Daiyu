@@ -36,12 +36,14 @@ import java.util.concurrent.atomic.AtomicLong
 
 private class WorkspaceTransfer(val directory: PrivateWorkspaceFiles.Entry?, val source: PrivateWorkspaceFiles.Entry?)
 private class WorkspaceAction(val entry: PrivateWorkspaceFiles.Entry, val epoch: Long)
+private class WorkspaceNewFolder(val directory: PrivateWorkspaceFiles.Entry, val epoch: Long)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles? = null,
     parentVisit: AtomicBoolean = remember { AtomicBoolean(true) },
-    sharedBusy: () -> Boolean = { false }, onOccupied: (Boolean) -> Unit = {}, compact: Boolean = false): LinuxFilePanel {
+    sharedBusy: () -> Boolean = { false }, onOccupied: (Boolean) -> Unit = {}, compact: Boolean = false,
+    ownerCurrent: () -> Boolean = { true }): LinuxFilePanel {
     val context = LocalContext.current
     val files = suppliedFiles ?: remember(context) { PrivateWorkspaceFiles(context.applicationContext) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -53,6 +55,7 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
     var readCancellation by remember(files) { mutableStateOf<AtomicBoolean?>(null) }
     var pending by remember(files) { mutableStateOf<WorkspaceTransfer?>(null) }
     var actions by remember(files) { mutableStateOf<WorkspaceAction?>(null) }
+    var creating by remember(files) { mutableStateOf<WorkspaceNewFolder?>(null) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     val transferred = remember(files) { AtomicLong() }
@@ -65,10 +68,10 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
             delay(100)
         }
     }
-    fun current() = visit.get() && parentVisit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-    fun permitted(at: Long) = visit.get() && parentVisit.get() && epoch.get() == at
+    fun current() = visit.get() && parentVisit.get() && ownerCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    fun permitted(at: Long) = visit.get() && parentVisit.get() && ownerCurrent() && epoch.get() == at
     fun load(directory: PrivateWorkspaceFiles.Entry? = listing?.directory, parent: Boolean = false, clearNotice: Boolean = true) {
-        if (!current() || busy || pending != null || sharedBusy()) return
+        if (!current() || busy || pending != null || creating != null || sharedBusy()) return
         actions = null
         readCancellation?.set(true)
         val cancellation = AtomicBoolean(false); readCancellation = cancellation
@@ -88,11 +91,11 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
     }
     DisposableEffect(files, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) { epoch.incrementAndGet(); readCancellation?.set(true); request = null; actions = null }
+            if (event == Lifecycle.Event.ON_PAUSE) { epoch.incrementAndGet(); readCancellation?.set(true); request = null; actions = null; creating = null }
             if (event == Lifecycle.Event.ON_RESUME && pending == null && !busy) load()
         }
         lifecycle.addObserver(observer)
-        onDispose { visit.set(false); epoch.incrementAndGet(); readCancellation?.set(true); request = null; pending = null; actions = null; onOccupied(false); lifecycle.removeObserver(observer) }
+        onDispose { visit.set(false); epoch.incrementAndGet(); readCancellation?.set(true); request = null; pending = null; actions = null; creating = null; onOccupied(false); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(files) { load(null) }
     fun transfer(uri: Uri?, importing: Boolean) {
@@ -158,7 +161,7 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { transfer(it, false) }
     val action = actions
     fun actionCurrent(ticket: WorkspaceAction) = actions === ticket && current() && permitted(ticket.epoch) &&
-        !busy && !sharedBusy() && pending == null && request == null && listing?.entries?.any { it === ticket.entry } == true
+        !busy && !sharedBusy() && pending == null && creating == null && request == null && listing?.entries?.any { it === ticket.entry } == true
     fun modify(ticket: WorkspaceAction, name: String?) {
         if (!actionCurrent(ticket)) return
         actions = null; busy = true; onOccupied(true); readCancellation?.set(true)
@@ -188,16 +191,47 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                 }
             }))
     }
+    val creation = creating
+    if (creation != null) app.daiyu.android.ui.components.WorkspaceCreateFolderDialog(
+        onConfirm = { name ->
+            if (creating === creation && current() && permitted(creation.epoch) && !busy && !sharedBusy() &&
+                pending == null && request == null && listing?.directory === creation.directory) {
+                creating = null; busy = true; onOccupied(true)
+                val token = Any(); request = token
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) { files.createDirectory(creation.directory, name) { !permitted(creation.epoch) } }
+                        if (current() && permitted(creation.epoch) && request === token) notice = "文件夹已创建"
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        if (current() && permitted(creation.epoch) && request === token) notice =
+                            if (failure.message == "workspace_directory_exists") "同名文件或文件夹已存在"
+                            else "新建文件夹未完成，请刷新检查目录"
+                    } finally {
+                        busy = false; onOccupied(false)
+                        if (request === token) request = null
+                        if (current()) load(clearNotice = false)
+                    }
+                }
+            }
+        }, onDismiss = { if (creating === creation) creating = null })
+    val createFolder: (() -> Unit)? = if (current() && !busy && !sharedBusy() && pending == null && request == null &&
+        creating == null && listing != null) ({
+            val directory = listing?.directory
+            if (current() && !busy && !sharedBusy() && pending == null && request == null && creating == null && directory != null) {
+                actions = null; creating = WorkspaceNewFolder(directory, epoch.get())
+            }
+        }) else null
     val importFile: () -> Unit = {
         val directory = listing?.directory
-        if (current() && !busy && !sharedBusy() && pending == null && request == null && directory != null) {
+        if (current() && !busy && !sharedBusy() && pending == null && request == null && directory != null && creating == null) {
             pending = WorkspaceTransfer(directory, null); onOccupied(true)
             try { importer.launch(arrayOf("*/*")) } catch (_: Exception) { pending = null; onOccupied(false); notice = "未能打开文件选择器" }
         }
     }
     return LinuxFilePanel(actions = {
         if (compact) {
-            val controlsEnabled = current() && !busy && !sharedBusy() && pending == null && request == null
+            val controlsEnabled = current() && !busy && !sharedBusy() && pending == null && request == null && creating == null
             val importEnabled = controlsEnabled && listing != null
             val refreshFiles: () -> Unit = { load() }
             val semanticImport = hapticClick(importEnabled, importFile)
@@ -240,7 +274,8 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
         listing?.let { shown ->
             val directoryContent: @Composable () -> Unit = {
                 if (compact) LinuxFileDirectoryHeader(shown.directory.relative, "workspace-private-parent",
-                    onParent = if (shown.directory.relative.isNotEmpty()) ({ load(parent = true) }) else null)
+                    onParent = if (shown.directory.relative.isNotEmpty()) ({ load(parent = true) }) else null,
+                    createTag = "workspace-private-create-folder", onCreate = createFolder)
                 else SettingsSectionTitle(shown.directory.relative.ifEmpty { "/" })
                 if (!compact && shown.directory.relative.isNotEmpty()) {
                     SettingsCard { SettingsRow("上级目录", onClick = { load(parent = true) }, tag = "workspace-private-parent") }
@@ -251,7 +286,7 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                 if (shown.truncated) SettingsNote("仅显示前 100 项，请缩小目录范围")
                 shown.entries.forEach { entry ->
                     val renderedEpoch = epoch.get()
-                    fun entryCurrent() = current() && permitted(renderedEpoch) && listing === shown && !busy && !sharedBusy() && pending == null && request == null
+                    fun entryCurrent() = current() && permitted(renderedEpoch) && listing === shown && !busy && !sharedBusy() && pending == null && creating == null && request == null
                     val entryContent: @Composable () -> Unit = {
                         SettingsRow(entry.name, summary = if (compact) entry.relative else if (entry.directory) "目录" else Formatter.formatShortFileSize(context, entry.size),
                             leading = { SettingsIcon(if (entry.directory) DaiyuIcons.Folder else DaiyuIcons.File) },

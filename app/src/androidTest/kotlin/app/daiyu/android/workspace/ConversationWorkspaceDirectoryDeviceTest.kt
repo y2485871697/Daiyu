@@ -96,4 +96,18 @@ class ConversationWorkspaceDirectoryDeviceTest : InstrumentationTestCase() {
         assertEquals(listOf("workspace"), storage.list()!!.toList())
     }
 
+
+    fun testCreateRefreshesOriginalFolderWithoutSavingOrEscapingWorkspace() = fixture { storage, access ->
+        val root = File(storage, "workspace").apply { mkdir() }
+        val name = "新建 项目"
+        access.createDirectory("private", root.path, name) { false }
+        assertEquals(listOf(name), access.directory("private", root.path).folders)
+        assertTrue(File(root, name).isDirectory)
+        assertNull(access.editor(null).binding)
+        assertEquals(root.path, access.editor(null).path)
+        val outside = File(storage, "outside").apply { mkdir() }
+        try { access.createDirectory("private", outside.path, "escape") { false }; fail("escaped workspace") }
+        catch (failure: IllegalArgumentException) { assertEquals("workspace_selection_root_required", failure.message) }
+        assertFalse(File(outside, "escape").exists())
+    }
 }

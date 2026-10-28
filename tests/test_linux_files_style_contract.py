@@ -147,7 +147,7 @@ class LinuxFilesStyleContract(unittest.TestCase):
                 'current() && !busy && !sharedBusy() && pending == null && request == null && directory != null',
                 'lifecycle.withResumed', 'permitted(at)'],
             'LinuxRootfsPanel.kt': ['Rootfs 未读取，请刷新或检查环境状态', '此目录为空',
-                '当前环境暂无可浏览的 Rootfs', '!visit.get() || token.get()'],
+                '当前环境暂无可浏览的 Rootfs', '!visit.get() || !parentVisit.get() || token.get()'],
             'WorkspaceSettingsScreen.kt': ['还没有共享目录或文件',
                 '撤销后，本应用将无法再读取该目录或文件。不会删除原文件。',
                 'fileScope === renderedScope', 'epoch.get() != pickerCallbackEpoch'],

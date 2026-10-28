@@ -11,7 +11,8 @@ import java.util.UUID
 
 /** App-owned files only. Each operation walks pinned directory descriptors, never a SAF host path. */
 internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
-    private val availableBytes: (File) -> Long = { it.usableSpace }) {
+    private val availableBytes: (File) -> Long = { it.usableSpace },
+    private val allowDirectoryCreation: Boolean = false) {
     private val readOnly: Boolean get() = paths.readOnly
     constructor(context: Context) : this(PrivateWorkspacePaths(context.filesDir))
 
@@ -67,6 +68,20 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths,
         }
         active(cancelled)
         names.sortedWith(compareBy<String> { it.lowercase(java.util.Locale.ROOT) }.thenBy { it })
+    }
+
+    fun createDirectory(directory: Entry?, name: String, cancelled: () -> Boolean = { false }) {
+        check(!readOnly || allowDirectoryCreation) { "workspace_read_only" }
+        val safeName = workspaceDirectoryName(name)
+        check(directory == null || directory.directory) { "workspace_not_directory" }
+        pinned(directory, cancelled) { descriptor, _ ->
+            active(cancelled)
+            try { Os.mkdir("${fdPath(descriptor)}/$safeName", 448) }
+            catch (failure: android.system.ErrnoException) {
+                if (failure.errno == OsConstants.EEXIST) error("workspace_directory_exists")
+                throw failure
+            }
+        }
     }
 
     fun parent(directory: Entry, cancelled: () -> Boolean = { false }): Listing {

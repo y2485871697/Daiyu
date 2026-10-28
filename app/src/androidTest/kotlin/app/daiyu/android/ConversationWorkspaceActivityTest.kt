@@ -74,7 +74,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeByFrame()
             ui.onAllNodes(hasTestTag("workspace-save") and isEnabled()).fetchSemanticsNodes().size == 1
         }
-        node("workspace-current-path").assertTextEquals(java.io.File(fixture.application.filesDir, "workspace").canonicalPath)
+        node("workspace-current-path").assertTextEquals("/workspace")
         node("workspace-error").assertDoesNotExist()
         mainThread {
             activity.getSystemService(android.content.ClipboardManager::class.java)
@@ -272,13 +272,14 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
             if (next == original) null else next.substringBeforeLast('/').ifEmpty { "/" }, listOf("项目 空格", "second"))
     }
 
-    private fun showSheet(appearance: AppearanceSettings = AppearanceSettings()) {
+    private fun showSheet(appearance: AppearanceSettings = AppearanceSettings(),
+        workspaceRoots: List<String> = listOf(original)) {
         mainThread { activity.setContent {
             AgentAppTheme(appearance, applyInterfaceScale = false) {
                 ConversationWorkspaceSheet(visible = visible,
                     path = path, busy = busy, choosing = choosing, listing = listing,
                     workspaces = choices, activeWorkspaceIndex = activeIndex,
-                    workspaceRoots = listOf(original), onCopyPath = { copiedPaths += it },
+                    workspaceRoots = workspaceRoots, onCopyPath = { copiedPaths += it },
                     selectionMode = selectionMode, selectedWorkspaces = selectedIndices,
                     onSelectionChange = { mode, selected -> selectionMode = mode; selectedIndices = selected },
                     onSelectWorkspace = { switches++; activeIndex = it },
@@ -311,9 +312,9 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("来源").assertDoesNotExist()
         ui.onNodeWithText("路径不可用").assertDoesNotExist()
         node("workspace-add").performClick()
-        node("workspace-current-path").assertTextEquals(original)
+        node("workspace-current-path").assertTextEquals("/workspace")
         node("workspace-folder:项目 空格").performClick()
-        node("workspace-current-path").assertTextEquals("$original/项目 空格")
+        node("workspace-current-path").assertTextEquals("/workspace/项目 空格")
         node("workspace-save").performClick()
         ui.runOnIdle { assertEquals(1, saves); assertEquals(0, dismisses) }
         node("conversation-workspace-sheet").assertExists()
@@ -324,11 +325,11 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         val other = "$original/客户乙/common"
         ui.runOnIdle { choices = listOf(original, child, other).map { app.daiyu.android.ui.components.WorkspaceItemOption(it) } }
         showSheet()
-        ui.onNodeWithTag("workspace-name:0", useUnmergedTree = true).assertTextEquals("workspace")
+        ui.onNodeWithTag("workspace-name:0", useUnmergedTree = true).assertTextEquals("/workspace")
         ui.onNodeWithTag("workspace-location:0", useUnmergedTree = true).assertDoesNotExist()
         ui.onNodeWithTag("workspace-name:1", useUnmergedTree = true).assertTextEquals("common")
-        ui.onNodeWithTag("workspace-location:1", useUnmergedTree = true).assertTextEquals("workspace / 客户甲 / common")
-        ui.onNodeWithTag("workspace-location:2", useUnmergedTree = true).assertTextEquals("workspace / 客户乙 / common")
+        ui.onNodeWithTag("workspace-location:1", useUnmergedTree = true).assertTextEquals("/workspace / 客户甲 / common")
+        ui.onNodeWithTag("workspace-location:2", useUnmergedTree = true).assertTextEquals("/workspace / 客户乙 / common")
         node("workspace-path-card:2").performClick()
         node("workspace-path-card:1").performTouchInput { longClick() }
         ui.runOnIdle {
@@ -341,23 +342,45 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(listOf(other), copiedPaths); assertEquals(1, switches); assertEquals(0, saves) }
     }
 
+    fun testActualRootNameOnlyOmitsItsParentsAndCopiesUnchangedAbsolutePath() {
+        val root = "/private/files/ 我的 项目 🐟 "
+        val child = "$root/客户/src"
+        ui.runOnIdle {
+            choices = listOf(root, child).map { app.daiyu.android.ui.components.WorkspaceItemOption(it) }
+        }
+        showSheet(workspaceRoots = listOf(root))
+        ui.onNodeWithTag("workspace-name:0", useUnmergedTree = true).assertTextEquals("/ 我的 项目 🐟 ")
+        ui.onNodeWithTag("workspace-location:0", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithTag("workspace-name:1", useUnmergedTree = true).assertTextEquals("src")
+        ui.onNodeWithTag("workspace-location:1", useUnmergedTree = true).assertTextEquals("/ 我的 项目 🐟  / 客户 / src")
+        node("workspace-edit:1").performClick()
+        node("workspace-current-path").assertTextEquals("/ 我的 项目 🐟 /客户/src")
+        node("workspace-copy-path").performClick()
+        ui.runOnIdle {
+            assertEquals(listOf(child), copiedPaths)
+            assertEquals(listOf(root, child), choices.map { it.path })
+            assertEquals(0, switches)
+            assertEquals(0, saves)
+        }
+    }
+
     fun testDeepPathKeepsRootAndTailAndCopiesExactUnshortenedValue() {
         val leaf = " 项目 '🐟' 空格 "
         val full = original + "/" + (1..16).joinToString("/") { "中间目录-$it" } + "/$leaf/src"
         ui.runOnIdle { choices = listOf(app.daiyu.android.ui.components.WorkspaceItemOption(full)) }
         showSheet()
         ui.onNodeWithTag("workspace-name:0", useUnmergedTree = true).assertTextEquals("src")
-        ui.onNodeWithTag("workspace-location:0", useUnmergedTree = true).assertTextEquals("workspace / … / $leaf / src")
+        ui.onNodeWithTag("workspace-location:0", useUnmergedTree = true).assertTextEquals("/workspace / … / $leaf / src")
         val footer = node("workspace-add").fetchSemanticsNode().boundsInRoot.bottom
         val card = node("workspace-path-card:0").fetchSemanticsNode().boundsInRoot
         val edit = node("workspace-edit:0").fetchSemanticsNode().boundsInRoot
         assertTrue(edit.left >= card.left && edit.right <= card.right)
         node("workspace-edit:0").performClick()
-        node("workspace-current-path").assertTextEquals(full)
+        node("workspace-current-path").assertTextEquals(full.replaceFirst(original, "/workspace"))
         val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
         node("workspace-current-path").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
-        assertEquals(full, layout.layoutInput.text.text)
+        assertEquals(full.replaceFirst(original, "/workspace"), layout.layoutInput.text.text)
         assertFalse(layout.hasVisualOverflow)
         for (line in 0 until layout.lineCount) assertFalse(layout.isLineEllipsized(line))
         node("workspace-copy-path").performClick()
@@ -434,9 +457,9 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("workspace-source:rootfs").assertDoesNotExist()
         node("workspace-folder:项目 空格").performClick()
         node("workspace-parent").assertIsEnabled()
-        node("workspace-current-path").assertTextEquals("$original/项目 空格")
+        node("workspace-current-path").assertTextEquals("/workspace/项目 空格")
         node("workspace-parent").performClick()
-        node("workspace-current-path").assertTextEquals(original)
+        node("workspace-current-path").assertTextEquals("/workspace")
         node("workspace-parent").assertIsNotEnabled()
         ui.runOnIdle { directory = null }
         node("workspace-save").assertIsNotEnabled()
@@ -496,6 +519,7 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
                 ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
                 val actions = resolveAppearanceActions(appearance, dark)
                 assertPickerColorPair(node("workspace-save"), actions.primary, actions.onPrimary)
+                assertPickerColorPair(node("workspace-create-folder"), actions.primary, actions.onPrimary)
                 assertPickerColorPair(node("workspace-cancel"), actions.secondaryContainer, actions.onSecondary)
                 node("workspace-cancel").performTouchInput { click() }
                 node("workspace-path-card:0").assertExists()

@@ -669,6 +669,8 @@ class ChatController internal constructor(private val application:Application,
         entry: app.daiyu.android.workspace.PrivateWorkspaceFiles.Entry, name: String?, cancelled: () -> Boolean) =
         conversationWorkspaces.modifyEntry(source, path, entry, name, cancelled)
 
+    internal fun createWorkspaceDirectoryOnWorker(source: String, path: String, name: String, cancelled: () -> Boolean) =
+        conversationWorkspaces.createDirectory(source, path, name, cancelled)
 
     internal fun saveWorkspaceOnWorker(owner: ConversationId?, expected: String?, source: String, path: String,
         replaceIndex: Int? = null,

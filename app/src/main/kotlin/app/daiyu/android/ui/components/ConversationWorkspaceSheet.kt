@@ -78,6 +78,7 @@ fun ConversationWorkspaceSheet(
     onDeleteWorkspaces: (Set<Int>) -> Unit = {},
     workspaceRoots: List<String> = emptyList(),
     onCopyPath: (String) -> Unit = {},
+    onCreateFolder: () -> Unit = {},
     selectionMode: Boolean = false,
     selectedWorkspaces: Set<Int> = emptySet(),
     onLongPressFile: (String) -> Unit = {},
@@ -176,7 +177,7 @@ fun ConversationWorkspaceSheet(
                             Box(Modifier.weight(1f).heightIn(max = 96.dp)) {
                                 key(fullPath) {
                                     SelectionContainer {
-                                        Text(fullPath, style = MaterialTheme.typography.bodyMedium,
+                                        Text(workspaceDirectoryDisplayPath(fullPath, workspaceRoots), style = MaterialTheme.typography.bodyMedium,
                                             modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                                                 .testTag("workspace-current-path"))
                                     }
@@ -210,6 +211,10 @@ fun ConversationWorkspaceSheet(
                                 modifier = Modifier.padding(vertical = 8.dp).testTag("workspace-error")
                                     .semantics { liveRegion = LiveRegionMode.Polite })
                         }
+                        ConversationAgentButton("新建文件夹", enabled = !busy && !listing && directory?.selectable == true,
+                            primary = true, primaryColor = actions.primary, onPrimaryColor = actions.onPrimary,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).testTag("workspace-create-folder"),
+                            onClick = onCreateFolder)
                         HorizontalDivider(color = colors.line)
                         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             ConversationAgentButton("取消", enabled = !busy, primary = true,

@@ -77,7 +77,8 @@ class LinuxInstallChoiceContract(unittest.TestCase):
                       'primaryContainer = container, onPrimaryContainer = onContainer']:
             self.assertIn(token, theme)
         screen = (SETTINGS / 'LinuxSettingsScreen.kt').read_text()
-        self.assertIn('suppliedChoicePreferences: LinuxInstallChoicePreferences? = null) = LinuxSettingsTheme {', screen)
+        self.assertIn('suppliedChoicePreferences: LinuxInstallChoicePreferences? = null,', screen)
+        self.assertIn('createRootfsDirectory: RootfsDirectoryCreator? = null) = LinuxSettingsTheme {', screen)
         self.assertIn('ButtonDefaults.buttonColorsPrimary()', screen)
         self.assertIn('MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.disabledOnPrimaryButton', screen)
         self.assertIn('import app.daiyu.android.ui.app.DaiyuPalette', theme)

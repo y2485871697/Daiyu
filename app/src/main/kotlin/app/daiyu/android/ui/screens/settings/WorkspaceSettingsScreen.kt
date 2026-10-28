@@ -46,7 +46,8 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     suppliedAccess: WorkspaceFilesAccess? = null, engineeringUi: Boolean = false,
     section: WorkspaceSettingsSection = WorkspaceSettingsSection.ALL, pageTitle: String = "工作区",
     integratedLinux: Boolean = false, rootfs: app.daiyu.android.terminal.LinuxInstallation? = null,
-    onOpenTerminal: (() -> Unit)? = null) {
+    onOpenTerminal: (() -> Unit)? = null, createRootfsDirectory: RootfsDirectoryCreator? = null,
+    ownerCurrent: () -> Boolean = { true }, onFileOccupied: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val access = suppliedAccess ?: remember(context) { WorkspaceFilesAccess(context.applicationContext) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -129,7 +130,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { visit.set(false); invalidateRead(); lifecycle.removeObserver(observer) }
+        onDispose { visit.set(false); onFileOccupied(false); invalidateRead(); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(access) { refresh() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -197,12 +198,19 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     val back: () -> Unit = { if (current()) { visit.set(false); revoking = null; invalidateRead(); onBack() } }
     BackHandler { back() }
     val privatePanel = if (showPrivate) rememberPrivateWorkspacePanel(parentVisit = visit, compact = integratedLinux,
+        ownerCurrent = { ownerCurrent() && fileScope === renderedScope },
         sharedBusy = { busy || pendingTree != null }, onOccupied = {
-            privateOccupied = it
+            privateOccupied = it; onFileOccupied(it)
             if (!it && current() && !loaded) refresh(clearNotice = false)
         }) else null
-    val rootfsPanel = if (integratedLinux && location == LinuxFileLocation.ROOTFS) key(rootfs) { rememberLinuxRootfsPanel(rootfs?.rootfs, parentVisit = visit,
-        sharedBusy = { busy || pendingTree != null }, onOccupied = { privateOccupied = it }) } else null
+    val rootfsPanel = if (integratedLinux && location == LinuxFileLocation.ROOTFS) key(rootfs) {
+        rememberLinuxRootfsPanel(rootfs?.rootfs, parentVisit = visit,
+            ownerCurrent = { ownerCurrent() && fileScope === renderedScope },
+            sharedBusy = { busy || pendingTree != null }, onOccupied = { privateOccupied = it; onFileOccupied(it) },
+            createDirectory = if (rootfs != null && createRootfsDirectory != null) ({ directory, name, cancelled ->
+                createRootfsDirectory(rootfs, directory, name, cancelled)
+            }) else null)
+    } else null
     // Loading must not measure the retained position against a temporarily shorter list.
     SettingsScaffoldPage(title = if (integratedLinux && location == LinuxFileLocation.WORKSPACE) "工作区" else pageTitle,
         onBack = back, modifier = modifier, compactTitle = true,

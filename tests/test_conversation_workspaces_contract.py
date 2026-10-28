@@ -59,7 +59,7 @@ class ConversationWorkspacesContract(unittest.TestCase):
         source = (android / 'ConversationWorkspacesActivityTest.kt').read_text()
         helper = source.split('private fun awaitLoadedDirectory(', 1)[1].split('fun test', 1)[0]
         for token in ('ui.waitUntil(5_000)', 'ui.mainClock.advanceTimeByFrame()',
-                      'hasTestTag("workspace-current-path") and hasText(path)',
+                      'hasTestTag("workspace-current-path") and hasText(displayPath)',
                       'hasTestTag("workspace-save") and isEnabled()',
                       'node("workspace-error").assertDoesNotExist()'):
             self.assertIn(token, helper)

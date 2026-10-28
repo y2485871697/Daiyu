@@ -129,6 +129,21 @@ class LinuxSettingsApplication private constructor(
         }
     }
 
+    internal fun createRootfsDirectoryOnWorker(filesDir: File, installation: LinuxInstallation,
+        directory: app.daiyu.android.workspace.PrivateWorkspaceFiles.Entry, name: String, cancelled: () -> Boolean) {
+        val reference = LinuxGenerationRef(installation.environmentId, installation.generation)
+        pinWorkspaceRootOnWorker(reference).use {
+            val approved = workspaceSnapshot.single {
+                it.first.environmentId == reference.environmentId && it.first.generation == reference.generation
+            }.first
+            check(approved.rootfs == installation.rootfs) { "linux_installation_changed" }
+            val files = app.daiyu.android.workspace.PrivateWorkspaceFiles(
+                app.daiyu.android.workspace.PrivateWorkspacePaths.existingRoot(filesDir, approved.rootfs),
+                allowDirectoryCreation = true)
+            files.createDirectory(directory, name, cancelled)
+        }
+    }
+
     /** Real application teardown only. A settings page must only close its own page handle. */
     override fun close() {
         settings.close()

@@ -28,7 +28,7 @@ internal enum class LinuxSettingsTab { BASIC, FILES }
 internal enum class LinuxFileLocation { WORKSPACE, ROOTFS, SHARED }
 
 @Composable
-internal fun LinuxSettingsTabs(selected: LinuxSettingsTab, onSelect: (LinuxSettingsTab) -> Unit) {
+internal fun LinuxSettingsTabs(selected: LinuxSettingsTab, enabled: Boolean = true, onSelect: (LinuxSettingsTab) -> Unit) {
     val colors = MiuixTheme.colorScheme
     Box(Modifier.fillMaxWidth().background(settingsPageBackground()).horizontalCutoutPadding()
         .testTag("linux-bottom-navigation"), contentAlignment = Alignment.Center) {
@@ -37,7 +37,7 @@ internal fun LinuxSettingsTabs(selected: LinuxSettingsTab, onSelect: (LinuxSetti
                 val active = selected == tab
                 val tint = if (active) colors.onPrimary else colors.onPrimaryContainer
                 Column(Modifier.weight(1f).testTag("linux-tab:${tab.name.lowercase()}")
-                    .selectable(active, role = Role.Tab, onClick = { onSelect(tab) })
+                    .selectable(active, enabled = enabled, role = Role.Tab, onClick = { onSelect(tab) })
                     .heightIn(min = 72.dp).padding(vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {

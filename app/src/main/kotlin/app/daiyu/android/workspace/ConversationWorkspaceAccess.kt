@@ -82,6 +82,16 @@ internal class ConversationWorkspaceAccess(private val context: Context,
         }
     }
 
+    fun createDirectory(sourceId: String, path: String, name: String, cancelled: () -> Boolean) {
+        val selection = ConversationWorkspaceSelection(context.filesDir)
+        val raw = ConversationWorkspaceCodec.encode(selection.binding(sourceId, path))
+        freeze(raw).use { run ->
+            val files = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(context.filesDir, run.resolved.hostDirectory),
+                allowDirectoryCreation = true)
+            files.createDirectory(null, name, cancelled)
+        }
+    }
+
     fun resolve(raw: String?): ResolvedConversationWorkspace {
         val binding = ConversationWorkspaceCodec.decode(raw)
         val approved = (binding as? ConversationWorkspaceBinding.Rootfs)?.let { selected ->

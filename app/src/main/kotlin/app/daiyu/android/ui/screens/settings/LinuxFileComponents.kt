@@ -28,7 +28,8 @@ internal fun LinuxFileEntryCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-internal fun LinuxFileDirectoryHeader(path: String, parentTag: String, onParent: (() -> Unit)?) {
+internal fun LinuxFileDirectoryHeader(path: String, parentTag: String, onParent: (() -> Unit)?,
+    createTag: String = "", onCreate: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 24.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         IconButton(onClick = { onParent?.invoke() }, enabled = onParent != null,
@@ -36,9 +37,13 @@ internal fun LinuxFileDirectoryHeader(path: String, parentTag: String, onParent:
             DaiyuIcon(DaiyuIcons.Back, "上级目录", size = 22.dp,
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = if (onParent != null) 1f else .4f))
         }
-        Text(path.ifEmpty { "/" }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        Text(path.ifEmpty { "/" }, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 20.sp),
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        if (createTag.isNotEmpty()) IconButton(onClick = { onCreate?.invoke() }, enabled = onCreate != null,
+            modifier = Modifier.size(48.dp).testTag(createTag)) {
+            DaiyuIcon(DaiyuIcons.Add, "新建文件夹", size = 22.dp, tint = MiuixTheme.colorScheme.primary)
+        }
     }
 }
 

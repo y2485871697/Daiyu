@@ -36,7 +36,8 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     onBack: () -> Unit, modifier: Modifier = Modifier, host: TerminalEnvironmentHost? = null,
     runningModeStore: RunningModeStore = AndroidRunningModeStore.get(LocalContext.current),
     filesOnly: Boolean = false, onOpenTerminal: (() -> Unit)? = null,
-    suppliedChoicePreferences: LinuxInstallChoicePreferences? = null) = LinuxSettingsTheme {
+    suppliedChoicePreferences: LinuxInstallChoicePreferences? = null,
+    createRootfsDirectory: RootfsDirectoryCreator? = null) = LinuxSettingsTheme {
     val runningMode by runningModeStore.mode.collectAsState()
     val rootMode = runningMode == RunningMode.ROOT
     val state by page.state.collectAsState()
@@ -68,6 +69,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
     var tab by remember(page, filesOnly) { mutableStateOf(if (filesOnly) LinuxSettingsTab.FILES else LinuxSettingsTab.BASIC) }
     var tabScope by remember(page) { mutableStateOf(Any()) }
     val renderedTabScope = tabScope
+    var fileOperationBusy by remember(page) { mutableStateOf(false) }
     fun basicCurrent() = !filesOnly && tab == LinuxSettingsTab.BASIC && tabScope === renderedTabScope && !page.state.value.revoked
     val choiceScope = remember(page, runningMode, installChoice) { Any() }
     val currentChoiceScope = rememberUpdatedState(choiceScope)
@@ -123,7 +125,9 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
         Box(Modifier.weight(1f)) {
             if (tab == LinuxSettingsTab.FILES) {
                 WorkspaceSettingsScreen(onBack = leave, pageTitle = if (filesOnly) "工作区" else "Linux 工具环境", integratedLinux = true,
-                    rootfs = rootfs, onOpenTerminal = onOpenTerminal)
+                    rootfs = rootfs, onOpenTerminal = onOpenTerminal, createRootfsDirectory = createRootfsDirectory,
+                    ownerCurrent = { !page.state.value.revoked && tabScope === renderedTabScope },
+                    onFileOccupied = { fileOperationBusy = it })
             } else SettingsScaffoldPage("Linux 工具环境", leave, compactTitle = true, actions = {
                 if (onOpenTerminal != null) {
                     val openTerminal: () -> Unit = { if (basicCurrent()) onOpenTerminal() }
@@ -237,8 +241,8 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
                 }
             }
         }
-        if (!filesOnly) LinuxSettingsTabs(tab) {
-            if (tabScope === renderedTabScope && tab != it) {
+        if (!filesOnly) LinuxSettingsTabs(tab, enabled = !fileOperationBusy) {
+            if (tabScope === renderedTabScope && tab != it && !fileOperationBusy) {
                 tabScope = Any(); installRequest = null; awaitingInstallPreparation = false; confirmPending = false; tab = it
             }
         }

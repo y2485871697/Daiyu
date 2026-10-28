@@ -16,6 +16,12 @@ class WorkspacePathDisplayContract(unittest.TestCase):
         for forbidden in ['java.io', 'java.nio', '.trim(', '.canonical', 'substringAfterLast("workspace")']:
             self.assertNotIn(forbidden, display)
 
+    def test_display_prefix_uses_actual_root_name_instead_of_fixed_workspace_alias(self):
+        display = (BASE / 'ui/components/WorkspacePathPresentation.kt').read_text()
+        self.assertNotIn('"/workspace"', display)
+        self.assertIn("root.substringAfterLast('/')", display)
+        self.assertIn('path.removePrefix(root)', display)
+
     def test_card_has_one_line_name_and_relative_location(self):
         sheet = (BASE / 'ui/components/ConversationWorkspaceSheet.kt').read_text()
         card = sheet.split('val display = workspacePathPresentation', 1)[1].split('if (selecting)', 1)[0]
@@ -26,13 +32,13 @@ class WorkspacePathDisplayContract(unittest.TestCase):
         self.assertIn('TextOverflow.MiddleEllipsis', card)
         self.assertNotIn('Text(workspace.path,', sheet)
 
-    def test_directory_keeps_full_scrollable_selectable_path_and_copy_callback(self):
+    def test_directory_shows_virtual_scrollable_path_and_keeps_real_copy_callback(self):
         sheet = (BASE / 'ui/components/ConversationWorkspaceSheet.kt').read_text()
         header = sheet.split('val fullPath = directory?.path ?: path', 1)[1].split('HorizontalDivider', 1)[0]
         self.assertIn('SelectionContainer', header)
         self.assertIn('heightIn(max = 96.dp)', header)
         self.assertIn('verticalScroll(rememberScrollState())', header)
-        self.assertIn('Text(fullPath', header)
+        self.assertIn('Text(workspaceDirectoryDisplayPath(fullPath, workspaceRoots)', header)
         self.assertNotIn('maxLines', header)
         self.assertIn('onCopyPath(fullPath)', header)
         self.assertIn('enabled = !busy && !listing', header)

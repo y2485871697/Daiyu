@@ -66,4 +66,61 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
             assertTrue(sub.isDirectory)
         } finally { gate.set(false); ui.waitForIdle(); root.deleteRecursively() }
     }
+
+    fun testCompactPrivateCreateCancelConfirmAndRetainedConfirmExpire() {
+        val storage = File(instrumentation.targetContext.cacheDir, "create-panel-${UUID.randomUUID()}").apply { mkdir() }
+        val paths = PrivateWorkspacePaths(storage)
+        val root = paths.ensureRoot()
+        val access = PrivateWorkspaceFiles(paths)
+        val gate = AtomicBoolean(true)
+        val ownerActive = AtomicBoolean(true)
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
+                val panel = rememberPrivateWorkspacePanel(access, gate, compact = true, ownerCurrent = ownerActive::get)
+                MiuixScaffoldPage("创建目录测试", onBack = { gate.set(false) }) { item { panel() } }
+            } } }
+            awaitUniqueTag("workspace-private-create-folder")
+            node("workspace-private-create-folder").assertIsEnabled().performClick()
+            awaitUniqueTag("prompt-input")
+            node("prompt-input").performTextReplacement("cancelled")
+            node("dialog-cancel").performClick()
+            assertFalse(File(root, "cancelled").exists())
+            node("workspace-private-create-folder").performClick()
+            awaitUniqueTag("prompt-input")
+            node("prompt-input").performTextReplacement("新建 文件夹")
+            node("dialog-confirm").performClick()
+            ui.waitUntil(5_000) { File(root, "新建 文件夹").isDirectory }
+            awaitUniqueTag("workspace-private-entry:新建 文件夹")
+            node("workspace-private-create-folder").performClick()
+            awaitUniqueTag("prompt-input")
+            node("prompt-input").performTextReplacement("stale")
+            val retained = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            mainThread { ownerActive.set(false); retained() }
+            assertTrue(gate.get())
+            assertFalse(File(root, "stale").exists())
+        } finally { gate.set(false); mainThread { activity.setContent {} }; ui.waitForIdle(); storage.deleteRecursively() }
+    }
+
+    fun testRootfsPathPlusUsesSameDialogAndRefreshesWithoutImportOrDelete() {
+        val storage = File(instrumentation.targetContext.filesDir, "rootfs-create-${UUID.randomUUID()}").apply { mkdir() }
+        val gate = AtomicBoolean(true)
+        val access = PrivateWorkspaceFiles(PrivateWorkspacePaths.existingRoot(instrumentation.targetContext.filesDir, storage),
+            allowDirectoryCreation = true)
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
+                val panel = app.daiyu.android.ui.screens.settings.rememberLinuxRootfsPanel(storage, parentVisit = gate,
+                    createDirectory = { directory, name, cancelled -> access.createDirectory(directory, name, cancelled) })
+                MiuixScaffoldPage("Rootfs创建测试", onBack = { gate.set(false) }) { item { panel() } }
+            } } }
+            awaitUniqueTag("linux-rootfs-create-folder")
+            node("linux-rootfs-create-folder").assertIsEnabled().performClick()
+            awaitUniqueTag("prompt-input")
+            node("prompt-input").performTextReplacement("new-rootfs-directory")
+            node("dialog-confirm").performClick()
+            ui.waitUntil(5_000) { File(storage, "new-rootfs-directory").isDirectory }
+            awaitUniqueTag("linux-rootfs-entry:new-rootfs-directory")
+            node("workspace-private-import").assertDoesNotExist()
+            assertTrue(gate.get())
+        } finally { gate.set(false); mainThread { activity.setContent {} }; ui.waitForIdle(); storage.deleteRecursively() }
+    }
 }

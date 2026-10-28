@@ -3029,7 +3029,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     is MessageActionResult.Branch -> select(outcome.conversation)
-                    MessageActionResult.Deleted -> { clearInlineMessageEditor(); shown.clear(); refresh() }
+                    MessageActionResult.Deleted -> { clearInlineMessageEditor(); refresh() }
                     is MessageActionResult.Regenerated -> {
                         if (outcome.outcome == RegenerationSendOutcome.ACCEPTED) {
                             clearInlineMessageEditor()
@@ -3041,7 +3041,7 @@ class MainActivity : ComponentActivity() {
                             RegenerationSendOutcome.ACCEPTED -> Unit
                             RegenerationSendOutcome.NOT_SENT -> toast(controller.problem ?: "本次未发送；原消息、摘要及草稿保留")
                             RegenerationSendOutcome.UNKNOWN -> {
-                                shown.clear(); refresh()
+                                refreshMessageActionHistory()
                                 toast("重新生成保存结果未确认；请核实历史，不会自动重发")
                             }
                         }
@@ -3061,7 +3061,7 @@ class MainActivity : ComponentActivity() {
                     }
                     is MessageActionResult.Unknown -> {
                         retainUncertainMessageEdit()
-                        shown.clear(); refresh(); refreshUnknownBranchOutcome(); toast(outcome.reason)
+                        refreshMessageActionHistory(); refreshUnknownBranchOutcome(); toast(outcome.reason)
                     }
                 }
             } })
@@ -5190,10 +5190,16 @@ class MainActivity : ComponentActivity() {
     private var refreshHistoryLoading = false
     private var refreshHistoryPending = false
     private var refreshHistoryRequestSerial = 0L
+    private var refreshHistoryTailConversation: ConversationId? = null
     private var loadedWindowReader: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = ::readLoadedWindow
 
     private fun loadedHistoryOwner(id: ConversationId) = controller.active?.takeIf { it.conversationId == id }
         ?.let { Triple(it.conversationId, it.id, it.runId) }
+
+    private fun refreshMessageActionHistory() {
+        refreshHistoryTailConversation = selected?.id
+        refresh()
+    }
 
     private fun loadRefreshedHistory(conversation: Conversation) {
         refreshHistoryPending = true
@@ -5211,6 +5217,7 @@ class MainActivity : ComponentActivity() {
         val first = shown.firstOrNull()?.first
         val last = shown.lastOrNull()?.first
         val count = shown.size
+        val reloadTail = refreshHistoryTailConversation == id
         val newOwner = owner != null && shown.none {
             Triple(it.second.conversationId, it.second.id, it.second.runId) == owner
         }
@@ -5219,7 +5226,8 @@ class MainActivity : ComponentActivity() {
             try {
                 val rows = try {
                     withContext(Dispatchers.IO) {
-                        read(id, if (newOwner || last == null) Long.MAX_VALUE else last + 1,
+                        if (reloadTail) readAcceptedWindow(id, first)
+                        else read(id, if (newOwner || last == null) Long.MAX_VALUE else last + 1,
                             if (count == 0) 50 else count + if (newOwner) 2 else 0)
                             .filter { first == null || it.first >= first }
                     }
@@ -5236,6 +5244,7 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
                 if (rows == null) { toast("历史读取失败；原数据保留"); return@launch }
+                if (reloadTail) refreshHistoryTailConversation = null
                 val active = controller.active?.takeIf { it.conversationId == id }
                 val currentOwner = loadedHistoryOwner(id)
                 shown = rows.map { entry ->

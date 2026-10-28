@@ -204,13 +204,12 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
         assertEquals(listOf(0, 0, 0), listOf(dismisses, renames, deletes))
     }
 
-    fun testHeaderUsesReferenceAccentColorsInLightDarkAndCustomThemes() {
-        for (dark in listOf(false, true)) for (custom in listOf(false, true)) {
+    fun testHeaderUsesReferenceAccentColorsInLightDarkAndPureBlackThemes() {
+        for (dark in listOf(false, true)) for (pureBlack in listOf(false, true)) {
             installClosed(AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                paletteSeedColor = if (custom) 0xffe8e1d5.toInt() else null,
-                primaryAccentColor = if (custom) 0xff356b52.toInt() else null,
-                secondaryAccentColor = if (custom) 0xff98612c.toInt() else null,
+                pureBlackEnabled = pureBlack,
+
             ))
             ui.runOnIdle { open = true }
             ui.waitForIdle()

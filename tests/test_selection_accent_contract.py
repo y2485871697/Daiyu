@@ -8,11 +8,11 @@ def source(name): return (SRC / name).read_text()
 class SelectionAccentContractTest(unittest.TestCase):
     def test_existing_foreground_is_single_source_not_material_primary(self):
         appearance = source('ui/app/AppearanceColors.kt')
-        self.assertIn('appearance.resolvedPrimaryAccent ?: Color(if (dark) 0xFFC6B6D5 else 0xFF82718F)', appearance)
-        self.assertIn('resolveSelectionAccent(LocalAppearanceSettings.current, LocalAppearanceDark.current)', source('ui/app/DaiyuPalette.kt'))
+        self.assertIn('Color(if (dark) 0xFFC6B6D5 else 0xFF82718F)', appearance)
+        self.assertIn('resolveSelectionAccent(LocalAppearanceDark.current)', source('ui/app/DaiyuPalette.kt'))
         usage = source('ui/components/UsagePresentation.kt')
-        self.assertIn('val accent = resolveSelectionAccent(appearance, dark)', usage)
-        self.assertIn('val primary = resolveSelectionAccent(appearance, dark)', usage)
+        self.assertIn('val accent = resolveSelectionAccent(dark)', usage)
+        self.assertIn('val primary = resolveSelectionAccent(dark)', usage)
 
     def test_material_defaults_only_override_enabled_selected_color(self):
         controls = source('ui/haptics/material/HapticMaterialControls.kt')

@@ -15,8 +15,16 @@ class CloudContextUsageTest {
     @Test fun unknownAndOutputOnlyDoNotFabricateAZeroPercent() {
         assertNull(acceptedContextInput(ModelEvent.Usage(null, 123), 128_000))
         assertNull(CloudContextUsageUi().fraction)
-        assertEquals("未知 上下文", CloudContextUsageUi().label(Locale.US))
+        assertEquals("上下文", CloudContextUsageUi().label(Locale.US))
         assertNull(CloudContextUsageUi(40_000).fraction)
+    }
+    @Test fun missingInputOrInvalidWindowShowsOnlyContextWithoutInventingAZero() {
+        for (value in listOf(CloudContextUsageUi(), CloudContextUsageUi(null, 272_000),
+            CloudContextUsageUi(-1, 272_000), CloudContextUsageUi(40_000),
+            CloudContextUsageUi(40_000, 0), CloudContextUsageUi(40_000, -1), CloudContextUsageUi(0))) {
+            assertNull(value.fraction)
+            assertEquals("上下文", value.label(Locale.US))
+        }
     }
     @Test fun zeroIsKnownAndRoundTripsToBothDisplayModes() {
         val input = acceptedContextInput(ModelEvent.Usage(0, 123), 272_000)

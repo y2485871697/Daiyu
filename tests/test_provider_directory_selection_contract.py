@@ -57,7 +57,7 @@ class ProviderDirectorySelectionContractTest(unittest.TestCase):
         footer = page.split("if (selectedSlots != null) WidePageContent(fillHeight = false)", 1)[1].split("internal fun ProviderAuthenticationPage", 1)[0]
         self.assertLess(footer.index('text = "取消"'), footer.index('text = "删除"'))
         cancel, delete = footer.split('TextButton(text = "取消"', 1)[1].split('TextButton(text = "删除"', 1)
-        self.assertIn('resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)', footer)
+        self.assertIn('resolveAppearanceActions(LocalAppearanceDark.current)', footer)
         self.assertIn('color = accents.secondaryContainer', cancel)
         self.assertIn('textColor = accents.onSecondary', cancel)
         self.assertIn('onClick = onCancelSelection', cancel)

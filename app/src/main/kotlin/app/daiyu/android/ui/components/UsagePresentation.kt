@@ -2,12 +2,8 @@ package app.daiyu.android.ui.components
 
 import app.daiyu.android.ui.app.resolveSelectionAccent
 import app.daiyu.android.ui.app.resolveAppearanceActions
-import app.daiyu.android.ui.app.resolveAppearanceColors
 import app.daiyu.android.ui.app.LocalAppearanceDark
-import app.daiyu.android.data.model.AppearanceSettings
-import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.readableAccent
-import app.daiyu.android.ui.app.styleColor
 
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -35,32 +31,27 @@ import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Text
 
 /** Local usage/context presentation only. Never installs a theme above settings. */
-internal data class UsagePalette(val dark: Boolean, val appearance: AppearanceSettings = AppearanceSettings()) {
-    private val customSurface = appearance.paletteSeedColor != null
-    private val theme = resolveAppearanceColors(appearance, dark)
-    private val actions = resolveAppearanceActions(appearance, dark)
-    val primary = resolveSelectionAccent(appearance, dark)
+internal data class UsagePalette(val dark: Boolean) {
+    private val actions = resolveAppearanceActions(dark)
+    val primary = resolveSelectionAccent(dark)
     val onPrimary = Color(if (dark) 0xff211735 else 0xffffffff)
-    val selectionContainer = if (appearance.primaryAccentColor != null) theme.primaryContainer
-        else if (customSurface) theme.surfaceContainerHigh else appearance.styleColor(Color(if (dark) 0xff28262f else 0xffefedfb))
-    val selectionContent = if (appearance.primaryAccentColor != null) theme.onPrimaryContainer
-        else Color(if (dark) 0xffc6b6d5 else 0xff82718f)
-    val secondaryContainer get() = if (appearance.secondaryAccentColor != null) actions.secondaryContainer else bubble
-    val onSecondaryContainer get() = appearance.secondaryAccentColor?.let(::Color)
-        ?: readableAccent(actions.secondary, dark, Color(if (dark) 0xff28262f else 0xfff1eff3))
+    val selectionContainer = Color(if (dark) 0xff28262f else 0xffefedfb)
+    val selectionContent = Color(if (dark) 0xffc6b6d5 else 0xff82718f)
+    val secondaryContainer get() = bubble
+    val onSecondaryContainer get() = readableAccent(actions.secondary, dark, Color(if (dark) 0xff28262f else 0xfff1eff3))
     val text = Color(if (dark) 0xffe0dce8 else 0xff36333f)
     val muted = Color(if (dark) 0xff918997 else 0xff968b9f)
-    val accent = resolveSelectionAccent(appearance, dark)
+    val accent = resolveSelectionAccent(dark)
     val toolbar = Color(if (dark) 0xffb2a9c7 else 0xff716a82)
-    val line = if (customSurface) theme.dividerLine else appearance.styleColor(Color(if (dark) 0xff393540 else 0xffe6e1e8))
-    val bubble = if (customSurface) theme.surfaceContainer else appearance.styleColor(Color(if (dark) 0xff28262f else 0xfff1eff3))
-    val background = if (customSurface) theme.surface else appearance.styleColor(Color(if (dark) 0xff101218 else 0xffffffff))
-    val sheet = if (customSurface) listOf(theme.surface, theme.surface) else listOf(Color(if (dark) 0xf22e283b else 0xf0ffffff), Color(if (dark) 0xf21b1825 else 0xf0f8f4ff)).map(appearance::styleColor)
-    val edge = if (customSurface) theme.outline else appearance.styleColor(Color(if (dark) 0x26dccdff else 0xedffffff))
+    val line = Color(if (dark) 0xff393540 else 0xffe6e1e8)
+    val bubble = Color(if (dark) 0xff28262f else 0xfff1eff3)
+    val background = Color(if (dark) 0xff101218 else 0xffffffff)
+    val sheet = listOf(Color(if (dark) 0xf22e283b else 0xf0ffffff), Color(if (dark) 0xf21b1825 else 0xf0f8f4ff))
+    val edge = Color(if (dark) 0x26dccdff else 0xedffffff)
 }
 
 @Composable
-internal fun usagePalette() = UsagePalette(LocalAppearanceDark.current, LocalAppearanceSettings.current)
+internal fun usagePalette() = UsagePalette(LocalAppearanceDark.current)
 
 @Composable
 internal fun UsageGlassDialog(

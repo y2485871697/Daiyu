@@ -126,8 +126,7 @@ class MessageConfirmationActivityTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) {
             val appearance = AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                paletteSeedColor = 0xFF29445B.toInt(), primaryAccentColor = 0xFF3167A3.toInt(),
-                secondaryAccentColor = 0xFF946922.toInt(),
+
             )
             mainThread { activity.setContent {
                 AgentAppTheme(appearance, applyInterfaceScale = false) {
@@ -139,7 +138,7 @@ class MessageConfirmationActivityTest : WiredActivityTestCase() {
             awaitUniqueTag("chat-selection-sheet")
             awaitNodeWindowFocus(node("chat-selection-sheet"))
             assertActions()
-            val actions = resolveAppearanceActions(appearance, dark)
+            val actions = resolveAppearanceActions(dark)
             assertButtonColors("dialog-confirm", actions.primary, actions.onPrimary)
             assertButtonColors("dialog-cancel", actions.secondaryContainer, actions.onSecondary)
         }

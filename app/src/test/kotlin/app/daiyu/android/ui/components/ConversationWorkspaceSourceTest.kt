@@ -20,7 +20,7 @@ class ConversationWorkspaceSourceTest {
         assertTrue(source.contains("onSelectWorkspace(index)"))
         assertTrue(source.contains("onSelectionChange(true"))
         assertTrue(source.contains("LazyColumn"))
-        assertTrue(source.contains("resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)"))
+        assertTrue(source.contains("resolveAppearanceActions(LocalAppearanceDark.current)"))
         assertFalse(source.contains("testTag(\"workspace-close\")"))
         assertFalse(source.contains("Icons.Rounded.Close"))
         assertFalse(source.contains("MiuixTheme.colorScheme"))

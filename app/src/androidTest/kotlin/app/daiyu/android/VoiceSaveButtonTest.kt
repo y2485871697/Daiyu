@@ -16,8 +16,8 @@ import app.daiyu.android.ui.app.resolveAppearanceActions
 
 class VoiceSaveButtonTest : WiredActivityTestCase() {
     fun testBothSaveButtonsFollowCurrentThemeAndKeepTheSameGeometry() {
-        for (dark in listOf(false, true)) for (accent in listOf(0xFF236D58.toInt(), 0xFFAD4168.toInt())) {
-            val appearance = AppearanceSettings(primaryAccentColor = accent,
+        for (dark in listOf(false, true)) {
+            val appearance = AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT)
             mainThread {
                 activity.setContent {
@@ -30,7 +30,7 @@ class VoiceSaveButtonTest : WiredActivityTestCase() {
                 }
             }
             awaitUniqueTag("quota-save")
-            val expected = resolveAppearanceActions(appearance, dark).primary
+            val expected = resolveAppearanceActions(dark).primary
             val account = node("account-save").fetchSemanticsNode().boundsInRoot
             val quota = node("quota-save").fetchSemanticsNode().boundsInRoot
             assertEquals(account.width, quota.width, 1f)

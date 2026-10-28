@@ -23,14 +23,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.media.video.MessageVideoReference
 import app.daiyu.android.ui.app.LocalAppearanceDark
-import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.resolveAppearanceActions
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun ComposerCancelEdit(enabled: Boolean, onCancel: () -> Unit) {
-    val colors = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)
+    val colors = resolveAppearanceActions(LocalAppearanceDark.current)
     Box(
         Modifier.widthIn(min = 72.dp).heightIn(min = 40.dp)
             .testTag("message-edit-cancel")

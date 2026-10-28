@@ -29,6 +29,8 @@ internal class ActivityRemoteVoiceHost(
     // Published only after the owned Android capture has actually started, never on a tap/connect.
     private val mutableListeningTarget = MutableStateFlow<DictationDraftTarget?>(null)
     val listeningTarget = mutableListeningTarget.asStateFlow()
+    private val mutablePreview = MutableStateFlow<Pair<DictationDraftTarget, String>?>(null)
+    val preview = mutablePreview.asStateFlow()
     private var attempt: Attempt? = null
     internal val dictationTarget: DictationDraftTarget? get() = attempt?.target
     private var duplex: DoubaoDuplexSession? = null
@@ -102,6 +104,7 @@ internal class ActivityRemoteVoiceHost(
         }
     }
     fun invalidate() {
+        mutablePreview.value = null
         mutableListeningTarget.value = null // Fence before cancelling/draining old callbacks.
         mutable.value = ""
         epoch++
@@ -156,6 +159,7 @@ internal class ActivityRemoteVoiceHost(
                                             withContext(Dispatchers.Main.immediate) {
                                                 check(current())
                                                 mutable.value = "豆包听写：${result.text}"
+                                                if (!result.final) mutablePreview.value = target to result.text
                                                 if (result.final) {
                                                     complete()
                                                     // complete() fences audio/callbacks first. Its ended flag must not
@@ -201,6 +205,7 @@ internal class ActivityRemoteVoiceHost(
             if (ended) return
             input.end()
             if (attempt === this) {
+                mutablePreview.value = null
                 mutableListeningTarget.value = null
                 attempt = null
             }

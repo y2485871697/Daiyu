@@ -7,7 +7,7 @@ def source(path): return (SRC / path).read_text()
 
 class DeletionOriginalRedContractTest(unittest.TestCase):
     def test_delete_role_is_original_reference_red_and_independent_of_the_theme(self):
-        resolver = source('ui/app/AppearanceColors.kt').split('internal fun destructiveColors()', 1)[1].split('internal data class UserBubbleColors', 1)[0]
+        resolver = source('ui/app/AppearanceColors.kt').split('internal fun destructiveColors()', 1)[1]
         self.assertIn('Color(0xFF92454F)', resolver)
         self.assertIn('DestructiveColors(red, Color.White, red)', resolver)
         for forbidden in ('DaiyuPalette', 'primaryAccentColor', 'secondaryAccentColor', 'paletteSeedColor'):

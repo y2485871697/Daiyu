@@ -50,10 +50,10 @@ class UsageCompactPresentationTest : WiredActivityTestCase() {
     }
 
     fun testTotalUsesPreviewNeutralColorWithoutChangingMetricTypographyOrAccent() {
-        for (dark in listOf(false, true)) for (customAccent in listOf<Int?>(null, 0xFF25836F.toInt())) {
+        for (dark in listOf(false, true)) for (pureBlack in listOf(false, true)) {
             val appearance = AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                primaryAccentColor = customAccent,
+                pureBlackEnabled = pureBlack,
             )
             mainThread { activity.setContent {
                 AgentAppTheme(appearance, applyInterfaceScale = false) {
@@ -76,7 +76,7 @@ class UsageCompactPresentationTest : WiredActivityTestCase() {
             assertEquals(16.sp, total.fontSize)
             assertEquals(22.sp, total.lineHeight)
             assertEquals(FontWeight.SemiBold, total.fontWeight)
-            val accent = app.daiyu.android.ui.app.resolveSelectionAccent(appearance, dark)
+            val accent = app.daiyu.android.ui.app.resolveSelectionAccent(dark)
             for (value in listOf("65", "20")) {
                 val row = measured(value).layoutInput.style
                 assertEquals(accent, row.color)

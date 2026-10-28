@@ -1,71 +1,33 @@
 package app.daiyu.android.data.model
 
-
 const val MIN_INTERFACE_SCALE = 0.8f
 const val MAX_INTERFACE_SCALE = 1.1f
 const val DEFAULT_INTERFACE_SCALE = 1f
 
 data class AppearanceSettings(
     val themeMode: AppearanceThemeMode = AppearanceThemeMode.LIGHT,
-    // Keep legacy keys readable while custom colors use independent optional overrides.
-    val monetEnabled: Boolean = false,
-    val paletteStyle: AppearancePaletteStyle = AppearancePaletteStyle.NEUTRAL,
-    val accentColor: AppearanceAccentColor = AppearanceAccentColor.SYSTEM,
     val pureBlackEnabled: Boolean = false,
     val blurEnabled: Boolean = true,
     val topBarBlurStyle: AppearanceTopBarBlurStyle = AppearanceTopBarBlurStyle.GAUSSIAN,
     val swipeDismissEnabled: Boolean = true,
     val predictiveBackEnabled: Boolean = false,
     val interfaceScale: Float = DEFAULT_INTERFACE_SCALE,
-    val morphLoadingIndicator: Boolean = true,
-    val morphLoadingBeforeResponseOnly: Boolean = false,
     val messageTimestampsEnabled: Boolean = false,
     val iconLightColor: Int = DEFAULT_ICON_LIGHT,
     val iconDarkColor: Int = DEFAULT_ICON_DARK,
     val iconCatColor: Int = DEFAULT_ICON_CAT,
-    val paletteSeedColor: Int? = null,
-    val primaryAccentColor: Int? = null,
-    val secondaryAccentColor: Int? = null,
-    val userBubbleMode: UserBubbleMode = UserBubbleMode.THEME,
-    val userBubbleColor: Int? = null,
 ) {
     fun normalized(): AppearanceSettings = copy(
         interfaceScale = normalizeInterfaceScale(interfaceScale),
-        paletteSeedColor = paletteSeedColor?.or(0xFF000000.toInt()),
-        primaryAccentColor = primaryAccentColor?.or(0xFF000000.toInt()),
-        secondaryAccentColor = secondaryAccentColor?.or(0xFF000000.toInt()),
-        userBubbleColor = userBubbleColor?.or(0xFF000000.toInt()),
         iconLightColor = iconLightColor or 0xFF000000.toInt(),
         iconDarkColor = iconDarkColor or 0xFF000000.toInt(),
         iconCatColor = iconCatColor or 0xFF000000.toInt(),
-    )
-
-    fun withColorStyle(source: AppearanceSettings) = copy(
-        paletteStyle = source.paletteStyle, paletteSeedColor = source.paletteSeedColor,
-    )
-
-    fun withAccentColors(source: AppearanceSettings) = copy(
-        accentColor = source.accentColor, primaryAccentColor = source.primaryAccentColor,
-        secondaryAccentColor = source.secondaryAccentColor,
-    )
-
-    fun withUserBubbleColors(source: AppearanceSettings) = copy(
-        userBubbleMode = source.userBubbleMode, userBubbleColor = source.userBubbleColor,
     )
 
     companion object {
         const val DEFAULT_ICON_LIGHT = 0xFFFFFFFF.toInt()
         const val DEFAULT_ICON_DARK = 0xFF1C1C1E.toInt()
         const val DEFAULT_ICON_CAT = 0xFF2491FF.toInt()
-    }
-}
-
-enum class UserBubbleMode(val persistedValue: String) {
-    OFF("off"), THEME("theme"), CUSTOM("custom");
-
-    companion object {
-        fun fromPersistedValue(value: String?): UserBubbleMode =
-            entries.firstOrNull { it.persistedValue == value } ?: THEME
     }
 }
 
@@ -77,40 +39,6 @@ enum class AppearanceThemeMode(val persistedValue: String) {
     companion object {
         fun fromPersistedValue(value: String?): AppearanceThemeMode =
             entries.firstOrNull { it.persistedValue == value } ?: LIGHT
-    }
-}
-
-enum class AppearancePaletteStyle(val persistedValue: String) {
-    TONAL_SPOT("tonal_spot"),
-    NEUTRAL("neutral"),
-    VIBRANT("vibrant"),
-    EXPRESSIVE("expressive"),
-    RAINBOW("rainbow"),
-    FRUIT_SALAD("fruit_salad"),
-    MONOCHROME("monochrome"),
-    FIDELITY("fidelity"),
-    CONTENT("content");
-
-    companion object {
-        fun fromPersistedValue(value: String?): AppearancePaletteStyle =
-            entries.firstOrNull { it.persistedValue == value } ?: NEUTRAL
-    }
-}
-
-enum class AppearanceAccentColor(val persistedValue: String) {
-    SYSTEM("system"),
-    BLUE("blue"),
-    PURPLE("purple"),
-    PINK("pink"),
-    RED("red"),
-    ORANGE("orange"),
-    YELLOW("yellow"),
-    GREEN("green"),
-    TEAL("teal");
-
-    companion object {
-        fun fromPersistedValue(value: String?): AppearanceAccentColor =
-            entries.firstOrNull { it.persistedValue == value } ?: SYSTEM
     }
 }
 

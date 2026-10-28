@@ -48,7 +48,7 @@ class WorkspacePickerContract(unittest.TestCase):
 
     def test_both_pages_hide_close_and_preserve_saved_accent_roles(self):
         sheet = self.text('ui/components/ConversationWorkspaceSheet.kt')
-        self.assertIn('resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)', sheet)
+        self.assertIn('resolveAppearanceActions(LocalAppearanceDark.current)', sheet)
         self.assertNotIn('MiuixTheme.colorScheme', sheet)
         self.assertNotIn('testTag("workspace-close")', sheet)
         self.assertNotIn('Icons.Rounded.Close', sheet)

@@ -108,17 +108,16 @@ class VoicePersonalVisualActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testAddButtonUsesDonePaletteForDefaultAndCustomAccentsWithoutChangingItsAction() {
+    fun testAddButtonUsesDonePaletteForDefaultThemesWithoutChangingItsAction() {
         val clicks = AtomicInteger()
-        for (dark in listOf(false, true)) for (accent in listOf(null, 0xFF005B4F.toInt(), 0xFFFFFFFF.toInt(), 0xFF000000.toInt())) {
+        for (dark in listOf(false, true)) {
             var expected = Color.Unspecified
             var expectedIcon = Color.Unspecified
             var density = 1f
             val visit = Any()
             mainThread { activity.setContent {
                 key(visit) {
-                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                        primaryAccentColor = accent), applyInterfaceScale = false) {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                         val colors = assistantPreviewPalette()
                         expected = colors.primary
                         expectedIcon = colors.onPrimary

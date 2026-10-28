@@ -115,11 +115,11 @@ class ModelPickerBalanceContract(unittest.TestCase):
         self.assertIn('background(if (selected) colors.accent else Color.Transparent)', picker)
         usage = source('ui/components/UsagePresentation.kt')
         collaboration = source('ui/screens/assistants/AssistantPreviewComponents.kt')
-        self.assertIn('val accent = resolveSelectionAccent(appearance, dark)', usage)
+        self.assertIn('val accent = resolveSelectionAccent(dark)', usage)
         selection_accent = source('ui/app/AppearanceColors.kt').split(
             'internal fun resolveSelectionAccent(', 1)[1].split('\ninternal fun ', 1)[0]
         def accent_values(text):
-            line = next(line for line in text.splitlines() if 'appearance.resolvedPrimaryAccent ?:' in line).rsplit('?:', 1)[1]
+            line = next(line for line in text.splitlines() if '0xFFC6B6D5' in line or '0xffc6b6d5' in line)
             return [value.lower() for value in re.findall(r'0[xX][0-9a-fA-F]{8}', line)]
         self.assertEqual(accent_values(selection_accent), accent_values(collaboration))
         self.assertEqual(['0xffc6b6d5', '0xff82718f'], accent_values(selection_accent))

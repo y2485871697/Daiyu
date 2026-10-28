@@ -6,13 +6,13 @@ import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 
-/** Default lavender and charcoal surfaces; custom colors resolve above these tokens. */
+/** Default lavender and charcoal surfaces. */
 internal object DaiyuPalette {
     val selectionAccent: Color
-        @Composable get() = resolveSelectionAccent(LocalAppearanceSettings.current, LocalAppearanceDark.current)
+        @Composable get() = resolveSelectionAccent(LocalAppearanceDark.current)
 
     val switchTrack: Color
-        @Composable get() = LocalAppearanceSettings.current.resolvedPrimaryAccent ?: Color(0xFF82728F)
+        @Composable get() = Color(0xFF82728F)
 
     val switchThumb: Color = Color.White
 

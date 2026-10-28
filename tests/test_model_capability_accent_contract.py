@@ -39,7 +39,7 @@ class ModelCapabilityAccentContractTest(unittest.TestCase):
         self.assertIn("color = MiuixTheme.colorScheme.primary", helper)
         self.assertIn("textColor = MiuixTheme.colorScheme.onPrimary", helper)
         theme = (SETTINGS / "ProviderSettingsTheme.kt").read_text()
-        self.assertIn("val accent = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)", theme)
+        self.assertIn("val accent = resolveAppearanceActions(LocalAppearanceDark.current)", theme)
         self.assertIn("primary = accent.primary, onPrimary = accent.onPrimary", theme)
 
 

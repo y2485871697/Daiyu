@@ -49,7 +49,7 @@ class VoiceSettingsPaletteContractTest(unittest.TestCase):
         visual = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceSettingsPaletteActivityTest.kt').read_text()
         for marker in ('SettingsScaffoldPage(', 'VoicePersonalScaffold(', 'VoicePersonalEmptyPage(',
                        'VoiceSettingsCard(', 'SettingsCard(', 'captureToImage().toPixelMap()',
-                       'paletteSeedColor = seed', 'pureBlackEnabled = pureBlack',
+                       'pureBlackEnabled = pureBlack',
                        'LocalSettingsPageStyle.current', 'assertEquals(0, fixture.opens.get())'):
             self.assertIn(marker, visual)
 

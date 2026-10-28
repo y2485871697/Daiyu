@@ -183,15 +183,16 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
                 ChatContextMark(fraction, contextColor, Modifier.size(15.dp).testTag("chat-context-icon"))
-                AnimatedContent(targetState = showContextTokens,
+                val contextText = if (showContextTokens) state.contextTokensText ?: "—/—" else state.contextUsageText
+                    ?: if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}"
+                AnimatedContent(targetState = showContextTokens to contextText,
                     modifier = Modifier.weight(1f, fill = false), contentAlignment = Alignment.CenterEnd,
                     transitionSpec = {
                         ((fadeIn(tween(180)) + slideInVertically(tween(220, easing = FastOutSlowInEasing)) { it / 3 })
                             togetherWith (fadeOut(tween(120)) + slideOutVertically(tween(180)) { -it / 3 }))
                             .using(SizeTransform { _, _ -> tween(220, easing = FastOutSlowInEasing) })
-                    }, label = "context-usage-mode") { showTokens ->
-                    Text(if (showTokens) state.contextTokensText ?: "—/—" else state.contextUsageText
-                            ?: if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
+                    }, label = "context-usage-mode") { (showTokens, text) ->
+                    Text(text,
                         modifier = Modifier.testTag("chat-context-label"),
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 14.sp,
                             letterSpacing = if (showTokens) 0.3.sp else MiuixTheme.textStyles.footnote1.letterSpacing,
@@ -239,7 +240,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     val selection = TextRange(projected.toVisible(rawOffset(value.selection.start)),
                                         projected.toVisible(rawOffset(value.selection.end)))
                                     val composition = rawComposition?.let { TextRange(projected.toVisible(it.start), projected.toVisible(it.end)) }
-                                    val accepted = if (references.references.isEmpty() && projected.references.isEmpty()) {
+                                    val accepted = if (!state.dictationPreview && references.references.isEmpty() && projected.references.isEmpty()) {
                                         if (next != state.text) actions.onTextChange(next)
                                         actions.onSelectionChange(rawOffset(value.selection.start), rawOffset(value.selection.end))
                                         true

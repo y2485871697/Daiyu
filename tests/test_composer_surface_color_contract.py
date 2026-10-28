@@ -10,7 +10,7 @@ ANDROID_TEST = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
 class ComposerSurfaceColorContractTest(unittest.TestCase):
     def test_light_card_adds_only_a_trace_of_color_to_the_original_white_glass(self):
         surface = (CHAT / 'ChatComposerSurface.kt').read_text()
-        self.assertIn('val tint = LocalAppearanceSettings.current.styleColor(if (dark) Color(0xFF1F1C29) else Color(0xFFF1EFF5))', surface)
+        self.assertIn('val tint = if (dark) Color(0xFF1F1C29) else Color(0xFFF1EFF5)', surface)
         self.assertIn('background(tint.copy(alpha = if (dark) .36f else .32f))', surface)
         self.assertIn('background.luminance() < 0.3f', surface)
         self.assertIn('RoundedCornerShape(22.dp)', surface)

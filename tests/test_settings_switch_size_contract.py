@@ -44,7 +44,7 @@ class SettingsSwitchSizeContractTest(unittest.TestCase):
         balance = (SRC / 'balance/ui/BalanceSettingsScreen.kt').read_text()
         self.assertIn(alias, balance)
         appearance = (SETTINGS / 'AppearanceSettingsScreen.kt').read_text()
-        self.assertIn('SettingsSwitch(checked = state.morphLoadingIndicator,', appearance)
+        self.assertNotIn('morphLoadingIndicator', appearance)
         self.assertNotIn('app.daiyu.android.ui.haptics.material.Switch(', appearance)
 
     def test_existing_compact_subagent_switch_and_nonsettings_controls_are_untouched(self):
@@ -66,8 +66,8 @@ class SettingsSwitchSizeContractTest(unittest.TestCase):
         self.assertIn('if (canAct()) intensityDialog = true', haptics)
         self.assertIn('onCheckedChange = { if (save { copy(background = it) }) expanded = it }', haptics)
         appearance = (SETTINGS / 'AppearanceSettingsScreen.kt').read_text()
-        self.assertIn('else loadingExpanded = !loadingExpanded', appearance)
-        self.assertIn('onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) }', appearance)
+        self.assertNotIn('loadingExpanded', appearance)
+        self.assertNotIn('loadingExpanded', appearance)
 
     def test_rounding_keeps_track_within_both_target_types(self):
         px = lambda dp, density: floor(dp * density + .5)

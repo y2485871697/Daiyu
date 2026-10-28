@@ -75,7 +75,7 @@ class ChatUsageReadyContractTest(unittest.TestCase):
         self.assertIn('fun testTotalUsesPreviewNeutralColorWithoutChangingMetricTypographyOrAccent()', regression)
         self.assertIn('assertEquals(neutral, total.color)', regression)
         self.assertIn('for (dark in listOf(false, true))', regression)
-        self.assertIn('primaryAccentColor = customAccent', regression)
+        self.assertIn('pureBlackEnabled = pureBlack', regression)
         self.assertIn('assertEquals(accent, row.color)', regression)
 
     def test_held_read_regressions_check_absence_before_awaiting_final_dialog(self):

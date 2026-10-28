@@ -35,20 +35,19 @@ class SelectionAccentAppearanceTest : WiredActivityTestCase() {
         return count
     }
 
-    fun testRadioCheckboxAndSettingsCheckShareDefaultAndCustomAccentInBothThemes() {
-        for (dark in listOf(false, true)) for (accent in listOf(null, 0xFF31886F.toInt())) {
+    fun testRadioCheckboxAndSettingsCheckShareDefaultAccentInBothThemes() {
+        for (dark in listOf(false, true)) {
             val selected = mutableStateOf(true)
             val enabled = mutableStateOf(true)
             var radioCalls = 0
             var checkboxCalls = 0
             var rowCalls = 0
             var resolved = Color.Transparent
-            val expected = Color(accent ?: if (dark) 0xFFC6B6D5.toInt() else 0xFF82718F.toInt())
+            val expected = Color(if (dark) 0xFFC6B6D5.toInt() else 0xFF82718F.toInt())
             try {
                 mainThread { activity.setContent {
                     AgentAppTheme(AppearanceSettings(
-                        themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
-                        primaryAccentColor = accent), applyInterfaceScale = false) {
+                        themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                         resolved = DaiyuPalette.selectionAccent
                         Column(Modifier.width(320.dp).background(MiuixTheme.colorScheme.surface).statusBarsPadding()) {
                             RadioButton(selected.value, onClick = { radioCalls++ }, enabled = enabled.value,
@@ -61,7 +60,7 @@ class SelectionAccentAppearanceTest : WiredActivityTestCase() {
                 } }
                 ui.runOnIdle { assertEquals(expected, resolved) }
                 for (tag in listOf("selection-radio", "selection-checkbox", "settings-radio:选中标记")) {
-                    assertTrue("selected accent: $tag; dark=$dark custom=${accent != null}",
+                    assertTrue("selected accent: $tag; dark=$dark",
                         matchingPixels(captureScreenNode(node(tag)), expected) > 0)
                 }
                 node("selection-radio").performTouchInput { click() }

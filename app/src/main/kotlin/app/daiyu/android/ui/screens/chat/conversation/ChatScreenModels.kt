@@ -137,6 +137,7 @@ data class ComposerUi(
     val contextUsageText: String? = null,
     val contextTokensText: String? = null,
     val listening: Boolean = false,
+    val dictationPreview: Boolean = false,
     val enabled: Boolean = true,
     val controlOwnerKey: String? = null,
     val mainContextCompressing: Boolean = false,
@@ -152,10 +153,6 @@ data class ComposerUi(
     val videoSendBlocked: Boolean = false,
     /** Actual runtime evidence, independent of pause-request/control-button projection. */
     val executionPhase: app.daiyu.android.domain.runtime.ExecutionPhase? = null,
-    /** Null means the current owner's output is not available; never guess from RUNNING. */
-    val hasAssistantOutput: Boolean? = null,
-    val morphLoadingIndicator: Boolean = true,
-    val morphLoadingBeforeResponseOnly: Boolean = false,
     val editorGeneration: Long = 0,
     val voiceMode: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
     val voiceModes: Set<ChatMenuAction> = setOf(ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT, ChatMenuAction.VOICE_DOUBAO),
@@ -163,7 +160,7 @@ data class ComposerUi(
     val gptSpeedSaving: Boolean = false,
 )
 
-internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !mainContextCompressing && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
+internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !mainContextCompressing && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && !dictationPreview && when (phase) {
     ComposerPhase.IDLE -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable
     ComposerPhase.PAUSED, ComposerPhase.RUNNING -> text.isNotBlank() && supplementAvailable
 }

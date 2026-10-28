@@ -4,12 +4,12 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCREEN = (ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/settings/AppearanceSettingsScreen.kt").read_text()
-BLUR = SCREEN.split("if (choosingBlur)", 1)[1].split("colorEditor?.let", 1)[0]
+BLUR = SCREEN.split("if (choosingBlur)", 1)[1].split("SettingsScaffoldPage(title", 1)[0]
 
 
 class AppearanceBlurSheetContractTest(unittest.TestCase):
     def test_blur_uses_shared_glass_bottom_sheet_without_an_extra_close_action(self):
-        self.assertIn("colorEditor?.let", SCREEN)
+        self.assertNotIn("colorEditor?.let", SCREEN)
         self.assertIn("ChatSelectionSheet(", BLUR)
         self.assertIn('title = "顶栏模糊样式"', BLUR)
         self.assertIn("showCloseButton = false", BLUR)

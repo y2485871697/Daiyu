@@ -24,8 +24,8 @@ class ChatComposerEditHeaderActivityTest : WiredActivityTestCase() {
     private val attachmentClicks = mutableListOf<ChatMenuAction>()
     private var density = 1f
     private fun show(width: Dp, font: Float, dark: Boolean, editing: Boolean = true,
-        primary: Long = 0xFF2266AA, enabled: Boolean = true) {
-        val appearance = AppearanceSettings(primaryAccentColor = primary.toInt(), secondaryAccentColor = 0xFF845CB5.toInt(),
+        enabled: Boolean = true) {
+        val appearance = AppearanceSettings(
             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT)
         mainThread { activity.setContent {
             val base = LocalDensity.current
@@ -139,14 +139,13 @@ class ChatComposerEditHeaderActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testCancelUsesSecondaryRoleIndependentOfPrimaryAndIsAbsentOutsideEditing() {
-        for (primary in listOf(0xFF2266AAL, 0xFFBB2244L)) for (dark in listOf(false, true)) {
-            show(320.dp, 1.3f, dark, primary = primary)
+    fun testCancelUsesDefaultSecondaryRoleAndIsAbsentOutsideEditing() {
+        for (dark in listOf(false, true)) {
+            show(320.dp, 1.3f, dark)
             val layouts = mutableListOf<TextLayoutResult>()
             ui.onNodeWithText("取消编辑", useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
-            val expected = resolveAppearanceActions(AppearanceSettings(primaryAccentColor = primary.toInt(),
-                secondaryAccentColor = 0xFF845CB5.toInt()), dark).onSecondary
+            val expected = resolveAppearanceActions(dark).onSecondary
             assertEquals(expected, layouts.single().layoutInput.style.color)
         }
         show(320.dp, 1f, false, editing = false)

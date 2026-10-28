@@ -18,10 +18,10 @@ class DeletionColorsTest {
         assertTrue("white labels stay readable: $contrast", contrast >= 4.5f)
     }
 
-    @Test fun customAccentsAndSurfacesDoNotRecolorDeletionOrGeneralErrors() {
-        for (dark in listOf(false, true)) for (color in listOf(0xFFFFFFFF.toInt(), 0xFF000000.toInt(), 0xFF00FF00.toInt())) {
-            val appearance = AppearanceSettings(primaryAccentColor = color, secondaryAccentColor = color, paletteSeedColor = color)
-            val deletion = AssistantPreviewPalette(dark, appearance)
+    @Test fun defaultThemesKeepDeletionAndGeneralErrorRolesSeparate() {
+        for (dark in listOf(false, true)) {
+            val appearance = AppearanceSettings()
+            val deletion = AssistantPreviewPalette(dark)
             assertEquals(Color(0xFF92454F), deletion.dangerContainer)
             assertEquals(Color.White, deletion.onDangerContainer)
             val original = if (dark) DaiyuPalette.dark else DaiyuPalette.light

@@ -42,10 +42,8 @@ import app.daiyu.android.ui.components.subagent.ConversationAgentIconButton
 import app.daiyu.android.ui.components.subagent.ConversationAgentSheet
 import app.daiyu.android.ui.components.subagent.ConversationAgentTypography
 import app.daiyu.android.ui.components.subagent.conversationAgentColors
-import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.haptics.combinedClickable
 import app.daiyu.android.ui.app.LocalAppearanceDark
-import app.daiyu.android.ui.app.LocalAppearanceSettings
 import app.daiyu.android.ui.app.resolveAppearanceActions
 
 internal val RetainedWorkspaceAction = SemanticsPropertyKey<() -> Unit>("RetainedWorkspaceAction")
@@ -89,7 +87,7 @@ fun ConversationWorkspaceSheet(
     WithoutPressRipple {
         ConversationAgentTypography {
             val colors = conversationAgentColors()
-            val actions = resolveAppearanceActions(LocalAppearanceSettings.current, LocalAppearanceDark.current)
+            val actions = resolveAppearanceActions(LocalAppearanceDark.current)
             ConversationAgentSheet(onDismiss, useDefaultHeight = true,
                 modifier = Modifier.testTag("conversation-workspace-sheet")) {
                 Column(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)) {

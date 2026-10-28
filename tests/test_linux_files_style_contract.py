@@ -176,7 +176,7 @@ class LinuxFilesStyleContract(unittest.TestCase):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/PrivateWorkspacePanelTest.kt').read_text()
         for token in ['compact = false', 'compact = true',
                       'rememberPrivateWorkspacePanel(access, gate, compact = compact)',
-                      'actions = { panel.actions() }', 'workspace-private-actions:sub/keep.txt',
+                      'actions = { panel.actions() }', 'node("workspace-private-actions:sub/keep.txt").assertDoesNotExist()',
                       'performTouchInput { longClick() }', 'assertTrue(sub.isDirectory)',
                       'realPauseResume(activity, atPause = { retained() })']:
             self.assertIn(token, test)

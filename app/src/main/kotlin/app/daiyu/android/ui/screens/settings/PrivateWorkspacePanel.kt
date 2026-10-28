@@ -6,7 +6,6 @@ import android.text.format.Formatter
 import app.daiyu.android.ui.haptics.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
@@ -290,13 +289,6 @@ internal fun rememberPrivateWorkspacePanel(suppliedFiles: PrivateWorkspaceFiles?
                     val entryContent: @Composable () -> Unit = {
                         SettingsRow(entry.name, summary = if (compact) entry.relative else if (entry.directory) "目录" else Formatter.formatShortFileSize(context, entry.size),
                             leading = { SettingsIcon(if (entry.directory) DaiyuIcons.Folder else DaiyuIcons.File) },
-                            trailing = if (compact) ({
-                                IconButton(onClick = {
-                                    if (entryCurrent()) actions = WorkspaceAction(entry, renderedEpoch)
-                                }, modifier = Modifier.size(48.dp).testTag("workspace-private-actions:${entry.relative}")) {
-                                    DaiyuIcon(DaiyuIcons.More, "文件操作", modifier = Modifier.rotate(90f), size = 20.dp)
-                                }
-                            }) else null,
                             modifier = (if (compact) Modifier.heightIn(min = 80.dp) else Modifier).combinedClickable(
                                 enabled = current() && !busy && !sharedBusy() && pending == null && request == null,
                                 onClick = { if (entryCurrent() && entry.directory) load(entry) },

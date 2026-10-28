@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
@@ -40,12 +41,16 @@ class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
             assertTrue(icon.right <= label.left)
             assertTrue(label.right <= arrow.left)
             assertTrue(kotlin.math.abs(icon.center.y - arrow.center.y) < 2f)
-            node("workspace-entry-action:cancel").performClick()
+            node("workspace-entry-action:cancel").assertDoesNotExist()
+            node("preview-dialog-scrim").performTouchInput { click(Offset(center.x, 4f)) }
             node("workspace-entry-action-sheet").assertDoesNotExist()
             assertEquals("keep", File(project, "keep").readText())
             reveal("linux-rootfs-entry:project", "Rootfs文件测试").performTouchInput { longClick() }
             node("workspace-entry-action:rename").performClick()
             awaitUniqueTag("prompt-input")
+            ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+            node("prompt-input").performTextClearance()
+            ui.onNodeWithText("名称").assertExists()
             node("prompt-input").performTextReplacement("renamed")
             node("dialog-confirm").performClick()
             awaitUniqueTag("linux-rootfs-entry:renamed")
@@ -78,11 +83,20 @@ class WorkspaceEntryActionsActivityTest : WiredActivityTestCase() {
             node("workspace-add").performClick()
             awaitUniqueTag("workspace-file:$name.txt")
             node("workspace-file:$name.txt").performTouchInput { longClick() }
-            node("workspace-entry-action:cancel").performClick()
+            node("workspace-entry-action:cancel").assertDoesNotExist()
+            awaitNodeWindowFocus(node("workspace-entry-action:rename"))
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            node("workspace-entry-action-sheet").assertDoesNotExist()
+            node("conversation-workspace-sheet").assertExists()
+            node("workspace-save").assertIsEnabled()
+            assertEquals(before, fixture.database.workspaceBinding(null))
             assertEquals("keep", file.readText())
             node("workspace-file:$name.txt").performTouchInput { longClick() }
             node("workspace-entry-action:rename").performClick()
             awaitUniqueTag("prompt-input")
+            ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+            node("prompt-input").performTextClearance()
+            ui.onNodeWithText("名称").assertExists()
             node("prompt-input").performTextReplacement(renamed.name)
             node("dialog-confirm").performClick()
             awaitUniqueTag("workspace-file:${renamed.name}")

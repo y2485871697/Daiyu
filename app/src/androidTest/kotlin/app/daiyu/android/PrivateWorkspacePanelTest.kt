@@ -3,7 +3,6 @@ package app.daiyu.android
 import androidx.activity.compose.setContent
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
-import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.MiuixScaffoldPage
@@ -18,7 +17,7 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
     fun testPrivateBrowseDeleteConfirmationAndRetainedPageRevocation() {
         assertPrivateBrowseDeleteConfirmationAndRetainedPageRevocation(compact = false)
     }
-    fun testCompactPrivateBrowseMoreMenuDeleteAndRetainedPageRevocation() {
+    fun testCompactPrivateBrowseLongPressWithoutMoreMenuAndRetainedPageRevocation() {
         assertPrivateBrowseDeleteConfirmationAndRetainedPageRevocation(compact = true)
     }
     private fun assertPrivateBrowseDeleteConfirmationAndRetainedPageRevocation(compact: Boolean) {
@@ -37,9 +36,9 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-private-entry:sub").fetchSemanticsNodes().size == 1 }
             reveal("workspace-private-entry:sub", "私有文件测试").performClick()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-private-entry:sub/keep.txt").fetchSemanticsNodes().size == 1 }
-            if (compact) {
-                reveal("workspace-private-actions:sub/keep.txt", "私有文件测试").assertHeightIsAtLeast(48.dp).performClick()
-            } else reveal("workspace-private-entry:sub/keep.txt", "私有文件测试").performTouchInput { longClick() }
+            node("workspace-private-actions:sub/keep.txt").assertDoesNotExist()
+            reveal("workspace-private-entry:sub/keep.txt", "私有文件测试").performTouchInput { longClick() }
+            node("workspace-entry-action:cancel").assertDoesNotExist()
             node("workspace-entry-action:delete").performClick()
             ui.onNodeWithText("删除文件").assertIsDisplayed()
             awaitUniqueTag("dialog-cancel")

@@ -33,6 +33,7 @@ internal fun AssistantSearchField(
     onFocusChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     fieldModifier: Modifier = Modifier,
+    showSearchIcon: Boolean = true,
 ) {
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
@@ -41,7 +42,7 @@ internal fun AssistantSearchField(
         .border(1.dp, if (focused) colors.accent else colors.line, RoundedCornerShape(13.dp * s))
         .padding(1.dp).padding(horizontal = 11.dp * s),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
-        Icon(AssistantPreviewIcons.Search, null, Modifier.size(18.dp * s), tint = colors.muted)
+        if (showSearchIcon) Icon(AssistantPreviewIcons.Search, null, Modifier.size(18.dp * s), tint = colors.muted)
         BasicTextField(value, onValueChange, singleLine = true,
             modifier = fieldModifier.managedInput().weight(1f).heightIn(min = 42.dp * s)
                 .onFocusChanged { onFocusChanged(it.isFocused) },

@@ -19,6 +19,15 @@ class ConversationWorkspacesActivityTest : WiredActivityTestCase() {
         finally { executor.shutdown() }
     }
 
+    private fun awaitLoadedDirectory(path: String) {
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(hasTestTag("workspace-current-path") and hasText(path)).fetchSemanticsNodes().size == 1 &&
+                ui.onAllNodes(hasTestTag("workspace-save") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        node("workspace-error").assertDoesNotExist()
+    }
+
     fun testAddSwitchRemoveAndReopenPreserveOtherConversationAndActualFiles() {
         val first = File(fixture.application.filesDir, "workspace/list-first").apply { mkdirs() }
         val second = File(fixture.application.filesDir, "workspace/list-second").apply { mkdirs() }
@@ -83,16 +92,18 @@ class ConversationWorkspacesActivityTest : WiredActivityTestCase() {
             awaitUniqueTag("conversation-workspace-sheet")
             ui.onNodeWithText("会话工作区").assertExists()
             node("workspace-edit:2").performClick()
-            awaitUniqueTag("workspace-current-path")
+            awaitLoadedDirectory(second.canonicalPath)
             ui.onNodeWithText("更改工作目录").assertExists()
-            node("workspace-current-path").assertTextEquals(second.canonicalPath)
+            awaitUniqueTag("workspace-folder:new-path")
             node("workspace-folder:new-path").performClick()
-            awaitControl("edited subdirectory loaded") {
-                ui.onAllNodesWithText(edited.canonicalPath).fetchSemanticsNodes().size == 1
-            }
+            awaitLoadedDirectory(edited.canonicalPath)
             ui.onNodeWithText("更改工作目录").assertExists()
             node("workspace-save").performClick()
             awaitControl("edited workspace persisted") { fixture.database.workspaceBinding(owner.id) != original }
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodesWithText("会话工作区").fetchSemanticsNodes().size == 1
+            }
             val updated = ConversationWorkspaceCodec.decodeWorkspaces(fixture.database.workspaceBinding(owner.id))
             assertEquals(3, updated.bindings.size)
             assertEquals(1, updated.activeIndex)
@@ -102,6 +113,41 @@ class ConversationWorkspacesActivityTest : WiredActivityTestCase() {
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             awaitHostWindowFocus(activity)
         } finally { first.deleteRecursively(); second.deleteRecursively() }
+    }
+
+    fun testRealActivityAddUsesControllerRootAndPersistsOnlyAfterLoadedSelection() {
+        val root = File(fixture.application.filesDir, "workspace")
+        val added = File(root, "list-ui-added").apply { mkdirs() }
+        val marker = File(added, "keep.txt").apply { writeText("keep") }
+        try {
+            val owner = fixture.database.create(fixture.database.selectedAssistantId())
+            mainThread { activity.select(owner) }
+            awaitControl("workspace editor idle") { !fixture.controller.dataBusy }
+            awaitHostWindowFocus(activity)
+            node("chat-workspace-gesture-area").performTouchInput {
+                swipe(center, center + Offset(0f, -80f * activity.resources.displayMetrics.density))
+            }
+            awaitUniqueTag("workspace-add")
+            node("workspace-add").performClick()
+            awaitLoadedDirectory(root.canonicalPath)
+            awaitUniqueTag("workspace-folder:list-ui-added")
+            node("workspace-folder:list-ui-added").performClick()
+            awaitLoadedDirectory(added.canonicalPath)
+            assertNull(fixture.database.workspaceBinding(owner.id))
+            node("workspace-save").performClick()
+            awaitControl("added workspace persisted") { fixture.database.workspaceBinding(owner.id) != null }
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodesWithText("会话工作区").fetchSemanticsNodes().size == 1
+            }
+            val saved = ConversationWorkspaceCodec.decodeWorkspaces(fixture.database.workspaceBinding(owner.id))
+            assertEquals(2, saved.bindings.size)
+            assertEquals(ConversationWorkspaceBinding.Private(added.canonicalPath), saved.active)
+            assertEquals("keep", marker.readText())
+            assertEquals(0, fixture.opens.get())
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            awaitHostWindowFocus(activity)
+        } finally { added.deleteRecursively() }
     }
 
     fun testCollectionRejectsAmbiguousAndroidJsonWithoutFallback() {

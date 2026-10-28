@@ -34,7 +34,13 @@ class WorkspaceSelectionBoundary(unittest.TestCase):
         self.assertNotIn('onSourceChange', sheet)
         self.assertNotIn('workspace-source:', sheet)
         main = (BASE / 'MainActivity.kt').read_text()
-        self.assertIn('browseConversationWorkspace(visit, "private", java.io.File(filesDir, "workspace").absolutePath, editingIndex = null)', main)
+        browse = main.split('ConversationWorkspaceSheet(', 1)[1].split('onNavigate =', 1)[0]
+        self.assertIn('visit.editor.sources.firstOrNull { it.id == "private" }', browse)
+        self.assertIn('browseConversationWorkspace(visit, source.id, source.initialPath, editingIndex = null)', browse)
+        self.assertNotIn('File(filesDir,', browse)
+        access = (BASE / 'workspace/ConversationWorkspaceAccess.kt').read_text()
+        self.assertIn('val defaultPath = java.io.File(context.filesDir, "workspace").absolutePath', access)
+        self.assertIn('ConversationWorkspaceSource("private", "应用私有目录", context.filesDir.absolutePath, defaultPath)', access)
         self.assertIn('只能选择工作区及其子目录', main)
 
     def test_general_resolver_keeps_existing_binding_compatibility(self):

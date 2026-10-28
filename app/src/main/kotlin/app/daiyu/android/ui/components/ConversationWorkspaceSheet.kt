@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.*
+import app.daiyu.android.ui.haptics.material.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment

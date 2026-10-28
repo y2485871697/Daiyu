@@ -35,8 +35,10 @@ class SubAgentStatusHeightContractTest(unittest.TestCase):
         self.assertIn("else Modifier.heightIn(max = (maxHeight - 20.dp).coerceAtLeast(0.dp)).padding(10.dp)", style)
         self.assertIn(".then(heightModifier).fillMaxWidth()", style)
         self.assertIn("PreviewDialog(onDismiss, bottomSheet = true)", style)
+        workspace = source("ui/components/ConversationWorkspaceSheet.kt")
+        self.assertIn("ConversationAgentSheet(onDismiss, useDefaultHeight = true,", workspace)
         for file in SRC.rglob("*.kt"):
-            if file.name not in {"SubAgentStatusDialog.kt", "ConversationCollaborationDialog.kt", "SearchHistoryDialog.kt"}:
+            if file.name not in {"SubAgentStatusDialog.kt", "ConversationCollaborationDialog.kt", "SearchHistoryDialog.kt", "ConversationWorkspaceSheet.kt"}:
                 self.assertNotIn("useDefaultHeight = true", file.read_text(), str(file))
 
     def test_height_rule_has_small_window_and_landscape_unit_cases(self):

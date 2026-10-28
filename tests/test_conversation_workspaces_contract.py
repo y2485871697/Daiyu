@@ -54,5 +54,26 @@ class ConversationWorkspacesContract(unittest.TestCase):
         self.assertNotIn('java.io', sheet)
 
 
+    def test_real_activity_waits_for_loaded_directory_on_the_test_thread(self):
+        android = Path(__file__).resolve().parents[1] / 'app/src/androidTest/kotlin/app/daiyu/android'
+        source = (android / 'ConversationWorkspacesActivityTest.kt').read_text()
+        helper = source.split('private fun awaitLoadedDirectory(', 1)[1].split('fun test', 1)[0]
+        for token in ('ui.waitUntil(5_000)', 'ui.mainClock.advanceTimeByFrame()',
+                      'hasTestTag("workspace-current-path") and hasText(path)',
+                      'hasTestTag("workspace-save") and isEnabled()',
+                      'node("workspace-error").assertDoesNotExist()'):
+            self.assertIn(token, helper)
+        self.assertNotIn('awaitControl("edited subdirectory loaded")', source)
+        self.assertIn('awaitUniqueTag("workspace-folder:new-path")', source)
+        self.assertIn('awaitLoadedDirectory(edited.canonicalPath)', source)
+        self.assertIn('testRealActivityAddUsesControllerRootAndPersistsOnlyAfterLoadedSelection', source)
+        self.assertIn('awaitLoadedDirectory(root.canonicalPath)', source)
+        self.assertIn('assertNull(fixture.database.workspaceBinding(owner.id))', source)
+        self.assertIn('ConversationWorkspaceBinding.Private(added.canonicalPath), saved.active', source)
+        cancelled = (android / 'ConversationWorkspaceActivityTest.kt').read_text().split(
+            'fun testRealChatFocusedEditorOpensActualSheetAndHidesIme()', 1)[1].split('private fun showComposer()', 1)[0]
+        self.assertIn('hasTestTag("workspace-save") and isEnabled()', cancelled)
+        self.assertIn('node("workspace-error").assertDoesNotExist()', cancelled)
+
 if __name__ == '__main__':
     unittest.main()

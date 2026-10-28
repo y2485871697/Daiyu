@@ -70,6 +70,12 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         node("chat-draft").assertIsNotFocused()
         node("workspace-add").performClick()
         awaitUniqueTag("workspace-current-path")
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(hasTestTag("workspace-save") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        node("workspace-current-path").assertTextEquals(java.io.File(fixture.application.filesDir, "workspace").canonicalPath)
+        node("workspace-error").assertDoesNotExist()
         node("workspace-cancel").performClick()
         node("workspace-path-card:0").assertExists()
         node("workspace-close").assertDoesNotExist()

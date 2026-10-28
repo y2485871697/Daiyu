@@ -2721,7 +2721,11 @@ class MainActivity : ComponentActivity() {
                                 app.daiyu.android.ui.components.WorkspaceDirectoryOption(directory.path, directory.parentPath,
                                     directory.folders, directory.selectable)
                             },
-                            onBrowse = { browseConversationWorkspace(visit, "private", java.io.File(filesDir, "workspace").absolutePath, editingIndex = null) },
+                            onBrowse = {
+                                visit.editor.sources.firstOrNull { it.id == "private" }?.let { source ->
+                                    browseConversationWorkspace(visit, source.id, source.initialPath, editingIndex = null)
+                                }
+                            },
                             onNavigate = { path -> browseConversationWorkspace(visit, path = path) }, onCancel = { cancelWorkspaceSelection(visit) },
                             onSave = { saveConversationWorkspace(visit) },
                             onDismiss = { if (workspaceVisit?.token === visit.token) {

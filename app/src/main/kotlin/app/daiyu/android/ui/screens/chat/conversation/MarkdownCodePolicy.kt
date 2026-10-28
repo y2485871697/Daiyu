@@ -6,7 +6,7 @@ internal fun markdownCodeProducing(block: MarkdownBlock.Code, visibleCharacters:
     visibleCharacters < block.text.length || (!block.closed && !generationComplete)
 
 internal fun markdownCodeDisplayText(block: MarkdownBlock.Code, visibleText: String): String =
-    if (block.closed && visibleText.length == block.text.length) visibleText.removeSuffix("\n") else visibleText
+    if (visibleText.length == block.text.length) visibleText.removeSuffix("\n") else visibleText
 
 internal fun markdownCodeFileName(language: String): String {
     val extension = when (language.lowercase(java.util.Locale.ROOT)) {

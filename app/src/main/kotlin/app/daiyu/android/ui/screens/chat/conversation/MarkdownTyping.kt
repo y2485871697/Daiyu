@@ -40,16 +40,18 @@ internal fun rememberMarkdownReveal(
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
     }
     val baseline = remember(identity, resetEpoch) { sources.toList() }
-    val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text })
+    val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
+        streaming = turn.status == RunStatus.RUNNING)
     val baselineLength = remember(baselineProjection) {
-        baselineProjection?.takeIf { isMarkdownAppend(it.sources, baseline.map { source -> source.text }) }?.let { parsed -> parsed.sources.sumOf {
+        baselineProjection?.takeIf { it.sources == baseline.map { source -> source.text } }?.let { parsed -> parsed.sources.sumOf {
             markdownBlocksLength(parsed.blocks.getValue(it)).toLong()
         }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt() }
     }
     val parts = remember(sources, projection) {
-        projection?.let { parsed -> sources.mapIndexed { index, source ->
+        projection?.let { parsed -> sources.take(parsed.sources.size).mapIndexed { index, source ->
             val displayed = source.copy(text = parsed.sources[index])
-            MarkdownTypingPart(displayed, markdownBlocksLength(parsed.blocks.getValue(displayed.text)))
+            val blocks = parsed.blocks.getValue(displayed.text)
+            MarkdownTypingPart(displayed, markdownBlocksLength(blocks), markdownBlocksDisplayText(blocks))
         } }
     }
     val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
@@ -65,7 +67,7 @@ internal fun rememberMarkdownReveal(
             value = MarkdownTypingFrame(current, shown)
         }
     }
-    val exact = projection?.sources == sources.map { it.text } && target != null &&
-        target.parts.map { it.source } == sources
+    val exact = projection?.sources == sources.map { it.text } && baselineLength != null && target != null &&
+        target.parts == parts && target.parts.map { it.source } == sources
     return remember(target, frame, exact) { MarkdownReveal(target, frame, exact) }
 }

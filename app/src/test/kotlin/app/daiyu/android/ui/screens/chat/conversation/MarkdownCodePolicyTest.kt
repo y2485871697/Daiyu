@@ -34,10 +34,11 @@ class MarkdownCodePolicyTest {
             assertEquals(original, code.text)
         }
     }
-    @Test fun openOrPartiallyRevealedCodeKeepsItsCurrentTrailingLine() {
+    @Test fun closingAFenceCannotChangeTheVisiblePayloadHeight() {
         val original = "echo first\necho second\n"
         val open = MarkdownBlock.Code(original, "sh", closed = false)
-        assertEquals(original, markdownCodeDisplayText(open, original))
+        assertEquals(original.removeSuffix("\n"), markdownCodeDisplayText(open, original))
+        assertEquals(markdownCodeDisplayText(open, original), markdownCodeDisplayText(open.copy(closed = true), original))
         val closed = open.copy(closed = true)
         val partial = "echo first\n"
         assertEquals(partial, markdownCodeDisplayText(closed, partial))

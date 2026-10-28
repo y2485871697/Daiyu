@@ -39,8 +39,8 @@ class MarkdownTableStyleContract(unittest.TestCase):
         self.assertNotIn("style = Stroke", self.table)
 
     def test_existing_width_reveal_and_grouping_stay_in_place(self):
-        for token in ["table.header.size > 32", "indices.chunked(32)", "MarkdownText.tableCellWidthEm(cell)",
-                      "style.fontSize.toDp()", "if (remaining <= 0) break", "var cellRemaining = rowVisible",
+        for token in ["table.header.size > 32", "indices.chunked(32)", "MarkdownText.tableColumnWidthEms(table.header)",
+                      "style.fontSize.toDp()", "if (visibleCharacters <= offsets[rowIndex][0]) break", "visibleCharacters - offsets[rowIndex][column]",
                       "MarkdownInlineText(cell, openLink", "SelectionContainer"]:
             source = self.table if token != "SelectionContainer" else (ROOT / (BASE + "MessageMarkdown.kt")).read_text()
             self.assertIn(token, source)

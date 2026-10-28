@@ -5,6 +5,18 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation'
 
 class MarkdownStreamProgressContract(unittest.TestCase):
+    def test_streaming_and_terminal_share_reveal_state_but_not_parser_cache_entries(self):
+        base = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation"
+        ui = (base / "MessageMarkdown.kt").read_text()
+        typing = (base / "MarkdownTyping.kt").read_text()
+        projection = (base / "MarkdownProjection.kt").read_text()
+        self.assertIn("streaming && configuredParser === defaultMarkdownParser", ui)
+        self.assertIn("internal val streamingMarkdownParser:", projection)
+        self.assertIn("parser === streamingMarkdownParser", projection)
+        self.assertIn("target.parts == parts", typing)
+        self.assertIn("baselineLength != null", typing)
+        self.assertIn("remember(identity, resetEpoch) { MarkdownTypingState(baseline) }", typing)
+
     def test_stream_queue_finishes_running_parse_and_conflates_pending_appends(self):
         source = (BASE / 'MarkdownProjection.kt').read_text()
         for token in ['Channel.CONFLATED', 'worker?.cancelAndJoin()',

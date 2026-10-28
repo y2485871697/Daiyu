@@ -27,7 +27,7 @@ class MarkdownTypingContract(unittest.TestCase):
             self.assertIn(token, mapper)
 
     def test_full_sources_still_project_once_not_per_frame(self):
-        self.assertIn("val projection = rememberMarkdownProjection(sources)", self.chat)
+        self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING)", self.chat)
         self.assertIn("val reveal = rememberMarkdownReveal(turn, projection, revealResetEpoch, onVisibleAdvance)", self.chat)
         self.assertIn("withFrameNanos { motion.advance(current, it) { currentAdvance() } }", self.typing)
         for source in [self.typing, self.reveal]:
@@ -37,7 +37,7 @@ class MarkdownTypingContract(unittest.TestCase):
 
     def test_mount_baseline_and_part_identity_are_not_text_guesses(self):
         for token in ["remember(identity, resetEpoch) { sources.toList() }", "MarkdownTypingSource(it.itemId, it.text)",
-                      "rememberMarkdownProjection(baseline.map { it.text })", "remember(identity, resetEpoch) { MarkdownTypingState(baseline) }"]:
+                      "rememberMarkdownProjection(baseline.map { it.text },", "remember(identity, resetEpoch) { MarkdownTypingState(baseline) }"]:
             self.assertIn(token, self.typing)
         self.assertIn('RevealedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText), reveal, "final"', self.chat)
         self.assertIn('RevealedMessageMarkdown(text.text, projection?.blocks?.get(text.text), reveal, text.itemId', self.chat)
@@ -55,6 +55,8 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertEqual(2, self.chat.count("readyTurns[it.listKey] == it"))
         self.assertIn("onContentReady(false); onRevealSettled(false)", self.chat)
         self.assertIn("target.parts.map { it.source } == sources", self.typing)
+        self.assertIn("baselineLength != null", self.typing)
+        self.assertIn("target.parts == parts", self.typing)
 
     def test_elapsed_time_drain_and_stale_target_guards_are_present(self):
         for token in ["if (target !== expected)", "frameNanos - lastFrame", "250_000_000.0",
@@ -67,15 +69,15 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("remember(content, linkColor, openLink)", inline)
         self.assertIn("body.subSequence(0, boundaries.end(visibleCharacters))", inline)
         self.assertNotIn("remember(content, linkColor, openLink, visibleCharacters)", inline)
-        for token in ["BreakIterator.getCharacterInstance(Locale.ROOT)", "characters.preceding(limit)", "isHighSurrogate()", "isLowSurrogate()"]:
+        for token in ["BreakIterator.getCharacterInstance(Locale.ROOT)", "characters.following(limit)", "isHighSurrogate()", "isLowSurrogate()"]:
             self.assertIn(token, self.reveal)
 
     def test_table_width_sampling_is_bounded_and_font_scaled_without_intrinsic(self):
         table = self.ui.split("private fun MarkdownTable(", 1)[1].split("private fun headingSize", 1)[0]
         self.assertNotIn("renderInline", table)
         self.assertNotIn("IntrinsicSize", self.ui)
-        for token in ["MarkdownText.tableCellWidthEm(cell)", "style.fontSize.toDp()", "remember(columnEms, em)",
-                      "table.header.size > 32", "horizontalScroll(rememberScrollState())", "Row(Modifier.drawBehind", "var cellRemaining = rowVisible"]:
+        for token in ["MarkdownText.tableColumnWidthEms(table.header)", "style.fontSize.toDp()", "remember(columnEms, em)",
+                      "table.header.size > 32", "horizontalScroll(rememberScrollState())", "Row(Modifier.drawBehind", "visibleCharacters - offsets[rowIndex][column]"]:
             self.assertIn(token, table)
         hints = (APP / "MarkdownText.kt").read_text().split("internal fun tableCellWidthEm", 1)[1].split("internal fun renderInline", 1)[0]
         self.assertIn("var charactersLeft = 32", hints)

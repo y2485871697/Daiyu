@@ -33,20 +33,103 @@ internal fun markdownBlockLength(block: MarkdownBlock): Int = when (block) {
     MarkdownBlock.Rule -> 1
 }.coerceAtLeast(1)
 
+/** Cell offsets stay row-major even when the renderer splits a wide table into groups. */
+internal fun markdownTableCellOffsets(table: MarkdownBlock.Table): List<List<Int>> {
+    var offset = 0L
+    return (listOf(table.header) + table.rows).map { row -> row.map { cell ->
+        val start = offset.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        offset += markdownInlineLength(cell).coerceAtLeast(1)
+        start
+    } }
+}
+
+/** The same display coordinate space as the leaf budgets; empty structures consume one slot. */
+internal fun markdownBlocksDisplayText(blocks: List<MarkdownBlock>): String = buildString {
+    fun inlines(nodes: List<MarkdownInline>) {
+        nodes.forEach { node -> when (node) {
+            is MarkdownInline.Text -> append(node.text)
+            is MarkdownInline.Code -> append(node.text)
+            is MarkdownInline.Emphasis -> inlines(node.content)
+            is MarkdownInline.Strike -> inlines(node.content)
+            is MarkdownInline.Link -> inlines(node.content)
+            MarkdownInline.Break -> append('\n')
+        } }
+    }
+    fun block(node: MarkdownBlock) {
+        val start = length
+        when (node) {
+            is MarkdownBlock.Paragraph -> inlines(node.content)
+            is MarkdownBlock.Heading -> inlines(node.content)
+            is MarkdownBlock.Code -> append(node.text)
+            is MarkdownBlock.Quote -> node.blocks.forEach(::block)
+            is MarkdownBlock.Items -> node.items.forEach { item ->
+                val before = length
+                item.blocks.forEach(::block)
+                if (length == before) append('\uFFFC')
+            }
+            is MarkdownBlock.Table -> (sequenceOf(node.header) + node.rows.asSequence()).forEach { row ->
+                row.forEach { cell ->
+                    val before = length
+                    inlines(cell)
+                    if (length == before) append('\uFFFC')
+                }
+            }
+            MarkdownBlock.Rule -> append('\uFFFC')
+        }
+        if (length == start) append('\uFFFC')
+    }
+    blocks.forEach(::block)
+}
+
+private fun mappedMarkdownFrontier(old: MarkdownTypingPart, next: MarkdownTypingPart, visible: Int): Int {
+    val before = old.displayed
+    val after = next.displayed
+    if (before == after) return visible.coerceAtMost(next.length)
+    var prefix = 0
+    while (prefix < minOf(before.length, after.length) && before[prefix] == after[prefix]) prefix++
+    if (visible <= prefix) return visible
+    var suffix = 0
+    while (suffix < minOf(before.length, after.length) - prefix &&
+        before[before.lastIndex - suffix] == after[after.lastIndex - suffix]) suffix++
+    return if (old.source.text == next.source.text && suffix > 0 && visible >= before.length - suffix)
+        (after.length - (before.length - visible)).coerceIn(0, next.length)
+    else prefix.coerceAtMost(next.length)
+}
+
+private fun mappedMarkdownPosition(previous: MarkdownTypingTarget, next: List<MarkdownTypingPart>, position: Double): Double {
+    var remaining = position.toInt()
+    var mapped = 0
+    for (index in previous.parts.indices) {
+        val before = previous.parts[index]
+        val after = next.getOrNull(index) ?: return mapped.toDouble()
+        if (before.source.id != after.source.id) return mapped.toDouble()
+        val visible = minOf(remaining, before.length)
+        val frontier = mappedMarkdownFrontier(before, after, visible)
+        mapped += frontier
+        if (remaining <= before.length || frontier < after.length) {
+            return mapped.toDouble() + if (frontier == visible) position % 1.0 else 0.0
+        }
+        remaining -= before.length
+    }
+    return mapped.toDouble()
+}
+
 internal class MarkdownTextBoundaries(private val text: String) {
     private val characters = BreakIterator.getCharacterInstance(Locale.ROOT).apply { setText(this@MarkdownTextBoundaries.text) }
 
     fun end(limit: Int): Int {
         if (limit >= text.length) return text.length
         if (limit <= 0) return 0
-        var end = if (characters.isBoundary(limit)) limit else characters.preceding(limit)
-        if (end > 0 && end < text.length && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end--
+        var end = if (characters.isBoundary(limit)) limit else characters.following(limit)
+        if (end > 0 && end < text.length && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end++
         return end.coerceAtLeast(0)
     }
 }
 
 internal data class MarkdownTypingSource(val id: String, val text: String)
-internal data class MarkdownTypingPart(val source: MarkdownTypingSource, val length: Int)
+internal data class MarkdownTypingPart(val source: MarkdownTypingSource, val length: Int,
+    val displayed: String = source.text,
+)
 
 internal fun markdownTypingAppends(previous: List<MarkdownTypingSource>, next: List<MarkdownTypingSource>): Boolean {
     if (previous.all { it.text.isEmpty() }) return true
@@ -93,13 +176,14 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         val sources = parts.map { it.source }
         val total = parts.sumOf { it.length.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         val appending = markdownTypingAppends(previous?.parts?.map { it.source } ?: baseline, sources)
+        val mapped = if (previous != null && appending) mappedMarkdownPosition(previous, parts, position) else position
         val start = when {
             !seenStreaming || closed || !appending -> total
             previous == null -> baselineLength.coerceAtMost(total)
-            else -> position.toInt().coerceAtMost(total)
+            else -> mapped.toInt().coerceAtMost(total)
         }
         if (previous == null || position >= previous.total || !appending) lastFrame = 0L
-        position = if (previous != null && appending && start < total) position.coerceAtMost(total.toDouble()) else start.toDouble()
+        position = if (previous != null && appending && start < total) mapped.coerceAtMost(total.toDouble()) else start.toDouble()
         if (!streaming) { drainStart = 0L; drainPosition = position }
         val next = MarkdownTypingTarget(parts, start, streaming, terminal)
         target = next

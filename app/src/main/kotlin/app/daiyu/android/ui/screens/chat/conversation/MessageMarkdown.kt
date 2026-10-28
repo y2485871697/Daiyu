@@ -84,8 +84,9 @@ internal fun MessageMarkdown(text: String, modifier: Modifier = Modifier, markdo
 internal val LocalMarkdownParser = staticCompositionLocalOf<(String) -> List<MarkdownBlock>> { defaultMarkdownParser }
 
 @Composable
-internal fun rememberMarkdownProjection(sources: List<String>): MarkdownProjection? {
-    val parser = LocalMarkdownParser.current
+internal fun rememberMarkdownProjection(sources: List<String>, streaming: Boolean = false): MarkdownProjection? {
+    val configuredParser = LocalMarkdownParser.current
+    val parser = if (streaming && configuredParser === defaultMarkdownParser) streamingMarkdownParser else configuredParser
     val parserIdentity = MarkdownParserIdentity(parser)
     val cached = remember(sources, parserIdentity) {
         markdownProjectionCache.get(sources, parser) ?: markdownProjectionCache.getPrepared(sources, parser)
@@ -243,34 +244,32 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>, openLink: (String) -> Un
     }
 }
 
-/** Width sampling reads the complete AST; reveal only changes which text/rows are visible. */
+/** Header widths and row-major reveal offsets do not move when body rows are appended. */
 @Composable
-private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit, visibleCharacters: Int = Int.MAX_VALUE) {
+private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit,
+    visibleCharacters: Int = Int.MAX_VALUE, cellOffsets: List<List<Int>>? = null,
+) {
+    val offsets = cellOffsets ?: remember(table) { markdownTableCellOffsets(table) }
     if (table.header.size > 32) {
         val groups = remember(table) { table.header.indices.chunked(32).map { columns ->
             table.copy(header = columns.map { table.header[it] },
                 rows = table.rows.map { row -> columns.map { row[it] } },
                 alignment = columns.map { table.alignment[it] })
         } }
-        val lengths = remember(groups) { groups.map(::markdownBlockLength) }
+        val groupOffsets = remember(offsets) { table.header.indices.chunked(32).map { columns ->
+            offsets.map { row -> columns.map { row[it] } }
+        } }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            var remaining = visibleCharacters
             groups.forEachIndexed { index, group ->
-                if (remaining > 0) MarkdownTable(group, openLink, minOf(remaining, lengths[index]))
-                remaining = (remaining - lengths[index]).coerceAtLeast(0)
+                if (visibleCharacters > groupOffsets[index][0][0]) {
+                    MarkdownTable(group, openLink, visibleCharacters, groupOffsets[index])
+                }
             }
         }
         return
     }
     val style = messageBodyStyle()
-    val columnEms = remember(table) {
-        FloatArray(table.header.size).also { widths ->
-            table.header.forEachIndexed { column, cell -> widths[column] = MarkdownText.tableCellWidthEm(cell) * 1.05f }
-            table.rows.forEach { row -> row.forEachIndexed { column, cell ->
-                widths[column] = maxOf(widths[column], MarkdownText.tableCellWidthEm(cell))
-            } }
-        }
-    }
+    val columnEms = remember(table.header) { MarkdownText.tableColumnWidthEms(table.header) }
     val em = with(LocalDensity.current) { style.fontSize.toDp() }
     val widths = remember(columnEms, em) { columnEms.map { (em * it + 24.dp).coerceIn(120.dp, 248.dp) } }
     val cellLengths = remember(table) { (listOf(table.header) + table.rows).map { row ->
@@ -284,12 +283,9 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
     Column(Modifier.widthIn(max = tableWidth).fillMaxWidth().testTag("markdown-table")
         .border(gridWidth, gridColor, tableShape).clip(tableShape)
         .horizontalScroll(rememberScrollState())) {
-        var remaining = visibleCharacters
         for (rowIndex in 0..table.rows.size) {
-            if (remaining <= 0) break
+            if (visibleCharacters <= offsets[rowIndex][0]) break
             val row = if (rowIndex == 0) table.header else table.rows[rowIndex - 1]
-            val rowVisible = remaining
-            remaining = (remaining - cellLengths[rowIndex].sum()).coerceAtLeast(0)
             Row(Modifier.drawBehind {
                 if (rowIndex == 0) drawRect(headerBackground)
                 val stroke = gridWidth.toPx()
@@ -305,10 +301,8 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
                     }
                 }
             }) {
-                var cellRemaining = rowVisible
                 row.forEachIndexed { column, cell ->
-                    val cellVisible = minOf(cellRemaining, cellLengths[rowIndex][column])
-                    cellRemaining = (cellRemaining - cellLengths[rowIndex][column]).coerceAtLeast(0)
+                    val cellVisible = (visibleCharacters - offsets[rowIndex][column]).coerceIn(0, cellLengths[rowIndex][column])
                     val align = when (table.alignment[column]) {
                         MarkdownBlock.Alignment.LEFT -> TextAlign.Start
                         MarkdownBlock.Alignment.CENTER -> TextAlign.Center

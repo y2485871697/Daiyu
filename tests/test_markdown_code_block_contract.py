@@ -38,7 +38,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn('MarkdownCodeText(block, visibleCharacters, Modifier.testTag("markdown-code-text")', self.code)
         self.assertIn('BasicText(markdownCodeDisplayText(block, visible)', self.reveal)
         policy = (BASE / "MarkdownCodePolicy.kt").read_text()
-        self.assertIn("block.closed && visibleText.length == block.text.length", policy)
+        self.assertIn("visibleText.length == block.text.length", policy)
         self.assertIn('visibleText.removeSuffix("\\n")', policy)
         self.assertNotIn(".trim(", policy)
         self.assertNotIn(".trimEnd(", policy)

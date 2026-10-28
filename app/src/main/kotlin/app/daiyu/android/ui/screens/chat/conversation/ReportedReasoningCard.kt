@@ -116,11 +116,11 @@ internal fun ReportedReasoningCard(
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     summaries.forEach { summary ->
                         key(ownerKey, summary.itemId) {
-                            val projection = rememberMarkdownProjection(listOf(summary.text))
+                            val projection = rememberMarkdownProjection(listOf(summary.text), streaming = !generationComplete)
                             val displayed = projection?.sources?.singleOrNull() ?: summary.text
                             ProjectedMessageMarkdown(
                                 displayed, projection?.blocks?.get(displayed), Modifier.fillMaxWidth(),
-                                generationComplete = generationComplete && displayed == summary.text,
+                                generationComplete = generationComplete && projection != null && displayed == summary.text,
                             )
                         }
                     }

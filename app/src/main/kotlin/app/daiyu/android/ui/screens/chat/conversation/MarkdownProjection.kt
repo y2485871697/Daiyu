@@ -30,6 +30,7 @@ internal fun markdownBodySnapshot(
     else previous?.takeIf { text.startsWith(it.text) }
 
 internal val defaultMarkdownParser: (String) -> List<MarkdownBlock> = MarkdownParser::parse
+internal val streamingMarkdownParser: (String) -> List<MarkdownBlock> = MarkdownParser::parseStreaming
 
 // Each lane has one running parse; short replies cannot queue behind bulk Markdown.
 internal const val INTERACTIVE_MARKDOWN_CHARS = 4_096L
@@ -54,10 +55,12 @@ internal suspend fun projectMarkdown(
         sources.forEachIndexed { index, source ->
             currentCoroutineContext().ensureActive()
             if (source !in blocks) {
-                val parsed = cached?.blocks?.get(source) ?: cache.getBlocks(source, parser) ?: if (parser === defaultMarkdownParser) {
+                val parsed = predecessor?.blocks?.get(source) ?: cached?.blocks?.get(source) ?: cache.getBlocks(source, parser) ?: if (parser === defaultMarkdownParser) {
                     MarkdownParser.parse(source) { context.ensureActive() }
+                } else if (parser === streamingMarkdownParser) {
+                    MarkdownParser.parseStreaming(source) { context.ensureActive() }
                 } else parser(source)
-                val old = predecessor?.let { it.blocks[it.sources[index]] }
+                val old = predecessor?.let { it.sources.getOrNull(index)?.let(it.blocks::get) }
                 blocks[source] = reuseMarkdownBlocks(old, parsed)
             }
         }
@@ -69,7 +72,7 @@ internal suspend fun projectMarkdown(
 }
 
 internal fun isMarkdownAppend(previous: List<String>, next: List<String>): Boolean =
-    previous.size == next.size && previous.indices.all { next[it].startsWith(previous[it]) }
+    previous.size <= next.size && previous.indices.all { next[it].startsWith(previous[it]) }
 
 // Finish each accepted snapshot; merge arriving appends instead of starving the parser.
 internal suspend fun collectMarkdownProjections(

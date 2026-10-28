@@ -67,6 +67,25 @@ class RegressionCompletionBarriersContractTest(unittest.TestCase):
                       'assertEquals(before, fixture.database.exportBackup())', 'assertDraft("sponsor unsent")'):
             self.assertIn(value, method)
 
+    def test_sponsor_system_back_requires_stable_native_window_before_single_delivery(self):
+        text = (TESTS / 'SettingsExternalLinksActivityTest.kt').read_text()
+        method = text.split('fun testSponsorSwitchesOriginalQrsAndClosesWithoutOpeningPayment()', 1)[1].split('fun testPausedOrRetiredSponsorCallback', 1)[0]
+        reopened = method.split('entry("赞助").performClick()', 1)[1].split('entry("赞助").performClick()', 1)[0]
+        order = ['awaitSponsorReady()', 'node("sponsor-wechat").assertIsSelected()',
+                 'awaitImeFrame(node("sponsor-wechat"), visible = false)',
+                 'instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)', 'awaitSponsorClosed()']
+        for before, after in zip(order, order[1:]):
+            self.assertIn(before, reopened)
+            self.assertIn(after, reopened)
+            self.assertLess(reopened.index(before), reopened.index(after))
+        self.assertEqual(1, method.count('sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)'))
+        self.assertEqual(1, method.count('awaitImeFrame(node("sponsor-wechat"), visible = false)'))
+        for oracle in ('assertEquals(before, fixture.database.exportBackup())',
+                       'assertEquals(settings, fixture.settings.loadForEditing().settings)',
+                       'assertEquals(0, fixture.opens.get())', 'assertDraft("sponsor unsent")'):
+            self.assertIn(oracle, method)
+        self.assertNotIn('Thread.sleep', method)
+
     def test_assistant_back_waits_for_settled_sheet_and_native_ime_before_single_back(self):
         text = (TESTS / 'AssistantNavigationActivityTest.kt').read_text()
         method = text.split('private fun back(system: Boolean)', 1)[1].split('fun testHeaderAndSystemBack', 1)[0]

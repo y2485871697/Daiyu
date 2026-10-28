@@ -100,6 +100,7 @@ class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
         entry("赞助").performClick()
         awaitSponsorReady()
         node("sponsor-wechat").assertIsSelected()
+        awaitImeFrame(node("sponsor-wechat"), visible = false)
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         awaitSponsorClosed()
         entry("赞助").performClick()

@@ -30,7 +30,9 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
         user, assistant = turns.split('internal fun AssistantTurn(', 1)
         self.assertIn('endAligned = true', user)
         self.assertNotIn('endAligned = true', assistant)
-        self.assertIn('val initialBodyPending = sources.any { it.isNotBlank() } && projection == null && !hasProjectedBody', assistant)
+        self.assertIn('val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true', assistant)
+        self.assertIn('val initialBodyPending = sources.any { it.isNotBlank() } && !hasDisplayBody && !hasProjectedBody', assistant)
+        self.assertIn('SideEffect { if (hasDisplayBody) hasProjectedBody = true }', assistant)
         self.assertIn('if (turn.status != RunStatus.RUNNING && !initialBodyPending)', assistant)
         self.assertIn('allowSpeech = hasTextActions, showCopyAction = hasTextActions', turns)
 

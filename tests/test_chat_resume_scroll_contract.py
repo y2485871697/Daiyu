@@ -64,7 +64,16 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('remember(identity, resetEpoch) { MarkdownTypingState(baseline) }', self.typing)
         self.assertIn('remember(motion, parts, baselineLength, turn.isStreaming, turn.status)', self.typing)
         self.assertNotIn('key(revealResetEpoch)', self.chat)
-        self.assertIn('readyTurns[tail.listKey] != tail || !tail.isStreaming && revealedTurns[tail.listKey] != tail', self.chat)
+        resume_gate = (
+            'resumeFollowPending && tail != null && '
+            'layout.visibleItemsInfo.any { it.key == tail.listKey } && '
+            '(if (tail.isStreaming) displayedTurns[tail.listKey] != tail '
+            'else readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)'
+        )
+        self.assertEqual(2, ' '.join(self.chat.split()).count(resume_gate))
+        self.assertIn('val contentReady = projection?.sources == sources', self.chat)
+        self.assertIn('SideEffect { onContentReady(contentReady) }', self.chat)
+        self.assertIn('SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }', self.chat)
 
     def test_device_regressions_cover_stopped_growth_static_return_and_ownership(self):
         device = DEVICE.read_text()

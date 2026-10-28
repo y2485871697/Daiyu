@@ -38,8 +38,16 @@ class SubAgentStatusHeightContractTest(unittest.TestCase):
         workspace = source("ui/components/ConversationWorkspaceSheet.kt")
         self.assertIn("ConversationAgentSheet(onDismiss, useDefaultHeight = true,", workspace)
         for file in SRC.rglob("*.kt"):
-            if file.name not in {"SubAgentStatusDialog.kt", "ConversationCollaborationDialog.kt", "SearchHistoryDialog.kt", "ConversationWorkspaceSheet.kt"}:
-                self.assertNotIn("useDefaultHeight = true", file.read_text(), str(file))
+            if file.name in {"SubAgentStatusDialog.kt", "ConversationCollaborationDialog.kt", "SearchHistoryDialog.kt", "ConversationWorkspaceSheet.kt"}:
+                continue
+            text = file.read_text()
+            if file.relative_to(SRC).as_posix() == "ui/screens/settings/McpSettingsScreen.kt":
+                before, boundary, detail = text.partition("private fun McpToolDescriptionSheet(")
+                self.assertTrue(boundary, str(file))
+                allowed = "ConversationAgentSheet(onDismiss, useDefaultHeight = true)"
+                self.assertEqual(1, detail.count(allowed), str(file))
+                text = before + boundary + detail.replace(allowed, "", 1)
+            self.assertNotIn("useDefaultHeight = true", text, str(file))
 
     def test_height_rule_has_small_window_and_landscape_unit_cases(self):
         text = (ROOT / "app/src/test/kotlin/app/daiyu/android/BottomSheetSizingTest.kt").read_text()

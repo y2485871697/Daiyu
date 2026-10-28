@@ -32,7 +32,12 @@ class WorkspaceFilesEntryContract(unittest.TestCase):
                       'fun basicCurrent() = !filesOnly && tab == LinuxSettingsTab.BASIC',
                       'if (!filesOnly) LinuxSettingsTabs(tab)',
                       'pageTitle = if (filesOnly) "工作区" else "Linux 工具环境", integratedLinux = true',
-                      'linuxBrowsableRootfs(state, distribution, mode, terminal?.linux?.selected)',
+                      'val selectedReference = state.selected ?: terminal?.linux?.selected',
+                      'val currentInstallation = state.entries.firstOrNull {\n'
+                      '        LinuxGenerationRef(it.environmentId, it.generation) == selectedReference\n'
+                      '    }',
+                      'val rootfs = linuxBrowsableRootfs(state, currentInstallation?.distribution ?: distribution,\n'
+                      '        currentInstallation?.executionMode ?: mode, selectedReference)',
                       'rootfs = rootfs, onOpenTerminal = onOpenTerminal']:
             self.assertIn(token, screen)
         self.assertEqual(screen.count('.navigationBarsPadding()'), 1)

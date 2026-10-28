@@ -9,6 +9,9 @@ import app.daiyu.android.delegation.ReasoningEffort
 class ChatThinkingPickerActivityTest : WiredActivityTestCase() {
     private fun openPicker() {
         node("chat-reasoning").performClick()
+        awaitUniqueTag("chat-thinking-title")
+        awaitDialogEnter(node("chat-thinking-title"))
+        awaitNodeWindowFocus(node("chat-thinking-title"))
         ui.onNodeWithText("调整思考深度").assertIsDisplayed()
         ui.onNodeWithText("默认", useUnmergedTree = true).assertDoesNotExist()
         for (text in listOf("下一次主请求生效", "Responses", "max_tokens", "隐藏内部推理")) {
@@ -17,8 +20,15 @@ class ChatThinkingPickerActivityTest : WiredActivityTestCase() {
     }
 
     private fun closePicker() {
+        awaitNodeWindowFocus(node("chat-thinking-title"))
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        ui.waitForIdle()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag("chat-thinking-title", useUnmergedTree = true)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
+        awaitNodeWindowFocus(node("chat-reasoning"))
+        node("chat-thinking-title").assertDoesNotExist()
         ui.onNodeWithText("调整思考深度").assertDoesNotExist()
     }
 

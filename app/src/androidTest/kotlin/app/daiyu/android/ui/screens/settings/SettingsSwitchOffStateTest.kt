@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -46,7 +47,7 @@ class SettingsSwitchOffStateTest : WiredActivityTestCase() {
                                 surface = MiuixTheme.colorScheme.surface
                                 val outline = MiuixTheme.colorScheme.onSurfaceVariantSummary
                                 thumb = if (enabled) outline else outline.copy(alpha = .38f).compositeOver(surface)
-                                Column {
+                                Column(Modifier.statusBarsPadding()) {
                                     for (interactive in listOf(false, true)) {
                                         Box(Modifier.requiredSize(80.dp, 48.dp).background(surface)
                                             .testTag("off-frame:$interactive"), contentAlignment = Alignment.Center) {
@@ -74,7 +75,16 @@ class SettingsSwitchOffStateTest : WiredActivityTestCase() {
                 }
                 for (interactive in listOf(false, true)) {
                     val diagnostic = "compact=$compact dark=$dark enabled=$enabled scale=$scale direction=$direction interactive=$interactive"
-                    val pixels = captureScreenNode(node("off-frame:$interactive")).toPixelMap()
+                    val frame = node("off-frame:$interactive")
+                    val pixels = captureScreenNode(frame).toPixelMap()
+                    val frameNode = frame.fetchSemanticsNode()
+                    var statusBarBottom = 0
+                    mainThread {
+                        statusBarBottom = checkNotNull(androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView))
+                            .getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars()).top
+                    }
+                    assertTrue("frame below status bar: $diagnostic bounds=${frameNode.boundsInRoot} statusBarBottom=$statusBarBottom",
+                        frameNode.positionOnScreen.y >= statusBarBottom)
                     val factor = density * if (compact) .7f else 1f
                     val sign = if (direction == LayoutDirection.Ltr) -1 else 1
                     val thumbX = (pixels.width / 2f + sign * 10f * factor).roundToInt()
@@ -82,9 +92,11 @@ class SettingsSwitchOffStateTest : WiredActivityTestCase() {
                     val y = pixels.height / 2
                     fun distance(actual: Color, expected: Color) = maxOf(abs(actual.red - expected.red),
                         abs(actual.green - expected.green), abs(actual.blue - expected.blue))
-                    assertTrue("thumb interior: $diagnostic", distance(pixels[thumbX, y], thumb) < .035f)
-                    assertTrue("track interior: $diagnostic", distance(pixels[trackX, y], surface) < .035f)
-                    assertTrue("thumb differs from track: $diagnostic", distance(pixels[thumbX, y], pixels[trackX, y]) > .08f)
+                    val samples = "$diagnostic density=$density image=${pixels.width}x${pixels.height} " +
+                        "thumb=($thumbX,$y):${pixels[thumbX, y]} expected=$thumb track=($trackX,$y):${pixels[trackX, y]} surface=$surface"
+                    assertTrue("thumb interior: $samples", distance(pixels[thumbX, y], thumb) < .035f)
+                    assertTrue("track interior: $samples", distance(pixels[trackX, y], surface) < .035f)
+                    assertTrue("thumb differs from track: $samples", distance(pixels[thumbX, y], pixels[trackX, y]) > .08f)
                 }
                 node("off-control:true").assertIsOff()
                 if (!enabled) {

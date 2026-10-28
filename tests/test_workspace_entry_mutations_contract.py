@@ -36,22 +36,27 @@ class WorkspaceEntryMutationsContract(unittest.TestCase):
         self.assertIn('add("delete" to "删除")', menu)
         self.assertIn('add("export" to "导出文件")', menu)
         rename = ui.split('"rename" ->', 1)[1].split('"delete" ->', 1)[0]
-        self.assertIn('"取消"', rename)
+        self.assertIn('WorkspaceNameDialog(', rename)
+        self.assertIn('"取消"', source('ui/components/WorkspaceNameDialog.kt'))
         self.assertIn('DaiyuConfirmDialog(', ui)
         self.assertIn('"workspace-cancel"', source('ui/components/ConversationWorkspaceSheet.kt'))
-    def test_rename_uses_assistant_search_geometry_without_close_or_label(self):
+    def test_rename_uses_creation_field_and_hint_without_search_or_close(self):
         ui = source('ui/components/WorkspaceEntryDialogs.kt')
         rename = ui.split('"rename" ->', 1)[1].split('"delete" ->', 1)[0]
-        for token in ['ChatSelectionSheet(', 'showCloseButton = false', 'AssistantSearchField(', 'placeholder = "名称"',
-                      'showSearchIcon = false', 'testTag("prompt-input")', 'testTag("dialog-cancel")', 'testTag("dialog-confirm")']:
-            self.assertIn(token, rename)
-        self.assertNotIn('DaiyuTextInputDialog(', rename)
+        self.assertIn('WorkspaceNameDialog(', rename)
+        self.assertIn('name, "文件夹名称", "保存"', rename)
+        self.assertIn('enabled = enabled', rename)
+        self.assertNotIn('AssistantSearchField(', rename)
         self.assertNotIn('AssistantPreviewField(', rename)
-        field = source('ui/screens/assistants/AssistantSearchField.kt')
-        self.assertIn('showSearchIcon: Boolean = true', field)
-        self.assertIn('if (showSearchIcon) Icon(', field)
-        self.assertIn('heightIn(min = 44.dp * s)', field)
-        self.assertIn('heightIn(min = 42.dp * s)', field)
+        field = source('ui/components/WorkspaceNameDialog.kt')
+        for token in ['ChatSelectionSheet(', 'showCloseButton = false', 'TextField(', 'label = hint',
+                      'useLabelAsPlaceholder = true', 'singleLine = true', 'managedInput()',
+                      'testTag("prompt-input")', 'testTag("dialog-cancel")', 'testTag("dialog-confirm")']:
+            self.assertIn(token, field)
+        self.assertNotIn('WindowDialog(', field)
+        search = source('ui/screens/assistants/AssistantSearchField.kt')
+        self.assertIn('Icon(AssistantPreviewIcons.Search,', search)
+        self.assertNotIn('showSearchIcon', search)
     def test_rootfs_protection_is_below_ui_and_applies_to_destination(self):
         files = source('workspace/PrivateWorkspaceFiles.kt')
         self.assertEqual(files.count('check(canModify(entry))'), 2)

@@ -66,6 +66,47 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
         } finally { gate.set(false); ui.waitForIdle(); root.deleteRecursively() }
     }
 
+    fun testPrivateRenameUsesCreateHintAndCancelPreservesOriginalFile() {
+        for (compact in listOf(false, true)) {
+            val storage = File(instrumentation.targetContext.cacheDir, "rename-panel-${UUID.randomUUID()}").apply { mkdir() }
+            val paths = PrivateWorkspacePaths(storage)
+            val root = paths.ensureRoot()
+            val original = File(root, "keep.txt").apply { writeText("keep") }
+            val renamed = File(root, "改名 文件.txt")
+            val gate = AtomicBoolean(true)
+            val access = PrivateWorkspaceFiles(paths)
+            try {
+                mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
+                    val panel = rememberPrivateWorkspacePanel(access, gate, compact = compact)
+                    MiuixScaffoldPage("私有文件改名测试", onBack = { gate.set(false) }) { item { panel() } }
+                } } }
+                awaitUniqueTag("workspace-private-entry:keep.txt")
+                reveal("workspace-private-entry:keep.txt", "私有文件改名测试").performTouchInput { longClick() }
+                node("workspace-entry-action:rename").performClick()
+                awaitUniqueTag("prompt-input")
+                node("prompt-input").assertTextContains("keep.txt").performTextClearance()
+                ui.onNodeWithText("文件夹名称").assertExists()
+                ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+                node("prompt-input").performTextReplacement(renamed.name)
+                node("dialog-cancel").performClick()
+                assertEquals("keep", original.readText())
+                assertFalse(renamed.exists())
+                reveal("workspace-private-entry:keep.txt", "私有文件改名测试").performTouchInput { longClick() }
+                node("workspace-entry-action:rename").performClick()
+                awaitUniqueTag("prompt-input")
+                node("prompt-input").assertTextContains("keep.txt").performTextReplacement("../invalid")
+                node("dialog-confirm").performClick()
+                node("prompt-input").assertTextContains("../invalid")
+                assertEquals("keep", original.readText())
+                node("prompt-input").performTextReplacement(renamed.name)
+                node("dialog-confirm").performClick()
+                awaitUniqueTag("workspace-private-entry:${renamed.name}")
+                assertFalse(original.exists())
+                assertEquals("keep", renamed.readText())
+            } finally { gate.set(false); mainThread { activity.setContent {} }; ui.waitForIdle(); storage.deleteRecursively() }
+        }
+    }
+
     fun testCompactPrivateCreateCancelConfirmAndRetainedConfirmExpire() {
         val storage = File(instrumentation.targetContext.cacheDir, "create-panel-${UUID.randomUUID()}").apply { mkdir() }
         val paths = PrivateWorkspacePaths(storage)

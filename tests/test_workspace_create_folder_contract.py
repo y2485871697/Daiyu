@@ -24,11 +24,30 @@ class WorkspaceCreateFolderContract(unittest.TestCase):
 
     def test_same_dialog_is_reused_without_changing_global_input_policy(self):
         dialog = read('ui/components/WorkspaceCreateFolderDialog.kt')
-        self.assertIn('DaiyuTextInputDialog("新建文件夹", ""', dialog)
+        self.assertIn('WorkspaceNameDialog("新建文件夹", ""', dialog)
         self.assertIn('"文件夹名称", "确定"', dialog)
         self.assertIn('workspaceDirectoryName(name)', dialog)
         for file in ['ui/screens/settings/PrivateWorkspacePanel.kt', 'ui/screens/settings/LinuxRootfsPanel.kt', 'MainActivity.kt']:
             self.assertIn('WorkspaceCreateFolderDialog(', read(file))
+
+    def test_names_share_real_miuix_field_in_standard_sheet_with_dynamic_button_roles(self):
+        path = BASE / 'ui/components/WorkspaceNameDialog.kt'
+        self.assertTrue(path.exists(), 'creation and rename need the same scoped name dialog')
+        dialog = path.read_text()
+        for token in ['ChatSelectionSheet(', 'showCloseButton = false', 'secondary = true', 'primary = true',
+                      'remember(initial)', 'label = hint', 'useLabelAsPlaceholder = true', 'singleLine = true',
+                      'Modifier.managedInput().testTag("prompt-input").fillMaxWidth()',
+                      'imeCursorBrush(MiuixTheme.colorScheme.primary)', 'testTag("workspace-name-field")',
+                      'if (enabled()) onConfirm(value)', 'onDismiss = { if (enabled()) onDismiss() }',
+                      'onValueChange = { if (enabled()) value = it }', 'dismissEnabled = enabled()']:
+            self.assertIn(token, dialog)
+        self.assertEqual(2, dialog.count('enabled = enabled()'))
+        self.assertEqual(2, dialog.count('Modifier.weight(1f).heightIn(min = 48.dp)'))
+        for forbidden in ['Color(0x', 'AssistantSearchField(', 'AssistantPreviewField(', '.trim()', 'onConfirm(value); onDismiss']:
+            self.assertNotIn(forbidden, dialog)
+        common = read('ui/components/DaiyuDialogs.kt')
+        self.assertIn('preview: Boolean = false', common)
+        self.assertIn('WindowDialog(show = true', common)
 
     def test_pinned_mkdir_is_atomic_and_does_not_open_other_writes(self):
         files = read('workspace/PrivateWorkspaceFiles.kt')

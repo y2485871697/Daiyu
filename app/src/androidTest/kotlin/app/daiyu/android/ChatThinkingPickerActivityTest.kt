@@ -116,4 +116,29 @@ class ChatThinkingPickerActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testRunningSliderKeepsConfirmedLabelThumbAndPreferenceThenUnlocks() {
+        val conversation = fixture.database.create("default")
+        fixture.controller.reasoningPreference.set(conversation.id.value, ReasoningEffort.LOW)
+        mainThread { activity.select(conversation) }
+        val session = fixture.session(held = true, holdSeconds = 30)
+        checkNotNull(fixture.controller.send(conversation, "held reasoning"))
+        assertTrue(session.entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        openPicker()
+        val before = fixture.application.getSharedPreferences("conversation-ui", 0).all.toMap()
+        node("thinking-depth-slider").performTouchInput { click(centerRight) }
+        node("thinking-depth-slider").performSemanticsAction(SemanticsActions.SetProgress) { it(4f) }
+        node("chat-thinking-value").assertTextEquals("低")
+        assertEquals(2f, node("thinking-depth-slider").fetchSemanticsNode()
+            .config[SemanticsProperties.ProgressBarRangeInfo].current)
+        assertEquals(before, fixture.application.getSharedPreferences("conversation-ui", 0).all.toMap())
+        assertEquals(ReasoningEffort.LOW, fixture.controller.reasoningPreference.snapshot(conversation.id.value))
+        assertEquals(1L, session.cancelled.count)
+        session.release.countDown()
+        awaitControl("task fully ended") { !fixture.controller.taskConfigurationBusy() }
+        node("thinking-depth-slider").performSemanticsAction(SemanticsActions.SetProgress) { it(4f) }
+        node("chat-thinking-value").assertTextEquals("高")
+        assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(conversation.id.value))
+        closePicker()
+    }
+
 }

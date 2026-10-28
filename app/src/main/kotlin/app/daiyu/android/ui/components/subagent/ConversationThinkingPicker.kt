@@ -91,7 +91,6 @@ import kotlin.math.roundToInt
                     lineHeight = 30.sp, fontWeight = FontWeight(450), color = colors.text,
                     modifier = Modifier.testTag("chat-thinking-value").padding(top = 8.dp, bottom = 13.dp))
                 if (choices.size > 1) ConversationDepthSlider(selected, choices.lastIndex, { index ->
-                    selected = index
                     if (choices[index] != effort) onEffortChange(choices[index])
                 }, {})
             }

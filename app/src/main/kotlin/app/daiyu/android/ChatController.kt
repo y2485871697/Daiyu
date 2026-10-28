@@ -1943,6 +1943,28 @@ class ChatController internal constructor(private val application:Application,
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
         resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && pendingPlatformAction==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
+    @Synchronized internal fun taskConfigurationBusy(): Boolean = preparing || active != null ||
+        resources != null || generationEntry != null || virtualDisplayEntry != null || guiEntry != null ||
+        generationReaders > 0 || pendingShizuku != null || pendingPlatformAction != null ||
+        unacceptedTools.isNotEmpty() || hasLiveChildTasks()
+
+    @Synchronized internal fun setChatReasoning(owner: String?, effort: ReasoningEffort): Boolean {
+        if (!idleAvailable() || hasLiveChildTasks()) return false
+        reasoningPreference.set(owner, effort)
+        return true
+    }
+
+    @Synchronized internal fun deleteAssistant(id: String) {
+        check(idleAvailable() && !hasLiveChildTasks()) { "请先结束任务" }
+        dataTask(failureNotice = "助手删除失败；请重新打开助手列表核对", work = {
+            val avatar = assistantStore.read(id)?.avatarFileName
+            assistantStore.delete(id)
+            assistantAssets.deleteMemory(id)
+            assistantAssets.deleteAvatar(avatar)
+            null
+        })
+    }
+
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
     @Volatile var active:Message?=null;private set
     private var problemRevision = 0L
@@ -4633,12 +4655,13 @@ class ChatController internal constructor(private val application:Application,
             null
         })
     }
-    internal fun selectActiveProviderCatalogModel(expectedActive: ProviderEditorSlot?, expectedSettings: ModelSettings?,
+    @Synchronized internal fun selectActiveProviderCatalogModel(expectedActive: ProviderEditorSlot?, expectedSettings: ModelSettings?,
         target: ProviderEditorSlot, targetSettings: ModelSettings?,
         ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
         cancelled: () -> Boolean, completed: (Boolean) -> Unit,
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
+        check(idleAvailable() && !hasLiveChildTasks()) { "请先结束任务" }
         invalidateVideoConfiguration()
         dataTask(failureNotice = "模型或提供商切换未完整确认；请重新打开目录核对", completed = completed, work = {
             switchChatReasoningModel(expectedActive?.slotId,
@@ -5058,7 +5081,7 @@ class ChatController internal constructor(private val application:Application,
                 // an attempted/duplicate import must leave old owners and their gates untouched.
                 value=work(report);success=true
             } catch(failure:Exception) {
-                value=failureNotice ?: when(failure) {
+                value=if (failure is AssistantInUseException) "请先结束任务" else failureNotice ?: when(failure) {
                     is SecurityException -> "备份文件访问权限不足或已失效；请重新选择文件。原会话保留，导出目标可能不完整"
                     is java.nio.charset.CharacterCodingException -> "导入失败；备份不是有效UTF-8文本。原会话保留，未执行历史请求"
                     is java.io.IOException -> if(importing) "导入失败；读取备份或写入附件失败。原会话保留，未执行历史请求"

@@ -94,6 +94,24 @@ class ComposerContextStyleContractTest(unittest.TestCase):
                       'assertNoTextOverflow(tokenLayout)'):
             self.assertIn(token, toggle)
 
+    def test_live_usage_updates_share_the_mode_animation_and_snapshot_outgoing_text(self):
+        self.assertIn('val contextText = if (showContextTokens)', self.badge)
+        self.assertIn('AnimatedContent(targetState = showContextTokens to contextText,', self.badge)
+        content = self.badge.split('label = "context-usage-mode")', 1)[1]
+        self.assertIn('{ (showTokens, text) ->', content)
+        self.assertIn('Text(text,', content)
+        self.assertNotIn('state.context', content)
+        for animation in ('fadeIn(tween(180))', 'fadeOut(tween(120))',
+                          'slideInVertically(tween(220, easing = FastOutSlowInEasing))',
+                          'slideOutVertically(tween(180))',
+                          'SizeTransform { _, _ -> tween(220, easing = FastOutSlowInEasing) }'):
+            self.assertIn(animation, self.badge)
+
+    def test_unknown_usage_label_is_only_context(self):
+        model = (SRC / 'ui/model/CloudContextUsage.kt').read_text()
+        self.assertNotIn('未知 上下文', model)
+        self.assertEqual(2, model.count('?: return "上下文"'))
+
     def test_context_toggles_locally_with_animated_text_and_width(self):
         self.assertIn('var showContextTokens by rememberSaveable { mutableStateOf(false) }', self.text)
         self.assertIn('onClick = { showContextTokens = !showContextTokens }', self.badge)

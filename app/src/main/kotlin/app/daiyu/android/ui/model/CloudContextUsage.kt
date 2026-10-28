@@ -30,7 +30,7 @@ internal data class CloudContextUsageUi(val inputTokens: Long? = null, val windo
         windowTokens?.takeIf { it > 0 }?.let { (input.toDouble() / it).toFloat().coerceIn(0f, 1f) }
     }
     fun label(locale: Locale = Locale.getDefault()): String {
-        val input = inputTokens?.takeIf { it >= 0 } ?: return "未知 上下文"
+        val input = inputTokens?.takeIf { it >= 0 } ?: return "上下文"
         val window = windowTokens?.takeIf { it > 0 } ?: return "上下文"
         val format = NumberFormat.getNumberInstance(locale).apply {
             minimumFractionDigits = 1; maximumFractionDigits = 1; isGroupingUsed = false

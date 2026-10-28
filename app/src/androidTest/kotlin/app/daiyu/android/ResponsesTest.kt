@@ -431,14 +431,15 @@ class ResponsesTest:InstrumentationTestCase() {
         assertEquals(RunStatus.FAILED,rejected.status)
     }
     fun testSummarySnapshotOrderAndItemIsolationDirectly() {
-        val snapshots=mutableListOf<ModelEvent.ReasoningFinal>()
+        val snapshots=mutableListOf<ModelEvent.ReasoningDelta>()
         val body=frames(reasoningDelta(1,"second",sequence=1),reasoningDelta(0,"first",sequence=2),
             reasoningDelta(0,"other",id="other-item",sequence=3),completed())
         ResponsesStream.read(body.byteInputStream().bufferedReader(),{false}) {
             assertFalse(it is ModelEvent.TextDelta || it is ModelEvent.TextFinal)
-            if(it is ModelEvent.ReasoningFinal) snapshots.add(it)
+            if(it is ModelEvent.ReasoningDelta) snapshots.add(it)
         }
         assertEquals(listOf("second","firstsecond","other"),snapshots.map {it.text})
+        assertTrue(snapshots.all { it.cumulative })
         assertEquals(listOf("rs","rs","other-item"),snapshots.map {it.itemId})
     }
     fun testSyntheticAccountRequestsRemainIsolated() {

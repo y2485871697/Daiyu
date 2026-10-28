@@ -196,4 +196,15 @@ class HapticsActivityHostTest : InstrumentationTestCase() {
             forwarder.close()
         }
     }
+
+    fun testOngoingCumulativeReasoningDoesNotEmitCompletionPulse() = withHost { f ->
+        f.sync(visible = false)
+        val current = f.bindings.single().beginRun("r", "m")
+        val forwarder = HapticsReasoningForwarder { current }
+        val message = Message(MessageId("m"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        forwarder.accept(message, ModelEvent.ReasoningDelta("reason", "", cumulative = true))
+        forwarder.accept(message, ModelEvent.ReasoningDelta("reason", "", cumulative = true))
+        f.afterDrain = { assertEquals(0, f.ports.sumOf { it.plays }); forwarder.close() }
+    }
 }

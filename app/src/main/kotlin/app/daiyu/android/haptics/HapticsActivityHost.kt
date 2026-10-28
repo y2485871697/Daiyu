@@ -115,7 +115,7 @@ internal class HapticsReasoningForwarder(
             is ModelEvent.ReasoningDelta -> {
                 if (event.itemId in completed) return
                 val old = text[event.itemId].orEmpty()
-                val next = old + event.text
+                val next = if (event.cumulative) event.text else old + event.text
                 text[event.itemId] = next
                 current.output((graphemes(next) - graphemes(old)).coerceAtLeast(0), reasoning = true)
             }

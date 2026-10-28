@@ -24,7 +24,7 @@ class ResponsesProtocolCompatibilityTest {
         val stream = frame(event("response.reasoning_summary_text.delta").put("item_id", "r").put("content_index", 2).put("delta", "summary")) +
             frame(event("response.reasoning_summary_text.done").put("item_id", "r")) + frame(terminal())
         ResponsesStream.read(stream.reader().buffered(), { false }, events::add)
-        assertEquals("summary", events.filterIsInstance<ModelEvent.ReasoningFinal>().last().text)
+        assertEquals("summary", events.filterIsInstance<ModelEvent.ReasoningDelta>().last().text)
     }
     @Test fun terminalOnlyCallsAreConfirmedOnce() {
         val events = mutableListOf<ModelEvent>()

@@ -48,7 +48,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
-    var expanded by rememberSaveable(ownerKey) { mutableStateOf(false) }
+    var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
+    val thinking = allowLiveTiming && work.segments.any { it.reasoning?.activeSinceNanos != null }
+    val expanded = expandedOverride ?: thinking
     val reasoningState = rememberSaveableStateHolder()
     val colors = conversationColors()
     val steps = work.segments.flatMap { it.steps }
@@ -65,7 +67,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val summaryWidth = maxWidth * .38f
             val stacked = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
-            Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 44.dp).conversationClickable { expanded = !expanded }
+            Row(Modifier.fillMaxWidth().testTag("work-process-header").heightIn(min = 44.dp).conversationClickable { expandedOverride = !expanded }
                 .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
                 .padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -3,7 +3,8 @@ package app.daiyu.android.domain
 sealed interface ModelEvent {
     data class TextDelta(val itemId: String, val text: String) : ModelEvent
     data class TextFinal(val itemId: String, val text: String) : ModelEvent
-    data class ReasoningDelta(val itemId: String, val text: String) : ModelEvent
+    /** An ongoing update; cumulative replaces the public text without completing the item. */
+    data class ReasoningDelta(val itemId: String, val text: String, val cumulative: Boolean = false) : ModelEvent
     data class ReasoningFinal(val itemId: String, val text: String) : ModelEvent
     /** Replacement snapshot cumulative within one ModelSession, including submitted outputs, excluding open history. */
     data class ProtocolOutput(val items: List<String>) : ModelEvent

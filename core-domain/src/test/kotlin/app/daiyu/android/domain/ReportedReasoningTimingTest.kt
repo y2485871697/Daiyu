@@ -119,4 +119,25 @@ class ReportedReasoningTimingTest {
         assertTrue(checkNotNull(item.elapsedMillis) <= (firstCancellation.get() - anchor) / 1_000_000)
     }
 
+
+    @Test fun cumulativeSnapshotsKeepTheAnchorAndFinalFreezesTheWholeItem() {
+        var now = 0L
+        val history = RunnerHistorySegments(initial()) { now }
+        fun item() = history.project(initial()).historySegments.single().reportedReasoning.single()
+        history.acceptReasoning("r", "second", final = false, replace = true)
+        now = 100_000_000L
+        history.acceptReasoning("r", "firstsecond", final = false, replace = true)
+        assertEquals("firstsecond", item().text)
+        assertEquals(0L, item().activeSinceNanos)
+        assertEquals(100L, item().elapsedAt(now))
+        now = 200_000_000L
+        history.acceptReasoning("r", "corrected", final = false, replace = true)
+        assertEquals("corrected", item().text)
+        assertEquals(0L, item().activeSinceNanos)
+        now = 300_000_000L
+        history.acceptReasoning("r", "corrected", final = true)
+        now = 9_000_000_000L
+        assertNull(item().activeSinceNanos)
+        assertEquals(300L, item().elapsedAt(now))
+    }
 }

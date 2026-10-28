@@ -66,8 +66,9 @@ internal fun ReportedReasoningCard(
     val hasSummary = summaries.isNotEmpty()
     val colors = conversationColors()
     val shape = RoundedCornerShape(14.dp)
-    var expandedOverride by rememberSaveable(ownerKey) { mutableStateOf<Boolean?>(null) }
-    val expanded = hasSummary && (expandedOverride ?: isThinking)
+    var expandedOverride by rememberSaveable(ownerKey, isThinking) { mutableStateOf<Boolean?>(null) }
+    var overridePhase by rememberSaveable(ownerKey, isThinking) { mutableStateOf(isThinking) }
+    val expanded = hasSummary && (expandedOverride?.takeIf { overridePhase == isThinking } ?: isThinking)
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
@@ -78,7 +79,7 @@ internal fun ReportedReasoningCard(
         Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey")
             .then(if (hasSummary) Modifier.conversationClickable(
                 onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
-            ) { expandedOverride = !expanded }.semantics {
+            ) { overridePhase = isThinking; expandedOverride = !expanded }.semantics {
                 stateDescription = if (expanded) "已展开" else "已折叠"
             } else Modifier.semantics(mergeDescendants = true) {})
             .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),
@@ -107,7 +108,11 @@ internal fun ReportedReasoningCard(
         ) {
             Column(Modifier.fillMaxWidth()) {
                 if (!embedded) HorizontalDivider(thickness = 1.dp, color = colors.line)
-                Column(Modifier.padding(start = if (embedded) 0.dp else 11.dp, end = if (embedded) 0.dp else 11.dp, top = 8.dp, bottom = 10.dp),
+                Column(Modifier.testTag("reported-reasoning-content:$ownerKey")
+                    .conversationClickable(onClickLabel = "收起思考摘要") {
+                        overridePhase = isThinking; expandedOverride = false
+                    }
+                    .padding(start = if (embedded) 0.dp else 11.dp, end = if (embedded) 0.dp else 11.dp, top = 8.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     summaries.forEach { summary ->
                         key(ownerKey, summary.itemId) {
@@ -154,7 +159,7 @@ private fun ReasoningElapsedTime(
         }
     }
     millis?.let { duration ->
-        Text("${duration / 1_000}.${duration / 100 % 10} 秒",
+        Text("${duration / 1_000}.${duration / 100 % 10}s",
             Modifier.testTag("reported-reasoning-duration:$ownerKey"), color = conversationColors().text,
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = if (embedded) 12.sp else 11.sp, lineHeight = if (embedded) 17.sp else 16.sp))
     }

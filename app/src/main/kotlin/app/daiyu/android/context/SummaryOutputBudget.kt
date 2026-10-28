@@ -14,7 +14,8 @@ internal class SummaryOutputBudget(outputTokens: Int, private val textLimit: Int
         when (event) {
             is ModelEvent.TextDelta -> text[event.itemId] = text[event.itemId].orEmpty() + event.text
             is ModelEvent.TextFinal -> text[event.itemId] = event.text
-            is ModelEvent.ReasoningDelta -> reasoning[event.itemId] = reasoning[event.itemId].orEmpty() + event.text
+            is ModelEvent.ReasoningDelta -> reasoning[event.itemId] =
+                if (event.cumulative) event.text else reasoning[event.itemId].orEmpty() + event.text
             is ModelEvent.ReasoningFinal -> reasoning[event.itemId] = event.text
             is ModelEvent.Usage -> {
                 val outputTokens = event.outputTokens

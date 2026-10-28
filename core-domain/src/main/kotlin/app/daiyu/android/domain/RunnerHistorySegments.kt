@@ -9,9 +9,9 @@ internal class RunnerHistorySegments(private val initial: Message, private val n
     private var protocolReasoning = emptySet<String>()
     private val reasoning = linkedMapOf<String, ReportedReasoning>()
 
-    fun acceptReasoning(itemId: String, text: String, final: Boolean, blockOffset: Int? = null) {
+    fun acceptReasoning(itemId: String, text: String, final: Boolean, blockOffset: Int? = null, replace: Boolean = final) {
         val previous = reasoning[itemId]
-        val nextText = if (final) text else previous?.text.orEmpty() + text
+        val nextText = if (replace) text else previous?.text.orEmpty() + text
         ReportedReasoning(itemId, nextText)
         check(reasoning.size < 1024 || itemId in reasoning)
         check(reasoning.filterKeys { it != itemId }.values.sumOf { it.text.length.toLong() } + nextText.length <= 2_000_000)

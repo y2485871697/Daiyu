@@ -199,7 +199,7 @@ class ReportedReasoningMarkdownTest : WiredActivityTestCase() {
         for (isDark in listOf(false, true)) {
             mainThread { dark = isDark }
             ui.waitForIdle()
-            for (text in listOf("Readable summary", "1.2 秒")) {
+            for (text in listOf("Readable summary", "1.2s")) {
                 val layouts = mutableListOf<TextLayoutResult>()
                 ui.onNodeWithText(text, useUnmergedTree = true)
                     .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }

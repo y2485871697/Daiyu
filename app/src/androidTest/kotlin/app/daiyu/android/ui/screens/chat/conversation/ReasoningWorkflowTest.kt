@@ -89,4 +89,34 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onNodeWithTag("reported-reasoning-header:${turn.listKey}").performClick()
         ui.onNodeWithText("first summary").assertIsDisplayed()
     }
+
+    fun testLiveReasoningOpensItsWorkflowAndCollapsesAtCompletion() {
+        prepare()
+        var reported by mutableStateOf(ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 1))
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val turn = mapped(message(listOf(tool("t1")), listOf(reported)).copy(status = RunStatus.RUNNING))
+                    .copy(isStreaming = true)
+                AssistantTurn(turn, ChatScreenActions())
+            } } }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+            ui.onNodeWithText("first summary").assertIsDisplayed()
+            ui.onNodeWithText("first summary").performTouchInput { click() }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("first summary").assertDoesNotExist()
+            ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
+            mainThread { reported = reported.copy(elapsedMillis = 5_400L, activeSinceNanos = null) }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithText("5.4s").assertExists()
+            ui.onNodeWithText("first summary").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
 }

@@ -36,4 +36,13 @@ class SummaryOutputBudgetTest {
         budget.observe(ModelEvent.Usage(1, 6)); budget.observe(ModelEvent.Usage(1, 6))
         reject { budget.observe(ModelEvent.Usage(1, 7)) }
     }
+
+    @Test fun ongoingCumulativeReasoningReplacesWithoutDoubleCounting() {
+        val budget = SummaryOutputBudget(6, textLimit = 6)
+        budget.observe(ModelEvent.ReasoningDelta("r", "abc", cumulative = true))
+        budget.observe(ModelEvent.ReasoningDelta("r", "abcdef", cumulative = true))
+        budget.observe(ModelEvent.ReasoningDelta("r", "abcdef", cumulative = true))
+        budget.observe(ModelEvent.ReasoningFinal("r", "abcdef"))
+        reject { budget.observe(ModelEvent.ReasoningDelta("r", "g")) }
+    }
 }

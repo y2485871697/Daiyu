@@ -117,7 +117,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(32)
             ui.onNodeWithText("正在思考…").assertExists()
             ui.onNodeWithText("...").assertDoesNotExist()
-            ui.onNodeWithText("1.2 秒").assertExists()
+            ui.onNodeWithText("1.2s").assertExists()
             ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").assertDoesNotExist()
             ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").assertDoesNotExist()
             mainThread { reported = listOf(ReportedReasoning("r", "real summary…", 1_200L, 0L)) }
@@ -128,7 +128,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
             mainThread { reported = listOf(ReportedReasoning("r", "real summary…", 1_500L)); live = false }
             ui.mainClock.advanceTimeBy(32)
             ui.onNodeWithText("已思考").assertExists()
-            ui.onNodeWithText("1.5 秒").assertExists()
+            ui.onNodeWithText("1.5s").assertExists()
             ui.onNodeWithText("real summary…").assertDoesNotExist()
             mainThread { reported = listOf(ReportedReasoning("r", "...", 1_500L)) }
             ui.mainClock.advanceTimeBy(32)
@@ -149,7 +149,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
             }
         } }
         ui.waitUntil(5_000) { ui.onAllNodesWithText("已思考").fetchSemanticsNodes().size == 1 }
-        ui.onNodeWithText("1.5 秒").assertExists()
+        ui.onNodeWithText("1.5s").assertExists()
         ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
         ui.onNodeWithText("checked…").assertIsDisplayed()
         ui.onNodeWithText("...").assertDoesNotExist()
@@ -171,10 +171,10 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.mainClock.advanceTimeBy(32)
         ui.onNodeWithText("正在思考…").assertExists()
         ui.onNodeWithText("live summary").assertExists()
-        ui.onNodeWithText("0.0 秒").assertExists()
+        ui.onNodeWithText("0.0s").assertExists()
         mainThread { now = 1_200_000_000L }
         ui.mainClock.advanceTimeBy(200)
-        ui.onNodeWithText("1.2 秒").assertExists()
+        ui.onNodeWithText("1.2s").assertExists()
         ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
         ui.mainClock.advanceTimeBy(300)
         ui.onNodeWithText("live summary").assertDoesNotExist()
@@ -182,7 +182,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.mainClock.advanceTimeBy(32)
         mainThread { mounted = true }
         ui.mainClock.advanceTimeBy(200)
-        ui.onNodeWithText("2.0 秒").assertExists()
+        ui.onNodeWithText("2.0s").assertExists()
         mainThread {
             reported = listOf(ReportedReasoning("r", "final summary", 2_300L))
             live = false
@@ -190,16 +190,16 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         }
         ui.mainClock.advanceTimeBy(200)
         ui.onNodeWithText("已思考").assertExists()
-        ui.onNodeWithText("2.3 秒").assertExists()
+        ui.onNodeWithText("2.3s").assertExists()
         mainThread { now = 12_000_000_000L }
         ui.mainClock.advanceTimeBy(1_000)
-        ui.onNodeWithText("2.3 秒").assertExists()
+        ui.onNodeWithText("2.3s").assertExists()
         ui.onNodeWithText("模型已报告").assertDoesNotExist()
         ui.onNodeWithText("仅包含供应商实际公开返回的内容；不代表隐藏内部推理。流中断时可能不完整。").assertDoesNotExist()
         ui.mainClock.autoAdvance = true
     }
 
-    fun testUnknownHistoricalTimeIsNotInventedAndManualExpansionSurvivesCompletion() {
+    fun testUnknownHistoricalTimeIsNotInventedAndCompletionResetsManualExpansion() {
         prepareSummaries("summary")
         ui.mainClock.autoAdvance = false
         var reported by mutableStateOf(listOf(ReportedReasoning("r", "summary", 1_000L, 0L)))
@@ -210,7 +210,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
             }
         } }
         ui.mainClock.advanceTimeBy(32)
-        ui.onNodeWithText("1.0 秒").assertExists()
+        ui.onNodeWithText("1.0s").assertExists()
         // Explicitly collapse, then expand: this is user intent, not the live default.
         ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
         ui.mainClock.advanceTimeBy(32)
@@ -219,8 +219,10 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         mainThread { reported = listOf(ReportedReasoning("r", "summary")); live = false }
         ui.mainClock.autoAdvance = true
         ui.waitForIdle()
-        ui.onNodeWithText("summary").assertIsDisplayed()
+        ui.onNodeWithText("summary").assertDoesNotExist()
         ui.onNodeWithTag("reported-reasoning-duration:manual").assertDoesNotExist()
+        ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
+        ui.onNodeWithText("summary").assertIsDisplayed()
     }
 
 
@@ -381,7 +383,7 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
             assertFalse(pending.contains(SemanticsProperties.Role))
             assertFalse(pending.contains(SemanticsProperties.Disabled))
             ui.onNodeWithText("正在思考…", useUnmergedTree = true).assertExists()
-            ui.onNodeWithText("1.2 秒", useUnmergedTree = true).assertExists()
+            ui.onNodeWithText("1.2s", useUnmergedTree = true).assertExists()
             mainThread { reported = listOf(ReportedReasoning("r", "real summary", 1_200L, 0L)) }
             ui.mainClock.advanceTimeBy(300)
             header.assertHasClickAction().assertIsEnabled()
@@ -393,5 +395,87 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         } finally {
             ui.mainClock.autoAdvance = true
         }
+    }
+
+    fun testLiveSummaryTenthsAutoCollapseAndBodyTap() {
+        prepareSummaries("live body")
+        ui.mainClock.autoAdvance = false
+        var now = 0L
+        val clock = { now }
+        var reported by mutableStateOf(listOf(ReportedReasoning("r", "live body", 0L, 0L)))
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReportedReasoningCard("lifecycle", reported, allowLiveTiming = true, nanoTime = clock)
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithText("正在思考…").assertExists()
+            ui.onNodeWithText("live body").assertIsDisplayed()
+            ui.onNodeWithText("0.0s").assertExists()
+            for (tenth in 1..2) {
+                mainThread { now = tenth * 100_000_000L }
+                ui.mainClock.advanceTimeBy(128)
+                ui.onNodeWithText("0.${tenth}s").assertExists()
+            }
+            ui.onNodeWithText("live body").performTouchInput { click() }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("live body").assertDoesNotExist()
+            ui.onNodeWithTag("reported-reasoning-header:lifecycle").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("live body").assertIsDisplayed()
+            mainThread { reported = listOf(ReportedReasoning("r", "live body", 5_400L)) }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithText("5.4s").assertExists()
+            ui.onNodeWithText("live body").assertDoesNotExist()
+            mainThread { now = 99_000_000_000L }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("5.4s").assertExists()
+            ui.onNodeWithTag("reported-reasoning-header:lifecycle").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("live body").assertIsDisplayed()
+            ui.onNodeWithText("live body").performTouchInput { click() }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("live body").assertDoesNotExist()
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testCompletedOffscreenSummaryDoesNotRestoreLiveExpansionOverride() {
+        prepareSummaries("saved body")
+        var reported by mutableStateOf(listOf(ReportedReasoning("r", "saved body", 0L, 0L)))
+        var visible by mutableStateOf(true)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                val states = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    if (visible) states.SaveableStateProvider("row") {
+                        ReportedReasoningCard("restored-phase", reported, allowLiveTiming = true, nanoTime = { 0L })
+                    }
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("reported-reasoning-header:restored-phase").performClick()
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("reported-reasoning-header:restored-phase").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("saved body").assertIsDisplayed()
+            mainThread { visible = false }
+            ui.mainClock.advanceTimeBy(32)
+            mainThread { reported = listOf(ReportedReasoning("r", "saved body", 300L)); visible = true }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("saved body").assertDoesNotExist()
+            ui.onNodeWithTag("reported-reasoning-header:restored-phase").performClick()
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("saved body").assertIsDisplayed()
+            mainThread { visible = false }
+            ui.mainClock.advanceTimeBy(32)
+            mainThread { visible = true }
+            ui.mainClock.advanceTimeBy(300)
+            ui.onNodeWithText("saved body").assertIsDisplayed()
+        } finally { ui.mainClock.autoAdvance = true }
     }
 }

@@ -100,13 +100,16 @@ internal object ResponsesStream {
             content[index]=if(final) value else content.getOrDefault(index,"")+value
             val combined=content.values.joinToString("")
             checkProtocol(combined.length<=2_000_000)
-            sink(ModelEvent.ReasoningFinal(id,combined))
+            sink(ModelEvent.ReasoningDelta(id,combined, cumulative = true))
         }
         fun summaryItem(item:JSONObject) {
             if(item.getString("type")!="reasoning") return
-            if(!item.has("summary") || item.isNull("summary")) return
-            val parts=item.getJSONArray("summary")
-            if(parts.length()==0) return
+            val parts = if (!item.has("summary") || item.isNull("summary")) null else item.getJSONArray("summary")
+            if (parts == null || parts.length() == 0) {
+                val id = item.optString("id")
+                summaries[id]?.let { sink(ModelEvent.ReasoningFinal(id, it.values.joinToString(""))) }
+                return
+            }
             val content=sortedMapOf<Int,String>()
             for(i in 0 until parts.length()) {
                 val part=parts.getJSONObject(i)

@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
+import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.runningmode.*
@@ -36,6 +37,8 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
         var failPrepare = false
         var failInstall = false
         var failRemember = false
+        var failDiscard = false
+        val discarded = mutableListOf<PreparedLinuxInstall>()
         val submitted = mutableListOf<PreparedLinuxInstall>()
         override fun prepare(artifact: LinuxRootfsArtifact, mirrorId: String, installation: LinuxInstallation): PreparedLinuxInstall {
             prepares++
@@ -54,7 +57,10 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
         }
         override fun rememberRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval) = Unit
         override fun completeRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval) = Unit
-        override fun discard(prepared: PreparedLinuxInstall) = Unit
+        override fun discard(prepared: PreparedLinuxInstall) {
+            discarded.add(prepared)
+            if (failDiscard) throw IOException("fixture_discard_failed")
+        }
         override fun recover(helpers: PackagedProotHelpers): RecoveredLinuxInstall? = null
         override fun recoverChroot(abi: String): RecoveredLinuxInstall? = null
         override fun confirmPublishedDurability(prepared: PreparedLinuxInstall) = error("unexpected_durability_retry")
@@ -132,149 +138,195 @@ class LinuxInstallClickTest : WiredActivityTestCase() {
         ui.onNodeWithText("下载并安装").assertDoesNotExist()
     }
 
-    private fun finishInstall(expected: Int) {
-        dispatcher.runNext()
-        ui.waitUntil(5_000) { dispatcher.pending }
-        dispatcher.runNext()
-        ui.waitUntil(5_000) { !coordinator.state.value.busy }
-        ui.waitForIdle()
-        assertEquals(expected, transactions.installs)
-        assertFalse(dispatcher.pending)
+    private fun assertNoLegacyActions() {
+        for (text in listOf("继续安装", "取消安装", "继续上次安装", "下载并安装")) {
+            ui.onNodeWithText(text).assertDoesNotExist()
+        }
         assertEquals(0, approvals)
         assertEquals(0, fixture.opens.get())
-        ui.onNodeWithText("下载并安装").assertDoesNotExist()
     }
 
-    fun testOneClickInstallsAllDistributionsAndModesWithoutConfirmationOrRegistration() {
+    private fun assertFreshButton(enabled: Boolean = true) {
+        ui.onNodeWithTag("page:Linux 工具环境").scrollToDescendant(hasTestTag("linux-install-environment"))
+        if (enabled) node("linux-install-environment").assertIsEnabled() else node("linux-install-environment").assertIsNotEnabled()
+        assertNoLegacyActions()
+    }
+
+    private fun finishInstall(expected: Int) {
+        dispatcher.runNext()
+        ui.waitUntil(5_000) {
+            dispatcher.pending && coordinator.state.value.busy && !coordinator.state.value.discarding &&
+                coordinator.state.value.prepared != null && transactions.installs == expected - 1
+        }
+        dispatcher.runNext()
+        ui.waitUntil(5_000) {
+            transactions.installs == expected &&
+                (!coordinator.state.value.busy || coordinator.state.value.discarding)
+        }
+        ui.waitForIdle()
+        assertEquals(expected, transactions.installs)
+        assertNoLegacyActions()
+    }
+
+    private fun finishRetirement(expected: Int) {
+        ui.waitUntil(5_000) { dispatcher.pending }
+        dispatcher.runNext()
+        ui.waitUntil(5_000) { !coordinator.state.value.busy && coordinator.state.value.prepared == null }
+        ui.waitForIdle()
+        assertEquals(expected, transactions.discarded.size)
+        assertFalse(dispatcher.pending)
+        node("linux-install-progress").assertDoesNotExist()
+        assertNoLegacyActions()
+    }
+
+    fun testOneClickInstallsAllDistributionsAndModesWithoutDiscardOrRegistration() {
         for (distribution in listOf("alpine", "debian")) for (mode in LinuxExecutionMode.entries) {
             val before = transactions.installs
             show(distribution, mode)
-            assertEquals(before, transactions.installs)
+            assertFreshButton()
             clickInstall()
             finishInstall(before + 1)
             assertTrue(coordinator.state.value.receipt?.directorySyncConfirmed == true)
+            assertTrue(transactions.discarded.isEmpty())
+            assertFalse(dispatcher.pending)
             ui.onNodeWithText("启用环境").assertExists()
             ui.onNodeWithText("允许使用").assertDoesNotExist()
+            node("linux-install-progress").assertDoesNotExist()
         }
     }
 
-    fun testExistingPreparedWaitsForExplicitContinueAndReusesOriginalRequest() {
+    fun testExistingPreparedIsDiscardedAndPrimaryButtonCreatesOnlyANewRequest() {
         show(preparedBeforeEntry = true)
         val original = checkNotNull(coordinator.state.value.prepared)
-        ui.waitForIdle()
-        assertFalse(dispatcher.pending)
+        finishRetirement(1)
+        assertSame(original, transactions.discarded.single())
         assertEquals(0, transactions.installs)
-        ui.onNodeWithText("继续安装").performClick()
-        ui.waitUntil(5_000) { dispatcher.pending }
-        dispatcher.drain()
-        ui.waitForIdle()
-        assertEquals(1, transactions.installs)
-        assertSame(original, transactions.submitted.single())
         assertEquals(1, transactions.prepares)
-        assertEquals(0, approvals)
-        ui.onNodeWithText("下载并安装").assertDoesNotExist()
-    }
-
-    fun testCancelWhilePreparingDoesNotInstallAfterPreparationFinishes() {
-        show()
+        assertFreshButton()
         clickInstall()
-        node("linux-install-cancel").performClick()
-        dispatcher.drain()
-        ui.waitForIdle()
-        assertNotNull(coordinator.state.value.prepared)
-        assertEquals(0, transactions.installs)
-        assertFalse(dispatcher.pending)
+        finishInstall(1)
+        assertEquals(2, transactions.prepares)
+        assertNotSame(original, transactions.submitted.single())
     }
 
-    fun testTabChangeAndNewPageDropPendingClick() {
+    fun testTabChangeDuringPreparationCancelsPendingRequestWithoutInstalling() {
         show()
         clickInstall()
         node("linux-tab:files").performClick()
-        dispatcher.drain()
+        dispatcher.runNext()
+        finishRetirement(1)
         node("linux-tab:basic").performClick()
-        ui.waitForIdle()
+        assertFreshButton()
         assertEquals(0, transactions.installs)
-        assertFalse(dispatcher.pending)
-        renderNewPage()
-        ui.waitForIdle()
-        assertEquals(0, transactions.installs)
-        assertFalse(dispatcher.pending)
+        assertEquals(1, transactions.prepares)
     }
 
-    fun testPageRevocationBeforePreparedDoesNotAuthorizeNewPage() {
+    fun testPageRevocationBeforePreparedRetiresOnNewPageWithoutInstalling() {
         show()
         clickInstall()
         renderNewPage()
-        ui.waitForIdle()
-        assertNotNull(coordinator.state.value.prepared)
+        finishRetirement(1)
+        assertFreshButton()
         assertEquals(0, transactions.installs)
-        assertFalse(dispatcher.pending)
+        assertEquals(1, transactions.prepares)
     }
 
-    fun testRootModeWithdrawalDropsChrootClickEvenWhenRootModeReturns() {
+    fun testRootModeWithdrawalStillCancelsChrootDescription() {
         show(mode = LinuxExecutionMode.CHROOT)
         clickInstall()
         mainThread { assertTrue(modes.save(RunningMode.NORMAL)) }
         ui.waitForIdle()
-        dispatcher.drain()
+        dispatcher.runNext()
+        finishRetirement(1)
         mainThread { assertTrue(modes.save(RunningMode.ROOT)) }
-        ui.waitForIdle()
+        assertFreshButton()
         assertEquals(0, transactions.installs)
-        assertFalse(dispatcher.pending)
+        assertEquals(1, transactions.prepares)
     }
 
-    fun testFailedPreparationDoesNotAuthorizeLaterPreparedState() {
+    fun testFailedPreparationReturnsPrimaryButtonWithoutAnAutomaticRetry() {
         transactions.failPrepare = true
         show()
         clickInstall()
-        dispatcher.drain()
+        dispatcher.runNext()
         ui.waitForIdle()
         assertNull(coordinator.state.value.prepared)
-        transactions.failPrepare = false
-        assertTrue(coordinator.prepare("debian", "primary"))
-        dispatcher.drain()
-        ui.waitForIdle()
-        assertNotNull(coordinator.state.value.prepared)
+        assertTrue(transactions.discarded.isEmpty())
+        assertFreshButton()
+        assertEquals(1, transactions.prepares)
         assertEquals(0, transactions.installs)
         assertFalse(dispatcher.pending)
+        transactions.failPrepare = false
+        clickInstall()
+        finishInstall(1)
+        assertEquals(2, transactions.prepares)
     }
 
-    fun testFailedDescriptionSaveRetainsPreparedWithoutStartingInstall() {
+    fun testFailedDescriptionSaveIsDiscardedBeforePrimaryButtonReturns() {
         transactions.failRemember = true
         show()
         clickInstall()
-        dispatcher.drain()
-        ui.waitForIdle()
+        dispatcher.runNext()
         val original = checkNotNull(coordinator.state.value.prepared)
-        assertTrue(coordinator.state.value.operationFailed)
+        finishRetirement(1)
+        assertSame(original, transactions.discarded.single())
+        assertFreshButton()
         assertEquals(0, transactions.installs)
-        assertFalse(dispatcher.pending)
         transactions.failRemember = false
-        ui.onNodeWithText("继续安装").performClick()
-        ui.waitUntil(5_000) { dispatcher.pending }
-        dispatcher.drain()
-        ui.waitForIdle()
-        assertEquals(1, transactions.installs)
-        assertSame(original, transactions.submitted.single())
-        assertFalse(coordinator.state.value.operationFailed)
-        assertEquals(0, approvals)
+        clickInstall()
+        finishInstall(1)
+        assertEquals(2, transactions.prepares)
+        assertNotSame(original, transactions.submitted.single())
     }
 
-    fun testFailedInstallDoesNotRetryUntilExplicitContinue() {
+    fun testFailedInstallIsDiscardedAndDoesNotReplayOldRequest() {
         transactions.failInstall = true
         show()
         clickInstall()
         finishInstall(1)
-        val original = checkNotNull(coordinator.state.value.prepared)
+        val original = transactions.submitted.single()
+        finishRetirement(1)
+        assertSame(original, transactions.discarded.single())
+        assertFreshButton()
         transactions.failInstall = false
-        ui.onNodeWithText("继续安装").performClick()
+        clickInstall()
+        finishInstall(2)
+        assertEquals(2, transactions.prepares)
+        assertNotSame(original, transactions.submitted.last())
+    }
+
+    fun testFailedDiscardDoesNotLoopOrEnableNewGenerationAndNewVisitCanRetryIt() {
+        transactions.failDiscard = true
+        show(preparedBeforeEntry = true)
+        val original = checkNotNull(coordinator.state.value.prepared)
         ui.waitUntil(5_000) { dispatcher.pending }
-        dispatcher.drain()
+        dispatcher.runNext()
         ui.waitForIdle()
-        assertEquals(2, transactions.installs)
-        assertTrue(transactions.submitted.all { it === original })
+        assertSame(original, coordinator.state.value.prepared)
+        assertTrue(coordinator.state.value.operationFailed)
+        assertEquals(1, transactions.discarded.size)
+        assertFalse(dispatcher.pending)
+        assertFreshButton(enabled = false)
+        assertEquals(0, transactions.installs)
+        transactions.failDiscard = false
+        renderNewPage()
+        finishRetirement(2)
+        assertTrue(transactions.discarded.all { it === original })
+        assertFreshButton()
         assertEquals(1, transactions.prepares)
-        assertEquals(0, approvals)
+    }
+
+    fun testOriginalTwentyDpBallAndInstallingSummaryAppearOnlyWhileBusy() {
+        show()
+        node("linux-install-progress").assertDoesNotExist()
+        clickInstall()
+        ui.onNodeWithTag("page:Linux 工具环境").scrollToDescendant(hasTestTag("linux-install-progress"))
+        node("linux-install-progress").assertIsDisplayed().assertWidthIsEqualTo(20.dp).assertHeightIsEqualTo(20.dp)
+        ui.onNodeWithText("正在安装…").assertIsDisplayed()
+        assertNoLegacyActions()
+        finishInstall(1)
+        node("linux-install-progress").assertDoesNotExist()
+        ui.onNodeWithText("正在安装…").assertDoesNotExist()
     }
 
     override fun tearDown() {

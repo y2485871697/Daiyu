@@ -47,6 +47,102 @@ class LinuxInstallRecoveryBoundaryTest : TestCase() {
         try { block(Fixture(root)) } finally { root.deleteRecursively() }
     }
 
+    fun testDiscardPublishesDurableEmptyAndNeverDeletesGenerationDirectory() = fixture { f ->
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        installer.rememberRequest(prepared)
+        installer.discardRequest(prepared)
+        assertEquals("daiyu-install-empty-v1\n", File(f.managed, ".install-request").readText())
+        assertTrue(f.target.parentFile.isDirectory)
+        assertFalse(f.target.exists())
+        installer.discardRequest(prepared)
+        assertNull(f.installer().recoverRequest(f.packaged(), listOf(f.artifact)))
+        assertEquals(0, f.requests)
+        assertEquals(0, f.probes)
+    }
+
+    fun testDiscardAfterEmptyRenameSyncFailureRetriesSameDescription() = fixture { f ->
+        var failEmptySync = true
+        val installer = f.installer(sync = {
+            val journal = File(f.managed, ".install-request")
+            if (failEmptySync && journal.isFile && journal.readText() == "daiyu-install-empty-v1\n") throw IOException("empty_sync_failed")
+        })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        installer.rememberRequest(prepared)
+        try { installer.discardRequest(prepared); fail("discard must fail before durability is acknowledged") }
+        catch (_: IOException) { }
+        assertEquals("daiyu-install-empty-v1\n", File(f.managed, ".install-request").readText())
+        failEmptySync = false
+        installer.discardRequest(prepared)
+        assertNull(f.installer().recoverRequest(f.packaged(), listOf(f.artifact)))
+        assertTrue(f.target.parentFile.isDirectory)
+    }
+
+    fun testFailedDescriptionForceCanBeRetiredWithoutReplacingUnknownJournal() = fixture { f ->
+        var failForce = true
+        val installer = f.installer(force = { if (failForce) throw IOException("description_force_failed") else it.force(true) })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        try { installer.rememberRequest(prepared); fail("force should fail") } catch (_: IOException) { }
+        assertFalse(File(f.managed, ".install-request").exists())
+        assertFalse(File(f.managed, ".install-request.tmp").exists())
+        failForce = false
+        installer.discardRequest(prepared)
+        assertEquals("daiyu-install-empty-v1\n", File(f.managed, ".install-request").readText())
+        assertNull(f.installer().recoverRequest(f.packaged(), listOf(f.artifact)))
+        assertEquals(0, f.requests)
+    }
+
+    fun testFailedAncestorSyncCanBeRetiredWithoutCreatingGeneration() = fixture { f ->
+        var failSync = true
+        val installer = f.installer(sync = { if (failSync) throw IOException("ancestor_sync_failed") })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        try { installer.rememberRequest(prepared); fail("ancestor sync should fail") } catch (_: IOException) { }
+        failSync = false
+        installer.discardRequest(prepared)
+        assertEquals("daiyu-install-empty-v1\n", File(f.managed, ".install-request").readText())
+        assertFalse(f.target.exists())
+        assertNull(f.installer().recoverRequest(f.packaged(), listOf(f.artifact)))
+        assertEquals(0, f.probes)
+    }
+
+    fun testDiscardRejectsTmpForeignJournalAndEveryGenerationResidueWithoutDeletingThem() {
+        for (residue in listOf(".install-request.tmp", "foreign-journal", ".install-lock", ".staging-owned", "archive", ".registration", "rootfs")) fixture { f ->
+            val installer = f.installer()
+            val prepared = installer.prepare(f.artifact, "primary", f.installation)
+            installer.rememberRequest(prepared)
+            val journal = File(f.managed, ".install-request")
+            val extra = when (residue) {
+                ".install-request.tmp" -> File(f.managed, residue)
+                "foreign-journal" -> journal
+                else -> File(f.target.parentFile, residue)
+            }
+            extra.writeText("retained-$residue")
+            val journalBytes = journal.readBytes()
+            try { installer.discardRequest(prepared); fail("must retain $residue") } catch (_: IllegalStateException) { }
+            assertTrue(journalBytes.contentEquals(journal.readBytes()))
+            assertEquals("retained-$residue", extra.readText())
+            assertEquals(0, f.requests)
+        }
+    }
+
+    fun testMissingJournalCannotHideOtherGenerationOrSymlinkData() {
+        for (symlink in listOf(false, true)) fixture { f ->
+            val installer = f.installer()
+            val prepared = installer.prepare(f.artifact, "primary", f.installation)
+            installer.rememberRequest(prepared)
+            val journal = File(f.managed, ".install-request")
+            assertTrue(journal.delete())
+            val retained = File(f.root, "retained").apply { writeText("must-stay") }
+            val extra = File(f.managed, "other-generation")
+            if (symlink) Files.createSymbolicLink(extra.toPath(), retained.toPath()) else extra.writeText("other-data")
+            try { installer.discardRequest(prepared); fail("missing journal is not proof of an empty installation") }
+            catch (_: IllegalStateException) { }
+            assertFalse(journal.exists())
+            assertTrue(Files.exists(extra.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            assertEquals("must-stay", retained.readText())
+        }
+    }
+
     fun testSuccessfulRegistrationRestartRetiresRequestAndAllowsRemovalWithoutResurrection() {
         for (scenario in listOf("completed", "crash-after-approve", "tombstone", "unknown")) fixture { f -> runBlocking {
             val first = f.installer()

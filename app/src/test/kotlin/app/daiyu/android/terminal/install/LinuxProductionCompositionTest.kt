@@ -29,7 +29,12 @@ class LinuxProductionCompositionTest : TestCase() {
         override fun completeRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval) { completions++ }
         var rememberFailure: Exception? = null
         override fun remember(prepared: PreparedLinuxInstall) { rememberFailure?.let { throw it } }
-        override fun discard(prepared: PreparedLinuxInstall) {}
+        val discarded = mutableListOf<PreparedLinuxInstall>()
+        var discardFailure: Exception? = null
+        override fun discard(prepared: PreparedLinuxInstall) {
+            discarded.add(prepared)
+            discardFailure?.let { throw it }
+        }
         var installs = 0
         var cleanupRetries = 0
         var cleanupReceipt: LinuxInstallReceipt? = null
@@ -117,6 +122,105 @@ class LinuxProductionCompositionTest : TestCase() {
         assertEquals(1, transactions.installs)
         assertSame(prepared, install.state.value.prepared)
         assertFalse(install.state.value.operationFailed)
+        install.close()
+    }
+
+    fun testDiscardRetiresExactUninstalledRequestBeforeAnotherCanBePrepared() = runTest {
+        val transactions = Transactions()
+        val catalog = Catalog()
+        val install = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), catalog, this)
+        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this, installation = install)
+        val page = controller.enterPage()
+        runCurrent()
+        assertTrue(page.prepareInstall("debian", "primary"))
+        runCurrent()
+        val first = checkNotNull(install.state.value.prepared)
+        assertTrue(page.discardInstall(first))
+        assertTrue(install.state.value.discarding)
+        assertFalse(page.prepareInstall("debian", "primary"))
+        runCurrent()
+        assertNull(install.state.value.prepared)
+        assertFalse(install.blocksManual)
+        assertSame(first, transactions.discarded.single())
+        assertTrue(page.prepareInstall("debian", "primary"))
+        runCurrent()
+        val second = checkNotNull(install.state.value.prepared)
+        assertNotSame(first, second)
+        assertFalse(page.discardInstall(first))
+        assertSame(second, install.state.value.prepared)
+        assertEquals(0, transactions.installs)
+        assertEquals(0, catalog.freezes)
+        assertTrue(catalog.approvals.isEmpty())
+        install.close()
+    }
+
+    fun testFailedDiscardRetainsIdentityAndCannotBeBypassedWithNewGeneration() = runTest {
+        val transactions = Transactions()
+        val install = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), Catalog(), this)
+        runCurrent()
+        assertTrue(install.prepare("debian", "primary"))
+        runCurrent()
+        val prepared = checkNotNull(install.state.value.prepared)
+        transactions.discardFailure = IOException("discard_not_durable")
+        assertTrue(install.discard(prepared))
+        runCurrent()
+        assertSame(prepared, install.state.value.prepared)
+        assertTrue(install.state.value.operationFailed)
+        assertFalse(install.state.value.discarding)
+        assertFalse(install.prepare("alpine", "primary"))
+        transactions.discardFailure = null
+        assertTrue(install.discard(prepared))
+        runCurrent()
+        assertNull(install.state.value.prepared)
+        assertEquals(2, transactions.discarded.size)
+        assertTrue(transactions.discarded.all { it === prepared })
+        assertEquals(0, transactions.installs)
+        install.close()
+    }
+
+    fun testChrootDescriptionDiscardNeedsCurrentPageButNotRetainedRootMode() = runTest {
+        val transactions = Transactions()
+        val catalog = Catalog()
+        var rootAllowed = true
+        val install = LinuxInstallCoordinator(transactions, { error("no_proot") }, File("/private/chroot"), catalog, this,
+            executionMode = LinuxExecutionMode.CHROOT, chrootAbi = { "arm64-v8a" })
+        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this,
+            chrootInstallation = install, allowChroot = { rootAllowed })
+        val oldPage = controller.enterPage()
+        runCurrent()
+        assertTrue(oldPage.prepareInstall("debian", "primary", LinuxExecutionMode.CHROOT))
+        runCurrent()
+        val prepared = checkNotNull(install.state.value.prepared)
+        rootAllowed = false
+        assertFalse(oldPage.install(prepared))
+        val newPage = controller.enterPage()
+        runCurrent()
+        assertFalse(oldPage.discardInstall(prepared))
+        assertTrue(newPage.discardInstall(prepared))
+        runCurrent()
+        assertNull(install.state.value.prepared)
+        assertSame(prepared, transactions.discarded.single())
+        assertEquals(0, transactions.installs)
+        install.close()
+    }
+
+    fun testDiscardPredicateRejectsEveryPublishedUnknownAndRegistrationState() = runTest {
+        val install = LinuxInstallCoordinator(Transactions(), ::helpers, File("/private/linux"), Catalog(), this)
+        runCurrent()
+        assertTrue(install.prepare("debian", "primary"))
+        runCurrent()
+        val prepared = checkNotNull(install.state.value.prepared)
+        val clean = LinuxInstallState(prepared = prepared)
+        assertTrue(clean.canDiscard)
+        assertTrue(clean.copy(operationFailed = true).canDiscard)
+        for (blocked in listOf(clean.copy(busy = true), clean.copy(unknown = true),
+            clean.copy(recoveryBlocked = true), clean.copy(cleanupPending = true),
+            clean.copy(registrationPending = true), clean.copy(registered = true),
+            clean.copy(receipt = LinuxInstallReceipt(prepared.installation, false)),
+            clean.copy(receipt = LinuxInstallReceipt(prepared.installation, true)),
+            clean.copy(registration = FrozenLinuxApproval(prepared.installation)), clean.copy(prepared = null))) {
+            assertFalse(blocked.toString(), blocked.canDiscard)
+        }
         install.close()
     }
 

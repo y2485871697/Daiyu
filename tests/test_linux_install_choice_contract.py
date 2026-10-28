@@ -47,12 +47,10 @@ class LinuxInstallChoiceContract(unittest.TestCase):
 
     def test_resume_pending_install_saves_pair_without_restarting_install(self):
         screen = (SETTINGS / 'LinuxSettingsScreen.kt').read_text()
-        resume = screen.split('TextButton("继续上次安装"', 1)[1].split('} else LinuxInstallAction', 1)[0]
-        for token in ['if (basicCurrent())', 'installation.prepared.artifact.distribution',
-                      'installation.prepared.installation.executionMode', 'choicePreferences.save(nextChoice)']:
-            self.assertIn(token, resume)
-        for token in ['.install(', '.approve(', 'selectLinux(']:
-            self.assertNotIn(token, resume)
+        self.assertNotIn('TextButton("继续上次安装"', screen)
+        self.assertIn('current.canDiscard', screen)
+        self.assertIn('page.discardInstall(prepared)', screen)
+        self.assertIn('request.executionMode == prepared.installation.executionMode', screen)
 
     def test_pending_recovery_remains_visible_ahead_of_saved_install_preference(self):
         screen = (SETTINGS / 'LinuxSettingsScreen.kt').read_text()

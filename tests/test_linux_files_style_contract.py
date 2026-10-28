@@ -63,7 +63,7 @@ class LinuxFilesStyleContract(unittest.TestCase):
         self.assertNotIn('navigationBarsPadding()', nav)
         self.assertLess(page.index('.navigationBarsPadding()'), page.index('Box(Modifier.weight(1f))'))
         self.assertIn('tabScope === renderedTabScope && tab != it', page)
-        self.assertIn('tabScope = Any(); installRequest = null; confirmUse = false; confirmPending = false; tab = it', page)
+        self.assertIn('tabScope = Any(); installRequest = null; awaitingInstallPreparation = false; confirmUse = false; confirmPending = false; tab = it', page)
 
     def test_file_source_segmented_control_preserves_disabled_and_tab_semantics(self):
         nav = read('LinuxSettingsNavigation.kt').split('internal fun LinuxFileLocationTabs', 1)[1].split('internal fun linuxBrowsableRootfs')[0]

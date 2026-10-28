@@ -164,6 +164,14 @@ class LinuxSettingsController internal constructor(
         }
     }
 
+    internal fun discardInstall(page: LinuxSettingsPageOwner,
+        prepared: app.daiyu.android.terminal.install.PreparedLinuxInstall): Boolean = synchronized(lock) {
+        if (!active(page)) false else {
+            val target = if (prepared.installation.executionMode == LinuxExecutionMode.CHROOT) chrootInstallation else installation
+            target?.discard(prepared) ?: false
+        }
+    }
+
     internal fun cancelInstall(page: LinuxSettingsPageOwner): Boolean = synchronized(lock) {
         if (!active(page)) false else { installation?.cancel(); chrootInstallation?.cancel(); true }
     }
@@ -291,6 +299,7 @@ class LinuxSettingsPageOwner internal constructor(
     fun remove(reference: LinuxGenerationRef) = controller.remove(this, reference)
     fun prepareInstall(distribution: String, mirrorId: String, mode: LinuxExecutionMode = LinuxExecutionMode.PROOT) = controller.installAction(this, mode, newRequest = true) { it.prepare(distribution, mirrorId) }
     fun discardInstall(mode: LinuxExecutionMode = LinuxExecutionMode.PROOT) = controller.installAction(this, mode) { it.discard() }
+    fun discardInstall(prepared: app.daiyu.android.terminal.install.PreparedLinuxInstall) = controller.discardInstall(this, prepared)
     fun recoverInstall(mode: LinuxExecutionMode = LinuxExecutionMode.PROOT) = controller.installAction(this, mode) { it.recover() }
     fun retryInstallCleanup(prepared: app.daiyu.android.terminal.install.PreparedLinuxInstall) =
         controller.installAction(this, prepared.installation.executionMode) { it.retryCleanup(prepared) }

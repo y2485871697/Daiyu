@@ -30,7 +30,11 @@ data class LinuxInstallState(
     val recoveryBlocked: Boolean = false,
     val cleanupPending: Boolean = false,
     val operationFailed: Boolean = false,
-)
+    val discarding: Boolean = false,
+) {
+    val canDiscard: Boolean get() = prepared != null && !busy && !unknown && !recoveryBlocked &&
+        !cleanupPending && !registrationPending && !registered && receipt == null && registration == null
+}
 
 internal interface LinuxInstallTransactions {
     fun prepare(artifact: LinuxRootfsArtifact, mirrorId: String, installation: LinuxInstallation): PreparedLinuxInstall
@@ -136,10 +140,13 @@ class LinuxInstallCoordinator internal constructor(
         LinuxInstallState(prepared = prepared, notice = "请核对固定条目和完整目标；尚未下载或批准注册。")
     }
 
-    internal fun discard(): Boolean = submit(eligible = {
-        it.prepared != null && it.receipt == null && !it.registrationPending && !it.unknown && !it.recoveryBlocked
-    }) {
-        installer.discard(checkNotNull(synchronized(lock) { mutable.value.prepared }))
+    internal fun discard(): Boolean = state.value.prepared?.let(::discard) ?: false
+
+    internal fun discard(prepared: PreparedLinuxInstall): Boolean = submit(
+        eligible = { it.canDiscard && it.prepared === prepared },
+        before = { it.copy(discarding = true) },
+    ) {
+        installer.discard(prepared)
         LinuxInstallState()
     }
 
@@ -262,8 +269,8 @@ class LinuxInstallCoordinator internal constructor(
             synchronized(lock) {
                 activeOperation = null
                 token = null
-                mutable.value = result.fold({ it.copy(busy = false, operationFailed = false) }, { failure ->
-                    mutable.value.copy(busy = false, operationFailed = true,
+                mutable.value = result.fold({ it.copy(busy = false, operationFailed = false, discarding = false) }, { failure ->
+                    mutable.value.copy(busy = false, operationFailed = true, discarding = false,
                         receipt = (failure as? LinuxInstallCleanupPending)?.receipt ?: mutable.value.receipt,
                         cleanupPending = mutable.value.cleanupPending || failure is LinuxInstallCleanupPending,
                         unknown = mutable.value.unknown || failure is LinuxInstallProbeUnknown,

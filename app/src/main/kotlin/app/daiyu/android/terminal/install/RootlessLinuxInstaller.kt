@@ -189,12 +189,31 @@ class RootlessLinuxInstaller internal constructor(
         check(prepared.owner === owner) { "linux_install_wrong_owner" }
         val parent = prepared.targetRootfs.parentFile!!
         securePath(parent)
-        check(readBounded(File(privateRoot, REQUEST)).contentEquals(requestBytes(prepared)))
-        check(!exists(prepared.targetRootfs) && parent.list()?.isEmpty() == true) {
+        val journal = File(privateRoot, REQUEST)
+        securePath(journal)
+        check(!exists(File(privateRoot, "$REQUEST.tmp"))) { "linux_install_request_incomplete" }
+        check(!exists(prepared.targetRootfs) && (!exists(parent) || parent.isDirectory && parent.list()?.isEmpty() == true)) {
             "linux_install_discard_not_safe"
         }
-        // A durable empty description distinguishes intentional discard from a missing journal.
-        // Do not delete rootfs, staging, writer locks or even old generation directories.
+        if (exists(journal)) {
+            val bytes = readBounded(journal)
+            if (bytes.contentEquals(EMPTY_REQUEST)) {
+                directorySync(privateRoot)
+                return
+            }
+            check(bytes.contentEquals(requestBytes(prepared))) { "linux_install_request_mismatch" }
+        } else {
+            // A failed first description may leave only this request's empty ancestor chain.
+            val environment = parent.parentFile!!
+            for ((directory, child) in listOf(privateRoot to environment.name, environment to parent.name, parent to null)) {
+                securePath(directory)
+                check(!exists(directory) || directory.isDirectory && directory.list()?.all { it == child } == true) {
+                    "linux_install_discard_not_safe"
+                }
+            }
+            secureDirectory(privateRoot)
+        }
+        // Retire the description durably; never delete a generation, rootfs or unknown residue.
         publishRequest(EMPTY_REQUEST)
     }
 

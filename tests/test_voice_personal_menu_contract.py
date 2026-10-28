@@ -81,6 +81,42 @@ class VoicePersonalMenuContractTest(unittest.TestCase):
         self.assertIn("minHeight = 56.dp, minWidth = 56.dp, cornerRadius = 18.dp", scaffold)
         self.assertIn('testTag("voice-account-add")', scaffold)
 
+    def test_record_actions_are_compact_play_and_vertical_menu_icons(self):
+        panel = (SRC / "VoiceAccountPanel.kt").read_text()
+        row = panel.split('SettingsRow(voice.name,', 1)[1].split('if (voice.tts && !voice.accepted)', 1)[0]
+        self.assertEqual(2, row.count('IconButton('))
+        for token in ('Modifier.size(48.dp)', 'minHeight = 48.dp, minWidth = 48.dp',
+                      'backgroundColor = Color.Transparent', 'ChatPreviewIcons.Play', 'DaiyuIcons.Stop',
+                      'ChatPreviewIcons.More', 'Modifier.rotate(90f)',
+                      'testTag("voice-preview:', 'testTag("voice-menu:',
+                      'enabled && voice.tts && voice.demo.isNotBlank()', 'preview.toggle(speech!!, voice)',
+                      'if (current() && !busy)', 'onSelect(frozenConfiguration, selectedVoice)'):
+            self.assertIn(token, row)
+        self.assertIn('runCatching { resources.voices.selected(voice.id, speech!!) }.getOrNull()', row)
+        self.assertNotIn('TextButton(', row)
+        self.assertIn('summary = voiceStatus(voice)', row)
+
+    def test_record_menu_has_exactly_status_and_local_removal_and_live_status_summary(self):
+        panel = (SRC / "VoiceAccountPanel.kt").read_text()
+        self.assertIn('voiceMenu?.let { pending ->', panel)
+        menu = panel.split('voiceMenu?.let { pending ->', 1)[1].split('confirmation?.let', 1)[0]
+        self.assertIn('listOf("QUERY" to "查看状态", "REMOVE" to "移除本机记录")', menu)
+        self.assertIn('resources.voices.refresh(latestVoice, speech!!)', menu)
+        self.assertIn('resources.voices.removeLocal(latestVoice)', menu)
+        self.assertIn('action != "REMOVE" || !voice.uncertain', menu)
+        self.assertIn('"REMOVE" -> if (!latestVoice.uncertain)', menu)
+        self.assertIn('voices.firstOrNull { it.account == pending.account && it.id == pending.id }', menu)
+        self.assertIn('val latestVoice = resources.voices.state.value.firstOrNull', menu)
+        self.assertIn('enabled && current() && latestVoice != null', menu)
+        for old in ('"ERROR"', '"SELECT"', '错误详情', '用于朗读'):
+            self.assertNotIn(old, menu)
+        status = panel.split('internal fun voiceStatus(', 1)[1].split('internal fun voiceSlotSummary', 1)[0]
+        for token in ('voice.status == 1', '"训练中"', 'voice.status == 2', '"训练成功"',
+                      'voice.status == 3', '"训练失败"', '"已激活"', '"状态查询失败，请重试"'):
+            self.assertIn(token, status)
+        self.assertNotIn('voice.status == 3 || voice.error.isNotBlank()', status)
+        self.assertNotIn('voice.accepted', status)
+
 
 if __name__ == "__main__":
     unittest.main()

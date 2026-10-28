@@ -1,4 +1,4 @@
-"""Creation quota chooser and explicit-sync-only side-effect contracts."""
+"""Creation/import card choosers and explicit-sync-only side-effect contracts."""
 from pathlib import Path
 import unittest
 from test_voice_creation_cards_contract import block
@@ -13,10 +13,13 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         cls.panel = (SRC / 'VoiceAccountPanel.kt').read_text()
         cls.first = block(cls.panel, 'if (page == "CREATE" && step == 0)')
         cls.row = block(cls.first, 'item { SettingsCard(Modifier.testTag("voice-create-sync-card"))')
+        cls.imported = block(cls.panel, 'if (page == "IMPORT") item')
+        cls.import_sheet = (block(cls.panel, 'importSlots.forEachIndexed')
+                            if 'importSlots.forEachIndexed' in cls.panel else '')
         cls.sheet = (block(cls.panel, 'creationSlots.forEachIndexed')
                      if 'creationSlots.forEachIndexed' in cls.panel else '')
 
-    def test_only_creation_replaces_inline_choices_with_one_shared_sheet_entry(self):
+    def test_creation_replaces_inline_choices_with_one_shared_sheet_entry(self):
         self.assertIn('SettingsRow("选择音色名额"', self.row)
         self.assertNotIn('查找我的音色名额', self.first)
         self.assertNotIn('SettingsRadioRow(', self.first)
@@ -48,7 +51,7 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertIn('var slotPicker by remember(frozenConfiguration.revision)', self.panel)
         self.assertIn('slotPicker = false', block(self.panel, 'fun navigate(target: String)'))
         self.assertIn('slotPicker = false', block(self.panel, 'fun back()'))
-        self.assertIn('slotPicker = false; confirmation = null; operation?.cancel(); preview.stop()', self.panel)
+        self.assertIn('slotPicker = false; importSlotPicker = false; confirmation = null; operation?.cancel(); preview.stop()', self.panel)
         self.assertIn('if (target == "SYNC" || target == "ACCOUNT") parentPage = page', self.panel)
         self.assertIn('page = parentPage', block(self.panel, 'fun back()'))
 
@@ -62,9 +65,44 @@ class VoiceQuotaSelectionContractTest(unittest.TestCase):
         self.assertNotIn('.save(', read)
         self.assertLess(save.index('refreshProjects(a, s, preferred)'), save.index('resources.preferences.save('))
         self.assertNotIn('importPurchased(', save)
-        imported = block(self.panel, 'if (page == "IMPORT") item')
-        self.assertIn('查找我的音色名额', imported)
-        self.assertIn('personalVoiceSlots(voices, creating = false, postpaid = postpaid)', imported)
+        self.assertIn('选择我的音色名额', self.imported)
+        self.assertIn('personalVoiceSlots(voices, creating = false, postpaid = postpaid)', self.panel)
+
+    def test_import_uses_local_card_sheet_and_empty_only_navigates_to_sync(self):
+        entry = self.imported.split('SettingsRow("选择我的音色名额"', 1)[-1].split('SettingsRow("备用方式', 1)[0]
+        self.assertIn('importSlots.withIndex()', entry)
+        self.assertIn('if (current() && !busy)', entry)
+        self.assertIn('it.account == account?.fingerprint && !it.unused', entry)
+        self.assertIn('importSlotPicker = true', entry)
+        self.assertIn('else navigate("SYNC")', entry)
+        self.assertNotIn('SettingsRadioRow(', self.imported)
+        self.assertNotIn('查找我的音色名额', self.imported)
+        for text in (entry, self.import_sheet):
+            for effect in ('execute(', 'ask(', 'importExisting(', 'importPurchased(', '.save(', 'refreshProjects(', '.create(', '.load('):
+                self.assertNotIn(effect, text)
+        self.assertIn('selected = existingId == voice.id', self.import_sheet)
+        self.assertIn('enabled = enabled, cardStyle = true', self.import_sheet)
+        self.assertIn('page == "IMPORT"', self.import_sheet)
+        self.assertIn('it.account == account?.fingerprint && it.id == voice.id && !it.unused', self.import_sheet)
+        self.assertIn('existingId = voice.id; confirmation = null; importSlotPicker = false', self.import_sheet)
+        self.assertNotIn('canTrain', self.import_sheet)
+        self.assertNotIn('name =', self.import_sheet)
+        for marker in ('fun navigate(target:', 'fun back()'):
+            self.assertIn('importSlotPicker = false', block(self.panel, marker))
+        self.assertIn('var importSlotPicker by remember(frozenConfiguration.revision)', self.panel)
+
+    def test_quota_cards_opt_in_without_changing_other_choice_defaults(self):
+        item = (SRC / 'ui/components/OptionSelectionSheet.kt').read_text()
+        for token in ('cardStyle: Boolean = false', 'itemSpacing: Dp = 3.dp',
+                      'RoundedCornerShape(16.dp)', 'RoundedCornerShape(12.dp)',
+                      'cardStyle && selected -> colors.selectionContainer', 'cardStyle -> colors.bubble',
+                      'Modifier.border(1.dp', 'colors.selectionContent', 'colors.line',
+                      'Arrangement.spacedBy(itemSpacing)', 'Role.RadioButton',
+                      'selected = selected, enabled = enabled', 'heightIn(min = 48.dp)'):
+            self.assertIn(token, item)
+        self.assertEqual(2, self.panel.count('itemSpacing = 8.dp'))
+        self.assertIn('cardStyle = true', self.sheet)
+        self.assertIn('cardStyle = true', self.import_sheet)
 
 
 if __name__ == '__main__':

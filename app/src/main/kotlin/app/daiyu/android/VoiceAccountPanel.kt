@@ -16,6 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -34,6 +36,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
 import app.daiyu.android.ui.haptics.miuix.TextButton
+import app.daiyu.android.ui.haptics.miuix.IconButton
+import app.daiyu.android.ui.icons.ChatPreviewIcons
+import app.daiyu.android.ui.icons.DaiyuIcon
+import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -133,6 +139,7 @@ internal fun VoiceAccountPanel(
     var pickerPending by remember { mutableStateOf(false) }
     var pickerResult by remember { mutableIntStateOf(0) }
     var slotPicker by remember(frozenConfiguration.revision) { mutableStateOf(false) }
+    var importSlotPicker by remember(frozenConfiguration.revision) { mutableStateOf(false) }
     var projects by remember(frozenConfiguration.revision) { mutableStateOf(emptyList<VoiceProjectCatalog.Project>()) }
     fun current() = latestCurrent(frozenConfiguration) && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     val enabled = loaded && !busy && account != null && current() && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
@@ -163,7 +170,7 @@ internal fun VoiceAccountPanel(
     DisposableEffect(lifecycle, frozenConfiguration.revision, preview) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                slotPicker = false; confirmation = null; operation?.cancel(); preview.stop()
+                slotPicker = false; importSlotPicker = false; confirmation = null; operation?.cancel(); preview.stop()
             }
         }
         lifecycle.addObserver(observer)
@@ -213,15 +220,16 @@ internal fun VoiceAccountPanel(
     var advancedCreation by remember { mutableStateOf(false) }
     var agreed by remember { mutableStateOf(false) }
     var projectPicker by remember { mutableStateOf(false) }
-    var detail by remember { mutableStateOf<String?>(null) }
     var voiceMenu by remember { mutableStateOf<PersonalVoices.Voice?>(null) }
     var accountKey by remember(frozenConfiguration.revision) { mutableStateOf(frozenConfiguration.key) }
     val creationSlots = personalVoiceSlots(voices, creating = true, postpaid = false)
         .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+")) }
+    val importSlots = personalVoiceSlots(voices, creating = false, postpaid = postpaid)
+        .filter { it.id.matches(Regex("S_[A-Za-z0-9_-]+|etaClone[a-fA-F0-9]{32}")) }
     fun navigate(target: String) {
         if (!current() || busy) return
         clearPageFeedback()
-        slotPicker = false; confirmation = null; menu = false; addMenu = false
+        slotPicker = false; importSlotPicker = false; confirmation = null; menu = false; addMenu = false
         if (target == "SYNC" || target == "ACCOUNT") parentPage = page
         page = target
     }
@@ -246,7 +254,7 @@ internal fun VoiceAccountPanel(
         if (busy) { operation?.cancel(); feedback = feedback.report(feedback.visit, "正在停止等待，请稍候。"); return }
         clearPageFeedback()
         samplePicker.invalidate()
-        slotPicker = false; confirmation = null; menu = false; addMenu = false; voiceMenu = null
+        slotPicker = false; importSlotPicker = false; confirmation = null; menu = false; addMenu = false; voiceMenu = null
         when {
             page == "SYNC" || page == "ACCOUNT" -> {
                 page = parentPage
@@ -282,13 +290,31 @@ internal fun VoiceAccountPanel(
                 items(visibleVoices.size, key = { visibleVoices[it].id }) { index ->
                     val voice = visibleVoices[index]
                     VoiceSettingsCard {
-                        SettingsRow(voice.name, summary = voiceStatus(voice), trailing = {
-                            TextButton(if (previewState.matches(voice.account, voice.id)) { if (previewState.loading) "正在准备" else "停止" } else "试听",
-                                enabled = enabled && voice.tts && voice.demo.isNotBlank(), onClick = {
-                                    if (previewState.matches(voice.account, voice.id)) preview.stop()
-                                    else { onPreviewRequest(); execute { check(current()); preview.toggle(speech!!, voice) } }
-                                })
-                            TextButton("更多", enabled = !busy, onClick = { if (current()) voiceMenu = voice })
+                        val playing = previewState.matches(voice.account, voice.id)
+                        SettingsRow(voice.name, summary = voiceStatus(voice), showChevron = false,
+                            onClick = if (!enabled || !voice.tts || !voice.accepted) null else ({
+                                if (current() && !busy) {
+                                    val selectedVoice = runCatching { resources.voices.selected(voice.id, speech!!) }.getOrNull()
+                                    if (selectedVoice != null) { preview.stop(); onSelect(frozenConfiguration, selectedVoice) }
+                                    else feedback = feedback.report(feedback.visit, "音色状态已变化，请查看状态后重试。")
+                                }
+                            }), trailing = {
+                            IconButton(enabled = enabled && voice.tts && voice.demo.isNotBlank(),
+                                modifier = Modifier.size(48.dp).testTag("voice-preview:${voice.id}"),
+                                minHeight = 48.dp, minWidth = 48.dp, backgroundColor = Color.Transparent, onClick = {
+                                    if (current() && !busy) {
+                                        if (previewState.matches(voice.account, voice.id)) preview.stop()
+                                        else { onPreviewRequest(); execute { check(current()); preview.toggle(speech!!, voice) } }
+                                    }
+                                }) {
+                                DaiyuIcon(if (playing) DaiyuIcons.Stop else ChatPreviewIcons.Play,
+                                    if (playing) { if (previewState.loading) "正在准备，点击停止" else "停止试听" } else "播放试听")
+                            }
+                            IconButton(enabled = enabled, modifier = Modifier.size(48.dp).testTag("voice-menu:${voice.id}"),
+                                minHeight = 48.dp, minWidth = 48.dp, backgroundColor = Color.Transparent,
+                                onClick = { if (current() && !busy) voiceMenu = voice }) {
+                                DaiyuIcon(ChatPreviewIcons.More, "音色菜单", modifier = Modifier.rotate(90f))
+                            }
                         })
                         if (voice.tts && !voice.accepted) SettingsRow("确认音色，允许正式合成", summary = "可能产生音色费用",
                             showChevron = true, onClick = if (!enabled) null else ({ ask("我有权使用此声音，并同意正式合成可能产生音色费用") {
@@ -365,13 +391,15 @@ internal fun VoiceAccountPanel(
             if (page == "IMPORT") item {
                 VoiceSettingsCard {
                     AccountField("备注名称（可空）", name, busy) { name = it.take(80); confirmation = null }
-                    personalVoiceSlots(voices, creating = false, postpaid = postpaid).forEachIndexed { index, voice ->
-                        SettingsRadioRow(personalVoiceSlotTitle(voice, index), existingId == voice.id,
-                            enabled = enabled, summary = voiceSlotSummary(voice)) {
-                            if (current()) { existingId = voice.id; confirmation = null }
-                        }
-                    }
-                    SettingsRow("查找我的音色名额", showChevron = true, onClick = if (!enabled) null else ({ navigate("SYNC") }))
+                    SettingsRow("选择我的音色名额", summary = importSlots.withIndex().firstOrNull { it.value.id == existingId }
+                        ?.let { personalVoiceSlotTitle(it.value, it.index) + " · " + it.value.id } ?: existingId.takeIf { it.isNotBlank() },
+                        showChevron = true, onClick = if (!enabled) null else ({
+                            if (current() && !busy) {
+                                if (resources.voices.state.value.any { it.account == account?.fingerprint && !it.unused &&
+                                    it.id.matches(Regex("S_[A-Za-z0-9_-]+|etaClone[a-fA-F0-9]{32}")) }) importSlotPicker = true
+                                else navigate("SYNC")
+                            }
+                        }))
                     SettingsRow("备用方式：从控制台复制 ID", showChevron = true, onClick = if (busy) null else ({ manualId = !manualId }))
                     if (manualId) {
                         SettingsNote("在豆包控制台进入声音复刻音色列表，将“已复刻”切换为“全部”或“未复刻”，复制 S_ 开头的音色 ID。API Key 与音色须属于同一项目。")
@@ -482,15 +510,29 @@ internal fun VoiceAccountPanel(
         if (addMenu) VoiceAddSheet(
             onSelect = { beginFlow(it) }, onDismiss = { addMenu = false }, isEnabled = { !busy && current() })
         if (slotPicker && page == "CREATE" && step == 0) OptionSelectionSheet(
-            "选择音色名额", onDismiss = { slotPicker = false }, modifier = Modifier.testTag("voice-create-slot-picker")) {
+            "选择音色名额", onDismiss = { slotPicker = false }, modifier = Modifier.testTag("voice-create-slot-picker"), itemSpacing = 8.dp) {
             creationSlots.forEachIndexed { index, voice ->
                 OptionSelectionItem(personalVoiceSlotTitle(voice, index) + "\n" + voice.id + " · " + voiceSlotSummary(voice),
                     selected = !postpaid && slotId == voice.id,
-                    enabled = enabled && voice.canTrain,
+                    enabled = enabled && voice.canTrain, cardStyle = true,
                     modifier = Modifier.testTag("voice-create-slot:${voice.id}")) {
                     if (enabled && !busy && current() && page == "CREATE" && step == 0 &&
                         resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && it.canTrain }) {
                         slotId = voice.id; postpaid = false; confirmation = null; slotPicker = false
+                    }
+                }
+            }
+        }
+        if (importSlotPicker && page == "IMPORT") OptionSelectionSheet(
+            "选择我的音色名额", onDismiss = { importSlotPicker = false },
+            modifier = Modifier.testTag("voice-import-slot-picker"), itemSpacing = 8.dp) {
+            importSlots.forEachIndexed { index, voice ->
+                OptionSelectionItem(personalVoiceSlotTitle(voice, index) + "\n" + voice.id + " · " + voiceSlotSummary(voice),
+                    selected = existingId == voice.id, enabled = enabled, cardStyle = true,
+                    modifier = Modifier.testTag("voice-import-slot:${voice.id}")) {
+                    if (enabled && !busy && current() && page == "IMPORT" &&
+                        resources.voices.state.value.any { it.account == account?.fingerprint && it.id == voice.id && !it.unused }) {
+                        existingId = voice.id; confirmation = null; importSlotPicker = false
                     }
                 }
             }
@@ -509,26 +551,21 @@ internal fun VoiceAccountPanel(
                 } }
             }
         }
-        voiceMenu?.let { voice ->
-            VoiceChoiceDialog(voice.name, buildList {
-                add("QUERY" to "查询状态")
-                if (voice.error.isNotBlank()) add("ERROR" to "错误详情")
-                if (voice.tts && voice.accepted) add("SELECT" to "用于朗读")
-                if (!voice.uncertain) add("REMOVE" to "移除本机记录")
-            }, "", onSelect = { action ->
-                voiceMenu = null
-                if (enabled) when (action) {
-                    "QUERY" -> ask("查询原音色 ${voice.id}，不重复制作") { resources.voices.refresh(voice, speech!!) }
-                    "ERROR" -> detail = voice.error
-                    "SELECT" -> { preview.stop(); resources.voices.selected(voice.id, speech!!)?.let { onSelect(frozenConfiguration, it) } }
-                    "REMOVE" -> ask("仅移除本机记录，不删除云端音色或任务，不退款、不释放名额") {
-                        preview.stop(); withContext(Dispatchers.IO) { resources.voices.removeLocal(voice) }
+        voiceMenu?.let { pending ->
+            voices.firstOrNull { it.account == pending.account && it.id == pending.id }
+        }?.let { voice ->
+            VoiceChoiceDialog(voice.name, listOf("QUERY" to "查看状态", "REMOVE" to "移除本机记录"), "",
+                onSelect = { action ->
+                    voiceMenu = null
+                    val latestVoice = resources.voices.state.value.firstOrNull { it.account == voice.account && it.id == voice.id }
+                    if (enabled && current() && latestVoice != null) when (action) {
+                        "QUERY" -> ask("查询原音色 ${latestVoice.id}，不重复制作") { resources.voices.refresh(latestVoice, speech!!) }
+                        "REMOVE" -> if (!latestVoice.uncertain) ask("仅移除本机记录，不删除云端音色或任务，不退款、不释放名额") {
+                            preview.stop(); withContext(Dispatchers.IO) { resources.voices.removeLocal(latestVoice) }
+                        }
                     }
-                }
-            }, onDismiss = { voiceMenu = null })
-        }
-        detail?.let { message ->
-            DaiyuConfirmDialog("错误详情", message, "关闭", false, onConfirm = { detail = null }, onDismiss = { detail = null })
+                }, onDismiss = { voiceMenu = null },
+                isEnabled = { action -> enabled && (action != "REMOVE" || !voice.uncertain) })
         }
         confirmation?.let { pending ->
             DaiyuConfirmDialog("确认本次操作", pending.label, "确认", false,
@@ -546,14 +583,14 @@ internal fun voiceStatus(voice: PersonalVoices.Voice): String = when {
     voice.uncertain -> "提交结果未知，请查询原音色，不要重新制作"
     voice.catalogState == "Expired" -> "已到期"
     voice.catalogState == "Reclaimed" -> "已回收"
-    voice.status == 1 || voice.catalogState == "Training" -> "制作中"
-    voice.status == 3 || voice.error.isNotBlank() -> "制作失败"
-    voice.accepted && voice.tts -> "已正式使用"
-    voice.tts -> "已就绪 · 试听后确认使用"
-    voice.status == 4 || voice.catalogState == "Active" -> "已锁定"
+    voice.status == 1 || voice.catalogState == "Training" -> "训练中"
+    voice.status == 3 -> "训练失败"
+    voice.status == 4 || voice.catalogState == "Active" -> "已激活"
+    voice.status == 2 || voice.catalogState == "Success" -> "训练成功"
     voice.remaining == 0 -> "制作次数已用完"
     voice.unused -> "未使用名额"
     voice.status == 0 -> "未找到音色"
+    voice.error.isNotBlank() -> "状态查询失败，请重试"
     else -> "待查询"
 }
 

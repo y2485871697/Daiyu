@@ -161,7 +161,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('personalVoiceSlots(voices, creating = true, postpaid = false)', leaf)
         self.assertIn('personalVoiceSlots(voices, creating = false, postpaid = postpaid)', leaf)
         self.assertIn('personalVoiceSlotTitle(voice, index)', leaf)
-        self.assertIn('summary = voiceSlotSummary(voice)', leaf)
+        self.assertIn('voiceSlotSummary(voice)', leaf)
         self.assertIn('.sortedWith(compareBy<PersonalVoices.Voice> { !it.unused }.thenBy { it.name })', leaf)
         self.assertIn('if (voice.name == voice.id) "音色名额 ${index + 1}" else voice.name', leaf)
         self.assertIn('OpenableColumns.DISPLAY_NAME', leaf)
@@ -178,7 +178,7 @@ class VoiceSettingsParityContractTest(unittest.TestCase):
         self.assertIn('resources.voices.importPurchased(speech!!, a, s, p)', leaf)
         self.assertIn('resources.voices.create(speech!!, sample, n, slot, confirmed = true)', leaf)
         self.assertIn('resources.voices.importExisting(speech!!, id, n)', leaf)
-        self.assertIn('if (!voice.uncertain) add("REMOVE"', leaf)
+        self.assertIn('action != "REMOVE" || !voice.uncertain', leaf)
         self.assertIn('仅移除本机记录，不删除云端音色或任务', leaf)
 
     def test_reference_voice_save_uses_theme_pill_without_changing_import_boundary(self):

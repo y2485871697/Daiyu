@@ -59,12 +59,24 @@ class VoiceSettingsParityTest {
         assertTrue(voiceStatus(voice.copy(uncertain = true)).contains("提交结果未知"))
         assertEquals("已到期", voiceStatus(voice.copy(catalogState = "Expired")))
         assertEquals("已回收", voiceStatus(voice.copy(catalogState = "Reclaimed")))
-        assertEquals("制作中", voiceStatus(voice.copy(status = 1)))
-        assertEquals("已锁定", voiceStatus(voice.copy(catalogState = "Active")))
+        assertEquals("训练中", voiceStatus(voice.copy(status = 1)))
+        assertEquals("已激活", voiceStatus(voice.copy(catalogState = "Active")))
         assertEquals("制作次数已用完", voiceStatus(voice.copy(remaining = 0)))
         assertFalse(voice.copy(uncertain = true).canTrain)
         assertFalse(voice.copy(status = 1).canTrain)
         assertFalse(voice.copy(catalogState = "Active").canTrain)
+    }
+
+    @Test fun personalVoiceSummaryShowsActualTrainingStateNotAcceptanceOrQueryErrors() {
+        val voice = PersonalVoices.Voice("S_test", "Fixture", "account", status = 2)
+        for (accepted in listOf(false, true)) for (error in listOf("", "查询未确认；不会重新训练，请手动查询")) {
+            assertEquals("训练成功", voiceStatus(voice.copy(accepted = accepted, error = error)))
+        }
+        assertEquals("训练成功", voiceStatus(voice.copy(status = -1, catalogState = "Success")))
+        assertEquals("训练失败", voiceStatus(voice.copy(status = 3, error = "service failure")))
+        assertEquals("已激活", voiceStatus(voice.copy(status = 4, error = "query failed")))
+        assertEquals("状态查询失败，请重试", voiceStatus(voice.copy(status = -1, error = "query failed")))
+        assertTrue(voiceStatus(voice.copy(uncertain = true)).contains("提交结果未知"))
     }
 
     @Test fun speechSelectionPreservesRecognitionRealtimeAndRevision() {

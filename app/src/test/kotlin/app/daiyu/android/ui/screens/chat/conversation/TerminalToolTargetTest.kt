@@ -25,7 +25,7 @@ class TerminalToolTargetTest {
             assertEquals("执行命令 · $label", value.title)
             assertTrue(value.details.fields.contains(ToolFieldUi("执行环境", label)))
             for (category in listOf("terminal", "background_job")) {
-                assertFalse(toolBodyLayout(category, value.details).fields.any { it.label == "执行环境" })
+                assertTrue("$category · $label", toolBodyLayout(category, value.details).fields.isEmpty())
             }
         }
     }
@@ -34,11 +34,15 @@ class TerminalToolTargetTest {
         val proot = card("""{"backend":"linux:debian","uid":0,"guest_uid":0,"host_root":false,"host_uid":10444}""")
         assertEquals("Debian • root（PRoot）", proot.targetLabel)
         assertTrue(proot.details.fields.contains(ToolFieldUi("Android 宿主权限", "user")))
-        val body = toolBodyLayout(proot.category, proot.details)
-        assertEquals(listOf(ToolFieldUi("Android 宿主权限", "user")), body.fields)
+        for (category in listOf("terminal", "background_job")) {
+            assertTrue(category, toolBodyLayout(category, proot.details).fields.isEmpty())
+        }
         val guestUser = card("""{"backend":"linux:alpine","uid":1000,"guest_uid":1000,"host_root":true,"host_uid":10444}""")
         assertEquals("Alpine • user", guestUser.targetLabel)
         assertTrue(guestUser.details.fields.contains(ToolFieldUi("Android 宿主权限", "root")))
+        for (category in listOf("terminal", "background_job")) {
+            assertTrue(category, toolBodyLayout(category, guestUser.details).fields.isEmpty())
+        }
     }
 
     @Test fun missingReceiptOrUnknownBackendNeverUsesRequestsOrCurrentSettings() {

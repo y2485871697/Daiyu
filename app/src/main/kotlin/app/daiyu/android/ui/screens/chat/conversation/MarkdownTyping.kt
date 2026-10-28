@@ -32,16 +32,29 @@ internal fun rememberMarkdownReveal(
     resetEpoch: Long = 0L,
     onVisibleAdvance: () -> Unit = {},
 ): MarkdownReveal {
-    val currentAdvance by rememberUpdatedState(onVisibleAdvance)
-    val parser = LocalMarkdownParser.current
-    val identity = MarkdownParserIdentity(parser)
     val sources = remember(turn.content, turn.finalText) {
         if (turn.content.isEmpty()) listOf(MarkdownTypingSource("final", turn.finalText))
         else turn.content.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
     }
+    return rememberMarkdownReveal(sources, projection, turn.isStreaming, turn.status != RunStatus.RUNNING,
+        resetEpoch, onVisibleAdvance)
+}
+
+@Composable
+internal fun rememberMarkdownReveal(
+    sources: List<MarkdownTypingSource>,
+    projection: MarkdownProjection?,
+    streaming: Boolean,
+    terminal: Boolean,
+    resetEpoch: Long = 0L,
+    onVisibleAdvance: () -> Unit = {},
+): MarkdownReveal {
+    val currentAdvance by rememberUpdatedState(onVisibleAdvance)
+    val parser = LocalMarkdownParser.current
+    val identity = MarkdownParserIdentity(parser)
     val baseline = remember(identity, resetEpoch) { sources.toList() }
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
-        streaming = turn.status == RunStatus.RUNNING)
+        streaming = !terminal)
     val baselineLength = remember(baselineProjection) {
         baselineProjection?.takeIf { it.sources == baseline.map { source -> source.text } }?.let { parsed -> parsed.sources.sumOf {
             markdownBlocksLength(parsed.blocks.getValue(it)).toLong()
@@ -55,8 +68,8 @@ internal fun rememberMarkdownReveal(
         } }
     }
     val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
-    val target = remember(motion, parts, baselineLength, turn.isStreaming, turn.status) {
-        motion.update(parts, baselineLength, turn.isStreaming, turn.status != RunStatus.RUNNING)
+    val target = remember(motion, parts, baselineLength, streaming, terminal) {
+        motion.update(parts, baselineLength, streaming, terminal)
     }
     val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target) {
         val current = target ?: return@produceState

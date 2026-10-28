@@ -58,7 +58,9 @@ internal fun ReportedReasoningCard(
     allowLiveTiming: Boolean = false,
     generationComplete: Boolean = !allowLiveTiming,
     embedded: Boolean = false,
-    nanoTime: () -> Long = System::nanoTime
+    nanoTime: () -> Long = System::nanoTime,
+    revealResetEpoch: Long = 0L,
+    onVisibleAdvance: () -> Unit = {},
 ) {
     val summaries = reported.filter { hasReportedReasoningText(it.text) }
     val isThinking = isReportedReasoningActive(reported, allowLiveTiming)
@@ -68,7 +70,21 @@ internal fun ReportedReasoningCard(
     val shape = RoundedCornerShape(14.dp)
     var expandedOverride by rememberSaveable(ownerKey, isThinking) { mutableStateOf<Boolean?>(null) }
     var overridePhase by rememberSaveable(ownerKey, isThinking) { mutableStateOf(isThinking) }
-    val expanded = hasSummary && (expandedOverride?.takeIf { overridePhase == isThinking } ?: isThinking)
+    val disclosureExpanded = expandedOverride?.takeIf { overridePhase == isThinking } ?: isThinking
+    val expanded = hasSummary && disclosureExpanded
+    val summaryDisplays = reported.map { summary ->
+        key(ownerKey, summary.itemId, disclosureExpanded) {
+            val text = summary.text.takeIf(::hasReportedReasoningText).orEmpty()
+            val projection = rememberMarkdownProjection(listOf(text), streaming = !generationComplete)
+            val reveal = rememberMarkdownReveal(
+                listOf(MarkdownTypingSource(summary.itemId, text)), projection,
+                streaming = allowLiveTiming && disclosureExpanded, terminal = generationComplete,
+                resetEpoch = revealResetEpoch,
+                onVisibleAdvance = { if (expanded) onVisibleAdvance() },
+            )
+            ReasoningSummaryDisplay(summary, projection, reveal)
+        }
+    }
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
@@ -114,15 +130,14 @@ internal fun ReportedReasoningCard(
                     }
                     .padding(start = if (embedded) 0.dp else 11.dp, end = if (embedded) 0.dp else 11.dp, top = 8.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    summaries.forEach { summary ->
-                        key(ownerKey, summary.itemId) {
-                            val projection = rememberMarkdownProjection(listOf(summary.text), streaming = !generationComplete)
-                            val displayed = projection?.sources?.singleOrNull() ?: summary.text
-                            ProjectedMessageMarkdown(
-                                displayed, projection?.blocks?.get(displayed), Modifier.fillMaxWidth(),
-                                generationComplete = generationComplete && projection != null && displayed == summary.text,
-                            )
-                        }
+                    summaryDisplays.filter { hasReportedReasoningText(it.reported.text) }.forEach { display ->
+                        val summary = display.reported
+                        val projection = display.projection
+                        val displayed = projection?.sources?.singleOrNull() ?: summary.text
+                        RevealedMessageMarkdown(
+                            displayed, projection?.blocks?.get(displayed), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
+                            generationComplete = generationComplete && projection != null && displayed == summary.text,
+                        )
                     }
                 }
             }
@@ -130,7 +145,13 @@ internal fun ReportedReasoningCard(
     }
 }
 
-/** Only the duration subscribes to frame ticks; the selectable summary does not recompose. */
+private data class ReasoningSummaryDisplay(
+    val reported: ReportedReasoning,
+    val projection: MarkdownProjection?,
+    val reveal: MarkdownReveal,
+)
+
+/** Timing and Markdown leaves subscribe independently to their frame clocks. */
 @Composable
 private fun ReasoningElapsedTime(
     ownerKey: String,
@@ -178,6 +199,8 @@ internal fun ReasoningStepRow(
     showConnector: Boolean = false,
     allowLiveTiming: Boolean = false,
     generationComplete: Boolean = !allowLiveTiming,
+    revealResetEpoch: Long = 0L,
+    onVisibleAdvance: () -> Unit = {},
 ) {
     val colors = conversationColors()
     Row(Modifier.fillMaxWidth().testTag("work-reasoning:${reported.itemId}").drawBehind {
@@ -189,7 +212,8 @@ internal fun ReasoningStepRow(
         }
         Column(Modifier.weight(1f)) {
             ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),
-                allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, embedded = true)
+                allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, embedded = true,
+                revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance)
         }
     }
 }

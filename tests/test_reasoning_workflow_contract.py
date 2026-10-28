@@ -35,7 +35,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
         self.assertIn('embedded: Boolean = false', source)
         self.assertIn('embedded = true', source)
-        self.assertIn('rememberMarkdownProjection(listOf(summary.text), streaming = !generationComplete)', source)
+        self.assertIn('rememberMarkdownProjection(listOf(text), streaming = !generationComplete)', source)
         self.assertIn('generationComplete && projection != null && displayed == summary.text', source)
         self.assertIn('ReasoningDisclosureDurationMillis = 220', source)
         content = (CHAT / 'MessageContent.kt').read_text()
@@ -47,7 +47,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('if (!integratedReasoning) ReportedReasoningCard', source)
         self.assertIn('turn.isStreaming && turn.status == RunStatus.RUNNING', source)
         work = (CHAT / 'WorkProcessCard.kt').read_text()
-        self.assertIn('key(ownerKey, "reasoning", reported.itemId)', work)
+        self.assertIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
         self.assertIn('reasoningState.SaveableStateProvider(reported.itemId)', work)
         self.assertIn('val steps = work.segments.flatMap { it.steps }', work)
 
